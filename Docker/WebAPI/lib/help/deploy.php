@@ -1,0 +1,81 @@
+<?php
+// Help panel partial, included by portal/help.php. Not directly reachable
+// (nginx denies /lib/).
+declare(strict_types=1);
+?>
+    <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
+        <section class="panel">
+            <h2><?php echo h(__t('help.deploy_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_requirements_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help.deploy_mode_full')); ?></li>
+                <li><?php echo h(__t('help.deploy_mode_create')); ?></li>
+                <li><?php echo h(__t('help.deploy_mode_powercycle')); ?></li>
+                <li><?php echo h(__t('help.deploy_mode_export')); ?></li>
+                <li><?php echo h(__t('help.deploy_mode_start')); ?></li>
+                <li><?php echo h(__t('help.deploy_mode_autostart')); ?></li>
+            </ul>
+            <h3><?php echo h(__t('help.deploy_verbose_heading')); ?></h3>
+            <p><?php echo h(__t('help.deploy_verbose_p1')); ?></p>
+            <h3><?php echo h(__t('help.deploy_powercycle_wait_heading')); ?></h3>
+            <p><?php echo h(__t('help.deploy_powercycle_wait_p1')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.deploy_schedule_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_schedule_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_schedule_p2')); ?></p>
+            <p><?php echo h(__t('help.deploy_schedule_p3')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.deploy_storage_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_storage_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_storage_p2')); ?></p>
+            <p><?php echo h(__t('help.deploy_storage_p3')); ?></p>
+            <p><?php echo h(__t('help.deploy_storage_p4')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.deploy_warn_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_warn_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_warn_p2')); ?></p>
+            <p><?php echo h(__t('help.deploy_warn_p3')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.deploy_retry_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_retry_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_retry_p2')); ?></p>
+            <p><?php echo h(__t('help.deploy_retry_p3')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.autostart_heading')); ?></h2>
+            <p><?php echo h(__t('help.autostart_p1')); ?></p>
+            <h3><?php echo h(__t('help.autostart_inherit_heading')); ?></h3>
+            <p><?php echo h(__t('help.autostart_inherit_p1', ['seconds' => VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT])); ?></p>
+            <p><?php echo h(__t('help.autostart_inherit_p2')); ?></p>
+            <h3><?php echo h(__t('help.autostart_heartbeat_heading')); ?></h3>
+            <p><?php echo h(__t('help.autostart_heartbeat_p1')); ?></p>
+            <p><?php echo h(__t('help.autostart_heartbeat_p2')); ?></p>
+            <h3><?php echo h(__t('help.autostart_limits_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help.autostart_limit_license')); ?></li>
+                <li><?php echo h(__t('help.autostart_limit_ha')); ?></li>
+                <li><?php echo h(__t('help.autostart_limit_tools')); ?></li>
+                <li><?php echo h(__t('help.autostart_limit_order')); ?></li>
+                <li><?php echo h(__t('help.autostart_limit_shared_host')); ?></li>
+            </ul>
+            <h3><?php echo h(__t('help.autostart_run_heading')); ?></h3>
+            <p><?php echo h(__t('help.autostart_run_p1b')); ?></p>
+            <p><?php echo h(__t('help.autostart_run_p1')); ?></p>
+            <p><?php echo h(__t('help.autostart_run_p2')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help.credentials_heading')); ?></h2>
+            <p><?php echo h(__t('help.credentials_p1')); ?></p>
+        </section>
+    </div>

@@ -1,0 +1,189 @@
+services:
+  webserver:
+    build:
+      context: ./Docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_BIND_IP}:${WEB_HTTP_PORT}:8080"
+      # HTTPS (WP7): unprivileged container port, served by the admin-generated
+      # server block in virtusphere-conf.d; inert until a cert is uploaded.
+      - "${APP_BIND_IP}:${WEB_HTTPS_PORT}:8443"
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      - ./Docker/nginx/ssl:/etc/nginx/ssl
+      - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
+      - ./Docker/logs/nginx:/var/log/nginx
+    env_file:
+      - .env
+    environment:
+      SSL_SUBJECT: ${SSL_SUBJECT}
+    depends_on:
+      php:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # nginx master starts as root, chowns its temp/cache dirs to the
+      # worker uid (101) and drops privileges to that worker. Port 8080
+      # is unprivileged, so NET_BIND_SERVICE is intentionally not granted.
+      - CHOWN
+      - SETGID
+      - SETUID
+      # Read-only DAC bypass so the root master can load the TLS key that PHP
+      # writes as www-data with mode 0600 (WP7). Narrower than DAC_OVERRIDE:
+      # no write bypass.
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+
+  php:
+    build:
+      context: ./Docker/php
+      dockerfile: Dockerfile
+    expose:
+      - 9000
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      # HTTPS admin flow (ADR-0012): PHP writes cert/key and the generated
+      # server block here; the watcher inside the nginx container picks them
+      # up. PHP never talks to Docker or nginx directly.
+      - ./Docker/nginx/ssl:/etc/nginx/ssl
+      - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
+      # Read-only: only the backup STATUS channel (JSONL), never the dumps or the
+      # config tar (which contains .env with the DB root password). ADR-0021.
+      - ./Docker/backups/status:/var/backups/virtusphere-status:ro
+      # The playbooks, read-only and OUTSIDE the webroot (nginx serves only
+      # /var/www/html). PHP-FPM never runs them. This exists so the contract
+      # tests that read the playbook source actually run here instead of
+      # skipping, which is how a skipped test silently stops guarding anything.
+      - ./Ansible:/var/www/ansible-src:ro
+    env_file:
+      - .env
+    environment:
+      ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # php-fpm master starts as root and drops each worker to www-data
+      # (uid/gid 33); the setuid/setgid syscalls need these caps.
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+
+  deploy-worker:
+    build:
+      context: ./Docker/php
+      dockerfile: Dockerfile
+    command: ["php", "/var/www/html/lib/deploy_worker.php", "--loop", "--sleep=5"]
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      - ./Ansible:/var/www/ansible-src:ro
+    env_file:
+      - .env
+    environment:
+      ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+      VIRTUSPHERE_DEPLOY_WORKDIR: /tmp/virtusphere-deploy
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+
+  maintenance-worker:
+    build:
+      context: ./Docker/php
+      dockerfile: Dockerfile
+    command: ["php", "/var/www/html/lib/maintenance_worker.php", "--loop", "--sleep=15"]
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+    volumes:
+      - ./Docker/mysql/mysql-data:/var/lib/mysql
+      - ./Docker/mysql/mysql-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1g
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    ports:
+      - "127.0.0.1:${PMA_PORT}:80"
+    env_file:
+      - .env
+    environment:
+      PMA_HOST: mysql
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m

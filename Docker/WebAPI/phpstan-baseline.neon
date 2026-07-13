@@ -1,0 +1,277 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Offset ''mode'' does not exist on array\{vm_ids\: array\<int\>, powercycle_wait\: int\}\.$#'
+			identifier: offsetAccess.notFound
+			count: 1
+			path: lib/ansible.php
+
+		-
+			message: '#^Offset ''domain'' on array\{lifetime\: int\<0, max\>, path\: non\-falsy\-string, domain\: string, secure\: bool, httponly\: bool, samesite\: ''Lax''\|''lax''\|''None''\|''none''\|''Strict''\|''strict''\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: lib/auth.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between int\|non\-empty\-string and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: lib/connection_errors.php
+
+		-
+			message: '#^Offset ''capabilities'' on array\{datacenters\: array\<int, string\>, datastores\: array\<int, array\<string, mixed\>\>, networks\: array\<int, array\<string, mixed\>\>, hosts\: array\<int, array\<string, mixed\>\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: lib/deploy_worker.php
+
+		-
+			message: '#^Variable \$canUsers might not be defined\.$#'
+			identifier: variable.undefined
+			count: 1
+			path: lib/help/users.php
+
+		-
+			message: '#^Call to function in_array\(\) with arguments ''de''\|''en'', array\{''de'', ''en''\} and true will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: lib/lang.php
+
+		-
+			message: '#^Comparison operation "\>" between int\<1, 65535\> and 65535 is always false\.$#'
+			identifier: greater.alwaysFalse
+			count: 1
+			path: lib/repo/credentials.php
+
+		-
+			message: '#^Comparison operation "\<" between int\<1, max\> and 1 is always false\.$#'
+			identifier: smaller.alwaysFalse
+			count: 1
+			path: lib/repo/deploy_jobs.php
+
+		-
+			message: '#^Offset ''vm_name'' on array\{id\: int, vm_name\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: lib/repo/deploy_jobs.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between mixed and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 3
+			path: lib/repo/esxi_inventory.php
+
+		-
+			message: '#^Ternary operator condition is always true\.$#'
+			identifier: ternary.alwaysTrue
+			count: 1
+			path: lib/repo/vms.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between int and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: lib/ssh.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 6
+			path: portal/account.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 20
+			path: portal/credentials.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 9
+			path: portal/dashboard.php
+
+		-
+			message: '#^Offset decimal\-int\-string on array\<string, \(int\|string\)\> in isset\(\) does not exist\.$#'
+			identifier: isset.offset
+			count: 1
+			path: portal/deploy.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 31
+			path: portal/deploy.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 5
+			path: portal/deploy_log.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 1
+			path: portal/help.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 8
+			path: portal/integrations.php
+
+		-
+			message: '#^Variable \$esxiWorst on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: portal/integrations.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 3
+			path: portal/login.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 2
+			path: portal/logout.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 6
+			path: portal/logs.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 15
+			path: portal/mission_details.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 14
+			path: portal/missions.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 7
+			path: portal/os.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 2
+			path: portal/packages.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 1
+			path: portal/session_ping.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 52
+			path: portal/settings.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 18
+			path: portal/users.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 7
+			path: portal/vlans.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 16
+			path: portal/vm_edit.php
+
+		-
+			message: '#^Variable \$connection might not be defined\.$#'
+			identifier: variable.undefined
+			count: 13
+			path: portal/vms.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 2
+			path: tests/Integration/AccessLegacyRbacTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true and ''gate accepted the…'' will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/Integration/DeployDatacenterResolutionTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/Integration/DeployDatacenterResolutionTest.php
+
+		-
+			message: '#^Unreachable statement \- code above always terminates\.$#'
+			identifier: deadCode.unreachable
+			count: 1
+			path: tests/Integration/EsxiVlanSyncTest.php
+
+		-
+			message: '#^Property LogRetentionPurgeTest\:\:\$logIds is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: tests/Integration/LogRetentionPurgeTest.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: tests/Integration/MachineApiWireTest.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: tests/Integration/MecmReportWireTest.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: tests/Integration/PackageSyncTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/Unit/AnsibleLocationOverrideTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/Unit/DeployModeGateTest.php
+
+		-
+			message: '#^Offset ''mode'' does not exist on array\{vm_ids\: array\<int\>, powercycle_wait\: int\}\.$#'
+			identifier: offsetAccess.notFound
+			count: 3
+			path: tests/Unit/DeployModeGateTest.php
+
+		-
+			message: '#^Offset ''capabilities'' does not exist on array\{datacenters\: array\<int, string\>, datastores\: array\<int, array\<string, mixed\>\>, networks\: array\<int, array\<string, mixed\>\>, hosts\: array\<int, array\<string, mixed\>\>\}\.$#'
+			identifier: offsetAccess.notFound
+			count: 2
+			path: tests/Unit/EsxiCapabilitiesTest.php

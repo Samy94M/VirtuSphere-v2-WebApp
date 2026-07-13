@@ -1,0 +1,9 @@
+{
+    "ProjectName": "DISPLAYNAME",
+    "version": "0.1",
+    "ErrorAction": "Stop",
+    "DeployTo": "",
+    "generateOwnDeviceColletion": "true",
+    "InstallationBehaviorType": "InstallForSystem",
+    "removeOldVersion": "true"
+}

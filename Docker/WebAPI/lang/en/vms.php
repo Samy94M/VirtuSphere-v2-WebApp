@@ -1,0 +1,35 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title_template' => 'Template VMs',
+    'title_mission' => 'Mission VMs',
+    'mission_details' => 'Mission details',
+    'add_vm' => 'Add VM',
+    'th_hostname' => 'Hostname',
+    'th_os' => 'OS',
+    'th_cpu' => 'CPU',
+    'th_ram' => 'RAM',
+    'th_mecm' => 'MECM',
+    'th_interfaces' => 'Interfaces',
+    'th_disks' => 'Disks',
+    'th_packages' => 'Packages',
+    'confirm_delete' => 'Delete VM :name?',
+    'empty' => 'No VMs found.',
+    'flash_deleted' => 'VM deleted.',
+    'bulk_selected' => 'selected',
+    'bulk_select_all' => 'Select all',
+    'bulk_delete_btn' => 'Delete selected',
+    'bulk_reset_btn' => 'Reset MECM ID',
+    'bulk_confirm_delete' => 'Delete the selected VMs? Only portal records are removed, nothing on the hypervisor.',
+    'bulk_confirm_reset' => 'Reset the MECM ID of the selected VMs?',
+    'bulk_hint' => 'Bulk actions only affect the portal records, never the hypervisor.',
+    'bulk_none_selected' => 'Please select VMs first.',
+    'bulk_too_many' => 'Too many VMs selected (limit :cap).',
+    'bulk_done' => ':done done.',
+    'bulk_skipped' => ':count skipped',
+    'skip_active_job' => 'active deploy job',
+    'skip_no_mac' => 'no imported MAC',
+    'skip_error' => 'error',
+];

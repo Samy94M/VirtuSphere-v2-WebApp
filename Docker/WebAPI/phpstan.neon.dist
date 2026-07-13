@@ -1,0 +1,19 @@
+# PHPStan-Baseline-Ratchet (ADR-0015). Level 4, Scope lib/portal/tests; die
+# Legacy-Maschinen-API-Dateien im WebAPI-Root (access.php, mecm-*.php,
+# db_importMAC.php, function.php, api/) bleiben bis zur E3-Entscheidung
+# draussen: eingefrorene Wire-Surface, deren dynamisches mysqli nur Baseline-
+# Ballast erzeugen wuerde. Neue Befunde in analysierten Dateien: fixen statt
+# re-baselinen.
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 4
+    paths:
+        - lib
+        - portal
+        - tests
+    excludePaths:
+        - vendor
+        - var
+        - logs

@@ -1,0 +1,25 @@
+{
+  "name": "virtusphere/webapi",
+  "description": "Server-rendered VirtuSphere WebAPI and portal foundation.",
+  "type": "project",
+  "license": "proprietary",
+  "require": {
+    "php": ">=8.4",
+    "phpseclib/phpseclib": "^3.0"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.2",
+    "phpunit/phpunit": "^12"
+  },
+  "scripts": {
+    "stan": "phpstan analyse -c phpstan.neon.dist --memory-limit=512M --no-progress",
+    "test": "phpunit",
+    "test:unit": "phpunit --testsuite unit"
+  },
+  "config": {
+    "platform": {
+      "php": "8.4.0"
+    },
+    "sort-packages": true
+  }
+}

@@ -1,0 +1,225 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/defaults.php';
+
+const VIRTUSPHERE_DEPLOY_STATUS_QUEUED = 'queued';
+const VIRTUSPHERE_DEPLOY_STATUS_RUNNING = 'running';
+const VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED = 'succeeded';
+const VIRTUSPHERE_DEPLOY_STATUS_FAILED = 'failed';
+const VIRTUSPHERE_DEPLOY_STATUS_CANCELLED = 'cancelled';
+
+const VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+    VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+];
+
+const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+    VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+    VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+];
+
+const VIRTUSPHERE_DEPLOY_LOG_STDOUT = 'stdout';
+const VIRTUSPHERE_DEPLOY_LOG_STDERR = 'stderr';
+const VIRTUSPHERE_DEPLOY_LOG_SYSTEM = 'system';
+
+const VIRTUSPHERE_DEPLOY_LOG_STREAMS = [
+    VIRTUSPHERE_DEPLOY_LOG_STDOUT,
+    VIRTUSPHERE_DEPLOY_LOG_STDERR,
+    VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+];
+
+const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
+const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
+const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
+
+// Scheduling (ADR-0022). scheduled_at is stored in UTC and compared against
+// UTC_TIMESTAMP(); staggering only makes sense for the power-on modes.
+const VIRTUSPHERE_DEPLOY_SCHEDULE_HORIZON_DAYS = 30;
+const VIRTUSPHERE_DEPLOY_SCHEDULE_PAST_GRACE_SECONDS = 300;
+const VIRTUSPHERE_DEPLOY_STAGGER_MIN = 1;
+const VIRTUSPHERE_DEPLOY_STAGGER_MAX = 120;
+const VIRTUSPHERE_DEPLOY_STAGGER_MODES = ['full', 'powercycle', 'start'];
+
+// Deploy modes that create VMs and thus change ESXi resource usage (datastore
+// allocation, portgroups in use). A successful job in one of these triggers an
+// inventory refresh for its ESXi credential (ADR-0023, E3.4b). Power-cycle,
+// start and export do not create resources and are excluded.
+const VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES = ['create', VIRTUSPHERE_DEPLOY_MODE_FULL];
+
+// ESXi inventory (ADR-0023): a system deploy mode that is never shown in the UI
+// (deliberately absent from virtusphere_deploy_mode_labels()). Its playbook is
+// read-only and runs without a mission.
+const VIRTUSPHERE_DEPLOY_MODE_INVENTORY = 'inventory';
+const VIRTUSPHERE_SYSTEM_PLAYBOOKS = [
+    VIRTUSPHERE_DEPLOY_MODE_INVENTORY => 'inventoryESXi_playbook.yml',
+];
+
+// ESXi autostart policy (ADR-0025). The deploy mode writes the host's autostart
+// configuration; it creates no resources and moves no power, so it is in neither
+// VIRTUSPHERE_DEPLOY_STAGGER_MODES nor VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES.
+const VIRTUSPHERE_DEPLOY_MODE_AUTOSTART = 'autostart';
+
+// SSoT for the deploy_missions.autostart_stop_action ENUM (mirrored order-exact
+// in struktur.sql + migrate.php, checked by scripts/check-enum-sync.sh).
+// These are community.vmware.vmware_host_auto_start's system_defaults.stop_action
+// values verbatim; do not translate or re-case them, the module compares strings.
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_GUEST_SHUTDOWN = 'guestShutdown';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_POWER_OFF = 'powerOff';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_SUSPEND = 'suspend';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_NONE = 'none';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTIONS = [
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_GUEST_SHUTDOWN,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_POWER_OFF,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_SUSPEND,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_NONE,
+];
+
+// Delay bounds in seconds. The mission default must be a real wait (>= 0); a VM
+// may additionally store VIRTUSPHERE_AUTOSTART_DELAY_INHERIT, which the module
+// reads as "use the host default". 0 and -1 are NOT interchangeable: 0 means
+// "no wait", -1 means "inherit". Keep them apart in every layer.
+const VIRTUSPHERE_AUTOSTART_DELAY_INHERIT = -1;
+const VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT = 120;
+const VIRTUSPHERE_AUTOSTART_DELAY_MIN = 0;
+const VIRTUSPHERE_AUTOSTART_DELAY_MAX = 3600;
+
+// The autostart entry that means "this VM does not participate". Writing it is
+// how the deactivation path removes a VM from the host's autostart list.
+const VIRTUSPHERE_AUTOSTART_START_ACTION_ON = 'powerOn';
+const VIRTUSPHERE_AUTOSTART_START_ACTION_OFF = 'none';
+
+// SSoT for the deploy_esxi_inventory.kind ENUM (mirrored order-exact in
+// struktur.sql + migrate.php, checked by scripts/check-enum-sync.sh, ADR-0016).
+const VIRTUSPHERE_INVENTORY_KIND_DATACENTER = 'datacenter';
+const VIRTUSPHERE_INVENTORY_KIND_DATASTORE = 'datastore';
+const VIRTUSPHERE_INVENTORY_KIND_NETWORK = 'network';
+const VIRTUSPHERE_INVENTORY_KIND_HOST = 'host';
+const VIRTUSPHERE_INVENTORY_KINDS = [
+    VIRTUSPHERE_INVENTORY_KIND_DATACENTER,
+    VIRTUSPHERE_INVENTORY_KIND_DATASTORE,
+    VIRTUSPHERE_INVENTORY_KIND_NETWORK,
+    VIRTUSPHERE_INVENTORY_KIND_HOST,
+];
+
+// Connection failure categories: the shared vocabulary for the inventory fetch
+// (stored in deploy_esxi_inventory_state.last_error_category) and the credential
+// connection test. Two classifiers feed it, because their inputs differ:
+// ansible_categorize_inventory_error() reads playbook stdout,
+// connection_error_category() reads PHP/OpenSSL/phpseclib error text.
+// Only AUTH pauses a credential (repo_esxi_inventory_record_failure).
+const VIRTUSPHERE_INVENTORY_ERROR_DNS = 'dns';
+const VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE = 'unreachable';
+const VIRTUSPHERE_INVENTORY_ERROR_TLS = 'tls';
+const VIRTUSPHERE_INVENTORY_ERROR_AUTH = 'auth';
+const VIRTUSPHERE_INVENTORY_ERROR_AUTHZ = 'authz';
+const VIRTUSPHERE_INVENTORY_ERROR_HTTP = 'http';
+const VIRTUSPHERE_INVENTORY_ERROR_SSH = 'ssh';
+const VIRTUSPHERE_INVENTORY_ERROR_PARSE = 'parse';
+const VIRTUSPHERE_INVENTORY_ERROR_CONFIG = 'config';
+const VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES = [
+    VIRTUSPHERE_INVENTORY_ERROR_DNS,
+    VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+    VIRTUSPHERE_INVENTORY_ERROR_TLS,
+    VIRTUSPHERE_INVENTORY_ERROR_AUTH,
+    VIRTUSPHERE_INVENTORY_ERROR_AUTHZ,
+    VIRTUSPHERE_INVENTORY_ERROR_HTTP,
+    VIRTUSPHERE_INVENTORY_ERROR_SSH,
+    VIRTUSPHERE_INVENTORY_ERROR_PARSE,
+    VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+];
+
+// Inventory settings + defaults.
+const VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS = 'esxi_inventory_interval_hours';
+const VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL = 'esxi_inventory_ansible_credential';
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT = 6;
+// Bounds of the interval an admin may set. 0 is not "no interval" but "off": the
+// automatic pull stops and only the manual refresh remains. The upper bound is a
+// week, past which a cached inventory says more about the past than the present.
+// Named because the number lived in three places at once (the POST validation,
+// the input's max attribute and the error text), and a change to any one of them
+// left the other two lying.
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MIN = 0;
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX = 168;
+// How often the maintenance worker re-evaluates which credentials are due.
+const VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS = 300;
+// ESXi host clock skew above this (seconds) is flagged as a warning (E9).
+const VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS = 120;
+
+// Inventory fetch traffic light (esxi_inventory_ampel): danger at this many
+// consecutive failures; a last success older than STALE_FACTOR x interval turns
+// warning. The integrations legend interpolates these same constants, so the
+// user-facing text cannot drift from the code.
+const VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER = 3;
+const VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR = 2;
+
+// Capability facts of a SUCCESSFUL pull (ADR-0023 amendment 3), stored on
+// deploy_esxi_inventory_state. Deliberately separate from the error categories
+// above: those describe a fetch that failed, these describe what the host is.
+// A NULL value means "not known", never "false".
+const VIRTUSPHERE_ESXI_CAPABILITY_FIELDS = [
+    'api_type',
+    'product_version',
+    'license_product',
+    'license_free',
+    'in_ha_cluster',
+    'in_maintenance',
+];
+
+// Substrings that identify a free (non-write-capable) ESXi license in the
+// about-info's licenseProductName. Broadcom reinstated the free hypervisor with
+// ESXi 8.0 U3e; its API is read-only, so deploy and autostart cannot work there.
+const VIRTUSPHERE_ESXI_FREE_LICENSE_MARKERS = ['hypervisor', 'free'];
+
+/**
+ * Every mode a stored payload may legally carry, system modes included. Read
+ * side: the worker reads back a queued job's payload with this.
+ */
+function virtusphere_deploy_modes(): array
+{
+    return array_merge(
+        array_keys(VIRTUSPHERE_PLAYBOOKS),
+        [VIRTUSPHERE_DEPLOY_MODE_FULL],
+        array_keys(VIRTUSPHERE_SYSTEM_PLAYBOOKS)
+    );
+}
+
+/**
+ * The modes an operator may ask for, which is exactly the set the deploy form
+ * offers. Write side: a mission job is created only with one of these.
+ *
+ * The label map is the source of truth for it, so a mode without a label cannot
+ * be posted and a postable mode cannot be unlabelled. System modes (inventory)
+ * are deliberately absent from the labels, and were previously accepted by the
+ * job validator anyway: a crafted POST could queue a mission job the worker then
+ * routed into the mission-less inventory branch.
+ */
+function virtusphere_user_deploy_modes(): array
+{
+    return array_keys(virtusphere_deploy_mode_labels());
+}
+
+/**
+ * Whether a mode needs the mission's datacenter and datastore. Autostart writes
+ * the host's boot configuration and touches neither, so refusing it because a
+ * mission has no datastore would be a gate answering the wrong question.
+ * Everything else creates, powers or exports VMs and needs a location.
+ */
+function virtusphere_deploy_mode_needs_location(string $mode): bool
+{
+    return $mode !== VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
+}
+
+function virtusphere_deploy_mode_labels(): array
+{
+    return [
+        VIRTUSPHERE_DEPLOY_MODE_FULL => 'Full pipeline',
+        'create' => 'Create VMs',
+        'powercycle' => 'Power-Cycle + Export MACs',
+        'export' => 'Export MACs',
+        'start' => 'Start VMs',
+        VIRTUSPHERE_DEPLOY_MODE_AUTOSTART => 'Apply ESXi autostart policy',
+    ];
+}

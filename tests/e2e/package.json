@@ -1,0 +1,15 @@
+{
+  "name": "virtusphere-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dev-only Playwright E2E layer for the VirtuSphere portal (ADR-0028). Not part of the shipped artifact; node_modules is git-ignored and installed on the dev host.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.49.0"
+  }
+}

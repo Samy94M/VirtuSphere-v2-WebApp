@@ -1,0 +1,54 @@
+---
+# Kurzer Power-Cycle, damit ESXi den NICs eine MAC zuweist (fuer den MAC-Export).
+# Nur VMs, deren PXE-relevante NIC noch keine MAC hat (needs_mac == true), werden angefasst;
+# bereits laufende/betankte VMs bleiben unberuehrt. Power-Off ist hart (force: yes), da frisch
+# erstellte VMs kein Guest-OS / keine VMware Tools haben.
+- name: Power-Cycle der VMs zur MAC-Erzeugung
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+
+  tasks:
+    - name: Ermitteln, ob ueberhaupt eine VM einen Power-Cycle braucht
+      set_fact:
+        powercycle_targets: "{{ vm_configurations | rejectattr('needs_mac', 'defined') | list
+                                + vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
+
+    - name: VMs einschalten (nur ohne MAC)
+      community.vmware.vmware_guest_powerstate:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: no
+        name: "{{ item.vm_name }}"
+        folder: "/"
+        datacenter: "{{ item.datacenter_name }}"
+        state: powered-on
+        force: no
+      delegate_to: localhost
+      loop: "{{ vm_configurations }}"
+      when: item.needs_mac | default(true)
+
+    - name: Warten, bis ESXi die MACs vergibt
+      pause:
+        seconds: "{{ PowerCycleWaitSeconds | default(5) | int }}"
+      when: powercycle_targets | length > 0
+
+    - name: VMs wieder hart ausschalten (nur ohne MAC)
+      community.vmware.vmware_guest_powerstate:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: no
+        name: "{{ item.vm_name }}"
+        folder: "/"
+        datacenter: "{{ item.datacenter_name }}"
+        state: powered-off
+        force: yes
+      delegate_to: localhost
+      loop: "{{ vm_configurations }}"
+      when: item.needs_mac | default(true)

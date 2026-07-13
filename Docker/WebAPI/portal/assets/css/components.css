@@ -1,0 +1,1588 @@
+.stack {
+    display: grid;
+    gap: 18px;
+}
+
+/* Grid/stack children default to min-width:auto, which lets wide tables push the
+   whole page sideways instead of scrolling inside .table-wrap. Pin them to 0. */
+.stack > *,
+.grid > * {
+    min-width: 0;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.panel,
+.card {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: var(--glass-bg);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* Tables and form controls stay solid on top of the glass panels so data and
+   inputs keep full contrast (ADR-0013: glass only on nav/cards/modals). */
+.panel .table-wrap,
+.card .table-wrap {
+    background: var(--surface);
+    border-radius: 8px;
+}
+
+/* Browsers without backdrop-filter fall back to opaque surfaces (no grey haze). */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .panel,
+    .card,
+    .sidebar,
+    .topbar,
+    .alert,
+    .modal-box {
+        background: var(--surface);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+}
+
+.panel {
+    padding: 18px 20px;
+}
+
+.card {
+    padding: 14px;
+}
+
+.card h2,
+.panel h2,
+.panel h3,
+.card h3 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    line-height: 1.25;
+}
+
+.panel p + h3,
+.panel ul + h3 {
+    margin-top: 18px;
+}
+
+.panel ul,
+.card ul {
+    margin: 0 0 14px;
+    padding-left: 20px;
+}
+
+.panel ul:last-child,
+.card ul:last-child,
+.panel p:last-child,
+.card p:last-child {
+    margin-bottom: 0;
+}
+
+/* Consistent vertical rhythm for a panel's direct paragraphs (intro/hint text)
+   so they don't rely on uneven browser default margins. */
+.panel > p {
+    margin: 0 0 14px;
+}
+
+/* Keep a filter form and its table, and a table and its follow-up create form,
+   from butting together. Adjacent-sibling margins so a table that is the panel's
+   first content still sits flush under the heading. */
+.panel > form + .table-wrap,
+.panel > .table-wrap + form {
+    margin-top: 16px;
+}
+
+/* A mid-panel filter/action button row (not the panel header) sitting directly
+   above a table needs the same breathing room, so the buttons don't butt against
+   the table header (e.g. the VLAN catalog status filter). */
+.panel > .actions:not(:first-child) + .table-wrap {
+    margin-top: 14px;
+}
+
+.kpi {
+    display: grid;
+    gap: 6px;
+}
+
+.kpi .value {
+    font-size: 30px;
+    font-weight: 800;
+}
+
+/* A KPI count that carries a signal by itself: pending work amber, in-flight
+   work blue. Status badges bring their own colour, so these apply to bare
+   numbers only. */
+.kpi .value.value-warning {
+    color: var(--warning);
+}
+
+.kpi .value.value-info {
+    color: var(--info);
+}
+
+a.card {
+    color: inherit;
+    transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* Link cards lift on hover so a clickable tile reads apart from a static one
+   (the KPI row mixes both). */
+a.card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    transform: translateY(-2px);
+    text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    a.card {
+        transition: border-color 120ms ease;
+    }
+
+    a.card:hover {
+        transform: none;
+    }
+}
+
+.nowrap {
+    white-space: nowrap;
+}
+
+/* Long unbroken identifiers (certificate fingerprints) wrap inside their
+   cell instead of widening the table. */
+.wrap-anywhere {
+    overflow-wrap: anywhere;
+}
+
+/* Log message column: audit rows quote user input and tokens, i.e. long
+   unbroken strings. `anywhere` also lowers min-content, so a floor keeps the
+   column from being squeezed by the near-nowrap columns beside it. */
+.log-message {
+    overflow-wrap: anywhere;
+    min-width: 320px;
+}
+
+/* An empty result row reads as a state, not as a data row. */
+.table-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--muted);
+}
+
+.button,
+button.button,
+a.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    border: 1px solid var(--btn-bg);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.button:hover {
+    text-decoration: none;
+    filter: brightness(0.96);
+}
+
+/* Disabled buttons (e.g. a blocked import confirm) must read as inactive, not
+   just refuse the click. Opacity keeps the variant colour but greys it back. */
+.button:disabled,
+button.button:disabled,
+.button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+    box-shadow: none;
+}
+
+.button:disabled:hover,
+button.button:disabled:hover,
+.button[disabled]:hover {
+    filter: none;
+}
+
+.button.button-secondary,
+.button.button-ghost {
+    background: var(--surface-muted);
+    color: var(--accent-strong);
+}
+
+.button.button-danger {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: var(--btn-fg);
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.actions > h2,
+.actions > h3 {
+    margin: 0;
+}
+
+.panel > .actions:first-child {
+    align-items: center;
+    min-height: 38px;
+    margin-bottom: 14px;
+}
+
+.panel > .actions:first-child > h2,
+.panel > .actions:first-child > h3 {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    margin-right: 2px;
+}
+
+.panel > .actions:only-child {
+    margin-bottom: 0;
+}
+
+td.actions {
+    /* Keep this a real table-cell, NOT display:flex. A flex <td> does not stretch
+       to the row height, so when the data cells are taller (wrapped OS names, a
+       two-line MECM cell) its bottom border floats up at the button height and the
+       row separator looks like detached line stubs under the actions column. As a
+       table-cell the border always sits at the row bottom. Row actions lay out
+       inline on one line; the user-admin cell opts into stacking via .actions-stack. */
+    display: table-cell;
+    vertical-align: middle;
+    /* Size to content instead of forcing a wide floor, so the table gives the
+       freed width back to the Name/Email columns. */
+    width: 1%;
+    white-space: nowrap;
+}
+
+td.actions > * {
+    vertical-align: middle;
+}
+
+td.actions > * + * {
+    margin-left: 8px;
+}
+
+/* The user-admin cell stacks its form controls (role select, password field)
+   vertically, one control group per line. */
+td.actions.actions-stack > * {
+    display: flex;
+    margin-left: 0;
+}
+
+td.actions.actions-stack > * + * {
+    margin-top: 6px;
+}
+
+td.actions .button,
+td.actions button.button,
+td.actions a.button {
+    min-height: 30px;
+    padding: 4px 9px;
+    font-size: 0.85rem;
+}
+
+td.actions .inline-form {
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+td.actions .inline-form select,
+td.actions .inline-form input {
+    flex: 0 0 auto;
+    width: 130px;
+    min-width: 0;
+}
+
+td.actions .inline-form .button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* Collapsible row editors (credentials): the editor row reads as a drawer of
+   the record above it, not as a separate record. The record row keeps its
+   bottom border only while the drawer is closed. */
+tr:has(+ tr.row-editor:not([hidden])) > td,
+tr:has(+ tr.row-editor[hidden]:last-child) > td {
+    border-bottom: 0;
+}
+
+tr.row-editor > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-editor .form-grid {
+    margin-top: 8px;
+}
+
+/* The drawer background is the same muted tone the fields normally use, so
+   inside it the field/background relationship inverts to keep the contrast. */
+tr.row-editor input,
+tr.row-editor select,
+tr.row-editor textarea {
+    background: var(--surface);
+}
+
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+.pagination-info {
+    opacity: 0.8;
+}
+
+.inline-form {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 0;
+}
+
+.inline-form label {
+    min-width: 180px;
+}
+
+/* Filter bars: keep the label word beside its control on one line, so the label
+   does not add row height and shift the heading/button out of alignment. */
+.actions .filter-field,
+.inline-form .filter-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.filter-field select,
+.filter-field input {
+    width: auto;
+    min-width: 160px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px 18px;
+    /* Top-align cells so an inline .field-error grows downward and does not
+       push its own input up out of line with the neighbouring fields. */
+    align-items: start;
+}
+
+.form-grid > .actions {
+    align-self: end;
+    min-height: 38px;
+    padding-top: 0;
+}
+
+/* A primary submit that must read as the end of the form, on its own final row
+   rather than flowing into the empty cell beside the last field group. The button
+   keeps its natural size and left edge; only the row it sits on spans the grid. */
+.form-grid > .actions-row {
+    grid-column: 1 / -1;
+}
+
+.form-grid-full {
+    grid-column: 1 / -1;
+    /* Stack the section caption, its options and hints with one consistent gap.
+       Without this the bordered checkbox/radio rows touched (block flow gave them
+       0 margin) while hint paragraphs kept their larger UA margins, so the rhythm
+       read as both too tight and uneven. */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-grid-full > p {
+    margin: 0;
+}
+
+/* A control that is taller than a single-line input (a notes textarea) takes the
+   cells its row would otherwise leave empty, instead of opening its own row. */
+.form-grid-span-2 {
+    grid-column: span 2;
+}
+
+/* A captioned option group (field-label plus its radio/checkbox rows) rendered as
+   a regular grid cell so a sibling field can share the row. Mirrors the
+   .form-grid-full stack: the option rows carry no block margin and would touch
+   without the gap, and they size to their label instead of stretching across the
+   cell. */
+.field-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.field-stack > label:not(.checkbox-item) {
+    width: 100%;
+    max-width: 22rem;
+}
+
+/* Caption for a grouped control (a checkbox set) that has no single <label> of
+   its own. Matches the field captions of the inputs around it. */
+.field-label {
+    display: block;
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* Explanatory prose next to a field reads as secondary on every page that uses
+   it (deploy, VM editor, mission editor), and inside a form section it stops at
+   a comfortable measure instead of running the full panel width. */
+.hint {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.form-grid-full > .hint {
+    max-width: 78ch;
+}
+
+/* A pair of related fields plus the prose that explains them. The group takes two
+   tracks of the parent grid and repeats its track sizing inside, so its controls
+   keep the column width of the fields above while the hint runs directly under
+   the controls it describes. A hint placed as a plain full-width grid row instead
+   would start at the far left of the form, columns away from its field, and the
+   column it would have to span cannot be pinned in CSS: a hidden datacenter field
+   shifts every following control by one track. */
+.field-group {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: 18px;
+    row-gap: 8px;
+}
+
+.field-group > .hint,
+.field-group > .alert {
+    grid-column: 1 / -1;
+}
+
+/* Even under its own field the hint names its subject: the group holds two
+   controls and the text rarely applies to both. */
+.hint-subject {
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* A full-width section spans the whole form, but its individual controls should
+   not run the entire panel width. Single toggle/radio rows size to their label,
+   and a standalone text field/select is capped to a comfortable field width. Only
+   multi-column option grids (.checkbox-grid) keep their full-width stretch. */
+.form-grid-full > .checkbox-item {
+    align-self: flex-start;
+}
+
+.form-grid-full > label:not(.checkbox-item) {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 22rem;
+}
+
+.form-grid > .actions .button {
+    min-width: 88px;
+}
+
+.panel > h2 + .form-grid,
+.panel > h3 + .form-grid,
+.panel > h2 + form,
+.panel > h3 + form {
+    margin-top: 2px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.interface-row,
+.vm-form-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.compound-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 82px;
+    gap: 6px;
+}
+
+.ram-field {
+    grid-template-columns: minmax(0, 1fr) 116px;
+}
+
+.narrow-form {
+    width: min(560px, 100%);
+}
+
+.checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+}
+
+/* Fixed option sets that belong to the surrounding form fields (not open-ended
+   lists like packages or mission VMs) mirror the .form-grid tracks, so each
+   option box is exactly as wide as the inputs above it. */
+.checkbox-grid-aligned {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: 18px;
+}
+
+.checkbox-item {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-muted);
+    font-weight: 400;
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.checkbox-item:hover {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+/* A selected option carries a light accent wash, so a long option list reads at
+   a glance instead of forcing the eye onto every single checkbox. */
+.checkbox-item:has(input:checked) {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* The card, not the bare 16px box, carries the keyboard focus ring: same outline
+   tokens as the global :focus-visible rule in base.css, only relocated to the
+   wrapper (ADR-0013). A translucent halo of our own was tried and dropped: at any
+   alpha that still looked soft it missed the 3:1 non-text contrast floor.
+   Matching on :has(input:focus-visible) keeps the ring off mouse clicks and
+   outranks the :checked rule above, which would otherwise swallow the border. */
+.checkbox-item:has(input:focus-visible) {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.checkbox-item input:focus-visible {
+    outline: none;
+}
+
+.checkbox-item:has(input:disabled) {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .checkbox-item {
+        transition: none;
+    }
+}
+
+.checkbox-item input {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    min-height: auto;
+    accent-color: var(--accent);
+    cursor: inherit;
+}
+
+/* Breathing room between a stacked label's caption and the control it wraps.
+   Labels render as <label>Caption <input></label>, so without this the caption
+   sits almost on top of the field. Row-style labels (filter bars, checkboxes)
+   lay their control out horizontally and opt out below. */
+label > input,
+label > select,
+label > textarea,
+label > .compound-field {
+    margin-top: 6px;
+}
+
+.filter-field > input,
+.filter-field > select,
+.checkbox-item > input {
+    margin-top: 0;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 2px 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-success {
+    color: var(--success);
+}
+
+.badge-warning {
+    color: var(--warning);
+}
+
+.badge-info {
+    color: var(--info);
+}
+
+.badge-neutral {
+    color: var(--muted);
+}
+
+.diagnostics {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: 0 0 14px;
+}
+
+.diagnostics-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.diagnostics-item dt {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.diagnostics-item dd {
+    margin: 0;
+}
+
+.diagnostics-item code {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* VM deploy-status panel: a read-only overview card, kept visually separate from
+   the editable VM form below it. The status pill rides in the heading row. */
+.vm-status-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+    margin: 0 0 14px;
+}
+
+.vm-status-head h2 {
+    margin: 0;
+}
+
+/* Client deploy phases as a numbered progress track: each step is its own tile
+   with a state-colored left rail, so the four phases read at a glance instead of
+   wrapping into one cramped row. */
+.phase-track {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+    padding: 0;
+    list-style: none;
+}
+
+.phase-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.phase-step-index {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.phase-step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.phase-step-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.phase-step-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.phase-step-running {
+    border-left-color: var(--info);
+}
+
+.phase-step-unconfirmed {
+    border-left-color: var(--warning);
+}
+
+.phase-step-finished {
+    border-left-color: var(--success);
+}
+
+.phase-step-failed {
+    border-left-color: var(--danger);
+}
+
+.phase-step-finished .phase-step-index {
+    border-color: var(--success);
+    background: var(--success);
+    color: var(--surface);
+}
+
+.phase-step-failed .phase-step-index {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: var(--surface);
+}
+
+.alert {
+    margin: 0 0 14px;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* An alert colours its whole text, so a link inside it is the same hue as the
+   prose around it and colour alone no longer marks it as a link (WCAG 1.4.1).
+   The underline is the non-colour affordance. It matters most exactly here: the
+   link in an error alert is the way out of the error. */
+.alert a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.alert-success {
+    border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+    color: var(--success);
+}
+
+.alert-error {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    color: var(--danger);
+}
+
+.alert-warning {
+    border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+    color: var(--warning);
+}
+
+/* Integrations overview strip: small solid tiles summarizing the worst state per
+   system (solid surface-muted, not glass, so they don't stack blur on the panel). */
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
+    gap: 12px;
+    justify-content: start;
+}
+
+.overview-tile {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.overview-tile-label {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+/* The red action hint attached to its status row reads as belonging to the source
+   above it, so it drops the floating alert margin. */
+.status-action {
+    margin: 0;
+}
+
+/* One shared colour key for both traffic lights: meaning column plus the live
+   badges each table uses for that severity. */
+.legend-key {
+    display: grid;
+    grid-template-columns: minmax(110px, max-content) 1fr 1fr;
+    gap: 10px 16px;
+    align-items: center;
+    margin: 0 0 14px;
+}
+
+.legend-key .lk-head {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.legend-key .lk-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.legend-caps {
+    list-style: none;
+    margin: 0;
+    padding-left: 0;
+    display: grid;
+    gap: 8px;
+}
+
+/* Badge inline, description flows after it and wraps under itself: keeps every
+   row consistent regardless of how wide the badge or how long the text is. */
+.legend-caps li {
+    line-height: 1.5;
+}
+
+.legend-caps .badge {
+    margin-right: 6px;
+}
+
+/* ESXi inventory (ADR-0023): per-credential cards + thin datastore capacity bars. */
+.inv-cards {
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    align-items: start;
+}
+
+/* Solid surface-muted card inside the glass panel (ADR-0013: glass only once). */
+.inv-card {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.inv-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+
+.inv-card-head h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+}
+
+.inv-card-head .inline-form {
+    margin-left: auto;
+}
+
+.inv-card p {
+    margin: 0;
+}
+
+.inv-card h4 {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.inv-card ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+/* The datastore table sits inside a ~340px card; the global 720px min-width would
+   force a scrollbar on three short columns. Let it size to its content instead. */
+.inv-card .table-wrap table {
+    min-width: 0;
+}
+
+.inv-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.inv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.capacity-bar {
+    display: inline-block;
+    width: 130px;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--surface-muted);
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.capacity-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--success);
+}
+
+.capacity-fill.warning {
+    background: var(--warning);
+}
+
+.capacity-fill.danger {
+    background: var(--danger);
+}
+
+.alert-info {
+    color: var(--info);
+}
+
+/* Operator diagnostics inside an alert: collapsed by default, muted so the
+   localized message above stays the thing you read first. Native <details>,
+   no JS. */
+.alert-details {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.alert-details > summary {
+    cursor: pointer;
+}
+
+.alert-details pre {
+    margin: 6px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.login-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+}
+
+/* Login-only atmosphere (ADR-0013 glass world): a soft, slowly drifting aurora
+   behind the panel. Scoped to .login-page so no other portal page is touched. */
+.login-page::before {
+    content: "";
+    position: fixed;
+    inset: -15vmax;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(38% 42% at 20% 22%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
+        radial-gradient(42% 44% at 82% 28%, color-mix(in srgb, var(--info) 18%, transparent), transparent 70%),
+        radial-gradient(46% 48% at 55% 90%, color-mix(in srgb, var(--accent-strong) 16%, transparent), transparent 72%);
+    filter: blur(52px);
+    opacity: 0.34;
+    animation: login-aurora 28s ease-in-out infinite alternate;
+}
+
+.login-panel {
+    width: min(420px, 100%);
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    box-shadow:
+        0 24px 60px color-mix(in srgb, var(--accent-strong) 20%, transparent),
+        var(--shadow);
+    animation: login-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Accent hairline along the top edge of the card. */
+.login-panel::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--info));
+}
+
+.login-theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+}
+
+.login-panel h1 {
+    margin: 0 0 4px;
+    text-align: center;
+    color: var(--accent-strong);
+    background: linear-gradient(92deg, var(--accent), var(--info));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.login-tagline {
+    margin: 0 0 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+}
+
+.login-logo {
+    display: block;
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    margin: 0 auto 12px;
+    filter:
+        drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 32%, transparent))
+        drop-shadow(0 0 16px color-mix(in srgb, var(--accent) 16%, transparent));
+}
+
+/* Icon-prefixed inputs (login only; global inputs stay solid and unchanged). */
+.login-input {
+    position: relative;
+    display: block;
+    margin-top: 6px;
+}
+
+.login-input-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: var(--muted);
+    pointer-events: none;
+}
+
+.login-input input {
+    padding-left: 38px;
+}
+
+.login-panel input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Accent submit button with a one-shot sheen and a nudging arrow on hover. */
+.login-panel form .button {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(92deg, var(--accent-strong), var(--accent));
+    border-color: transparent;
+    color: #ffffff;
+}
+
+:root[data-theme="dark"] .login-panel form .button {
+    color: #06181b;
+}
+
+.login-panel form .button::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    transform: skewX(-18deg);
+    transition: left 0.5s ease;
+}
+
+.login-panel form .button:hover::after {
+    left: 120%;
+}
+
+.login-btn-arrow {
+    transition: transform 0.2s ease;
+}
+
+.login-panel form .button:hover .login-btn-arrow {
+    transform: translateX(3px);
+}
+
+@keyframes login-rise {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes login-aurora {
+    0% {
+        transform: translate3d(-3%, -2%, 0) scale(1);
+    }
+    50% {
+        transform: translate3d(3%, 2%, 0) scale(1.06);
+    }
+    100% {
+        transform: translate3d(-1%, 3%, 0) scale(1.02);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login-page::before,
+    .login-panel {
+        animation: none;
+    }
+    .login-panel form .button::after,
+    .login-btn-arrow {
+        transition: none;
+    }
+}
+
+.hidden-template {
+    display: none;
+}
+.badge-danger {
+    color: var(--danger);
+}
+
+.value-small {
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.field-error {
+    display: block;
+    margin-top: 4px;
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+input.is-invalid,
+select.is-invalid,
+textarea.is-invalid {
+    border-color: var(--danger);
+}
+
+.log-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .panel {
+        padding: 16px 14px;
+    }
+
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .panel > .actions:first-child {
+        align-items: stretch;
+    }
+
+    .panel > .actions:first-child > h2,
+    .panel > .actions:first-child > h3 {
+        width: 100%;
+    }
+
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: 1fr;
+    }
+
+    /* One track left: a span would add an implicit second column and push the
+       grid past the panel. */
+    .form-grid-span-2 {
+        grid-column: auto;
+    }
+
+    .field-group {
+        grid-column: auto;
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   Session timer (sidebar widget) + expiry warning modal
+   ========================================================================== */
+.session-timer {
+    margin-top: auto;
+    display: grid;
+    gap: 8px;
+    padding: 12px 10px;
+    border-top: 1px solid var(--border);
+}
+
+.session-timer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.session-timer-title {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.session-timer-clock {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.session-timer-clock.is-warning {
+    color: var(--danger);
+}
+
+.session-timer-extend {
+    width: 100%;
+    min-height: 34px;
+}
+
+@media (max-width: 860px) {
+    /* Sidebar is a horizontal-ish stack on mobile; don't force the timer down. */
+    .session-timer {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 16px;
+    }
+
+    .session-timer-head {
+        flex: 1 1 auto;
+    }
+
+    .session-timer-extend {
+        width: auto;
+        flex: 0 0 auto;
+    }
+}
+
+/* ==========================================================================
+   Modal dialogs (SSoT for the session-expiry warning and the confirm dialog)
+
+   Both are native <dialog> elements opened with showModal(), so the browser
+   owns the top layer, the focus trap and the Escape key. The dialog element
+   itself is the dim layer that covers the viewport; .modal-box is the panel.
+   A click that lands on the element and not on the box is therefore a
+   backdrop click, which is what app.js tests for.
+
+   The dim is painted on the element rather than on ::backdrop because custom
+   properties do not inherit into ::backdrop on older engines.
+   ========================================================================== */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    border: 0;
+    padding: 16px;
+    overflow: auto;
+    background: color-mix(in srgb, #02141a 72%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    color: var(--text);
+}
+
+/* Explicit, so the fallback path in app.js (which only toggles the [open]
+   attribute) still hides the dialog without the UA stylesheet. */
+.modal:not([open]) {
+    display: none;
+}
+
+.modal[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal::backdrop {
+    background: transparent;
+}
+
+/* showModal() makes the page inert but does not stop it scrolling behind the
+   dialog; app.js sets this class while any modal is open. */
+.is-modal-open,
+.is-modal-open body {
+    overflow: hidden;
+}
+
+.modal-box {
+    width: min(420px, 100%);
+    padding: 24px 26px;
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    color: var(--text);
+    text-align: center;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.modal-icon {
+    font-size: 34px;
+    line-height: 1;
+    margin-bottom: 10px;
+}
+
+.modal-danger .modal-icon {
+    color: var(--danger);
+}
+
+.modal-title {
+    margin: 0 0 8px;
+    font-size: 19px;
+}
+
+/* Every modal message, not just the confirm one: a message that fits a line
+   sits on the dialog axis with the icon, title and actions; one that wraps
+   reads left-aligned, because there the left edge is what carries the reader.
+   fit-content decides which without asking CSS whether the text wrapped. A
+   one-line message takes its own width and the auto inline margins recentre
+   it; a longer one hits max-width, fills the box and keeps its left edge.
+
+   overflow-wrap because a confirm question names its target (portal.md) and a
+   target name is user input: an unbroken 90-character service account would
+   otherwise run past the box, and a clipped name is exactly the misread the
+   naming rule exists to prevent. */
+.modal-msg {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto 18px;
+    overflow-wrap: anywhere;
+    text-align: left;
+    color: var(--muted);
+}
+
+.modal-msg strong {
+    color: var(--danger);
+    font-variant-numeric: tabular-nums;
+}
+
+.modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* Confirm dialog: its message can run to a few sentences (a used operating
+   system, a mission with waiting deploy jobs), so it gets a wider box and the
+   full-contrast text colour. The alignment it inherits from .modal-msg.
+   Dismiss sits left of the accept button. */
+.modal-confirm .modal-box {
+    width: min(480px, 100%);
+}
+
+.modal-confirm .modal-msg {
+    color: var(--text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .modal[open] {
+        animation: modal-fade 120ms ease-out;
+    }
+
+    .modal[open] .modal-box {
+        animation: modal-rise 140ms ease-out;
+    }
+}
+
+@keyframes modal-fade {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes modal-rise {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+}
+
+/* ==========================================================================
+   Tabs (progressive enhancement: the tab list ships hidden and is revealed
+   by app.js; without JS every panel stays visible)
+   ========================================================================== */
+.tab-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+
+.tab-list[hidden] {
+    display: none;
+}
+
+/* .stack's display:grid would override the UA [hidden] rule. */
+[data-tab-panel][hidden] {
+    display: none;
+}
+
+.tab {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 7px 14px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+/* Link-based server-nav tabs (e.g. the log sections) reuse the .tab look but
+   navigate instead of toggling in-page panels; they mark the active tab with
+   aria-current and need the anchor decoration reset. */
+a.tab {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+.tab:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.tab[aria-selected='true'],
+.tab[aria-current='page'] {
+    border-color: var(--accent);
+    background: var(--surface);
+    color: var(--accent-strong);
+}
+
+/* Fragment navigation (help.php#panel-stack from the topbar help icon,
+   help.php#help-backup from the backup card) scrolls the target flush to the
+   viewport top, where the sticky .topbar covers it. Both the panel itself and any
+   deep-link anchor inside it need clearance, or the heading you jumped to is the
+   one thing you cannot read. */
+[data-tab-panel],
+[data-tab-panel] [id] {
+    scroll-margin-top: 92px;
+}
+
+/* FAQ accordion (native <details>, no JS) */
+.faq details {
+    border-top: 1px solid var(--border);
+    padding: 12px 0;
+}
+
+.faq details:last-child {
+    padding-bottom: 0;
+}
+
+.faq summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.faq summary:hover {
+    color: var(--accent-strong);
+}
+
+.faq details[open] summary {
+    color: var(--accent-strong);
+}
+
+.faq details p {
+    margin: 10px 0 0;
+}

@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title' => 'Benutzer',
+    'create_heading' => 'Benutzer anlegen',
+    'field_email' => 'E-Mail',
+    'field_password' => 'Passwort',
+    'field_role' => 'Rolle',
+    'th_id' => 'ID',
+    'th_active' => 'Aktiv',
+    'th_must_change' => 'Passwortwechsel',
+    'th_last_seen' => 'Zuletzt angemeldet',
+    'badge_locked' => 'Gesperrt',
+    'locked_until_hint' => 'Automatisch gesperrt bis :time',
+    'btn_activate' => 'Aktivieren',
+    'btn_deactivate' => 'Deaktivieren',
+    'btn_role' => 'Rolle ändern',
+    'aria_role_select' => 'Rolle von :name',
+    'btn_reset' => 'Zurücksetzen',
+    'confirm_reset_password' => 'Passwort von :name zurücksetzen? Das bisherige Passwort gilt danach nicht mehr.',
+    'confirm_deactivate' => 'Benutzer :name deaktivieren? Die Anmeldung wird sofort verweigert; laufende Sitzungen enden beim nächsten Aufruf.',
+    'confirm_role' => 'Rolle von :name ändern? Die neuen Rechte gelten sofort.',
+    'confirm_role_self' => 'Deine eigene Rolle ändern? Nimmst du dir die Administratorrechte, verlierst du sofort den Zugang zur Benutzerverwaltung. Nur ein anderer Administrator kann das rückgängig machen.',
+    'btn_unlock' => 'Sperre aufheben',
+    'new_password_placeholder' => 'Neues Passwort',
+    'err_email_invalid' => 'E-Mail muss eine gültige Adresse sein.',
+    'err_password_min' => 'Passwort muss mindestens :min Zeichen lang sein.',
+    'err_self_deactivate' => 'Du kannst dein eigenes Konto nicht deaktivieren.',
+    'err_last_admin' => 'Der letzte aktive Admin kann nicht deaktiviert oder demotet werden.',
+    'flash_created' => 'Benutzer angelegt.',
+    'flash_status' => 'Benutzerstatus aktualisiert.',
+    'flash_role' => 'Rolle aktualisiert.',
+    'flash_password_reset' => 'Passwort zurückgesetzt.',
+    'flash_lock_cleared' => 'Sperre aufgehoben.',
+    'flash_check_input' => 'Bitte Eingaben prüfen.',
+];

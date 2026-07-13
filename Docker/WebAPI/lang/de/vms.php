@@ -1,0 +1,35 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title_template' => 'Vorlagen-VMs',
+    'title_mission' => 'Missions-VMs',
+    'mission_details' => 'Missionsdetails',
+    'add_vm' => 'VM hinzufügen',
+    'th_hostname' => 'Hostname',
+    'th_os' => 'OS',
+    'th_cpu' => 'CPU',
+    'th_ram' => 'RAM',
+    'th_mecm' => 'MECM',
+    'th_interfaces' => 'Schnittstellen',
+    'th_disks' => 'Datenträger',
+    'th_packages' => 'Pakete',
+    'confirm_delete' => 'VM :name löschen?',
+    'empty' => 'Keine VMs gefunden.',
+    'flash_deleted' => 'VM gelöscht.',
+    'bulk_selected' => 'ausgewählt',
+    'bulk_select_all' => 'Alle auswählen',
+    'bulk_delete_btn' => 'Ausgewählte löschen',
+    'bulk_reset_btn' => 'MECM-ID zurücksetzen',
+    'bulk_confirm_delete' => 'Ausgewählte VMs löschen? Es werden nur Portal-Datensätze entfernt, nichts auf dem Hypervisor.',
+    'bulk_confirm_reset' => 'MECM-ID der ausgewählten VMs zurücksetzen?',
+    'bulk_hint' => 'Bulk-Aktionen betreffen nur die Portal-Datensätze, nie den Hypervisor.',
+    'bulk_none_selected' => 'Bitte zuerst VMs auswählen.',
+    'bulk_too_many' => 'Zu viele VMs ausgewählt (Grenze :cap).',
+    'bulk_done' => ':done erledigt.',
+    'bulk_skipped' => ':count übersprungen',
+    'skip_active_job' => 'aktiver Deploy-Job',
+    'skip_no_mac' => 'kein importierter MAC',
+    'skip_error' => 'Fehler',
+];

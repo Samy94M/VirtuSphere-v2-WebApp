@@ -1,0 +1,54 @@
+# ADR-0025: ESXi Autostart Policy
+
+Date: 2026-07-10
+Status: Accepted
+
+## Context
+
+The `start` deploy mode powers VMs on once. Nothing survives a host reboot or a power loss, so after either the operator powers every VM of a mission back on by hand, in an order only they remember. ESXi has carried the answer since forever: the host client's "Verwalten → System → Autostart", a per-host list with a start order and start/stop delays. Nothing in VirtuSphere ever wrote it.
+
+Two constraints shape the whole feature. Autostart is a **write** to the hypervisor, and `community.vmware` needs the write API, which a **free ESXi licence does not have** (Broadcom reinstated the free hypervisor with 8.0 U3e; its API is documented read-only). And **vSphere HA disables autostart entirely**: on a host inside an HA cluster the setting exists, is accepted, and does nothing, because HA's restart priority owns VM startup there. The customer runs vSphere 8 Enterprise Plus for VCF on one of their hosts; the others are exactly the case that must not fail silently.
+
+## Decision
+
+**A mission carries the host defaults, a VM carries its override.** This is ESXi's own two-level model ("Default VM Settings" plus per-VM overrides), not an invention. `deploy_missions` gains `autostart_enabled`, `autostart_start_delay` (120s), `autostart_stop_delay` (120s), `autostart_stop_action` (`guestShutdown`) and `autostart_wait_for_heartbeat`; `deploy_vms` gains `autostart_enabled` plus its two delays. The mission's values become the host's `system_defaults`, the VM's its `power_info`. It rests on the precondition one mission = one standalone host, which the deploy already assumes when it resolves `ha-datacenter`.
+
+**`-1` means inherit; `0` means no wait.** The two must never collapse into each other, in any layer. A per-VM delay of `-1` is handed to `vmware_host_auto_start` unchanged, and the module reads it as "use the system default", so the inheritance is resolved **on ESXi**, never guessed in PHP. Consequently a later change to the mission default reaches every VM that did not override it, on the next autostart run. The mission's own delays may not be `-1`: a host default has nothing to inherit from. The editor's empty delay field is the inherit state and `repo_vm_delay_value()` turns it into `-1`; it must never reach the `INT NOT NULL` column as `''`, and a `0` stored there would silently mean "boot immediately".
+
+**No start-order field.** [community.vmware#1903](https://github.com/ansible-collections/community.vmware/issues/1903) is open: the module rejects any `start_order` above 1. A numeric order control would therefore be a field that works for the first VM and fails for the second, which is worse than not having it. `start_order` is pinned to `-1` and the mission staggers its VMs through `start_delay`. Strict ordering is a documented limitation; lifting it needs a small pyvmomi script (`HostAutoStartManager.ReconfigureAutostart`, one bulk call), not a bigger form.
+
+**No per-VM stop action or heartbeat override.** The module's `systemDefault` already inherits both. Two fewer fields, and one ENUM fewer to mirror.
+
+**A VM cannot participate while its mission has autostart off.** The mission switch is not decoration: it is what turns the host's autostart manager on. A VM written with `start_action: powerOn` while the manager stays off would sit in the host's list waiting for some *other* mission to enable it, and would then boot without anybody having asked. The AND of the two switches is therefore resolved once, in `ansible_vm_autostart()`, and the playbook only reads the result; re-deriving it in Jinja would let the two implementations drift. The VM editor locks the control in that state instead of accepting a setting that would do nothing, and the lock posts the stored value through a hidden field, because a `disabled` input posts nothing and saving would otherwise clear the VM's own setting. The delays stay `readonly` rather than `disabled` for the same reason: a readonly number input still posts, so a blank field keeps meaning "inherit".
+
+**The playbook never writes `system_defaults.enabled: false`.** One host can carry VMs of several missions. Disabling the host's autostart manager to turn one mission off would stop the others too. Turning a mission off means writing every one of *its* VMs with `start_action: none`, which is exactly how ESXi records "not in the list". Only VMs in the job's selection are written; a VM left out keeps whatever the host holds for it, so withdrawing a policy requires a run that includes the VM.
+
+**`full` appends the autostart playbook only for a mission that enabled it.** Otherwise every full deploy would rewrite the target host's `system_defaults` with the defaults of a mission that never asked for autostart, clobbering the policy of the missions that did. The explicit `autostart` mode always runs, including for a disabled mission, because that is the withdrawal path. The mode is in neither `VIRTUSPHERE_DEPLOY_STAGGER_MODES` (a config write, not a power operation) nor `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES` (it creates no resources).
+
+**Preflight refuses only on fresh evidence.** The capability facts from the inventory cache (ADR-0023 amendment 3) decide, and the cache-never-blocks rule keeps holding: unknown or stale facts warn and let the job run, because ESXi is the authority and a job that fails loudly on the host beats a job the portal refused on a month-old assumption. Two exceptions, both requiring a fact from a fresh successful pull:
+
+- `license_free` → **refuse**, in every mode. The write API does not exist there and the module's own error is not one an operator can act on.
+- `in_ha_cluster` → **refuse** in mode `autostart` (the operator asked for exactly the thing that cannot work), **skip the step and continue** in mode `full` (the operator asked for a deploy, and losing the VMs over an ineffective autostart step would be a poor trade).
+
+Either way the facts are written to the job log first, fresh or not, so the run is explainable afterwards even when the verdict was "go ahead".
+
+**The module is addressed by the host's object name, not by the address we connect to.** `vmware_host_auto_start`'s `esxi_hostname` names the host object as the hypervisor knows itself; a credential holding an IP would not resolve to it. The inventory cache already stores that name, so `ansible_esxi_host_object_name()` reads it and the playbook falls back to the connection address only when the credential was never pulled or reports several hosts (a vCenter).
+
+**A mode is now two questions, not one.** `deploy_job_normalize_mode()` answered both "may a stored payload carry this" and "may an operator ask for this", so a crafted POST could queue a *mission* job with mode `inventory`, which the worker then routed into the mission-less inventory branch. The label map is the source of truth for what an operator may post (`virtusphere_user_deploy_modes()`), the read side stays permissive for the worker, and `repo_create_system_job()` mirrors the rule by refusing anything that is not a system mode. Both guards live in the repository, because a page-level guard is bypassable. Staggering is refused for `autostart` there too: a config write has nothing to spread over time.
+
+**A gate may only ask what its mode needs.** `autostart` reads neither `datacenter_name` nor `datastore_name`, so `virtusphere_deploy_mode_needs_location()` skips the location requirement for it, in the enqueue gate and its worker-side twin alike. Refusing to write a host's boot order because the mission has no datastore would have been a gate answering the wrong question.
+
+**The collection is pinned in the repository.** `Ansible/requirements.yml` names `community.vmware` 6.2.0, the version verified to carry `vmware_host_auto_start` and `vmware_about_info`. `docs/DEPLOYMENT.md` gained the support matrix the project never had.
+
+## Consequences
+
+- New schema (migration 0016): five `deploy_missions` columns, three `deploy_vms` columns, six capability columns on `deploy_esxi_inventory_state`. `autostart_stop_action` is an ENUM mirrored from `VIRTUSPHERE_AUTOSTART_STOP_ACTIONS` and checked by `scripts/check-enum-sync.sh` (ADR-0016). Everything defaults to off, so no host changes until an operator opts in.
+- `Validator::enum()` is **not** used for the stop action: it lower-cases its input, and these are vSphere API literals the module compares case-sensitively. `guestshutdown` is not `guestShutdown` to ESXi.
+- A mission column has to be named in several places (update, checked update, clone, template capture, the transfer format). They now share `REPO_MISSION_EDITABLE_COLUMNS` / `REPO_MISSION_COPYABLE_COLUMNS`, because the previous duplication meant a new field could be saved by the editor and silently dropped by the clone. `VIRTUSPHERE_MISSION_EXPORT_VERSION` stays at 1: the export builds from those lists and the import is key-guarded, so an old file still imports and a bump would only make every file already on disk unreadable.
+- VMware Tools are required for `guestShutdown` and `wait_for_heartbeat`. Without them the stop delay elapses and the VM is powered off hard; the default `guestShutdown` therefore degrades to `powerOff` rather than breaking.
+- Several missions on one host share the host's `system_defaults`, so the last mission written wins them. Documented, and the reason the delays are per-VM overridable.
+- On vCenter (`api_type = VirtualCenter`) DRS or vMotion can move a VM off the host whose autostart list names it, orphaning the entry. The precondition remains a static standalone host.
+- `deploy_job_logs` had no retention and the interval inventory pull writes a job every few hours. Terminal jobs now lose their streamed output after 30 days, and finished system jobs are removed outright; see `docs/DEPLOYMENT.md`.
+- The `php` container mounts `Ansible/` read-only outside the webroot, so the playbook contract tests read the file the deploy would upload instead of skipping. A skipped test has silently stopped guarding anything.
+- `lib/ansible.php` had grown to carry two unrelated jobs and passed its size budget. The inventory transport and its parsers moved to `lib/ansible_inventory.php` (ADR-0006, split by domain).
+- Verified against a productive host on rollout, like every ESXi field path in this project.

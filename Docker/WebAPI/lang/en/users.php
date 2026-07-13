@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title' => 'Users',
+    'create_heading' => 'Create user',
+    'field_email' => 'Email',
+    'field_password' => 'Password',
+    'field_role' => 'Role',
+    'th_id' => 'ID',
+    'th_active' => 'Active',
+    'th_must_change' => 'Must Change',
+    'th_last_seen' => 'Last Login',
+    'badge_locked' => 'Locked',
+    'locked_until_hint' => 'Automatically locked until :time',
+    'btn_activate' => 'Activate',
+    'btn_deactivate' => 'Deactivate',
+    'btn_role' => 'Change role',
+    'aria_role_select' => 'Role of :name',
+    'btn_reset' => 'Reset',
+    'confirm_reset_password' => 'Reset the password of :name? The previous password stops working.',
+    'confirm_deactivate' => 'Deactivate the user :name? Login is refused immediately; running sessions end on the next request.',
+    'confirm_role' => 'Change the role of :name? The new permissions apply immediately.',
+    'confirm_role_self' => 'Change your own role? Taking away your administrator rights locks you out of user management immediately. Only another administrator can undo it.',
+    'btn_unlock' => 'Clear Lock',
+    'new_password_placeholder' => 'New password',
+    'err_email_invalid' => 'Email must be a valid address.',
+    'err_password_min' => 'Password must be at least :min characters.',
+    'err_self_deactivate' => 'You cannot deactivate your own account.',
+    'err_last_admin' => 'The last active admin cannot be deactivated or demoted.',
+    'flash_created' => 'User created.',
+    'flash_status' => 'User status updated.',
+    'flash_role' => 'Role updated.',
+    'flash_password_reset' => 'Password reset.',
+    'flash_lock_cleared' => 'Lock cleared.',
+    'flash_check_input' => 'Please check your input.',
+];

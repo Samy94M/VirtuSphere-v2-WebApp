@@ -1,0 +1,126 @@
+---
+# Read-only ESXi/vCenter inventory (ADR-0023). Uses only community.vmware
+# *_info / *_facts modules; it never changes anything on the host. The worker
+# parses the single base64-JSON marker line at the end (VirtuSphere_inventory).
+#
+# Field paths follow the documented community.vmware module outputs; they are
+# verified against the productive host on first rollout (see docs/operations/
+# esxi-inventory.md). Everything is guarded with default() so a missing section
+# yields an empty list rather than failing the whole run.
+- name: VirtuSphere ESXi inventory (read-only)
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./accounts.yml
+
+  tasks:
+    # Connection canary: NO ignore_errors, so a connection/auth/authz failure
+    # fails the run with a categorizable message (the worker classifies it).
+    - name: Gather datacenters
+      community.vmware.vmware_datacenter_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_datacenters
+
+    - name: Gather datastores
+      community.vmware.vmware_datastore_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_datastores
+      ignore_errors: true
+
+    - name: Gather standard portgroups
+      community.vmware.vmware_portgroup_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_portgroups
+      ignore_errors: true
+
+    - name: Gather distributed portgroups
+      community.vmware.vmware_dvs_portgroup_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_dvs_portgroups
+      ignore_errors: true
+
+    - name: Gather host facts
+      community.vmware.vmware_host_facts:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_hosts
+      ignore_errors: true
+
+    # Capability facts (ADR-0023 amendment 3). Read-only, like everything else
+    # here. about_info answers what the endpoint IS (standalone host or vCenter,
+    # product, licence); the vsphere schema answers what it is DOING (maintenance
+    # mode, HA cluster membership). Both are properties of a SUCCESSFUL pull, not
+    # error categories. A failing task leaves its key absent and the PHP parser
+    # reads that as "not known", never as false.
+    - name: Gather about info (api type, product, license)
+      community.vmware.vmware_about_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_about
+      ignore_errors: true
+
+    - name: Gather host runtime (maintenance mode, HA state)
+      community.vmware.vmware_host_facts:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+        schema: vsphere
+        properties:
+          - runtime.inMaintenanceMode
+          - runtime.dasHostState
+      register: vs_host_runtime
+      ignore_errors: true
+
+    - name: Assemble inventory result
+      ansible.builtin.set_fact:
+        vs_inventory:
+          fetched_epoch: "{{ ansible_date_time.epoch | default(lookup('pipe', 'date +%s')) }}"
+          datacenters: >-
+            {{ (vs_datacenters.datacenter_info | default([])) | map(attribute='name') | list }}
+          datastores: >-
+            {{ (vs_datastores.datastores | default([])) | map('combine', {}) | list }}
+          # Raw portgroup objects, deliberately unprojected: the PHP parser
+          # extracts name and vlan_id (ansible_inventory_network_item), because
+          # PHP is unit-testable without an ESXi host while Jinja is not.
+          networks_standard: >-
+            {{ (vs_portgroups.hosts_portgroup_info | default({})) | dict2items
+               | map(attribute='value') | flatten | list }}
+          networks_dvs: >-
+            {{ (vs_dvs_portgroups.dvs_portgroup_info | default({})) | dict2items
+               | map(attribute='value') | flatten | list }}
+          hosts: >-
+            {{ vs_hosts.ansible_facts | default({}) }}
+          # Raw pass-through, for the same reason as the portgroups above: the
+          # field extraction lives in ansible_parse_inventory_capabilities().
+          about: >-
+            {{ vs_about.about_info | default({}) }}
+          host_runtime: >-
+            {{ vs_host_runtime.ansible_facts | default({}) }}
+
+    - name: Emit inventory marker (base64 JSON for robust parsing)
+      ansible.builtin.debug:
+        msg: "VIRTUSPHERE_INVENTORY_B64_BEGIN{{ vs_inventory | to_json | b64encode }}VIRTUSPHERE_INVENTORY_B64_END"

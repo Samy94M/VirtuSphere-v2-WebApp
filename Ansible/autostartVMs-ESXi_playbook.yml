@@ -1,0 +1,79 @@
+---
+# Writes the ESXi host's autostart configuration for the VMs of one mission
+# (ADR-0025). It is the persistent counterpart of startVMs-ESXi_playbook.yml:
+# that one powers VMs on once, this one teaches the host to do it after every
+# reboot or power loss.
+#
+# Two levels, mirroring the host client's "Verwalten -> System -> Autostart":
+#   1. system_defaults  = the mission's autostart defaults (host-wide).
+#   2. power_info       = per VM; -1 / systemDefault mean "inherit level 1".
+#
+# Requires API write access, so it does NOT work on a free ESXi licence, and it
+# is a silent no-op on a host inside a vSphere HA cluster. The worker checks both
+# from the cached capability facts before it ever gets here.
+#
+# start_order is pinned to -1 on purpose. community.vmware#1903 (still open)
+# rejects any value above 1, so a numeric order would be a trap; the mission
+# staggers its VMs through start_delay instead.
+- name: ESXi-Autostart-Richtlinie der Mission anwenden
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+
+  vars:
+    # The module's `esxi_hostname` names the host OBJECT as the hypervisor knows
+    # itself, not the address we connect to. A credential holding an IP would not
+    # resolve to it, so the WebAPI passes the name from the inventory cache and we
+    # fall back to the connection address only when it has never been pulled.
+    vs_esxi_host: "{{ mission_configuration.autostart.esxi_host | default('', true) or esxi_hostname }}"
+
+  tasks:
+    # Level 1. Only ever enables the host's autostart manager, never disables it:
+    # one host can carry VMs of several missions, and switching the manager off
+    # would silently stop their autostart too. Turning a mission off is done by
+    # setting each of ITS VMs to start_action "none" (level 2 below).
+    - name: Autostart-Standardwerte des Hosts setzen
+      community.vmware.vmware_host_auto_start:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: no
+        esxi_hostname: "{{ vs_esxi_host }}"
+        system_defaults:
+          enabled: true
+          start_delay: "{{ mission_configuration.autostart.start_delay | int }}"
+          stop_delay: "{{ mission_configuration.autostart.stop_delay | int }}"
+          stop_action: "{{ mission_configuration.autostart.stop_action }}"
+          wait_for_heartbeat: "{{ mission_configuration.autostart.wait_for_heartbeat | bool }}"
+      delegate_to: localhost
+      when: mission_configuration.autostart.enabled | bool
+
+    # Level 2. Every selected VM is written, participating or not: a VM whose
+    # checkbox was cleared must lose its entry, and "none" is how the host records
+    # that. `item.autostart.enabled` is already the EFFECTIVE value (the VM's own
+    # checkbox AND the mission's), computed in ansible_vm_autostart(); this task
+    # does not re-derive it. A VM outside this job keeps what the host has for it.
+    - name: Autostart je VM schreiben
+      community.vmware.vmware_host_auto_start:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: no
+        esxi_hostname: "{{ vs_esxi_host }}"
+        name: "{{ item.vm_name }}"
+        power_info:
+          start_action: "{{ 'powerOn' if (item.autostart.enabled | bool) else 'none' }}"
+          start_order: -1
+          start_delay: "{{ item.autostart.start_delay | int }}"
+          stop_delay: "{{ item.autostart.stop_delay | int }}"
+          stop_action: systemDefault
+          wait_for_heartbeat: systemDefault
+      delegate_to: localhost
+      loop: "{{ vm_configurations }}"
+      loop_control:
+        label: "{{ item.vm_name }}"
+      when: vm_configurations | length > 0

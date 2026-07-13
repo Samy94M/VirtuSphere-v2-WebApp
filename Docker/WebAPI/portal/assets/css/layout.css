@@ -1,0 +1,329 @@
+.app-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    /* dvh keeps the sidebar honest when browser chrome eats viewport height. */
+    height: 100dvh;
+    /* Short/low windows (wide but not tall) still use the desktop layout, so the
+       sidebar must scroll its own overflow instead of clipping the admin group
+       and session timer below the fold. overscroll-behavior stops the scroll
+       from chaining into the main content. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* On tall windows nothing overflows and no scrollbar shows at all. When a
+       short window does force a scroll, keep the bar slim and quiet instead of
+       the chunky default gutter. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 14px;
+    border-right: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.sidebar::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 35%, transparent);
+    border-radius: 999px;
+    /* Transparent border + padding-box clip floats the thumb as a slim pill. */
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--muted) 55%, transparent);
+    background-clip: padding-box;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px 18px;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.brand-mark {
+    display: block;
+    width: 34px;
+    height: 34px;
+    object-fit: contain;
+    flex: none;
+}
+
+.button.nav-toggle {
+    display: none;
+    width: 42px;
+    padding: 0;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.nav-group {
+    display: grid;
+    gap: 4px;
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+}
+
+.nav-group-title {
+    margin: 0 0 4px;
+    padding: 0 10px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.nav-group a {
+    display: block;
+    border-left: 3px solid transparent;
+    border-radius: 0 6px 6px 0;
+    padding: 9px 10px 9px 7px;
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.nav-group a:hover {
+    background: var(--surface-muted);
+    color: var(--text);
+}
+
+.nav-group a.active {
+    border-left-color: var(--accent);
+    background: var(--surface-muted);
+    color: var(--text);
+    font-weight: 700;
+}
+
+.nav-admin {
+    margin-top: 8px;
+}
+
+.app-main {
+    min-width: 0;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    min-height: 76px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.topbar h1 {
+    margin: 0;
+    font-size: 24px;
+    line-height: 1.1;
+}
+
+.eyebrow {
+    margin: 0 0 4px;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.page-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.page-help-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    color: var(--accent-strong);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.page-help-link:hover,
+.page-help-link:focus-visible {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.page-help-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--btn-fg);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.topbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    align-items: center;
+}
+
+.topbar-actions form {
+    margin: 0;
+}
+
+.account-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    min-width: 0;
+    max-width: 220px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    background: var(--surface-muted);
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.account-link:hover {
+    border-color: var(--accent);
+    text-decoration: none;
+}
+
+.account-avatar {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+    background: var(--surface-muted);
+    color: var(--accent-strong);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.account-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.theme-toggle {
+    width: 38px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.theme-icon {
+    display: none;
+}
+
+:root[data-theme="light"] .theme-icon-sun {
+    display: inline;
+}
+
+:root[data-theme="dark"] .theme-icon-moon {
+    display: inline;
+}
+
+.content {
+    width: min(1360px, 100%);
+    padding: 22px 24px 40px;
+}
+
+@media (max-width: 860px) {
+    .app-shell {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .button.nav-toggle {
+        display: inline-flex;
+        margin-left: auto;
+    }
+
+    .sidebar:not(.nav-open) .nav-group,
+    .sidebar:not(.nav-open) .session-timer {
+        display: none;
+    }
+
+    .brand {
+        padding-bottom: 6px;
+    }
+
+    .nav-group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        padding: 10px 0;
+    }
+
+    .nav-group-title {
+        flex-basis: 100%;
+        margin-bottom: 2px;
+    }
+
+    .nav-group a {
+        flex: 0 0 auto;
+    }
+
+    .topbar {
+        position: static;
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .topbar-actions {
+        justify-content: flex-start;
+    }
+
+    .content {
+        padding: 18px 14px 32px;
+    }
+}

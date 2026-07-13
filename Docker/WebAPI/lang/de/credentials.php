@@ -1,0 +1,36 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title' => 'Zugangsdaten',
+    'create_heading' => 'Zugangsdaten anlegen',
+    'stored_heading' => 'Gespeicherte Zugangsdaten',
+    'label_type' => 'Typ',
+    'label_host' => 'Host',
+    'label_port' => 'Port',
+    'label_username' => 'Benutzername',
+    'label_secret' => 'Secret',
+    'label_new_secret' => 'Neues Secret',
+    'host_placeholder' => 'https://esxi.local oder ansible.local',
+    'port_placeholder' => '443 oder 22',
+    'secret_keep_placeholder' => 'Leer lassen zum Beibehalten',
+    'btn_test' => 'Testen',
+    'confirm_delete' => 'Zugangsdaten :name löschen?',
+    'err_in_use' => 'Diese Zugangsdaten werden von einem wartenden oder laufenden Bereitstellungsauftrag verwendet und lassen sich deshalb nicht löschen. Den Auftrag zuerst abwarten oder abbrechen.',
+    'empty' => 'Keine Zugangsdaten gespeichert.',
+    'err_not_found' => 'Zugangsdaten nicht gefunden.',
+    'flash_created' => 'Zugangsdaten angelegt.',
+    'flash_updated' => 'Zugangsdaten aktualisiert.',
+    'flash_deleted' => 'Zugangsdaten gelöscht.',
+    'test_ok_ansible' => 'SSH-Anmeldung und Ansible-Preflight waren erfolgreich.',
+    'test_err_preflight' => 'Die SSH-Anmeldung hat funktioniert, aber der Ansible-Preflight ist mit Exit-Code :status fehlgeschlagen.',
+    'test_esxi_queued' => 'Inventar-Abruf angestoßen. Das Ergebnis erscheint als Ampel unter Integrationen, sobald der Auftrag gelaufen ist.',
+    'test_esxi_already_pending' => 'Für dieses Zugangsdatum läuft bereits ein Inventar-Abruf. Das Ergebnis erscheint unter Integrationen.',
+    'test_esxi_no_ansible' => 'Kein eindeutiges Ansible-Zugangsdatum vorhanden. Legen Sie eines an oder wählen Sie es in den Einstellungen aus.',
+    'test_esxi_failed' => 'Der Inventar-Abruf konnte nicht eingereiht werden.',
+    'test_hint' => 'ESXi wird nie direkt aus dem Portal angesprochen. „Testen" stößt einen echten Inventar-Abruf über den Ansible-Host an, also genau den Weg, den auch ein Deploy nimmt. Ergebnis und Details:',
+    'test_hint_link' => 'Seite Integrationen',
+    'th_esxi_state' => 'ESXi-Status',
+    'esxi_state_link_title' => 'Details zum letzten Inventar-Abruf ansehen',
+];

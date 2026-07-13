@@ -1,0 +1,1 @@
+# Keeps the persistent nginx log directory present in fresh checkouts.

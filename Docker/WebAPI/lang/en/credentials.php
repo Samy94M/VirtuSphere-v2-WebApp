@@ -1,0 +1,36 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'title' => 'Credentials',
+    'create_heading' => 'Create credential',
+    'stored_heading' => 'Stored credentials',
+    'label_type' => 'Type',
+    'label_host' => 'Host',
+    'label_port' => 'Port',
+    'label_username' => 'Username',
+    'label_secret' => 'Secret',
+    'label_new_secret' => 'New secret',
+    'host_placeholder' => 'https://esxi.local or ansible.local',
+    'port_placeholder' => '443 or 22',
+    'secret_keep_placeholder' => 'Leave blank to keep',
+    'btn_test' => 'Test',
+    'confirm_delete' => 'Delete credential :name?',
+    'err_in_use' => 'These credentials are in use by a queued or running deploy job and cannot be deleted. Wait for that job to finish, or cancel it first.',
+    'empty' => 'No credentials stored.',
+    'err_not_found' => 'Credential not found.',
+    'flash_created' => 'Credential created.',
+    'flash_updated' => 'Credential updated.',
+    'flash_deleted' => 'Credential deleted.',
+    'test_ok_ansible' => 'SSH login and Ansible preflight succeeded.',
+    'test_err_preflight' => 'The SSH login succeeded, but the Ansible preflight failed with exit code :status.',
+    'test_esxi_queued' => 'Inventory pull queued. The result appears as a traffic light on the integrations page once the job has run.',
+    'test_esxi_already_pending' => 'An inventory pull for this credential is already queued. The result appears on the integrations page.',
+    'test_esxi_no_ansible' => 'No unambiguous Ansible credential exists. Create one, or select it in the settings.',
+    'test_esxi_failed' => 'The inventory pull could not be queued.',
+    'test_hint' => 'The portal never talks to ESXi directly. "Test" queues a real inventory pull over the Ansible host, the exact path a deploy takes. Result and details:',
+    'test_hint_link' => 'Integrations page',
+    'th_esxi_state' => 'ESXi status',
+    'esxi_state_link_title' => 'Show the details of the last inventory pull',
+];

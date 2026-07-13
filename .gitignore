@@ -1,0 +1,54 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+
+# Logs
+Docker/mysql/mysql-data/
+Docker/WebAPI/logs/*
+!Docker/WebAPI/logs/.gitkeep
+Docker/WebAPI/api/*.log
+Docker/WebAPI/api/logs/*.log
+Docker/WebAPI/var/
+Docker/logs/*
+!Docker/logs/
+!Docker/logs/nginx/
+Docker/logs/nginx/*
+!Docker/logs/nginx/.gitkeep
+# HTTPS material and the generated server block (WP7): never in git, but the
+# directories must exist on a clean checkout for the compose bind mounts.
+Docker/nginx/ssl/*
+!Docker/nginx/ssl/.gitkeep
+Docker/nginx/conf.d/*
+!Docker/nginx/conf.d/.gitkeep
+Docker/backups/
+
+# Dev-only Playwright E2E layer (ADR-0028): tooling installed on the dev host,
+# never vendored into the shipped artifact. package.json + lock stay tracked.
+tests/e2e/node_modules/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/.auth/
+
+# Secrets / generated
+.env
+ApiService.cs
+VirtuSphere_TemporaryKey.pfx
+Docker/WebAPI/.phpunit.result.cache
+# Infection (mutation testing) is dev-host-only (ADR-0028 reasoning): the phar,
+# its run artifacts and cache are never tracked. The infection.json5.dist config
+# is tracked; the local infection.json5 (if any) and the log are not.
+Docker/WebAPI/infection.phar
+Docker/WebAPI/infection.json5
+Docker/WebAPI/infection.log
+Docker/WebAPI/.infection-cache/

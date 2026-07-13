@@ -1,0 +1,6 @@
+# Normalize all text files to LF in the object store, independent of each
+# clone's core.autocrlf. Without this, git inside the Linux lint container
+# sees every CRLF working-tree file on a Windows checkout as modified and
+# scans the whole tree as "changed".
+* text=auto
+*.sh text eol=lf

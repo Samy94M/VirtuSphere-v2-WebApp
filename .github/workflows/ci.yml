@@ -1,0 +1,120 @@
+name: CI
+
+# Minimal-CI-Baseline (Paket 0). Faehrt genau den lokalen Check-Satz aus
+# docs/QA.md nach: PHP-Lint, PHPUnit-unit-Suite, PHPStan (Level 4 mit
+# Baseline-Ratchet, ADR-0015), Sprach-Parity, JS-Syntax und die SSoT-/Doku-
+# Drift-Guards. Bewusst ohne DB-Server (Integrationstests skippen ohne DB von
+# selbst) und ohne E2E.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, sodium
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: PHP lint (first-party, ohne vendor)
+        run: |
+          set -eu
+          find Docker/WebAPI -name '*.php' \
+            -not -path 'Docker/WebAPI/vendor/*' -print0 \
+          | xargs -0 -n1 -P4 php -l >/dev/null
+
+      - name: Composer install
+        working-directory: Docker/WebAPI
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHPUnit (unit + static)
+        working-directory: Docker/WebAPI
+        run: composer run test:unit
+
+      - name: PHPStan (Level 4, Baseline-Ratchet)
+        working-directory: Docker/WebAPI
+        run: composer run stan
+
+      - name: Sprach-Parity (lang-audit)
+        run: php scripts/lang-audit.php --ci
+
+      - name: JS-Syntax (Portal-Skripte)
+        run: |
+          set -eu
+          for js in Docker/WebAPI/portal/assets/*.js; do
+            node --check "$js"
+          done
+
+      - name: ENUM-SSoT-Sync
+        run: sh scripts/check-enum-sync.sh --ci
+
+      - name: PHP-Version-SSoT-Sync
+        run: sh scripts/check-php-version-sync.sh --ci
+
+      - name: Grenzwert-SSoT-Sync (keine Konstante als Zahl im Text)
+        run: php scripts/check-bounds-sync.php --ci
+
+      - name: Doku-Hygiene
+        run: sh scripts/check-doc-hygiene.sh --ci
+
+      # Die PowerShell-Integrationsclients (MECM-Sync, PXE-Client-Kette) laufen als
+      # SYSTEM in Endlosschleifen beim Kunden und waren bis 2026-07 der einzige Code
+      # im Projekt, den kein Werkzeug geprueft hat. pwsh ist auf ubuntu-latest
+      # vorinstalliert; die Module kommen aus der PSGallery und werden bewusst NICHT
+      # eingecheckt (dieselbe Dev-Tooling-Regel wie Playwright/Infection, ADR-0028).
+      - name: PowerShell-Module (Pester, PSScriptAnalyzer)
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: PSScriptAnalyzer + Pester (Powershell-MECM)
+        shell: pwsh
+        run: ./scripts/run-pester.ps1
+
+      - name: CSP-Pattern-Lint (geaenderte PHP-Dateien)
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # Erst-Push/leerer Vorgaenger -> auf HEAD~1 zurueckfallen.
+          if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1; then
+            base="$(git rev-parse --verify --quiet 'HEAD~1' || git rev-parse HEAD)"
+          fi
+          changed="$(git diff --name-only "$base" "${{ github.sha }}" -- '*.php' || true)"
+          if [ -n "$changed" ]; then
+            echo "Geaenderte PHP-Dateien:"
+            echo "$changed"
+            # shellcheck disable=SC2086
+            sh scripts/lint-csp-patterns.sh --file $changed
+          else
+            echo "Keine geaenderten PHP-Dateien - CSP-Lint uebersprungen."
+          fi
