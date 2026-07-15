@@ -7,10 +7,10 @@ VirtuSphere keeps Ansible outside the PHP/nginx stack. The browser queues a depl
 Required on the Ubuntu host:
 
 - A dedicated SSH user reachable from the `deploy-worker` container.
-- `ansible-playbook` and `ansible-doc` in the SSH user's `PATH`, from `ansible-core` 2.17 or newer.
+- `ansible-playbook` and `ansible-doc` in the SSH user's `PATH`, from `ansible-core` 2.19 or newer.
 - `python3` with `pyvmomi` 8.0.3.0.1 or newer, importable as `pyVim` and `pyVmomi`.
 - The `community.vmware` collection, installed from the repository's pin **before** air-gapped operation:
-  `ansible-galaxy collection install -r Ansible/requirements.yml`. That file is the single source of truth for the version. For an air-gapped host, run `ansible-galaxy collection download -r Ansible/requirements.yml -p ./offline` once on a connected machine and install from that directory.
+  `ansible-galaxy collection install -r Ansible/requirements.yml`. That file is the single source of truth for the version. For an air-gapped host, run `ansible-galaxy collection download -r Ansible/requirements.yml -p ./offline` once on a connected machine and install from that directory. On a fully offline host `ansible-core` and `pyvmomi` come the same way: fetch their pip wheels on a connected machine and `pip install --no-index` them into the SSH user's Python environment. The 2.19 floor is not a preference; it is the `requires_ansible` the 6.2.0 pin enforces, and an older core makes the collection refuse to load.
 - Network access from Ubuntu to ESXi and from Ubuntu back to the VirtuSphere WebAPI base URL.
 
 ### ESXi support matrix
