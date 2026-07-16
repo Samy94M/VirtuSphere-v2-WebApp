@@ -3,15 +3,19 @@
 declare(strict_types=1);
 
 /**
- * Audits the VirtuSphere portal language catalog for DE/EN key parity.
+ * Audits the VirtuSphere portal language catalog for DE/EN key parity and
+ * placeholder parity (a `:placeholder` missing in one locale silently drops
+ * the interpolated value there, .claude/rules/i18n.md).
  *
  * CLI contract:
- *   php scripts/lang-audit.php          Full report, exit 1 on parity gaps.
- *   php scripts/lang-audit.php --ci     CI-style output, exit 1 on parity gaps.
+ *   php scripts/lang-audit.php          Full report, exit 1 on findings.
+ *   php scripts/lang-audit.php --ci     CI-style output, exit 1 on findings.
  *   php scripts/lang-audit.php --quiet  Only output on failure.
  *   php scripts/lang-audit.php --help   Usage.
  *
- * Tests may override the catalog root with VIRTUSPHERE_LANG_BASE.
+ * Tests may override the catalog root with VIRTUSPHERE_LANG_BASE (or point
+ * VIRTUSPHERE_CHECK_ROOT at a fixture repo root, guard harness convention).
+ * Finding lines carry stable [lang-audit.*] IDs as the diagnostic contract.
  */
 
 $mode = 'full';
@@ -36,9 +40,11 @@ foreach ($args as $arg) {
 }
 
 $envBase = getenv('VIRTUSPHERE_LANG_BASE');
+$envRoot = getenv('VIRTUSPHERE_CHECK_ROOT');
+$root = is_string($envRoot) && $envRoot !== '' ? $envRoot : dirname(__DIR__);
 $base = is_string($envBase) && $envBase !== ''
     ? $envBase
-    : dirname(__DIR__) . DIRECTORY_SEPARATOR . 'Docker' . DIRECTORY_SEPARATOR . 'WebAPI' . DIRECTORY_SEPARATOR . 'lang';
+    : $root . DIRECTORY_SEPARATOR . 'Docker' . DIRECTORY_SEPARATOR . 'WebAPI' . DIRECTORY_SEPARATOR . 'lang';
 
 $locales = ['de', 'en'];
 $catalog = [];
@@ -107,11 +113,42 @@ foreach (array_keys($modules) as $module) {
     }
 }
 
-$failed = $fileErrors !== [] || $gaps !== [];
+/**
+ * Placeholder parity: for a key present in both locales, the set of
+ * `:placeholder` tokens must match, or one locale silently drops the value.
+ *
+ * @var array<int, array{key: string, detail: string}> $placeholderDrifts
+ */
+$placeholderDrifts = [];
+$placeholdersOf = static function (string $text): array {
+    preg_match_all('/:([a-z][a-z0-9_]*)/', $text, $matches);
+    $tokens = array_values(array_unique($matches[1]));
+    sort($tokens);
+    return $tokens;
+};
+foreach (array_keys($modules) as $module) {
+    $deKeys = $catalog['de'][$module] ?? [];
+    $enKeys = $catalog['en'][$module] ?? [];
+    foreach ($deKeys as $key => $deText) {
+        if (!array_key_exists($key, $enKeys)) {
+            continue;
+        }
+        $dePlaceholders = $placeholdersOf($deText);
+        $enPlaceholders = $placeholdersOf($enKeys[$key]);
+        if ($dePlaceholders !== $enPlaceholders) {
+            $placeholderDrifts[] = [
+                'key' => $module . '.' . $key,
+                'detail' => 'de=[' . implode(',', $dePlaceholders) . '] en=[' . implode(',', $enPlaceholders) . ']',
+            ];
+        }
+    }
+}
+
+$failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [];
 
 if ($mode === 'quiet') {
     if ($failed) {
-        fwrite(STDERR, 'Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . " parity gap(s).\n");
+        fwrite(STDERR, 'Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . " placeholder drift(s).\n");
         exit(1);
     }
     exit(0);
@@ -119,12 +156,15 @@ if ($mode === 'quiet') {
 
 if ($mode === 'ci') {
     if ($failed) {
-        fwrite(STDERR, '::error::Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . " parity gap(s).\n");
+        fwrite(STDERR, '::error::Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . " placeholder drift(s).\n");
         foreach ($fileErrors as $error) {
-            fwrite(STDERR, "  - {$error}\n");
+            fwrite(STDERR, "  - [lang-audit.file-error] {$error}\n");
         }
         foreach ($gaps as $gap) {
-            fwrite(STDERR, '  - ' . $gap['key'] . ' present=[' . implode(',', $gap['present']) . '] missing=[' . implode(',', $gap['missing']) . "]\n");
+            fwrite(STDERR, '  - [lang-audit.parity-gap] ' . $gap['key'] . ' present=[' . implode(',', $gap['present']) . '] missing=[' . implode(',', $gap['missing']) . "]\n");
+        }
+        foreach ($placeholderDrifts as $drift) {
+            fwrite(STDERR, '  - [lang-audit.placeholder-drift] ' . $drift['key'] . ' ' . $drift['detail'] . "\n");
         }
         exit(1);
     }
@@ -143,7 +183,11 @@ foreach ($fileErrors as $error) {
 }
 echo 'Parity gaps: ' . count($gaps) . "\n";
 foreach ($gaps as $gap) {
-    echo 'GAP ' . $gap['key'] . ' present=[' . implode(',', $gap['present']) . '] missing=[' . implode(',', $gap['missing']) . "]\n";
+    echo 'GAP [lang-audit.parity-gap] ' . $gap['key'] . ' present=[' . implode(',', $gap['present']) . '] missing=[' . implode(',', $gap['missing']) . "]\n";
+}
+echo 'Placeholder drifts: ' . count($placeholderDrifts) . "\n";
+foreach ($placeholderDrifts as $drift) {
+    echo 'DRIFT [lang-audit.placeholder-drift] ' . $drift['key'] . ' ' . $drift['detail'] . "\n";
 }
 
 exit($failed ? 1 : 0);

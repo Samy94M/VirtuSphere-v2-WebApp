@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 BACKUP_DIR="$ROOT_DIR/Docker/backups"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TARGET="$BACKUP_DIR/$STAMP"

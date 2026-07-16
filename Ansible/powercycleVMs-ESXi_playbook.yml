@@ -12,7 +12,7 @@
 
   tasks:
     - name: Ermitteln, ob ueberhaupt eine VM einen Power-Cycle braucht
-      set_fact:
+      ansible.builtin.set_fact:
         powercycle_targets: "{{ vm_configurations | rejectattr('needs_mac', 'defined') | list
                                 + vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
 
@@ -22,18 +22,18 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         name: "{{ item.vm_name }}"
         folder: "/"
         datacenter: "{{ item.datacenter_name }}"
         state: powered-on
-        force: no
+        force: false
       delegate_to: localhost
       loop: "{{ vm_configurations }}"
       when: item.needs_mac | default(true)
 
     - name: Warten, bis ESXi die MACs vergibt
-      pause:
+      ansible.builtin.pause:
         seconds: "{{ PowerCycleWaitSeconds | default(5) | int }}"
       when: powercycle_targets | length > 0
 
@@ -43,12 +43,12 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         name: "{{ item.vm_name }}"
         folder: "/"
         datacenter: "{{ item.datacenter_name }}"
         state: powered-off
-        force: yes
+        force: true
       delegate_to: localhost
       loop: "{{ vm_configurations }}"
       when: item.needs_mac | default(true)

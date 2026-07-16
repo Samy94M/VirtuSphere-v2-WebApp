@@ -15,9 +15,13 @@
 #
 # Aufrufer:
 #   - .claude/hooks/session-start.sh  (Modus --quiet)
+#   - scripts/check.ps1 (Fast-Lane) und scripts/test-guards.ps1 (Fixtures)
 #   - manuell vor Commit              (kein Argument)
+#
+# VIRTUSPHERE_CHECK_ROOT uebersteuert das Repo-Root (Guard-Fixtures); die
+# [php-version-sync.*]-IDs in Fehlerzeilen sind der stabile Diagnose-Vertrag.
 set -eu
-cd "$(dirname "$0")/.."
+cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}"
 
 quiet=0
 case "${1:-}" in
@@ -29,14 +33,15 @@ esac
 
 ver=$(sed -n 's/^FROM php:\([0-9][0-9.]*\)-fpm.*/\1/p' Docker/php/Dockerfile | head -n 1)
 if [ -z "$ver" ]; then
-  echo "FEHLER: keine 'FROM php:X.Y-fpm'-Zeile in Docker/php/Dockerfile." >&2
+  # Zero-Match darf nie leer gruen werden: fehlende SSoT-Zeile ist ein Fehler.
+  echo "FEHLER: [php-version-sync.no-ssot] keine 'FROM php:X.Y-fpm'-Zeile in Docker/php/Dockerfile." >&2
   exit 1
 fi
 
 errors=0
 expect() { # $1=file $2=grep-fixed-string $3=beschreibung
   if ! grep -qF "$2" "$1"; then
-    echo "FEHLER: PHP-Version-Drift — $1 enthaelt nicht '$2' ($3, SSoT: $ver)." >&2
+    echo "FEHLER: [php-version-sync.drift] PHP-Version-Drift — $1 enthaelt nicht '$2' ($3, SSoT: $ver)." >&2
     errors=$((errors + 1))
   fi
 }

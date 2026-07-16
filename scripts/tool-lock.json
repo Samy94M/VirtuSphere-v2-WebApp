@@ -1,0 +1,45 @@
+{
+    "version": 1,
+    "comment": "Tool-Lockdatei (AP4, Plan v2): SSoT fuer die Versionen und Digests der Pruef-Toolchain. Gilt fuer CI-Sandbox und QA-Runner (scripts/check.ps1 liest dockerImages, .github/workflows/ci.yml liest powershellModules). Das reale Staging laeuft gegen die Kundenversionen; Ansible/requirements.yml bleibt die Collection-SSoT (ADR-0025) und Docker/qa-ansible/requirements.txt traegt die pip-Pins mit Hashes.",
+    "dockerImages": {
+        "yamllint": {
+            "ref": "cytopia/yamllint@sha256:3e9eb827ab2b12a5ea5f49d4257bb3aca94bba9f1ba427c8bc7f2456385a5204",
+            "pulledAs": "cytopia/yamllint:latest",
+            "note": "yamllint 1.x CLI-Image"
+        },
+        "actionlint": {
+            "ref": "rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667",
+            "pulledAs": "rhysd/actionlint:latest",
+            "note": "GitHub-Workflow-Linter"
+        },
+        "shellcheck": {
+            "ref": "koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d",
+            "pulledAs": "koalaman/shellcheck:stable",
+            "note": "ShellCheck stable"
+        },
+        "hadolint": {
+            "ref": "hadolint/hadolint@sha256:27086352fd5e1907ea2b934eb1023f217c5ae087992eb59fde121dce9c9ff21e",
+            "pulledAs": "hadolint/hadolint:latest",
+            "note": "Dockerfile-Linter; Regeln in .hadolint.yaml"
+        },
+        "python": {
+            "ref": "python@sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0",
+            "pulledAs": "python:3.13-alpine",
+            "note": "python-client-tests (Ansible/tests) und Basisimage des QA-Ansible-Images"
+        },
+        "ansible": {
+            "ref": "virtusphere-qa-ansible:latest",
+            "build": "Docker/qa-ansible/Dockerfile",
+            "note": "lokal gebaut (Repo-Root-Kontext); ansible-core/ansible-lint/pyVmomi gepinnt+gehasht in Docker/qa-ansible/requirements.txt, Collection in Ansible/requirements.yml"
+        },
+        "php": {
+            "ref": "virtusphere-v2-webapp-php",
+            "build": "Docker/php/Dockerfile",
+            "note": "Projekt-PHP-Image (Compose-Build); traegt php-lint/phpunit-unit und die Fallbacks fuer sh-/php-Checks"
+        }
+    },
+    "powershellModules": {
+        "Pester": "6.0.0",
+        "PSScriptAnalyzer": "1.25.0"
+    }
+}

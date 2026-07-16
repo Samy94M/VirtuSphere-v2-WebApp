@@ -1,0 +1,11 @@
+# Eingabedatei fuer die QA-Ansible-Toolchain (AP4, Tool-Lockdatei).
+# Floor = Kundenumgebung laut Ansible/requirements.yml und docs/DEPLOYMENT.md:
+# community.vmware 6.2.0 verlangt ansible-core >= 2.19 und pyVmomi >= 8.0.3.0.1.
+# Die CI-Sandbox pinnt exakt; das reale Staging laeuft gegen die Kundenversionen.
+#
+# Regenerieren (schreibt requirements.txt mit Hashes):
+#   docker run --rm -v "$PWD/Docker/qa-ansible:/ctx" -w /ctx python:3.13-alpine \
+#     sh -c "pip install --no-cache-dir pip-tools && pip-compile --generate-hashes --strip-extras -o requirements.txt requirements.in"
+ansible-core~=2.19.0
+ansible-lint
+pyvmomi>=8.0.3.0.1

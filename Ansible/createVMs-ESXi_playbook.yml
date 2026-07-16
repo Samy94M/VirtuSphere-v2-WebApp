@@ -13,7 +13,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         name: "{{ item.vm_name }}"
         state: present
         folder: "/"
@@ -37,6 +37,6 @@
       when: vm_configurations | length > 0
       register: vm_creation_results
 
-    - name: warten
-      pause:
+    - name: Warten, bis ESXi die neuen VMs registriert hat
+      ansible.builtin.pause:
         seconds: 60

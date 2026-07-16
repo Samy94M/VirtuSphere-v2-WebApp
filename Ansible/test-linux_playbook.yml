@@ -16,6 +16,7 @@
       ansible.builtin.copy:
         dest: "{{ item.path }}"
         content: "{{ item.content | default('Hello World!') }}"
+        mode: "0644"
       loop:
         - { path: "~/folder1/file1.txt" }
         - { path: "~/folder1/file2.txt" }
@@ -24,13 +25,14 @@
       ansible.builtin.ping:
 
     - name: Display ping results
-      debug:
+      ansible.builtin.debug:
         msg: "Ping successful"
 
     - name: Get local IP addresses
-      ansible.builtin.shell: hostname -I
+      ansible.builtin.command: hostname -I
       register: ip_result
+      changed_when: false
 
     - name: Show local IP addresses
-      debug:
+      ansible.builtin.debug:
         msg: "Local IP addresses: {{ ip_result.stdout }}"

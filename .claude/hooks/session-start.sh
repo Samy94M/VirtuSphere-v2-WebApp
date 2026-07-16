@@ -21,3 +21,10 @@ for check in enum-sync php-version-sync doc-hygiene; do
     echo "VirtuSphere warning: Drift in check-$check; run sh $script"
   fi
 done
+
+# PHP-basierter Grenzwert-Check (eigener Zweig: die Schleife oben fasst nur .sh)
+if command -v php >/dev/null 2>&1 && [ -f scripts/check-bounds-sync.php ]; then
+  if ! php scripts/check-bounds-sync.php --quiet >/dev/null 2>&1; then
+    echo "VirtuSphere warning: Drift in check-bounds-sync; run php scripts/check-bounds-sync.php"
+  fi
+fi

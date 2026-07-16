@@ -4,6 +4,24 @@ Date: 2026-07-07
 
 This page documents the lightweight local QA baseline introduced with ADR-0015. It is intentionally container-first so checks work the same way on Windows hosts and in air-gapped LAN environments once Docker images and Composer vendor artifacts are present.
 
+## Canonical Check Runner
+
+`scripts/check.ps1` is the executable SSoT of all quality gates (ADR-0031). It runs under Windows PowerShell 5.1 and PowerShell 7 and replaces "run these commands in order" lists; the commands below stay documented for targeted debugging of a single gate.
+
+```powershell
+powershell -NoProfile -File scripts\check.ps1 -List                 # Gates der Fast-Lane anzeigen
+powershell -NoProfile -File scripts\check.ps1                       # Fast-Lane (jeder PR / lokaler Vorabcheck)
+powershell -NoProfile -File scripts\check.ps1 -Lane Integration     # Merge/Nightly-Gates (laufender Stack noetig)
+powershell -NoProfile -File scripts\check.ps1 -Gate enum-sync,phpstan   # gezielte Teilmenge
+powershell -NoProfile -File scripts\check.ps1 -Json qa.json -KeepArtifacts
+```
+
+Every gate reports `pass`, `fail`, `skip`, `not_applicable` or `infrastructure_error`; a missing tool is an infrastructure error, never a skip. Runner exit codes: `0` all gates green, `1` at least one gate failed (dominates), `2` environment incomplete, `3` invalid invocation. Containerized linters (yamllint, actionlint, ShellCheck, Hadolint, ansible-lint) run through Docker; on Windows the Fast lane therefore requires Docker. `-NoNetwork` marks network-dependent gates (`composer-audit`) as not applicable and never pulls images.
+
+Tool versions are pinned in `scripts/tool-lock.json` (AP4): registry images by digest, PowerShell modules by exact version. The runner refuses to start without a valid lock file (exit 2). The two Ansible gates run against the locally built `virtusphere-qa-ansible` image; build it once with `docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .` (pip pins with hashes in `Docker/qa-ansible/requirements.txt`, collection pin from `Ansible/requirements.yml`).
+
+`scripts/test-guards.ps1` proves the guards themselves: every check runs once against the real repo (green), once against a mutated fixture copy (must turn red with the right `[check.case]` diagnostic ID) and once against a zero-match root (must not pass silently). Fixtures are wired through `VIRTUSPHERE_CHECK_ROOT`; the repo is never mutated. Exit codes: `0` all proven, `1` a guard failed to detect its mutation, `2` only infrastructure gaps (e.g. no host PHP for the php-lint hook case).
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:

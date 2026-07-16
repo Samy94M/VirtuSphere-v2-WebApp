@@ -1,0 +1,21 @@
+# Hadolint-Konfiguration fuer das hadolint-Gate in scripts/check.ps1.
+#
+# Ignorierte Regeln sind Entscheidungen auf Zeit, nicht auf Dauer: AP8
+# (Container-/Supply-Chain-Haertung) entscheidet je Regel neu, ob gepinnt
+# oder die Ausnahme mit Begruendung verlaengert wird.
+ignored:
+  # DL3008: apt-Paketversionen pinnen. Debian-Point-Releases raeumen alte
+  # Versionen aus den Repos, ein hartes Pin bricht den Build schneller als es
+  # Reproduzierbarkeit stiftet; echte Reproduzierbarkeit kommt in AP8 ueber
+  # Image-Digests.
+  - DL3008
+  # DL3015: --no-install-recommends. Sinnvoll, aber eine Aenderung am
+  # PHP-Basisimage (Rebuild aller Umgebungen); wird in AP8 zusammen mit den
+  # Digest-Pins umgesetzt.
+  - DL3015
+  # DL3018: apk-Paketversionen pinnen; dieselbe Abwaegung wie DL3008, nur fuer
+  # Alpine (Docker/qa-ansible). Alpine raeumt alte Paketversionen sofort aus
+  # den Repos, ein hartes Pin bricht jeden Rebuild; die Reproduzierbarkeit
+  # kommt aus dem Digest-Pin des Basisimages (scripts/tool-lock.json) und den
+  # pip-Hashes in Docker/qa-ansible/requirements.txt.
+  - DL3018

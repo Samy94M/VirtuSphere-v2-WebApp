@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 SOURCE="$1"
 STATUS="$ROOT_DIR/Docker/backups/status.jsonl"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

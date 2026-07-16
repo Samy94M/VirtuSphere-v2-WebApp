@@ -45,7 +45,11 @@
       register: vs_portgroups
       ignore_errors: true
 
-    - name: Gather distributed portgroups
+    # `datacenter` fehlt hier bewusst: gegen einen Standalone-ESXi-Host gibt es
+    # keinen DVS, der Task scheitert dann kontrolliert (ignore_errors) und die
+    # PHP-Seite liest networks_dvs als leer. noqa nur fuer die experimentelle
+    # args-Regel von ansible-lint.
+    - name: Gather distributed portgroups # noqa: args[module]
       community.vmware.vmware_dvs_portgroup_info:
         hostname: "{{ esxi_hostname }}"
         port: "{{ esxi_port | int }}"

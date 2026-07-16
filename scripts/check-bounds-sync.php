@@ -18,10 +18,34 @@ declare(strict_types=1);
  * *not* own (an external standard, a column width) are exempt and listed with the
  * reason, so the exemption is a decision on record and not an oversight.
  *
- * Usage: php scripts/check-bounds-sync.php [--ci]
+ * Usage: php scripts/check-bounds-sync.php [--ci|--quiet]
+ *
+ * --quiet prints nothing on success (session-start hook). VIRTUSPHERE_CHECK_ROOT
+ * overrides the repo root (guard harness fixtures). Finding lines carry stable
+ * [bounds-sync.*] IDs as the diagnostic contract.
  */
 
-$root = dirname(__DIR__);
+$quiet = false;
+foreach (array_slice(array_values((array) ($_SERVER['argv'] ?? [])), 1) as $arg) {
+    switch ($arg) {
+        case '--ci':
+            break;
+        case '--quiet':
+        case '-q':
+            $quiet = true;
+            break;
+        case '--help':
+        case '-h':
+            fwrite(STDOUT, "Usage: php scripts/check-bounds-sync.php [--ci|--quiet|-q|--help|-h]\n");
+            exit(0);
+        default:
+            fwrite(STDERR, "Unknown option: {$arg}\n");
+            exit(2);
+    }
+}
+
+$envRoot = getenv('VIRTUSPHERE_CHECK_ROOT');
+$root = is_string($envRoot) && $envRoot !== '' ? $envRoot : dirname(__DIR__);
 
 // Constants are not all in constants.php: the mission import TTL lives next to
 // the importer, the SSH timeouts next to the SSH client. Parse every lib file
@@ -134,7 +158,7 @@ foreach (['de', 'en'] as $locale) {
                     continue;
                 }
                 $findings[] = sprintf(
-                    '  %s/%s: writes "%s %s"; a constant owns that value (%s). Interpolate it.',
+                    '  [bounds-sync.spelled-out] %s/%s: writes "%s %s"; a constant owns that value (%s). Interpolate it.',
                     $locale,
                     $fullKey,
                     $match[1],
@@ -165,7 +189,7 @@ foreach (array_keys(BOUNDS_EXEMPT) as $exempt) {
 if ($stale !== []) {
     echo "check-bounds-sync: BOUNDS_EXEMPT names a text that no longer exists; delete the entry:\n";
     foreach ($stale as $entry) {
-        echo '  ' . $entry . "\n";
+        echo '  [bounds-sync.stale-exempt] ' . $entry . "\n";
     }
     exit(1);
 }
@@ -182,5 +206,7 @@ if ($findings !== []) {
     exit(1);
 }
 
-echo "check-bounds-sync: keine Zahl in Portal-Texten spiegelt eine Konstante.\n";
+if (!$quiet) {
+    echo "check-bounds-sync: keine Zahl in Portal-Texten spiegelt eine Konstante.\n";
+}
 exit(0);

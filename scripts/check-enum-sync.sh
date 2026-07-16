@@ -18,9 +18,13 @@
 #
 # Aufrufer:
 #   - .claude/hooks/session-start.sh  (Modus --quiet)
+#   - scripts/check.ps1 (Fast-Lane) und scripts/test-guards.ps1 (Fixtures)
 #   - manuell vor Commit              (kein Argument)
+#
+# VIRTUSPHERE_CHECK_ROOT uebersteuert das Repo-Root (Guard-Fixtures); die
+# [enum-sync.*]-IDs in Fehlerzeilen sind der stabile Diagnose-Vertrag.
 set -eu
-cd "$(dirname "$0")/.."
+cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}"
 
 quiet=0
 case "${1:-}" in
@@ -49,17 +53,18 @@ enum_values() { # $1=file $2=column
 check_pair() { # $1=label $2=php-file $3=const-prefix $4=column
   expected=$(php_values "$2" "$3")
   if [ -z "$expected" ]; then
-    echo "FEHLER: keine Consts mit Praefix $3 in $2 gefunden." >&2
+    # Zero-Match darf nie leer gruen werden: keine Consts gefunden ist ein Fehler.
+    echo "FEHLER: [enum-sync.no-consts] keine Consts mit Praefix $3 in $2 gefunden." >&2
     errors=$((errors + 1))
     return 0
   fi
   for src in "$SQL" "$MIG"; do
     actual=$(enum_values "$src" "$4")
     if [ -z "$actual" ]; then
-      echo "FEHLER: $1 — Spalte $4 hat keine ENUM-Definition in $src." >&2
+      echo "FEHLER: [enum-sync.no-enum] $1 — Spalte $4 hat keine ENUM-Definition in $src." >&2
       errors=$((errors + 1))
     elif [ "$actual" != "$expected" ]; then
-      echo "FEHLER: $1 — ENUM-Drift in $src fuer $4:" >&2
+      echo "FEHLER: [enum-sync.drift] $1 — ENUM-Drift in $src fuer $4:" >&2
       echo "  PHP-SSoT: $expected" >&2
       echo "  DB-ENUM:  $actual" >&2
       errors=$((errors + 1))

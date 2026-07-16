@@ -13,9 +13,13 @@
 #
 # Aufrufer:
 #   - .claude/hooks/session-start.sh  (Modus --quiet)
+#   - scripts/check.ps1 (Fast-Lane) und scripts/test-guards.ps1 (Fixtures)
 #   - manuell vor Commit              (kein Argument)
+#
+# VIRTUSPHERE_CHECK_ROOT uebersteuert das Repo-Root (Guard-Fixtures); die
+# [doc-hygiene.*]-IDs in Fehlerzeilen sind der stabile Diagnose-Vertrag.
 set -eu
-cd "$(dirname "$0")/.."
+cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}"
 
 quiet=0
 case "${1:-}" in
@@ -38,14 +42,14 @@ budget_for() {
 
 for file in AGENTS.md GROK.md CLAUDE.md README.md; do
   if [ ! -f "$file" ]; then
-    echo "FEHLER: $file nicht gefunden." >&2
+    echo "FEHLER: [doc-hygiene.missing-file] $file nicht gefunden." >&2
     errors=$((errors + 1))
     continue
   fi
 
   # 1. Changelog-Marker
   if grep -nE '^#{1,3} .*20[0-9]{2}-[0-9]{2}-[0-9]{2}|^\*\*(Nachtrag|Vorher|Aktueller Stand)|Fortschritt 20[0-9]{2}-' "$file" >&2; then
-    echo "FEHLER: $file enthaelt Changelog-Marker — Historie gehoert nach docs/CHANGELOG.md." >&2
+    echo "FEHLER: [doc-hygiene.changelog-marker] $file enthaelt Changelog-Marker — Historie gehoert nach docs/CHANGELOG.md." >&2
     errors=$((errors + 1))
   fi
 
@@ -53,7 +57,7 @@ for file in AGENTS.md GROK.md CLAUDE.md README.md; do
   budget=$(budget_for "$file")
   lines=$(wc -l < "$file" | tr -d ' ')
   if [ "$lines" -gt "$budget" ]; then
-    echo "FEHLER: $file hat $lines Zeilen (Budget: $budget). Kuerzen oder nach docs/ auslagern." >&2
+    echo "FEHLER: [doc-hygiene.line-budget] $file hat $lines Zeilen (Budget: $budget). Kuerzen oder nach docs/ auslagern." >&2
     errors=$((errors + 1))
   fi
 done

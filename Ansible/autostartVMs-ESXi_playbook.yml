@@ -40,7 +40,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         esxi_hostname: "{{ vs_esxi_host }}"
         system_defaults:
           enabled: true
@@ -62,7 +62,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         esxi_hostname: "{{ vs_esxi_host }}"
         name: "{{ item.vm_name }}"
         power_info:

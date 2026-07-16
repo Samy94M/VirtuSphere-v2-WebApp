@@ -1,16 +1,33 @@
 #!/bin/sh
+# scripts/lint-csp-patterns.sh — Forbidden-Pattern-Scan fuer PHP-Dateien.
+#
+# Modi (AP3: eindeutig getrennt):
+#   --file <path>...      genau diese Dateien pruefen (Hooks, CI-Dateilisten)
+#   --worktree            staged + unstaged + untracked First-Party-PHP-Dateien
+#   --range <base> <head> zwischen zwei Commits geaenderte PHP-Dateien (CI)
+#   --all-changed         dokumentierter Alias fuer --worktree
+#
+# Harte Befunde melden "BLOCK: [csp.<id>] ..." und beenden mit Exit 2, weiche
+# Befunde bleiben "WARN: [csp.<id>] ..."-Zeilen. Die IDs sind stabil und werden
+# vom Guard-Harness (scripts/test-guards.ps1) als Diagnose-Vertrag geprueft.
+#
+# VIRTUSPHERE_CHECK_ROOT uebersteuert das Repo-Root (Guard-Fixtures).
 set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/lint-csp-patterns.sh --file <path>... | --all-changed
+Usage: scripts/lint-csp-patterns.sh --file <path>... | --worktree | --range <base> <head> | --all-changed
 USAGE
   exit 2
 }
 
+cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}"
+
 [ "$#" -gt 0 ] || usage
 mode=""
 files=""
+range_base=""
+range_head=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -23,9 +40,17 @@ while [ "$#" -gt 0 ]; do
         shift
       done
       ;;
-    --all-changed)
-      mode="all-changed"
+    --worktree|--all-changed)
+      mode="worktree"
       shift
+      ;;
+    --range)
+      mode="range"
+      shift
+      [ "$#" -ge 2 ] || usage
+      range_base="$1"
+      range_head="$2"
+      shift 2
       ;;
     *)
       usage
@@ -33,9 +58,31 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$mode" = "all-changed" ]; then
-  files="$(git diff --name-only -- '*.php' 2>/dev/null || true)"
+# Git-Modi duerfen ohne funktionierendes Git nie leer gruen werden (Zero-Match).
+if [ "$mode" != "file" ] && ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "BLOCK: [csp.no-git] --$mode braucht ein Git-Repo und git im PATH" >&2
+  exit 2
 fi
+
+case "$mode" in
+  worktree)
+    # Staged, unstaged UND untracked: der fruehere --all-changed sah via
+    # `git diff` nur unstaged Aenderungen und liess staged/neue Dateien durch.
+    files="$( {
+      git diff --name-only -- '*.php'
+      git diff --cached --name-only -- '*.php'
+      git ls-files --others --exclude-standard -- '*.php'
+    } 2>/dev/null | sort -u || true)"
+    ;;
+  range)
+    if ! git rev-parse --verify --quiet "$range_base^{commit}" >/dev/null 2>&1 \
+      || ! git rev-parse --verify --quiet "$range_head^{commit}" >/dev/null 2>&1; then
+      echo "BLOCK: [csp.bad-range] --range braucht zwei aufloesbare Commits (base=$range_base head=$range_head)" >&2
+      exit 2
+    fi
+    files="$(git diff --name-only "$range_base" "$range_head" -- '*.php' 2>/dev/null || true)"
+    ;;
+esac
 
 [ -n "$files" ] || exit 0
 hard=0
@@ -47,7 +94,9 @@ has_allow() {
 }
 
 warn() {
-  printf 'WARN: %s\n' "$1" >&2
+  check="$1"
+  message="$2"
+  printf 'WARN: [csp.%s] %s\n' "$check" "$message" >&2
 }
 
 block() {
@@ -55,11 +104,11 @@ block() {
   file="$2"
   message="$3"
   if has_allow "$check" "$file"; then
-    warn "$message (allowed by csp-allow: $check)"
+    warn "$check" "$message (allowed by csp-allow: $check)"
     return
   fi
   hard=1
-  printf 'BLOCK: %s\n' "$message" >&2
+  printf 'BLOCK: [csp.%s] %s\n' "$check" "$message" >&2
 }
 
 check_pattern() {
@@ -72,7 +121,7 @@ check_pattern() {
     if [ "$severity" = "hard" ]; then
       block "$check" "$file" "$message"
     else
-      warn "$message"
+      warn "$check" "$message"
     fi
   fi
 }
@@ -84,7 +133,7 @@ for file in $files; do
     *) continue ;;
   esac
   case "$file" in
-    */vendor/*|vendor/*|*/tests/*|tests/*|Docker/WebAPI/vendor/*|Docker/WebAPI/tests/*) continue ;;
+    */vendor/*|vendor/*|*/tests/*|tests/*) continue ;;
   esac
 
   if command -v php >/dev/null 2>&1; then
@@ -110,7 +159,7 @@ for file in $files; do
   check_pattern soft inline-style "$file" '<[^>]+ style=' "inline style attribute in $file"
 
   case "$file" in
-    Docker/WebAPI/portal/*.php|Docker/WebAPI/portal/*/*.php|Docker/WebAPI/lib/layout.php)
+    Docker/WebAPI/portal/*.php|Docker/WebAPI/lib/layout.php)
       check_pattern soft raw-getmessage "$file" 'flash_set\('"'"'error'"'"',[[:space:]]*\$exception->getMessage\(\)\)|form_remember\([^;]*\$exception->getMessage\(\)|\$error[[:space:]]*=[[:space:]]*\$exception->getMessage\(\)' "raw exception message may be user-facing in $file"
       check_pattern soft hardcoded-text "$file" "layout_header\\('[^']*[[:alpha:]][^']*'|flash_set\\('(success|info)',[[:space:]]*'[^']*[[:alpha:]][^']*'|<h[1-6][^>]*>[[:alpha:]]|<label[^>]*>[[:alpha:]]|<button[^>]*>[[:alpha:]]" "possible hardcoded visible portal text in $file"
       ;;
@@ -118,7 +167,7 @@ for file in $files; do
 
   lines="$(wc -l < "$file" | tr -d ' ')"
   if [ "$lines" -gt 400 ]; then
-    warn "$file has $lines lines; consider extracting modules"
+    warn line-budget "$file has $lines lines; consider extracting modules"
   fi
 done
 
