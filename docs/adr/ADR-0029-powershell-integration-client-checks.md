@@ -33,6 +33,28 @@ Treat the PowerShell integration clients as first-class code with the same disci
 - `functions.psm1` is deleted. The secret in it must be treated as compromised regardless: it was in the **initial commit** (`4fd9379`), so `git rm` does not remove it from history. Rotating that database account is an operator task, recorded in `docs/operations/go-live.md`.
 - The Pester layer is dev/CI tooling only. Nothing here ships, nothing is mounted into a container, and `Powershell-MECM/` itself is unchanged in what it *does* — it is only now observable.
 
+## Amendment 1 (2026-07-16, Plan v2 AP5): the 5.1 target becomes a tested matrix axis
+
+The original CI job ran the suite only under `pwsh` on `ubuntu-latest` — a
+different engine than the `powershell.exe` 5.1 the scripts run on in
+production. Three additions close that gap:
+
+- **Windows PowerShell 5.1 CI job** (`windows-powershell-51` in `ci.yml`):
+  the same `powershell-syntax`/`powershell-tests` gates of the canonical
+  runner, executed by `powershell.exe` on `windows-latest`. Only there do the
+  registry-backed test blocks run (config loss, address chain, scheme
+  override) — on Linux they are not defined.
+- **PSScriptAnalyzer compatibility rules** (`PSUseCompatibleSyntax` for
+  5.1 + 7.0, `PSUseCompatibleCommands`/`PSUseCompatibleTypes` against the
+  Server-2019/5.1 profile) in `PSScriptAnalyzerSettings.psd1`. First catch:
+  `Set-ItemProperty -Type` is a dynamic provider parameter the profile cannot
+  resolve; the scripts now rely on the REG_SZ default instead.
+- **Coverage ratchet** over the three Common/Packaging files, floor in
+  `scripts/tool-lock.json` (`pesterCoverageFloorPercent`), enforced by
+  `scripts/run-pester.ps1` only where the registry provider exists. The loop
+  scripts stay unmeasured by design — an endless loop cannot be loaded by a
+  test, which is why their logic lives in the Common files (see Decision).
+
 ## Alternatives considered
 
 - **Merge the two PowerShell MAC twins into one shared file.** Rejected: the MECM scripts are installed to `%ProgramFiles%\VirtuSphere\mecm` on the SCCM server, the client scripts are packaged into MECM applications and shipped to the VMs. They have no common deployment root. The vector table plus a textual twin-check gives the same guarantee without inventing a shared deployment path.

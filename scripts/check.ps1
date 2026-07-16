@@ -510,6 +510,39 @@ Add-Gate -Name 'ansible-lint' -Lanes $allLanes -Kind 'container' -Body {
     Format-ToolResult $r 'ansible-lint --strict sauber' 'ansible-lint meldet Befunde'
 }
 
+Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
+    # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
+    # rendert die feindliche Fixture mit den Produktions-Generatoren,
+    # roundtrip_verify.py laedt beide Artefakte mit yaml.safe_load (YAML 1.1,
+    # wie Ansible) und deep-vergleicht gegen den expected-Vertrag der Fixture.
+    $fixture = Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/golden-mission.json'
+    if (-not (Test-Path $fixture)) { return New-InfraResult 'golden-mission.json fehlt unter dem Pruef-Root (Zero-Match)' }
+    if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+    if (-not (Test-DockerImage $toolImages.ansible)) {
+        return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+    }
+    $outDir = Join-Path $artifactDir 'yaml-roundtrip'
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $outMount = ($outDir -replace '\\', '/')
+    $render = Invoke-Tool 'docker' @('run', '--rm',
+        '-v', ($repoRoot + ':/repo:ro'), '-v', ($outMount + ':/out'),
+        $toolImages.php, 'php', '/repo/Docker/WebAPI/tests/tools/render-golden-serverlist.php',
+        '/repo/Docker/WebAPI/tests/fixtures/golden-mission.json', '/out')
+    if ($render.ExitCode -eq 2) { return New-InfraResult 'Golden-Renderer ohne brauchbare Umgebung (Fixture/Outdir)' $render.Output }
+    if ($render.ExitCode -ne 0) { return New-FailResult 'Golden-Serverlist-Rendering rot (Generatorfehler)' $render.Output }
+    foreach ($artifact in @('serverlist.yml', 'accounts.yml')) {
+        if (-not (Test-Path (Join-Path $outDir $artifact))) {
+            return New-InfraResult ('Renderer meldete Erfolg, aber {0} fehlt (Zero-Match)' -f $artifact)
+        }
+    }
+    $verify = Invoke-Tool 'docker' @('run', '--rm',
+        '-v', ($repoRoot + ':/repo:ro'), '-v', ($outMount + ':/out:ro'),
+        $toolImages.ansible, 'python', '/repo/Ansible/tests/roundtrip_verify.py',
+        '/repo/Docker/WebAPI/tests/fixtures/golden-mission.json', '/out')
+    if ($verify.ExitCode -eq 2) { return New-InfraResult 'PyYAML-Verifier ohne brauchbare Umgebung' $verify.Output }
+    Format-ToolResult $verify 'serverlist/accounts ueberleben den PyYAML-Roundtrip semantisch' 'PyYAML-Roundtrip weicht vom expected-Vertrag ab'
+}
+
 Add-Gate -Name 'shellcheck' -Lanes $allLanes -Kind 'container' -Body {
     $files = Get-CheckFiles @('*.sh')
     if ($files.Count -eq 0) { return New-InfraResult 'keine Shellskripte gefunden (Zero-Match)' }

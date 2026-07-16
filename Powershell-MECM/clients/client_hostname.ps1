@@ -27,9 +27,12 @@ function Set-SccmDetection {
     param([hashtable]$Values)
     try {
         if (-not (Test-Path $detectionPath)) { New-Item -Path $detectionPath -Force | Out-Null }
-        Set-ItemProperty -Path $detectionPath -Name 'LastUpdate' -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
-        Set-ItemProperty -Path $detectionPath -Name 'Version' -Value '2.0' -Type String
-        foreach ($key in $Values.Keys) { Set-ItemProperty -Path $detectionPath -Name $key -Value $Values[$key] -Type String }
+        # Kein -Type: ein String-Value wird ohnehin REG_SZ, und -Type ist ein
+        # dynamischer Provider-Parameter, den PSUseCompatibleCommands (5.1-
+        # Profil) nicht aufloesen kann.
+        Set-ItemProperty -Path $detectionPath -Name 'LastUpdate' -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Set-ItemProperty -Path $detectionPath -Name 'Version' -Value '2.0'
+        foreach ($key in $Values.Keys) { Set-ItemProperty -Path $detectionPath -Name $key -Value ([string]$Values[$key]) }
     } catch {
         Write-VsClientLog -Level WARN "SCCM-Erkennungs-Registry fehlgeschlagen: $($_.Exception.Message)"
     }

@@ -404,6 +404,19 @@ $cases = @(
         Add-FixtureFile $fx 'probe.sh' "#!/bin/sh`necho `"unclosed`n"
         Assert-Guard (Invoke-RunnerGate $fx 'shellcheck') @(1) -InfraOnExit2
     } }
+    @{ Name = 'runner.yaml-roundtrip.drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        # Expected-Vertrag der Golden-Mission mutieren: der PyYAML-Verifier
+        # muss die semantische Abweichung rot melden, nicht leer gruen laufen.
+        $fx = New-Fixture @('Docker/WebAPI/lib', 'Docker/WebAPI/tests/fixtures', 'Docker/WebAPI/tests/tools', 'Ansible/tests')
+        Edit-Fixture $fx 'Docker/WebAPI/tests/fixtures/golden-mission.json' '"memory": 8192' '"memory": 9999'
+        Assert-Guard (Invoke-RunnerGate $fx 'yaml-roundtrip') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.yaml-roundtrip.zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        Assert-Guard (Invoke-RunnerGate $fx 'yaml-roundtrip') @(2)
+    } }
 )
 
 # Hook-Payload-Faelle brauchen stdin; eigener Baustein statt Invoke-Tool.

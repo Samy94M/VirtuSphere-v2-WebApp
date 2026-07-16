@@ -106,10 +106,57 @@ if (-not $SkipTests) {
     $config.Run.Path = $testRoot
     $config.Run.PassThru = $true
     $config.Output.Verbosity = 'Detailed'
+
+    # Coverage-Ratchet (AP5): die Common-Module tragen die ganze wiederver-
+    # wendete Logik der SYSTEM-Skripte; ihr Deckungsgrad darf nur steigen.
+    # Der Floor steht in tool-lock.json (pesterCoverageFloorPercent) und wird
+    # nur auf Windows durchgesetzt: die Registry-Testbloecke existieren unter
+    # pwsh/Linux nicht, dort waere derselbe Floor unerreichbar. Die Loop-
+    # Skripte selbst sind bewusst nicht vermessen (Endlosschleifen laedt kein
+    # Test); ihre Logik lebt genau deshalb in den Common-Dateien.
+    $coverageFloor = $null
+    if ($lockedPester -and (Test-Path $lockPath)) {
+        try {
+            $lockData = Get-Content -Raw -Path $lockPath | ConvertFrom-Json
+            if ($lockData.PSObject.Properties['pesterCoverageFloorPercent']) {
+                $coverageFloor = [double]$lockData.pesterCoverageFloorPercent
+            }
+        } catch { Write-Debug $_ }
+    }
+    $coveragePaths = @(
+        (Join-Path (Join-Path $scriptRoot 'mecm') 'VirtuSphere-Common.ps1'),
+        (Join-Path (Join-Path $scriptRoot 'mecm') 'VirtuSphere-ClientPackaging.ps1'),
+        (Join-Path (Join-Path $scriptRoot 'clients') 'VirtuSphere-Client-Common.ps1')
+    )
+    if ($null -ne $coverageFloor) {
+        $config.CodeCoverage.Enabled = $true
+        $config.CodeCoverage.Path = $coveragePaths
+        $config.CodeCoverage.OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) 'vs-pester-coverage.xml'
+    }
+
     $result = Invoke-Pester -Configuration $config
 
-    if ($result.FailedCount -gt 0) {
-        Write-Host ('    {0} Test(s) rot' -f $result.FailedCount) -ForegroundColor Red
+    if ($null -ne $coverageFloor -and $result.CodeCoverage) {
+        $percent = [math]::Round([double]$result.CodeCoverage.CoveragePercent, 1)
+        $enforce = (Test-Path 'HKCU:\')
+        if ($percent -lt $coverageFloor) {
+            if ($enforce) {
+                Write-Host ('    Coverage-Ratchet verletzt: {0}% < Floor {1}% (Common-Module)' -f $percent, $coverageFloor) -ForegroundColor Red
+                $failed = $true
+            } else {
+                Write-Host ('    Coverage {0}% unter Floor {1}% - nur informativ (kein Registry-Provider, Windows-Job setzt durch)' -f $percent, $coverageFloor) -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host ('    Coverage {0}% (Floor {1}%)' -f $percent, $coverageFloor) -ForegroundColor Green
+        }
+    }
+
+    # Nicht nur FailedCount: ein Container, der schon in der Discovery stirbt
+    # (Parse-/Setup-Fehler), hat 0 rote Tests und waere sonst still gruen
+    # (so geschehen 2026-07-16 mit einem Parse-Fehler in ErrorPaths).
+    $failedContainers = @($result.Containers | Where-Object { $_.Result -eq 'Failed' })
+    if ($result.FailedCount -gt 0 -or $failedContainers.Count -gt 0) {
+        Write-Host ('    {0} Test(s) rot, {1} Container gescheitert' -f $result.FailedCount, $failedContainers.Count) -ForegroundColor Red
         $failed = $true
     } else {
         Write-Host ('    OK  {0} Test(s) gruen' -f $result.PassedCount) -ForegroundColor Green

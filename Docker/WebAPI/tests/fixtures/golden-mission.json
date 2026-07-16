@@ -1,0 +1,137 @@
+{
+    "comment": "Golden-Mission fuer den semantischen PyYAML-Roundtrip (Plan v2, AP5). Feindliche Eingaben (YAML-1.1-Norway-Tokens, Unicode, Control-Bytes, Backslashes, Kommentar-/Quote-Zeichen, numerisch aussehende Strings) plus Overrides, Mehrfach-Disks/-NICs, Autostart und Default-Faelle. `mission`/`vms`/... sind die Generator-Eingaben (render-golden-serverlist.php), `expected` ist der semantische Vertrag, gegen den Ansible/tests/roundtrip_verify.py das per yaml.safe_load geladene Ergebnis deep-vergleicht. Wer den Generator aendert, zieht `expected` nach - genau dieses Gespraech erzwingt das Gate.",
+    "mission": {
+        "id": 42,
+        "mission_name": "Bühne: \"Gold\" #7",
+        "hypervisor_datacenter": "on",
+        "hypervisor_datastorage": "ds: \"prod\" #1",
+        "wds_vlan": "no",
+        "mission_notes": "Zeile1 \"q\"\nZeile2: näch\u0007ste",
+        "mission_status": "Aktiv",
+        "autostart_enabled": 1,
+        "autostart_start_delay": 45,
+        "autostart_wait_for_heartbeat": 1
+    },
+    "vms": [
+        {
+            "vm_name": "vm-ü01ß",
+            "vm_ram": "8192",
+            "vm_cpu": "4",
+            "cpu_hotplug": 0,
+            "ram_hotplug": 1,
+            "disks": [
+                { "disk_size": "100", "disk_type": "THIN " },
+                { "disk_size": "0", "disk_type": "" }
+            ],
+            "interfaces": [
+                { "vlan": "no", "type": "e1000" },
+                { "vlan": "VLAN: \"evil\" #x", "type": "weird type" },
+                { "vlan": "   ", "type": "vmxnet3" }
+            ],
+            "vm_datacenter": "off",
+            "vm_datastore": "",
+            "vm_guest_id": "windows2022srvNext_64Guest",
+            "packages": [
+                { "package_name": "yes" },
+                { "package_name": "010" },
+                { "package_name": "1e2" },
+                { "package_name": "Paket-Süd" },
+                { "package_name": "" }
+            ],
+            "vm_os": "Windows Server 2025",
+            "autostart_enabled": 1,
+            "autostart_start_delay": "9999",
+            "autostart_stop_delay": -5
+        },
+        {
+            "vm_name": "on"
+        }
+    ],
+    "power_cycle_wait": 7,
+    "host_datacenter": "",
+    "esxi_host_name": "esxi-güld.lan",
+    "esxi_credential": {
+        "host": "esxi-01.example.invalid",
+        "port": 8443,
+        "username": "rö\"ot"
+    },
+    "esxi_secret": "p@ss\"wö\\rd:on\u0001\nx",
+    "ansible_credential": {
+        "username": "ansible"
+    },
+    "api_base_url": "http://10.10.10.10:8021",
+    "expected": {
+        "accounts": {
+            "esxi_hostname": "esxi-01.example.invalid",
+            "esxi_port": 8443,
+            "esxi_username": "rö\"ot",
+            "esxi_password": "p@ss\"wö\\rd:on\u0001\nx",
+            "ansible_username": "ansible",
+            "WaitingTime": "60",
+            "apiUrl": "http://10.10.10.10:8021"
+        },
+        "serverlist": {
+            "vm_configurations": [
+                {
+                    "vm_name": "vm-ü01ß",
+                    "memory": 8192,
+                    "vcpus": 4,
+                    "hotadd_cpu": false,
+                    "hotadd_memory": true,
+                    "disks": [
+                        { "size_gb": 100, "type": "thin" },
+                        { "size_gb": 50, "type": "thick" }
+                    ],
+                    "network": [
+                        { "name": "no", "device_type": "e1000" },
+                        { "name": "VLAN: \"evil\" #x", "device_type": "weird type" }
+                    ],
+                    "datastore_name": "ds: \"prod\" #1",
+                    "datacenter_name": "off",
+                    "guest_id": "windows2022srvNext_64Guest",
+                    "packages": ["yes", "010", "1e2", "Paket-Süd"],
+                    "os": "Windows Server 2025",
+                    "needs_mac": true,
+                    "autostart": { "enabled": true, "start_delay": 3600, "stop_delay": -1 }
+                },
+                {
+                    "vm_name": "on",
+                    "memory": 4096,
+                    "vcpus": 2,
+                    "hotadd_cpu": true,
+                    "hotadd_memory": true,
+                    "disks": [
+                        { "size_gb": 50, "type": "thick" }
+                    ],
+                    "network": [
+                        { "name": "no", "device_type": "vmxnet3" }
+                    ],
+                    "datastore_name": "ds: \"prod\" #1",
+                    "datacenter_name": "on",
+                    "guest_id": "windows2019srv_64Guest",
+                    "packages": [],
+                    "os": "Windows",
+                    "needs_mac": true,
+                    "autostart": { "enabled": false, "start_delay": -1, "stop_delay": -1 }
+                }
+            ],
+            "PowerCycleWaitSeconds": 7,
+            "mission_configuration": {
+                "mission_name": "Bühne: \"Gold\" #7",
+                "mission_id": 42,
+                "mission_datacenter": "on",
+                "mission_datastore": "ds: \"prod\" #1",
+                "mission_notes": "Zeile1 \"q\"\nZeile2: näch\u0007ste",
+                "mission_status": "Aktiv",
+                "autostart": {
+                    "enabled": true,
+                    "start_delay": 45,
+                    "stop_delay": 120,
+                    "stop_action": "guestShutdown",
+                    "wait_for_heartbeat": true,
+                    "esxi_host": "esxi-güld.lan"
+                }
+            }
+        }
+    }
+}

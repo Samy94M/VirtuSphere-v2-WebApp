@@ -255,7 +255,12 @@ foreach ($task in $tasks) {
     $scriptFile = Join-Path $installDir $task.Script
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-ExecutionPolicy Bypass -NonInteractive -File "{0}"' -f $scriptFile)
     $trigger = New-ScheduledTaskTrigger -AtStartup
-    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    # -MultipleInstances IgnoreNew ist der Doppelstart-Schutz (AP5): die
+    # Skripte sind Endlosschleifen, eine zweite Instanz wuerde denselben Sync
+    # parallel fahren (doppelte Imports, konkurrierende Registry-Writes).
+    # IgnoreNew ist zwar der Scheduler-Default, steht aber explizit hier, damit
+    # der Schutz ein gepinnter Vertrag ist und kein Zufall der Plattform.
+    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     # Endlosschleifen: kein Laufzeitlimit (Standard 72h wuerde sie killen).
     $set.ExecutionTimeLimit = 'PT0S'
     $definition = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $set -Description 'VirtuSphere MECM Integration'

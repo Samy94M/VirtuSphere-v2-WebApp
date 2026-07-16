@@ -110,7 +110,9 @@ function Set-VsResolvedApi {
 function Get-VsApiScheme {
     try {
         $override = (Get-ItemProperty -Path $script:VsRegistryBase -Name 'Scheme' -ErrorAction Stop).Scheme
-        if ($override -in @('http', 'https')) { return [string]$override }
+        # -in vergleicht case-insensitiv; kanonisch klein zurueckgeben, damit
+        # URL-Bau und Schema-Vergleiche eine Schreibweise sehen.
+        if ($override -in @('http', 'https')) { return ([string]$override).ToLowerInvariant() }
     } catch { Write-Debug $_ }
     return $script:VsDefaultScheme
 }

@@ -186,6 +186,40 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Windows-PowerShell-5.1-Matrix (Plan v2 AP5, ADR-0029): dieselben nativen
+  # PowerShell-Gates wie in der Fast-Lane (dort pwsh 7 auf ubuntu), aber unter
+  # powershell.exe 5.1 - der Engine, auf der die Skripte beim Kunden als
+  # SYSTEM laufen. Nur hier laufen auch die Registry-Testbloecke und der
+  # Coverage-Ratchet (run-pester.ps1 setzt ihn nur mit Registry-Provider durch).
+  windows-powershell-51:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: PowerShell-Module (Versionen aus scripts/tool-lock.json, unter 5.1)
+        shell: powershell
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $lock = Get-Content -Raw scripts/tool-lock.json | ConvertFrom-Json
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -RequiredVersion $lock.powershellModules.Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion $lock.powershellModules.PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: PowerShell-Gates unter Windows PowerShell 5.1 (kanonischer Runner)
+        shell: powershell
+        run: ./scripts/check.ps1 -Gate powershell-syntax,powershell-tests -Json qa-ps51.json
+
+      - name: QA-Artefakt hochladen
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-windows-powershell-51
+          path: qa-ps51.json
+          retention-days: 14
+
   # Windows-only-Gate derselben Lane (Plan v2 L8): der Legacy-C#-Client baut
   # nur mit MSBuild/NuGet auf Windows. Die HintPaths des historischen Projekts
   # zeigen auf ..\packages (eine Ebene ueber dem Checkout), also restauriert

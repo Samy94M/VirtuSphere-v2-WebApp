@@ -24,9 +24,12 @@ function Set-DiskStatus {
     param([string]$Status, [hashtable]$Extra = @{})
     try {
         if (-not (Test-Path $registryPath)) { New-Item -Path $registryPath -Force | Out-Null }
-        Set-ItemProperty -Path $registryPath -Name $valueName -Value $Status -Type String
-        Set-ItemProperty -Path $registryPath -Name 'LastRunDate' -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
-        foreach ($key in $Extra.Keys) { Set-ItemProperty -Path $registryPath -Name $key -Value $Extra[$key] -Type String }
+        # Kein -Type: ein String-Value wird ohnehin REG_SZ, und -Type ist ein
+        # dynamischer Provider-Parameter, den PSUseCompatibleCommands (5.1-
+        # Profil) nicht aufloesen kann.
+        Set-ItemProperty -Path $registryPath -Name $valueName -Value $Status
+        Set-ItemProperty -Path $registryPath -Name 'LastRunDate' -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        foreach ($key in $Extra.Keys) { Set-ItemProperty -Path $registryPath -Name $key -Value ([string]$Extra[$key]) }
     } catch {
         Write-VsClientLog -Level WARN "Status-Registry fehlgeschlagen: $($_.Exception.Message)"
     }
