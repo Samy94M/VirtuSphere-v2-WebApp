@@ -1,10 +1,11 @@
 name: CI
 
-# Minimal-CI-Baseline (Paket 0). Faehrt genau den lokalen Check-Satz aus
-# docs/QA.md nach: PHP-Lint, PHPUnit-unit-Suite, PHPStan (Level 4 mit
-# Baseline-Ratchet, ADR-0015), Sprach-Parity, JS-Syntax und die SSoT-/Doku-
-# Drift-Guards. Bewusst ohne DB-Server (Integrationstests skippen ohne DB von
-# selbst) und ohne E2E.
+# Fast-Lane des kanonischen Pruef-Runners (ADR-0031, Plan v2 AP4): CI fuehrt
+# scripts/check.ps1 -Lane Fast aus statt einer zweiten, driftfaehigen
+# Schrittliste. Tool-Versionen kommen aus scripts/tool-lock.json (Images per
+# Digest, PowerShell-Module exakt); Actions sind auf volle Commit-SHAs gepinnt.
+# Bewusst ohne DB-Server; die Integration-Lane (QA-Stack, --fail-on-skipped)
+# folgt nach der ADR-0015-Ergaenzung/ADR-0028-Revision.
 
 on:
   push:
@@ -19,16 +20,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  qa:
+  fast-lane:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
+      # Host-PHP 8.4 haelt php-lint/lang-audit schnell und versionsgleich zum
+      # Runtime-Image; ohne dieses Setup wuerde der Runner das vorinstallierte
+      # Runner-PHP (8.3) nutzen und 8.4-Syntax falsch rot linten.
       - name: Setup PHP 8.4
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.4'
           extensions: mysqli, sodium
@@ -36,67 +41,40 @@ jobs:
           coverage: none
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
-      - name: PHP lint (first-party, ohne vendor)
+      # compose-config interpoliert env_file/Variablen; CI hat kein echtes .env.
+      - name: .env fuer das Compose-Gate stellen
+        run: cp .env.example .env
+
+      - name: PHP-Projektimage bauen
+        run: docker build -t virtusphere-v2-webapp-php Docker/php
+
+      - name: QA-Ansible-Image bauen (Pins aus Docker/qa-ansible und Ansible/requirements.yml)
+        run: docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .
+
+      - name: Composer install (im Projekt-Image, vendor in den Checkout)
         run: |
-          set -eu
-          find Docker/WebAPI -name '*.php' \
-            -not -path 'Docker/WebAPI/vendor/*' -print0 \
-          | xargs -0 -n1 -P4 php -l >/dev/null
+          docker run --rm -v "$PWD:/repo" -w /repo/Docker/WebAPI \
+            -e COMPOSER_CACHE_DIR=/tmp/composer-cache -e COMPOSER_ALLOW_SUPERUSER=1 \
+            virtusphere-v2-webapp-php composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Composer install
-        working-directory: Docker/WebAPI
-        run: composer install --no-interaction --no-progress --prefer-dist
-
-      - name: PHPUnit (unit + static)
-        working-directory: Docker/WebAPI
-        run: composer run test:unit
-
-      - name: PHPStan (Level 4, Baseline-Ratchet)
-        working-directory: Docker/WebAPI
-        run: composer run stan
-
-      - name: Sprach-Parity (lang-audit)
-        run: php scripts/lang-audit.php --ci
-
-      - name: JS-Syntax (Portal-Skripte)
-        run: |
-          set -eu
-          for js in Docker/WebAPI/portal/assets/*.js; do
-            node --check "$js"
-          done
-
-      - name: ENUM-SSoT-Sync
-        run: sh scripts/check-enum-sync.sh --ci
-
-      - name: PHP-Version-SSoT-Sync
-        run: sh scripts/check-php-version-sync.sh --ci
-
-      - name: Grenzwert-SSoT-Sync (keine Konstante als Zahl im Text)
-        run: php scripts/check-bounds-sync.php --ci
-
-      - name: Doku-Hygiene
-        run: sh scripts/check-doc-hygiene.sh --ci
-
-      # Die PowerShell-Integrationsclients (MECM-Sync, PXE-Client-Kette) laufen als
-      # SYSTEM in Endlosschleifen beim Kunden und waren bis 2026-07 der einzige Code
-      # im Projekt, den kein Werkzeug geprueft hat. pwsh ist auf ubuntu-latest
-      # vorinstalliert; die Module kommen aus der PSGallery und werden bewusst NICHT
-      # eingecheckt (dieselbe Dev-Tooling-Regel wie Playwright/Infection, ADR-0028).
-      - name: PowerShell-Module (Pester, PSScriptAnalyzer)
+      - name: PowerShell-Module (Versionen aus scripts/tool-lock.json)
         shell: pwsh
         run: |
+          $lock = Get-Content -Raw scripts/tool-lock.json | ConvertFrom-Json
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module Pester -RequiredVersion $lock.powershellModules.Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion $lock.powershellModules.PSScriptAnalyzer -Scope CurrentUser -Force
 
-      - name: PSScriptAnalyzer + Pester (Powershell-MECM)
+      - name: Fast-Lane (kanonischer Runner)
         shell: pwsh
-        run: ./scripts/run-pester.ps1
+        run: ./scripts/check.ps1 -Lane Fast -Json qa-fast.json
 
+      # Diff-bezogen statt lane-gebunden: die Lane prueft den Worktree (in CI
+      # immer sauber), dieser Schritt den gepushten Commit-Bereich (ADR-0031).
       - name: CSP-Pattern-Lint (geaenderte PHP-Dateien)
         run: |
           set -eu
@@ -109,12 +87,12 @@ jobs:
           if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1; then
             base="$(git rev-parse --verify --quiet 'HEAD~1' || git rev-parse HEAD)"
           fi
-          changed="$(git diff --name-only "$base" "${{ github.sha }}" -- '*.php' || true)"
-          if [ -n "$changed" ]; then
-            echo "Geaenderte PHP-Dateien:"
-            echo "$changed"
-            # shellcheck disable=SC2086
-            sh scripts/lint-csp-patterns.sh --file $changed
-          else
-            echo "Keine geaenderten PHP-Dateien - CSP-Lint uebersprungen."
-          fi
+          sh scripts/lint-csp-patterns.sh --range "$base" "${{ github.sha }}"
+
+      - name: QA-Artefakt hochladen
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-fast-lane
+          path: qa-fast.json
+          retention-days: 14

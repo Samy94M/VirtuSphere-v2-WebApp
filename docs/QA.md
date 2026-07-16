@@ -66,17 +66,11 @@ Expected results: PHPUnit and the Python client tests exit green, lang audit rep
 
 ## Continuous Integration (GitHub Actions)
 
-`.github/workflows/ci.yml` runs the same check-set as this page on every `push` to `main` and on every pull request. It uses `shivammathur/setup-php` (PHP 8.4, `mysqli` + `sodium`) and Node 20; **no MySQL server** is provisioned, so the integration suite skips itself and only the unit + static suites run. Steps, in order:
+`.github/workflows/ci.yml` runs the **Fast lane of the canonical runner** (`scripts/check.ps1 -Lane Fast`) on every `push` to `main` and on every pull request, instead of maintaining a second step list that could drift from the local gates. Actions are pinned to full commit SHAs, the job has a `timeout-minutes` budget, and the machine-readable lane result (`qa-fast.json`) is uploaded as a build artifact with limited retention. Setup before the lane: PHP 8.4 on the host (so `php -l`/lang-audit lint with the runtime version, not the runner default), Node 20, `.env` from `.env.example` for the compose gate, the project PHP image and the QA Ansible image built from their Dockerfiles, `composer install` inside the project image, and Pester/PSScriptAnalyzer at the exact versions from `scripts/tool-lock.json`.
 
-1. `php -l` over every first-party `Docker/WebAPI/**/*.php` (vendor excluded).
-2. `composer install` then `composer run test:unit` (unit + static suites).
-3. `composer run stan` (PHPStan level 4 over `lib`/`portal`/`tests`, baseline ratchet per ADR-0015).
-4. `php scripts/lang-audit.php --ci` (DE/EN parity).
-5. `node --check` over each `Docker/WebAPI/portal/assets/*.js` (`core.js`, `forms.js`, `deploy.js`).
-6. `check-enum-sync.sh`, `check-php-version-sync.sh`, `check-doc-hygiene.sh` (SSoT + doc drift).
-7. `lint-csp-patterns.sh --file` over the PHP files changed in the push/PR (same changed-file scope as the local hook).
+**No MySQL server** is provisioned: the Fast lane runs the unit + static suites without skips (`--fail-on-skipped`); the full suite including integration tests belongs to the Integration lane, which follows the ADR-0015 amendment and ADR-0028 revision. One step stays outside the lane on purpose: `lint-csp-patterns.sh --range <base> <head>` checks the pushed commit range (the lane's `csp-patterns` gate checks the worktree, which is always clean in CI; locally use `--worktree`).
 
-End-to-end browser tests stay out of this baseline; they are re-evaluated at the E3 milestone (ADR-0015). PHPStan findings in analysed files are fixed, not re-baselined; the legacy machine-API root files join the scope after the E3 retirement decision. To confirm the pipeline actually fails on regressions, remove a `__t()` key from one locale and observe the lang-audit step turn red.
+End-to-end browser tests stay out of this baseline; they are re-evaluated at the E3 milestone (ADR-0015). PHPStan findings in analysed files are fixed, not re-baselined; the legacy machine-API root files join the scope after the E3 retirement decision. To confirm the pipeline actually fails on regressions, remove a `__t()` key from one locale and observe the `lang-parity` gate turn red.
 
 ## Phase C Regression Coverage
 
