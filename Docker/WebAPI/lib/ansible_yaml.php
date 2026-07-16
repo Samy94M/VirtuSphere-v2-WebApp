@@ -367,16 +367,25 @@ function ansible_vm_packages(array $vm): array
     return $packages;
 }
 
-function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $missionId): void
+function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $missionId, int $jobId): void
 {
     $script = file_get_contents($path);
     if ($script === false) {
         throw new RuntimeException('Cannot read upload_mac_list.py.');
     }
 
+    $expectedApiLine = 'api_base_url = ' . ansible_python_string($apiBaseUrl);
+    $expectedMissionLine = 'mission_id = ' . ansible_python_string((string) $missionId);
+    $expectedJobLine = 'job_id = ' . ansible_python_string((string) $jobId);
     $script = preg_replace("/^api_base_url = .*$/m", 'api_base_url = ' . ansible_python_string($apiBaseUrl), $script, 1);
     $script = preg_replace("/^mission_id = .*$/m", 'mission_id = ' . ansible_python_string((string) $missionId), (string) $script, 1);
-    if ($script === null) {
+    $script = preg_replace('/^job_id = .*$/m', 'job_id = ' . ansible_python_string((string) $jobId), (string) $script, 1);
+    if (
+        $script === null
+        || !str_contains($script, $expectedApiLine)
+        || !str_contains($script, $expectedMissionLine)
+        || !str_contains($script, $expectedJobLine)
+    ) {
         throw new RuntimeException('Cannot patch upload_mac_list.py.');
     }
 

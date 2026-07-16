@@ -29,6 +29,13 @@ return [
     'empty' => 'Keine Bereitstellungsaufträge gefunden.',
     'retry' => 'Erneut ausführen',
     'confirm_retry' => 'Deploy für Mission :name erneut in die Warteschlange stellen?',
+    // Retry eines partial-Jobs: der neue Auftrag wiederholt nur den MAC-Export,
+    // nie das Anlegen oder den Power-Cycle. Satzwahl nach Anzahl; die Variante
+    // ohne Anzahl greift, wenn kein vertrauenswürdiges Teilergebnis vorliegt
+    // und der Export deshalb die ursprüngliche Auswahl wiederholt.
+    'confirm_retry_partial_one' => 'Export für Mission :name erneut einreihen? Nur der MAC-Export der einen fehlgeschlagenen VM wird wiederholt.',
+    'confirm_retry_partial_many' => 'Export für Mission :name erneut einreihen? Nur der MAC-Export der :count fehlgeschlagenen VMs wird wiederholt.',
+    'confirm_retry_partial' => 'Export für Mission :name erneut einreihen? Nur der MAC-Export der ursprünglichen VM-Auswahl wird wiederholt.',
     'flash_queued' => 'Bereitstellungsauftrag eingereiht.',
     'flash_cancelled' => 'Bereitstellungsauftrag abgebrochen.',
     'flash_retried' => 'Bereitstellungsauftrag erneut eingereiht.',

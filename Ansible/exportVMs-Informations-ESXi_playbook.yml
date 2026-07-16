@@ -13,18 +13,32 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: no
+        validate_certs: false
         datacenter: "{{ item.datacenter_name }}"
         name: "{{ item.vm_name }}"
       delegate_to: localhost
       loop: "{{ vm_configurations }}"
       register: vm_info
+      # A missing/unreachable VM is a per-VM MAC result, not a reason to hide
+      # every other VM result. ignore_errors keeps the failed item (including
+      # item/failed/msg) in vm_info.results for db_importMAC.php to classify.
+      ignore_errors: true
 
     - name: Speichere gesammelte Informationen in einer temporaeren Datei
-      copy:
+      ansible.builtin.copy:
         dest: "./vm_infos.json"
         content: "{{ vm_info.results | to_nice_json }}"
+        # Nur der Ansible-Benutzer liest die Datei (upload_mac_list.py im selben
+        # Arbeitsverzeichnis); VM-Namen/MACs gehen niemanden sonst etwas an.
+        mode: "0600"
 
     - name: Fuehre Python-Skript aus, um Daten zu verarbeiten und in CSV umzuwandeln
       ansible.builtin.command: python3 ./upload_mac_list.py
       delegate_to: localhost
+      register: mac_upload
+      # The upload always mutates server state when it succeeds (MACs, job
+      # result); there is no read-only pass to detect.
+      changed_when: true
+      # rc=20 is a durable partial result in deploy_jobs.result_json. All other
+      # non-zero codes mean the callback itself was not safely completed.
+      failed_when: mac_upload.rc not in [0, 20]

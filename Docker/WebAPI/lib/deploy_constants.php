@@ -9,16 +9,22 @@ const VIRTUSPHERE_DEPLOY_STATUS_RUNNING = 'running';
 const VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED = 'succeeded';
 const VIRTUSPHERE_DEPLOY_STATUS_FAILED = 'failed';
 const VIRTUSPHERE_DEPLOY_STATUS_CANCELLED = 'cancelled';
+const VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial';
 
 const VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
     VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
 ];
 
+// `partial` is terminal: the sequence ended and the per-VM result is durable in
+// result_json. Membership here also opts partial jobs into the retention purges
+// (repo_purge_deploy_job_logs / repo_purge_finished_system_jobs), which is
+// intended - a partial job ages like any finished job.
 const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
     VIRTUSPHERE_DEPLOY_STATUS_FAILED,
     VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+    VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
 ];
 
 const VIRTUSPHERE_DEPLOY_LOG_STDOUT = 'stdout';
@@ -34,6 +40,13 @@ const VIRTUSPHERE_DEPLOY_LOG_STREAMS = [
 const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
 const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
 const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
+
+// Convergence sweep interval (L4): the maintenance worker periodically fails
+// VMs stuck in `deploying` whose mission has no queued/running job left. That
+// covers the fault the deploy worker cannot: it died (or was cancelled and then
+// died) before its own catch could mark the VMs, and the heartbeat reaper only
+// touches jobs that are still `running`.
+const VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS = 300;
 
 // Scheduling (ADR-0022). scheduled_at is stored in UTC and compared against
 // UTC_TIMESTAMP(); staggering only makes sense for the power-on modes.

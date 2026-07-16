@@ -504,11 +504,32 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                             </form>
                         <?php } ?>
                         <?php if (deploy_job_is_retryable((string) $job['status'], $job['mission_id'] !== null ? (int) $job['mission_id'] : null)) { ?>
+                            <?php
+                            // A partial job never re-runs the whole deploy: its retry is
+                            // export-only (deploy_job_retry_plan), so the question must say
+                            // so and name the scope. Sentence picked by count (no "VM(s)");
+                            // without a trustworthy failed set (the divergence rule) the
+                            // export repeats the original selection and the text says that.
+                            $retryName = (string) ($job['mission_name'] ?? '');
+                            if ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
+                                $retryResult = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
+                                $retryFailedCount = $retryResult !== null && $retryResult['outcome'] === 'partial' ? count($retryResult['failed_vm_ids']) : 0;
+                                if ($retryFailedCount === 1) {
+                                    $retryConfirm = __t('deploy.confirm_retry_partial_one', ['name' => $retryName]);
+                                } elseif ($retryFailedCount > 1) {
+                                    $retryConfirm = __t('deploy.confirm_retry_partial_many', ['name' => $retryName, 'count' => $retryFailedCount]);
+                                } else {
+                                    $retryConfirm = __t('deploy.confirm_retry_partial', ['name' => $retryName]);
+                                }
+                            } else {
+                                $retryConfirm = __t('deploy.confirm_retry', ['name' => $retryName]);
+                            }
+                            ?>
                             <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="action" value="retry">
                                 <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
-                                <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('deploy.confirm_retry', ['name' => (string) ($job['mission_name'] ?? '')])); ?>"><?php echo h(__t('deploy.retry')); ?></button>
+                                <button class="button button-secondary" type="submit" data-confirm="<?php echo h($retryConfirm); ?>"><?php echo h(__t('deploy.retry')); ?></button>
                             </form>
                         <?php } ?>
                         <?php if (($job['group_id'] ?? '') !== '' && isset($groupPositions[(int) $job['id']]) && $groupPositions[(int) $job['id']][0] === 1) { ?>

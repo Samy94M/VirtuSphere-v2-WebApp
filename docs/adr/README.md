@@ -29,3 +29,4 @@
 - [ADR-0027: HTTPS Toggles, Cert Upload and HSTS](ADR-0027-https-toggles-cert-upload-and-hsts.md)
 - [ADR-0028: Playwright as a Dev-only E2E Layer](ADR-0028-playwright-dev-e2e-layer.md)
 - [ADR-0029: The PowerShell Integration Clients Get Checked](ADR-0029-powershell-integration-client-checks.md)
+- [ADR-0030: Partial-Ergebnismodell und result_json-Vertrag](ADR-0030-partial-deploy-results-and-result-json.md)

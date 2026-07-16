@@ -18,6 +18,12 @@ Run PHPStan (level 4, baseline ratchet per ADR-0015) inside the PHP container:
 docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html run stan
 ```
 
+Run the stdlib-only MAC upload client tests in an isolated Python container:
+
+```powershell
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo:ro -w /repo python:3.13-alpine python -m unittest discover -s Ansible/tests -v
+```
+
 Run the language catalog parity audit from the project image:
 
 ```powershell
@@ -38,7 +44,7 @@ curl.exe -s -S -i http://127.0.0.1:8021/portal/health.php
 curl.exe -s -S -i http://127.0.0.1:8021/tests/bootstrap.php
 ```
 
-Expected results: PHPUnit exits green, lang audit reports DE/EN parity clean, migration check ends with `check: ok`, the health endpoint returns HTTP 200, and `/tests/bootstrap.php` returns HTTP 403.
+Expected results: PHPUnit and the Python client tests exit green, lang audit reports DE/EN parity clean, migration check ends with `check: ok`, the health endpoint returns HTTP 200, and `/tests/bootstrap.php` returns HTTP 403.
 
 ## Continuous Integration (GitHub Actions)
 
@@ -142,7 +148,7 @@ See `docs/operations/backup.md` for the runbook and `PRE-SHIP-CHECKLIST.md` for 
 sh scripts/check-schema-convergence.sh
 ```
 
-The script builds one throwaway DB from `struktur.sql` alone and one from `struktur.sql` + all migrations, then diffs the `--no-data` dumps (AUTO_INCREMENT stripped). It is mandatory after any schema change touching either side. The migrations are deltas on the `struktur.sql` base, not a from-empty rebuild, so "build DB from migrations on an empty DB" is not a valid check; this script is. On Git Bash it exports `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` itself, because Git Bash otherwise mangles the container-absolute paths.
+The script builds one throwaway DB from `struktur.sql` alone and one from `struktur.sql` + all migrations, then diffs the `--no-data` dumps (AUTO_INCREMENT stripped). Before the migration run it reconstructs the schema directly preceding migrations 0019/0020 and seeds the default-interface edge cases: materializable VM, empty WDS VLAN, template, and an already stored interface. It asserts the JSON column, exact backfill, named skip report, untouched rows, and a forced second run of migration 0020. The script is mandatory after any schema change touching either side. The migrations are deltas on the `struktur.sql` base, not a from-empty rebuild, so "build DB from migrations on an empty DB" is not a valid check; this script is. On Git Bash it exports `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` itself, because Git Bash otherwise mangles the container-absolute paths.
 
 ## Concurrency and HTTPS Integration Tests
 

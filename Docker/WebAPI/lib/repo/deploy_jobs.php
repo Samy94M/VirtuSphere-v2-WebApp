@@ -6,9 +6,11 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../credentials.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../mac_import.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/status_events.php';
 
 /**
  * Reads a mode out of a stored payload. Accepts system modes too, because the
@@ -88,10 +90,12 @@ function deploy_job_payload(array $data): array
 }
 
 /**
- * Only failed and cancelled jobs can be re-queued: re-running a succeeded job
- * is the start form's business (it walks the readiness preview), and active
- * jobs are cancelled, not retried. Mission-less system jobs (the ESXi
- * inventory pulls) are scheduled by the worker, never retried by hand.
+ * Only failed, cancelled and partial jobs can be re-queued: re-running a
+ * succeeded job is the start form's business (it walks the readiness preview),
+ * and active jobs are cancelled, not retried. A partial job is terminal with a
+ * durable per-VM verdict in result_json; its retry is the export-only follow-up
+ * (deploy_job_retry_plan). Mission-less system jobs (the ESXi inventory pulls)
+ * are scheduled by the worker, never retried by hand.
  */
 function deploy_job_is_retryable(string $status, ?int $missionId): bool
 {
@@ -99,7 +103,47 @@ function deploy_job_is_retryable(string $status, ?int $missionId): bool
         return false;
     }
 
-    return $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED || $status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+    return in_array($status, [
+        VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+    ], true);
+}
+
+/**
+ * Decides what a retry re-queues. NULL means "repeat the old payload
+ * unchanged", which stays the behaviour for plain failed and cancelled jobs.
+ *
+ * Once a MAC import has committed anything, a retry must never re-run
+ * `create` or `powercycle` for the whole job again:
+ * - a `partial` job retries as export-only for exactly its failed_vm_ids;
+ * - if that failed set is not trustworthy - the job status and the stored
+ *   outcome diverge (a `failed` job whose result says success/partial, e.g.
+ *   after a lost HTTP response), or a partial job's result is missing,
+ *   malformed or names no failed VM - the export is repeated for the
+ *   ORIGINAL selection, never widened to the full deploy.
+ * Cancelled jobs keep the plain re-queue: a cancellation makes no outcome
+ * claim, so there is nothing to diverge from.
+ *
+ * @param array{outcome:string, successful_vm_ids:list<int>, failed_vm_ids:list<int>}|null $result decoded result_json (mac_import_decode_result)
+ * @param int[] $originalVmIds the old payload's vm_ids ([] = whole mission)
+ * @return array{mode:string, vm_ids:list<int>, scope:string}|null
+ */
+function deploy_job_retry_plan(string $status, ?array $result, array $originalVmIds): ?array
+{
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
+        if ($result !== null && $result['outcome'] === 'partial' && $result['failed_vm_ids'] !== []) {
+            return ['mode' => 'export', 'vm_ids' => $result['failed_vm_ids'], 'scope' => 'failed_vms'];
+        }
+
+        return ['mode' => 'export', 'vm_ids' => array_values($originalVmIds), 'scope' => 'original_selection'];
+    }
+
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED && $result !== null && $result['outcome'] !== 'failed') {
+        return ['mode' => 'export', 'vm_ids' => array_values($originalVmIds), 'scope' => 'original_selection'];
+    }
+
+    return null;
 }
 
 function deploy_schedule_error(string $field, string $key, string $fallback, array $replace = []): ValidationException
@@ -219,7 +263,7 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
     $limit = max(1, min(500, $limit));
     if ($missionId !== null && $missionId > 0) {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -232,7 +276,7 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
         $stmt->bind_param('ii', $missionId, $limit);
     } else {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -252,7 +296,7 @@ function repo_deploy_job(mysqli $db, int $jobId): ?array
 {
     return repo_fetch_one(
         $db,
-        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
          FROM deploy_jobs j
          LEFT JOIN deploy_missions m ON m.id = j.mission_id
          LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -465,13 +509,15 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
 }
 
 /**
- * Re-queues a failed/cancelled mission job as a NEW job with the old job's
- * payload and credential snapshot. Runs immediately (no scheduled_at or
- * group_id carry-over: "retry" means "run it again now") and is attributed to
- * the retrying user, not the original author. Every create-time guard fires
- * again via repo_create_deploy_job(): one-active-job-per-mission, mission
- * readiness, VM-id filtering and the credential type asserts, so a mission or
- * credential deleted since the original run throws instead of half-queuing.
+ * Re-queues a retryable mission job as a NEW job with the old job's credential
+ * snapshot. Runs immediately (no scheduled_at or group_id carry-over: "retry"
+ * means "run it again now") and is attributed to the retrying user, not the
+ * original author. The payload is the old one, unless deploy_job_retry_plan()
+ * turns the retry into an export-only follow-up (partial jobs and diverged
+ * failed jobs). Every create-time guard fires again via
+ * repo_create_deploy_job(): one-active-job-per-mission, mission readiness,
+ * VM-id filtering and the credential type asserts, so a mission or credential
+ * deleted since the original run throws instead of half-queuing.
  */
 function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
 {
@@ -486,20 +532,34 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
         }
         $missionId = $job['mission_id'] !== null ? (int) $job['mission_id'] : null;
         if (!deploy_job_is_retryable((string) $job['status'], $missionId)) {
-            throw new RuntimeException('Only failed or cancelled mission jobs can be retried.');
+            throw new RuntimeException('Only failed, cancelled or partial mission jobs can be retried.');
         }
 
         $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
+        $payload = is_array($payload) ? $payload : [];
+        $plan = deploy_job_retry_plan(
+            (string) $job['status'],
+            mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null),
+            deploy_job_normalize_vm_ids($payload['vm_ids'] ?? [])
+        );
+        if ($plan !== null) {
+            $payload['mode'] = $plan['mode'];
+            $payload['vm_ids'] = $plan['vm_ids'];
+        }
         $newJobId = repo_create_deploy_job(
             $db,
             (int) $missionId,
             $userId,
             (int) $job['credential_esxi_id'],
             (int) $job['credential_ansible_id'],
-            is_array($payload) ? $payload : [],
+            $payload,
             null
         );
-        repo_insert_deploy_job_log_unlocked($db, $newJobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Retry of deploy job ' . $jobId);
+        $note = 'Retry of deploy job ' . $jobId;
+        if ($plan !== null) {
+            $note .= ' (export-only: ' . ($plan['scope'] === 'failed_vms' ? count($plan['vm_ids']) . ' failed VMs' : 'original selection') . ')';
+        }
+        repo_insert_deploy_job_log_unlocked($db, $newJobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $note);
 
         return $newJobId;
     });
@@ -767,6 +827,63 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
         }
 
         return $jobs;
+    });
+}
+
+/**
+ * Convergence sweep for orphaned deploying VMs. A VM left in `deploying` whose
+ * mission has no queued/running job any more can never be finished by a
+ * worker: the job that owned it is terminal, and the worker died (or was
+ * cancelled and then died) before its own failure path could mark the VM. The
+ * heartbeat reaper cannot help either - it only touches jobs still `running`.
+ *
+ * Convergence means failed/failed: lifecycle_state and mecm_sync_state
+ * together, so no orphan advertises a MECM pickup that can never happen.
+ * Stored MACs are untouched and the frozen legacy vm_status is not rewritten.
+ * VMs of missions with an active job are never touched, however long they
+ * have been deploying - the running worker owns them.
+ *
+ * SKIP LOCKED for the same reason as the reaper: a concurrent import callback
+ * holds row locks on its mission's VMs, and the sweep must neither block on it
+ * nor deadlock; skipped rows converge on the next interval.
+ *
+ * @return array<int, array{vm_id:int, mission_id:int, vm_name:string}>
+ */
+function repo_sweep_orphaned_deploying_vms(mysqli $db): array
+{
+    $deploying = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
+    $failedLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
+    $failedMecm = VIRTUSPHERE_MECM_FAILED;
+    $note = 'convergence sweep: stuck in deploying without an active deploy job';
+
+    return repo_transaction($db, static function () use ($db, $deploying, $failedLifecycle, $failedMecm, $note): array {
+        $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+        $stmt = $db->prepare(
+            'SELECT v.id, v.mission_id, v.vm_name, v.vm_status FROM deploy_vms v
+             WHERE v.lifecycle_state = ?
+               AND NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (?, ?))
+             ORDER BY v.id
+             FOR UPDATE SKIP LOCKED'
+        );
+        $stmt->bind_param('sss', $deploying, $queued, $running);
+        $stmt->execute();
+        $vms = repo_fetch_all($stmt->get_result());
+
+        $swept = [];
+        foreach ($vms as $vm) {
+            $vmId = (int) $vm['id'];
+            $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated_at = NOW() WHERE id = ? AND lifecycle_state = ?');
+            $stmt->bind_param('ssis', $failedLifecycle, $failedMecm, $vmId, $deploying);
+            $stmt->execute();
+            if ($stmt->affected_rows !== 1) {
+                continue;
+            }
+            repo_record_vm_status_event($db, $vmId, $failedLifecycle, $failedMecm, (string) ($vm['vm_status'] ?? ''), $note);
+            $swept[] = ['vm_id' => $vmId, 'mission_id' => (int) $vm['mission_id'], 'vm_name' => (string) $vm['vm_name']];
+        }
+
+        return $swept;
     });
 }
 

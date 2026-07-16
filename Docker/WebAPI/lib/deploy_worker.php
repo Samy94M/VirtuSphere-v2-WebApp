@@ -22,7 +22,7 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/esxi_capabilities.php';
-require_once __DIR__ . '/repo/status_events.php';
+require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/ssh.php';
 
 final class DeployWorkerCancelled extends RuntimeException
@@ -111,15 +111,6 @@ function deploy_worker_run_once(mysqli $db, string $workerId, array $options): b
     return true;
 }
 
-function deploy_worker_reap_stale_jobs(mysqli $db): void
-{
-    foreach (repo_reap_stale_deploy_jobs($db) as $job) {
-        $payload = deploy_worker_payload($job);
-        $vmIds = $payload['vm_ids'] ?? [];
-        deploy_worker_mark_mission_vms($db, (int) $job['mission_id'], VIRTUSPHERE_LIFECYCLE_FAILED, 'deploy job ' . (int) $job['id'] . ' reaped after stale heartbeat', $vmIds);
-    }
-}
-
 function deploy_worker_process_job(mysqli $db, array $job, string $workerId, array $options): void
 {
     // System jobs (e.g. ESXi inventory) run a separate, mission-less path so the
@@ -137,7 +128,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     try {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing deploy artifacts.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
-        deploy_worker_mark_mission_vms($db, (int) $job['mission_id'], VIRTUSPHERE_LIFECYCLE_DEPLOYING, 'deploy job ' . $jobId . ' started', $vmIds);
+        $priorLifecycles = deploy_worker_mark_vms_deploying($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' started', $vmIds);
         deploy_worker_assert_not_cancelled($db, $jobId);
 
         $esxiCredential = deploy_worker_credential($db, (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
@@ -195,22 +186,11 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . '.');
         }
 
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job succeeded.');
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
-        deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
-        // A create/full deploy changed ESXi resource usage (new VMs, datastore
-        // allocation): enqueue an inventory refresh for this credential (E3.4b).
-        // Fail-soft and after the job is finalized, so it can never taint the
-        // deploy result; the double-enqueue guard prevents pile-up.
-        deploy_worker_refresh_inventory_after_deploy($db, $job);
+        deploy_worker_conclude_sequence($db, $job, $workerId, $vmIds, $priorLifecycles);
     } catch (DeployWorkerCancelled $cancelled) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Worker stopped processing because the job was cancelled.');
+        deploy_worker_handle_cancelled($db, $job, $vmIds);
     } catch (Throwable $exception) {
-        $message = $exception->getMessage();
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_STDERR, $message);
-        deploy_worker_mark_mission_vms($db, (int) $job['mission_id'], VIRTUSPHERE_LIFECYCLE_FAILED, 'deploy job ' . $jobId . ' failed', $vmIds);
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
-        deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
+        deploy_worker_handle_failure($db, $job, $workerId, $vmIds, $exception->getMessage());
     } finally {
         repo_touch_deploy_job_heartbeat($db, $jobId, $workerId);
         if (!empty($options['cleanup'])) {
@@ -362,78 +342,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     }
 }
 
-function deploy_worker_finish_job(mysqli $db, int $jobId, string $workerId, string $status, ?string $lastError = null): void
-{
-    if (!repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError)) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Terminal status ' . $status . ' skipped because the job is no longer locked by this worker.');
-    }
-}
-
-/**
- * Records a finished MISSION deploy in the audit trail, so the logs page shows a
- * job ending, not just being queued. Attributed to the operator who queued it
- * (the job row carries user_id) even though the worker runs headless.
- *
- * Deliberately only for mission deploys, not the mission-less inventory system
- * jobs: those run on the interval and a "succeeded" line per credential every few
- * hours would bury real events. An inventory failure is already recorded in the
- * fetch-state row, and its one durable consequence, the auth pause, is audited
- * where it is set/cleared. Called after finish_job and never lets an audit hiccup
- * escape into the job's finally block.
- */
-function deploy_worker_audit_outcome(mysqli $db, array $job, string $status, ?string $error = null): void
-{
-    if (($job['mission_id'] ?? null) === null) {
-        return;
-    }
-    try {
-        $userId = isset($job['user_id']) ? (int) $job['user_id'] : null;
-        $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-        $message = 'deploy job id ' . (int) $job['id'] . ' (mission id ' . (int) $job['mission_id']
-            . ', mode ' . audit_snippet($mode, 24) . ') ' . $status;
-        if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED && $error !== null && $error !== '') {
-            $message .= ': ' . audit_snippet($error, 120);
-        }
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, $message, $userId, 'cli');
-    } catch (Throwable $exception) {
-        error_log('[deploy-worker] outcome audit failed: ' . $exception->getMessage());
-    }
-}
-
-/**
- * After a successful resource-changing deploy (create/full), enqueue an ESXi
- * inventory refresh for the job's credential so datastore usage etc. catch up
- * without waiting for the interval (ADR-0023, E3.4b). Fail-soft: a scheduling
- * hiccup must never taint the already-finished deploy job. The double-enqueue
- * guard in repo_create_system_job prevents pile-up with the interval automation.
- */
-function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): void
-{
-    $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-    $credentialId = (int) ($job['credential_esxi_id'] ?? 0);
-    if ($credentialId <= 0 || !in_array($mode, VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, true)) {
-        return;
-    }
-    try {
-        esxi_inventory_enqueue_for_credential($db, $credentialId);
-    } catch (Throwable $exception) {
-        error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . $exception->getMessage());
-    }
-}
-
 function deploy_worker_credential(mysqli $db, int $credentialId, string $type): array
 {
     return repo_deploy_assert_credential_type($db, $credentialId, $type);
-}
-
-function deploy_worker_payload(array $job): array
-{
-    $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
-    if (!is_array($payload)) {
-        return ['mode' => VIRTUSPHERE_DEPLOY_MODE_FULL, 'verbose' => false];
-    }
-
-    return deploy_job_payload($payload);
 }
 
 function deploy_worker_assert_not_cancelled(mysqli $db, int $jobId): void
@@ -441,39 +352,6 @@ function deploy_worker_assert_not_cancelled(mysqli $db, int $jobId): void
     $job = repo_deploy_job($db, $jobId);
     if ($job !== null && (string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
         throw new DeployWorkerCancelled('Deploy job was cancelled.');
-    }
-}
-
-/**
- * @param int[] $vmIds Empty means "all VMs of the mission".
- */
-function deploy_worker_mark_mission_vms(mysqli $db, int $missionId, string $lifecycleState, string $note, array $vmIds = []): void
-{
-    virtusphere_assert_lifecycle_state($lifecycleState);
-    if ($missionId <= 0) {
-        return;
-    }
-
-    $vmIds = array_values(array_filter(array_map('intval', $vmIds), static fn (int $id): bool => $id > 0));
-    if ($vmIds !== []) {
-        $placeholders = implode(', ', array_fill(0, count($vmIds), '?'));
-        $stmt = $db->prepare('SELECT id, mecm_sync_state, vm_status FROM deploy_vms WHERE mission_id = ? AND id IN (' . $placeholders . ') ORDER BY id');
-        $stmt->bind_param('i' . str_repeat('i', count($vmIds)), $missionId, ...$vmIds);
-    } else {
-        $stmt = $db->prepare('SELECT id, mecm_sync_state, vm_status FROM deploy_vms WHERE mission_id = ? ORDER BY id');
-        $stmt->bind_param('i', $missionId);
-    }
-    $stmt->execute();
-    $vms = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-    foreach ($vms as $vm) {
-        $vmId = (int) $vm['id'];
-        $mecmSyncState = (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_NOT_READY);
-        $legacyStatus = (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED);
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('si', $lifecycleState, $vmId);
-        $stmt->execute();
-        repo_record_vm_status_event($db, $vmId, $lifecycleState, $mecmSyncState, $legacyStatus, $note);
     }
 }
 

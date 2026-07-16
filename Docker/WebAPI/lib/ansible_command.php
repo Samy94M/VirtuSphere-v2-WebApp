@@ -107,6 +107,21 @@ function ansible_modes_using_powercycle(): array
     ));
 }
 
+/**
+ * Whether a mode's sequence runs the MAC export playbook, i.e. whether the
+ * worker must find a mac_import result in deploy_jobs.result_json afterwards.
+ * Derived from ansible_playbooks_for_mode() rather than listed, so a sequence
+ * change cannot drift from the worker's expectation: a mode without the export
+ * step must never be failed for a missing result (L3), and a mode with it must
+ * never finish green without one. Today: 'full', 'powercycle' and 'export'.
+ * The autostart flag only gates the autostart step, never the export step, so
+ * it cannot change the answer.
+ */
+function ansible_mode_expects_mac_result(string $mode): bool
+{
+    return in_array(VIRTUSPHERE_PLAYBOOKS['export'], ansible_playbooks_for_mode($mode), true);
+}
+
 function ansible_remote_command(string $remoteDir, array $payload, bool $autostartEnabled = false): string
 {
     $mode = (string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL);

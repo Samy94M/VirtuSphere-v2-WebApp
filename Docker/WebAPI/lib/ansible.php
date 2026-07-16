@@ -83,7 +83,7 @@ function ansible_prepare_job_artifacts(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
         ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName)
     );
-    ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId);
+    ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId, $jobId);
 
     return [
         'local_dir' => $workDir,

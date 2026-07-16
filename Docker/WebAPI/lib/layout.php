@@ -444,6 +444,9 @@ function deploy_job_status_badge_class(string $status): string
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => 'success',
         VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'danger',
         VIRTUSPHERE_DEPLOY_STATUS_RUNNING => 'info',
+        // Same variant as the default, pinned on purpose: partial is a terminal
+        // per-VM verdict, not a transient state that merely lacks a mapping.
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'warning',
         default => 'warning',
     };
 }

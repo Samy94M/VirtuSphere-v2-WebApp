@@ -29,6 +29,13 @@ return [
     'empty' => 'No deploy jobs found.',
     'retry' => 'Run again',
     'confirm_retry' => 'Queue the deploy for mission :name again?',
+    // Retry of a partial job: the new job repeats only the MAC export, never
+    // the create or power-cycle steps. Sentence picked by count; the variant
+    // without a count applies when no trustworthy partial result exists and
+    // the export therefore repeats the original selection.
+    'confirm_retry_partial_one' => 'Queue the export for mission :name again? Only the MAC export of the one failed VM is repeated.',
+    'confirm_retry_partial_many' => 'Queue the export for mission :name again? Only the MAC export of the :count failed VMs is repeated.',
+    'confirm_retry_partial' => 'Queue the export for mission :name again? Only the MAC export of the original VM selection is repeated.',
     'flash_queued' => 'Deploy job queued.',
     'flash_cancelled' => 'Deploy job cancelled.',
     'flash_retried' => 'Deploy job queued again.',

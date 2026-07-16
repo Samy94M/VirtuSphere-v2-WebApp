@@ -125,7 +125,78 @@ function migrator_count(mysqli $db, string $sql): int
     return (int) $row['c'];
 }
 
-function migrator_preflight(mysqli $db): void
+/** @return array{materialize:array<int,array<string,mixed>>,skipped:array<int,array<string,mixed>>} */
+function migrator_default_interface_plan(mysqli $db): array
+{
+    if (!migrator_table_exists($db, 'deploy_missions')
+        || !migrator_table_exists($db, 'deploy_vms')
+        || !migrator_table_exists($db, 'deploy_interfaces')) {
+        return ['materialize' => [], 'skipped' => []];
+    }
+
+    require_once __DIR__ . '/defaults.php';
+    $sql = <<<'SQL'
+SELECT v.id AS vm_id, v.vm_name, m.mission_name, TRIM(COALESCE(m.wds_vlan, '')) AS wds_vlan
+FROM deploy_vms v
+INNER JOIN deploy_missions m ON m.id = v.mission_id
+WHERE NOT EXISTS (SELECT 1 FROM deploy_interfaces i WHERE i.vm_id = v.id)
+ORDER BY m.id, v.id
+SQL;
+    $result = $db->query($sql);
+    $plan = ['materialize' => [], 'skipped' => []];
+    while ($row = $result->fetch_assoc()) {
+        if (mission_name_is_template((string) $row['mission_name'])) {
+            continue;
+        }
+        $key = (string) $row['wds_vlan'] === '' ? 'skipped' : 'materialize';
+        $plan[$key][] = $row;
+    }
+    $result->free();
+
+    return $plan;
+}
+
+/** @param array<int,array<string,mixed>> $rows */
+function migrator_report_default_interface_skips(array $rows, string $phase): void
+{
+    foreach ($rows as $row) {
+        $mission = json_encode((string) $row['mission_name'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $vm = json_encode((string) $row['vm_name'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        migrator_out($phase . ': skipped VM ' . $vm . ' in mission ' . $mission . ' because wds_vlan is empty');
+    }
+}
+
+function migrator_preflight_deploy_job_statuses(mysqli $db): void
+{
+    if (!migrator_table_exists($db, 'deploy_jobs') || !migrator_column_exists($db, 'deploy_jobs', 'status')) {
+        return;
+    }
+
+    require_once __DIR__ . '/deploy_constants.php';
+    $allowed = [
+        VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+        VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+        VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+    ];
+    $invalid = [];
+    $result = $db->query('SELECT status, COUNT(*) AS c FROM deploy_jobs GROUP BY status ORDER BY status');
+    while ($row = $result->fetch_assoc()) {
+        $status = (string) $row['status'];
+        if (!in_array($status, $allowed, true)) {
+            $invalid[] = json_encode($status) . ' (' . (int) $row['c'] . ')';
+        }
+    }
+    $result->free();
+
+    if ($invalid !== []) {
+        throw new RuntimeException('Preflight blocked: deploy_jobs.status contains unsupported value(s): ' . implode(', ', $invalid) . '.');
+    }
+}
+
+function migrator_preflight(mysqli $db, bool $reportDefaultInterfaces = false): void
 {
     if (migrator_table_exists($db, 'deploy_vms')) {
         $duplicateVms = migrator_count($db, 'SELECT COUNT(*) AS c FROM (SELECT mission_id, vm_name FROM deploy_vms GROUP BY mission_id, vm_name HAVING COUNT(*) > 1) duplicates');
@@ -146,6 +217,14 @@ function migrator_preflight(mysqli $db): void
         if ($orphans > 0) {
             throw new RuntimeException('Preflight blocked: orphan deploy_disks rows exist.');
         }
+    }
+
+    migrator_preflight_deploy_job_statuses($db);
+
+    if ($reportDefaultInterfaces) {
+        $plan = migrator_default_interface_plan($db);
+        migrator_out('check: 0020 default interfaces materialize=' . count($plan['materialize']) . ' skipped=' . count($plan['skipped']));
+        migrator_report_default_interface_skips($plan['skipped'], 'check: 0020');
     }
 }
 
@@ -195,7 +274,7 @@ function migrator_run_check(mysqli $db, array $migrations): void
     migrator_out('check: env ok');
     migrator_out('check: database ok');
 
-    migrator_preflight($db);
+    migrator_preflight($db, true);
     migrator_out('check: data preflight ok');
 
     $pending = migrator_pending_migrations($db, $migrations);
@@ -251,13 +330,14 @@ $migrations = [
             id INT AUTO_INCREMENT PRIMARY KEY,
             mission_id INT NULL,
             user_id INT NULL,
-            status ENUM('queued','running','succeeded','failed','cancelled') NOT NULL DEFAULT 'queued',
+            status ENUM('queued','running','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
             locked_at TIMESTAMP NULL,
             locked_by VARCHAR(191) NULL,
             heartbeat_at TIMESTAMP NULL,
             attempts INT NOT NULL DEFAULT 0,
             last_error TEXT NULL,
             payload_json JSON NULL,
+            result_json JSON NULL,
             credential_esxi_id INT NULL,
             credential_ansible_id INT NULL,
             cancelled_at TIMESTAMP NULL,
@@ -553,6 +633,59 @@ $migrations = [
         }
 
         migrator_out('0018: re-normalized ' . $updated . ' interface MAC(s) that drifted after 0008');
+    },
+    '0019_deploy_partial_results' => function (mysqli $db): void {
+        // The status values are an order-exact mirror of deploy_constants.php.
+        // Preflight rejects unsupported stored values before this DDL, so MySQL
+        // can never coerce an unknown status while changing the ENUM.
+        if (migrator_table_exists($db, 'deploy_jobs') && migrator_column_exists($db, 'deploy_jobs', 'status')) {
+            $sql = <<<'SQL'
+ALTER TABLE deploy_jobs
+MODIFY COLUMN status ENUM('queued','running','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'
+SQL;
+            $db->query($sql);
+        }
+        migrator_add_column($db, 'deploy_jobs', 'result_json', 'JSON NULL AFTER payload_json');
+    },
+    '0020_materialize_default_interfaces' => function (mysqli $db): void {
+        // Materialize the exact interface ansible_vm_interfaces() used to invent
+        // only in YAML. Empty mission VLANs are reported and never guessed.
+        require_once __DIR__ . '/defaults.php';
+        $plan = migrator_default_interface_plan($db);
+        $sql = <<<'SQL'
+INSERT INTO deploy_interfaces
+    (vm_id, ip, subnet, gateway, dns1, dns2, vlan, mac, mode, type)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM deploy_interfaces WHERE vm_id = ?)
+SQL;
+        $insert = $db->prepare($sql);
+        $empty = '';
+        $mode = VIRTUSPHERE_VM_DEFAULTS['interface_mode'];
+        $type = VIRTUSPHERE_VM_DEFAULTS['interface_type'];
+        $materialized = 0;
+        foreach ($plan['materialize'] as $row) {
+            $vmId = (int) $row['vm_id'];
+            $vlan = (string) $row['wds_vlan'];
+            $insert->bind_param(
+                'isssssssssi',
+                $vmId,
+                $empty,
+                $empty,
+                $empty,
+                $empty,
+                $empty,
+                $vlan,
+                $empty,
+                $mode,
+                $type,
+                $vmId
+            );
+            $insert->execute();
+            $materialized += $insert->affected_rows;
+        }
+
+        migrator_out('0020: materialized ' . $materialized . ' default interface(s); skipped ' . count($plan['skipped']) . ' VM(s) with empty wds_vlan');
+        migrator_report_default_interface_skips($plan['skipped'], '0020');
     },
 ];
 

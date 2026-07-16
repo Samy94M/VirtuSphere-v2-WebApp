@@ -216,8 +216,11 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
 - **MAC-Adressen**: kanonisches Format `AA:BB:CC:DD:EE:FF` (Großbuchstaben,
   Doppelpunkte). Lookups akzeptieren alle üblichen Schreibweisen; der
   Ansible-Import lehnt Dubletten (gleiche MAC an anderer VM) und mehrdeutige
-  Ziele (zwei NICs derselben VM im selben VLAN) mit klarer Fehlermeldung ab
-  (Antwortfeld `duplicate_macs` bzw. `unmatched_interfaces`).
+  Ziele (zwei NICs derselben VM im selben VLAN) mit klarer Fehlermeldung ab.
+  Eine fehlerhafte NIC verwirft alle MAC-Schreibplaene dieser VM, nicht aber
+  vollstaendig valide VMs desselben Callbacks. Die alten Diagnosefelder
+  `duplicate_macs`/`unmatched_interfaces` bleiben erhalten; `vm_results`
+  nennt pro Inputzeile Outcome, Updatezahl und feste Fehlercodes.
 
 ## Paket-Lebenszyklus (Etappe 3)
 

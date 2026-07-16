@@ -78,7 +78,8 @@ final class PhaseCContractTest extends TestCase
     {
         // E2: canonical MACs, duplicate guard, global VM names, rename guard.
         $import = $this->source('db_importMAC.php');
-        self::assertStringContainsString('virtusphere_normalize_mac', $import);
+        $importPlanner = $this->source('lib/mac_import.php');
+        self::assertStringContainsString('virtusphere_normalize_mac', $importPlanner);
         self::assertStringContainsString('duplicate_macs', $import);
 
         $vms = $this->source('lib/repo/vms.php');

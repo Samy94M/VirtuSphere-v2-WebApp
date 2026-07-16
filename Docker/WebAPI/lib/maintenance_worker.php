@@ -23,6 +23,7 @@ require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/repo/catalog.php';
+require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_inventory.php';
 
@@ -137,6 +138,10 @@ function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = fa
         }
     }
 
+    if (maintenance_worker_due($state, 'deploy-vm-sweep', VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS, $force)) {
+        maintenance_worker_sweep_deploying_vms($db);
+    }
+
     if (maintenance_worker_due($state, 'esxi-inventory', VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS, $force)) {
         try {
             $enqueued = esxi_inventory_enqueue_due($db);
@@ -149,6 +154,39 @@ function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = fa
     }
 
     maintenance_worker_audit_transitions($db, $state);
+}
+
+// Convergence sweep: VMs stuck in `deploying` whose mission has no active
+// (queued/running) job converge to failed/failed. Covers the fault the deploy
+// worker cannot handle itself - it died before its own failure/cancel path ran
+// - and the heartbeat reaper misses, because the job is already terminal. One
+// audit line per affected mission; the per-VM evidence is in the status events
+// the repo sweep records.
+function maintenance_worker_sweep_deploying_vms(mysqli $db): void
+{
+    try {
+        $swept = repo_sweep_orphaned_deploying_vms($db);
+    } catch (Throwable $exception) {
+        fwrite(STDERR, '[maintenance-worker] deploy VM convergence sweep failed: ' . $exception->getMessage() . "\n");
+
+        return;
+    }
+    if ($swept === []) {
+        return;
+    }
+
+    $byMission = [];
+    foreach ($swept as $vm) {
+        $byMission[(int) $vm['mission_id']][] = (int) $vm['vm_id'];
+    }
+    foreach ($byMission as $missionId => $vmIds) {
+        try {
+            audit($db, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, '[maintenance-worker] convergence sweep marked ' . count($vmIds) . ' VM(s) of mission id ' . $missionId . ' as failed: stuck in deploying without an active deploy job', null, 'cli');
+        } catch (Throwable $exception) {
+            fwrite(STDERR, '[maintenance-worker] sweep audit failed: ' . $exception->getMessage() . "\n");
+        }
+    }
+    fwrite(STDOUT, '[maintenance-worker] convergence sweep marked ' . count($swept) . " deploying VM(s) as failed\n");
 }
 
 // Active reachability check of the MECM server. Target host: explicit setting
