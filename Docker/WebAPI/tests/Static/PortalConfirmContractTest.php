@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../Support/PortalActionInventory.php';
+
 /**
  * The confirmation contract (ADR-0013) is an attribute agreement between portal
  * markup, lib/layout_modals.php and assets/app.js, so php -l, node --check, the
@@ -117,52 +119,22 @@ final class PortalConfirmContractTest extends TestCase
     /** @return array<string, string> relative path => contents */
     private function portalPages(): array
     {
-        $pages = [];
-        foreach (glob($this->root() . '/portal/*.php') ?: [] as $path) {
-            $pages['portal/' . basename($path)] = (string) file_get_contents($path);
-        }
-
+        $pages = PortalActionInventory::portalPages($this->root());
         self::assertNotSame([], $pages, 'no portal pages were scanned');
 
         return $pages;
     }
 
     /**
-     * Every action a portal form can POST, and whether it is confirmed.
-     *
-     * Where the action rides on the submit button itself (`<button name="action"
-     * value="delete">`) the prompt must sit on that button: one form can hold two
-     * such buttons (the VM bulk actions) and a form-wide check would let the
-     * second one through unconfirmed. Where the action rides on a hidden input,
-     * the form has a single submit and the form-wide check is the right scope.
+     * The shared scan (tests/Support/PortalActionInventory.php): the E2E
+     * coverage contract consumes the same inventory, so the definition of
+     * "postable action" cannot drift between the two.
      *
      * @return array<string, bool> "page.php:action" => confirmed
      */
     private function postableActions(): array
     {
-        $actions = [];
-        foreach ($this->portalPages() as $path => $contents) {
-            $page = basename($path);
-            preg_match_all('/<form\b.*?<\/form>/s', $contents, $forms);
-            foreach ($forms[0] as $block) {
-                preg_match_all('/<button\b[^>]*>/', $block, $buttons);
-                foreach ($buttons[0] as $tag) {
-                    if (preg_match('/name="action"\s+value="([a-z_]+)"/', $tag, $m) === 1) {
-                        $actions[$page . ':' . $m[1]] = str_contains($tag, 'data-confirm=');
-                    }
-                }
-
-                preg_match_all('/<input\b[^>]*name="action"[^>]*value="([a-z_]+)"[^>]*>/', $block, $hidden);
-                foreach ($hidden[1] as $action) {
-                    $key = $page . ':' . $action;
-                    // A page may render the same action twice (a per-row form and a
-                    // bulk form); a single unconfirmed rendering is a finding.
-                    $confirmed = str_contains($block, 'data-confirm=');
-                    $actions[$key] = ($actions[$key] ?? true) && $confirmed;
-                }
-            }
-        }
-
+        $actions = PortalActionInventory::postableActions($this->portalPages());
         self::assertNotSame([], $actions, 'the action scan matched nothing; the markup or the regex changed');
 
         return $actions;

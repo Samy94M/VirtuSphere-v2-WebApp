@@ -96,6 +96,7 @@ async function createMission(page, name) {
   return idByName(name);
 }
 
+// e2e-covers: missions.php:create
 test('create: the mission appears in the list, in a fresh GET and in the DB', async ({ page }) => {
   const name = PREFIX + 'create-1';
   const id = await createMission(page, name);
@@ -108,6 +109,7 @@ test('create: the mission appears in the list, in a fresh GET and in the DB', as
   expect((await row.locator('td').first().textContent()).trim()).toBe(name);
 });
 
+// e2e-covers: mission_details.php:update
 test('edit: a change survives reload and leaves a neighbor field untouched', async ({ page }) => {
   const name = PREFIX + 'edit-1';
   // Seed a ready mission (datacenter/datastore set) so the update form does not
@@ -141,6 +143,8 @@ test('edit: a change survives reload and leaves a neighbor field untouched', asy
   expect(stored.domain, 'the domain neighbor survived the rename').toBe('corp.example.local');
 });
 
+// e2e-covers: missions.php:delete
+// e2e-covers-cancel: missions.php:delete
 test('delete: Cancel keeps the row, Confirm removes it from the DB and the list', async ({ page }) => {
   const name = PREFIX + 'del-1';
   const id = await createMission(page, name);
