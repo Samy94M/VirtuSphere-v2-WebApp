@@ -678,6 +678,16 @@ Add-Gate -Name 'health-contract' -Lanes $intRel -Kind 'container' -Body {
         $health = Invoke-WebRequest -Uri ($qaPortalBase + '/portal/health.php') -UseBasicParsing -TimeoutSec 10
         if ([int]$health.StatusCode -ne 200) { return New-FailResult ('health.php liefert HTTP {0} statt 200' -f $health.StatusCode) }
     } catch { return New-FailResult ('health.php nicht erreichbar: ' + $_.Exception.Message) }
+
+    # Versionsoffenlegung (AP7): kein X-Powered-By, Server-Header ohne
+    # Versionsnummer, health-JSON nur mit grober PHP-Version (major.minor).
+    # Die Konfigquellen pinnt VersionExposureContractTest; hier steht der
+    # Beweis, dass der laufende Stack sie auch anwendet.
+    if ($health.Headers['X-Powered-By']) { return New-FailResult 'health.php sendet X-Powered-By (expose_php greift nicht)' }
+    $serverHeader = [string]$health.Headers['Server']
+    if ($serverHeader -match '\d') { return New-FailResult ('Server-Header nennt eine Version: {0} (server_tokens off greift nicht)' -f $serverHeader) }
+    try { $healthJson = $health.Content | ConvertFrom-Json } catch { return New-FailResult 'health.php liefert kein parsebares JSON' }
+    if ([string]$healthJson.php -notmatch '^\d+\.\d+$') { return New-FailResult ('health.php nennt eine exakte PHP-Version: {0}' -f $healthJson.php) }
     $testsStatus = 0
     try {
         $t = Invoke-WebRequest -Uri ($qaPortalBase + '/tests/bootstrap.php') -UseBasicParsing -TimeoutSec 10

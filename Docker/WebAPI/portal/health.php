@@ -11,6 +11,12 @@ require_once __DIR__ . '/../lib/backup_status.php';
 virtusphere_send_security_headers();
 header('Content-Type: application/json; charset=utf-8');
 
+// Grobe Laufzeitversion (major.minor), keine Patchstufe: der Endpoint ist
+// unauthentifiziert, und eine exakte Version macht CVE-Zuordnung von aussen
+// trivial. Der einzige maschinelle Konsument (install-VirtuSphere-MECM.ps1)
+// liest nur `.status`. Gepinnt durch VersionExposureContractTest.
+const HEALTH_PHP_VERSION = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+
 function health_bool_status(bool $ok): string
 {
     return $ok ? 'ok' : 'error';
@@ -77,7 +83,7 @@ try {
     echo json_encode([
         'status' => $status,
         'db' => 'ok',
-        'php' => PHP_VERSION,
+        'php' => HEALTH_PHP_VERSION,
         'logs' => $logs,
         'worker' => $worker,
         'backup' => [
@@ -91,7 +97,7 @@ try {
     echo json_encode([
         'status' => 'error',
         'db' => 'error',
-        'php' => PHP_VERSION,
+        'php' => HEALTH_PHP_VERSION,
         'message' => 'Service temporarily unavailable',
     ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 }
