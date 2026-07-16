@@ -1,7 +1,7 @@
 // Portal forms: repeat rows (add/remove/toggle), the subnet CIDR helper, the
-// compound RAM/combo field and the DHCP interface-mode disabling. Independent
-// of core.js and deploy.js; registers its own delegated click/input/change
-// listeners for the form hooks only.
+// compound RAM/combo field, the DHCP interface-mode disabling and the VM bulk
+// selection. Independent of core.js and deploy.js; registers its own delegated
+// click/input/change listeners for the form hooks only.
 (function () {
     function selectHasValue(select, value) {
         for (var index = 0; index < select.options.length; index += 1) {
@@ -134,6 +134,42 @@
         });
     }
 
+    // VM bulk selection (vms.php): the row checkboxes sit in the table body and
+    // associate with the bulk form via form="..."; they are not descendants, so
+    // form.elements is the one collection that sees them. The submit buttons are
+    // rendered disabled and only a non-empty selection enables them; the header
+    // checkbox mirrors the selection (checked = all, indeterminate = some).
+    function bulkItems(form) {
+        var items = [];
+        for (var index = 0; index < form.elements.length; index += 1) {
+            var element = form.elements[index];
+            if (element.hasAttribute('data-bulk-item')) {
+                items.push(element);
+            }
+        }
+
+        return items;
+    }
+
+    function syncBulkForm(form) {
+        var items = bulkItems(form);
+        var checkedCount = items.filter(function (item) { return item.checked; }).length;
+
+        var counter = form.querySelector('[data-bulk-count]');
+        if (counter) {
+            counter.textContent = String(checkedCount);
+        }
+        form.querySelectorAll('[data-bulk-submit]').forEach(function (button) {
+            button.disabled = checkedCount === 0;
+        });
+
+        var all = document.querySelector('[data-bulk-all]');
+        if (all) {
+            all.checked = items.length > 0 && checkedCount === items.length;
+            all.indeterminate = checkedCount > 0 && checkedCount < items.length;
+        }
+    }
+
     function initDynamicControls(root) {
         root.querySelectorAll('[data-mode-select]').forEach(function (select) {
             syncInterfaceMode(select);
@@ -202,6 +238,22 @@
     });
 
     document.addEventListener('change', function (event) {
+        if (event.target.closest('[data-bulk-all]')) {
+            var bulkForm = document.querySelector('[data-bulk-form]');
+            if (bulkForm) {
+                var selectAll = event.target.checked;
+                bulkItems(bulkForm).forEach(function (item) { item.checked = selectAll; });
+                syncBulkForm(bulkForm);
+            }
+            return;
+        }
+
+        var bulkItem = event.target.closest('[data-bulk-item]');
+        if (bulkItem && bulkItem.form) {
+            syncBulkForm(bulkItem.form);
+            return;
+        }
+
         var modeSelect = event.target.closest('[data-mode-select]');
         if (modeSelect) {
             syncInterfaceMode(modeSelect);
@@ -233,4 +285,7 @@
     });
 
     initDynamicControls(document);
+    // Back/forward navigation restores checkbox state without change events, so
+    // the counter and buttons must be derived from the DOM once at load.
+    document.querySelectorAll('[data-bulk-form]').forEach(syncBulkForm);
 }());

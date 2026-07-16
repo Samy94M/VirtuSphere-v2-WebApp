@@ -34,24 +34,6 @@ final class E2eActionCoverageContractTest extends TestCase
      * @var array<string, string>
      */
     private const PENDING_ACTIONS = [
-        // Etappe 7, CRUD slice (todo: CRUD round trips per entity).
-        'credentials.php:create' => 'credentials CRUD spec',
-        'credentials.php:update' => 'credentials CRUD spec',
-        'credentials.php:delete' => 'credentials CRUD spec (crud-negative proves the refusal, not the delete)',
-        'credentials.php:test' => 'credentials CRUD spec',
-        'os.php:delete' => 'catalog CRUD spec',
-        'vlans.php:delete' => 'catalog CRUD spec',
-        'users.php:create' => 'users CRUD spec',
-        'users.php:set_active' => 'users CRUD spec',
-        'users.php:set_role' => 'users CRUD spec',
-        'users.php:reset_password' => 'users CRUD spec',
-        'users.php:clear_lock' => 'users CRUD spec',
-        'vms.php:delete' => 'VM CRUD spec',
-        'vms.php:bulk_delete' => 'VM CRUD spec',
-        'vms.php:reset_mecm_id' => 'VM CRUD spec',
-        'vms.php:bulk_reset_mecm_id' => 'VM CRUD spec',
-        'vm_edit.php:reset_mecm_id' => 'VM CRUD spec',
-
         // Etappe 7, flows slice (todo: RBAC/CSRF, validation, uploads, deploy).
         'missions.php:import_preview' => 'mission transfer flow spec',
         'missions.php:import_confirm' => 'mission transfer flow spec',
