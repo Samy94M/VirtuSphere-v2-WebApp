@@ -21,6 +21,12 @@
 
 .EXAMPLE
     powershell -NoProfile -File scripts\run-pester.ps1
+
+.NOTES
+    Exitcodes: 0 alles gruen; 1 Analyzer-Befunde oder rote Tests; 3 ein
+    Toolmodul fehlt (Infrastruktur, nicht Befund). check.ps1 unterscheidet
+    fail/infrastructure_error ausschliesslich ueber diesen Code, nie ueber
+    Textmuster im Output: Testnamen duerfen jedes Wort enthalten.
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +48,8 @@ $failed = $false
 if (-not $SkipAnalyzer) {
     Write-Host '==> PSScriptAnalyzer (Powershell-MECM)' -ForegroundColor Cyan
     if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
-        throw 'PSScriptAnalyzer fehlt. Install-Module PSScriptAnalyzer -Scope CurrentUser'
+        Write-Host 'PSScriptAnalyzer fehlt. Install-Module PSScriptAnalyzer -Scope CurrentUser' -ForegroundColor Red
+        exit 3
     }
     Import-Module PSScriptAnalyzer -ErrorAction Stop
 
@@ -63,9 +70,35 @@ if (-not $SkipAnalyzer) {
 # --- Pester -----------------------------------------------------------------
 if (-not $SkipTests) {
     Write-Host '==> Pester (tests\powershell)' -ForegroundColor Cyan
-    $pester = Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 } | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $pester) {
-        throw 'Pester 5+ fehlt (die Windows-Inbox-Version 3.4 reicht nicht). Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck'
+    # Exakte Version aus der Tool-Lockdatei (AP4-SSoT, dieselbe Datei lesen
+    # check.ps1 und ci.yml). Kein Fallback auf "irgendein Pester >= 5": ein
+    # anderes Major hat andere Semantik (6.0.0 brach 2026-07-16 unter Linux,
+    # waehrend es unter Windows gruen war), und ein stiller Fallback waere
+    # genau der Versions-Drift, den die Lockdatei verhindern soll.
+    $lockPath = Join-Path $PSScriptRoot 'tool-lock.json'
+    $lockedPester = $null
+    if (Test-Path $lockPath) {
+        try {
+            $lockedPester = [string](Get-Content -Raw -Path $lockPath | ConvertFrom-Json).powershellModules.Pester
+        } catch {
+            Write-Host ('tool-lock.json unlesbar: {0}' -f $_.Exception.Message) -ForegroundColor Red
+            exit 3
+        }
+    }
+    if ($lockedPester) {
+        $pester = Get-Module -ListAvailable Pester | Where-Object { "$($_.Version)" -eq $lockedPester } | Select-Object -First 1
+        if (-not $pester) {
+            Write-Host ('Pester {0} (tool-lock.json) fehlt. Install-Module Pester -RequiredVersion {0} -Scope CurrentUser -Force -SkipPublisherCheck' -f $lockedPester) -ForegroundColor Red
+            exit 3
+        }
+    } else {
+        # Ohne Lockdatei (Checkout-Fragment, Fixture-Root): dev-freundlicher
+        # Minimalanspruch wie vor AP4.
+        $pester = Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 } | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $pester) {
+            Write-Host 'Pester 5+ fehlt (die Windows-Inbox-Version 3.4 reicht nicht). Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck' -ForegroundColor Red
+            exit 3
+        }
     }
     Import-Module $pester.Path -ErrorAction Stop
 

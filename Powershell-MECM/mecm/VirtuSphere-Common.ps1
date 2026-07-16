@@ -58,7 +58,7 @@ function Get-VsConfig {
         DeviceSyncInterval     = if ($raw.DeviceSyncIntervalSeconds) { [int]$raw.DeviceSyncIntervalSeconds } else { 10 }
         PackagesSyncInterval   = if ($raw.PackagesSyncIntervalSeconds) { [int]$raw.PackagesSyncIntervalSeconds } else { 60 }
         ImporterInterval       = if ($raw.ImporterIntervalSeconds) { [int]$raw.ImporterIntervalSeconds } else { 60 }
-        LogRoot                = if ($raw.LogRoot) { [string]$raw.LogRoot } else { Join-Path $env:ProgramFiles 'VirtuSphere\Logs' }
+        LogRoot                = if ($raw.LogRoot) { [string]$raw.LogRoot } elseif ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'VirtuSphere\Logs' } else { Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs' }
     }
 }
 
@@ -68,7 +68,17 @@ function Get-VsConfig {
 # Tagesdateien unter <LogRoot>\yyyy-MM-dd_<komponente>.log, Aufraeumen nach 30 Tagen.
 # ---------------------------------------------------------------------------
 $script:VsLogComponent = 'virtusphere'
-$script:VsLogRoot = Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
+# $env:ProgramFiles existiert nur auf Windows. Diese Zeile laeuft beim
+# Dot-Sourcen, und die Pester-Suite sourct die Datei auch unter pwsh auf
+# Linux (CI): ein Join-Path mit $null wirft dort und riss 44 Tests mit
+# (CI-Lauf 2026-07-16). Auf dem echten Ziel (SCCM-Server) unveraendert;
+# anderswo zaehlt nur, dass der Dot-Source nicht wirft, denn jedes Skript
+# setzt sein LogRoot ohnehin per Initialize-VsLog.
+$script:VsLogRoot = if ($env:ProgramFiles) {
+    Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
+} else {
+    Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs'
+}
 $script:VsCorrelationId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 
 function Initialize-VsLog {

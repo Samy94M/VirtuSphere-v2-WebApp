@@ -15,5 +15,8 @@ parameters:
         - tests
     excludePaths:
         - vendor
-        - var
-        - logs
+        # var und logs sind gitignorierte Laufzeitverzeichnisse: in einem
+        # frischen CI-Checkout existieren sie nicht, ohne (?) bricht PHPStan
+        # dort mit "Invalid entry in excludePaths" ab.
+        - var (?)
+        - logs (?)

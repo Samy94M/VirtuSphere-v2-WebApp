@@ -232,6 +232,12 @@ function Invoke-AppComposer {
         return Invoke-Tool 'docker' (@('run', '--rm',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
             '-e', 'COMPOSER_CACHE_DIR=/tmp/composer-cache', '-e', 'COMPOSER_ALLOW_SUPERUSER=1',
+            # Der Mount gehoert dem Host-User, composer laeuft als root: ohne
+            # safe.directory verweigert git die Versionsermittlung und composer
+            # verrauscht jeden Lauf mit "dubious ownership"-Fatals (CI-Lauf
+            # 2026-07-16). Env-Config statt --global, das Image bleibt sauber.
+            '-e', 'GIT_CONFIG_COUNT=1',
+            '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=*',
             $toolImages.php, 'composer') + $Arguments)
     }
     return $null
@@ -405,7 +411,10 @@ Add-Gate -Name 'powershell-tests' -Lanes $allLanes -Kind 'native' -Body {
     $hostExe = 'powershell'
     if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
     $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'run-pester.ps1'))
-    if ($r.ExitCode -ne 0 -and (@($r.Output) -join ' ') -match 'fehlt') {
+    # Exitcode-Vertrag von run-pester.ps1 (3 = Modul fehlt), niemals ein
+    # Textmuster: der CI-Lauf 2026-07-16 klassifizierte 44 rote Tests als
+    # "Module fehlen", weil ein Testname das Wort "fehlt" enthielt.
+    if ($r.ExitCode -eq 3) {
         return New-InfraResult 'Pester/PSScriptAnalyzer-Module fehlen (PSGallery)' $r.Output
     }
     Format-ToolResult $r 'PSScriptAnalyzer und Pester gruen' 'PowerShell-Pruefungen rot'

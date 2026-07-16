@@ -39,7 +39,8 @@
         }
     },
     "powershellModules": {
-        "Pester": "6.0.0",
+        "comment": "Pester bleibt auf der 5er-Linie: die Suite ist fuer Pester 5 geschrieben, 6.0.0 brach unter Linux (CI 2026-07-16: 44 rote Tests auf ubuntu, Import-Fehler unter pwsh 7.5). Ein Wechsel auf 6.x ist eine eigene Migrationsentscheidung mit Linux-Beweislauf, kein Pin-Bump.",
+        "Pester": "5.7.1",
         "PSScriptAnalyzer": "1.25.0"
     }
 }
