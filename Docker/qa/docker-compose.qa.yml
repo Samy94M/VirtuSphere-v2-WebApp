@@ -1,0 +1,57 @@
+# QA-Wegwerf-Stack: Override ueber docker-compose.yml (Integration-Lane,
+# ADR-0015-Ergaenzung / ADR-0031). Gestartet von scripts/check.ps1 als eigenes
+# Compose-Projekt (-p virtusphere-qa), nie von Hand neben dem Dev-Stack unter
+# demselben Projektnamen.
+#
+# Isolationsentscheidungen:
+# - Die Datenbank liegt in einem projekt-eigenen Named Volume statt im
+#   Dev-Bind-Mount: jeder Lane-Lauf beginnt mit einem frischen struktur.sql
+#   und stirbt mit `down -v`. Kein Test laeuft je auf der Dev-Datenbank.
+# - ssl/ und virtusphere-conf.d/ sind Named Volumes, die php und webserver
+#   teilen: ein HTTPS-Zertifikats-Test im QA-Stack darf niemals die
+#   nginx-Konfiguration des Dev-Stacks anfassen.
+# - Der Code-Mount (Docker/WebAPI, Ansible) bleibt der Arbeitsbaum, denn genau
+#   dieser Stand soll bewiesen werden.
+# - Ports/Namen kommen aus qa.env (--env-file); env_file haengt qa.env NACH
+#   .env an, damit die QA-Werte pro Variable gewinnen.
+# - restart "no": ein crashender Service soll im QA-Lauf sichtbar rot sein,
+#   nicht per Neustart kaschiert werden.
+
+services:
+  webserver:
+    env_file:
+      - Docker/qa/qa.env
+    volumes:
+      - qa-ssl:/etc/nginx/ssl
+      - qa-conf:/etc/nginx/virtusphere-conf.d
+      - qa-nginx-logs:/var/log/nginx
+    restart: "no"
+
+  php:
+    env_file:
+      - Docker/qa/qa.env
+    volumes:
+      - qa-ssl:/etc/nginx/ssl
+      - qa-conf:/etc/nginx/virtusphere-conf.d
+    restart: "no"
+
+  deploy-worker:
+    env_file:
+      - Docker/qa/qa.env
+    restart: "no"
+
+  maintenance-worker:
+    env_file:
+      - Docker/qa/qa.env
+    restart: "no"
+
+  mysql:
+    volumes:
+      - qa-mysql-data:/var/lib/mysql
+    restart: "no"
+
+volumes:
+  qa-mysql-data:
+  qa-ssl:
+  qa-conf:
+  qa-nginx-logs:

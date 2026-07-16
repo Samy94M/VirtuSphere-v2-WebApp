@@ -117,6 +117,41 @@ $phpContainer = 'virtusphere-v2-webapp-php-1'
 $webContainer = 'virtusphere-v2-webapp-webserver-1'
 $portalBase = 'http://127.0.0.1:8021'
 
+# --- QA-Wegwerf-Stack (Integration-/Release-Lane) ------------------------------
+# Eigenes Compose-Projekt aus docker-compose.yml + Docker/qa/docker-compose.qa.yml
+# mit Docker/qa/qa.env: eigene Wegwerf-DB, eigene ssl/conf-Volumes, Ports 8031ff.
+# Kein Integration-Gate laeuft gegen den Dev-Stack oder die Dev-Datenbank.
+$qaProject = 'virtusphere-qa'
+$qaPhpContainer = 'virtusphere-qa-php-1'
+$qaWebContainer = 'virtusphere-qa-webserver-1'
+$qaMysqlContainer = 'virtusphere-qa-mysql-1'
+$qaNetwork = 'virtusphere-qa_default'
+$qaPortalBase = 'http://127.0.0.1:8031'
+$qaDir = Join-Path (Join-Path $repoRoot 'Docker') 'qa'
+$qaEnvFile = Join-Path $qaDir 'qa.env'
+$qaComposeOverride = Join-Path $qaDir 'docker-compose.qa.yml'
+$qaServices = @('webserver', 'php', 'mysql', 'deploy-worker', 'maintenance-worker')
+$script:qaStackStarted = $false
+
+function Invoke-QaCompose {
+    param([string[]]$Arguments)
+    return Invoke-Tool 'docker' (@('compose', '-p', $qaProject,
+        '--env-file', $qaEnvFile,
+        '-f', (Join-Path $repoRoot 'docker-compose.yml'),
+        '-f', $qaComposeOverride,
+        '--project-directory', $repoRoot) + $Arguments)
+}
+
+# Einen Wert aus qa.env lesen (die Datei ist eingecheckt und enthaelt nur
+# QA-Wegwerf-Werte, keine Geheimnisse).
+function Get-QaEnvValue {
+    param([string]$Name)
+    foreach ($line in (Get-Content -Path $qaEnvFile -ErrorAction SilentlyContinue)) {
+        if ($line -match ('^' + [regex]::Escape($Name) + '=(.*)$')) { return $Matches[1] }
+    }
+    return ''
+}
+
 # --- Ergebnis-Helfer ----------------------------------------------------------
 function New-GateOutcome {
     param([string]$Class, [string]$Detail = '', [string[]]$Output = @())
@@ -516,43 +551,168 @@ Add-Gate -Name 'python-client-tests' -Lanes $allLanes -Kind 'container' -Body {
 
 # --- Integration-Lane ---------------------------------------------------------
 
+# Der QA-Stack ist das erste Integration-Gate: alle folgenden Gates laufen
+# gegen seine Container. down -v im finally des Runners raeumt ihn ab;
+# -KeepArtifacts laesst ihn zum Debuggen stehen.
+Add-Gate -Name 'qa-stack' -Lanes $intRel -Kind 'container' -Body {
+    if (-not (Test-Path $qaEnvFile)) { return New-InfraResult ('QA-Env fehlt: {0}' -f $qaEnvFile) }
+    if (-not (Test-Path (Join-Path $repoRoot '.env'))) {
+        return New-InfraResult '.env fehlt (Basis-Compose referenziert sie; in CI aus .env.example stellen)'
+    }
+    # Ab hier aufraeumen, auch wenn up nur halb durchkommt.
+    $script:qaStackStarted = $true
+    $up = Invoke-QaCompose (@('up', '-d', '--build', '--wait') + $qaServices)
+    if ($up.ExitCode -ne 0) { return New-InfraResult 'docker compose up --wait rot (QA-Stack startet nicht)' $up.Output }
+
+    # Frisches struktur.sql-Schema: Migrationen muessen als No-op durchlaufen
+    # und hinterlassen die Tracking-Zeilen fuer migrate --check.
+    $mig = Invoke-Tool 'docker' @('exec', $qaPhpContainer, 'php', '/var/www/html/lib/migrate.php')
+    if ($mig.ExitCode -ne 0) { return New-FailResult 'Migrationen laufen auf dem frischen QA-Schema nicht durch' $mig.Output }
+
+    # QA-Admin fuer die E2E-Anmeldung (Werte aus qa.env via Container-Env).
+    # seed.php erzwingt einen Passwortwechsel; fuer das Wegwerf-Konto wird das
+    # Flag zurueckgesetzt, sonst landet der Login nie auf dem Dashboard.
+    $seed = Invoke-Tool 'docker' @('exec', $qaPhpContainer, 'php', '/var/www/html/lib/seed.php')
+    if ($seed.ExitCode -ne 0) { return New-InfraResult 'seed.php rot (QA-Admin fehlt)' $seed.Output }
+    # Bewusst ohne jedes doppelte Anfuehrungszeichen: Windows PowerShell 5.1
+    # zerlegt eingebettete Doppel-Quotes in nativen Argumenten (der erste Lauf
+    # kam als "SQL syntax near ''" zurueck). Das UPDATE trifft absichtlich alle
+    # Zeilen: zu diesem Zeitpunkt existiert nur der frisch geseedete QA-Admin.
+    # Die $MYSQL_*-Werte kommen aus qa.env und enthalten keine Leerzeichen.
+    $flag = Invoke-Tool 'docker' @('exec', $qaMysqlContainer, 'sh', '-c',
+        'MYSQL_PWD=$MYSQL_PASSWORD exec mysql -u$MYSQL_USER $MYSQL_DATABASE -e ''UPDATE deploy_users SET must_change_password = 0''')
+    if ($flag.ExitCode -ne 0) { return New-InfraResult 'QA-Admin-Flag nicht zuruecksetzbar' $flag.Output }
+
+    # Portal-Readiness von aussen (nginx -> php-fpm -> DB), bis zu 30s.
+    $deadline = (Get-Date).AddSeconds(30)
+    while ($true) {
+        try {
+            $h = Invoke-WebRequest -Uri ($qaPortalBase + '/portal/health.php') -UseBasicParsing -TimeoutSec 5
+            if ([int]$h.StatusCode -eq 200) { break }
+        } catch { }
+        if ((Get-Date) -gt $deadline) {
+            return New-InfraResult ('Portal am QA-Stack nicht erreichbar: {0}/portal/health.php' -f $qaPortalBase)
+        }
+        Start-Sleep -Seconds 2
+    }
+    New-PassResult ('QA-Stack laeuft ({0}, Portal {1})' -f $qaProject, $qaPortalBase)
+}
+
 Add-Gate -Name 'migrate-check' -Lanes $intRel -Kind 'container' -Body {
-    if (-not (Test-Container $phpContainer)) { return New-InfraResult ('Container {0} laeuft nicht' -f $phpContainer) }
-    $r = Invoke-Tool 'docker' @('exec', $phpContainer, 'php', '/var/www/html/lib/migrate.php', '--check')
+    if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
+    $r = Invoke-Tool 'docker' @('exec', $qaPhpContainer, 'php', '/var/www/html/lib/migrate.php', '--check')
     Format-ToolResult $r 'Migrationen konsistent (pending=0)' 'migrate.php --check rot'
 }
 
 Add-Gate -Name 'phpunit-full' -Lanes $intRel -Kind 'container' -Body {
-    if (-not (Test-Container $phpContainer)) { return New-InfraResult ('Container {0} laeuft nicht' -f $phpContainer) }
-    # --fail-on-skipped folgt erst mit der ADR-0015-Ergaenzung (Plan v2, E3/AP4).
-    $r = Invoke-Tool 'docker' @('exec', $phpContainer, 'composer', '--working-dir=/var/www/html', 'test')
-    Format-ToolResult $r 'vollstaendige PHPUnit-Suite gruen' 'PHPUnit-Suite rot'
+    if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
+    if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+    # docker run mit Repo-Mount im QA-Netz statt exec in den App-Container:
+    # die Repo-Level-Contract-Tests sehen ihre Dateien, die Integrationstests
+    # erreichen mysql und webserver:8080 des QA-Projekts, und --fail-on-skipped
+    # macht jeden dynamischen Skip rot (ADR-0015-Ergaenzung: in dieser Lane
+    # ist ein Skip nie legitim).
+    $r = Invoke-Tool 'docker' @('run', '--rm',
+        '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+        '--network', $qaNetwork,
+        '--env-file', $qaEnvFile,
+        '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
+        $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped')
+    Format-ToolResult $r 'vollstaendige PHPUnit-Suite gruen (ohne Skips)' 'PHPUnit-Suite rot oder geskippt'
 }
 
 Add-Gate -Name 'schema-convergence' -Lanes $intRel -Kind 'container' -Body {
-    $r = Invoke-CheckShell 'check-schema-convergence.sh' @()
+    if (-not (Test-Container $qaMysqlContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
+    $prevMy = $env:MYSQL_CONTAINER; $prevPh = $env:PHP_CONTAINER; $prevPw = $env:MYSQL_ROOT_PASSWORD
+    $env:MYSQL_CONTAINER = $qaMysqlContainer
+    $env:PHP_CONTAINER = $qaPhpContainer
+    $env:MYSQL_ROOT_PASSWORD = Get-QaEnvValue 'MYSQL_ROOT_PASSWORD'
+    try {
+        $r = Invoke-CheckShell 'check-schema-convergence.sh' @()
+    } finally {
+        $env:MYSQL_CONTAINER = $prevMy; $env:PHP_CONTAINER = $prevPh; $env:MYSQL_ROOT_PASSWORD = $prevPw
+    }
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
     if ($r.ExitCode -eq 2) { return New-InfraResult 'Konvergenz-Check ohne Umgebung (Stack/.env fehlt)' $r.Output }
     Format-ToolResult $r 'struktur.sql und migrate.php konvergieren' 'Schema-Konvergenz verletzt'
 }
 
 Add-Gate -Name 'health-contract' -Lanes $intRel -Kind 'container' -Body {
-    if (-not (Test-Container $webContainer)) { return New-InfraResult ('Container {0} laeuft nicht' -f $webContainer) }
-    $n = Invoke-Tool 'docker' @('exec', $webContainer, 'nginx', '-t')
+    if (-not (Test-Container $qaWebContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
+    $n = Invoke-Tool 'docker' @('exec', $qaWebContainer, 'nginx', '-t')
     if ($n.ExitCode -ne 0) { return New-FailResult 'nginx -t rot' $n.Output }
     try {
-        $health = Invoke-WebRequest -Uri ($portalBase + '/portal/health.php') -UseBasicParsing -TimeoutSec 10
+        $health = Invoke-WebRequest -Uri ($qaPortalBase + '/portal/health.php') -UseBasicParsing -TimeoutSec 10
         if ([int]$health.StatusCode -ne 200) { return New-FailResult ('health.php liefert HTTP {0} statt 200' -f $health.StatusCode) }
     } catch { return New-FailResult ('health.php nicht erreichbar: ' + $_.Exception.Message) }
     $testsStatus = 0
     try {
-        $t = Invoke-WebRequest -Uri ($portalBase + '/tests/bootstrap.php') -UseBasicParsing -TimeoutSec 10
+        $t = Invoke-WebRequest -Uri ($qaPortalBase + '/tests/bootstrap.php') -UseBasicParsing -TimeoutSec 10
         $testsStatus = [int]$t.StatusCode
     } catch {
         if ($_.Exception.Response) { $testsStatus = [int]$_.Exception.Response.StatusCode } else { return New-InfraResult ('Portal nicht erreichbar: ' + $_.Exception.Message) }
     }
     if ($testsStatus -ne 403) { return New-FailResult ('/tests/bootstrap.php liefert HTTP {0} statt 403 (Exposure-Vertrag)' -f $testsStatus) }
     New-PassResult 'nginx -t OK, health=200, /tests=403'
+}
+
+Add-Gate -Name 'e2e-portal' -Lanes $intRel -Kind 'native' -Network $true -Body {
+    # Playwright-Chromium gegen den QA-Stack (ADR-0028-Revision): beweist, was
+    # nur ein Browser beweisen kann. Netzabhaengig wegen npm ci beim Erstlauf.
+    if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
+    if (-not (Test-Command 'npm')) { return New-InfraResult 'npm fehlt (Node auf dem Pruef-Host noetig)' }
+    $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
+    if (-not (Test-Path (Join-Path $e2eDir 'package.json'))) { return New-InfraResult 'tests/e2e fehlt unter dem Pruef-Root' }
+
+    # Browser-Preflight statt Textmuster im Playwright-Output (die
+    # fehlt-Lektion aus dem Pester-Gate): env-Pfad, Playwright-Cache oder der
+    # Dev-Default aus playwright.config.js. Nichts davon da -> Infrastruktur.
+    $browserOk = $false
+    if ($env:PLAYWRIGHT_CHROMIUM) { $browserOk = (Test-Path $env:PLAYWRIGHT_CHROMIUM) }
+    if (-not $browserOk) {
+        $cacheRoots = @()
+        if ($env:PLAYWRIGHT_BROWSERS_PATH) { $cacheRoots += $env:PLAYWRIGHT_BROWSERS_PATH }
+        if ($env:LOCALAPPDATA) { $cacheRoots += (Join-Path $env:LOCALAPPDATA 'ms-playwright') }
+        if ($env:HOME) { $cacheRoots += (Join-Path (Join-Path $env:HOME '.cache') 'ms-playwright') }
+        foreach ($cacheRoot in $cacheRoots) {
+            if ((Test-Path $cacheRoot) -and (@(Get-ChildItem -Path $cacheRoot -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue).Count -gt 0)) {
+                $browserOk = $true
+                break
+            }
+        }
+    }
+    if (-not $browserOk) {
+        # Derselbe Literal-Default wie in tests/e2e/playwright.config.js.
+        $browserOk = (Test-Path 'C:\Users\Samy\AppData\Local\ms-playwright\chromium-1223\chrome-win64\chrome.exe')
+    }
+    if (-not $browserOk) { return New-InfraResult 'kein Chromium fuer Playwright: PLAYWRIGHT_CHROMIUM setzen oder npx playwright install chromium' }
+
+    if (-not (Test-Path (Join-Path $e2eDir 'node_modules'))) {
+        $ci = Invoke-Tool 'npm' @('--prefix', $e2eDir, 'ci')
+        if ($ci.ExitCode -ne 0) { return New-InfraResult 'npm ci fuer tests/e2e rot' $ci.Output }
+    }
+
+    $prevEnv = @{}
+    $e2eEnv = @{
+        VIRTUSPHERE_BASE_URL        = ($qaPortalBase + '/portal/')  # Slash ist tragend (ADR-0028)
+        VIRTUSPHERE_PHP_CONTAINER   = $qaPhpContainer
+        VIRTUSPHERE_MYSQL_CONTAINER = $qaMysqlContainer
+        VIRTUSPHERE_ADMIN_USER      = (Get-QaEnvValue 'SEED_ADMIN_USER')
+        VIRTUSPHERE_ADMIN_PASS      = (Get-QaEnvValue 'SEED_ADMIN_PASSWORD')
+        DB_NAME                     = (Get-QaEnvValue 'DB_NAME')
+    }
+    foreach ($k in $e2eEnv.Keys) {
+        $prevEnv[$k] = [Environment]::GetEnvironmentVariable($k)
+        [Environment]::SetEnvironmentVariable($k, [string]$e2eEnv[$k])
+    }
+    Push-Location $e2eDir
+    try {
+        $r = Invoke-Tool 'npx' @('playwright', 'test', '--project=chromium')
+    } finally {
+        Pop-Location
+        foreach ($k in $prevEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $prevEnv[$k]) }
+    }
+    Format-ToolResult $r 'Playwright-Chromium-Suite gruen (QA-Stack)' 'Playwright-Suite rot'
 }
 
 Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {
@@ -666,6 +826,14 @@ try {
     }
 } finally {
     $env:VIRTUSPHERE_CHECK_ROOT = $originalCheckRoot
+    if ($script:qaStackStarted) {
+        if ($KeepArtifacts) {
+            Write-Host ('QA-Stack bleibt stehen (-KeepArtifacts); aufraeumen mit: docker compose -p {0} down -v --remove-orphans' -f $qaProject) -ForegroundColor Yellow
+        } else {
+            Write-Host ('==> QA-Stack abraeumen ({0})' -f $qaProject) -ForegroundColor Cyan
+            [void](Invoke-QaCompose @('down', '-v', '--remove-orphans'))
+        }
+    }
 }
 
 # --- Summe, Artefakt, Exitcode -------------------------------------------------

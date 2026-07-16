@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/ClientIpAllowlist.php';
+
 final class MachineApiWireTest extends TestCase
 {
+    use ClientIpAllowlist;
+
     protected function setUp(): void
     {
         $health = @file_get_contents(virtusphere_test_base_url() . '/portal/health.php');
         if ($health === false) {
             self::markTestSkipped('VirtuSphere test stack is not reachable.');
         }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreClientIpAllowlistIfTouched();
     }
 
     public function testInvalidMacKeepsMachineApiWireEnvelope(): void
@@ -25,12 +34,14 @@ final class MachineApiWireTest extends TestCase
 
     public function testForbiddenEnvelopeIncludesClientIp(): void
     {
+        // Zustand herstellen statt skippen (ADR-0015-Ergaenzung): der Test
+        // behauptet die 403-Envelope, also entfernt er die eigene IP aus der
+        // Allowlist; tearDown stellt den Ausgangszustand wieder her.
+        $this->ensureClientIpNotAllowlisted(db(true));
+
         [$status, $headers, $body] = $this->get('/mecm-api.php?action=getDeviceList');
 
-        if ($status !== 403) {
-            self::markTestSkipped('Current test client IP is allowlisted.');
-        }
-
+        self::assertSame(403, $status);
         self::assertStringContainsString('application/json', strtolower($headers));
         $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
         self::assertArrayHasKey('error', $payload);
@@ -52,12 +63,12 @@ final class MachineApiWireTest extends TestCase
         // db_importMAC.php and mecm_updateid.php must keep the two cases
         // apart like mecm-api.php and mecm_report.php do: a wrong HTTP method
         // answers 405, an unknown action answers the 400 invalid-action
-        // envelope. Both gates sit behind the IP allowlist.
+        // envelope. Both gates sit behind the IP allowlist, also traegt sich
+        // der Test selbst ein statt zu skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
         foreach (['/db_importMAC.php?action=updateInterface', '/mecm_updateid.php?action=updateDevice'] as $path) {
             [$status, , $body] = $this->get($path);
-            if ($status === 403) {
-                self::markTestSkipped('Current test client IP is not allowlisted.');
-            }
             self::assertSame(405, $status, $path);
             self::assertSame(['error' => 'Method not allowed'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $path);
         }

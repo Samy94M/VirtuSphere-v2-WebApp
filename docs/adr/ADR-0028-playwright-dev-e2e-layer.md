@@ -1,7 +1,7 @@
 # ADR-0028: Playwright as a Dev-only E2E Layer
 
 Date: 2026-07-12
-Status: Accepted
+Status: Accepted; revised 2026-07-16 (E2E additionally gates the Integration/Release lanes, see below)
 
 ## Context
 
@@ -28,3 +28,14 @@ The portal gains a runtime regression net over the full page matrix that curl ca
 The cost is a second toolchain on the dev host (Node + Playwright browsers) and a suite that only runs where a browser and the stack exist, so it cannot gate a PR on GitHub. That is the deliberate trade: the security and logic contracts that must hold on every push already live in PHPUnit and the static guards (ADR-0015); Playwright is the deeper, slower, dev-host proof, re-run before a release rather than on every commit.
 
 Because the browser and the DB are both reachable from the test, an E2E test can leave residue in a shared dev database. Suites therefore scope their fixtures to a recognizable prefix and clean up in setup/teardown, the same discipline the PHPUnit integration suite already follows (`phpunit_*` rows), and destructive checks operate on their own seeded objects, never on ambient dev data.
+
+## Revision 2026-07-16: E2E Additionally Gates the Integration and Release Lanes
+
+The "Out of CI" decision above described the minimal CI of ADR-0015. With the canonical runner and its lanes (ADR-0031), that reasoning no longer holds for every CI context: the Integration lane provisions exactly what this ADR said CI lacks, a MySQL server, the full stack and a controlled toolchain. The revision:
+
+- **Playwright Chromium becomes a gate of the Integration lane** (merge, nightly, release candidates) against the lane's throwaway QA stack, and the fuller browser matrix (Firefox, WebKit, Windows Edge) belongs to the Release lane. The Fast lane stays browser-free: PRs are still gated by PHPUnit, the static contracts and the drift guards alone.
+- **Connected CI may fetch the tooling.** `npm ci` for `tests/e2e/` and a Playwright browser download are allowed in the CI sandbox, like Composer advisories and lint images already are (ADR-0031/tool-lock). Nothing changes for the shipped artifact: nothing is vendored into `Docker/WebAPI`, the runtime needs no Node, no browser and no internet. On dev hosts the existing offline pattern (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, `PLAYWRIGHT_CHROMIUM` from the environment) remains the default.
+- **The dev-host tier stays.** Local on-demand runs against the dev stack keep working exactly as decided above; the lanes add a second, reproducible execution context, they do not replace the first.
+- **Scope follows the coverage contract (E6).** The lane-gated suite proves each portal POST action, upload/download flow and CRUD round-trip once in a real browser, including the confirm-cancel branch; exhaustive field matrices stay in PHPUnit. The E2E layer gates a lane only for what a browser alone can prove.
+
+An Integration-lane run without a usable browser or QA stack is `infrastructure_error`, never a skip and never a pass (ADR-0015 amendment, ADR-0031).

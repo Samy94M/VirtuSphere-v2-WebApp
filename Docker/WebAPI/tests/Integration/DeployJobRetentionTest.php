@@ -20,6 +20,7 @@ final class DeployJobRetentionTest extends TestCase
     private ?mysqli $db = null;
     /** @var int[] */
     private array $jobIds = [];
+    private ?int $fixtureMissionId = null;
 
     protected function setUp(): void
     {
@@ -39,6 +40,10 @@ final class DeployJobRetentionTest extends TestCase
             $this->db->query('DELETE FROM deploy_jobs WHERE id = ' . (int) $id);
         }
         $this->jobIds = [];
+        if ($this->fixtureMissionId !== null) {
+            $this->db->query('DELETE FROM deploy_missions WHERE id = ' . $this->fixtureMissionId);
+            $this->fixtureMissionId = null;
+        }
     }
 
     public function testFinishedJobLogsArePrunedAndRunningOnesAreNot(): void
@@ -107,12 +112,20 @@ final class DeployJobRetentionTest extends TestCase
 
     private function missionId(): int
     {
-        $row = repo_fetch_one($this->db, "SELECT id FROM deploy_missions WHERE LEFT(mission_name, 1) <> '_' LIMIT 1");
-        if ($row === null) {
-            self::markTestSkipped('No mission available for the fixture.');
+        // Eigene Fixture-Mission statt einer geliehenen aus dem Umgebungsbestand:
+        // auf der frischen QA-Datenbank existiert keine Mission, und ein
+        // dynamischer Skip ist in der Integration-Lane nie legitim
+        // (ADR-0015-Ergaenzung). tearDown raeumt die Zeile wieder ab.
+        if ($this->fixtureMissionId === null) {
+            $name = 'phpunit_retention_mission';
+            $status = 'active';
+            $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)');
+            $stmt->bind_param('ss', $name, $status);
+            $stmt->execute();
+            $this->fixtureMissionId = (int) $this->db->insert_id;
         }
 
-        return (int) $row['id'];
+        return $this->fixtureMissionId;
     }
 
     private function logCount(int $jobId): int

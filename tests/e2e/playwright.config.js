@@ -1,14 +1,20 @@
-// Dev-only E2E config (ADR-0028). Runs on the dev host against the running
-// Docker stack; never part of the shipped artifact and never in CI.
+// E2E config (ADR-0028, revised 2026-07-16): runs on the dev host against the
+// running Docker stack AND as the e2e-portal gate of the Integration lane
+// against the throwaway QA stack. Never part of the shipped artifact.
 const { defineConfig, devices } = require('@playwright/test');
 const path = require('node:path');
+const fs = require('node:fs');
 
-// The known-good local Chromium (portal-screenshot-setup). Overridable so the
-// suite is not pinned to one machine, but Playwright never downloads a browser
-// (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 in the environment for an offline install).
+// Browser resolution, in order: explicit env path; the known-good local
+// Chromium (portal-screenshot-setup) when it exists; otherwise undefined so
+// Playwright uses its own installed browser (npx playwright install chromium,
+// the CI path). Dev hosts keep PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 offline
+// installs working because the local path resolves first.
+const LOCAL_DEFAULT =
+  'C:\\Users\\Samy\\AppData\\Local\\ms-playwright\\chromium-1223\\chrome-win64\\chrome.exe';
 const CHROMIUM =
   process.env.PLAYWRIGHT_CHROMIUM ||
-  'C:\\Users\\Samy\\AppData\\Local\\ms-playwright\\chromium-1223\\chrome-win64\\chrome.exe';
+  (fs.existsSync(LOCAL_DEFAULT) ? LOCAL_DEFAULT : undefined);
 
 // Trailing slash is load-bearing: the no-slash form triggers an nginx redirect
 // that this Chromium fails with ERR_CONNECTION_REFUSED (portal-screenshot-setup).
@@ -37,7 +43,10 @@ module.exports = defineConfig({
     // not a hang: fail fast instead of waiting out the connect timeout.
     navigationTimeout: 15000,
     launchOptions: {
-      executablePath: CHROMIUM,
+      // Spread instead of `executablePath: undefined`: Playwright treats the
+      // present-but-undefined key as "no browser" instead of falling back to
+      // its own registry install.
+      ...(CHROMIUM ? { executablePath: CHROMIUM } : {}),
       args: ['--no-sandbox'],
     },
   },

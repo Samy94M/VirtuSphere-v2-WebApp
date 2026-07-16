@@ -1,26 +1,35 @@
 name: CI
 
-# Fast-Lane des kanonischen Pruef-Runners (ADR-0031, Plan v2 AP4): CI fuehrt
-# scripts/check.ps1 -Lane Fast aus statt einer zweiten, driftfaehigen
-# Schrittliste. Tool-Versionen kommen aus scripts/tool-lock.json (Images per
-# Digest, PowerShell-Module exakt); Actions sind auf volle Commit-SHAs gepinnt.
-# Bewusst ohne DB-Server; die Integration-Lane (QA-Stack, --fail-on-skipped)
-# folgt nach der ADR-0015-Ergaenzung/ADR-0028-Revision.
+# Lanes des kanonischen Pruef-Runners (ADR-0031, Plan v2 AP4): CI fuehrt
+# scripts/check.ps1 aus statt einer zweiten, driftfaehigen Schrittliste.
+# Fast-Lane auf jedem PR und Push; Integration-Lane (QA-Wegwerf-Stack,
+# --fail-on-skipped, Playwright-Chromium; ADR-0015-Ergaenzung und
+# ADR-0028-Revision) auf Merge nach main, nightly und manuell; der
+# windows-only Legacy-C#-Build laeuft als eigener Windows-Job derselben Lane.
+# Tool-Versionen kommen aus scripts/tool-lock.json (Images per Digest,
+# PowerShell-Module exakt); Actions sind auf volle Commit-SHAs gepinnt.
 
 on:
   push:
     branches: [ main ]
   pull_request:
+  schedule:
+    # Nightly-Integration (UTC); haelt die Lane auch ohne Merges beweisbar.
+    - cron: '30 2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Event im Schluessel: der Nightly-Lauf darf keinen Merge-Lauf canceln.
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   fast-lane:
+    # Nightly faehrt die Integration-Lane, die alle Fast-Gates enthaelt.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -95,4 +104,119 @@ jobs:
         with:
           name: qa-fast-lane
           path: qa-fast.json
+          retention-days: 14
+
+  # Integration-Lane (Merge/Nightly/manuell): dedizierter QA-Wegwerf-Stack,
+  # vollstaendige PHPUnit-Suite mit --fail-on-skipped, Schema-Konvergenz,
+  # Health-/Exposure-Vertrag, Guard-Harness und Playwright-Chromium (E2E).
+  integration-lane:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, sodium
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      # Die Basis-Compose referenziert .env; der QA-Stack ueberschreibt jede
+      # relevante Variable aus Docker/qa/qa.env.
+      - name: .env fuer Compose stellen
+        run: cp .env.example .env
+
+      - name: PHP-Projektimage bauen
+        run: docker build -t virtusphere-v2-webapp-php Docker/php
+
+      - name: QA-Ansible-Image bauen (Pins aus Docker/qa-ansible und Ansible/requirements.yml)
+        run: docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .
+
+      - name: Composer install (im Projekt-Image, vendor in den Checkout)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo/Docker/WebAPI \
+            -e COMPOSER_CACHE_DIR=/tmp/composer-cache -e COMPOSER_ALLOW_SUPERUSER=1 \
+            virtusphere-v2-webapp-php composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PowerShell-Module (Versionen aus scripts/tool-lock.json)
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw scripts/tool-lock.json | ConvertFrom-Json
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -RequiredVersion $lock.powershellModules.Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion $lock.powershellModules.PSScriptAnalyzer -Scope CurrentUser -Force
+
+      # Versionen pinnt tests/e2e/package-lock.json; der Browser landet im
+      # Playwright-Cache, den das e2e-portal-Gate im Preflight erkennt.
+      - name: Playwright und Chromium installieren
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Integration-Lane (kanonischer Runner)
+        shell: pwsh
+        run: ./scripts/check.ps1 -Lane Integration -Json qa-integration.json
+
+      - name: QA-Artefakt hochladen
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-integration-lane
+          path: qa-integration.json
+          retention-days: 14
+
+      - name: Playwright-Report hochladen (nur rot)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Windows-only-Gate derselben Lane (Plan v2 L8): der Legacy-C#-Client baut
+  # nur mit MSBuild/NuGet auf Windows. Die HintPaths des historischen Projekts
+  # zeigen auf ..\packages (eine Ebene ueber dem Checkout), also restauriert
+  # NuGet gezielt dorthin.
+  legacy-csharp-build:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: MSBuild in den PATH (vswhere statt ungepinnter Action)
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if (-not $msbuild) { throw 'MSBuild nicht gefunden' }
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $msbuild -Parent)
+
+      - name: NuGet restore (packages.config, Ziel ..\packages laut HintPaths)
+        run: nuget restore VirtuSphere.sln -PackagesDirectory ..\packages
+
+      - name: Legacy-C#-Build (kanonischer Runner, ein Gate)
+        shell: pwsh
+        run: ./scripts/check.ps1 -Lane Integration -Gate legacy-csharp-build -Json qa-csharp.json
+
+      - name: QA-Artefakt hochladen
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-legacy-csharp
+          path: qa-csharp.json
           retention-days: 14

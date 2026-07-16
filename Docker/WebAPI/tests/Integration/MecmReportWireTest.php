@@ -4,17 +4,26 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/ClientIpAllowlist.php';
+
 // Wire contract of the report channel (ADR-0018). Runs against the live
 // Docker stack like MachineApiWireTest; the POST helper is the first POST
 // usage in the wire suite.
 final class MecmReportWireTest extends TestCase
 {
+    use ClientIpAllowlist;
+
     protected function setUp(): void
     {
         $health = @file_get_contents(virtusphere_test_base_url() . '/portal/health.php');
         if ($health === false) {
             self::markTestSkipped('VirtuSphere test stack is not reachable.');
         }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreClientIpAllowlistIfTouched();
     }
 
     public function testGetIsRejectedWithMethodNotAllowed(): void
@@ -55,11 +64,11 @@ final class MecmReportWireTest extends TestCase
 
     public function testHeartbeatValidatesSourceAndInterval(): void
     {
+        // Selbst allowlisten statt skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
         [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'unknown-source', 'interval_seconds' => 10]);
         $this->skipUnlessAuthorized($status);
-        if ($status === 403) {
-            self::markTestSkipped('Current test client IP is not allowlisted.');
-        }
         self::assertSame(400, $status);
         self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
 
@@ -70,11 +79,11 @@ final class MecmReportWireTest extends TestCase
 
     public function testHeartbeatRoundTripLandsInDatabase(): void
     {
+        // Selbst allowlisten statt skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
         [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10, 'detail' => 'phpunit wire test']);
         $this->skipUnlessAuthorized($status);
-        if ($status === 403) {
-            self::markTestSkipped('Current test client IP is not allowlisted.');
-        }
 
         self::assertSame(200, $status);
         self::assertSame(['success' => true, 'source' => 'device-sync'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
