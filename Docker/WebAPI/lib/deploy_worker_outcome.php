@@ -29,8 +29,15 @@ function deploy_worker_payload(array $job): array
     return deploy_job_payload($payload);
 }
 
-function deploy_worker_reap_stale_jobs(mysqli $db): void
+/**
+ * @return int Number of stale running jobs reaped. Called from the deploy
+ *         worker's loop start and, since AP6, from the maintenance worker's
+ *         interval as well - both go through this function so the MAC-aware
+ *         VM convergence below can never be bypassed by one of the callers.
+ */
+function deploy_worker_reap_stale_jobs(mysqli $db): int
 {
+    $reaped = 0;
     foreach (repo_reap_stale_deploy_jobs($db) as $job) {
         $payload = deploy_worker_payload($job);
         $vmIds = $payload['vm_ids'] ?? [];
@@ -46,7 +53,10 @@ function deploy_worker_reap_stale_jobs(mysqli $db): void
             $vmIds,
             $result !== null ? $result['successful_vm_ids'] : []
         );
+        $reaped++;
     }
+
+    return $reaped;
 }
 
 /**

@@ -59,7 +59,7 @@ Abgeleitete Zustände (Schwere `failed` > `stale` > `disk_low`): `ok`, `failed` 
 
 Die Überfälligkeitsgrenze ist der *erwartete* Lauf plus `VIRTUSPHERE_BACKUP_GRACE_SECONDS` (2 h), nicht ein festes Alter. Ist ein Zeitplan gemeldet, stammt der erwartete Lauf daraus; sonst aus `VIRTUSPHERE_BACKUP_INTERVAL_SECONDS` (24 h). Ein wöchentliches Backup gilt damit nicht mehr dauerhaft als veraltet.
 
-## Restore-Probe
+## Restore-Drill
 
 Ein Backup ist erst dann ein Backup, wenn der Restore bewiesen ist:
 
@@ -67,9 +67,20 @@ Ein Backup ist erst dann ein Backup, wenn der Restore bewiesen ist:
 sh scripts/restore_test.sh
 ```
 
-Das Skript startet einen Wegwerf-Container mit dem Stack-Image `mysql:8.4` (air-gap-freundlich, kein Download nötig), spielt den jüngsten Dump ein, prüft die Applikationstabellen (inkl. `deploy_vms`) und räumt den Container wieder ab. Der laufende Stack wird nicht berührt.
+Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem Stack-Image `mysql:8.4`, Projekt-PHP-Image) und prüft die ganze Kette:
 
-Kadenz: nach jedem Schema-Meilenstein und mindestens monatlich; das Ergebnis gehört als Haken in `PRE-SHIP-CHECKLIST.md` vor jedem Release.
+1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
+2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
+3. Import des jüngsten Dumps, Tabellenzahl Dump gegen Restore
+4. Migrationen bis `pending=0`, danach Schema-Fingerprint gegen das frische `struktur.sql`
+5. Invarianten und Rowcounts (Benutzer, Migrationstracking, keine verwaisten Interfaces/VMs/Jobs)
+6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
+7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung eines ungültigen Tokens
+8. Vollständiges Cleanup per Trap; der laufende Stack wird nie berührt
+
+Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`, Gate `restore-drill`), nach jedem Schema-Meilenstein und mindestens monatlich.
+
+Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt (E5): sie waren ein zweiter, unvalidierter Pfad und brechen jetzt absichtlich mit einem Verweis hierher ab.
 
 ## Echter Restore (Desaster-Fall)
 

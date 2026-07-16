@@ -125,6 +125,13 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
     $vmIds = deploy_worker_payload($job)['vm_ids'] ?? [];
 
+    // Time-based heartbeat (AP6): the bounded SSH transport calls this on every
+    // silent read slice, so a playbook that is busy without printing (a long
+    // vmware_guest clone) keeps the job alive for the stale-heartbeat reaper.
+    $heartbeatOnSilence = static function () use ($db, $jobId, $workerId): void {
+        deploy_worker_heartbeat_tick($db, $jobId, $workerId);
+    };
+
     try {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing deploy artifacts.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
@@ -143,7 +150,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $preflightBuffer = '';
         $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer): void {
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
-        }, 45);
+        }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
         deploy_worker_assert_not_cancelled($db, $jobId);
         if ($preflightExitCode !== 0) {
@@ -175,15 +182,31 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $command = ansible_remote_command((string) $artifacts['remote_dir'], $payload, $autostartEnabled);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible playbook sequence: ' . deploy_job_payload_summary((string) $job['payload_json']));
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
+        // Failed-phase naming (AP6): the remote command brackets every playbook
+        // with begin/end markers; the last begin without its end is the step
+        // that failed, and it is named in the error instead of leaving the
+        // operator to guess which of up to five playbooks broke the chain.
+        $currentStep = null;
+        $stepTracker = static function (string $line) use (&$currentStep): void {
+            $marker = ansible_step_marker_parse($line);
+            if ($marker !== null) {
+                $currentStep = $marker['event'] === VIRTUSPHERE_ANSIBLE_STEP_BEGIN ? $marker['playbook'] : null;
+            }
+        };
         $buffer = '';
-        $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($db, $jobId, $workerId, &$buffer): void {
-            deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk);
-        });
-        deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer);
+        try {
+            $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($db, $jobId, $workerId, &$buffer, $stepTracker): void {
+                deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk, $stepTracker);
+            }, 0, $heartbeatOnSilence);
+        } catch (RuntimeException $transportError) {
+            deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
+            throw new RuntimeException($transportError->getMessage() . ansible_step_failure_suffix($currentStep), 0, $transportError);
+        }
+        deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
         deploy_worker_assert_not_cancelled($db, $jobId);
 
         if ($exitCode !== 0) {
-            throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . '.');
+            throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . ansible_step_failure_suffix($currentStep) . '.');
         }
 
         deploy_worker_conclude_sequence($db, $job, $workerId, $vmIds, $priorLifecycles);
@@ -252,6 +275,10 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     $failCategory = null;
     $fullOutput = '';
 
+    $heartbeatOnSilence = static function () use ($db, $jobId, $workerId): void {
+        deploy_worker_heartbeat_tick($db, $jobId, $workerId);
+    };
+
     try {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing ESXi inventory fetch.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
@@ -266,7 +293,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $preflightBuffer = '';
         $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer): void {
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
-        }, 45);
+        }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
         deploy_worker_assert_not_cancelled($db, $jobId);
         if ($preflightExit !== 0) {
@@ -288,7 +315,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($db, $jobId, $workerId, &$buffer, &$fullOutput): void {
             $fullOutput .= $chunk;
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk);
-        });
+        }, 0, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer);
         deploy_worker_assert_not_cancelled($db, $jobId);
 
@@ -370,7 +397,7 @@ function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, 
     }
 }
 
-function deploy_worker_log_stream_chunk(mysqli $db, int $jobId, string $workerId, string $stream, string &$buffer, string $chunk): void
+function deploy_worker_log_stream_chunk(mysqli $db, int $jobId, string $workerId, string $stream, string &$buffer, string $chunk, ?callable $onLine = null): void
 {
     deploy_worker_heartbeat_tick($db, $jobId, $workerId);
     $buffer .= str_replace("\r\n", "\n", str_replace("\r", "\n", $chunk));
@@ -378,16 +405,22 @@ function deploy_worker_log_stream_chunk(mysqli $db, int $jobId, string $workerId
         $line = substr($buffer, 0, $pos);
         $buffer = substr($buffer, $pos + 1);
         repo_append_deploy_job_log($db, $jobId, $stream, $line);
+        if ($onLine !== null) {
+            $onLine($line);
+        }
     }
 }
 
-function deploy_worker_log_stream_flush(mysqli $db, int $jobId, string $workerId, string $stream, string &$buffer): void
+function deploy_worker_log_stream_flush(mysqli $db, int $jobId, string $workerId, string $stream, string &$buffer, ?callable $onLine = null): void
 {
     if ($buffer === '') {
         return;
     }
 
     repo_append_deploy_job_log($db, $jobId, $stream, $buffer);
+    if ($onLine !== null) {
+        $onLine($buffer);
+    }
     deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
     $buffer = '';
 }

@@ -201,16 +201,16 @@ docker compose down
 
 ## Backup und Restore
 
-Die Skripte liegen unter `Docker/scripts/`:
+Kanonisch sind die Skripte unter `scripts/` (die frueheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
 
 ```bash
-Docker/scripts/backup.sh
-Docker/scripts/restore.sh Docker/backups/<stamp>
+sh scripts/backup.sh        # DB-Dump, Config-Archiv und SHA-256-Manifest nach Docker/backups/
+sh scripts/restore_test.sh  # Restore-Drill in einer Wegwerf-Umgebung (beruehrt den Stack nicht)
 ```
 
-`restore.sh` erwartet das Backup-Verzeichnis (den Zeitstempel-Ordner unter `Docker/backups/`), nicht eine Archivdatei; darin liegen `db.sql` und optional `.env`/`ssl.tgz`.
+Der Drill verifiziert das Manifest, spielt den juengsten Dump in einen Wegwerf-MySQL ein, laesst die Migrationen laufen, vergleicht das Schema gegen `struktur.sql`, prueft Invarianten und die Credential-Entschluesselung mit dem gesicherten `APP_KEY` und faehrt einen App-Smoke (Health, Portal-Login, Machine API). Der Ernstfall-Ablauf steht in `docs/operations/backup.md` (Disaster Recovery).
 
-Wichtig: `.env` und `APP_KEY` sind fuer verschluesselte Credentials kritisch. Ohne passenden `APP_KEY` koennen gespeicherte Secrets nicht sinnvoll entschluesselt werden.
+Wichtig: `.env` und `APP_KEY` sind fuer verschluesselte Credentials kritisch. Ohne passenden `APP_KEY` koennen gespeicherte Secrets nicht sinnvoll entschluesselt werden; genau das beweist der Drill in beide Richtungen.
 
 Jeder Backup-Lauf schreibt zusaetzlich eine Statuszeile nach `Docker/backups/status/backup-status.jsonl`. Nur dieses `status/`-Unterverzeichnis wird read-only in den `php`-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), damit das Portal auf der Einstellungen-Seite eine Backup-Karte und bei Problemen ein Dashboard-Banner anzeigt (ADR-0021). Die Dumps und das Config-Tar (mit `.env`) werden nie gemountet. Nach dem ersten Start ohne Backup zeigt die Karte den Zustand `Unbekannt`, bis `scripts/backup.sh` einmal gelaufen ist.
 

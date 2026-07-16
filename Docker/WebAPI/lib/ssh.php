@@ -12,6 +12,7 @@ if (is_file($autoload)) {
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/connection_errors.php';
+require_once __DIR__ . '/deploy_constants.php';
 
 /**
  * Connection tests return a code plus an operator detail, never a ready-made
@@ -186,7 +187,26 @@ function ssh_execute_capture(array $credential, string $secret, string $command,
     return ['exit_code' => $exitCode, 'output' => $output];
 }
 
-function ssh_execute_command(array $credential, string $secret, string $command, callable $stdoutLogger, int $timeout = 0): int
+/**
+ * Runs a remote command over a BOUNDED transport (AP6). The old implementation
+ * ran the playbook exec with an unlimited timeout, and when a caller did pass
+ * one, phpseclib's timeout ended exec() without an exit status - which this
+ * function then reported as exit 0: a hung remote command came back green.
+ * Now every command has an idle and a total limit, and hitting either one
+ * throws instead of returning a made-up success.
+ *
+ * @param callable(string):void $stdoutLogger Receives raw output chunks.
+ * @param int $idleTimeout Seconds without any remote output before the command
+ *        fails. Callers with a short, known-fast command (preflight, capture)
+ *        pass their own budget; 0 or negative falls back to the SSoT default.
+ * @param ?callable():void $onSilence Called roughly every
+ *        VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS while the remote is silent. The
+ *        deploy worker hangs its DB heartbeat here, so the heartbeat is
+ *        time-based and a quiet clone task no longer looks like a dead worker.
+ * @param int $totalTimeout Wall-clock cap regardless of output. 0 or negative
+ *        falls back to the SSoT default; never below the idle timeout.
+ */
+function ssh_execute_command(array $credential, string $secret, string $command, callable $stdoutLogger, int $idleTimeout = 0, ?callable $onSilence = null, int $totalTimeout = 0): int
 {
     if (!class_exists(SSH2::class)) {
         throw new RuntimeException('phpseclib SSH is not available.');
@@ -199,20 +219,97 @@ function ssh_execute_command(array $credential, string $secret, string $command,
         throw new RuntimeException('Ansible SSH host and username are required.');
     }
 
+    if ($idleTimeout <= 0) {
+        $idleTimeout = VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS;
+    }
+    if ($totalTimeout <= 0) {
+        $totalTimeout = VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS;
+    }
+    $totalTimeout = max($totalTimeout, $idleTimeout);
+
     $ssh = new SSH2($host, $port, 15);
-    $ssh->setTimeout($timeout);
+    $ssh->setKeepAlive(VIRTUSPHERE_SSH_KEEPALIVE_INTERVAL_SECONDS);
+    // The phpseclib timeout is only the read-slice length: each expiry returns
+    // control so the loop below can tick the heartbeat and enforce the real
+    // limits. It must never exceed the caller's idle budget.
+    $ssh->setTimeout(min(VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS, $idleTimeout));
     if (!$ssh->login($username, $secret)) {
         throw new RuntimeException('SSH login failed.');
     }
 
-    $ssh->exec($command, static function (string $chunk) use ($stdoutLogger): void {
-        $stdoutLogger($chunk);
-    });
+    // exec() with callback === false only starts the command; the channel is
+    // then drained manually, one slice per read, via the loop below.
+    if ($ssh->exec($command, false) !== true) {
+        $ssh->disconnect();
+        throw new RuntimeException('SSH exec request failed.');
+    }
+
+    try {
+        ssh_stream_command_output(static function () use ($ssh) {
+            $slice = $ssh->read('', SSH2::READ_NEXT, SSH2::CHANNEL_EXEC);
+            if ($slice === false) {
+                throw new RuntimeException('SSH transport failed while streaming command output.');
+            }
+            if ($slice === true) {
+                // true means either "slice elapsed without data" or "channel
+                // closed"; phpseclib's timeout flag tells them apart.
+                return $ssh->isTimeout() ? true : false;
+            }
+
+            return (string) $slice;
+        }, $stdoutLogger, $onSilence, $idleTimeout, $totalTimeout);
+    } catch (Throwable $exception) {
+        $ssh->disconnect();
+        throw $exception;
+    }
 
     $status = $ssh->getExitStatus();
     $ssh->disconnect();
 
     return $status === false || $status === null ? 0 : (int) $status;
+}
+
+/**
+ * The bounded streaming loop, separated from the SSH plumbing so the timeout
+ * and heartbeat semantics are provable with a scripted reader and a fake
+ * clock (no SSH server in unit tests).
+ *
+ * @param callable():(string|bool) $readSlice Next output chunk; true for a
+ *        silent slice (no data yet), false when the channel closed.
+ * @param callable(string):void $stdoutLogger
+ * @param ?callable():void $onSilence Called once per silent slice.
+ * @param ?callable():int $clock Injectable time source for tests.
+ */
+function ssh_stream_command_output(callable $readSlice, callable $stdoutLogger, ?callable $onSilence, int $idleTimeout, int $totalTimeout, ?callable $clock = null): void
+{
+    $clock = $clock ?? static fn (): int => time();
+    $startedAt = $clock();
+    $lastDataAt = $startedAt;
+
+    while (true) {
+        $slice = $readSlice();
+        $now = $clock();
+
+        if ($slice === false) {
+            return;
+        }
+
+        if ($slice === true) {
+            if ($onSilence !== null) {
+                $onSilence();
+            }
+            if (($now - $lastDataAt) >= $idleTimeout) {
+                throw new RuntimeException('Remote command produced no output for ' . $idleTimeout . ' seconds (idle timeout).');
+            }
+        } elseif ($slice !== '') {
+            $stdoutLogger($slice);
+            $lastDataAt = $now;
+        }
+
+        if (($now - $startedAt) >= $totalTimeout) {
+            throw new RuntimeException('Remote command exceeded the total time limit of ' . $totalTimeout . ' seconds.');
+        }
+    }
 }
 
 function ssh_sftp_mkdir_recursive(SFTP $sftp, string $dir): void

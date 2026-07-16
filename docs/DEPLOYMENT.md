@@ -115,7 +115,7 @@ docker exec virtusphere-v2-webapp-php-1 php-fpm -t
 
 ## Backup and restore
 
-`scripts/backup.sh` writes a full MySQL dump plus a config tarball to `Docker/backups/`; `scripts/restore_test.sh` proves the newest dump restores into a throwaway `mysql:8.4` container. See `docs/operations/backup.md` for scheduling, offsite handling and the disaster-recovery procedure (ADR-0017). The restore proof is a `PRE-SHIP-CHECKLIST.md` release gate.
+`scripts/backup.sh` writes a full MySQL dump, a config tarball and a SHA-256 manifest to `Docker/backups/`; `scripts/restore_test.sh` runs the full restore drill against a throwaway environment (manifest, schema convergence, migrations, invariants, `APP_KEY` binding, app smoke). See `docs/operations/backup.md` for scheduling, offsite handling and the disaster-recovery procedure (ADR-0017, amendment 1). The drill is the `restore-drill` gate of the Release lane (`scripts/check.ps1`).
 
 Each run also appends a status line to `Docker/backups/status/backup-status.jsonl`. Only this `status/` subdirectory is bind-mounted read-only into the `php` service (`./Docker/backups/status:/var/backups/virtusphere-status:ro`, ADR-0021) so the portal can show a backup card and dashboard banner; the dumps and the config tar (which holds `.env`) are never mounted. After adding or changing this mount, recreate the container (`docker compose up -d php`, or `--force-recreate` if the bind was already present) or the portal keeps reporting the `unknown` state.
 

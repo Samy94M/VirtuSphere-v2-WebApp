@@ -41,6 +41,28 @@ const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
 const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
 const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
 
+// SSH transport hardening (AP6). A remote command used to run with an
+// unbounded timeout, and a timed-out exec came back as exit 0. These four
+// constants are the SSoT for the bounded transport in lib/ssh.php:
+//  - KEEPALIVE: SSH_MSG_IGNORE interval, keeps NAT/firewall state alive.
+//  - SILENCE_TICK: read-slice length; every slice without remote output calls
+//    the onSilence hook, which is what makes the worker heartbeat time-based
+//    instead of output-based. Must stay below HEARTBEAT_INTERVAL and far below
+//    STALE_AFTER, otherwise a silent-but-alive playbook gets reaped mid-run.
+//  - IDLE: no remote output at all for this long fails the command. Generous,
+//    because vmware_guest clones a template for many minutes without printing.
+//  - TOTAL: wall-clock cap per remote command, however chatty. A full pipeline
+//    over many VMs is slow, but nothing legitimate runs for four hours.
+const VIRTUSPHERE_SSH_KEEPALIVE_INTERVAL_SECONDS = 15;
+const VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS = 15;
+const VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS = 1800;
+const VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS = 14400;
+
+// Second reaper (AP6): the deploy worker reaps only at its own loop start, so
+// a worker stuck inside a blocking transport call would never be reaped until
+// it returns. The maintenance worker runs the same reap on this interval.
+const VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS = 120;
+
 // Convergence sweep interval (L4): the maintenance worker periodically fails
 // VMs stuck in `deploying` whose mission has no queued/running job left. That
 // covers the fault the deploy worker cannot: it died (or was cancelled and then

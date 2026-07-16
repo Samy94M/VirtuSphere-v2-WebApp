@@ -1,9 +1,13 @@
 #!/bin/sh
 # scripts/backup.sh — VirtuSphere Vollbackup (DB + Konfiguration).
 #
-# Schreibt pro Lauf zwei Dateien nach Docker/backups/ (gitignored):
-#   1. db-<ts>.sql.gz      — komplette MySQL (alle DBs, Routines, Events, Trigger)
-#   2. config-<ts>.tar.gz  — .env, docker-compose.yml, nginx-Konfiguration/SSL
+# Schreibt pro Lauf drei Dateien nach Docker/backups/ (gitignored):
+#   1. db-<ts>.sql.gz        — komplette MySQL (alle DBs, Routines, Events, Trigger)
+#   2. config-<ts>.tar.gz    — .env, docker-compose.yml, nginx-Konfiguration/SSL
+#   3. manifest-<ts>.sha256  — SHA-256-Hashes beider Archive; der Restore-Drill
+#                              (scripts/restore_test.sh) verifiziert sie vor dem
+#                              Einspielen, ein Backup ohne Manifest ist fuer den
+#                              Drill nicht verifizierbar (AP6/E5)
 #
 # Zusaetzlich schreibt jeder Lauf eine JSONL-Statuszeile nach
 # Docker/backups/status/backup-status.jsonl. Dieses Status-Verzeichnis (und nur
@@ -212,9 +216,19 @@ config_items="docker-compose.yml"
 tar czf "$config_file" $config_items
 config_bytes=$(wc -c < "$config_file" | tr -d ' ')
 
-# Retention: je Datei (db, config) getrennt nur die neuesten $KEEP Laeufe behalten.
-for prefix in db config; do
-  ls -1t "$BACKUP_DIR"/$prefix-*.gz 2>/dev/null | tail -n +$((KEEP + 1)) | while IFS= read -r old; do
+# Manifest: ohne Hashes kann der Restore-Drill ein manipuliertes oder halb
+# kopiertes Archiv nicht von einem intakten unterscheiden.
+if ! command -v sha256sum >/dev/null 2>&1; then
+  error="sha256sum fehlt; Backup ohne Manifest ist nicht verifizierbar."
+  echo "FEHLER: $error" >&2
+  exit 1
+fi
+( cd "$BACKUP_DIR" && sha256sum "db-$ts.sql.gz" "config-$ts.tar.gz" ) > "$BACKUP_DIR/manifest-$ts.sha256"
+
+# Retention: je Lauf-Artefakt getrennt nur die neuesten $KEEP Laeufe behalten.
+for pattern in 'db-*.sql.gz' 'config-*.tar.gz' 'manifest-*.sha256'; do
+  # shellcheck disable=SC2086
+  ls -1t "$BACKUP_DIR"/$pattern 2>/dev/null | tail -n +$((KEEP + 1)) | while IFS= read -r old; do
     rm -f "$old"
   done
 done

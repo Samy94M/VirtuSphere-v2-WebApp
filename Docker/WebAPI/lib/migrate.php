@@ -687,6 +687,28 @@ SQL;
         migrator_out('0020: materialized ' . $materialized . ' default interface(s); skipped ' . count($plan['skipped']) . ' VM(s) with empty wds_vlan');
         migrator_report_default_interface_skips($plan['skipped'], '0020');
     },
+    '0021_deploy_tokens_user_fk' => function (mysqli $db): void {
+        // Migration 0010 added deploy_tokens.user_id but never the FK that
+        // struktur.sql grew alongside it, so every pre-0010 install diverges
+        // from a fresh schema. Found by the restore drill's schema fingerprint
+        // (AP6). Preflight per database.md: orphaned user_id values would block
+        // the DDL; NULL them first, which is exactly what ON DELETE SET NULL
+        // would have done had the FK existed when the user was removed.
+        if (migrator_fk_exists($db, 'deploy_tokens', 'fk_deploy_tokens_user')) {
+            return;
+        }
+
+        $orphaned = 0;
+        if (migrator_column_exists($db, 'deploy_tokens', 'user_id')) {
+            $db->query('UPDATE deploy_tokens t LEFT JOIN deploy_users u ON u.id = t.user_id SET t.user_id = NULL WHERE t.user_id IS NOT NULL AND u.id IS NULL');
+            $orphaned = $db->affected_rows;
+        } else {
+            migrator_add_column($db, 'deploy_tokens', 'user_id', 'INT NULL');
+        }
+
+        $db->query('ALTER TABLE deploy_tokens ADD CONSTRAINT fk_deploy_tokens_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL');
+        migrator_out('0021: added fk_deploy_tokens_user; nulled ' . $orphaned . ' orphaned token user reference(s)');
+    },
 ];
 
 try {

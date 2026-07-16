@@ -83,7 +83,10 @@ final class DeployConvergenceContractTest extends TestCase
 
     public function testMaintenanceWorkerRunsTheConvergenceSweep(): void
     {
-        $maintenance = $this->source('lib/maintenance_worker.php');
+        // The jobs live in the requireable module; the CLI entrypoint only
+        // delegates (AP6 split, same reason as deploy_worker_outcome.php).
+        self::assertStringContainsString("require_once __DIR__ . '/maintenance_tasks.php'", $this->source('lib/maintenance_worker.php'));
+        $maintenance = $this->source('lib/maintenance_tasks.php');
         self::assertStringContainsString("maintenance_worker_due(\$state, 'deploy-vm-sweep', VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS", $maintenance);
         self::assertStringContainsString('repo_sweep_orphaned_deploying_vms($db)', $maintenance);
         self::assertStringContainsString('VIRTUSPHERE_LOG_CATEGORY_DEPLOY', $maintenance);
@@ -96,6 +99,39 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertMatchesRegularExpression('/lifecycle_state = \?\s+AND NOT EXISTS/s', $repo);
         self::assertMatchesRegularExpression('/repo_sweep_orphaned_deploying_vms.*?FOR UPDATE SKIP LOCKED/s', $repo);
         self::assertStringContainsString('WHERE id = ? AND lifecycle_state = ?', $repo);
+    }
+
+    public function testMaintenanceWorkerRunsTheSecondReaper(): void
+    {
+        // AP6: the deploy worker reaps only at its own loop start; a worker
+        // stuck inside a blocking transport call is reaped by the maintenance
+        // worker instead. Both callers must go through the outcome module's
+        // reap so the MAC-aware VM convergence cannot be bypassed.
+        $maintenance = $this->source('lib/maintenance_tasks.php');
+        self::assertStringContainsString("maintenance_worker_due(\$state, 'deploy-job-reap', VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS", $maintenance);
+        self::assertStringContainsString('deploy_worker_reap_stale_jobs($db)', $maintenance);
+        self::assertStringNotContainsString('repo_reap_stale_deploy_jobs', $maintenance);
+        self::assertStringContainsString('deploy_worker_reap_stale_jobs($db)', $this->source('lib/deploy_worker.php'));
+    }
+
+    public function testPlaybookExecIsBoundedAndHeartbeatIsTimeBased(): void
+    {
+        // AP6: no unbounded remote command, and the DB heartbeat must tick on
+        // silent read slices, not only on output - otherwise a quiet clone
+        // task looks like a dead worker and gets reaped mid-run.
+        $ssh = $this->source('lib/ssh.php');
+        self::assertStringContainsString('setKeepAlive(VIRTUSPHERE_SSH_KEEPALIVE_INTERVAL_SECONDS)', $ssh);
+        self::assertStringContainsString('function ssh_stream_command_output', $ssh);
+        self::assertStringContainsString('idle timeout', $ssh);
+        self::assertStringContainsString('total time limit', $ssh);
+
+        $worker = $this->source('lib/deploy_worker.php');
+        self::assertStringContainsString('$heartbeatOnSilence', $worker);
+        self::assertStringContainsString('ansible_step_failure_suffix($currentStep)', $worker);
+
+        $command = $this->source('lib/ansible_command.php');
+        self::assertStringContainsString('function ansible_step_marker_line', $command);
+        self::assertStringContainsString('function ansible_step_marker_parse', $command);
     }
 
     private function source(string $relativePath): string

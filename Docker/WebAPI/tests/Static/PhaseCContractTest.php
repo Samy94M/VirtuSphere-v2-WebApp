@@ -65,7 +65,7 @@ final class PhaseCContractTest extends TestCase
         // ADR-0018: retention no longer rides on request handling.
         self::assertStringNotContainsString('removeLog($connection);', $this->source('function.php'));
 
-        $worker = $this->source('lib/maintenance_worker.php');
+        $worker = $this->source('lib/maintenance_tasks.php');
         self::assertStringContainsString('repo_purge_client_events', $worker);
         self::assertStringContainsString('removeLog', $worker);
         self::assertStringContainsString('maintenance_worker_tcp_check', $worker);

@@ -1,23 +1,8 @@
 #!/bin/sh
-set -eu
-
-ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
-BACKUP_DIR="$ROOT_DIR/Docker/backups"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-TARGET="$BACKUP_DIR/$STAMP"
-STATUS="$BACKUP_DIR/status.jsonl"
-
-mkdir -p "$TARGET"
-
-if [ -f "$ROOT_DIR/.env" ]; then
-  cp "$ROOT_DIR/.env" "$TARGET/.env"
-fi
-
-if [ -d "$ROOT_DIR/Docker/nginx/ssl" ]; then
-  tar -C "$ROOT_DIR/Docker/nginx" -czf "$TARGET/ssl.tgz" ssl
-fi
-
-docker compose --env-file "$ROOT_DIR/.env" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysqldump -u"$MYSQL_USER" "$MYSQL_DATABASE"' > "$TARGET/db.sql"
-
-printf '{"ts":"%s","type":"backup","path":"%s","status":"ok"}\n' "$STAMP" "$TARGET" >> "$STATUS"
-echo "$TARGET"
+# STILLGELEGT (E5, ADR-0017): dieses Skript war ein zweiter, abweichender
+# Backup-Pfad ohne Dump-Validierung, Retention und Statuskanal. Kanonisch ist
+# ausschliesslich scripts/backup.sh (Restore-Probe: scripts/restore_test.sh);
+# siehe docs/operations/backup.md. Dieses Skript schlaegt absichtlich hart
+# fehl, damit kein Cronjob und keine Anleitung es weiter benutzt.
+echo "FEHLER: Docker/scripts/backup.sh ist stillgelegt. Kanonischer Weg: sh scripts/backup.sh (siehe docs/operations/backup.md)." >&2
+exit 2

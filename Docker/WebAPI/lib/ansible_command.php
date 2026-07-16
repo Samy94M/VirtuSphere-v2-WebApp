@@ -122,6 +122,52 @@ function ansible_mode_expects_mac_result(string $mode): bool
     return in_array(VIRTUSPHERE_PLAYBOOKS['export'], ansible_playbooks_for_mode($mode), true);
 }
 
+// Step markers (AP6): every playbook of a sequence is bracketed by a begin and
+// an end line on stdout. Because the sequence is one && chain, a failure stops
+// the chain right after the failing playbook - the last begin without its end
+// IS the failed phase, and the worker names it in the job's error message
+// instead of reporting only the exit code of a five-playbook pipeline.
+const VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX = '::virtusphere-step::';
+
+const VIRTUSPHERE_ANSIBLE_STEP_BEGIN = 'begin';
+const VIRTUSPHERE_ANSIBLE_STEP_END = 'end';
+
+function ansible_step_marker_line(string $event, string $playbook): string
+{
+    return VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX . ' ' . $event . ' ' . $playbook;
+}
+
+/**
+ * @return array{event: string, playbook: string}|null Null for any line that
+ *         is not a well-formed step marker.
+ */
+function ansible_step_marker_parse(string $line): ?array
+{
+    $line = trim($line);
+    if (!str_starts_with($line, VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX . ' ')) {
+        return null;
+    }
+
+    $parts = explode(' ', substr($line, strlen(VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX) + 1), 2);
+    $event = $parts[0];
+    $playbook = trim($parts[1] ?? '');
+    if (!in_array($event, [VIRTUSPHERE_ANSIBLE_STEP_BEGIN, VIRTUSPHERE_ANSIBLE_STEP_END], true) || $playbook === '') {
+        return null;
+    }
+
+    return ['event' => $event, 'playbook' => $playbook];
+}
+
+/**
+ * Suffix naming the failed playbook step for a job error message. Empty when
+ * no step was open (the failure happened outside the playbook sequence, e.g.
+ * during cd/chmod or before the first marker arrived).
+ */
+function ansible_step_failure_suffix(?string $playbook): string
+{
+    return $playbook === null || $playbook === '' ? '' : ' (playbook step: ' . $playbook . ')';
+}
+
 function ansible_remote_command(string $remoteDir, array $payload, bool $autostartEnabled = false): string
 {
     $mode = (string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL);
@@ -132,7 +178,9 @@ function ansible_remote_command(string $remoteDir, array $payload, bool $autosta
     ];
 
     foreach (ansible_playbooks_for_mode($mode, $autostartEnabled) as $playbook) {
+        $commands[] = 'echo ' . ansible_sh_quote(ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_BEGIN, $playbook));
         $commands[] = 'ansible-playbook ' . ansible_sh_quote($playbook) . ($verbose ? ' -vvv' : '') . ' 2>&1';
+        $commands[] = 'echo ' . ansible_sh_quote(ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_END, $playbook));
     }
 
     $cleanup = 'rm -rf -- ' . ansible_sh_quote($remoteDir);

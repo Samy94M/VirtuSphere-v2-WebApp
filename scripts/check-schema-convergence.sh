@@ -49,8 +49,10 @@ echo "convergence: building $B from struktur.sql + migrate.php"
 myql -e "DROP DATABASE IF EXISTS $B; CREATE DATABASE $B CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 myql "$B" < "$STRUKTUR"
 
-echo "convergence: exercising migrations 0019/0020 from the previous schema"
+echo "convergence: exercising migrations 0019/0020/0021 from the previous schema"
 myql "$B" -e "
+  ALTER TABLE deploy_tokens DROP FOREIGN KEY fk_deploy_tokens_user;
+  ALTER TABLE deploy_tokens DROP INDEX fk_deploy_tokens_user;
   ALTER TABLE deploy_jobs
     MODIFY COLUMN status ENUM('queued','running','succeeded','failed','cancelled') NOT NULL DEFAULT 'queued',
     DROP COLUMN result_json;
@@ -89,6 +91,7 @@ assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON 
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-empty'" "0" "migration 0020 guessed an interface for an empty WDS VLAN"
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-template'" "0" "migration 0020 materialized an interface for a non-deployable template"
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-existing' AND i.vlan = 'KEEP' AND i.type = 'e1000e'" "1" "migration 0020 changed an existing interface"
+assert_sql "SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = '$B' AND constraint_name = 'fk_deploy_tokens_user'" "1" "migration 0021 did not restore fk_deploy_tokens_user on a pre-0010 shaped schema"
 
 # Re-run the data migration itself, not just the tracking guard, to prove that
 # its NOT EXISTS write cannot duplicate a previously materialized interface.
