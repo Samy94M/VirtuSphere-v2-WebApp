@@ -9,14 +9,23 @@ const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-w
 /**
  * @param {string} body PHP statements, executed after the bootstrap require.
  * @param {string[]} [requires] additional /var/www/html-relative requires.
+ * @param {{ user?: string }} [options] user runs the exec as that container
+ *   user. Needed to touch files the FPM worker owns: the container drops
+ *   CAP_DAC_OVERRIDE, so even root cannot read a www-data-owned 0600 session
+ *   file - it has to be www-data.
  */
-function runPhp(body, requires = []) {
+function runPhp(body, requires = [], options = {}) {
   const php =
     '<?php\n' +
     'require_once "/var/www/html/lib/bootstrap.php";\n' +
     requires.map((r) => `require_once "/var/www/html/${r}";\n`).join('') +
     body;
-  return execFileSync('docker', ['exec', '-i', PHP_CONTAINER, 'php'], {
+  const args = ['exec', '-i'];
+  if (options.user) {
+    args.push('-u', options.user);
+  }
+  args.push(PHP_CONTAINER, 'php');
+  return execFileSync('docker', args, {
     input: php,
     encoding: 'utf8',
     timeout: 15000,

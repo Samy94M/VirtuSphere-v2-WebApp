@@ -26,13 +26,13 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 
 | Zusage | Status | Beweis |
 |---|---|---|
-| Session-ID-Rotation beim Login (Fixation) | automatisiert (Konfig + Code), Laufzeitbeweis offen | `session.use_strict_mode` + `session_regenerate_id` gepinnt durch `SessionHardeningContractTest`; Browser-Beweis der Rotation: offen (Etappe 10 Abnahme) |
+| Session-ID-Rotation beim Login (Fixation) | automatisiert | `session.use_strict_mode` + `session_regenerate_id` gepinnt durch `SessionHardeningContractTest`; Browser-Beweis der Rotation E2E `session-security.spec.js` |
 | Cookie-Flags HttpOnly/SameSite=Strict/use_only_cookies/kein trans_sid | automatisiert | `SessionHardeningContractTest` (INI-Ebene) + Bootstrap-Cookie-Params |
 | Secure-Flag dynamisch ab TLS | automatisiert | ADR-0027-Pfad, `HttpsConfigTest` |
 | Session-Datei überlebt die längste konfigurierbare Sitzung (gc_maxlifetime) | automatisiert | `SessionHardeningContractTest` (Konstante gegen INI) |
-| Serverseitiger Ablauf (session_expires_at), Verlängerung via session_ping | teils | Settings-Wert E2E `settings-flow.spec.js`; Laufzeitbeweis des erzwungenen Re-Logins nach Ablauf: **offen** (TESTPLAN 3.2-Rest) |
+| Serverseitiger Ablauf (session_expires_at), Verlängerung via session_ping | automatisiert | Settings-Wert E2E `settings-flow.spec.js`; erzwungener Re-Login nach Ablauf E2E `session-security.spec.js` (Session-Datei gealtert, kein Client-Timer) |
 | CSRF-Token sessiongebunden, POST ohne/mit fremdem Token abgelehnt | automatisiert | E2E `rbac-csrf.spec.js` (400 + unversehrte DB-Zeile), `PortalPostGuardContractTest` (jede Seite läuft durch den Guard) |
-| Logout invalidiert serverseitig (Back-Button zeigt nichts Geschütztes) | **offen** | TESTPLAN 3.2-Rest; Etappe-10-Abnahme |
+| Logout invalidiert serverseitig (Back-Button zeigt nichts Geschütztes) | automatisiert | E2E `session-security.spec.js` (destroy + Clear-Site-Data; direkter GET 302, Back+Reload landet am Login) |
 
 ## V4 Access Control
 
@@ -56,7 +56,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Upload-Validierung: Zertifikat (PEM/Größe/Schlüssel-Match), Mission-Import (JSON/Version/TTL) | automatisiert | `HttpsConfigTest` (Parser + Fixtures) + E2E `https-flow.spec.js` (Nicht-PEM-Ablehnung), `mission-transfer.spec.js` (Nicht-JSON-Ablehnung), `MissionTransferRoundTripTest` |
 | XSS: kontextgerechtes Escaping, CSP mit Nonce, keine Inline-Handler | automatisiert | `lint-csp-patterns`-Gate, E2E `health-matrix.spec.js` (keine CSP-Violations), `field-roundtrip.spec.js` (Script-Payload bleibt Text) |
 | Log-Injection: CR/LF-Kollaps + Längenbegrenzung vor Audit-Zeilen | automatisiert | `audit_snippet()` + `AuditEventsTest` |
-| CSV-Formel-Injection im heruntergeladenen Artefakt erneut geprüft | **offen** | TESTPLAN 2.4/3.5-Rest (Logs-CSV-E2E); PHPUnit-Schutz existiert (`PortalCsvExportTest`) |
+| CSV-Formel-Injection im heruntergeladenen Artefakt erneut geprüft | automatisiert | `PortalCsvExportTest` (Guard isoliert) + E2E `csv-injection.spec.js` (jeder Formel-Lead im heruntergeladenen VM-CSV neutralisiert) |
 
 ## V7/V8 Krypto & Datenschutz
 
