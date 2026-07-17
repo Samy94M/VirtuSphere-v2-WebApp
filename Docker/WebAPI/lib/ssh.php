@@ -238,7 +238,11 @@ function ssh_execute_command(array $credential, string $secret, string $command,
     }
 
     // exec() with callback === false only starts the command; the channel is
-    // then drained manually, one slice per read, via the loop below.
+    // then drained manually, one slice per read, via the loop below. phpseclib
+    // types the parameter as callable|null, but `false` is the documented way
+    // to disable its internal callback loop, which is exactly what the bounded
+    // AP6 read loop needs - null would make exec() block and drain internally.
+    // @phpstan-ignore argument.type
     if ($ssh->exec($command, false) !== true) {
         $ssh->disconnect();
         throw new RuntimeException('SSH exec request failed.');

@@ -63,7 +63,9 @@ function deploy_job_normalize_vm_ids(mixed $value): array
         }
     }
 
-    return array_values(array_map('intval', array_keys($ids)));
+    // array_keys already yields a list; the intval map keeps the element type
+    // explicit for callers that pass it straight into a bind.
+    return array_map('intval', array_keys($ids));
 }
 
 function deploy_job_normalize_wait(mixed $value): int

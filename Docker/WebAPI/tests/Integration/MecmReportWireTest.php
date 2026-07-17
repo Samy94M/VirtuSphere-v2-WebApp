@@ -141,6 +141,103 @@ final class MecmReportWireTest extends TestCase
         }
     }
 
+    public function testEveryWireSourceIsAcceptedAndReturnsItsShapeInternalSourcesRejected(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        // The wire contract: exactly the wire sources may report a heartbeat,
+        // each returns {success:true, source:<echo>}; the internal-only sources
+        // (written by the maintenance worker) are refused at the wire.
+        foreach (VIRTUSPHERE_INTEGRATION_WIRE_SOURCES as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => $source, 'interval_seconds' => 30]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status, $source . ' must be accepted');
+            self::assertSame(['success' => true, 'source' => $source], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $source . ' heartbeat wire shape');
+        }
+
+        $internalOnly = array_diff(VIRTUSPHERE_INTEGRATION_SOURCES, VIRTUSPHERE_INTEGRATION_WIRE_SOURCES);
+        self::assertNotSame([], $internalOnly, 'there must be internal-only sources to guard');
+        foreach ($internalOnly as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => $source, 'interval_seconds' => 30]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, $source . ' must not be reportable over the wire');
+            self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function testReportPhaseRoundTripEchoesVmIdAndDeduplicates(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $db = db(true);
+        $prefix = 'phpunit_wire_' . bin2hex(random_bytes(4));
+        $mac = sprintf('02:00:%02x:%02x:%02x:%02x', random_int(0, 255), random_int(0, 255), random_int(0, 255), random_int(0, 255));
+
+        require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
+        $missionId = 0;
+        try {
+            $missionId = repo_create_mission($db, ['mission_name' => $prefix . '_m'], false, null);
+            $vmName = strtoupper($prefix);
+            $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
+            $stmt->bind_param('iss', $missionId, $vmName, $vmName);
+            $stmt->execute();
+            $vmId = (int) $db->insert_id;
+            $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', ?, 'dhcp')");
+            $stmt->bind_param('is', $vmId, $mac);
+            $stmt->execute();
+
+            // First report: the success shape echoes the resolved vm_id.
+            $detail = $prefix . '-detail';
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => $mac, 'phase' => 'getinfo', 'event' => 'started', 'detail' => $detail]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status);
+            self::assertSame(['success' => true, 'vm_id' => $vmId], json_decode($body, true, 512, JSON_THROW_ON_ERROR), 'reportPhase success wire shape');
+
+            // It landed in the client-event log.
+            $count = (int) ($db->query('SELECT COUNT(*) AS c FROM deploy_client_events WHERE vm_id = ' . $vmId)->fetch_assoc()['c'] ?? 0);
+            self::assertSame(1, $count, 'the event was recorded once');
+
+            // An identical repeat inside the dedup window is acknowledged as a
+            // duplicate and writes no second row.
+            [$status2, , $body2] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => $mac, 'phase' => 'getinfo', 'event' => 'started', 'detail' => $detail]);
+            self::assertSame(200, $status2);
+            self::assertSame(['success' => true, 'vm_id' => $vmId, 'deduplicated' => true], json_decode($body2, true, 512, JSON_THROW_ON_ERROR), 'the duplicate wire shape carries deduplicated:true');
+            $count2 = (int) ($db->query('SELECT COUNT(*) AS c FROM deploy_client_events WHERE vm_id = ' . $vmId)->fetch_assoc()['c'] ?? 0);
+            self::assertSame(1, $count2, 'the duplicate wrote no second row');
+        } finally {
+            if ($missionId > 0) {
+                $db->query('DELETE FROM deploy_client_events WHERE vm_id IN (SELECT id FROM deploy_vms WHERE mission_id = ' . $missionId . ')');
+                $db->query('DELETE FROM deploy_missions WHERE id = ' . $missionId);
+            }
+        }
+    }
+
+    public function testInvalidJsonBodyReturns400(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => '{not valid json',
+                'ignore_errors' => true,
+                'timeout' => 5,
+            ],
+        ]);
+        $body = @file_get_contents(virtusphere_test_base_url() . '/mecm_report.php?action=heartbeat', false, $context);
+        if ($body === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable.');
+        }
+        // $http_response_header is populated by the successful call above; no
+        // `?? []` guard (the post() helper's guarded use is the baselined one).
+        $status = 0;
+        foreach ($http_response_header as $header) {
+            if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match) === 1) {
+                $status = (int) $match[1];
+            }
+        }
+        self::assertContains($status, [400, 401], 'malformed JSON is a 400 (or the token gate if one is configured)');
+    }
+
     // Only action=heartbeat can return 401 (report token). reportPhase is
     // MAC-authenticated and never token-gated, so its posts skip on 401 as a
     // no-op safety net only.

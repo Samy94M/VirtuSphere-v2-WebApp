@@ -38,7 +38,7 @@ Run PHPUnit inside the PHP container:
 docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html test
 ```
 
-Run PHPStan (level 4, baseline ratchet per ADR-0015) inside the PHP container:
+Run PHPStan (level 5, baseline ratchet per ADR-0015) inside the PHP container:
 
 ```powershell
 docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html run stan
