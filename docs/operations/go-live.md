@@ -81,6 +81,31 @@ sh scripts/backup.sh            # Erstsicherung, Ablage/Runbook siehe docs/opera
 Restore-Probe (`scripts/restore_test.sh`) mindestens einmal ausführen, bevor
 produktive Daten entstehen.
 
+## Schritt 3a: DB-Anwendungskonto rotieren (bei Bedarf)
+
+Eine Passwortrotation braucht ein Wartungsfenster und ein aktuelles Backup.
+Das kurze Fenster zwischen DB-Änderung und Container-Neustart liefert
+erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen:
+
+1. Interaktiv in MySQL anmelden und das Anwendungskonto ändern:
+   `ALTER USER '<DB_USER>'@'%' IDENTIFIED BY '<neues Passwort>';`
+2. `DB_PASS` in der produktiven `.env` sofort auf denselben Wert setzen.
+3. Die DB-Clients mit der neuen Umgebung neu erzeugen:
+
+   ```bash
+   docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker
+   docker compose restart webserver
+   ```
+
+   Der Webserver-Neustart ist erforderlich: nginx löst den Namen des neu
+   erzeugten PHP-Containers beim eigenen Start auf; ohne Neustart kann trotz
+   gesundem PHP-Container ein HTTP 502 zurückbleiben.
+4. Mit `docker compose ps`, `health.php`,
+   `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check`
+   und den Container-Logs prüfen.
+5. Beim Rollback Passwort und `.env` in umgekehrter Reihenfolge zurücksetzen
+   und anschließend dieselben Container erneut erzeugen bzw. neu starten.
+
 ## Schritt 4: Admin & Portal-Grundfunktion
 
 1. **Admin-Konto klären.** Es existiert bereits ein Konto `admin`; das

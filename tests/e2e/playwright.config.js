@@ -20,6 +20,14 @@ const CHROMIUM =
 // that this Chromium fails with ERR_CONNECTION_REFUSED (portal-screenshot-setup).
 const BASE_URL = process.env.VIRTUSPHERE_BASE_URL || 'http://127.0.0.1:8021/portal/';
 
+// Chromium-engine launch options only: the resolved executable path and
+// --no-sandbox would break Firefox/WebKit if they sat in the global `use`,
+// and the msedge project must resolve through its channel, never a path.
+const CHROMIUM_LAUNCH = {
+  ...(CHROMIUM ? { executablePath: CHROMIUM } : {}),
+  args: ['--no-sandbox'],
+};
+
 module.exports = defineConfig({
   testDir: './specs',
   // A shared dev DB is not safe to hammer in parallel, and destructive specs
@@ -42,21 +50,41 @@ module.exports = defineConfig({
     // Every test asserts the air-gap, so a stray external request is a failure,
     // not a hang: fail fast instead of waiting out the connect timeout.
     navigationTimeout: 15000,
-    launchOptions: {
-      // Spread instead of `executablePath: undefined`: Playwright treats the
-      // present-but-undefined key as "no browser" instead of falling back to
-      // its own registry install.
-      ...(CHROMIUM ? { executablePath: CHROMIUM } : {}),
-      args: ['--no-sandbox'],
-    },
   },
 
   projects: [
     // Auth setup: logs in once per role and writes storageState, reused below.
-    { name: 'setup', testMatch: /auth\.setup\.js/ },
+    // Runs on the Chromium engine; the storageState it writes is engine-neutral.
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.js/,
+      use: { launchOptions: CHROMIUM_LAUNCH },
+    },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: undefined },
+      // Spread instead of `executablePath: undefined`: Playwright treats the
+      // present-but-undefined key as "no browser" instead of falling back to
+      // its own registry install.
+      use: { ...devices['Desktop Chrome'], channel: undefined, launchOptions: CHROMIUM_LAUNCH },
+      dependencies: ['setup'],
+    },
+    // Release-lane browser matrix (ADR-0028 revision): Integration stays
+    // Chromium-only (`e2e-portal` gate); these projects run via the
+    // `e2e-browser-matrix`/`e2e-msedge` gates and `npm run test:matrix`.
+    // Firefox/WebKit come from the Playwright cache (npx playwright install).
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'msedge',
+      use: { ...devices['Desktop Edge'], channel: 'msedge', launchOptions: { args: ['--no-sandbox'] } },
       dependencies: ['setup'],
     },
   ],

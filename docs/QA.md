@@ -198,7 +198,7 @@ docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAP
 
 ## Browser E2E (dev-host only)
 
-A Playwright layer under `tests/e2e/` (ADR-0028). Dev-host tooling: `node_modules` is git-ignored and nothing is mounted into the containers. The same suite runs in two contexts: on demand against the local dev stack (this section), and as the `e2e-portal` gate of the Integration lane against the throwaway QA stack (ADR-0028 revision); the PR-facing Fast lane stays browser-free.
+A Playwright layer under `tests/e2e/` (ADR-0028). Dev-host tooling: `node_modules` is git-ignored and nothing is mounted into the containers. The same suite runs in three contexts: on demand against the local dev stack (this section), as the `e2e-portal` gate of the Integration lane (Chromium), and as the `e2e-browser-matrix`/`e2e-msedge` gates of the Release lane (Firefox, WebKit, Windows Edge) against the throwaway QA stack (ADR-0028 revision); the PR-facing Fast lane stays browser-free. `npm test` stays pinned to Chromium for the dev loop; `npm run test:matrix` runs the other engines after a one-time `npx playwright install firefox webkit` (Edge resolves through the installed browser).
 
 ```bash
 cd tests/e2e

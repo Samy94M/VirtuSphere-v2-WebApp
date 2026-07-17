@@ -5,7 +5,11 @@
 FROM nginx:1.31-alpine@sha256:7068961d45b07b2af510ac002e9daa63a1d3eba2111202d6768798690800fffd
 COPY ./default.conf /etc/nginx/conf.d/default.conf
 
-RUN mkdir -p /etc/nginx/ssl /etc/nginx/virtusphere-conf.d
+# Keep this identical to Docker/php/Dockerfile. Named shared volumes inherit
+# the mount-point metadata from the first image that initializes them.
+RUN mkdir -p /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
+    && chown 33:0 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
+    && chmod 0770 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d
 
 COPY init.sh /init.sh
 RUN chmod +x /init.sh

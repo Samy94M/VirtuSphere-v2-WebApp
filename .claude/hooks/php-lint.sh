@@ -43,4 +43,18 @@ case "$file_path" in
     exit 2
     ;;
 esac
+
+# Guard-Harness fixtures and other edited PHP files outside Docker/WebAPI are
+# not mounted into the running app container. Reuse the already-built project
+# image with a narrow read-only mount instead of requiring host PHP.
+php_image="virtusphere-v2-webapp-php"
+if command -v docker >/dev/null 2>&1 && docker image inspect "$php_image" >/dev/null 2>&1; then
+  lint_dir="$(dirname "$file_path")"
+  lint_name="$(basename "$file_path")"
+  if ! out=$(docker run --rm -v "$lint_dir:/lint:ro" "$php_image" php -l "/lint/$lint_name" 2>&1); then
+    echo "BLOCK: PHP-Syntaxfehler in $file_path (Container-Lint)" >&2
+    echo "$out" >&2
+    exit 2
+  fi
+fi
 exit 0

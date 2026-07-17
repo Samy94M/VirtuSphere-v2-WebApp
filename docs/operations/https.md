@@ -30,6 +30,9 @@ WP7-Update): `WEB_HTTPS_PORT` in `.env` setzen und `docker compose up -d`
 ausführen (neue Mounts + Portmapping). `Docker/nginx/ssl` und
 `Docker/nginx/conf.d` müssen für uid 33 (`www-data`, den PHP-FPM-Worker)
 schreibbar sein, z. B. `chown 33:33` auf dem Docker-Host.
+Bei den von Compose verwalteten Named Volumes initialisieren PHP- und
+nginx-Image diese Verzeichnisse automatisch als `33:0` mit Modus `0770`.
+Nur bei Bind-Mounts muss der Betreiber die Host-Rechte selbst passend setzen.
 
 ## Erneuerung
 

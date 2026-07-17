@@ -470,8 +470,8 @@ function Invoke-HookWithPayload {
 }
 
 # Hook-Payload-Faelle: ungueltige Payloads duerfen weder crashen noch blocken
-# (Exit 0); eine Payload auf eine kaputte PHP-Datei muss blocken (Exit 2),
-# sofern Host-PHP existiert.
+# (Exit 0); eine Payload auf eine kaputte PHP-Datei muss blocken (Exit 2).
+# Der Hook nutzt Host-PHP oder fuer fixture-fremde Pfade das Projekt-Image.
 $cases += @(
     @{ Name = 'hooks.php-lint.invalid-payload'; Body = {
         Assert-Guard (Invoke-HookWithPayload '.claude/hooks/php-lint.sh' 'kein json {{{') @(0)
@@ -483,7 +483,6 @@ $cases += @(
         Assert-Guard (Invoke-HookWithPayload '.claude/hooks/lint-csp-patterns.sh' 'kein json {{{') @(0)
     } }
     @{ Name = 'hooks.php-lint.blocks-syntax-error'; Body = {
-        if (-not (Test-Command 'php')) { return @{ Status = 'infra'; Detail = 'Host-PHP fehlt; der Hook lintet fixture-fremde Pfade nur mit Host-PHP' } }
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.php' "<?php`nif (true {`n"
         $payload = '{"tool_input":{"file_path":"' + (($fx -replace '\\', '/') + '/broken.php') + '"}}'

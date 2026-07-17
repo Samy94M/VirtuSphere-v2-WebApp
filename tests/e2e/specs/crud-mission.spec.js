@@ -7,6 +7,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { execFileSync } = require('node:child_process');
 
 test.use({ storageState: ROLES.admin.storageState });
@@ -89,10 +90,11 @@ test.afterAll(() => cleanup());
 async function createMission(page, name) {
   await page.goto('missions.php?type=missions');
   await page.locator('form:has(input[name="action"][value="create"]) input[name="mission_name"]').fill(name);
-  await Promise.all([
-    page.waitForURL(/missions\.php/),
-    page.locator('form:has(input[name="action"][value="create"]) button[type="submit"]').click(),
-  ]);
+  await submitAndWaitForNavigation(
+    page,
+    page.locator('form:has(input[name="action"][value="create"]) button[type="submit"]'),
+    'missions.php'
+  );
   return idByName(name);
 }
 
@@ -104,7 +106,7 @@ test('create: the mission appears in the list, in a fresh GET and in the DB', as
 
   // Fresh GET, not the POST response.
   await page.goto('missions.php?type=missions');
-  const row = page.locator('tr', { has: page.locator(`a[href*="mission_details.php?id=${id}"]`) });
+  const row = page.locator('tr', { has: page.locator(`a[href="mission_details.php?id=${id}"]`) });
   await expect(row, 'the new mission is listed').toHaveCount(1);
   expect((await row.locator('td').first().textContent()).trim()).toBe(name);
 });
@@ -120,10 +122,11 @@ test('edit: a change survives reload and leaves a neighbor field untouched', asy
   // Change the domain (a neighbor of mission_name) through the detail form.
   await page.goto(`mission_details.php?id=${id}`);
   await page.locator('form:has(input[name="action"][value="update"]) input[name="domain"]').fill('corp.example.local');
-  await Promise.all([
-    page.waitForURL(/mission_details\.php/),
-    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first().click(),
-  ]);
+  await submitAndWaitForNavigation(
+    page,
+    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first(),
+    'mission_details.php'
+  );
 
   let stored = missionRow(id);
   expect(stored.domain, 'the domain persisted').toBe('corp.example.local');
@@ -133,10 +136,11 @@ test('edit: a change survives reload and leaves a neighbor field untouched', asy
   const renamed = PREFIX + 'edit-1-renamed';
   await page.goto(`mission_details.php?id=${id}`);
   await page.locator('form:has(input[name="action"][value="update"]) input[name="mission_name"]').fill(renamed);
-  await Promise.all([
-    page.waitForURL(/mission_details\.php/),
-    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first().click(),
-  ]);
+  await submitAndWaitForNavigation(
+    page,
+    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first(),
+    'mission_details.php'
+  );
 
   stored = missionRow(id);
   expect(stored.mission_name, 'the rename persisted after reload').toBe(renamed);
@@ -150,7 +154,7 @@ test('delete: Cancel keeps the row, Confirm removes it from the DB and the list'
   const id = await createMission(page, name);
 
   await page.goto('missions.php?type=missions');
-  const row = page.locator('tr', { has: page.locator(`a[href*="mission_details.php?id=${id}"]`) });
+  const row = page.locator('tr', { has: page.locator(`a[href="mission_details.php?id=${id}"]`) });
   const deleteButton = row.locator('button.button-danger');
   const dialog = page.locator('[data-confirm-dialog]');
 
@@ -174,13 +178,10 @@ test('delete: Cancel keeps the row, Confirm removes it from the DB and the list'
   // Confirm: the row is removed from the DB and the list.
   await deleteButton.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/missions\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'missions.php');
   expect(missionRow(id), 'Confirm deleted the mission from the DB').toBeNull();
   await expect(
-    page.locator('tr', { has: page.locator(`a[href*="mission_details.php?id=${id}"]`) }),
+    page.locator('tr', { has: page.locator(`a[href="mission_details.php?id=${id}"]`) }),
     'the row is gone from the list'
   ).toHaveCount(0);
 });

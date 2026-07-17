@@ -25,6 +25,14 @@ COPY --from=composer:2@sha256:5946476338742b200bb9ff88f8be56275ddae4b3949c72305c
 COPY conf.d/zz-virtusphere.ini /usr/local/etc/php/conf.d/
 COPY fpm.d/zz-virtusphere.conf /usr/local/etc/php-fpm.d/zz-virtusphere.conf
 
+# Shared HTTPS volumes may be empty named volumes (QA/fresh installs). Docker
+# copies mount-point ownership from whichever image initializes the volume
+# first, so both PHP and nginx declare the same contract: PHP-FPM's uid 33 owns
+# the directories and root (nginx init/watcher) keeps group write access.
+RUN mkdir -p /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
+    && chown 33:0 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
+    && chmod 0770 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d
+
 WORKDIR /var/www/html
 
 EXPOSE 9000

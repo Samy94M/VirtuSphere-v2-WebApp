@@ -5,6 +5,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { runPhp, phpJson } = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
@@ -70,10 +71,7 @@ test('create: the credential appears in the DB and in a fresh GET', async ({ pag
   await form.locator('input[name="port"]').fill('1');
   await form.locator('input[name="username"]').fill('root');
   await form.locator('input[name="secret"]').fill('e2e-secret-123');
-  await Promise.all([
-    page.waitForURL(/credentials\.php/),
-    form.locator('button[type="submit"]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, form.locator('button[type="submit"]'), 'credentials.php');
 
   const id = idByName(name);
   expect(id, 'row exists in the DB').toBeGreaterThan(0);
@@ -94,10 +92,7 @@ test('update: a host change persists and the username neighbor is untouched', as
   const editor = page.locator(`#credential-editor-${id}`);
   await expect(editor).toBeVisible();
   await editor.locator('input[name="host"]').fill('127.0.0.2');
-  await Promise.all([
-    page.waitForURL(/credentials\.php/),
-    editor.locator('button[type="submit"]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, editor.locator('button[type="submit"]'), 'credentials.php');
 
   const stored = credentialRow(id);
   expect(stored.host, 'the host change persisted').toBe('127.0.0.2');
@@ -146,10 +141,7 @@ test('delete: Cancel keeps the row, Confirm removes it', async ({ page }) => {
   // Confirm: the row is gone from the DB and the list.
   await row.locator('button[name="action"][value="delete"]').click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/credentials\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
   expect(credentialRow(id), 'Confirm deleted the credential').toBeNull();
   await expect(page.locator('tr', { hasText: name }), 'the row is gone from the list').toHaveCount(0);
 });

@@ -195,6 +195,35 @@ function Test-Container {
     return ($r.ExitCode -eq 0)
 }
 
+# Playwright-Browsercache: liegt eine Engine (chromium/firefox/webkit) in
+# einem der Playwright-Cache-Wurzelverzeichnisse? Der msedge-Channel laeuft
+# nicht ueber den Cache, sondern ueber das installierte Edge.
+function Test-PlaywrightEngineCache {
+    param([string]$Engine)
+    $cacheRoots = @()
+    if ($env:PLAYWRIGHT_BROWSERS_PATH) { $cacheRoots += $env:PLAYWRIGHT_BROWSERS_PATH }
+    if ($env:LOCALAPPDATA) { $cacheRoots += (Join-Path $env:LOCALAPPDATA 'ms-playwright') }
+    if ($env:HOME) { $cacheRoots += (Join-Path (Join-Path $env:HOME '.cache') 'ms-playwright') }
+    foreach ($cacheRoot in $cacheRoots) {
+        if ((Test-Path $cacheRoot) -and (@(Get-ChildItem -Path $cacheRoot -Directory -Filter ($Engine + '-*') -ErrorAction SilentlyContinue).Count -gt 0)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+# Chromium-Preflight statt Textmuster im Playwright-Output (die fehlt-Lektion
+# aus dem Pester-Gate): env-Pfad, Playwright-Cache oder der Dev-Default aus
+# playwright.config.js. Nichts davon da -> Infrastruktur.
+function Test-PlaywrightChromium {
+    if ($env:PLAYWRIGHT_CHROMIUM) {
+        if (Test-Path $env:PLAYWRIGHT_CHROMIUM) { return $true }
+    }
+    if (Test-PlaywrightEngineCache 'chromium') { return $true }
+    # Derselbe Literal-Default wie in tests/e2e/playwright.config.js.
+    return (Test-Path 'C:\Users\Samy\AppData\Local\ms-playwright\chromium-1223\chrome-win64\chrome.exe')
+}
+
 # Git-Bash-sh finden (Windows) bzw. sh vom PATH (Linux/pwsh).
 function Find-Sh {
     if (Test-Command 'sh') { return (Get-Command 'sh').Source }
@@ -719,36 +748,18 @@ Add-Gate -Name 'health-contract' -Lanes $intRel -Kind 'container' -Body {
     New-PassResult 'nginx -t OK, health=200, /tests=403'
 }
 
-Add-Gate -Name 'e2e-portal' -Lanes $intRel -Kind 'native' -Network $true -Body {
-    # Playwright-Chromium gegen den QA-Stack (ADR-0028-Revision): beweist, was
-    # nur ein Browser beweisen kann. Netzabhaengig wegen npm ci beim Erstlauf.
+# Gemeinsamer Playwright-Lauf gegen den QA-Stack, geteilt von e2e-portal
+# (Integration, Chromium) und der Release-Browser-Matrix: Preflight fuer
+# Stack/npm/Suite plus Chromium (das setup-Projekt mit Login/storageState
+# laeuft immer auf der Chromium-Engine), npm ci beim Erstlauf, QA-Env,
+# Projektlauf. Engine-spezifische Preflights bleiben im jeweiligen Gate.
+function Invoke-PlaywrightSuite {
+    param([string[]]$Projects, [string]$OkDetail, [string]$FailDetail)
     if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
     if (-not (Test-Command 'npm')) { return New-InfraResult 'npm fehlt (Node auf dem Pruef-Host noetig)' }
     $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
     if (-not (Test-Path (Join-Path $e2eDir 'package.json'))) { return New-InfraResult 'tests/e2e fehlt unter dem Pruef-Root' }
-
-    # Browser-Preflight statt Textmuster im Playwright-Output (die
-    # fehlt-Lektion aus dem Pester-Gate): env-Pfad, Playwright-Cache oder der
-    # Dev-Default aus playwright.config.js. Nichts davon da -> Infrastruktur.
-    $browserOk = $false
-    if ($env:PLAYWRIGHT_CHROMIUM) { $browserOk = (Test-Path $env:PLAYWRIGHT_CHROMIUM) }
-    if (-not $browserOk) {
-        $cacheRoots = @()
-        if ($env:PLAYWRIGHT_BROWSERS_PATH) { $cacheRoots += $env:PLAYWRIGHT_BROWSERS_PATH }
-        if ($env:LOCALAPPDATA) { $cacheRoots += (Join-Path $env:LOCALAPPDATA 'ms-playwright') }
-        if ($env:HOME) { $cacheRoots += (Join-Path (Join-Path $env:HOME '.cache') 'ms-playwright') }
-        foreach ($cacheRoot in $cacheRoots) {
-            if ((Test-Path $cacheRoot) -and (@(Get-ChildItem -Path $cacheRoot -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue).Count -gt 0)) {
-                $browserOk = $true
-                break
-            }
-        }
-    }
-    if (-not $browserOk) {
-        # Derselbe Literal-Default wie in tests/e2e/playwright.config.js.
-        $browserOk = (Test-Path 'C:\Users\Samy\AppData\Local\ms-playwright\chromium-1223\chrome-win64\chrome.exe')
-    }
-    if (-not $browserOk) { return New-InfraResult 'kein Chromium fuer Playwright: PLAYWRIGHT_CHROMIUM setzen oder npx playwright install chromium' }
+    if (-not (Test-PlaywrightChromium)) { return New-InfraResult 'kein Chromium fuer Playwright: PLAYWRIGHT_CHROMIUM setzen oder npx playwright install chromium' }
 
     if (-not (Test-Path (Join-Path $e2eDir 'node_modules'))) {
         $ci = Invoke-Tool 'npm' @('--prefix', $e2eDir, 'ci')
@@ -768,14 +779,22 @@ Add-Gate -Name 'e2e-portal' -Lanes $intRel -Kind 'native' -Network $true -Body {
         $prevEnv[$k] = [Environment]::GetEnvironmentVariable($k)
         [Environment]::SetEnvironmentVariable($k, [string]$e2eEnv[$k])
     }
+    $projectArgs = @()
+    foreach ($p in $Projects) { $projectArgs += ('--project=' + $p) }
     Push-Location $e2eDir
     try {
-        $r = Invoke-Tool 'npx' @('playwright', 'test', '--project=chromium')
+        $r = Invoke-Tool 'npx' (@('playwright', 'test') + $projectArgs)
     } finally {
         Pop-Location
         foreach ($k in $prevEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $prevEnv[$k]) }
     }
-    Format-ToolResult $r 'Playwright-Chromium-Suite gruen (QA-Stack)' 'Playwright-Suite rot'
+    Format-ToolResult $r $OkDetail $FailDetail
+}
+
+Add-Gate -Name 'e2e-portal' -Lanes $intRel -Kind 'native' -Network $true -Body {
+    # Playwright-Chromium gegen den QA-Stack (ADR-0028-Revision): beweist, was
+    # nur ein Browser beweisen kann. Netzabhaengig wegen npm ci beim Erstlauf.
+    Invoke-PlaywrightSuite @('chromium') 'Playwright-Chromium-Suite gruen (QA-Stack)' 'Playwright-Suite rot'
 }
 
 Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {
@@ -799,6 +818,34 @@ Add-Gate -Name 'legacy-csharp-build' -Lanes $intRel -Kind 'windows-only' -Networ
 }
 
 # --- Release-Lane -------------------------------------------------------------
+
+# Volle Browser-Matrix (ADR-0028-Revision): dieselbe Suite wie e2e-portal auf
+# den Engines, die die Integration-Lane nicht faehrt. Firefox/WebKit sind
+# plattformneutral aus dem Playwright-Cache; Edge haengt am installierten
+# Windows-Edge und ist deshalb ein eigenes windows-only-Gate, damit es auf
+# einem Linux-Release-Runner sichtbar not_applicable wird statt still zu fehlen.
+Add-Gate -Name 'e2e-browser-matrix' -Lanes @('Release') -Kind 'native' -Network $true -Body {
+    foreach ($engine in @('firefox', 'webkit')) {
+        if (-not (Test-PlaywrightEngineCache $engine)) {
+            return New-InfraResult ('kein ' + $engine + ' fuer Playwright: npx playwright install ' + $engine)
+        }
+    }
+    Invoke-PlaywrightSuite @('firefox', 'webkit') 'Playwright-Suite gruen auf Firefox und WebKit (QA-Stack)' 'Browser-Matrix rot'
+}
+
+Add-Gate -Name 'e2e-msedge' -Lanes @('Release') -Kind 'windows-only' -Network $true -Body {
+    if (-not $isWindowsHost) { return New-NaResult 'windows-only: der msedge-Channel braucht ein installiertes Windows-Edge' }
+    $edgeFound = $false
+    foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if (-not $root) { continue }
+        if (Test-Path (Join-Path $root 'Microsoft\Edge\Application\msedge.exe')) {
+            $edgeFound = $true
+            break
+        }
+    }
+    if (-not $edgeFound) { return New-InfraResult 'msedge.exe nicht gefunden (installiertes Edge noetig fuer den msedge-Channel)' }
+    Invoke-PlaywrightSuite @('msedge') 'Playwright-Suite gruen auf Windows-Edge (QA-Stack)' 'Edge-Lauf rot'
+}
 
 Add-Gate -Name 'restore-drill' -Lanes @('Release') -Kind 'container' -Body {
     $r = Invoke-CheckShell 'restore_test.sh' @()

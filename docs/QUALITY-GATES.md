@@ -54,6 +54,8 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 
 | Gate | Beweist | Form | Rot heißt meist |
 |---|---|---|---|
+| `e2e-browser-matrix` | Dieselbe Playwright-Suite wie `e2e-portal` auf Firefox und WebKit (ADR-0028-Revision: die volle Browser-Matrix gehört zur Release-Lane) | nativ, Netz für Toolbezug | Engine-spezifische Regression; Report im Artefakt |
+| `e2e-msedge` | Dieselbe Suite auf Windows-Edge über den `msedge`-Channel | windows-only, Netz für Toolbezug | Edge-spezifische Regression; off-Windows `not_applicable` |
 | `restore-drill` | Backup + Restore in isolierten Containern: Hash/Manifest, Rowcounts, Schemafingerprint, Invarianten, App-Smoke, Credential-Entschlüsselung mit richtigem und Scheitern mit falschem `APP_KEY` (ADR-0017) | containerisiert | Restore-Pfad oder Schlüsselmaterial-Handling gebrochen |
 | `secret-scan` | Kein Secret in der vollständigen Git-Historie | containerisiert, Netz | Neues Secret committet: rotieren, nicht nur löschen |
 | `sbom` | SPDX-SBOM je Runtime-Image | containerisiert, Netz | Toolfehler; SBOM gehört ins Artefakt |

@@ -5,6 +5,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { runPhp, phpJson } = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
@@ -65,10 +66,7 @@ test('create: the account exists with must_change_password set', async ({ page }
   await form.locator('input[name="name"]').fill(name);
   await form.locator('input[name="password"]').fill(PASSWORD);
   await form.locator('select[name="role"]').selectOption('user');
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    form.locator('button[type="submit"]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, form.locator('button[type="submit"]'), 'users.php');
 
   const stored = phpJson(`
 $db = db();
@@ -107,19 +105,13 @@ test('set_active: deactivating asks (Cancel changes nothing), activating does no
   // Confirm: the account is deactivated.
   await deactivate.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'users.php');
   expect(Number(userRow(id).is_active), 'Confirm deactivated the account').toBe(0);
 
   // Harmless branch: activating fires without any dialog.
   const activate = targetRow(page, name).locator('form:has(input[name="action"][value="set_active"]) button');
   await expect(activate, 'the activate branch renders no confirm').not.toHaveAttribute('data-confirm', /./);
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    activate.click(),
-  ]);
+  await submitAndWaitForNavigation(page, activate, 'users.php');
   expect(Number(userRow(id).is_active), 'the account is active again').toBe(1);
 });
 
@@ -143,10 +135,7 @@ test('set_role: Cancel keeps the role, Confirm changes it', async ({ page }) => 
 
   await form.locator('button[type="submit"]').click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'users.php');
   expect(userRow(id).role, 'Confirm changed the role').toBe('admin');
 });
 
@@ -171,10 +160,7 @@ test('reset_password: Cancel keeps the hash, Confirm replaces it and forces a ch
 
   await form.locator('button[type="submit"]').click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'users.php');
   const after = userRow(id);
   expect(after.password, 'Confirm replaced the hash').not.toBe(before.password);
   expect(Number(after.must_change_password), 'the next login forces a change').toBe(1);
@@ -193,9 +179,6 @@ $stmt->execute();
   await page.goto('users.php');
   const unlock = targetRow(page, name).locator('form:has(input[name="action"][value="clear_lock"]) button');
   await expect(unlock, 'unlocking is a reversible remediation and needs no prompt').not.toHaveAttribute('data-confirm', /./);
-  await Promise.all([
-    page.waitForURL(/users\.php/),
-    unlock.click(),
-  ]);
+  await submitAndWaitForNavigation(page, unlock, 'users.php');
   expect(userRow(id).locked_until, 'the lock is cleared').toBeNull();
 });

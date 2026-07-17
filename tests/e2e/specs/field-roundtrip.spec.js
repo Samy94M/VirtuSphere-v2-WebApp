@@ -12,6 +12,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { execFileSync } = require('node:child_process');
 
 test.use({ storageState: ROLES.admin.storageState });
@@ -82,8 +83,8 @@ function createButton(page) {
 async function createMissionViaUi(page, name) {
   await page.goto('missions.php?type=missions');
   await page.locator('form:has(input[name="action"][value="create"]) input[name="mission_name"]').fill(name);
-  await Promise.all([page.waitForURL(/missions\.php/), createButton(page).click()]);
-  // The redirect lands back on the list; resolve the id of the row we just made.
+  await submitAndWaitForNavigation(page, createButton(page), 'missions.php');
+  // The redirect lands on the new detail page; resolve the id of the row.
   return idByName(name);
 }
 
@@ -125,7 +126,7 @@ for (const probe of PROBES) {
     // cell. A `<script>` in the value proves it renders as literal text.
     await page.goto('missions.php?type=missions');
     const row = page.locator('tr', {
-      has: page.locator(`a[href*="mission_details.php?id=${missionId}"]`),
+      has: page.locator(`a[href="mission_details.php?id=${missionId}"]`),
     });
     await expect(row, 'the mission appears in the list').toHaveCount(1);
     expect((await row.locator('td').first().textContent()).trim(), 'list cell renders the value verbatim')
@@ -147,11 +148,28 @@ test('no-op re-save keeps the value unchanged (idempotency)', async ({ page }) =
   const missionId = await createMissionViaUi(page, value);
   expect(missionColumn(missionId, 'mission_name')).toBe(value);
 
+  // The compact create form intentionally leaves the infrastructure fields
+  // empty. The detail form requires them, so make the row valid before the
+  // no-op submit; otherwise native browser validation blocks the POST and an
+  // unchanged DB value proves nothing.
+  runPhp(`
+$db = db();
+$stmt = $db->prepare('UPDATE deploy_missions SET hypervisor_datastorage = ?, hypervisor_datacenter = ?, domain = ? WHERE id = ?');
+$datastore = 'ds1';
+$datacenter = 'DC1';
+$domain = 'seed.example.local';
+$id = ${Number(missionId)};
+$stmt->bind_param('sssi', $datastore, $datacenter, $domain, $id);
+$stmt->execute();
+echo 'READY';
+`);
+
   // Re-save the detail form without changing anything.
   await page.goto(`mission_details.php?id=${missionId}`);
-  await Promise.all([
-    page.waitForURL(/mission_details\.php/),
-    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first().click(),
-  ]);
+  await submitAndWaitForNavigation(
+    page,
+    page.locator('form:has(input[name="action"][value="update"]) button[type="submit"]').first(),
+    'mission_details.php'
+  );
   expect(missionColumn(missionId, 'mission_name'), 'value unchanged after a no-op re-save').toBe(value);
 });

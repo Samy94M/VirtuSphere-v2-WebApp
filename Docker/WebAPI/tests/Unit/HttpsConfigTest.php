@@ -129,6 +129,28 @@ final class HttpsConfigTest extends TestCase
         self::assertSame('virtusphere.local', $meta['subject']);
     }
 
+    public function testBothImagesInitializeSharedHttpsVolumesForPhpAndNginx(): void
+    {
+        $repoRoot = dirname(__DIR__, 4);
+        $expected = [
+            'chown 33:0 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d',
+            'chmod 0770 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d',
+        ];
+
+        foreach (['Docker/php/Dockerfile', 'Docker/nginx/Dockerfile'] as $relativePath) {
+            $path = $repoRoot . '/' . $relativePath;
+            self::assertFileExists($path);
+            $dockerfile = (string) file_get_contents($path);
+            foreach ($expected as $contract) {
+                self::assertStringContainsString(
+                    $contract,
+                    $dockerfile,
+                    $relativePath . ' must initialize empty shared HTTPS volumes with the same ownership contract'
+                );
+            }
+        }
+    }
+
     public function testRenderedConfServesTlsAndContainsNoKeyMaterial(): void
     {
         $conf = https_render_nginx_conf();

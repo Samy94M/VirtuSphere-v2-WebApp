@@ -4,8 +4,9 @@
   "private": true,
   "description": "Dev-only Playwright E2E layer for the VirtuSphere portal (ADR-0028). Not part of the shipped artifact; node_modules is git-ignored and installed on the dev host.",
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
+    "test": "playwright test --project=chromium",
+    "test:headed": "playwright test --headed --project=chromium",
+    "test:matrix": "playwright test --project=firefox --project=webkit --project=msedge",
     "report": "playwright show-report"
   },
   "devDependencies": {
