@@ -34,13 +34,6 @@ final class E2eActionCoverageContractTest extends TestCase
      * @var array<string, string>
      */
     private const PENDING_ACTIONS = [
-        // Etappe 7, deploy slice: these need the worker/QA-stack choreography.
-        'deploy.php:start' => 'deploy actions spec',
-        'deploy.php:cancel' => 'deploy actions spec',
-        'deploy.php:cancel_group' => 'deploy actions spec',
-        'deploy.php:retry' => 'deploy actions spec',
-        'deploy_log.php:cancel' => 'deploy actions spec',
-
         // Etappe 7, HTTPS slice: the enable/disable dance needs cert material
         // and a stack whose listener may flip (QA stack, not the dev stack).
         'settings.php:save_https_enabled' => 'HTTPS cert upload flow spec',
