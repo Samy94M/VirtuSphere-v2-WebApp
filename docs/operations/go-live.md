@@ -197,7 +197,7 @@ Das Passwort bleibt trotzdem kompromittiert: die Datei stammt aus dem **Initial-
 |---|---|
 | Alt-Credential aus der Git-Historie (Schritt 0) | **muss rotiert werden**, unabhängig vom Löschen der Datei |
 | Admin-Passwort (Schritt 4) | Entscheidung des Betreibers |
-| PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + 80 Pester-Tests in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte SCCM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
+| PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte SCCM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
 | Portal auf HTTPS umstellen | Die PS-Skripte können es jetzt (`Scheme`-Registry-Wert, `-Scheme`-Parameter im Installer). Wer HTTP **abschaltet**, muss den Wert auf `https` setzen, sonst steht die MECM-Integration und die PXE-Client-Kette still |
 | Frische-DB-Migration (Schritt 2) | zweithöchstes Risiko: Konvergenz nie produktiv gelaufen |
 | Deploy-Worker/Ansible gegen echtes ESXi | Teil des ungetesteten Kerns, nicht nur MECM |

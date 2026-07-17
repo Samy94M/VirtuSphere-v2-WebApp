@@ -15,7 +15,7 @@ if command -v php >/dev/null 2>&1 && [ -f scripts/lang-audit.php ]; then
 fi
 
 # Drift-Checks (leise; bei Drift eine Warnzeile mit dem Reproduktions-Kommando)
-for check in enum-sync php-version-sync doc-hygiene; do
+for check in enum-sync php-version-sync doc-hygiene doc-semantics; do
   script="scripts/check-$check.sh"
   if [ -f "$script" ] && ! sh "$script" --quiet >/dev/null 2>&1; then
     echo "VirtuSphere warning: Drift in check-$check; run sh $script"

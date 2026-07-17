@@ -214,6 +214,16 @@ $phpVerFixtureFiles = @(
     'Docker/WebAPI/lib/constants.php', 'CLAUDE.md', 'AGENTS.md'
 )
 $docFixtureFiles = @('AGENTS.md', 'GROK.md', 'CLAUDE.md', 'README.md')
+# doc-semantics liest den vollen Doku-Scope plus seine SSoT-Quellen; eine
+# unvollstaendige Fixture wuerde ueber missing-file rot und die Mutation
+# waere nicht mehr der bewiesene Grund.
+$docSemFixtureFiles = @(
+    'README.md', 'AGENTS.md', 'GROK.md', 'CLAUDE.md', 'PRE-SHIP-CHECKLIST.md',
+    'docs/QA.md', 'docs/QUALITY-GATES.md', 'docs/TESTPLAN.md',
+    'docs/DEPLOYMENT.md', 'docs/INSTALLATION-ANLEITUNG.md',
+    'docs/operations', 'docs/security',
+    'Docker/WebAPI/phpstan.neon.dist', 'docker-compose.yml', '.github/workflows/ci.yml'
+)
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
 $enumList = "'queued','running','succeeded','failed','cancelled','partial'"
 
@@ -265,6 +275,25 @@ $cases = @(
         $pad = ("Zeile fuer das Budget`n" * 80)
         [System.IO.File]::AppendAllText((Join-Path $fx 'CLAUDE.md'), $pad)
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.line-budget\]'
+    } }
+
+    @{ Name = 'doc-semantics.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'doc-semantics.pre-ship-checked'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'PRE-SHIP-CHECKLIST.md' '- [ ] Fast-Lane' '- [x] Fast-Lane'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.pre-ship-checked\]'
+    } }
+    @{ Name = 'doc-semantics.stale-number'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/QA.md' 'PHPStan (level 5' 'PHPStan (level 4'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phpstan-level\]'
+    } }
+    @{ Name = 'doc-semantics.zero-match'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/phpstan.neon.dist' 'level: 5' 'tier: 5'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.no-ssot\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {

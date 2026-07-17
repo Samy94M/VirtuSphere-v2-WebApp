@@ -1,8 +1,6 @@
 # QA Baseline
 
-Date: 2026-07-07
-
-This page documents the lightweight local QA baseline introduced with ADR-0015. It is intentionally container-first so checks work the same way on Windows hosts and in air-gapped LAN environments once Docker images and Composer vendor artifacts are present.
+This page is the operating manual for the VirtuSphere QA battery: how to run each check and how to debug a red one locally. What a gate means and how to interpret its result lives in `docs/QUALITY-GATES.md`; the decisions behind the setup are ADR-0015 (baseline and skip policy), ADR-0028 (E2E tiers) and ADR-0031 (runner). It is intentionally container-first so checks work the same way on Windows hosts and in air-gapped LAN environments once Docker images and Composer vendor artifacts are present.
 
 ## Canonical Check Runner
 
@@ -86,7 +84,7 @@ Expected results: PHPUnit and the Python client tests exit green, lang audit rep
 
 **No MySQL server** is provisioned: the Fast lane runs the unit + static suites without skips (`--fail-on-skipped`); the full suite including integration tests belongs to the Integration lane, which follows the ADR-0015 amendment and ADR-0028 revision. One step stays outside the lane on purpose: `lint-csp-patterns.sh --range <base> <head>` checks the pushed commit range (the lane's `csp-patterns` gate checks the worktree, which is always clean in CI; locally use `--worktree`).
 
-End-to-end browser tests stay out of this baseline; they are re-evaluated at the E3 milestone (ADR-0015). PHPStan findings in analysed files are fixed, not re-baselined; the legacy machine-API root files join the scope after the E3 retirement decision. To confirm the pipeline actually fails on regressions, remove a `__t()` key from one locale and observe the `lang-parity` gate turn red.
+End-to-end browser tests gate the Integration and Release lanes, never the PR-facing Fast lane (ADR-0028 revision); connected CI may fetch the Playwright tooling while the shipped artifact stays browser- and Node-free. PHPStan findings in analysed files are fixed, not re-baselined; the legacy machine-API root files join the scope after the E3 retirement decision. To confirm the pipeline actually fails on regressions, remove a `__t()` key from one locale and observe the `lang-parity` gate turn red.
 
 ## Phase C Regression Coverage
 
@@ -152,14 +150,17 @@ Every portal error page shows a reference like `error [a1b2c3d4e5f60718]`. That 
 
 ## Drift Checks
 
-Four checks guard SSoT mirrors and doc hygiene. They run quietly on every Claude session start and must be green before commits that touch the mirrored places:
+Five checks guard SSoT mirrors and doc hygiene. They run quietly on every Claude session start and must be green before commits that touch the mirrored places:
 
 ```powershell
 sh scripts/check-enum-sync.sh          # PHP-Const-SSoT vs. ENUM in struktur.sql und migrate.php
 sh scripts/check-php-version-sync.sh   # Dockerfile-FROM (SSoT) vs. composer.json, constants.php, Docs
 sh scripts/check-doc-hygiene.sh        # Changelog-Marker-Verbot + Zeilen-Budgets fuer AGENTS/GROK/CLAUDE/README
+sh scripts/check-doc-semantics.sh      # Betriebsdoku behauptet keine veraltbaren Staende (Zahlen, Level, Pfade)
 php scripts/check-bounds-sync.php      # keine Konstante als ausgeschriebene Zahl in Portal-Texten
 ```
+
+`check-doc-semantics` (AP9) polices the operating docs the way `check-bounds-sync` polices portal texts: `PRE-SHIP-CHECKLIST.md` must stay an empty template (no `[x]`, no dated evidence), no active doc may hardcode test/migration counts or load metrics, and PHPStan-level, MySQL- and Node-version mentions must match their SSoT (`phpstan.neon.dist`, `docker-compose.yml`, `ci.yml`). Retired backup paths may only appear next to a retirement marker. Historical documents (`docs/audits/`, `docs/CHANGELOG.md`, ADRs) are exempt: they describe a dated state on purpose.
 
 `check-bounds-sync` guards a failure that is quiet by construction: the code keeps working and only the prose starts lying, so no test notices. A text that states a number followed by a unit must interpolate the constant that owns it (`:min`, `:days`, …) instead of writing the digits. It matches on value **and** unit, because the stale timeout is 600 seconds, which is also 10 minutes, and "10 Prozent" in the backup hint is not that; a check that cries wolf is a check that gets ignored. Numbers the project does not own (the NetBIOS 15, a VARCHAR width, the MECM sync cadence configured on the SCCM server) are listed in `BOUNDS_EXEMPT` with the reason, and a stale exemption fails the check too.
 
@@ -174,7 +175,7 @@ See `docs/operations/backup.md` for the runbook and `PRE-SHIP-CHECKLIST.md` for 
 
 ## Schema Convergence Proof
 
-`struktur.sql` (the fresh-install schema, mounted into `docker-entrypoint-initdb.d`) and `lib/migrate.php` (17+ incremental delta migrations on top of that base) must converge to the same shape, and `struktur.sql` must load standalone on an empty volume:
+`struktur.sql` (the fresh-install schema, mounted into `docker-entrypoint-initdb.d`) and `lib/migrate.php` (incremental delta migrations on top of that base) must converge to the same shape, and `struktur.sql` must load standalone on an empty volume:
 
 ```bash
 sh scripts/check-schema-convergence.sh
@@ -197,7 +198,7 @@ docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAP
 
 ## Browser E2E (dev-host only)
 
-A Playwright layer under `tests/e2e/` (ADR-0028). Dev-host tooling: `node_modules` is git-ignored, nothing is mounted into the containers, and it does **not** run in CI (no MySQL, no browser there). Run it against the running stack before a release, not on every commit.
+A Playwright layer under `tests/e2e/` (ADR-0028). Dev-host tooling: `node_modules` is git-ignored and nothing is mounted into the containers. The same suite runs in two contexts: on demand against the local dev stack (this section), and as the `e2e-portal` gate of the Integration lane against the throwaway QA stack (ADR-0028 revision); the PR-facing Fast lane stays browser-free.
 
 ```bash
 cd tests/e2e
@@ -240,7 +241,7 @@ This one **does run in CI**, twice (AP5): under `pwsh` on `ubuntu-latest` in the
 
 `Docker/WebAPI/tests/fixtures/mac-vectors.json` is the shared source of truth for three implementations that cannot share a file, because they are deployed to three different machines: `virtusphere_normalize_mac()` (PHP), and the two `ConvertTo-VsNormalizedMac` twins (MECM server, deploy client). PHPUnit's `MacNormalizeTest` and Pester's `VirtuSphere.Common.Tests.ps1` both read that table, and a further Pester test asserts the two PowerShell twins stay textually identical.
 
-Change the canonicalization in one place and a build fails. That is the point: this seam already produced a P1 once (TESTPLAN 2.2 — a MAC stored in the wrong notation makes a VM invisible to MECM, with no error anywhere).
+Change the canonicalization in one place and a build fails. That is the point: this seam already produced a P1 once (finding 2.2 in `docs/audits/2026-07-hardening.md` — a MAC stored in the wrong notation makes a VM invisible to MECM, with no error anywhere).
 
 `PSAvoidUsingEmptyCatchBlock` stays enabled on purpose; a silent failure is exactly this code's failure mode. Empty catches carry a `Write-Debug` line, so a `-Debug` run shows what was swallowed. Three rules are excluded, each with its reason in `PSScriptAnalyzerSettings.psd1`.
 
@@ -278,7 +279,7 @@ The baseline run is deferred to a dev host on purpose: this stack is air-gapped 
 
 ## Load Probe (dev-host only)
 
-`tests/load/portal-read.js` is a k6 read-path load test (TESTPLAN 4.7), dev-host tooling on the same footing as the E2E and mutation layers: not vendored, not in CI. It logs in once and has each VU poll the pages an operator sits on (dashboard, mission and VM lists, health), ramping to 30 concurrent VUs — 3× a realistic LAN peak. k6 runs from a container sharing the web server's network namespace; see `tests/load/README.md` for the command and the recorded baseline (0 % errors over 2469 requests, all p95 thresholds met, `missions.php` the slowest page). Writes stay out of scope: a load test must not mutate real rows. Run it if the volume behaviour of the list pages is ever in question, not on every change.
+`tests/load/` holds the k6 profiles (campaign reference: TESTPLAN 4.7), dev-host tooling on the same footing as the E2E and mutation layers: not vendored, not in CI. `portal-read.js` has each VU sign in as its own operator and poll the pages an operator sits on; `portal-write.js` drives the write path and refuses to run without an explicit throwaway-stack opt-in, because a load test must never mutate real rows. k6 runs from a container sharing the web server's network namespace. Commands, thresholds and the recorded baseline live **only** in `tests/load/README.md`; this page deliberately repeats none of those numbers. Run the probes if the volume behaviour of the list pages is ever in question, not on every change.
 
 ## Hook Scan
 

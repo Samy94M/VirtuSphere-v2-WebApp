@@ -1,33 +1,25 @@
-# Pre-Ship-Checkliste
+# Pre-Ship-Checkliste (Vorlage)
 
-Vor jedem Release-/Meilenstein-Abschluss abhaken. Reihenfolge ist Empfehlung; jeder Punkt nennt sein Prüfkommando. Historie gehört nach `docs/CHANGELOG.md`, nicht hierher.
+Vor jedem Release-/Meilenstein-Abschluss durchgehen. Diese Datei bleibt eine **leere Vorlage**: Haken, Daten und Messwerte gehören in das QA-Artefakt des jeweiligen Laufs (`scripts/check.ps1 -Json …`) bzw. in `docs/CHANGELOG.md`, nie hierher; ein committeter Haken ist beim nächsten Lesen eine veraltete Behauptung (`doc-semantics`-Gate erzwingt das). Gate-Bedeutung und Interpretation: `docs/QUALITY-GATES.md`; Bedienung: `docs/QA.md`.
 
-## Automatische Checks (müssen grün sein)
+## Automatische Gates (der Runner ist der Nachweis)
 
-- [x] PHPUnit: `docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html test` (2026-07-12: 458 Tests grün, 7 skipped)
-- [x] Migrations-Preflight: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` (pending=0)
-- [x] Lang-Parität DE/EN: `php scripts/lang-audit.php --ci` (21 Module)
-- [x] CSP-/Pattern-Scan ohne `BLOCK:`: `sh scripts/lint-csp-patterns.sh --all-changed` (nur WARN-Zeilenbudget)
-- [x] ENUM-Spiegel synchron: `sh scripts/check-enum-sync.sh`
-- [x] PHP-Version konsistent: `sh scripts/check-php-version-sync.sh`
-- [x] Doku-Hygiene: `sh scripts/check-doc-hygiene.sh`
-- [x] Git-Whitespace: `git diff --check -- ':!Docker/WebAPI/vendor/**'`
+- [ ] Fast-Lane grün: `powershell -NoProfile -File scripts\check.ps1 -Lane Fast -Json qa-fast.json`
+- [ ] Integration-Lane grün (Wegwerf-QA-Stack, volle Suite ohne Skips, E2E, Guard-Harness): `scripts\check.ps1 -Lane Integration -Json qa-integration.json`
+- [ ] Release-Lane grün (Restore-Drill, Secret-Scan, SBOM/CVE, Offline-Bundle): `scripts\check.ps1 -Lane Release -Json qa-release.json`
+- [ ] Kein Gate endete als `skip`/`not_applicable` ohne dokumentierten Grund im Artefakt; `infrastructure_error` ist ein Blocker, kein Skip.
 
-## Manuelle Nachweise
+## Manuelle Nachweise (je Lauf im QA-Artefakt referenzieren)
 
-- [x] Backup + Restore-Probe frisch gelaufen: `sh scripts/backup.sh && sh scripts/restore_test.sh` (2026-07-12: 884 KB Dump, 23 Tabellen wiederhergestellt)
-- [x] Schema-Konvergenz bewiesen (frische `struktur.sql` == struktur + Migrationen, lädt auf leerem Volume): `sh scripts/check-schema-convergence.sh`
-- [x] `portal/health.php` liefert HTTP 200 mit `ok`-Status, `/tests/bootstrap.php` liefert 403
-- [x] Keine Secrets/Logs/Build-Artefakte neu getrackt: `git status --short` und `git ls-files | grep -iE '\.(env|pfx|pem|key|log)$'` leer
-- [x] `docs/CHANGELOG.md` für den Meilenstein aktualisiert (Härtungskampagne 2026-07)
-
-## Pre-Release-Härtungskampagne (2026-07)
-
-Die systematische Härtung nach `docs/TESTPLAN.md` deckt die Sicherheits-, Nebenläufigkeits-, HTTPS- und Doku-Nachweise dieser Liste ab; die vollständige Befundtabelle steht dort. Kurzfassung der behobenen Release-Blocker: Fresh-Install-DB (`struktur.sql` FK-Guard), Deploy-YAML-Steuerzeichen, MAC-Kanonisierung (MECM-Lookup), Maschinen-API-JSON-Fehlerform, Security-Header auf nginx-Fehlerseiten, HTTPS-Quarantäne-Aussperrung, Deploy-Enqueue-Race. Offen bleiben nur die bewusst zurückgestellten Punkte unten und die in `docs/TESTPLAN.md` notierten Nicht-Blocker.
+- [ ] Tastatur-, Fokus- und Screenreader-Durchgang der Kernflüsse in beiden Themes (Login, Mission anlegen, VM bearbeiten, Deploy starten).
+- [ ] PowerShell-SYSTEM-Smoke in einer Wegwerf-Windows-VM; Installer-Lebenszyklus (Erstinstallation, Re-Run, Upgrade, Deinstallation).
+- [ ] MECM-Staging-Abnahme und reales Ansible-/ESXi-Staging mit zweitem Idempotenzlauf.
+- [ ] Keine Secrets/Logs/Build-Artefakte neu getrackt: `git status --short` und `git ls-files | grep -iE '\.(env|pfx|pem|key|log)$'` leer.
+- [ ] `docs/CHANGELOG.md` für den Meilenstein aktualisiert.
+- [ ] Go-live-Schritte aus `docs/operations/go-live.md` geplant (IP-Allowlist für MECM- und Ansible-Host, Erstpasswort-Datei löschen, DB-Konto-Rotation).
 
 ## Meilenstein-gebundene Punkte (offen bis zur jeweiligen Etappe)
 
-- [x] WP7/HTTPS-Finalisierung: Admin-Config-Flow, HSTS-Entscheidung, nginx-Reload-Pfad (ADR-0012, ADR-0027; Runbook `docs/operations/https.md`)
-- [ ] E3-Legacy-Retirement: Desktop-Client, `access.php`, `api/login.php`, `deploy_tokens` physisch entfernen (nur nach akzeptierter E3-Entscheidung)
-- [ ] Clean-Checkout-Probelauf auf frischem Host (Ubuntu) als Release-Nachweis
-- [ ] Visuelles Frontend-Design-Handoff abgeschlossen (ADR-0013)
+- [ ] Clean-Checkout-Releaseprobe auf frischem Host (Ubuntu) als Release-Nachweis.
+- [ ] E3-Legacy-Retirement: Desktop-Client, `access.php`, `api/login.php`, `deploy_tokens` physisch entfernen (nur nach akzeptierter E3-Entscheidung, ADR-0019).
+- [ ] Visuelles Frontend-Design-Handoff abgeschlossen (ADR-0013).

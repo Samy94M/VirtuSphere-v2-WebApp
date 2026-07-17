@@ -415,6 +415,12 @@ Add-Gate -Name 'doc-hygiene' -Lanes $allLanes -Kind 'native' -Body {
     Format-ToolResult $r 'Agenten-Dokus sauber' 'Doku-Hygiene verletzt'
 }
 
+Add-Gate -Name 'doc-semantics' -Lanes $allLanes -Kind 'native' -Body {
+    $r = Invoke-CheckShell 'check-doc-semantics.sh' @('--ci')
+    if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
+    Format-ToolResult $r 'Betriebsdoku ohne veraltbare Staende' 'Doku behauptet einen veralteten Stand'
+}
+
 Add-Gate -Name 'csp-patterns' -Lanes $allLanes -Kind 'native' -Body {
     $r = Invoke-CheckShell 'lint-csp-patterns.sh' @('--worktree')
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
