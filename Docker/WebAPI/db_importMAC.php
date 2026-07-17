@@ -56,6 +56,21 @@ try {
         machine_api_json(['error' => 'No result entries received'], 400);
     }
 
+    // ADR-0032: diagnostic only. A valid id is adopted so this request's
+    // audit/log lines carry the caller's trace, and it is echoed back; an
+    // invalid one is noted and ignored, never a 4xx - the id must not be able
+    // to break an import, and it grants nothing.
+    $correlationId = null;
+    if (array_key_exists('correlation_id', $payload)) {
+        $rawCorrelation = is_string($payload['correlation_id']) ? $payload['correlation_id'] : '';
+        if (virtusphere_correlation_id_is_valid($rawCorrelation)) {
+            $correlationId = $rawCorrelation;
+            virtusphere_correlation_adopt($correlationId);
+        } else {
+            machine_api_log_warning('db_importMAC', 'Ignored invalid correlation_id from ' . $clientIp . '.');
+        }
+    }
+
     // The authoritative 409 gate is deliberately before begin_transaction().
     // A terminal, unknown or mission-foreign callback cannot write any row.
     $job = null;
@@ -157,6 +172,7 @@ try {
         'result_version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
         'outcome' => $plan['outcome'],
         'job_id' => $jobId,
+        'correlation_id' => $correlationId,
         'vm_results' => $plan['vm_results'],
         'counts' => $plan['counts'],
         'errors' => $plan['errors'],

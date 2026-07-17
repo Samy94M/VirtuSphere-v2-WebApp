@@ -54,6 +54,13 @@ $action = request_string($_GET, 'action');
 $mac = request_string($_GET, 'mac');
 $ipAllowed = machine_api_ip_allowed($connection, $clientIp);
 
+// ADR-0032: adopt the PowerShell client's per-run correlation id for this
+// request's audit lines. Diagnostic only; an invalid header is ignored.
+$headerCorrelation = (string) ($_SERVER['HTTP_X_VIRTUSPHERE_CORRELATION'] ?? '');
+if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
+    virtusphere_correlation_adopt($headerCorrelation);
+}
+
 try {
     if ($action === 'getDeviceInfos') {
         if ($mac === '' || !filter_var($mac, FILTER_VALIDATE_MAC)) {

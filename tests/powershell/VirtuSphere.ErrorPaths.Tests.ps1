@@ -109,7 +109,7 @@ Describe 'Get-VsApiHeaders (Token-Handhabung)' {
         $headers['X-VirtuSphere-Token'] | Should -Be 'tok-123'
     }
 
-    It 'sendet keinen Header bei leerem oder Whitespace-Token' -ForEach @(
+    It 'sendet keinen Token-Header bei leerem oder Whitespace-Token' -ForEach @(
         @{ token = '' }
         @{ token = '   ' }
         @{ token = $null }
@@ -117,7 +117,19 @@ Describe 'Get-VsApiHeaders (Token-Handhabung)' {
         $headers = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($token) -Body {
             param($t) Get-VsApiHeaders -Config ([pscustomobject]@{ ReportToken = $t })
         }
-        @($headers.Keys).Count | Should -Be 0
+        $headers.ContainsKey('X-VirtuSphere-Token') | Should -BeFalse
+        # ADR-0032: die Korrelations-ID ist kein Secret und haengt nicht am Token.
+        $headers['X-VirtuSphere-Correlation'] | Should -Match '^[0-9a-f]{16}$'
+    }
+
+    It 'mintet die Korrelations-ID einmal pro Lauf und haelt sie dann konstant (ADR-0032)' {
+        $ids = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $a = (Get-VsApiHeaders -Config ([pscustomobject]@{ ReportToken = 'tok' }))['X-VirtuSphere-Correlation']
+            $b = (Get-VsApiHeaders -Config ([pscustomobject]@{ ReportToken = 'tok' }))['X-VirtuSphere-Correlation']
+            , @($a, $b)
+        }
+        $ids[0] | Should -Match '^[0-9a-f]{16}$'
+        $ids[1] | Should -Be $ids[0]
     }
 }
 

@@ -1,7 +1,7 @@
 # ADR-0032: Durchgängige Korrelations-ID über alle sieben Ausführungsschichten
 
 Date: 2026-07-17
-Status: Accepted (Entscheidung; Implementierung ist der AP7b-Umsetzungsschritt, Plan v2)
+Status: Accepted (umgesetzt 2026-07-17: Migration 0022, alle sieben Schichten, Testmatrix 1-9)
 
 ## Context
 

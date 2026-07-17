@@ -380,6 +380,58 @@ final class MacImportCallbackTest extends TestCase
         return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
     }
 
+    /**
+     * ADR-0032, matrix point 7: a valid correlation id is echoed back, an
+     * invalid one is ignored without changing the outcome, and the absent
+     * field stays legacy-legal. The id must never be load-bearing.
+     */
+    public function testCorrelationIdIsEchoedWhenValidAndIgnoredWhenNot(): void
+    {
+        $missionId = $this->insertMission('corr');
+        $vmA = $this->insertVm($missionId, 'A');
+        $this->insertInterface($vmA, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmA]);
+        $results = [
+            ['instance' => [
+                'hw_name' => $this->vmName('A'),
+                'hw_eth0' => ['macaddress' => $this->mac('a0'), 'summary' => 'WDS'],
+            ]],
+        ];
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'correlation_id' => 'feedface00000020',
+            'results' => $results,
+        ]);
+        self::assertSame(200, $status);
+        $decoded = json_decode($body, true);
+        self::assertSame('feedface00000020', $decoded['correlation_id'] ?? null, 'a valid id is echoed');
+        self::assertSame('success', $decoded['outcome'] ?? null);
+
+        // Invalid id: ignored, never a 4xx, outcome unchanged (idempotent
+        // repeat of the same import while the job would be running; here the
+        // job is terminal after the worker path, so use a fresh legacy call).
+        [$status2, $body2] = $this->post([
+            'mission_id' => $missionId,
+            'correlation_id' => 'NOT-AN-ID',
+            'results' => $results,
+        ]);
+        self::assertSame(200, $status2, 'a broken id must not be able to break an import');
+        $decoded2 = json_decode($body2, true);
+        self::assertNull($decoded2['correlation_id'] ?? null, 'an invalid id is not echoed');
+
+        // Absent field: the legacy contract is untouched.
+        [$status3, $body3] = $this->post([
+            'mission_id' => $missionId,
+            'results' => $results,
+        ]);
+        self::assertSame(200, $status3);
+        $decoded3 = json_decode($body3, true);
+        self::assertArrayHasKey('correlation_id', $decoded3);
+        self::assertNull($decoded3['correlation_id']);
+    }
+
     /** @return array{0:int,1:string} */
     private function post(array $payload): array
     {

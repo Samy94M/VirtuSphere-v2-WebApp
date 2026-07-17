@@ -367,24 +367,31 @@ function ansible_vm_packages(array $vm): array
     return $packages;
 }
 
-function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $missionId, int $jobId): void
+function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $missionId, int $jobId, ?string $correlationId = null): void
 {
     $script = file_get_contents($path);
     if ($script === false) {
         throw new RuntimeException('Cannot read upload_mac_list.py.');
     }
 
+    // ADR-0032: default to the current execution's id (the worker has adopted
+    // the job's), so callers do not need to thread it through.
+    $correlationId ??= virtusphere_correlation_id();
+
     $expectedApiLine = 'api_base_url = ' . ansible_python_string($apiBaseUrl);
     $expectedMissionLine = 'mission_id = ' . ansible_python_string((string) $missionId);
     $expectedJobLine = 'job_id = ' . ansible_python_string((string) $jobId);
+    $expectedCorrelationLine = 'correlation_id = ' . ansible_python_string($correlationId);
     $script = preg_replace("/^api_base_url = .*$/m", 'api_base_url = ' . ansible_python_string($apiBaseUrl), $script, 1);
     $script = preg_replace("/^mission_id = .*$/m", 'mission_id = ' . ansible_python_string((string) $missionId), (string) $script, 1);
     $script = preg_replace('/^job_id = .*$/m', 'job_id = ' . ansible_python_string((string) $jobId), (string) $script, 1);
+    $script = preg_replace('/^correlation_id = .*$/m', 'correlation_id = ' . ansible_python_string($correlationId), (string) $script, 1);
     if (
         $script === null
         || !str_contains($script, $expectedApiLine)
         || !str_contains($script, $expectedMissionLine)
         || !str_contains($script, $expectedJobLine)
+        || !str_contains($script, $expectedCorrelationLine)
     ) {
         throw new RuntimeException('Cannot patch upload_mac_list.py.');
     }

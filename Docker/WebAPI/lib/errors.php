@@ -133,13 +133,60 @@ function virtusphere_try_chmod(string $path, int $mode, int $requiredBits): void
     }
 }
 
+/**
+ * The correlation id of the current execution (ADR-0032): one id per request
+ * (or per CLI process), minted lazily on first use. Purely diagnostic - it
+ * authenticates nothing, and a missing or foreign id never changes behaviour,
+ * only the log line.
+ *
+ * A worker adopts the claimed job's stored id via
+ * virtusphere_correlation_adopt(), so every log helper downstream stamps the
+ * job's trace without threading a parameter through each signature.
+ */
+function virtusphere_correlation_id(): string
+{
+    if (isset($GLOBALS['virtusphere_correlation_override'])) {
+        return (string) $GLOBALS['virtusphere_correlation_override'];
+    }
+
+    static $minted = null;
+    if ($minted === null) {
+        try {
+            $minted = bin2hex(random_bytes(8));
+        } catch (Throwable) {
+            $minted = substr(md5(uniqid('', true)), 0, 16);
+        }
+    }
+
+    return $minted;
+}
+
+/** Accepted foreign ids: 8-32 lowercase hex (ADR-0032). */
+function virtusphere_correlation_id_is_valid(string $id): bool
+{
+    return preg_match('/^[0-9a-f]{8,32}$/', $id) === 1;
+}
+
+/**
+ * Adopt (or, with null/invalid, drop back to the process id). The worker calls
+ * this when claiming a job and again with null after finishing it.
+ */
+function virtusphere_correlation_adopt(?string $id): void
+{
+    if ($id !== null && virtusphere_correlation_id_is_valid($id)) {
+        $GLOBALS['virtusphere_correlation_override'] = $id;
+
+        return;
+    }
+    unset($GLOBALS['virtusphere_correlation_override']);
+}
+
 function virtusphere_error_reference(): string
 {
-    try {
-        return bin2hex(random_bytes(4));
-    } catch (Throwable) {
-        return substr(str_replace('.', '', uniqid('', true)), -8);
-    }
+    // The reference shown on error pages IS the request's correlation id
+    // (ADR-0032): the operator's screenshot now leads straight to the audit
+    // and job-log rows of the same request instead of to a one-off token.
+    return virtusphere_correlation_id();
 }
 
 function virtusphere_handle_uncaught_error(Throwable $exception, bool $fromShutdown = false): void

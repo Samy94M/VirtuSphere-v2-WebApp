@@ -37,6 +37,18 @@ final class E2eActionCoverageContractTest extends TestCase
      */
     private const PENDING_ACTIONS = [];
 
+    /**
+     * Accessor instead of direct const reads: with the list empty, PHPStan
+     * would otherwise flag every check against it as statically impossible,
+     * and the checks must survive for the day an entry returns.
+     *
+     * @return array<string, string>
+     */
+    private static function pendingActions(): array
+    {
+        return self::PENDING_ACTIONS;
+    }
+
     private function webApiRoot(): string
     {
         return str_replace('\\', '/', dirname(__DIR__, 2));
@@ -90,7 +102,7 @@ final class E2eActionCoverageContractTest extends TestCase
         $unclassified = [];
         foreach (array_keys($this->inventory()) as $key) {
             $covered = array_key_exists($key, $markers['covers']);
-            $pending = array_key_exists($key, self::PENDING_ACTIONS);
+            $pending = array_key_exists($key, self::pendingActions());
             if (!$covered && !$pending) {
                 $unclassified[] = $key;
             }
@@ -135,11 +147,11 @@ final class E2eActionCoverageContractTest extends TestCase
         sort($staleMarkers);
         self::assertSame([], $staleMarkers, 'e2e-covers names an action no portal form posts any more; fix the marker');
 
-        $stalePending = array_diff(array_keys(self::PENDING_ACTIONS), array_keys($inventory));
+        $stalePending = array_diff(array_keys(self::pendingActions()), array_keys($inventory));
         sort($stalePending);
         self::assertSame([], $stalePending, 'PENDING_ACTIONS names an action no portal form posts any more; delete the entry');
 
-        $contradictory = array_intersect(array_keys($markers['covers']), array_keys(self::PENDING_ACTIONS));
+        $contradictory = array_intersect(array_keys($markers['covers']), array_keys(self::pendingActions()));
         sort($contradictory);
         self::assertSame([], $contradictory, 'covered by a spec but still booked as pending; delete the PENDING_ACTIONS entry');
 
@@ -158,7 +170,7 @@ final class E2eActionCoverageContractTest extends TestCase
         sort($needlessCancel);
         self::assertSame([], $needlessCancel, 'e2e-covers-cancel on an action whose markup renders no confirm dialog');
 
-        foreach (self::PENDING_ACTIONS as $key => $reason) {
+        foreach (self::pendingActions() as $key => $reason) {
             self::assertNotSame('', trim($reason), $key . ' must name the slice that owes the spec');
         }
     }

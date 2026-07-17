@@ -709,6 +709,15 @@ SQL;
         $db->query('ALTER TABLE deploy_tokens ADD CONSTRAINT fk_deploy_tokens_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL');
         migrator_out('0021: added fk_deploy_tokens_user; nulled ' . $orphaned . ' orphaned token user reference(s)');
     },
+    '0022_correlation_ids' => function (mysqli $db): void {
+        // ADR-0032: purely diagnostic, additive NULL columns. NULL reads as
+        // "predates the correlation id"; no backfill, no index (lookups are
+        // grep-shaped operator work, not hot paths).
+        migrator_add_column($db, 'deploy_jobs', 'correlation_id', 'VARCHAR(32) NULL AFTER group_id');
+        migrator_add_column($db, 'deploy_logs', 'correlation_id', 'VARCHAR(32) NULL AFTER user_id');
+        migrator_add_column($db, 'deploy_job_logs', 'correlation_id', 'VARCHAR(32) NULL AFTER line');
+        migrator_out('0022: added correlation_id to deploy_jobs, deploy_logs and deploy_job_logs (ADR-0032)');
+    },
 ];
 
 try {

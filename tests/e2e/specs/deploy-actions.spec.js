@@ -57,7 +57,7 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc() ?: null) . 'JSON';
 function missionJobs(missionId) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT id, status, scheduled_at, group_id FROM deploy_jobs WHERE mission_id = ? ORDER BY id');
+$stmt = $db->prepare('SELECT id, status, scheduled_at, group_id, correlation_id FROM deploy_jobs WHERE mission_id = ? ORDER BY id');
 $id = ${Number(missionId)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
@@ -131,6 +131,28 @@ test('start (scheduled): the preview must be confirmed, then a scheduled job is 
   expect(jobs.length, 'exactly one job was queued').toBe(1);
   expect(jobs[0].status, 'the job waits as queued').toBe('queued');
   expect(jobs[0].scheduled_at, 'the job carries its start time').not.toBeNull();
+
+  // ADR-0032, matrix point 9: the browser-enqueued job carries the request's
+  // correlation id, and the same id sits on the queue line and on the audit
+  // row the same request wrote - one click, one trace across three tables.
+  const correlation = String(jobs[0].correlation_id || '');
+  expect(correlation, 'the job carries the enqueueing request id').toMatch(/^[0-9a-f]{8,32}$/);
+  const trace = phpJson(`
+$db = db();
+$id = ${Number(jobs[0].id)};
+$stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_job_logs WHERE job_id = ? AND correlation_id = ?');
+$c = '${correlation}';
+$stmt->bind_param('is', $id, $c);
+$stmt->execute();
+$logLines = (int) $stmt->get_result()->fetch_assoc()['c'];
+$stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_logs WHERE correlation_id = ? AND log_message LIKE 'queued deploy job id%'");
+$stmt->bind_param('s', $c);
+$stmt->execute();
+$auditRows = (int) $stmt->get_result()->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['logLines' => $logLines, 'auditRows' => $auditRows]) . 'JSON';
+`);
+  expect(trace.logLines, 'the queue line carries the same trace').toBeGreaterThan(0);
+  expect(trace.auditRows, 'the audit row carries the same trace').toBeGreaterThan(0);
 });
 
 // e2e-covers: deploy.php:cancel

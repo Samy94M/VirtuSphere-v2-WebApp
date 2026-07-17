@@ -193,6 +193,8 @@ CREATE TABLE IF NOT EXISTS deploy_logs (
     category VARCHAR(32) NOT NULL DEFAULT 'system',
     log_message TEXT NOT NULL,
     user_id INT NULL,
+    -- ADR-0032: request correlation, diagnostic only.
+    correlation_id VARCHAR(32) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX deploy_logs_category_lookup (category),
@@ -265,6 +267,9 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- group_id ties a staggered batch of per-VM jobs together.
     scheduled_at DATETIME NULL,
     group_id CHAR(12) NULL,
+    -- Diagnostic correlation id (ADR-0032): ties the job to the portal request
+    -- that enqueued it. Opaque, never authorization; NULL predates the id.
+    correlation_id VARCHAR(32) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX deploy_jobs_mission_status (mission_id, status),
@@ -282,6 +287,8 @@ CREATE TABLE IF NOT EXISTS deploy_job_logs (
     seq INT NOT NULL,
     stream ENUM('stdout','stderr','system') NOT NULL DEFAULT 'stdout',
     line TEXT NOT NULL,
+    -- ADR-0032: the owning job's correlation id, filled by the insert helper.
+    correlation_id VARCHAR(32) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY deploy_job_logs_job_seq_unique (job_id, seq),
     CONSTRAINT fk_deploy_job_logs_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE

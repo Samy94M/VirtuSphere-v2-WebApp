@@ -175,6 +175,9 @@ function ansible_remote_command(string $remoteDir, array $payload, bool $autosta
     $commands = [
         'cd ' . ansible_sh_quote($remoteDir),
         'chmod 600 accounts.yml',
+        // ADR-0032: opaque diagnostic id for the whole remote sequence; remote
+        // tooling passes it through, nothing parses it.
+        'export VS_CORRELATION_ID=' . ansible_sh_quote(virtusphere_correlation_id()),
     ];
 
     foreach (ansible_playbooks_for_mode($mode, $autostartEnabled) as $playbook) {

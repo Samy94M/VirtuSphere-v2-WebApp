@@ -19,8 +19,11 @@ function addLog($ip, string $category, $request, $authToken, $connection)
 function audit(mysqli $connection, string $category, string $message, ?int $userId = null, ?string $ip = null): bool
 {
     $ip = $ip ?? (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-    $stmt = $connection->prepare('INSERT INTO deploy_logs (ip, category, log_message, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())');
-    $stmt->bind_param('sssi', $ip, $category, $message, $userId);
+    // ADR-0032: every audit row carries the correlation id of the execution
+    // that wrote it (request id, or the adopted job id inside the worker).
+    $correlationId = virtusphere_correlation_id();
+    $stmt = $connection->prepare('INSERT INTO deploy_logs (ip, category, log_message, user_id, correlation_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())');
+    $stmt->bind_param('sssis', $ip, $category, $message, $userId, $correlationId);
 
     return $stmt->execute();
 }

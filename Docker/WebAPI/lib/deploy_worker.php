@@ -107,7 +107,16 @@ function deploy_worker_run_once(mysqli $db, string $workerId, array $options): b
         return false;
     }
 
-    deploy_worker_process_job($db, $job, $workerId, $options);
+    // ADR-0032: every log line this job produces carries the job's stored
+    // correlation id; a legacy job without one falls back to the worker's
+    // process id. Dropped again in finally so the ids of two consecutive
+    // jobs cannot bleed into each other.
+    virtusphere_correlation_adopt(isset($job['correlation_id']) ? (string) $job['correlation_id'] : null);
+    try {
+        deploy_worker_process_job($db, $job, $workerId, $options);
+    } finally {
+        virtusphere_correlation_adopt(null);
+    }
     return true;
 }
 

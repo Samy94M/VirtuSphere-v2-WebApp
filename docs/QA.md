@@ -138,6 +138,10 @@ Each guard was run against a deliberately broken stylesheet, so each is known to
 
 `settings.php` re-opens the posting form's tab after the POST redirect via a URL fragment (`settings.php#panel-<tab>`, restored by `initTabs` in `assets/core.js`). The `$actionTabs` map next to the action dispatch is the SSoT for which form lives in which tab. `tests/Static/SettingsTabRedirectContractTest.php` runs in the normal `unit` suite and fails when a postable action has no map entry (its redirect would fall back to the first tab, hiding sticky field errors and the one-time report token in a hidden panel), when a map entry names an action no form posts any more, or when a mapped tab has no rendered tabpanel.
 
+## Correlation IDs (ADR-0032)
+
+Every portal error page shows a reference like `error [a1b2c3d4e5f60718]`. That value is the request's correlation id, and the same id sits on the audit rows (`deploy_logs.correlation_id`), on the deploy job the request enqueued (`deploy_jobs.correlation_id`) and on every log line the worker writes for that job (`deploy_job_logs.correlation_id`). To trace an incident, take the id from the screenshot or from any of the three tables and grep the other two; the remote Ansible run sees it as `VS_CORRELATION_ID`, the MAC callback echoes it, and the MECM PowerShell scripts send their own per-run id as `X-VirtuSphere-Correlation`. A retry deliberately starts a new id; the new job's first system line names the old one (`[correlation …]`). The id is diagnostic only and never grants access.
+
 ## Drift Checks
 
 Four checks guard SSoT mirrors and doc hygiene. They run quietly on every Claude session start and must be green before commits that touch the mirrored places:

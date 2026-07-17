@@ -56,3 +56,7 @@ Docker/WebAPI/infection.phar
 Docker/WebAPI/infection.json5
 Docker/WebAPI/infection.log
 Docker/WebAPI/.infection-cache/
+
+# Python bytecode from local test runs
+__pycache__/
+*.pyc

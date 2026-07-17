@@ -263,7 +263,7 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
     $limit = max(1, min(500, $limit));
     if ($missionId !== null && $missionId > 0) {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -276,7 +276,7 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
         $stmt->bind_param('ii', $missionId, $limit);
     } else {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -296,7 +296,7 @@ function repo_deploy_job(mysqli $db, int $jobId): ?array
 {
     return repo_fetch_one(
         $db,
-        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.created_at, j.updated_at
+        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
          FROM deploy_jobs j
          LEFT JOIN deploy_missions m ON m.id = j.mission_id
          LEFT JOIN deploy_users u ON u.id = j.user_id
@@ -497,8 +497,9 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
             throw new RuntimeException('This mission already has an active deploy job.');
         }
 
-        $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at) VALUES (?, ?, ?, ?, ?, ?)');
-        $stmt->bind_param('iisiis', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $scheduledAtUtc);
+        $correlationId = virtusphere_correlation_id();
+        $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, correlation_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('iisiiss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $scheduledAtUtc, $correlationId);
         $stmt->execute();
         $jobId = (int) $db->insert_id;
         $logSuffix = $scheduledAtUtc !== null ? ' scheduled for ' . $scheduledAtUtc . ' UTC' : '';
@@ -558,6 +559,12 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
         $note = 'Retry of deploy job ' . $jobId;
         if ($plan !== null) {
             $note .= ' (export-only: ' . ($plan['scope'] === 'failed_vms' ? count($plan['vm_ids']) . ' failed VMs' : 'original selection') . ')';
+        }
+        // ADR-0032: the retry runs under a NEW correlation id (the retrying
+        // request's); this line is the deliberate link back to the old trace.
+        $oldCorrelation = trim((string) ($job['correlation_id'] ?? ''));
+        if ($oldCorrelation !== '') {
+            $note .= ' [correlation ' . $oldCorrelation . ']';
         }
         repo_insert_deploy_job_log_unlocked($db, $newJobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $note);
 
@@ -635,8 +642,11 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             $payload['vm_ids'] = [$vmId];
             $payloadJson = json_encode($payload, JSON_THROW_ON_ERROR);
 
-            $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, group_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $stmt->bind_param('iisiiss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $slotUtc, $groupId);
+            // All slots share the enqueueing request's id (ADR-0032): one
+            // click, one trace, even when it fans out into per-VM jobs.
+            $correlationId = virtusphere_correlation_id();
+            $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, group_id, correlation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->bind_param('iisiisss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $slotUtc, $groupId, $correlationId);
             $stmt->execute();
             $jobId = (int) $db->insert_id;
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued (group ' . $groupId . ', slot ' . ($index + 1) . '/' . count($vms) . ') scheduled for ' . $slotUtc . ' UTC');
@@ -715,8 +725,9 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
 
         $payloadJson = json_encode(['mode' => $mode], JSON_THROW_ON_ERROR);
         $userParam = $userId !== null && $userId > 0 ? $userId : null;
-        $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id) VALUES (NULL, ?, ?, ?, ?)');
-        $stmt->bind_param('isii', $userParam, $payloadJson, $esxiCredentialId, $ansibleCredentialId);
+        $correlationId = virtusphere_correlation_id();
+        $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, correlation_id) VALUES (NULL, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isiis', $userParam, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $correlationId);
         $stmt->execute();
         $jobId = (int) $db->insert_id;
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'System job queued: ' . $mode . ' for ESXi credential ' . $esxiCredentialId);
@@ -1000,8 +1011,11 @@ function repo_insert_deploy_job_log_unlocked(mysqli $db, int $jobId, string $str
     $row = $stmt->get_result()->fetch_assoc();
     $seq = (int) ($row['seq'] ?? 0) + 1;
 
-    $stmt = $db->prepare('INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (?, ?, ?, ?)');
-    $stmt->bind_param('iiss', $jobId, $seq, $stream, $line);
+    // ADR-0032: the execution's correlation id (the worker adopts the job's
+    // stored id on claim, so its lines carry the job's trace).
+    $correlationId = virtusphere_correlation_id();
+    $stmt = $db->prepare('INSERT INTO deploy_job_logs (job_id, seq, stream, line, correlation_id) VALUES (?, ?, ?, ?, ?)');
+    $stmt->bind_param('iisss', $jobId, $seq, $stream, $line, $correlationId);
     $stmt->execute();
 
     return $seq;

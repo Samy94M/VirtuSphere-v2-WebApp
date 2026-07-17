@@ -104,6 +104,19 @@ class UploadMacListTest(unittest.TestCase):
         self.assertEqual({'mission_id': 12, 'results': data}, payload)
         self.assertNotIn('job_id', payload)
 
+    def test_correlation_id_is_sent_when_patched_and_omitted_otherwise(self):
+        # ADR-0032, matrix point 6: the id rides along only when the worker
+        # patched a well-formed one; an unpatched template or garbage never
+        # reaches the wire, and the legacy shape stays identical.
+        data = [{'instance': {'hw_name': 'vm01'}}]
+
+        payload = UPLOAD.build_payload(data, '12', '34', 'feedface00000021')
+        self.assertEqual('feedface00000021', payload['correlation_id'])
+
+        for invalid in ('{{correlationId}}', 'XYZ-not-hex', 'abc', 'A' * 40, ''):
+            with self.subTest(invalid=invalid):
+                self.assertNotIn('correlation_id', UPLOAD.build_payload(data, '12', '34', invalid))
+
     def test_recognized_outcomes_map_to_fixed_exit_codes(self):
         cases = {
             'success': UPLOAD.EXIT_SUCCESS,

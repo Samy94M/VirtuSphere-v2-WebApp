@@ -26,6 +26,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     machine_api_json(['error' => 'Method not allowed'], 405);
 }
 
+// ADR-0032: adopt the PowerShell client's per-run correlation id for this
+// request's audit lines. Diagnostic only; an invalid header is ignored.
+$headerCorrelation = (string) ($_SERVER['HTTP_X_VIRTUSPHERE_CORRELATION'] ?? '');
+if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
+    virtusphere_correlation_adopt($headerCorrelation);
+}
+
 try {
     // The report token, when configured, authenticates the server heartbeat
     // channel only. Client phase reports (reportPhase) authenticate by their

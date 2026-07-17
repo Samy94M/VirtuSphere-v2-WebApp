@@ -142,12 +142,25 @@ function Invoke-VsLogRetention {
 # ---------------------------------------------------------------------------
 # WebAPI-Aufrufe (inkl. optionalem Token-Header)
 # ---------------------------------------------------------------------------
+# Korrelations-ID pro Prozesslauf (ADR-0032): 16 Hex aus einer GUID, beim
+# ersten Header-Bau gemintet und dann konstant. Bewusst KEIN Registry-Wert:
+# ein Neustart des Skripts ist eine neue Spur. Rein diagnostisch, kein Secret
+# und kein Token; die Redaction laesst sie deshalb sichtbar.
+$script:VsCorrelationId = $null
+function Get-VsCorrelationId {
+    if (-not $script:VsCorrelationId) {
+        $script:VsCorrelationId = ([guid]::NewGuid().ToString('N')).Substring(0, 16).ToLowerInvariant()
+    }
+    $script:VsCorrelationId
+}
+
 function Get-VsApiHeaders {
     param([Parameter(Mandatory)]$Config)
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($Config.ReportToken)) {
         $headers['X-VirtuSphere-Token'] = $Config.ReportToken
     }
+    $headers['X-VirtuSphere-Correlation'] = (Get-VsCorrelationId)
     $headers
 }
 

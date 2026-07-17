@@ -7,6 +7,7 @@ file_path = './vm_infos.json'
 api_base_url = 'http://{{apiUrl}}'
 mission_id = '{{missionId}}'
 job_id = '{{jobId}}'
+correlation_id = '{{correlationId}}'
 
 EXIT_SUCCESS = 0
 EXIT_PARTIAL = 20
@@ -34,6 +35,16 @@ def positive_int(value):
     return number if number > 0 else None
 
 
+def hex_correlation(value):
+    # ADR-0032: 8-32 lowercase hex; anything else (unpatched template, garbage)
+    # is silently omitted - the id is diagnostic, never load-bearing.
+    text = str(value).strip()
+    if 8 <= len(text) <= 32 and all(c in '0123456789abcdef' for c in text):
+        return text
+
+    return None
+
+
 def load_vm_infos(path):
     try:
         with open(path, 'r', encoding='utf-8') as handle:
@@ -49,7 +60,7 @@ def load_vm_infos(path):
     return data
 
 
-def build_payload(data, mission_value=mission_id, job_value=job_id):
+def build_payload(data, mission_value=mission_id, job_value=job_id, correlation_value=None):
     parsed_mission_id = positive_int(mission_value)
     if parsed_mission_id is None:
         # Legacy/Desktop rendering can leave placeholders unresolved. Keep the
@@ -60,6 +71,10 @@ def build_payload(data, mission_value=mission_id, job_value=job_id):
     parsed_job_id = positive_int(job_value)
     if parsed_job_id is not None:
         payload['job_id'] = parsed_job_id
+
+    parsed_correlation = hex_correlation(correlation_id if correlation_value is None else correlation_value)
+    if parsed_correlation is not None:
+        payload['correlation_id'] = parsed_correlation
 
     return payload
 
