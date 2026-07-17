@@ -58,6 +58,14 @@ const VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS = 15;
 const VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS = 1800;
 const VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS = 14400;
 
+// SFTP upload of the generated deploy artifacts (serverlist.yml, accounts.yml,
+// the patched upload script - all a few KB). Two bounds, mirroring the exec
+// path: a per-operation read timeout so one stalled transfer cannot hang the
+// worker forever, and a wall-clock cap across the whole directory. Both are
+// tight because these files are small; a legitimate upload finishes in seconds.
+const VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS = 120;
+const VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS = 300;
+
 // Second reaper (AP6): the deploy worker reaps only at its own loop start, so
 // a worker stuck inside a blocking transport call would never be reaped until
 // it returns. The maintenance worker runs the same reap on this interval.

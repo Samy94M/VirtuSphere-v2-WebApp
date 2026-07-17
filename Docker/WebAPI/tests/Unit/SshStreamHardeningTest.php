@@ -147,5 +147,11 @@ final class SshStreamHardeningTest extends TestCase
         self::assertLessThan(VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS);
         self::assertLessThanOrEqual(VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS, VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS);
         self::assertGreaterThan(0, VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS);
+
+        // SFTP upload bounds (AP6-Rest): both positive, and one file's per-op
+        // timeout must fit inside the whole-directory budget, or the total cap
+        // could never trip before a single operation already blew past it.
+        self::assertGreaterThan(0, VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
+        self::assertLessThanOrEqual(VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS, VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
     }
 }

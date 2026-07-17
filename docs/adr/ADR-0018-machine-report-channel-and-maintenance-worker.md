@@ -73,6 +73,31 @@ ADR-0015).
 - Out of scope: Fern-Neustart der Tasks aus der WebApp (WinRM), Tombstone-/
   Auto-Cleanup in SCCM, System-Hub mit Disk/TLS/OPcache-Karten.
 
+## Amendment (2026-07-17): SFTP-Upload beschränkt, Cancel-Grenze festgeschrieben
+
+Zwei bewusst offen gelassene AP6-Grenzen werden hier abgeschlossen, damit sie
+nicht als stillschweigende Annahmen weiterleben:
+
+- **SFTP-Upload-Timeout.** Der Upload der generierten Deploy-Artefakte
+  (`ssh_sftp_upload_directory`) hatte nur einen 15-s-Connect-Timeout, danach
+  keinen. Ein nach dem Login stockender Transfer hätte den Worker unbegrenzt
+  blockiert, dieselbe Form wie der früher ungebremste Exec-Pfad. Neu: ein
+  Per-Operation-Read-Timeout (`VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS`, 120 s) und
+  ein Wall-Clock-Deckel über das gesamte Verzeichnis
+  (`VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS`, 300 s), vor jeder Datei geprüft.
+  Beide sind knapp, weil die Dateien wenige KB groß sind.
+
+- **Cancel-Granularität.** Ein Cancel wird ausschließlich an Schrittgrenzen
+  geehrt (`deploy_worker_assert_not_cancelled` zwischen Preflight, Upload und
+  jedem Playbook), nie mitten in einem laufenden `ansible-playbook`. Das
+  Abschießen eines create/powercycle mitten im Lauf hinterließe die ESXi-Seite
+  in undefiniertem Zustand (halb geklonte VM, Power-Operation unbekannten
+  Ausgangs), über den kein Folgeschritt mehr korrekt entscheiden könnte. Die
+  Obergrenze für einen einzelnen hängenden Schritt ist der Transport-Timeout
+  (Idle/Total); Cancel ist kooperativ an den Nähten. Stirbt der Worker nach dem
+  Cancel, bevor sein Catch die VMs markiert, räumt der Konvergenz-Sweep (L4)
+  die in `deploying` zurückgebliebenen VMs auf.
+
 ## Amendment (2026-07-08)
 
 Der Token-Header wird nur noch für `action=heartbeat` erzwungen. `action=reportPhase`

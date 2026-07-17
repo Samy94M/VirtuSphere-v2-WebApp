@@ -144,6 +144,10 @@ function ssh_sftp_upload_directory(array $credential, string $secret, string $lo
     }
 
     $sftp = new SFTP($host, $port, 15);
+    // Per-operation read timeout (AP6): without it a stalled transfer blocks
+    // the worker forever, the same unbounded-wait shape the exec path had. The
+    // constant is the SSoT.
+    $sftp->setTimeout(VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
     if (!$sftp->login($username, $secret)) {
         throw new RuntimeException('SFTP login failed.');
     }
@@ -154,6 +158,9 @@ function ssh_sftp_upload_directory(array $credential, string $secret, string $lo
         throw new RuntimeException('Cannot read local deploy work directory.');
     }
 
+    // Wall-clock cap across the whole directory, checked before each file, so a
+    // sequence of slow-but-not-idle transfers cannot run unbounded either.
+    $deadline = time() + VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS;
     foreach ($files as $file) {
         if ($file === '.' || $file === '..') {
             continue;
@@ -162,6 +169,11 @@ function ssh_sftp_upload_directory(array $credential, string $secret, string $lo
         $localPath = $localDir . DIRECTORY_SEPARATOR . $file;
         if (!is_file($localPath)) {
             continue;
+        }
+
+        if (time() >= $deadline) {
+            $sftp->disconnect();
+            throw new RuntimeException('SFTP upload exceeded the total time budget of ' . VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS . ' seconds.');
         }
 
         $remotePath = rtrim($remoteDir, '/') . '/' . $file;

@@ -383,6 +383,18 @@ function deploy_worker_credential(mysqli $db, int $credentialId, string $type): 
     return repo_deploy_assert_credential_type($db, $credentialId, $type);
 }
 
+/**
+ * Cancellation is honoured at step boundaries only, never mid-exec (AP6, by
+ * design). A cancel flips the job to `cancelled`; this check runs between the
+ * preflight, the SFTP upload and each playbook, so the sequence stops before
+ * the next step. It deliberately does NOT interrupt a running ansible-playbook:
+ * killing a create/powercycle mid-run would leave the ESXi side in an undefined
+ * state (a half-cloned VM, a power operation of unknown outcome) that no later
+ * step could reason about. The bounded SSH transport (idle/total timeout) is
+ * what caps an individual step; cancel is cooperative at the seams. The
+ * convergence sweep (L4) cleans up VMs left `deploying` if the worker dies
+ * before its own cancelled-catch runs.
+ */
 function deploy_worker_assert_not_cancelled(mysqli $db, int $jobId): void
 {
     $job = repo_deploy_job($db, $jobId);
