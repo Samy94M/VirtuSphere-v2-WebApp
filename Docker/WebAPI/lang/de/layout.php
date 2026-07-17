@@ -24,6 +24,7 @@ return [
     'nav_logs' => 'Protokolle',
     'nav_primary_label' => 'Hauptnavigation',
     'nav_toggle' => 'Menü umschalten',
+    'skip_to_content' => 'Zum Inhalt springen',
     'nav_group_operations' => 'Betrieb',
     'nav_group_catalog' => 'Katalog',
     'nav_group_admin' => 'Verwaltung',

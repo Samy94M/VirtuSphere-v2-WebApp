@@ -226,6 +226,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
     <?php layout_app_scripts($nonce); ?>
 </head>
 <body>
+<a class="skip-link" href="#main"><?php echo h(__t('layout.skip_to_content')); ?></a>
 <div class="app-shell">
     <aside class="sidebar" aria-label="<?php echo h(__t('layout.nav_primary_label')); ?>">
         <div class="brand">
@@ -309,7 +310,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
                 </form>
             </div>
         </header>
-        <main class="content">
+        <main class="content" id="main" tabindex="-1">
             <?php foreach (flash_messages() as $message) {
                 echo flash_alert_html(is_array($message) ? $message : []);
             } ?>

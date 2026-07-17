@@ -24,6 +24,7 @@ return [
     'nav_logs' => 'Logs',
     'nav_primary_label' => 'Primary navigation',
     'nav_toggle' => 'Toggle menu',
+    'skip_to_content' => 'Skip to content',
     'nav_group_operations' => 'Operations',
     'nav_group_catalog' => 'Catalog',
     'nav_group_admin' => 'Administration',
