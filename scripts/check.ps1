@@ -113,8 +113,10 @@ foreach ($name in $requiredToolImages) {
     }
     $toolImages[$name] = [string]$entry.Value.ref
 }
-# Dev-Stack-Container: nur noch Fallback-Ziel fuer Invoke-AppComposer; alle
-# Integration-Gates laufen gegen den QA-Stack.
+# Dev-Stack-Container: letzter Fallback fuer Invoke-AppComposer; der
+# primaere Pfad mountet immer den aktuellen Pruef-Root, damit ein Clean
+# Checkout nie versehentlich den Code eines parallel laufenden Dev-Stacks
+# prueft. Alle Integration-Gates laufen gegen den QA-Stack.
 $phpContainer = 'virtusphere-v2-webapp-php-1'
 
 # --- QA-Wegwerf-Stack (Integration-/Release-Lane) ------------------------------
@@ -283,15 +285,13 @@ function Invoke-CheckPhp {
     return $null
 }
 
-# Composer im App-Kontext: bevorzugt der laufende Compose-Container (dessen
-# Bind-Mount /var/www/html ist Docker/WebAPI), sonst ein frisches docker run
-# mit Repo-Mount. Der zweite Pfad traegt CI, wo der Stack nicht laeuft: das
-# Projekt-Image bringt composer mit, vendor/ kommt aus dem Mount.
+# Composer im App-Kontext: primaer ein frisches docker run mit dem aktuellen
+# Pruef-Root. Ein parallel laufender Dev-Container kann aus einem anderen
+# Checkout gemountet sein und darf deshalb nie die bevorzugte Beweisquelle
+# sein. Das Projekt-Image bringt composer mit, vendor/ kommt aus dem Mount.
+# Der Dev-Container bleibt nur Fallback, falls sein Image-Tag fehlt.
 function Invoke-AppComposer {
     param([string[]]$Arguments)
-    if (Test-Container $phpContainer) {
-        return Invoke-Tool 'docker' (@('exec', '-w', '/var/www/html', $phpContainer, 'composer') + $Arguments)
-    }
     if (Test-DockerImage $toolImages.php) {
         return Invoke-Tool 'docker' (@('run', '--rm',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
@@ -303,6 +303,9 @@ function Invoke-AppComposer {
             '-e', 'GIT_CONFIG_COUNT=1',
             '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=*',
             $toolImages.php, 'composer') + $Arguments)
+    }
+    if (Test-Container $phpContainer) {
+        return Invoke-Tool 'docker' (@('exec', '-w', '/var/www/html', $phpContainer, 'composer') + $Arguments)
     }
     return $null
 }
