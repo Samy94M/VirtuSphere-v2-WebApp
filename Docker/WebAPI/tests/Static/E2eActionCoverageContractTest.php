@@ -29,18 +29,13 @@ final class E2eActionCoverageContractTest extends TestCase
 {
     /**
      * Actions without browser proof yet, each with the owing slice. Delete the
-     * entry in the commit that adds the covering spec.
+     * entry in the commit that adds the covering spec. Empty since Etappe 7:
+     * every portal POST action carries a marker; a new action lands here (or
+     * gets its spec) before the build goes green again.
      *
      * @var array<string, string>
      */
-    private const PENDING_ACTIONS = [
-        // Etappe 7, HTTPS slice: the enable/disable dance needs cert material
-        // and a stack whose listener may flip (QA stack, not the dev stack).
-        'settings.php:save_https_enabled' => 'HTTPS cert upload flow spec',
-        'settings.php:save_https_redirect' => 'HTTPS cert upload flow spec',
-        'settings.php:save_https_hsts' => 'HTTPS cert upload flow spec',
-        'settings.php:upload_https_cert' => 'HTTPS cert upload flow spec',
-    ];
+    private const PENDING_ACTIONS = [];
 
     private function webApiRoot(): string
     {
