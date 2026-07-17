@@ -175,6 +175,19 @@ tail -n 100 Docker/logs/nginx/error.log
 
 Alle Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie automatisch wieder. Der Deploy-Worker haelt zudem eine MySQL-Unterbrechung aus: er verbindet sich mit Backoff neu, statt abzustuerzen und Deploy-Jobs im Status `queued` haengen zu lassen. Ein manueller Eingriff ist nur noetig, wenn ein Container dauerhaft in einem Fehlerzustand bleibt (`docker compose ps` pruefen).
 
+Jeder Dienst hat einen Healthcheck: `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurueck, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Pruefergebnisse.
+
+### phpMyAdmin (optional)
+
+phpMyAdmin ist reines Admin-Werkzeug und startet nicht mehr automatisch mit dem Stack. Bei Bedarf:
+
+```bash
+docker compose --profile tools up -d phpmyadmin   # starten (nur 127.0.0.1:PMA_PORT)
+docker compose --profile tools rm -sf phpmyadmin  # wieder entfernen
+```
+
+Hinweis fuer Updates von aelteren Staenden: ein frueher dauerhaft laufender phpMyAdmin-Container bleibt nach dem Update zurueck, weil `docker compose down` Profil-Dienste nicht anfasst. Einmalig mit `docker compose --profile tools rm -sf phpmyadmin` entfernen; danach gilt der On-Demand-Weg oben.
+
 Migrationen erneut pruefen:
 
 ```bash

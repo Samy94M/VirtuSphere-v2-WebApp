@@ -491,6 +491,91 @@ $cases += @(
     } }
 )
 
+# Compose-/Dockerfile-Haertungs-Contract (AP8): check-compose-hardening.ps1
+# liest VIRTUSPHERE_CHECK_ROOT selbst; die Fixtures brauchen eine .env (aus
+# .env.example kopiert, enthaelt keine Geheimnisse), weil compose config die
+# env_file-Direktiven aufloest.
+function Invoke-ComposeHardeningGuard {
+    param([string]$FixtureRoot = '')
+    $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
+    if ($FixtureRoot) { $env:VIRTUSPHERE_CHECK_ROOT = ($FixtureRoot -replace '\\', '/') }
+    try {
+        return Invoke-Tool $hostShell @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $scriptDir 'check-compose-hardening.ps1'))
+    } finally {
+        $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
+    }
+}
+function New-ComposeFixture {
+    $fx = New-Fixture @('docker-compose.yml', '.env.example',
+        'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile', 'Docker/qa-ansible/Dockerfile')
+    Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
+    return $fx
+}
+$cases += @(
+    @{ Name = 'compose-hardening.green'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        Assert-Guard (Invoke-ComposeHardeningGuard) @(0) -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.read-only-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'read_only: true' 'read_only: false'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.read-only\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.cap-add-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - DAC_READ_SEARCH' ("      - DAC_READ_SEARCH`n      - SYS_ADMIN")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.cap-add\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.depends-started-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'condition: service_healthy' 'condition: service_started'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.depends-healthy\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-profile-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Der reale Drift: Profil entfernt (x-Key ist valide, compose ignoriert
+        # ihn) und phpMyAdmin startet wieder always-on.
+        Edit-Fixture $fx 'docker-compose.yml' '    profiles:' '    x-disabled-profiles:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-wrong-profile-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        # In ein fremdes Profil verschoben: dank --profile "*" bleibt der
+        # Service sichtbar und wird als falsch platziert gemeldet.
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - tools' '      - werkzeuge'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.image-digest-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Anker digest-unabhaengig, sonst bricht jeder Digest-Bump den Guard:
+        # der Digest-Rest wird zum YAML-Inline-Kommentar, das Image verliert
+        # seinen Pin.
+        Edit-Fixture $fx 'docker-compose.yml' 'image: mysql:8.4@sha256:' 'image: mysql:8.4 # sha256:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.image-digest\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.dockerfile-digest-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Gleiche Digest-Unabhaengigkeit: der Check parst die FROM-Referenz nur
+        # bis zum ersten Leerzeichen und baut nie, der Rest darf Muell sein.
+        Edit-Fixture $fx 'Docker/php/Dockerfile' 'FROM php:8.4-fpm@sha256:' 'FROM php:8.4-fpm sha256:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '  phpmyadmin:' '  phpmyadmin-renamed:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.services\]' -InfraOnExit2
+    } }
+)
+
 # --- Ausfuehrung -----------------------------------------------------------------
 $selected = $cases
 if ($Filter) {

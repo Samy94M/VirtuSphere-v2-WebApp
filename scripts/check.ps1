@@ -93,7 +93,7 @@ $isWindowsHost = ($env:OS -eq 'Windows_NT')
 # kaputte Lockdatei ist eine unvollstaendige Pruefumgebung (Exit 2), denn ohne
 # Pins wuerde jedes Gate gegen eine unbestimmte Toolversion pruefen.
 $toolLockPath = Join-Path $scriptDir 'tool-lock.json'
-$requiredToolImages = @('yamllint', 'actionlint', 'shellcheck', 'hadolint', 'ansible', 'python', 'php', 'gitleaks')
+$requiredToolImages = @('yamllint', 'actionlint', 'shellcheck', 'hadolint', 'ansible', 'python', 'php', 'gitleaks', 'trivy')
 if (-not (Test-Path $toolLockPath)) {
     Write-Host ('check.ps1: Tool-Lockdatei fehlt: {0}' -f $toolLockPath) -ForegroundColor Yellow
     exit 2
@@ -322,6 +322,20 @@ $intRel = @('Integration', 'Release')
 Add-Gate -Name 'compose-config' -Lanes $allLanes -Kind 'container' -Body {
     $r = Invoke-Tool 'docker' @('compose', '--project-directory', $repoRoot, 'config', '--quiet')
     Format-ToolResult $r 'docker-compose.yml valide' 'docker compose config meldet Fehler'
+}
+
+Add-Gate -Name 'compose-hardening' -Lanes $allLanes -Kind 'container' -Body {
+    # Haertungs-Contract (AP8): read_only/cap_drop/cap_add/no-new-privileges/
+    # Limits/Healthchecks/service_healthy/tools-Profil/Digest-Pins, semantisch
+    # ueber docker compose config. Das Skript liest VIRTUSPHERE_CHECK_ROOT
+    # selbst (vererbt sich an den Kindprozess, so beweisen es die Guards).
+    $hostExe = 'powershell'
+    if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
+    $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', (Join-Path $scriptDir 'check-compose-hardening.ps1'))
+    if ($r.ExitCode -eq 0) { return New-PassResult 'Container-Haertung und Digest-Pins gepinnt' $r.Output }
+    if ($r.ExitCode -eq 2) { return New-InfraResult 'check-compose-hardening: Pruefumgebung unvollstaendig' $r.Output }
+    New-FailResult ('Haertungs-Contract verletzt (exit ' + $r.ExitCode + ')') $r.Output
 }
 
 Add-Gate -Name 'php-lint' -Lanes $allLanes -Kind 'container' -Body {
@@ -803,6 +817,141 @@ Add-Gate -Name 'secret-scan' -Lanes @('Release') -Kind 'container' -Network $tru
         return New-InfraResult ('Tool-Image {0} nicht verfuegbar' -f $toolImages.gitleaks) $r.Output
     }
     Format-ToolResult $r 'Secret-Scan ueber die volle Historie: null Funde' 'gitleaks meldet Secrets'
+}
+
+# Runtime-Images des Stacks fuer die SBOM-/CVE-Gates (AP8): Registry-Refs aus
+# der aufgeloesten Compose-Sicht (inkl. tools-Profil), Build-Services ueber den
+# Compose-Projektnamen; buildgleiche Images (php und die zwei Worker teilen ein
+# Dockerfile) werden ueber die Image-ID dedupliziert. Das config-JSON traegt
+# interpolierte Secrets und wird deshalb nie ausgegeben oder gespeichert.
+function Get-RuntimeImages {
+    $r = Invoke-Tool 'docker' @('compose', '--project-directory', $repoRoot,
+        '--profile', '*', 'config', '--format', 'json')
+    if ($r.ExitCode -ne 0) { return $null }
+    $config = $null
+    try { $config = (@($r.Output) -join "`n") | ConvertFrom-Json } catch { return $null }
+    $refs = @()
+    $project = [string]$config.name
+    foreach ($p in $config.services.PSObject.Properties) {
+        $imgProp = $p.Value.PSObject.Properties['image']
+        if ($imgProp -and $imgProp.Value) {
+            $refs += [string]$imgProp.Value
+        } elseif ($p.Value.PSObject.Properties['build']) {
+            $refs += ($project + '-' + $p.Name)
+        }
+    }
+    $byId = @{}
+    $missing = @()
+    foreach ($ref in @($refs | Sort-Object -Unique)) {
+        $probe = Invoke-Tool 'docker' @('image', 'inspect', '--format', '{{.Id}}', $ref)
+        if ($probe.ExitCode -ne 0) { $missing += $ref; continue }
+        $id = [string]$probe.Output[0]
+        if (-not $byId.ContainsKey($id)) { $byId[$id] = $ref }
+    }
+    return @{ Images = @($byId.Values | Sort-Object); Missing = @($missing) }
+}
+
+# trivy als Container: Docker-Socket, damit es die lokalen Images liest, plus
+# ein persistentes Cache-Volume fuer die Vuln-DB (ein Re-Download pro Lauf
+# waere Verschwendung; das Volume ist ein Tool-Cache mit virtusphere-Praefix,
+# kein QA-Artefakt, und faellt nicht unter das finally-Cleanup).
+function Invoke-Trivy {
+    param([string[]]$Arguments)
+    return Invoke-Tool 'docker' (@('run', '--rm',
+        '-v', '/var/run/docker.sock:/var/run/docker.sock',
+        '-v', 'virtusphere-trivy-cache:/root/.cache',
+        '-v', ($repoRoot + ':/repo:ro'),
+        '-v', (($artifactDir -replace '\\', '/') + ':/out'),
+        $toolImages.trivy) + $Arguments)
+}
+
+Add-Gate -Name 'sbom' -Lanes @('Release') -Kind 'container' -Network $true -Body {
+    $found = Get-RuntimeImages
+    if ($null -eq $found) { return New-InfraResult 'docker compose config nicht lesbar' }
+    if ($found.Missing.Count -gt 0) {
+        return New-InfraResult ('Runtime-Image(s) fehlen lokal: ' + ($found.Missing -join ', ') + ' (erst docker compose build bzw. pull)')
+    }
+    if ($found.Images.Count -eq 0) { return New-InfraResult 'keine Runtime-Images gefunden (Zero-Match)' }
+    $written = @()
+    foreach ($img in $found.Images) {
+        $safe = ($img -replace '[^A-Za-z0-9._-]', '_')
+        $r = Invoke-Trivy @('image', '--format', 'spdx-json',
+            '--output', ('/out/sbom-' + $safe + '.spdx.json'), $img)
+        if ($r.ExitCode -ne 0) { return New-FailResult ('SBOM-Erzeugung fuer ' + $img + ' fehlgeschlagen (exit ' + $r.ExitCode + ')') $r.Output }
+        $written += ('sbom-' + $safe + '.spdx.json')
+    }
+    New-PassResult ('SPDX-SBOM fuer {0} Image(s) unter {1}' -f $found.Images.Count, $artifactDir) $written
+}
+
+Add-Gate -Name 'image-cve' -Lanes @('Release') -Kind 'container' -Network $true -Body {
+    # Critical/High blockieren; Ausnahmen nur befristet ueber .trivyignore.yaml
+    # (expired_at laesst eine abgelaufene Ausnahme automatisch wieder rot werden).
+    if (-not (Test-Path (Join-Path $repoRoot '.trivyignore.yaml'))) {
+        return New-InfraResult '.trivyignore.yaml fehlt (CVE-Ausnahme-Vertrag)'
+    }
+    $found = Get-RuntimeImages
+    if ($null -eq $found) { return New-InfraResult 'docker compose config nicht lesbar' }
+    if ($found.Missing.Count -gt 0) {
+        return New-InfraResult ('Runtime-Image(s) fehlen lokal: ' + ($found.Missing -join ', ') + ' (erst docker compose build bzw. pull)')
+    }
+    if ($found.Images.Count -eq 0) { return New-InfraResult 'keine Runtime-Images gefunden (Zero-Match)' }
+    $bad = @()
+    $reportLines = @()
+    foreach ($img in $found.Images) {
+        $safe = ($img -replace '[^A-Za-z0-9._-]', '_')
+        # Zwei Sichten (dokumentierte Politik, .trivyignore.yaml): der volle
+        # Bericht inklusive unfixed geht als Artefakt raus; blockiert wird nur,
+        # wofuer es eine Handlungsoption gibt (--ignore-unfixed), sonst waere
+        # das Gate an Debian-will_not_fix-Eintraegen dauerrot und wertlos.
+        $full = Invoke-Trivy @('image', '--quiet', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+            '--ignorefile', '/repo/.trivyignore.yaml',
+            '--output', ('/out/cve-' + $safe + '.txt'), $img)
+        if ($full.ExitCode -ne 0) {
+            return New-InfraResult ('trivy-Bericht fuer ' + $img + ' nicht erzeugbar (exit ' + $full.ExitCode + ')') $full.Output
+        }
+        $r = Invoke-Trivy @('image', '--quiet', '--scanners', 'vuln', '--severity', 'CRITICAL,HIGH',
+            '--ignore-unfixed', '--ignorefile', '/repo/.trivyignore.yaml', '--exit-code', '1', $img)
+        if ($r.ExitCode -eq 1) {
+            $bad += $img
+            $reportLines += ('--- ' + $img + ' (voller Bericht: cve-' + $safe + '.txt) ---')
+            $reportLines += @($r.Output | Select-Object -Last 25)
+        } elseif ($r.ExitCode -ne 0) {
+            return New-InfraResult ('trivy-Scan fuer ' + $img + ' nicht ausfuehrbar (exit ' + $r.ExitCode + ')') $r.Output
+        }
+    }
+    if ($bad.Count -gt 0) {
+        return New-FailResult ('fixbare Critical/High-CVEs offen in: ' + ($bad -join ', ') + ' (Berichte unter ' + $artifactDir + '; Ausnahmen nur befristet via .trivyignore.yaml)') $reportLines
+    }
+    New-PassResult ('{0} Image(s) ohne fixbare Critical/High-CVEs (volle Berichte unter {1})' -f $found.Images.Count, $artifactDir)
+}
+
+Add-Gate -Name 'offline-bundle' -Lanes @('Release') -Kind 'container' -Network $true -Body {
+    # Baut das Offline-Release-Bundle (Images, vendor, Collections, SBOM,
+    # CVE-Berichte, Digest-Manifest) und laesst es sich am Ende selbst offline
+    # verifizieren (verify.sh). -KeepArtifacts behaelt das Bundle.
+    if (-not $shExe) {
+        return New-InfraResult 'kein Host-sh (Git Bash): das Bundle-Skript orchestriert docker und kann nicht in den PHP-Container ausweichen'
+    }
+    $bundleDir = ((Join-Path $artifactDir 'offline-bundle') -replace '\\', '/')
+    $r = Invoke-CheckShell 'build-offline-bundle.sh' @($bundleDir)
+    if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar' }
+    if ($r.ExitCode -eq 2) { return New-InfraResult 'Bundle-Umgebung unvollstaendig' $r.Output }
+    Format-ToolResult $r ('Offline-Bundle gebaut und offline verifiziert: ' + $bundleDir) 'Offline-Bundle fehlgeschlagen'
+}
+
+Add-Gate -Name 'npm-audit' -Lanes @('Release') -Kind 'native' -Network $true -Body {
+    # QA-Tooling-Abhaengigkeiten (Playwright/axe in tests/e2e): Advisory-Bericht
+    # als Artefakt, blockiert ab high - das Pendant zu composer-audit.
+    if (-not (Test-Command 'npm')) { return New-InfraResult 'npm nicht gefunden' }
+    $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
+    if (-not (Test-Path (Join-Path $e2eDir 'package-lock.json'))) {
+        return New-InfraResult 'tests/e2e/package-lock.json fehlt (Zero-Match)'
+    }
+    $r = Invoke-Tool 'npm' @('--prefix', $e2eDir, 'audit', '--audit-level=high', '--json')
+    $reportPath = Join-Path $artifactDir 'npm-audit.json'
+    [System.IO.File]::WriteAllLines($reportPath, [string[]]@($r.Output))
+    if ($r.ExitCode -eq 0) { return New-PassResult ('keine high/critical-Advisories; Bericht: ' + $reportPath) }
+    New-FailResult ('npm audit meldet Advisories ab high (Bericht: ' + $reportPath + ')') @($r.Output | Select-Object -First 40)
 }
 
 # --- Auswahl ------------------------------------------------------------------

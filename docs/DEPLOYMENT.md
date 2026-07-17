@@ -64,7 +64,7 @@ The `Ansible/` copies are the web-app deploy source. The `bin/Debug|Release/Ansi
 
 ### Worker resilience
 
-The `deploy-worker`, `php`, `webserver`, `mysql` and `phpmyadmin` services run with `restart: unless-stopped` so the stack recovers after a host reboot or a container crash without manual intervention.
+The `deploy-worker`, `maintenance-worker`, `php`, `webserver` and `mysql` services run with `restart: unless-stopped` so the stack recovers after a host reboot or a container crash without manual intervention. Every runtime service carries a healthcheck (AP8): MySQL answers `mysqladmin ping`, PHP answers the FPM FastCGI ping, nginx answers its own `/nginx-health` location, and both workers keep a liveness file fresh that `lib/worker_healthcheck.php` judges. `webserver` waits for real PHP readiness (`service_healthy`), so a cold `docker compose up -d --wait` only returns green when the whole chain accepts work. phpMyAdmin is admin tooling in the optional `tools` profile (`docker compose --profile tools up -d phpmyadmin`, loopback-only) and is not part of the runtime stack.
 
 In `--loop` mode the worker tolerates a MySQL outage instead of exiting: it retries the initial connection with backoff (up to 30s between attempts) and, if the database drops mid-loop, reconnects through `db(true)` and continues claiming jobs. This closes the earlier failure where a slow MySQL start or a MySQL restart left the worker container dead and deploy jobs stuck in `queued` with no portal-visible error. The `--once` mode used by tooling still fails fast (three connection attempts, then a non-zero exit).
 

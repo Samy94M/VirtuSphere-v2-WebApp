@@ -136,7 +136,7 @@ return [
     'stack_a2_li2' => 'php: führt den PHP-Code von Portal und Maschinen-API aus (PHP 8.4).',
     'stack_a2_li3' => 'mysql: die Datenbank (MySQL 8.4); die Daten liegen dauerhaft in einem Datenverzeichnis auf dem Host und überleben jeden Container-Neustart.',
     'stack_a2_li4' => 'deploy-worker und maintenance-worker: die beiden Hintergrunddienste für Bereitstellungen und Wartung.',
-    'stack_a2_li5' => 'phpmyadmin: eine Datenbank-Verwaltungsoberfläche für Administratoren.',
+    'stack_a2_li5' => 'phpmyadmin: eine Datenbank-Verwaltungsoberfläche für Administratoren. Sie startet nicht mit dem Stack, sondern wird bei Bedarf über das Docker-Compose-Profil „tools" gestartet und ist nur vom Server selbst aus erreichbar.',
     'stack_a2_p2' => 'Alle Container tragen die Neustart-Regel „unless-stopped": Nach einem Absturz oder einem Reboot des Ubuntu-Hosts starten sie automatisch wieder, ohne dass jemand eingreifen muss. Das System ist bewusst LAN-only gebaut: kein Internetzugang nötig, keine externen Dienste, keine Telemetrie. Gesprochen wird zunächst über HTTP; die Umstellung auf HTTPS ist als späterer Verwaltungsschritt vorgesehen.',
 
     'stack_q3' => 'Wo werden welche Daten gespeichert, und was ist die „Wahrheit"?',

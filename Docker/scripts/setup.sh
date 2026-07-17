@@ -48,7 +48,10 @@ fi
 
 docker compose config --quiet
 docker compose build
-docker compose up -d
+# --wait: erst weitermachen, wenn jeder Healthcheck gruen ist (AP8). Ein Stack,
+# der nicht gesund wird, bricht das Setup sichtbar ab, statt kaputte Container
+# stehen zu lassen.
+docker compose up -d --wait
 
 docker compose exec -T php php /var/www/html/lib/migrate.php --check
 docker compose exec -T php php /var/www/html/lib/migrate.php

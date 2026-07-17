@@ -135,7 +135,7 @@ return [
     'stack_a2_li2' => 'php: runs the PHP code of the portal and the machine API (PHP 8.4).',
     'stack_a2_li3' => 'mysql: the database (MySQL 8.4); its data lives permanently in a data directory on the host and survives every container restart.',
     'stack_a2_li4' => 'deploy-worker and maintenance-worker: the two background services for deployments and maintenance.',
-    'stack_a2_li5' => 'phpmyadmin: a database administration interface for administrators.',
+    'stack_a2_li5' => 'phpmyadmin: a database administration interface for administrators. It does not start with the stack; it is started on demand through the Docker Compose "tools" profile and is only reachable from the server itself.',
     'stack_a2_p2' => 'All containers carry the restart rule "unless-stopped": after a crash or a reboot of the Ubuntu host they come back automatically without anyone stepping in. The system is deliberately built LAN-only: no internet access required, no external services, no telemetry. Communication starts out over HTTP; the switch to HTTPS is planned as a later administrative step.',
 
     'stack_q3' => 'Where is which data stored, and what is the "truth"?',

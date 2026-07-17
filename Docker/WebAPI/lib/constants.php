@@ -324,6 +324,15 @@ const VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS = 15;
 const VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS = 60;
 const VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS = 3600;
 
+// Container liveness heartbeat (AP8): both loop workers touch this file on
+// every loop iteration, on every DB-reconnect attempt and on every transport
+// heartbeat tick; the compose healthcheck runs lib/worker_healthcheck.php,
+// which only checks the file's age. Path and window live here so the compose
+// file hardcodes neither. The window must stay above the largest legitimate
+// touch gap, which is the 30s DB-reconnect backoff, with generous margin.
+const VIRTUSPHERE_WORKER_HEARTBEAT_FILE = '/tmp/virtusphere-worker-heartbeat';
+const VIRTUSPHERE_WORKER_HEARTBEAT_MAX_AGE_SECONDS = 120;
+
 // Free-text status columns keep their free-text nature; only the defaults for
 // fresh rows are centralized so create paths do not drift.
 const VIRTUSPHERE_MISSION_STATUS_DEFAULT = 'active';

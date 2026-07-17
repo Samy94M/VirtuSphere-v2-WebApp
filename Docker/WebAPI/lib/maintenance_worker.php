@@ -19,6 +19,7 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/maintenance_tasks.php';
+require_once __DIR__ . '/worker_heartbeat.php';
 
 function maintenance_worker_options(array $argv): array
 {
@@ -48,6 +49,7 @@ function maintenance_worker_main(array $argv): int
     $state = ['last_run' => [], 'states' => []];
 
     do {
+        worker_heartbeat_touch();
         try {
             maintenance_worker_run_once($db, $state, $options['once']);
         } catch (mysqli_sql_exception $exception) {
@@ -80,6 +82,8 @@ function maintenance_worker_connect_db(array $options): mysqli
                 throw $exception;
             }
             fwrite(STDERR, '[maintenance-worker] Database not reachable (attempt ' . $attempt . '): ' . $exception->getMessage() . "\n");
+            // Waiting out a DB restart is a healthy worker state (AP8).
+            worker_heartbeat_touch();
             sleep(min(30, 2 * $attempt));
         }
     }

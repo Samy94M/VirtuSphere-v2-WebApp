@@ -49,6 +49,9 @@ Docker/WebAPI/.phpunit.result.cache
 # Generated, redacted local QA evidence (never a release document).
 qa-artifacts/
 
+# Offline-release bundles (scripts/build-offline-bundle.sh default output).
+dist/
+
 # Infection (mutation testing) is dev-host-only (ADR-0028 reasoning): the phar,
 # its run artifacts and cache are never tracked. The infection.json5.dist config
 # is tracked; the local infection.json5 (if any) and the log are not.

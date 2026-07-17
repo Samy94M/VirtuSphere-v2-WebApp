@@ -1,21 +1,17 @@
 # Hadolint-Konfiguration fuer das hadolint-Gate in scripts/check.ps1.
 #
-# Ignorierte Regeln sind Entscheidungen auf Zeit, nicht auf Dauer: AP8
-# (Container-/Supply-Chain-Haertung) entscheidet je Regel neu, ob gepinnt
-# oder die Ausnahme mit Begruendung verlaengert wird.
+# AP8-Entscheidung (2026-07-17): Reproduzierbarkeit kommt aus den
+# Digest-Pins der Basisimages (FROM ...@sha256 in allen Dockerfiles) plus den
+# gehashten pip-Pins (Docker/qa-ansible/requirements.txt). DL3015 ist seitdem
+# umgesetzt (--no-install-recommends im PHP-Image) und nicht mehr ignoriert.
 ignored:
   # DL3008: apt-Paketversionen pinnen. Debian-Point-Releases raeumen alte
-  # Versionen aus den Repos, ein hartes Pin bricht den Build schneller als es
-  # Reproduzierbarkeit stiftet; echte Reproduzierbarkeit kommt in AP8 ueber
-  # Image-Digests.
+  # Versionen aus den Repos, ein hartes Pin bricht jeden Rebuild schneller als
+  # es Reproduzierbarkeit stiftet. Akzeptierte Grenze: der apt-Layer ist
+  # zeitvariabel, die Basis ist per Digest fixiert; echte Byte-Gleichheit
+  # liefert das Offline-Bundle (docker save der gebauten Images).
   - DL3008
-  # DL3015: --no-install-recommends. Sinnvoll, aber eine Aenderung am
-  # PHP-Basisimage (Rebuild aller Umgebungen); wird in AP8 zusammen mit den
-  # Digest-Pins umgesetzt.
-  - DL3015
-  # DL3018: apk-Paketversionen pinnen; dieselbe Abwaegung wie DL3008, nur fuer
-  # Alpine (Docker/qa-ansible). Alpine raeumt alte Paketversionen sofort aus
-  # den Repos, ein hartes Pin bricht jeden Rebuild; die Reproduzierbarkeit
-  # kommt aus dem Digest-Pin des Basisimages (scripts/tool-lock.json) und den
-  # pip-Hashes in Docker/qa-ansible/requirements.txt.
+  # DL3018: apk-Paketversionen pinnen; dieselbe Abwaegung wie DL3008 fuer
+  # Alpine (Docker/qa-ansible), wo alte Paketversionen sofort aus den Repos
+  # verschwinden.
   - DL3018

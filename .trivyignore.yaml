@@ -1,0 +1,103 @@
+# CVE-Ausnahme-Vertrag fuer das image-cve-Gate (AP8, scripts/check.ps1) und
+# das Offline-Bundle (scripts/build-offline-bundle.sh).
+#
+# Politik: Das Gate blockiert fixbare Critical/High-CVEs (--ignore-unfixed);
+# Funde ohne verfuegbaren Fix stehen im vollstaendigen Bericht (cve-*.txt),
+# blockieren aber nicht, weil es fuer sie keine Handlungsoption gibt.
+# Eine Ausnahme hier braucht alle vier Angaben und ist immer befristet:
+#   - id:         die CVE-/Advisory-ID
+#   - statement:  Begruendung UND Owner ("warum vertretbar; Owner: <wer>")
+#   - expired_at: Ablaufdatum (YYYY-MM-DD). Nach Ablauf meldet trivy den
+#                 Eintrag automatisch wieder - eine abgelaufene Ausnahme
+#                 bricht also den Build, genau wie eine fehlende.
+# Eine Ausnahme ohne Ablaufdatum ist keine Ausnahme, sondern ein Ignorieren;
+# solche Eintraege sind in Reviews abzulehnen.
+#
+# Stand 2026-07-17 (Owner aller Eintraege: Samy):
+# - mysql:8.4 (aktuellster Oracle-Build c592c15): gosu ist mit Go 1.24.6
+#   gebaut (15 stdlib-CVEs), mysqlsh buendelt aeltere Python-Pakete. Beheben
+#   kann das nur ein neuer Oracle-Image-Build; gosu laeuft nur beim
+#   Containerstart als Privilege-Dropper, mysqlsh ist kein Netzdienst.
+# - phpmyadmin:5.2.3 (aktuellster Library-Build b68f318): buendelt twig 3.11
+#   und symfony/cache 5.4 im eigenen vendor; behebt nur ein neues
+#   phpMyAdmin-Release. Das Tool liegt im tools-Profil, loopback-only,
+#   und laeuft nicht im Runtime-Stack.
+vulnerabilities:
+  # --- mysql:8.4 / usr/local/bin/gosu (Go stdlib 1.24.6) ---
+  - id: CVE-2025-68121
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; nur Startup-Privilege-Dropper, kein Netzdienst; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2025-61726
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2025-61729
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-25679
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-27145
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-32280
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-32281
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-32283
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-33811
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-33814
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-39820
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-39822
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-39836
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-42499
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-42504
+    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  # --- mysql:8.4 / mysqlsh-Python-Pakete ---
+  - id: GHSA-537c-gmf6-5ccf
+    statement: "cryptography im mysqlsh-Bundle des Oracle-Builds; mysqlsh ist kein Netzdienst; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-27459
+    statement: "pyOpenSSL im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-44431
+    statement: "urllib3 im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-44432
+    statement: "urllib3 im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
+    expired_at: 2026-09-30
+  # --- phpmyadmin:5.2.3 / gebuendeltes vendor (twig, symfony/cache) ---
+  - id: CVE-2026-24425
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; tools-Profil, loopback-only, nur Admin-Nutzung; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-46633
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-46634
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-46638
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-49981
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-45073
+    statement: "symfony/cache 5.4 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30

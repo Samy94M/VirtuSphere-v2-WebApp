@@ -19,7 +19,18 @@ services:
       SSL_SUBJECT: ${SSL_SUBJECT}
     depends_on:
       php:
-        condition: service_started
+        # Real PHP readiness (AP8): nginx only starts once FPM answers its
+        # FastCGI ping, so a cold `up --wait` cannot go green with a dead
+        # upstream behind it.
+        condition: service_healthy
+    healthcheck:
+      # nginx-only probe (no PHP, no DB): a database outage must not flag the
+      # webserver unhealthy. Busybox wget ships with the alpine base.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -72,6 +83,14 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      # Real FPM readiness over the FastCGI path (ping.path from
+      # Docker/php/fpm.d/zz-virtusphere.conf), not just "a process exists".
+      test: ["CMD-SHELL", "REQUEST_METHOD=GET SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -104,6 +123,15 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      # Liveness file the loop keeps fresh - also during long playbook runs,
+      # via the transport's silence tick. Path and window are PHP constants
+      # (lib/worker_heartbeat.php), so nothing is hardcoded here.
+      test: ["CMD", "php", "/var/www/html/lib/worker_healthcheck.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -127,6 +155,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "/var/www/html/lib/worker_healthcheck.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -139,7 +173,8 @@ services:
     mem_limit: 128m
 
   mysql:
-    image: mysql:8.4
+    # Tag documents the line, digest pins the bytes (AP8).
+    image: mysql:8.4@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
@@ -169,7 +204,14 @@ services:
     mem_limit: 1g
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin
+    # Admin tooling, not part of the runtime stack (AP8): only started on
+    # demand via `docker compose --profile tools up -d phpmyadmin`. Stays
+    # loopback-only (GROK.md). Previously this ran tagless (implicit :latest)
+    # and always-on. Library image, not phpmyadmin/phpmyadmin: the vendor repo
+    # stopped rebuilding (hundreds of fixable base CVEs frozen in its 5.2.3).
+    image: phpmyadmin:5.2.3@sha256:b68f318c5fd85541795ed8eb4ced28ea6908a89910871783b3e479cc6c6d1e1b
+    profiles:
+      - tools
     ports:
       - "127.0.0.1:${PMA_PORT}:80"
     env_file:

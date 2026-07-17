@@ -24,6 +24,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/esxi_capabilities.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/ssh.php';
+require_once __DIR__ . '/worker_heartbeat.php';
 
 final class DeployWorkerCancelled extends RuntimeException
 {
@@ -58,6 +59,7 @@ function deploy_worker_main(array $argv): int
     $db = deploy_worker_connect_db($options);
 
     do {
+        worker_heartbeat_touch();
         try {
             $claimed = deploy_worker_run_once($db, $workerId, $options);
         } catch (mysqli_sql_exception $exception) {
@@ -93,6 +95,8 @@ function deploy_worker_connect_db(array $options): mysqli
                 throw $exception;
             }
             fwrite(STDERR, '[deploy-worker] Database not reachable (attempt ' . $attempt . '): ' . $exception->getMessage() . "\n");
+            // Waiting out a DB restart is a healthy worker state (AP8).
+            worker_heartbeat_touch();
             sleep(min(30, 2 * $attempt));
         }
     }
@@ -406,6 +410,11 @@ function deploy_worker_assert_not_cancelled(mysqli $db, int $jobId): void
 function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, int $intervalSeconds = VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS): void
 {
     static $lastHeartbeat = [];
+
+    // Ticks fire on every read slice of the bounded transport (AP6), also the
+    // silent ones, so touching here keeps the container healthcheck green
+    // through playbook runs far longer than the loop cadence (AP8).
+    worker_heartbeat_touch();
 
     $key = $jobId . ':' . $workerId;
     $now = time();
