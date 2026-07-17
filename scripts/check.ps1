@@ -93,7 +93,7 @@ $isWindowsHost = ($env:OS -eq 'Windows_NT')
 # kaputte Lockdatei ist eine unvollstaendige Pruefumgebung (Exit 2), denn ohne
 # Pins wuerde jedes Gate gegen eine unbestimmte Toolversion pruefen.
 $toolLockPath = Join-Path $scriptDir 'tool-lock.json'
-$requiredToolImages = @('yamllint', 'actionlint', 'shellcheck', 'hadolint', 'ansible', 'python', 'php')
+$requiredToolImages = @('yamllint', 'actionlint', 'shellcheck', 'hadolint', 'ansible', 'python', 'php', 'gitleaks')
 if (-not (Test-Path $toolLockPath)) {
     Write-Host ('check.ps1: Tool-Lockdatei fehlt: {0}' -f $toolLockPath) -ForegroundColor Yellow
     exit 2
@@ -785,6 +785,24 @@ Add-Gate -Name 'restore-drill' -Lanes @('Release') -Kind 'container' -Body {
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
     if ($r.ExitCode -eq 2) { return New-InfraResult 'Restore-Drill ohne Umgebung (Stack/Backup fehlt)' $r.Output }
     Format-ToolResult $r 'Backup-/Restore-Drill gruen' 'Restore-Drill rot'
+}
+
+Add-Gate -Name 'secret-scan' -Lanes @('Release') -Kind 'container' -Network $true -Body {
+    # Volle Git-Historie, nicht nur der Worktree: git rm entfernt keine
+    # Vergangenheit, und die zwei bekannten Altfunde sind in .gitleaks.toml
+    # als Entscheidungen dokumentiert. Erwartung: null Funde; jeder neue Fund
+    # ist rot, bis er rotiert oder als Fixture begruendet ist.
+    if (-not (Test-Path (Join-Path $repoRoot '.gitleaks.toml'))) { return New-InfraResult '.gitleaks.toml fehlt (Allowlist-Vertrag)' }
+    if (-not (Test-DockerImage $toolImages.gitleaks)) {
+        if ($NoNetwork) { return New-InfraResult ('Tool-Image {0} fehlt lokal (NoNetwork: kein Pull)' -f $toolImages.gitleaks) }
+    }
+    $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo'),
+        $toolImages.gitleaks, 'detect', '--source', '/repo',
+        '--config', '/repo/.gitleaks.toml', '--redact', '--exit-code', '1')
+    if ($r.ExitCode -gt 1 -and (@($r.Output) -join ' ') -match 'pull|not found|no such') {
+        return New-InfraResult ('Tool-Image {0} nicht verfuegbar' -f $toolImages.gitleaks) $r.Output
+    }
+    Format-ToolResult $r 'Secret-Scan ueber die volle Historie: null Funde' 'gitleaks meldet Secrets'
 }
 
 # --- Auswahl ------------------------------------------------------------------

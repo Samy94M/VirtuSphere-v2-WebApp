@@ -1,0 +1,36 @@
+# Secret-Scan-Vertrag (Etappe 7, AP7 Security). Der Scan laeuft ueber die VOLLE
+# Git-Historie (Release-Lane-Gate `secret-scan` in scripts/check.ps1); erwartet
+# werden null Funde. Jeder Allowlist-Eintrag ist eine dokumentierte
+# Entscheidung, kein Komfort:
+#
+# Bekannte HISTORISCHE Leaks, die die Historie behaelt (git rm entfernt keine
+# Vergangenheit) und die deshalb hier abgeschlossen werden, statt jeden Lauf
+# neu aufzuschrecken:
+#   - functions.psm1 (Initial-Commit): Klartext-MySQL-Passwort. gitleaks'
+#     Regeln matchen es nicht, ein Eintrag ist nicht noetig; die Rotation des
+#     Kontos ist als Go-live-Schritt in docs/operations/go-live.md verbucht.
+#   - Docker/nginx/ssl/nginx-selfsigned.key (Commit 7dbefa78, in HEAD
+#     geloescht): ein selbstsignierter Dev-Schluessel aus der Zeit vor dem
+#     Admin-Upload-Flow (ADR-0027). Nie ein Produktionszertifikat; das
+#     Zertifikat des Zielsystems wird ueber den Portal-Upload frisch
+#     installiert und teilt dieses Schluesselmaterial nicht.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "dokumentierte Test-Fixtures, Vendor-Format-Templates und der historische Dev-Key"
+paths = [
+    # HTTPS-Test-Fixtures: absichtlich eingecheckte Wegwerf-Schluessel, die nur
+    # der Upload-Parser-Test laedt. .txt-Endung, damit kein Deploy-Tooling sie
+    # je als echtes Material einsammelt.
+    '''Docker/WebAPI/tests/fixtures/https/.*\.key\.txt''',
+    # phpseclib traegt PEM-Header als Format-Templates im Bibliothekscode.
+    '''Docker/WebAPI/vendor/phpseclib/.*''',
+    # Historischer Dev-Self-Signed-Key, siehe Kopfkommentar.
+    '''Docker/nginx/ssl/nginx-selfsigned\.key''',
+]
+# Passwoerter, die Tests absichtlich als Literale fuehren (E2E-Fixtures).
+stopwords = [
+    "Rbac-Smuggle",
+]
