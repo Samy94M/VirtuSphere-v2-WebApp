@@ -34,30 +34,15 @@ final class E2eActionCoverageContractTest extends TestCase
      * @var array<string, string>
      */
     private const PENDING_ACTIONS = [
-        // Etappe 7, flows slice (todo: RBAC/CSRF, validation, uploads, deploy).
-        'missions.php:import_preview' => 'mission transfer flow spec',
-        'missions.php:import_confirm' => 'mission transfer flow spec',
-        'mission_details.php:export' => 'mission transfer flow spec',
-        'mission_details.php:clone_template' => 'mission template flow spec',
-        'mission_details.php:save_as_template' => 'mission template flow spec',
+        // Etappe 7, deploy slice: these need the worker/QA-stack choreography.
         'deploy.php:start' => 'deploy actions spec',
         'deploy.php:cancel' => 'deploy actions spec',
         'deploy.php:cancel_group' => 'deploy actions spec',
         'deploy.php:retry' => 'deploy actions spec',
         'deploy_log.php:cancel' => 'deploy actions spec',
-        'integrations.php:refresh_inventory' => 'integrations flow spec',
-        'integrations.php:reassign_vlan' => 'integrations flow spec',
-        'settings.php:allow_create' => 'settings flow spec',
-        'settings.php:allow_delete' => 'settings flow spec',
-        'settings.php:generate_token' => 'settings flow spec',
-        'settings.php:clear_token' => 'settings flow spec',
-        'settings.php:save_api' => 'settings flow spec',
-        'settings.php:save_esxi_inventory' => 'settings flow spec',
-        'settings.php:save_password_policy' => 'settings flow spec',
-        'settings.php:save_probe' => 'settings flow spec',
-        'settings.php:save_retire_threshold' => 'settings flow spec',
-        'settings.php:save_session' => 'settings flow spec',
-        'settings.php:save_timezone' => 'settings flow spec',
+
+        // Etappe 7, HTTPS slice: the enable/disable dance needs cert material
+        // and a stack whose listener may flip (QA stack, not the dev stack).
         'settings.php:save_https_enabled' => 'HTTPS cert upload flow spec',
         'settings.php:save_https_redirect' => 'HTTPS cert upload flow spec',
         'settings.php:save_https_hsts' => 'HTTPS cert upload flow spec',

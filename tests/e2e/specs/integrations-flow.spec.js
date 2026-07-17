@@ -1,0 +1,126 @@
+// TESTPLAN 3.5 / E6: the two integrations actions. The inventory refresh must
+// enqueue a real system job for the clicked credential; the VLAN mass
+// reassignment only renders when a genuine deviation exists, asks first
+// (danger: it rewrites every stored assignment), and proves its Cancel branch
+// by DB state.
+
+const { test, expect } = require('@playwright/test');
+const { ROLES } = require('../lib/auth');
+const { runPhp, phpJson } = require('../lib/php');
+
+test.use({ storageState: ROLES.admin.storageState });
+
+const MARK = 'e2eint';
+
+function cleanup() {
+  runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_esxi_inventory_state WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_credentials WHERE name LIKE '${MARK}%'");
+$db->query("DELETE FROM deploy_vlan WHERE vlan_name LIKE 'E2EVLAN-%'");
+$db->query("DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_missions WHERE mission_name LIKE '${MARK}%'");
+echo 'CLEANED';
+`);
+}
+
+test.beforeAll(() => cleanup());
+test.afterAll(() => cleanup());
+
+// e2e-covers: integrations.php:refresh_inventory
+test('refresh_inventory: the targeted refresh enqueues a system job for the credential', async ({ page }) => {
+  const seed = phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$hasAnsible = (int) ($db->query("SELECT COUNT(*) AS c FROM deploy_credentials WHERE type = 'ansible'")->fetch_assoc()['c'] ?? 0) > 0;
+if (!$hasAnsible) {
+    repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ans', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'ans'], 'secret123', $admin);
+}
+echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
+`, ['lib/repo/credentials.php']);
+
+  await page.goto('integrations.php');
+  const card = page.locator('.inv-cards > *', { hasText: `${MARK}-esxi` }).first();
+  const refresh = card.locator('form:has(input[name="action"][value="refresh_inventory"]) button');
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('integrations.php') && r.request().method() === 'POST'),
+    refresh.click(),
+  ]);
+  await expect(page.locator('.alert').first(), 'the refresh reports its outcome').toBeVisible();
+
+  // A system job has no mission; its mode travels in payload_json.
+  const jobs = phpJson(`
+$db = db();
+$stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_jobs WHERE credential_esxi_id = ? AND mission_id IS NULL AND payload_json LIKE '%\\"inventory\\"%'");
+$id = ${Number(seed.esxi)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]) . 'JSON';
+`);
+  expect(jobs.c, 'an inventory system job was enqueued for the credential').toBe(1);
+});
+
+// e2e-covers: integrations.php:reassign_vlan
+// e2e-covers-cancel: integrations.php:reassign_vlan
+test('reassign_vlan: renders only with a real deviation, Cancel keeps assignments, Confirm rewrites them', async ({ page }) => {
+  const seed = phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-inv', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$stmt = $db->prepare("INSERT INTO deploy_esxi_inventory (credential_id, kind, name) VALUES (?, 'network', 'E2EVLAN-OK')");
+$stmt->bind_param('i', $esxi);
+$stmt->execute();
+$db->query("INSERT INTO deploy_vlan (vlan_name) VALUES ('E2EVLAN-OK')");
+$mid = repo_create_mission($db, ['mission_name' => '${MARK}-mission', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local', 'wds_vlan' => 'E2EVLAN-STALE'], false, null);
+$stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, 'E2EIVM1', 'E2EIVM1')");
+$stmt->bind_param('i', $mid);
+$stmt->execute();
+$vmId = (int) $db->insert_id;
+$stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mode) VALUES (?, '', '', '', 'E2EVLAN-STALE', 'dhcp')");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'JSON' . json_encode(['missionId' => $mid, 'vmId' => $vmId]) . 'JSON';
+`, ['lib/repo/credentials.php', 'lib/repo/missions.php']);
+
+  const missionVlan = () => phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT wds_vlan FROM deploy_missions WHERE id = ?');
+$id = ${Number(seed.missionId)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`).wds_vlan;
+
+  await page.goto('integrations.php');
+  const form = page.locator('form:has(input[name="action"][value="reassign_vlan"])');
+  await expect(form, 'the deviation makes the reassign form render').toBeVisible();
+  await form.locator('input[name="vlan_from"]').fill('E2EVLAN-STALE');
+  await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
+
+  const dialog = page.locator('[data-confirm-dialog]');
+  await form.locator('button[type="submit"]').click();
+  await expect(dialog, 'the mass rewrite asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(missionVlan(), 'Cancel kept the stale assignment').toBe('E2EVLAN-STALE');
+
+  await form.locator('button[type="submit"]').click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('integrations.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page.locator('.alert-success').first(), 'the rewrite reports missions and interfaces').toBeVisible();
+  expect(missionVlan(), 'the mission VLAN was reassigned').toBe('E2EVLAN-OK');
+  const iface = phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT vlan FROM deploy_interfaces WHERE vm_id = ?');
+$id = ${Number(seed.vmId)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+  expect(iface.vlan, 'the interface VLAN was reassigned').toBe('E2EVLAN-OK');
+});

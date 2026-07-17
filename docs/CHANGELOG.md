@@ -2,6 +2,10 @@
 
 All notable migration changes for VirtuSphere are tracked here. Do not duplicate changelog entries in `CLAUDE.md` or `GROK.md`.
 
+## 2026-07-17
+
+- **Settings-, Transfer-, Template- und Integrations-Aktionen sind im Browser bewiesen (Plan-Etappe 7, E6).** Drei neue Playwright-Specs decken 18 weitere Portal-Actions ab: jede Settings-Karte speichert gegen DB-Beweis und stellt den Vorzustand wieder her, der Tab-Anker-Vertrag (Redirect ins Formular-Tab) läuft erstmals im echten Browser, der Report-Token beweist Regenerate-/Clear-Dialog samt Einmal-Anzeige, die Allowlist den Sticky-Feldfehler-Pfad. Der Mission-Transfer fährt Export als echten JSON-Download, Ablehnung einer Nicht-JSON-Datei, Preview und Confirm mit VM-Zählung; Template-Clone und Save-as-Template beweisen die Kopie inklusive VMs. Integrations: der gezielte Inventory-Refresh muss einen System-Job für genau das geklickte Credential einreihen, die VLAN-Massen-Umhängung rendert nur bei echter Abweichung, fragt vorher und beweist den Abbrechen-Zweig per DB. Offen im Abdeckungsvertrag: die 5 Deploy-Aktionen und der HTTPS-Block (9 PENDING-Einträge).
+
 ## 2026-07-16
 
 - **Die VM-Bulk-Aktionen funktionieren jetzt wirklich im Browser, und der E2E-Abdeckungsvertrag hat genau das aufgedeckt (Plan-Etappe 7, E6).** `vms.php` rendert seit jeher die komplette Bulk-UI (Alles-auswählen, Zähler, Bulk-Löschen, Bulk-MECM-Reset), aber kein Portal-Script las je eines der `data-bulk-*`-Attribute: die Buttons starteten `disabled` und blieben es für immer; nur der Server-Handler existierte. Der erste Browser-Beweis der Aktion (neue Playwright-CRUD-Runde) fand die tote UI sofort. `forms.js` verdrahtet die Auswahl jetzt (form-assoziierte Checkboxen über `form.elements`, Select-All mit indeterminate-Zustand, Zähler, Enable erst ab Auswahl). Dazu vier neue CRUD-Specs (Credential, OS/VLAN-Katalog, Benutzer, VM: 16 abgedeckte Portal-Actions inklusive beider Dialog-Zweige je Confirm) und der neue `E2eActionCoverageContractTest`: jede POST-Action braucht einen `e2e-covers`-Marker in einer Spec oder einen begründeten PENDING-Eintrag, Confirm-Actions zusätzlich den bewiesenen Abbrechen-Zweig.
