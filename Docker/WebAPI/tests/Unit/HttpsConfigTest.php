@@ -246,7 +246,7 @@ final class HttpsConfigTest extends TestCase
         $httpConf = (string) file_get_contents($path);
         $generated = https_render_nginx_conf();
 
-        preg_match_all('/^\s*(add_header [^\n]*always;)$/m', $httpConf, $httpHeaders);
+        preg_match_all('/^[\t ]*(add_header [^\r\n]*always;)\r?$/m', $httpConf, $httpHeaders);
         self::assertNotSame([], $httpHeaders[1], 'the HTTP block must declare the fallback headers');
 
         foreach ($httpHeaders[1] as $header) {
