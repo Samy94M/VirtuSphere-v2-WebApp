@@ -185,3 +185,31 @@ test('delete: Cancel keeps the row, Confirm removes it from the DB and the list'
     'the row is gone from the list'
   ).toHaveCount(0);
 });
+
+// The browser queues the dialog's close event as a task, so an Escape followed
+// by an immediate keyboard reopen can put the stale close AFTER the reopen.
+// core.js must not let it clear the fresh pending trigger, or the accept
+// closes the dialog without deleting anything. Keyboard-driven on purpose:
+// only back-to-back key presses are fast enough to hit the window.
+test('delete: Escape then an immediate reopen still submits the accept', async ({ page }) => {
+  const name = PREFIX + 'del-reopen-1';
+  const id = await createMission(page, name);
+
+  await page.goto('missions.php?type=missions');
+  const row = page.locator('tr', { has: page.locator(`a[href="mission_details.php?id=${id}"]`) });
+  const deleteButton = row.locator('button.button-danger');
+  const dialog = page.locator('[data-confirm-dialog]');
+
+  await deleteButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  // Deliberately no expect between the presses: the dialog closes and restores
+  // focus synchronously, and any polling wait here would let the queued close
+  // land before the reopen and miss the race window.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'missions.php');
+  expect(missionRow(id), 'the reopened dialog still deleted the mission').toBeNull();
+});

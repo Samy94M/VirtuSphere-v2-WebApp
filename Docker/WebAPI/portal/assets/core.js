@@ -108,6 +108,14 @@
         });
 
         dialog.addEventListener('close', function () {
+            // The browser queues this event as a task, so a reopen can outrun
+            // it: Escape closes, the user reopens, and only then does the stale
+            // close arrive. It must not clear the fresh pending trigger, or the
+            // accept closes the dialog without submitting anything. An open
+            // dialog means this close belongs to an already finished session.
+            if (dialog.hasAttribute('open')) {
+                return;
+            }
             var accepted = dialog.returnValue === 'confirm';
             var trigger = pending;
             pending = null;
