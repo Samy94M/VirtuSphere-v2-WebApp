@@ -39,14 +39,33 @@ export const options = {
       ],
       gracefulRampDown: '5s',
     },
+    // The monitor is not an operator: it polls health.php at a fixed rate no
+    // matter how slow the portal gets. constant-arrival-rate models exactly
+    // that, and dropped_iterations is its truth metric: if k6 cannot keep the
+    // rate up, the run must fail instead of quietly measuring a slower one.
+    monitor: {
+      executor: 'constant-arrival-rate',
+      exec: 'monitor',
+      rate: 5,
+      timeUnit: '1s',
+      duration: '60s',
+      preAllocatedVUs: 5,
+      maxVUs: 10,
+    },
   },
   thresholds: {
+    // Checks without a threshold cannot fail a run: k6 reports them and exits 0.
+    // Every check in this script is a false-green detector (signed-in marker,
+    // health body), so a failing check must fail the run.
+    checks: ['rate>0.99'],
     // No request may error, and the pages an operator waits on stay snappy.
     http_req_failed: ['rate<0.01'],
     'http_req_duration{page:dashboard}': ['p(95)<800'],
     'http_req_duration{page:missions}': ['p(95)<800'],
     'http_req_duration{page:vms}': ['p(95)<800'],
     'http_req_duration{page:health}': ['p(95)<300'],
+    // The monitor keeps its rate or the run is red (see the scenario comment).
+    'dropped_iterations{scenario:monitor}': ['count<1'],
   },
 };
 
@@ -123,4 +142,12 @@ export default function () {
   check(health, { 'health reports ok': (r) => r.status === 200 && r.body.includes('ok') });
 
   sleep(1); // an operator reads between clicks
+}
+
+// The unauthenticated monitor probe (health.php needs no session by design:
+// it is what LAN monitoring polls). Own exec so the arrival-rate scenario
+// never pays the login cost and never touches the operator sessions.
+export function monitor() {
+  const health = http.get(`${BASE}/health.php`, { tags: { page: 'health' } });
+  check(health, { 'monitor sees a healthy portal': (r) => r.status === 200 && r.body.includes('ok') });
 }
