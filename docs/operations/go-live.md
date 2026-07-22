@@ -2,14 +2,14 @@
 
 Dieses Dokument führt die **erste** produktive Inbetriebnahme der VirtuSphere-WebApp
 auf dem Ubuntu-Host durch. Zielgruppe sind Administratoren ohne tiefes Docker- oder
-SCCM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolge).
+MECM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolge).
 
 ## Wichtig vorab: „committet" heißt nicht „verifiziert"
 
 Der gesamte Anwendungskern (Portal, Deploy-Worker, Ansible-Anbindung) und die
 MECM-Integration wurden bisher **nur gegen den lokalen Docker-Stack** geprüft. Die
 PowerShell-Skripte (`Powershell-MECM/`) wurden ausschließlich vom Parser
-syntaktisch abgenommen, **nie auf einem echten SCCM-Server oder Client ausgeführt**.
+syntaktisch abgenommen, **nie auf einem echten MECM-Server oder Client ausgeführt**.
 Dieses Runbook ist daher zugleich Inbetriebnahme **und** erste echte Verifikation.
 
 | Ebene | Stand | Erste echte Abnahme in |
@@ -48,6 +48,14 @@ meldet sich per SSH/SFTP an, lädt die Playbooks pro Auftrag nach
 `/tmp/virtusphere-job-*`, führt sie aus und räumt wieder auf. Die Playbooks laufen
 gegen `localhost` und rufen nur die ESXi-API; lokale Adminrechte braucht das Konto
 nicht. Dieses Konto trägst du im Portal als **Ansible-Zugang** ein (Zugangsdaten).
+
+Dieser Zugang und die **API-Basis-URL** unter Einstellungen sind keine
+Alternativen: Der Zugang liefert SSH/SFTP zum Ausführungs-Host, die URL dessen
+Rückweg zur WebApp; ein Deploy verwendet beides gemeinsam. Ein im Portal
+gespeicherter URL-Wert hat Vorrang vor `APP_PUBLIC_BASE_URL` aus der `.env`.
+Nach einem Zurücksetzen gilt die `.env` wieder, und fehlt auch sie, starten keine
+Deploy-Jobs. Die Karte **Deploy-Laufzeit** zeigt den wirksamen Wert samt Quelle;
+der Ansible-Zugang selbst wird beim Einreihen des Auftrags ausgewählt.
 
 Auf dem Host installieren und bereitstellen:
 
@@ -189,7 +197,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 
    | IP | Wofür | Sonst |
    |---|---|---|
-   | MECM-/SCCM-Server | `mecm_packages.php`, `mecm_updateid.php`, `mecm_report.php` | Paket-Sync, MECM-IDs und Heartbeats bleiben aus |
+   | MECM-Server | `mecm_packages.php`, `mecm_updateid.php`, `mecm_report.php` | Paket-Sync, MECM-IDs und Heartbeats bleiben aus |
    | Ansible-Host | `db_importMAC.php` (`upload_mac_list.py` meldet die MACs zurück) | Deploy läuft, aber keine MAC kommt an, damit keine MECM-Übergabe |
 
    Die ausgerollten Client-VMs brauchen **keinen** Eintrag: `mecm-api.php` und
@@ -203,7 +211,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 
 ## Schritt 5: MECM-Server anbinden (E4, erster echter Funktionstest)
 
-1. **Installer auf dem SCCM-Server** ausführen:
+1. **Installer auf dem MECM-Server** ausführen:
    `Powershell-MECM/install-VirtuSphere-MECM.ps1`. Er schreibt die Registry
    `HKLM:\SOFTWARE\VirtuSphere\MECM` (Vererbung aus, Lesezugriff nur SYSTEM und
    Administratoren), legt Ordner an, kopiert die Skripte und registriert die drei
@@ -289,7 +297,7 @@ Das Passwort bleibt trotzdem kompromittiert: die Datei stammt aus dem **Initial-
 |---|---|
 | Alt-Credential aus der Git-Historie (Schritt 0) | **muss rotiert werden**, unabhängig vom Löschen der Datei |
 | Admin-Passwort (Schritt 4) | Entscheidung des Betreibers |
-| PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte SCCM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
+| PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte MECM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
 | Portal auf HTTPS umstellen | Die PS-Skripte können es jetzt (`Scheme`-Registry-Wert, `-Scheme`-Parameter im Installer). Wer HTTP **abschaltet**, muss den Wert auf `https` setzen, sonst steht die MECM-Integration und die PXE-Client-Kette still |
 | Frische-DB-Migration (Schritt 2) | zweithöchstes Risiko: Konvergenz nie produktiv gelaufen |
 | Deploy-Worker/Ansible gegen echtes ESXi | Teil des ungetesteten Kerns, nicht nur MECM |

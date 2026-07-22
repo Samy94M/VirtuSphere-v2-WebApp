@@ -116,6 +116,6 @@ Die Wertklassen und was sie fangen; erschöpfend je Validator-Regel in `Validato
 Nicht automatisierbar bzw. bewusst menschlich; sie gehören zur Release-Abnahme (`PRE-SHIP-CHECKLIST.md`) und werden als Blocker dokumentiert, nie als Skip umgedeutet:
 
 - **Tastatur-, Fokus- und Screenreader-Durchgang** der Kernflüsse in beiden Themes: Axe findet Attribut-, nicht Bedienbarkeitsfehler.
-- **SYSTEM-Smoke** der PowerShell-Clients in einer Wegwerf-Windows-VM und **MECM-Staging-Abnahme**: braucht echte SCCM-Infrastruktur.
+- **SYSTEM-Smoke** der PowerShell-Clients in einer Wegwerf-Windows-VM und **MECM-Staging-Abnahme**: braucht echte MECM-Infrastruktur.
 - **Reales Ansible-/ESXi-Staging** mit zweitem Idempotenzlauf (`changed=0`-Erwartung): der Sandbox-Stub beweist die Choreografie, nicht das Zielsystem.
 - **Clean-Checkout-Releaseprobe** auf frischem Host (Rollout-Schritt 9/10).

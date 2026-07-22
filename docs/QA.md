@@ -162,7 +162,7 @@ php scripts/check-bounds-sync.php      # keine Konstante als ausgeschriebene Zah
 
 `check-doc-semantics` (AP9) polices the operating docs the way `check-bounds-sync` polices portal texts: `PRE-SHIP-CHECKLIST.md` must stay an empty template (no `[x]`, no dated evidence), no active doc may hardcode test/migration counts or load metrics, and PHPStan-level, MySQL- and Node-version mentions must match their SSoT (`phpstan.neon.dist`, `docker-compose.yml`, `ci.yml`). Retired backup paths may only appear next to a retirement marker. Historical documents (`docs/audits/`, `docs/CHANGELOG.md`, ADRs) are exempt: they describe a dated state on purpose.
 
-`check-bounds-sync` guards a failure that is quiet by construction: the code keeps working and only the prose starts lying, so no test notices. A text that states a number followed by a unit must interpolate the constant that owns it (`:min`, `:days`, …) instead of writing the digits. It matches on value **and** unit, because the stale timeout is 600 seconds, which is also 10 minutes, and "10 Prozent" in the backup hint is not that; a check that cries wolf is a check that gets ignored. Numbers the project does not own (the NetBIOS 15, a VARCHAR width, the MECM sync cadence configured on the SCCM server) are listed in `BOUNDS_EXEMPT` with the reason, and a stale exemption fails the check too.
+`check-bounds-sync` guards a failure that is quiet by construction: the code keeps working and only the prose starts lying, so no test notices. A text that states a number followed by a unit must interpolate the constant that owns it (`:min`, `:days`, …) instead of writing the digits. It matches on value **and** unit, because the stale timeout is 600 seconds, which is also 10 minutes, and "10 Prozent" in the backup hint is not that; a check that cries wolf is a check that gets ignored. Numbers the project does not own (the NetBIOS 15, a VARCHAR width, the MECM sync cadence configured on the MECM server) are listed in `BOUNDS_EXEMPT` with the reason, and a stale exemption fails the check too.
 
 ## Backup and Restore Proof
 
@@ -219,7 +219,7 @@ Two traps worth knowing before writing a spec: the layout header carries a logou
 
 ## PowerShell Integration Clients (dev host + CI)
 
-The `Powershell-MECM/` tree runs as SYSTEM in endless loops on the customer's SCCM server and on every freshly PXE-installed client. Until 2026-07 nothing checked it: no linter, no test, no CI, no `Set-StrictMode`. It now has all four (ADR-0029).
+The `Powershell-MECM/` tree runs as SYSTEM in endless loops on the customer's MECM server and on every freshly PXE-installed client. Until 2026-07 nothing checked it: no linter, no test, no CI, no `Set-StrictMode`. It now has all four (ADR-0029).
 
 ```powershell
 powershell -NoProfile -File scripts\run-pester.ps1              # analyzer + tests
