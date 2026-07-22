@@ -290,6 +290,11 @@ $cases = @(
         Edit-Fixture $fx 'docs/QA.md' 'PHPStan (level 5' 'PHPStan (level 4'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phpstan-level\]'
     } }
+    @{ Name = 'doc-semantics.sccm-terminology'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/mecm-integration.md' 'MECM-Server' 'SCCM-Server'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.sccm-terminology\]'
+    } }
     @{ Name = 'doc-semantics.zero-match'; Body = {
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/phpstan.neon.dist' 'level: 5' 'tier: 5'

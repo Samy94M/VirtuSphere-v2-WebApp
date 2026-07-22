@@ -17,6 +17,7 @@
 #   7. "Node NN"-Nennungen == node-version in ci.yml.
 #   8. Stillgelegte Backup-Pfade (Docker/scripts/backup|restore.sh) nur mit
 #      Stilllegungs-Marker in derselben Zeile.
+#   9. Aktive Doku und PowerShell verwenden nur die MECM-Terminologie.
 #
 # Bewusst NICHT geprueft (datierte Dokumente, die einen Stand beschreiben
 # sollen): docs/audits/, docs/CHANGELOG.md, docs/adr/. Nicht maschinell
@@ -125,6 +126,18 @@ for f in $active_docs; do
     fail backup-path "$f referenziert Docker/scripts/backup.sh|restore.sh ohne Stilllegungs-Marker; kanonisch sind scripts/backup.sh + scripts/restore_test.sh (ADR-0017/E5)."
   fi
 done
+
+# --- 9. Terminologie: SCCM ist ausgemustert, aktiver Text sagt MECM -------------
+term_scope="$active_docs"
+for p in Powershell-MECM tests/powershell PSScriptAnalyzerSettings.psd1 \
+         scripts/run-pester.ps1 scripts/check-bounds-sync.php; do
+  [ -e "$p" ] && term_scope="$term_scope $p"
+done
+# Word splitting is intentional: every scope path is repository-owned and has no spaces.
+# shellcheck disable=SC2086
+if grep -rinEI 'sccm|configmgr' $term_scope >&2; then
+  fail sccm-terminology "aktiver Text verwendet den ausgemusterten Begriff SCCM/ConfigMgr; aktiver Text sagt MECM."
+fi
 
 if [ "$errors" -gt 0 ]; then
   echo "check-doc-semantics: $errors Fehler." >&2
