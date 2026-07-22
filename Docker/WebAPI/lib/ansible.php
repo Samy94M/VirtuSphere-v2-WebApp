@@ -96,19 +96,37 @@ function ansible_prepare_job_artifacts(
     ];
 }
 
-function ansible_resolve_api_base_url(mysqli $db): string
+/**
+ * Resolves the configured value and, separately, the source an operator needs
+ * to understand in the settings UI. A non-empty portal value always wins over
+ * APP_PUBLIC_BASE_URL; an empty/missing portal row deliberately falls through.
+ *
+ * @return array{value:string,source:'portal'|'env'|'none'}
+ */
+function ansible_api_base_url_configuration(mysqli $db): array
 {
     $setting = repo_fetch_one($db, 'SELECT setting_value FROM deploy_settings WHERE setting_key = ? LIMIT 1', 's', [VIRTUSPHERE_SETTING_API_BASE_URL]);
     $value = trim((string) ($setting['setting_value'] ?? ''));
-    if ($value === '') {
-        $value = trim(envboot_optional('APP_PUBLIC_BASE_URL', ''));
+    if ($value !== '') {
+        return ['value' => $value, 'source' => 'portal'];
     }
 
-    if ($value === '') {
+    $value = trim(envboot_optional('APP_PUBLIC_BASE_URL', ''));
+    if ($value !== '') {
+        return ['value' => $value, 'source' => 'env'];
+    }
+
+    return ['value' => '', 'source' => 'none'];
+}
+
+function ansible_resolve_api_base_url(mysqli $db): string
+{
+    $configuration = ansible_api_base_url_configuration($db);
+    if ($configuration['source'] === 'none') {
         throw new RuntimeException('Set deploy_settings.api_base_url or APP_PUBLIC_BASE_URL before running deploy jobs.');
     }
 
-    return ansible_normalize_api_base_url($value);
+    return ansible_normalize_api_base_url($configuration['value']);
 }
 
 function ansible_normalize_api_base_url(string $value): string

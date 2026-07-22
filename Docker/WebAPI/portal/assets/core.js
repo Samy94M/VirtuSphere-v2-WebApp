@@ -298,6 +298,25 @@
         activate(initial, false, false);
         if (scrollTarget && scrollTarget.scrollIntoView) {
             scrollTarget.scrollIntoView();
+        } else if (matchedTab && document.querySelector('[data-flash]')) {
+            // A save redirect carries its tab as the fragment. The browser's
+            // anchor jump to that panel parks the flash message behind the
+            // sticky topbar, so the save looks like a no-op. [data-flash]
+            // (not .alert, which also matches static info boxes) only exists
+            // right after such a redirect; scroll back to the top so it is
+            // seen. The jump is deferred (it fires once the panel is visible,
+            // up to the load event), so the counter-scroll must run after
+            // load or it would be overridden.
+            var revealFlash = function () {
+                window.requestAnimationFrame(function () {
+                    window.scrollTo(0, 0);
+                });
+            };
+            if (document.readyState === 'complete') {
+                revealFlash();
+            } else {
+                window.addEventListener('load', revealFlash);
+            }
         }
     }
 
@@ -484,8 +503,61 @@
         }
     }
 
+    // A submit button carrying data-busy-label swaps to that label, shows a
+    // spinner and disables itself on submit, so a synchronous POST (the
+    // credential test does a real SSH round-trip that can take seconds) gives
+    // immediate feedback instead of a button that looks unclicked. Pure
+    // progressive enhancement: without JS the POST still works, it just lacks
+    // the pending state. The disable is deferred one tick so the current
+    // submission is captured first; the pages using this keep the form action
+    // in a hidden input, never on the button, so nothing is dropped from POST.
+    function initBusyButtons() {
+        document.addEventListener('submit', function (event) {
+            var form = event.target;
+            // A submit some other handler cancelled must not strand a disabled
+            // button on a page that is not navigating anywhere.
+            if (!form || typeof form.querySelector !== 'function' || event.defaultPrevented) {
+                return;
+            }
+            var button = form.querySelector('button[data-busy-label]');
+            if (!button || button.disabled) {
+                return;
+            }
+            var label = (button.getAttribute('data-busy-label') || '').trim();
+            if (label !== '') {
+                button.setAttribute('data-busy-restore', button.textContent);
+                button.textContent = label;
+            }
+            button.classList.add('is-busy');
+            button.setAttribute('aria-busy', 'true');
+            window.setTimeout(function () {
+                button.disabled = true;
+            }, 0);
+        });
+
+        // Back/forward cache: Firefox and Safari restore the submitted page's
+        // DOM as-is, including a disabled "Testing..." button that would stay
+        // dead forever. pageshow with persisted=true is that restore moment.
+        window.addEventListener('pageshow', function (event) {
+            if (!event.persisted) {
+                return;
+            }
+            Array.prototype.forEach.call(document.querySelectorAll('.button.is-busy'), function (button) {
+                var restore = button.getAttribute('data-busy-restore');
+                if (restore !== null) {
+                    button.textContent = restore;
+                    button.removeAttribute('data-busy-restore');
+                }
+                button.classList.remove('is-busy');
+                button.removeAttribute('aria-busy');
+                button.disabled = false;
+            });
+        });
+    }
+
     initConfirmDialog();
     initTabs();
     initSessionTimer();
     initTimeDrift();
+    initBusyButtons();
 }());

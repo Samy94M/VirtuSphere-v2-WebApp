@@ -27,3 +27,10 @@ function repo_set_setting(mysqli $db, string $key, string $value): void
     $stmt->bind_param('sss', $key, $value, $value);
     $stmt->execute();
 }
+
+function repo_delete_setting(mysqli $db, string $key): void
+{
+    $stmt = $db->prepare('DELETE FROM deploy_settings WHERE setting_key = ?');
+    $stmt->bind_param('s', $key);
+    $stmt->execute();
+}

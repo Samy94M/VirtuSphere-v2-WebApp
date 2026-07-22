@@ -3,6 +3,71 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/repo/credentials.php';
+require_once __DIR__ . '/repo/ansible_preflight.php';
+
+/**
+ * Renders the Ansible-host panel: one row per Ansible credential with its last
+ * on-demand preflight result, giving the host that executes every deploy a home
+ * here like ESXi instead of only a one-shot flash on the credentials page. Lives
+ * here rather than inline so portal/integrations.php stays under the file-size
+ * budget (ADR-0006). The preflight is on-demand (no scheduler), so the timestamp
+ * is shown verbatim and staleness is the reader's call, unlike the ESXi ampel.
+ */
+function integrations_render_ansible_panel(mysqli $connection): void
+{
+    $ansibleCredentials = repo_credentials_by_type($connection, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
+    $states = [];
+    foreach ($ansibleCredentials as $credential) {
+        $states[(int) $credential['id']] = repo_ansible_preflight_state($connection, (int) $credential['id']);
+    }
+    ?>
+    <section class="panel" id="ansible">
+        <h2><?php echo h(__t('integrations.ansible_heading')); ?></h2>
+        <p class="muted"><?php echo h(__t('integrations.ansible_hint')); ?></p>
+        <?php if ($ansibleCredentials === []) { ?>
+            <p class="muted"><?php echo h(__t('integrations.ansible_empty')); ?></p>
+        <?php } else { ?>
+            <div class="table-wrap" tabindex="0"><table>
+                <thead><tr>
+                    <th><?php echo h(__t('common.name')); ?></th>
+                    <th><?php echo h(__t('credentials.label_host')); ?></th>
+                    <th><?php echo h(__t('integrations.th_status')); ?></th>
+                    <th><?php echo h(__t('integrations.ansible_th_last_test')); ?></th>
+                    <th><?php echo h(__t('integrations.th_detail')); ?></th>
+                </tr></thead>
+                <tbody>
+                <?php foreach ($ansibleCredentials as $credential) {
+                    $ansibleId = (int) $credential['id'];
+                    $preflight = $states[$ansibleId] ?? null;
+                    $failedComponent = $preflight !== null ? trim((string) ($preflight['last_component'] ?? '')) : '';
+                    // A warning is not a broken component, so it gets its own
+                    // sentence instead of "failed at: allowlist".
+                    $isWarning = $preflight !== null
+                        && (string) ($preflight['last_status'] ?? '') === VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING;
+                    if ($isWarning) {
+                        $detailHtml = h(__t('integrations.ansible_allowlist_detail'));
+                    } elseif ($failedComponent !== '') {
+                        $detailHtml = h(__t('integrations.ansible_failed_component', ['component' => $failedComponent]));
+                    } else {
+                        $detailHtml = '<span class="muted">&mdash;</span>';
+                    }
+                    ?>
+                    <tr id="cred-<?php echo h((string) $ansibleId); ?>">
+                        <td><?php echo h((string) ($credential['name'] ?? '')); ?></td>
+                        <td><?php echo h((string) ($credential['host'] ?? '')); ?></td>
+                        <td><?php echo ansible_preflight_badge($preflight); ?></td>
+                        <td><?php echo $preflight !== null && !empty($preflight['last_checked_at']) ? h(portal_format_timestamp((string) $preflight['last_checked_at'])) : h(__t('integrations.ansible_never_tested')); ?></td>
+                        <td><?php echo $detailHtml; ?></td>
+                    </tr>
+                <?php } ?>
+                </tbody>
+            </table></div>
+            <p class="muted"><?php echo h(__t('integrations.ansible_test_hint')); ?> <a href="credentials.php"><?php echo h(__t('integrations.ansible_test_link')); ?></a></p>
+        <?php } ?>
+    </section>
+    <?php
+}
 
 /**
  * POST actions of the integrations page (ADR-0018/0023): the manual ESXi

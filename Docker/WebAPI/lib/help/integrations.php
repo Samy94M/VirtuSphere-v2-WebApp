@@ -121,6 +121,11 @@ declare(strict_types=1);
             <p><?php echo h(__t('help.esxi_test_p1')); ?></p>
             <p><?php echo h(__t('help.esxi_test_p2')); ?></p>
 
+            <h3><?php echo h(__t('help.esxi_test_ansible_heading')); ?></h3>
+            <p><?php echo h(__t('help.esxi_test_ansible_p1')); ?></p>
+            <p><?php echo h(__t('help.esxi_test_ansible_p2')); ?></p>
+            <p><?php echo h(__t('help.esxi_test_ansible_p3')); ?></p>
+
             <h3><?php echo h(__t('help.esxi_cap_heading')); ?></h3>
             <p><?php echo h(__t('help.esxi_cap_p1')); ?></p>
             <ul>

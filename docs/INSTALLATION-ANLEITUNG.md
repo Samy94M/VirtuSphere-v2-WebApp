@@ -139,7 +139,7 @@ Bei Zugriff von einem anderen Rechner statt `127.0.0.1` die Server-IP verwenden,
 
 1. Anmelden.
 2. Unter Credentials je ein `esxi`- und ein `ansible`-Credential anlegen.
-3. Ansible Credential testen; der Test prueft SSH und die Ansible-/Python-/community.vmware-Basis.
+3. Ansible Credential testen; der Test prueft SSH-Login, die Toolchain (ansible-playbook, python3, pyvmomi, community.vmware), einen SFTP-Schreibtest in /tmp und, bei gesetzter API-Basis-URL, die Portal-Erreichbarkeit. Ein Fehler nennt die betroffene Komponente; das Ergebnis bleibt als Status-Marke unter Zugangsdaten und im Abschnitt "Ansible-Host" unter Integrationen sichtbar. Nach dem Bearbeiten des Zugangs wird das gespeicherte Ergebnis verworfen (Status "Nicht getestet"); danach einmal neu testen.
 4. OS, VLANs und Packages pflegen.
 5. Mission anlegen und Datacenter/Datastore/WDS VLAN setzen.
 6. Mindestens eine VM in der Mission anlegen.

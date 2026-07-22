@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/repo/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_capabilities.php';
+require_once __DIR__ . '/../lib/repo/ansible_preflight.php';
 require_once __DIR__ . '/../lib/ssh.php';
 
 /**
@@ -21,10 +22,35 @@ require_once __DIR__ . '/../lib/ssh.php';
 function credentials_test_message(array $result): string
 {
     if ($result['ok']) {
+        // Green chain with an allowlist warning: the credential works, but the
+        // host's IP would be rejected by db_importMAC.php. Two keys instead of
+        // an ":ip"-with-"?" sentence, because the IP is only known when the
+        // legacy 403 echoed one.
+        if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST) {
+            $ip = trim((string) ($result['context']['ip'] ?? ''));
+            return $ip !== ''
+                ? __t('credentials.test_warn_allowlist', ['ip' => $ip])
+                : __t('credentials.test_warn_allowlist_noip');
+        }
         return __t('credentials.test_ok_ansible');
     }
 
+    if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP) {
+        return __t('credentials.test_err_sftp');
+    }
+
     if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_PREFLIGHT) {
+        $component = trim((string) ($result['context']['component'] ?? ''));
+        // The portal-reachability probe is not a "missing tool"; it points at the
+        // API base URL and the network, so it gets its own sentence.
+        if ($component === VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL) {
+            return __t('credentials.test_err_portal');
+        }
+        // A named component (pyvmomi, community.vmware, ...) points the operator
+        // straight at what to install; an unnamed failure keeps the exit code.
+        if ($component !== '') {
+            return __t('credentials.test_err_preflight_component', $result['context']);
+        }
         return __t('credentials.test_err_preflight', $result['context']);
     }
 
@@ -115,6 +141,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($secret !== '') {
                 $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'secret: changed']));
             }
+            // The stored preflight result proved the OLD host/account; an edit
+            // invalidates it. ESXi gets a fresh pull below, Ansible honestly
+            // drops back to "not tested" until someone clicks Test again. The
+            // reset rides the update's own audit line rather than adding a
+            // second entry for a deterministic consequence.
+            if (repo_ansible_preflight_clear($connection, $id)) {
+                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
+            }
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'updated credential id ' . $id . audit_change_note($credentialDiff), (int) $user['id']);
             flash_set('success', __t('credentials.flash_updated'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
@@ -134,18 +168,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'requested ESXi inventory pull for credential id ' . $id . ' (' . $flashType . ')', (int) $user['id']);
                 flash_set($flashType, $flashMessage);
             } else {
-                $result = credential_test_connection($credential, repo_credential_secret($connection, $id));
+                // The preflight also probes the portal return route, so it needs
+                // the configured API base URL (empty is fine: that check is then
+                // skipped, the tooling checks still run). The resolver THROWS when
+                // no URL is configured (that is correct for the deploy path), but
+                // a test must still run its tooling checks, so a missing URL just
+                // disables the portal probe here rather than aborting the test.
+                try {
+                    $apiBaseUrl = ansible_resolve_api_base_url($connection);
+                } catch (Throwable $exception) {
+                    $apiBaseUrl = '';
+                }
+                $result = credential_test_connection($credential, repo_credential_secret($connection, $id), $apiBaseUrl);
+                // Persist so the credential row and the integrations page can show
+                // a badge instead of only this one-shot flash. An SFTP failure has
+                // no preflight marker, so its code doubles as the component name;
+                // the integrations detail then says what broke instead of a dash.
+                // The allowlist verdict rides the same slot: it is the check that
+                // raised the warning, not a broken component.
+                $isAllowlistWarning = $result['ok'] && $result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST;
+                $failedComponent = ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP || $isAllowlistWarning)
+                    ? $result['code']
+                    : (string) ($result['context']['component'] ?? '');
+                $preflightStatus = VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_FAILED;
+                if ($result['ok']) {
+                    $preflightStatus = $isAllowlistWarning
+                        ? VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING
+                        : VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK;
+                }
+                repo_ansible_preflight_record($connection, $id, $preflightStatus, $failedComponent);
                 $detail = $result['ok'] ? '' : (string) $result['detail'];
+                // The audit line names the failed component too ("preflight:
+                // pyvmomi"), so the trail answers WHAT broke without the flash.
+                $warnedIp = trim((string) ($result['context']['ip'] ?? ''));
+                if ($isAllowlistWarning) {
+                    $auditOutcome = 'ok with warning (allowlist' . ($warnedIp !== '' ? ': ' . $warnedIp : '') . ')';
+                } elseif ($result['ok']) {
+                    $auditOutcome = 'ok';
+                } else {
+                    $auditOutcome = 'failed (' . $result['code'] . ($failedComponent !== '' && $failedComponent !== $result['code'] ? ': ' . $failedComponent : '') . ')';
+                }
                 audit(
                     $connection,
                     VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
-                    'tested credential id ' . $id . ': ' . ($result['ok'] ? 'ok' : 'failed (' . $result['code'] . ')'),
+                    'tested credential id ' . $id . ': ' . $auditOutcome,
                     (int) $user['id']
                 );
                 if ($detail !== '') {
                     error_log(sprintf('[credentials] test id=%d code=%s detail=%s', $id, $result['code'], $detail));
                 }
-                flash_set($result['ok'] ? 'success' : 'error', credentials_test_message($result), $detail);
+                $flashType = 'error';
+                if ($result['ok']) {
+                    $flashType = $isAllowlistWarning ? 'warning' : 'success';
+                }
+                flash_set($flashType, credentials_test_message($result), $detail);
             }
         }
     } catch (ValidationException $exception) {
@@ -165,9 +241,13 @@ $credentials = repo_credentials($connection);
 // question (ADR-0023), so the detail lives there and this links to it.
 $inventoryIntervalHours = esxi_inventory_interval_hours($connection);
 $esxiStates = [];
+$ansiblePreflightStates = [];
 foreach ($credentials as $credentialRow) {
-    if ((string) ($credentialRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+    $credentialType = (string) ($credentialRow['type'] ?? '');
+    if ($credentialType === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
         $esxiStates[(int) $credentialRow['id']] = repo_esxi_inventory_state($connection, (int) $credentialRow['id']);
+    } elseif ($credentialType === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) {
+        $ansiblePreflightStates[(int) $credentialRow['id']] = repo_ansible_preflight_state($connection, (int) $credentialRow['id']);
     }
 }
 layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
@@ -199,8 +279,9 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
     <section class="panel">
         <h2><?php echo h(__t('credentials.stored_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('credentials.test_hint')); ?> <a href="integrations.php"><?php echo h(__t('credentials.test_hint_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.test_checks')); ?></p>
         <div class="table-wrap" tabindex="0"><table>
-            <thead><tr><th><?php echo h(__t('credentials.label_type')); ?></th><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('credentials.label_host')); ?></th><th><?php echo h(__t('credentials.label_port')); ?></th><th><?php echo h(__t('credentials.label_username')); ?></th><th><?php echo h(__t('credentials.th_esxi_state')); ?></th><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+            <thead><tr><th><?php echo h(__t('credentials.label_type')); ?></th><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('credentials.label_host')); ?></th><th><?php echo h(__t('credentials.label_port')); ?></th><th><?php echo h(__t('credentials.label_username')); ?></th><th><?php echo h(__t('credentials.th_status')); ?></th><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
             <tbody>
             <?php foreach ($credentials as $row) {
                 $rowId = (int) $row['id'];
@@ -211,6 +292,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
                 // the field errors and sticky values are visible without a click.
                 $editorOpen = form_has_state($rowKey);
                 $isEsxi = (string) ($row['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI;
+                $isAnsible = (string) ($row['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE;
             ?>
                 <tr>
                     <td><?php echo h(credential_type_label((string) ($row['type'] ?? ''))); ?></td>
@@ -222,7 +304,14 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
                         <?php if ($isEsxi) {
                             $esxiAmpel = esxi_credential_state($esxiStates[$rowId] ?? null, $inventoryIntervalHours);
                             ?>
-                            <a href="integrations.php" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
+                            <a href="integrations.php#cred-<?php echo h((string) $rowId); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
+                        <?php } elseif ($isAnsible) {
+                            $pfState = $ansiblePreflightStates[$rowId] ?? null;
+                            $pfTitle = $pfState !== null && !empty($pfState['last_checked_at'])
+                                ? __t('credentials.ansible_state_link_title', ['when' => portal_format_timestamp((string) $pfState['last_checked_at'])])
+                                : __t('credentials.ansible_state_untested_title');
+                            ?>
+                            <a href="integrations.php#cred-<?php echo h((string) $rowId); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState); ?></a>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>
@@ -233,7 +322,11 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
                         <form class="inline-form" method="post" action="credentials.php">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
-                            <button class="button button-secondary" type="submit" name="action" value="test"><?php echo h(__t('credentials.btn_test')); ?></button>
+                            <?php // action in a hidden field, not on the button: the busy handler
+                                  // disables the button on submit, which would drop a button-borne
+                                  // name/value from the POST. ?>
+                            <input type="hidden" name="action" value="test">
+                            <button class="button button-secondary" type="submit" data-busy-label="<?php echo h(__t('credentials.btn_testing')); ?>"><?php echo h(__t('credentials.btn_test')); ?></button>
                         </form>
                         <form class="inline-form" method="post" action="credentials.php">
                             <?php echo csrf_field(); ?>

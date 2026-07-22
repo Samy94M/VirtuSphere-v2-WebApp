@@ -55,6 +55,10 @@ async function submitAndReturnToTab(page, form, tab) {
     form.locator('button[type="submit"]').click(),
   ]);
   await expect(page.locator('.alert-success, .alert-error').first(), 'the handler answered with a flash').toBeVisible();
+  // Visible is not enough: the tab-anchor jump used to park the flash behind
+  // the sticky topbar, so every save outside the first tab looked like a
+  // no-op. core.js counter-scrolls when a [data-flash] is present; pin that.
+  await expect(page.locator('[data-flash]').first(), 'the flash is inside the viewport, not behind the sticky topbar').toBeInViewport();
   expect(page.url(), 'the redirect carries the tab anchor').toContain(`#panel-${tab}`);
   // The anchor is only half the contract; the panel must actually be open.
   await expect(page.locator(`#panel-${tab}`), 'the redirect reopens the form tab').toBeVisible();
@@ -71,6 +75,57 @@ test('save_api: persists the normalized URL and returns to the deploy tab', asyn
     expect(readSetting('VIRTUSPHERE_SETTING_API_BASE_URL'), 'the URL persisted').toBe('http://127.0.0.1:8021');
   } finally {
     writeSetting('VIRTUSPHERE_SETTING_API_BASE_URL', before);
+  }
+});
+
+// e2e-covers: settings.php:clear_api
+// e2e-covers-cancel: settings.php:clear_api
+test('clear_api: reset asks first; Cancel keeps the URL, Confirm deletes the setting row', async ({ page }) => {
+  const before = readSetting('VIRTUSPHERE_SETTING_API_BASE_URL');
+  const rowCount = () => phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_settings WHERE setting_key = ?');
+$key = constant('VIRTUSPHERE_SETTING_API_BASE_URL');
+$stmt->bind_param('s', $key);
+$stmt->execute();
+echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]) . 'JSON';
+`, SETTING_LIBS).c;
+  try {
+    // Deterministic start: a stored URL exists, so the reset button renders.
+    writeSetting('VIRTUSPHERE_SETTING_API_BASE_URL', 'http://e2e-reset.example:8021');
+
+    await openTab(page, 'deploy');
+    const dialog = page.locator('[data-confirm-dialog]');
+    const reset = settingsForm(page, 'clear_api').locator('button[type="submit"]');
+
+    // Cancel: the stored URL survives.
+    await reset.click();
+    await expect(dialog, 'the reset asks first').toBeVisible();
+    await dialog.locator('button[value="cancel"]').click();
+    await expect(dialog).toBeHidden();
+    expect(readSetting('VIRTUSPHERE_SETTING_API_BASE_URL'), 'Cancel kept the URL').toBe('http://e2e-reset.example:8021');
+
+    // Confirm: the row is gone (deleted, not blanked; the resolver treats
+    // both as "use the env fallback", but a blank row would be a lie in the
+    // table), the input renders empty and the reset button disappears with
+    // the stored value it acts on.
+    await reset.click();
+    await expect(dialog).toBeVisible();
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
+      dialog.locator('[data-confirm-accept]').click(),
+    ]);
+    await expect(page.locator('.alert-success').first(), 'the reset answered with a flash').toBeVisible();
+    expect(page.url(), 'the redirect carries the deploy anchor').toContain('#panel-deploy');
+    expect(rowCount(), 'the setting row is deleted, not blanked').toBe(0);
+    await expect(settingsForm(page, 'save_api').locator('input[name="api_base_url"]'), 'the input renders empty').toHaveValue('');
+    await expect(settingsForm(page, 'clear_api'), 'the reset button only renders with a stored value').toHaveCount(0);
+  } finally {
+    if (before === '') {
+      runPhp(`repo_delete_setting(db(), VIRTUSPHERE_SETTING_API_BASE_URL); echo 'CLEANED';`, SETTING_LIBS);
+    } else {
+      writeSetting('VIRTUSPHERE_SETTING_API_BASE_URL', before);
+    }
   }
 });
 

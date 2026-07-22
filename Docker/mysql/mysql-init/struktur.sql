@@ -177,6 +177,18 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
     CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- On-demand Ansible preflight result (migration 0023). Unlike the ESXi inventory
+-- state above there is no scheduler: a row is written only when an operator hits
+-- "Test", so last_checked_at is shown verbatim and the reader judges staleness.
+-- last_status is a plain VARCHAR ('ok'/'warning'/'failed'), not a DB ENUM.
+CREATE TABLE IF NOT EXISTS deploy_ansible_preflight_state (
+    credential_id INT PRIMARY KEY,
+    last_status VARCHAR(16) NOT NULL,
+    last_checked_at TIMESTAMP NULL,
+    last_component VARCHAR(64) NULL,
+    CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS deploy_tokens (
     id INT AUTO_INCREMENT PRIMARY KEY,
     token VARCHAR(255) NOT NULL,

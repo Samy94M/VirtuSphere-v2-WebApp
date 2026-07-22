@@ -161,13 +161,22 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible host preflight.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
         $preflightBuffer = '';
-        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer): void {
+        // Accumulated separately from the stream buffer (which the chunk logger
+        // consumes): on failure the last stage marker in here names the broken
+        // component for the job's error message.
+        $preflightOutput = '';
+        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
+            $preflightOutput .= $chunk;
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
         deploy_worker_assert_not_cancelled($db, $jobId);
         if ($preflightExitCode !== 0) {
-            throw new RuntimeException('Ansible host preflight failed with exit code ' . $preflightExitCode . '.');
+            $failedComponent = ansible_preflight_failed_component($preflightOutput);
+            throw new RuntimeException(
+                'Ansible host preflight failed with exit code ' . $preflightExitCode . '.'
+                . ($failedComponent !== null ? ' (failed at: ' . $failedComponent . ')' : '')
+            );
         }
 
         $artifacts = ansible_prepare_job_artifacts($db, $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
@@ -304,14 +313,22 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $apiBaseUrl = ansible_resolve_api_base_url($db);
 
         $preflightBuffer = '';
-        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer): void {
+        // Same accumulation as the deploy path: the last stage marker names the
+        // broken component in the job error instead of a bare exit code.
+        $preflightOutput = '';
+        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
+            $preflightOutput .= $chunk;
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
         deploy_worker_assert_not_cancelled($db, $jobId);
         if ($preflightExit !== 0) {
             $failCategory = VIRTUSPHERE_INVENTORY_ERROR_SSH;
-            throw new RuntimeException('Ansible host preflight failed with exit code ' . $preflightExit . '.');
+            $failedComponent = ansible_preflight_failed_component($preflightOutput);
+            throw new RuntimeException(
+                'Ansible host preflight failed with exit code ' . $preflightExit . '.'
+                . ($failedComponent !== null ? ' (failed at: ' . $failedComponent . ')' : '')
+            );
         }
 
         $artifacts = ansible_prepare_inventory_artifacts($db, $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);

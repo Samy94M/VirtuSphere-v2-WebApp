@@ -250,7 +250,7 @@ return [
     'clientphases_p3' => 'Only "Failed" with a detail text is a real error. In that case the script log directly on the affected VM under C:\\Program Files\\aplw\\Logs helps.',
 
     'settings_heading' => 'Settings: the admin area step by step',
-    'settings_p1' => 'The "Settings" page is visible to administrators only and bundles every system-wide switch. It is organized into four areas: Deployment, Machine API, Catalog and inventory, and System. Each change takes effect immediately (no restart needed) and is recorded in the audit log under "System & integrations → Settings" with user and time. For rotating staff: the defaults are deliberately safe. When in doubt, change nothing and first check the "Deploy runtime" card in the Deployment area.',
+    'settings_p1' => 'The "Settings" page is visible to administrators only and bundles every system-wide switch. It is organized into the areas Deployment, Machine API, Catalog and inventory, HTTPS, and System; the sections in this help follow the same layout. Each change takes effect immediately (no restart needed) and is recorded in the audit log under "System & integrations → Settings" with user and time. For rotating staff: the defaults are deliberately safe. When in doubt, change nothing and first check the "Deploy runtime" card in the Deployment area.',
 
     'settings_api_heading' => 'API base URL (deploy)',
     'settings_api_p1' => 'This is the address at which the web app is reachable on the LAN. The deploy worker writes it into every generated Ansible file; Ansible uses it to upload the MAC addresses it reads out, and all status reports flow back to it. If the value is wrong or unreachable, VMs are still created on ESXi but stay stuck at stage 2/5 without a MAC address.',
@@ -258,7 +258,7 @@ return [
 
     'settings_allowlist_heading' => 'Machine API IP allowlist',
     'settings_allowlist_p1' => 'This list decides which machines may call the machine API: the SCCM server (device sync, package sync, reporting the device ID) and the Ansible host (MAC upload). If an IP is not on the list it gets "Access denied" (403). An empty list therefore rejects all script and Ansible access, and the sync sources on "Integrations" stay at "Down".',
-    'settings_allowlist_p2' => 'Enter the IP addresses of the SCCM server and the Ansible host, each with a short description so the next person knows what an entry is for. Windows clients need no entry here: they identify themselves via a MAC address the web app already knows. If a server\'s IP changes, delete the old entry here and add the new one.',
+    'settings_allowlist_p2' => 'Enter the IP addresses of the SCCM server and the Ansible host, each with a short description so the next person knows what an entry is for. Windows clients need no entry here: they identify themselves via a MAC address the web app already knows. If a server\'s IP changes, delete the old entry here and add the new one. Testing an Ansible credential warns, including the affected IP, when the entry for the Ansible host is missing.',
 
     'settings_token_heading' => 'Report channel token (optional)',
     'settings_token_p1' => 'An optional shared secret the SCCM server sync tasks use to identify themselves to the report channel (mecm_report.php), on top of the IP allowlist. It applies to the server heartbeats only. How it works: the sync tasks send it in the HTTP header "X-VirtuSphere-Token" with every heartbeat; the web app stores only its SHA-256 hash and compares against that, so the plaintext never sits in the database. Only heartbeats with a matching token are accepted. The client-phase reports from the deployed VMs deliberately do not need the token: they identify themselves via their already-known MAC, so the token never has to be distributed to every ephemeral VM. What for and why: the token makes sure the heartbeats really come from the genuine SCCM server, not some arbitrary host on the LAN; forged heartbeats could otherwise mislead the traffic lights on the "Integrations" page (the channel never changes deploy or status decisions itself, display only).',
@@ -288,6 +288,9 @@ return [
     'settings_password_heading' => 'Password policy',
     'settings_password_p1' => 'The minimum length applies to every newly set password: your own change in the account page, creating an account, and an admin reset. Portal and server check the same rule, there is no way around the form.',
     'settings_password_p2' => 'Allowed are :min to :max characters (:default by default); :min is the floor and cannot be undercut. After an increase, existing passwords stay valid until they are next changed. To enforce the new length right away, reset the accounts in question in the user administration; the new length then applies together with the mandatory change on next sign-in.',
+
+    'settings_retention_heading' => 'Retention windows (display only)',
+    'settings_retention_p1' => 'The card shows how long each log category is kept, such as the security log, sign-in attempts and job logs. The windows are deliberately fixed in code and cannot be changed in the portal; the maintenance worker deletes older entries automatically. Periods further back can therefore no longer be viewed in the log either.',
 
     'settings_backup_heading' => 'Backup status',
     'settings_backup_p1' => 'The backup card shows the last run of the nightly backup: state, schedule, next run, age, sizes, free disk space and the retention. The host creates the backup via cron (script backup.sh); the portal only displays the status and cannot trigger or download a backup.',
@@ -402,7 +405,11 @@ return [
 
     'esxi_test_heading' => 'Testing a credential',
     'esxi_test_p1' => 'The portal never talks to ESXi directly. For an ESXi account, the "Test" button on the credentials page queues the same inventory pull that saving the credential triggers: over the Ansible host, the exact path a deploy takes. Because that pull is a queued job, the message after the click only says it was queued.',
-    'esxi_test_p2' => 'The result then lives on this page as a traffic light, permanently, rather than as a one-off message. The raw output is in the job log. An Ansible account is still tested immediately, because that path runs from the portal itself.',
+    'esxi_test_p2' => 'The result then lives on this page as a traffic light, permanently, rather than as a one-off message. The raw output is in the job log.',
+    'esxi_test_ansible_heading' => 'Ansible credential: what the test checks',
+    'esxi_test_ansible_p1' => 'An Ansible credential is tested immediately and in full, because that path runs from the portal itself: SSH login, then the toolchain on the host (ansible-playbook, python3, the pyvmomi Python module and the community.vmware collection), a real SFTP write into /tmp and, if an API base URL is set, whether the host can reach the portal (health.php) and whether its IP is on the machine API IP allowlist. A missing allowlist entry is reported as a warning, not a failure: the credential works, but a deploy\'s MAC upload would be rejected. When something fails, the message names the component that broke instead of a bare exit code; the raw output sits behind "technical details".',
+    'esxi_test_ansible_p2' => 'The result stays visible: as a status badge in the "Status" column on this page and as its own row in the "Ansible host" section of the Integrations page, each with the time of the last test. Unlike the ESXi pull, the Ansible test runs only on click, not on a schedule, so the row shows the timestamp to make a stale result recognisable.',
+    'esxi_test_ansible_p3' => 'When the credential is edited, the portal discards the stored result and the badge returns to "Not tested": the old result proved the old host and the old account, not the new values. Test once again after every change.',
 
     'esxi_cap_heading' => 'Reading the host notes',
     'esxi_cap_p1' => 'After a successful pull the portal shows what the host is (product, version, licence, direct or through vCenter) and what it is doing. These notes do not say something is broken; they say what the host can do:',

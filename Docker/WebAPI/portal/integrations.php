@@ -158,6 +158,8 @@ layout_header(__t('integrations.title'), $user, 'integrations', 'integrations');
         </div>
     </section>
 
+    <?php integrations_render_ansible_panel($connection); ?>
+
     <section class="panel">
         <div class="actions">
             <h2><?php echo h(__t('integrations.inv_heading')); ?></h2>
@@ -166,7 +168,7 @@ layout_header(__t('integrations.title'), $user, 'integrations', 'integrations');
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="refresh_inventory">
                     <input type="hidden" name="credential_id" value="0">
-                    <button class="button button-secondary" type="submit"><?php echo h(__t('integrations.inv_refresh_all')); ?></button>
+                    <button class="button button-secondary" type="submit" data-busy-label="<?php echo h(__t('integrations.refreshing')); ?>"><?php echo h(__t('integrations.inv_refresh_all')); ?></button>
                 </form>
             <?php } ?>
         </div>
@@ -188,7 +190,7 @@ layout_header(__t('integrations.title'), $user, 'integrations', 'integrations');
             // fetched_at values after a kept-empty fetch.
             $fetchedAt = $state['last_success_at'] ?? null;
             ?>
-            <div class="inv-card">
+            <div class="inv-card" id="cred-<?php echo h((string) $cred['id']); ?>">
                 <div class="inv-card-head">
                     <?php // The badge is the credential's fetch health only (esxi_credential_state):
                           // a free-licence or HA host that pulls fine stays green here, its limitation
@@ -199,7 +201,7 @@ layout_header(__t('integrations.title'), $user, 'integrations', 'integrations');
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="action" value="refresh_inventory">
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $cred['id']); ?>">
-                            <button class="button button-ghost" type="submit"><?php echo h(__t('common.refresh')); ?></button>
+                            <button class="button button-ghost" type="submit" data-busy-label="<?php echo h(__t('integrations.refreshing')); ?>"><?php echo h(__t('common.refresh')); ?></button>
                         </form>
                     <?php } ?>
                 </div>
@@ -354,7 +356,9 @@ layout_header(__t('integrations.title'), $user, 'integrations', 'integrations');
         <?php // One colour key for both traffic lights: same colours, same meaning,
               // only the per-table wording differs. The badges are live so a colour
               // change in the palette shows here too. ?>
-        <div class="legend-key">
+        <?php // tabindex: the key scrolls horizontally on narrow phones (see
+              // .legend-key), and a scroll region needs keyboard reachability. ?>
+        <div class="legend-key" tabindex="0">
             <span class="lk-head"><?php echo h(__t('integrations.legend_col_meaning')); ?></span>
             <span class="lk-head"><?php echo h(__t('integrations.legend_col_status')); ?></span>
             <span class="lk-head"><?php echo h(__t('integrations.legend_col_esxi')); ?></span>

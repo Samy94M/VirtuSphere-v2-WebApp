@@ -14,7 +14,7 @@ Dieses Runbook ist daher zugleich Inbetriebnahme **und** erste echte Verifikatio
 
 | Ebene | Stand | Erste echte Abnahme in |
 |---|---|---|
-| PHP-Code, Migrationen 0001–0010 | lokal grün, nie produktiv | Schritt 1–2 |
+| PHP-Code, Migrationen 0001–0022 | lokal grün, nie produktiv | Schritt 1–2 |
 | MECM-Rückkanal, Heartbeats, Statusseite | lokal grün | Schritt 4 |
 | Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 5 |
 | PowerShell MECM-Server-Skripte | nur Parser-Check | Schritt 4 |
@@ -37,6 +37,38 @@ des Repos und müssen separat bereitstehen:
 `APP_KEY`, `DB_PASS` und `MYSQL_ROOT_PASSWORD` kommen bewusst nicht per `git pull`
 mit; EnvBoot bricht hart ab, wenn sie fehlen oder schwach sind.
 
+## Ansible-Host vorbereiten (vor Schritt 4)
+
+Der Ansible-Host ist der Linux-Host, auf dem `ansible-playbook` gegen ESXi läuft;
+das Portal spricht ESXi nie direkt an, sondern immer über diesen Host (Inventar-
+Abruf und Deploy). Er kann dieselbe Ubuntu-Maschine wie der Docker-Stack sein.
+
+Nötig ist ein **dediziertes, unprivilegiertes Konto** (kein sudo/root): das Portal
+meldet sich per SSH/SFTP an, lädt die Playbooks pro Auftrag nach
+`/tmp/virtusphere-job-*`, führt sie aus und räumt wieder auf. Die Playbooks laufen
+gegen `localhost` und rufen nur die ESXi-API; lokale Adminrechte braucht das Konto
+nicht. Dieses Konto trägst du im Portal als **Ansible-Zugang** ein (Zugangsdaten).
+
+Auf dem Host installieren und bereitstellen:
+
+| Braucht | Warum |
+|---|---|
+| SSH-Login für das Konto, Schreibrecht in `~` und `/tmp` | Job-Arbeitsverzeichnis unter `/tmp/virtusphere-job-*` |
+| `ansible-playbook` (ansible-core) und `python3` | führt die Playbooks aus |
+| Python-Modul `pyvmomi` | vSphere-Anbindung (`pip install pyvmomi`) |
+| Collection `community.vmware` | die `vmware_guest`-Module (`ansible-galaxy collection install -r Ansible/requirements.yml`) |
+| Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
+| Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
+
+Der Portal-Test „Testen" beim Ansible-Zugang prüft genau das (SSH-Login,
+`ansible-playbook`, `python3`, `pyvmomi`, `community.vmware`) und benennt bei
+einem Fehler die fehlende Komponente. Bei gesetzter API-Basis-URL prüft er
+zusätzlich den Rückweg: die Portal-Erreichbarkeit vom Host aus und ob die
+Host-IP in den Machine-API IP-Freigaben steht; fehlt die Freigabe, warnt das
+Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.3). Die eigentlichen vSphere-Rechte liegen im
+**separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
+erlaubt keine Schreibzugriffe, das meldet die Integrationen-Seite als Warnung).
+
 ---
 
 ## Schritt 1: Stack hochfahren
@@ -56,6 +88,38 @@ mit; EnvBoot bricht hart ab, wenn sie fehlen oder schwach sind.
    Fehlt `maintenance-worker`, ist die Compose-Datei veraltet (`git pull`
    nachziehen).
 
+## Schritt 1a: Stolpersteine auf einem echten Linux-Host
+
+Auf Docker Desktop (Entwicklung) treten diese drei nicht auf, auf einem nackten
+Linux-Host schon. Der Fix lebt in einer lokalen `docker-compose.override.yml`
+(gitignored, nicht im Repo) plus einem `chmod`; ohne ihn startet der Stack nicht
+oder die SSH-Sitzung friert ein.
+
+1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` (PHP als uid 33) und
+   `Docker/logs/nginx` müssen für den Container-User schreibbar sein. Gehören sie
+   dem SSH-User, crash-loopen Worker und nginx (`Log directory is not writable`,
+   `error.log Permission denied`). Vor dem Start `chmod 0777` auf beide.
+   Docker Desktop umgeht das über seine VM, ein Linux-Host nicht. Folge:
+   `initial-admin-password.txt` liegt dann uid-33-owned, mit `sudo cat` lesen.
+2. **Docker-Default-Subnetz.** `docker compose up` legt ein Netz aus
+   `172.17.0.0/16` an. Liegt die IP, über die du per SSH verbunden bist, in
+   diesem Bereich, routet der Host die Antwortpakete in die Docker-Bridge und die
+   SSH-Sitzung friert ein. In der Override ein unbenutztes Subnetz pinnen
+   (`networks.default.ipam.config.subnet`, z. B. `10.89.7.0/24`). Recovery bei
+   bereits eingefrorener Sitzung: neu verbinden, `docker compose down` (entfernt
+   das Netz), Override anlegen, neu hoch.
+3. **Proxy-Variablen im Container.** Injiziert der Docker-Client
+   (`~/.docker/config.json`) einen `HTTP_PROXY`, erben ihn alle Container. Der
+   nginx-Healthcheck-`wget` schickt seinen Loopback-Aufruf dann durch den Proxy
+   (`502`, webserver dauerhaft unhealthy, obwohl das Portal per `curl` mit `302`
+   antwortet); und Deploy-Worker → ESXi/MECM/Ansible (LAN!) liefen fälschlich
+   über den Proxy. In der Override die vier Proxy-Variablen
+   (`HTTP_PROXY`/`HTTPS_PROXY` groß und klein) je Service leeren und den
+   webserver-Healthcheck-Test auf `wget -Y off` setzen.
+
+Start-Reihenfolge, die funktioniert: Log-`chmod`, Override anlegen,
+`docker compose up -d --force-recreate --wait`, dann Schritt 2.
+
 ## Schritt 2: Migrationen gegen die frische Produktions-DB
 
 Dies ist der am höchsten eingeschätzte ungetestete Pfad (`struktur.sql` und
@@ -67,7 +131,8 @@ docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php       
 docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check # muss sauber melden
 ```
 
-Erwartet: Migrationen 0001–0010 angewandt, `--check` ohne Drift.
+Erwartet: Migrationen 0001–0022 angewandt, `--check` ohne Drift. (Auf ubuntu-102
+am 2026-07-22 einmal produktiv bestätigt: alle 22 sauber, `--check: ok`.)
 
 ## Schritt 3: Backup einrichten (vor dem ersten echten Datenbestand)
 
@@ -129,7 +194,9 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 
    Die ausgerollten Client-VMs brauchen **keinen** Eintrag: `mecm-api.php` und
    `mecm_report.php` lassen alternativ eine im Portal bekannte MAC-Adresse als
-   Ausweis gelten.
+   Ausweis gelten. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
+   („Testen" beim Ansible-Zugang): fehlt er, endet der Test als Warnung mit der
+   IP, die hier einzutragen ist.
 4. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft
    später über den Admin-Config-Flow (ADR-0012, Runbook
    `docs/operations/https.md`).

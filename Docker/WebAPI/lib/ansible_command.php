@@ -190,19 +190,213 @@ function ansible_remote_command(string $remoteDir, array $payload, bool $autosta
     return 'trap ' . ansible_sh_quote($cleanup) . ' EXIT; ' . implode(' && ', $commands);
 }
 
-function ansible_preflight_command(): string
-{
-    $checks = [
-        'command -v ansible-playbook >/dev/null 2>&1',
-        'ansible-playbook --version 2>&1',
-        'command -v python3 >/dev/null 2>&1',
-        'python3 --version 2>&1',
-        'python3 -c ' . ansible_sh_quote('import pyVim, pyVmomi; print("pyvmomi import ok")') . ' 2>&1',
-        'ansible-doc -t module community.vmware.vmware_guest >/dev/null 2>&1',
-        'echo community.vmware.vmware_guest available',
-    ];
+// Stage marker echoed before each preflight component; the last one on stdout
+// names the component the shell reached before the && chain broke.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER = '::virtusphere-preflight::';
 
-    return implode(' && ', $checks);
+// Component token for the optional portal-reachability probe (the MAC return
+// route). Appended by ansible_preflight_command() only when an API base URL is
+// configured; kept as a constant so ansible_preflight_failed_component() names
+// it even though it is not one of the static tool checks.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL = 'portal';
+
+// Component token for the machine-API allowlist probe that follows the portal
+// probe: reaching the portal is not the same as passing the IP gate that
+// db_importMAC.php enforces on the MAC upload.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST = 'allowlist';
+
+// Verdict line the allowlist probe prints ("<marker> ok|denied <ip>|unknown").
+// Distinct from the stage marker: the stage marker says the probe ran, this
+// line says what it found. The probe always exits 0, because a missing
+// allowlist entry is a warning about a FUTURE deploy, not a broken credential.
+const VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER = '::virtusphere-allowlist::';
+
+/**
+ * The Ansible-host readiness checks, keyed by the component token shown to the
+ * operator, in the order a deploy needs the pieces. Each value is the shell test
+ * for that component (possibly several commands joined by &&).
+ *
+ * Redirection rule: the `command -v` presence probes are silenced, but the real
+ * checks keep stderr on the captured stream (2>&1) so a failure's actual reason
+ * (a Python ModuleNotFoundError, a missing collection) survives into the detail
+ * behind the alert, not just the marker.
+ *
+ * $strict swaps the collection probe from vmware_guest to vmware_host_auto_start,
+ * the module that pins the required collection floor (requirements.yml 6.2.0,
+ * ADR-0025). The on-demand credential test uses strict mode to catch a too-old
+ * collection that carries vmware_guest but not the autostart module. The deploy
+ * worker uses the lenient probe on purpose: an old collection can still run a
+ * create-only deploy, so its hard preflight gate must not fail for a module that
+ * job may never use (the autostart step has its own preflight, ADR-0025).
+ *
+ * @return array<string, string>
+ */
+function ansible_preflight_checks(bool $strict = false): array
+{
+    $collectionModule = $strict ? 'community.vmware.vmware_host_auto_start' : 'community.vmware.vmware_guest';
+
+    return [
+        'ansible-playbook' => 'command -v ansible-playbook >/dev/null 2>&1 && ansible-playbook --version 2>&1',
+        'python3' => 'command -v python3 >/dev/null 2>&1 && python3 --version 2>&1',
+        'pyvmomi' => 'python3 -c ' . ansible_sh_quote('import pyVim, pyVmomi') . ' 2>&1',
+        'community.vmware' => 'ansible-doc -t module ' . $collectionModule . ' 2>&1',
+    ];
+}
+
+/**
+ * A single && chain that echoes a stage marker BEFORE attempting each component.
+ * Because the chain stops at the first failing component, the LAST marker on
+ * stdout names exactly the component that failed. The worker/test caller reads
+ * it with ansible_preflight_failed_component() instead of guessing from an exit
+ * code that only ever says "1".
+ *
+ * When $apiBaseUrl is set, a final 'portal' step probes the MAC return route
+ * from the host via python3 (already required above): the deploy's
+ * upload_mac_list.py posts back to this URL, and a host that cannot reach it
+ * leaves VMs stuck at stage 2/5. The URL travels in an env var, not interpolated
+ * into the python source, so a crafted setting cannot break out of the quoting.
+ *
+ * An 'allowlist' step then asks the frozen wire contract itself whether the
+ * host would pass the IP gate of that upload: a GET to db_importMAC.php from a
+ * non-allowlisted IP answers with the legacy 403 that echoes the caller's IP
+ * ("Zugriff verweigert. Ihre IP: ..."), while an allowlisted IP reaches the
+ * method check (405). Nothing is written either way and the wire behaviour is
+ * exactly the E3-frozen one, so the probe changes no contract. It prints a
+ * verdict line and always exits 0: health.php passing while this says denied
+ * is a warning (deploys would lose their MAC upload), not a broken credential.
+ */
+function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false): string
+{
+    $checks = ansible_preflight_checks($strict);
+
+    $apiBaseUrl = trim($apiBaseUrl);
+    if ($apiBaseUrl !== '') {
+        $healthUrl = rtrim($apiBaseUrl, '/') . '/portal/health.php';
+        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL] = 'VS_PF_URL=' . ansible_sh_quote($healthUrl)
+            . ' python3 -c ' . ansible_sh_quote('import os, urllib.request; urllib.request.urlopen(os.environ["VS_PF_URL"], timeout=5)') . ' 2>&1';
+
+        $macUploadUrl = rtrim($apiBaseUrl, '/') . '/db_importMAC.php';
+        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST] = 'VS_PF_MAC_URL=' . ansible_sh_quote($macUploadUrl)
+            . ' python3 -c ' . ansible_sh_quote(ansible_allowlist_probe_source()) . ' 2>&1';
+    }
+
+    $steps = [];
+    foreach ($checks as $component => $check) {
+        $steps[] = 'echo ' . ansible_sh_quote(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . $component);
+        $steps[] = $check;
+    }
+
+    return implode(' && ', $steps);
+}
+
+/**
+ * Python source of the allowlist probe. Only the 403 counts as denied: any
+ * other HTTP answer (the expected 405, but also e.g. a redirect target's
+ * status) means the IP gate was passed, and a transport error right after the
+ * portal probe succeeded is reported as unknown rather than crying wolf. The
+ * "Ihre IP: " needle is part of the frozen legacy 403 (machine_api.php), so the
+ * echoed IP can be lifted into the operator's warning.
+ */
+function ansible_allowlist_probe_source(): string
+{
+    $source = <<<'PY'
+import os, re, urllib.request, urllib.error
+try:
+    urllib.request.urlopen(os.environ["VS_PF_MAC_URL"], timeout=5)
+    print("{marker} ok")
+except urllib.error.HTTPError as error:
+    if error.code == 403:
+        body = ""
+        try:
+            body = error.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        hit = re.search("Ihre IP: ([0-9a-fA-F.:]+)", body)
+        print("{marker} denied " + (hit.group(1) if hit else ""))
+    else:
+        print("{marker} ok")
+except Exception:
+    print("{marker} unknown")
+PY;
+
+    return str_replace('{marker}', VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER, $source);
+}
+
+/**
+ * Reads the allowlist probe's verdict line out of the preflight output. The
+ * last line wins. 'absent' means the probe never printed one (no API base URL,
+ * or output from before the probe existed); the caller then simply has no
+ * verdict to act on. A denied verdict carries the IP the portal echoed back,
+ * validated here because it crossed a remote shell before it reaches an audit
+ * line and a flash message.
+ *
+ * @return array{status: 'ok'|'denied'|'unknown'|'absent', ip: string}
+ */
+function ansible_preflight_allowlist_verdict(string $output): array
+{
+    $status = 'absent';
+    $ip = '';
+    foreach (explode("\n", $output) as $line) {
+        $line = trim($line);
+        if (!str_starts_with($line, VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ')) {
+            continue;
+        }
+        $verdict = trim(substr($line, strlen(VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER) + 1));
+        if ($verdict === 'ok' || $verdict === 'unknown') {
+            $status = $verdict;
+            $ip = '';
+        } elseif (str_starts_with($verdict, 'denied')) {
+            $status = 'denied';
+            $candidate = trim(substr($verdict, strlen('denied')));
+            $ip = filter_var($candidate, FILTER_VALIDATE_IP) !== false ? $candidate : '';
+        }
+    }
+
+    return ['status' => $status, 'ip' => $ip];
+}
+
+/**
+ * The component whose check failed, read from the preflight output. The last
+ * marker printed is the component the shell reached before the chain broke, so
+ * that component is the culprit. Null when no marker was printed at all (the
+ * SSH exec never ran the script) - the caller then keeps its generic message.
+ */
+function ansible_preflight_failed_component(string $output): ?string
+{
+    // The static tool checks plus the optional portal/allowlist tokens, so a
+    // probe failure is named too even though this reader has no API base URL.
+    $components = array_merge(
+        array_keys(ansible_preflight_checks()),
+        [VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL, VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST]
+    );
+    $found = null;
+    foreach (explode("\n", $output) as $line) {
+        $line = trim($line);
+        if (!str_starts_with($line, VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ')) {
+            continue;
+        }
+        $candidate = trim(substr($line, strlen(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER) + 1));
+        if (in_array($candidate, $components, true)) {
+            $found = $candidate;
+        }
+    }
+
+    return $found;
+}
+
+/**
+ * The preflight output with the internal stage markers removed, so the detail
+ * shown behind the alert is the remote's own error text and nothing else.
+ */
+function ansible_preflight_strip_markers(string $output): string
+{
+    $lines = array_filter(
+        explode("\n", $output),
+        static fn (string $line): bool => !str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ')
+            && !str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ')
+    );
+
+    return trim(implode("\n", $lines));
 }
 
 function ansible_sh_quote(string $value): string

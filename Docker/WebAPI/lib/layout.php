@@ -139,7 +139,9 @@ function flash_messages(): array
  */
 function flash_alert_html(array $flash): string
 {
-    $html = '<div class="alert alert-' . h((string) ($flash['type'] ?? 'info')) . '">'
+    // data-flash separates a one-shot flash from the static .alert info boxes;
+    // core.js uses it to counter-scroll the tab anchor jump only after a POST.
+    $html = '<div class="alert alert-' . h((string) ($flash['type'] ?? 'info')) . '" data-flash>'
         . h((string) ($flash['message'] ?? ''));
 
     $detail = trim((string) ($flash['detail'] ?? ''));
@@ -416,6 +418,44 @@ function esxi_state_badge(string $state): string
         'warning' => __t('integrations.esxi_state_warning'),
         'danger' => __t('integrations.esxi_state_danger'),
         default => __t('integrations.esxi_state_unknown'),
+    };
+
+    return portal_badge((string) $meta['badge'], $label);
+}
+
+/**
+ * Traffic-light state for an Ansible credential's last preflight test: 'ok',
+ * 'danger' (last test failed) or 'unknown' (never tested). There is deliberately
+ * no staleness axis: the preflight is on-demand, so age is shown as a timestamp
+ * rather than folded into the colour (an old green is still the last known good).
+ *
+ * @param array<string, mixed>|null $state
+ */
+function ansible_preflight_ampel(?array $state): string
+{
+    if ($state === null || trim((string) ($state['last_status'] ?? '')) === '') {
+        return 'unknown';
+    }
+
+    // Literal comparison like the 'ok' case: the value set is owned by
+    // lib/repo/ansible_preflight.php, which layout deliberately does not load.
+    return match ((string) $state['last_status']) {
+        'ok' => 'ok',
+        'warning' => 'warning',
+        default => 'danger',
+    };
+}
+
+/** @param array<string, mixed>|null $state */
+function ansible_preflight_badge(?array $state): string
+{
+    $ampel = ansible_preflight_ampel($state);
+    $meta = virtusphere_heartbeat_meta($ampel);
+    $label = match ($ampel) {
+        'ok' => __t('integrations.ansible_state_ok'),
+        'warning' => __t('integrations.ansible_state_warning'),
+        'danger' => __t('integrations.ansible_state_danger'),
+        default => __t('integrations.ansible_state_unknown'),
     };
 
     return portal_badge((string) $meta['badge'], $label);

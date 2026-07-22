@@ -26,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // tests/Static/SettingsTabRedirectContractTest.php.
     $actionTabs = [
         'save_api' => 'deploy',
+        'clear_api' => 'deploy',
         'allow_create' => 'machine-api',
         'allow_delete' => 'machine-api',
         'generate_token' => 'machine-api',
@@ -56,6 +57,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = portal_error_message($exception);
             form_remember('settings', $_POST, ['api_base_url' => $message]);
             flash_set('error', $message);
+        }
+    } elseif ($action === 'clear_api') {
+        try {
+            repo_delete_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'cleared deploy api_base_url setting', (int) $user['id']);
+            flash_set('success', __t('settings.api_base_url_reset_done'));
+        } catch (Throwable $exception) {
+            flash_set('error', portal_error_message($exception));
         }
     } elseif ($action === 'save_timezone') {
         $timezone = request_trimmed($_POST, 'timezone');
@@ -400,6 +409,14 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
                 </label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
             </form>
+            <?php if ($storedApiBaseUrl !== '') { ?>
+                <p class="muted"><?php echo h(__t('settings.api_base_url_reset_hint')); ?></p>
+                <form method="post" action="settings.php">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="clear_api">
+                    <div class="actions"><button class="button" type="submit" data-confirm="<?php echo h(__t('settings.api_base_url_reset_confirm')); ?>"><?php echo h(__t('settings.api_base_url_reset')); ?></button></div>
+                </form>
+            <?php } ?>
         </section>
 
         <section class="panel">
@@ -461,6 +478,24 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
         </section>
 
         <section class="panel">
+            <h2><?php echo h(__t('settings.probe_title')); ?></h2>
+            <p class="muted"><?php echo h(__t('settings.probe_hint', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
+            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_probe">
+                <label><?php echo h(__t('settings.probe_host_label')); ?>
+                    <input name="probe_host" value="<?php echo h(form_old('probe', 'probe_host', $probeHost)); ?>"<?php echo form_input_class('probe', 'probe_host'); ?> placeholder="<?php echo h(__t('settings.probe_host_placeholder')); ?>">
+                    <?php echo form_error_html('probe', 'probe_host'); ?>
+                </label>
+                <label><?php echo h(__t('settings.probe_port_label')); ?>
+                    <input name="probe_port" type="number" min="1" max="65535" value="<?php echo h(form_old('probe', 'probe_port', $probePort)); ?>"<?php echo form_input_class('probe', 'probe_port'); ?>>
+                    <?php echo form_error_html('probe', 'probe_port'); ?>
+                </label>
+                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
+            </form>
+        </section>
+
+        <section class="panel">
             <h2><?php echo h(__t('settings.report_token_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.report_token_hint')); ?></p>
             <?php if ($reportTokenOnce !== '') { ?>
@@ -493,24 +528,6 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
                     </form>
                 <?php } ?>
             </div>
-        </section>
-
-        <section class="panel">
-            <h2><?php echo h(__t('settings.probe_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.probe_hint', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
-            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
-                <?php echo csrf_field(); ?>
-                <input type="hidden" name="action" value="save_probe">
-                <label><?php echo h(__t('settings.probe_host_label')); ?>
-                    <input name="probe_host" value="<?php echo h(form_old('probe', 'probe_host', $probeHost)); ?>"<?php echo form_input_class('probe', 'probe_host'); ?> placeholder="<?php echo h(__t('settings.probe_host_placeholder')); ?>">
-                    <?php echo form_error_html('probe', 'probe_host'); ?>
-                </label>
-                <label><?php echo h(__t('settings.probe_port_label')); ?>
-                    <input name="probe_port" type="number" min="1" max="65535" value="<?php echo h(form_old('probe', 'probe_port', $probePort)); ?>"<?php echo form_input_class('probe', 'probe_port'); ?>>
-                    <?php echo form_error_html('probe', 'probe_port'); ?>
-                </label>
-                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
-            </form>
         </section>
     </div>
 

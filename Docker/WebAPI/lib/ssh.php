@@ -31,6 +31,15 @@ require_once __DIR__ . '/deploy_constants.php';
  */
 const VIRTUSPHERE_CREDENTIAL_TEST_OK = 'ok';
 const VIRTUSPHERE_CREDENTIAL_TEST_PREFLIGHT = 'preflight';
+// SSH exec and the preflight passed, but the SFTP subsystem or /tmp write that
+// every deploy relies on did not. A distinct code because it is not a login or
+// a tooling problem: the account works, the file transport it needs does not.
+const VIRTUSPHERE_CREDENTIAL_TEST_SFTP = 'sftp';
+// Everything works, but the host's callback IP is missing from the machine-API
+// allowlist: a deploy's MAC upload would get the legacy 403. Travels with
+// ok=true, because the credential and the toolchain ARE fine; the portal turns
+// it into a warning, not a failure.
+const VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST = 'allowlist';
 
 /**
  * @param array<string, string|int> $context Placeholders for the portal message.
@@ -41,17 +50,23 @@ function credential_test_result(bool $ok, string $code, string $detail = '', arr
     return ['ok' => $ok, 'code' => $code, 'detail' => $detail, 'context' => $context];
 }
 
-function credential_test_connection(array $credential, string $secret): array
+function credential_test_connection(array $credential, string $secret, string $apiBaseUrl = ''): array
 {
     $type = (string) ($credential['type'] ?? '');
     if ($type === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) {
-        return credential_test_ansible($credential, $secret);
+        return credential_test_ansible($credential, $secret, $apiBaseUrl);
     }
 
     return credential_test_result(false, VIRTUSPHERE_INVENTORY_ERROR_CONFIG, 'Unsupported credential type for a synchronous test: ' . $type);
 }
 
-function credential_test_ansible(array $credential, string $secret): array
+/**
+ * Tests an Ansible credential end to end, in the order a deploy needs it: SSH
+ * login, then the tooling/portal preflight over SSH exec, then a real SFTP
+ * write into /tmp. Each layer only runs once the one below it passed, so the
+ * failure that comes back is the first thing actually broken.
+ */
+function credential_test_ansible(array $credential, string $secret, string $apiBaseUrl = ''): array
 {
     $login = credential_test_ssh($credential, $secret);
     if (!$login['ok']) {
@@ -59,26 +74,52 @@ function credential_test_ansible(array $credential, string $secret): array
     }
 
     try {
-        $result = ssh_execute_capture($credential, $secret, ansible_preflight_command(), 25);
+        $result = ssh_execute_capture($credential, $secret, ansible_preflight_command($apiBaseUrl, true), 25);
         $exitCode = (int) $result['exit_code'];
-        if ($exitCode === 0) {
-            return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_OK);
+        if ($exitCode !== 0) {
+            // The login worked, so this is not a credential problem: the remote
+            // host is missing a tool, carries a too-old collection, or cannot
+            // reach the portal. The last stage marker on stdout names the
+            // component that broke the chain, so the operator sees "pyvmomi" or
+            // "portal" instead of a bare exit code.
+            $rawOutput = (string) $result['output'];
+            $component = ansible_preflight_failed_component($rawOutput);
+            return credential_test_result(
+                false,
+                VIRTUSPHERE_CREDENTIAL_TEST_PREFLIGHT,
+                connection_error_detail(ansible_preflight_strip_markers($rawOutput), $secret),
+                ['status' => $exitCode, 'component' => $component ?? '']
+            );
         }
-
-        // The login worked, so this is not a credential problem: the remote host
-        // is missing Ansible or the preflight command itself failed.
-        return credential_test_result(
-            false,
-            VIRTUSPHERE_CREDENTIAL_TEST_PREFLIGHT,
-            connection_error_detail((string) $result['output'], $secret),
-            ['status' => $exitCode]
-        );
     } catch (Throwable $exception) {
         return credential_test_ssh_failure($exception, $secret, [
             'host' => (string) ($credential['host'] ?? ''),
             'port' => credential_ssh_port($credential['port'] ?? null),
         ]);
     }
+
+    // Tooling is fine; now prove the file transport the deploy actually uses.
+    // SSH exec working does not imply the SFTP subsystem is enabled or that /tmp
+    // is writable, and both are load-bearing for every deploy.
+    try {
+        ssh_sftp_probe($credential, $secret);
+    } catch (Throwable $exception) {
+        return credential_test_result(
+            false,
+            VIRTUSPHERE_CREDENTIAL_TEST_SFTP,
+            connection_error_detail($exception->getMessage(), $secret)
+        );
+    }
+
+    // The chain is green; the allowlist verdict decides between plain ok and
+    // ok-with-warning. Reaching health.php proved the network path, but only
+    // passing the db_importMAC.php IP gate proves the MAC upload would land.
+    $allowlist = ansible_preflight_allowlist_verdict((string) $result['output']);
+    if ($allowlist['status'] === 'denied') {
+        return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST, '', ['ip' => $allowlist['ip']]);
+    }
+
+    return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_OK);
 }
 
 function credential_test_ssh(array $credential, string $secret): array
@@ -186,6 +227,41 @@ function ssh_sftp_upload_directory(array $credential, string $secret, string $lo
         }
     }
 
+    $sftp->disconnect();
+}
+
+/**
+ * Proves the SFTP path a deploy relies on: log in over SFTP, write a tiny probe
+ * file into /tmp and delete it. Throws on any step. This catches a host that
+ * allows SSH exec but has the SFTP subsystem disabled, or a /tmp that is not
+ * writable for the account, which the SSH-exec preflight cannot see.
+ */
+function ssh_sftp_probe(array $credential, string $secret): void
+{
+    if (!class_exists(SFTP::class)) {
+        throw new RuntimeException('phpseclib SFTP is not available.');
+    }
+
+    $host = (string) ($credential['host'] ?? '');
+    $port = credential_ssh_port($credential['port'] ?? null);
+    $username = (string) ($credential['username'] ?? '');
+    if ($host === '' || $username === '') {
+        throw new RuntimeException('Ansible SSH host and username are required.');
+    }
+
+    $sftp = new SFTP($host, $port, 15);
+    $sftp->setTimeout(VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
+    if (!$sftp->login($username, $secret)) {
+        throw new RuntimeException('SFTP login failed (the SSH login worked, so the SFTP subsystem is likely disabled).');
+    }
+
+    $probePath = '/tmp/.virtusphere-preflight-' . bin2hex(random_bytes(4));
+    if ($sftp->put($probePath, 'virtusphere preflight') === false) {
+        $sftp->disconnect();
+        throw new RuntimeException('Cannot write into /tmp over SFTP on the Ansible host.');
+    }
+
+    $sftp->delete($probePath);
     $sftp->disconnect();
 }
 

@@ -50,6 +50,7 @@ final class PortalConfirmNamingContractTest extends TestCase
     private const NO_TARGET = [
         'deploy.confirm_cancel_group' => 'cancels a whole staggered batch; the batch is the target, not a row',
         'integrations.reassign_confirm' => 'the target field (vlan_from) is an editable input, so a name rendered server-side would state a value the operator may have changed since',
+        'settings.api_base_url_reset_confirm' => 'the one stored API base URL, not a row',
         'settings.https_confirm_disable' => 'a global switch, not a row',
         'settings.https_confirm_overwrite' => 'a global switch, not a row',
         'settings.https_confirm_redirect' => 'a global switch, not a row',
