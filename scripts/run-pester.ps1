@@ -7,7 +7,7 @@
 .DESCRIPTION
     Dev-Host- und CI-Tooling (ADR-0028-Familie): nichts davon wird ausgeliefert.
     Die PowerShell-Skripte laufen als SYSTEM in Endlosschleifen auf dem
-    SCCM-Server und auf frisch ausgerollten Clients; bis 2026-07 hat sie nichts
+    MECM-Server und auf frisch ausgerollten Clients; bis 2026-07 hat sie nichts
     geprueft. Dieses Skript ist der Einstiegspunkt fuer beides, lokal wie in CI.
 
     Module (Pester >= 5, PSScriptAnalyzer) kommen aus der PSGallery und werden

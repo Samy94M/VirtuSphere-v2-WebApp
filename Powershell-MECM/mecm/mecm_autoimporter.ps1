@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ============================================================================
 # mecm_autoimporter.ps1 - erzeugt aus config.json-Paketordnern automatisch
-# SCCM-Applications, Collections und Deployments.
+# MECM-Applications, Collections und Deployments.
 # Laeuft als geplante Aufgabe "VirtuSphere MECM Package Import".
 #
 # Quelle: <PackagesRoot>\files\<Paket>\config.json
@@ -82,7 +82,7 @@ while ($true) {
     try {
         if (-not $siteCode) {
             $siteCode = Initialize-VsCmSite -Config $config
-            if (-not $siteCode) { throw 'SCCM-Site nicht initialisierbar.' }
+            if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar.' }
             Write-VsLog -Message ("Site-Drive {0} aktiv" -f $siteCode)
 
             # Self-Healing: die VirtuSphere_Applications-Ordner (Applications
@@ -90,7 +90,7 @@ while ($true) {
             # Sync liest den Collections-Ordner als Katalogquelle; ohne ihn
             # wuerde dessen Sende-Guard dauerhaft warnen.
             # Get-/New-CMFolder erwarten laut MS-Doku RELATIVE Pfade ohne
-            # Site-Drive-Praefix (anders als Move-CMObject); ConfigMgr >= 2111.
+            # Site-Drive-Praefix (anders als Move-CMObject); MECM >= 2111.
             foreach ($parentNode in @('Application', 'DeviceCollection')) {
                 $fp = "{0}\{1}" -f $parentNode, $appFolderName
                 if (-not (Get-CMFolder -FolderPath $fp -ErrorAction SilentlyContinue)) {

@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 # ============================================================================
 # mecm_new-device-sync.ps1 - synchronisiert VMs aus der VirtuSphere-Datenbank
-# nach SCCM: importiert Geraete, approved sie, weist OS-/Paket-/Mission-
+# nach MECM: importiert Geraete, approved sie, weist OS-/Paket-/Mission-
 # Collections zu und meldet die ResourceID zurueck.
 # Laeuft als geplante Aufgabe "VirtuSphere MECM Devices Sync".
 #
 # Haertung/Optimierung gegenueber V2:
 #  - Konfiguration aus Registry (keine harten IPs/Site-Codes)
-#  - Leerlauf-Abkuerzung: bei 0 Devices werden die teuren SCCM-Vollabfragen
+#  - Leerlauf-Abkuerzung: bei 0 Devices werden die teuren MECM-Vollabfragen
 #    uebersprungen (Normalfall alle 10s ist damit fast kostenlos)
 #  - Collection-Cache je Scan statt Get-CMDeviceCollection pro Device/Paket
 #  - Task-Sequence-Collections werden EINMAL pro Scan geprueft, nicht je Device
@@ -69,21 +69,21 @@ while ($true) {
         $consecutiveErrors = 0
 
         if ($devices.Count -eq 0) {
-            # Leerlauf-Abkuerzung: keine SCCM-Vollabfragen ausloesen.
+            # Leerlauf-Abkuerzung: keine MECM-Vollabfragen ausloesen.
             Start-Sleep -Seconds $intervalSeconds
             continue
         }
 
         if (-not $siteCode) {
             $siteCode = Initialize-VsCmSite -Config $config
-            if (-not $siteCode) { throw 'SCCM-Site nicht initialisierbar.' }
+            if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar.' }
         }
         $osFolder = "{0}:\DeviceCollection\VirtuSphere_OS" -f $siteCode
         $missionFolder = "{0}:\DeviceCollection\VirtuSphere_Missions" -f $siteCode
 
         Write-VsLog -Message ("Scan #{0}: {1} Devices von VirtuSphere geladen." -f $loop, $devices.Count)
 
-        # --- SCCM-Daten EINMAL je Scan cachen ------------------------------
+        # --- MECM-Daten EINMAL je Scan cachen ------------------------------
         $mecmDevices = @{}
         foreach ($d in @(Get-CMDevice -Fast | Select-Object Name, MACAddress, ResourceID)) {
             if ($d.Name) { $mecmDevices[$d.Name] = $d }
@@ -156,7 +156,7 @@ while ($true) {
             if ($mecmDevices.ContainsKey($deviceName)) {
                 $mecmMac = ConvertTo-VsNormalizedMac ([string]$mecmDevices[$deviceName].MACAddress)
                 if ($mecmMac -and $mecmMac -ne $deviceMac) {
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("MAC-Konflikt: SCCM={0} ESXi={1} - manuelle Pruefung noetig." -f $mecmMac, $deviceMac)
+                    Write-VsLog -Level WARN -Context $deviceName -Message ("MAC-Konflikt: MECM={0} ESXi={1} - manuelle Pruefung noetig." -f $mecmMac, $deviceMac)
                 }
             }
 
@@ -168,7 +168,7 @@ while ($true) {
                     $imported++
                     Start-Sleep -Seconds 2
                 } catch {
-                    # Kein Fehlertext-Parsing (Texte variieren je SCCM-Version und
+                    # Kein Fehlertext-Parsing (Texte variieren je MECM-Version und
                     # -Sprache): Import-Race liegt vor, wenn das Device trotz
                     # Fehler inzwischen existiert - dann normal weitermachen.
                     if (Get-CMDevice -Name $deviceName -Fast -ErrorAction SilentlyContinue) {
@@ -237,7 +237,7 @@ while ($true) {
         # Collection-Updates gesammelt anstossen (einmal je geaenderter Collection)
         foreach ($name in $collectionsToUpdate.Keys) {
             try { Invoke-CMCollectionUpdate -Name $name -ErrorAction Stop | Out-Null } catch {
-                Write-VsLog -Level WARN -Context $name -Message ("Collection-Update nicht angestossen (Mitgliedschaft greift erst beim naechsten SCCM-Zyklus): {0}" -f $_.Exception.Message)
+                Write-VsLog -Level WARN -Context $name -Message ("Collection-Update nicht angestossen (Mitgliedschaft greift erst beim naechsten MECM-Zyklus): {0}" -f $_.Exception.Message)
             }
         }
 

@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Erstinstallation der VirtuSphere-MECM-Integration auf dem SCCM-Server.
+    Erstinstallation der VirtuSphere-MECM-Integration auf dem MECM-Server.
 
 .DESCRIPTION
     Schreibt die Konfiguration in die Registry, legt Verzeichnisse an, kopiert
@@ -16,11 +16,11 @@
     Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
 
 .PARAMETER PackagesRoot
-    Wurzel der Paketablage auf dem SCCM-Server. Standard: D:\VirtuSphere\Packages.
+    Wurzel der Paketablage auf dem MECM-Server. Standard: D:\VirtuSphere\Packages.
 
 .PARAMETER PackagesShare
-    UNC-Pfad auf den files-Ordner (ContentLocation der SCCM-Applications),
-    z. B. \\SCCM-SERVER\VirtuSphere\Packages\files.
+    UNC-Pfad auf den files-Ordner (ContentLocation der MECM-Applications),
+    z. B. \\MECM-SERVER\VirtuSphere\Packages\files.
 
 .PARAMETER Scheme
     Schema der WebAPI: "http" (LAN-Default) oder "https", sobald das Portal auf
@@ -36,7 +36,7 @@
 
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
-        -PackagesShare \\SCCM-01\VirtuSphere\Packages\files
+        -PackagesShare \\MECM-01\VirtuSphere\Packages\files
 #>
 [CmdletBinding()]
 param(
@@ -111,9 +111,9 @@ if ([string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
 # --- Voraussetzungen --------------------------------------------------------
 Write-Step 'Pruefe Voraussetzungen'
 if (-not $env:SMS_ADMIN_UI_PATH) {
-    throw 'SMS_ADMIN_UI_PATH nicht gesetzt - die ConfigMgr-Konsole muss installiert sein und dieses Skript auf dem SCCM-Server laufen.'
+    throw 'SMS_ADMIN_UI_PATH nicht gesetzt - die MECM-Konsole muss installiert sein und dieses Skript auf dem MECM-Server laufen.'
 }
-Write-Ok 'ConfigMgr-Konsole gefunden'
+Write-Ok 'MECM-Konsole gefunden'
 
 $siteCode = $null
 try {
@@ -125,7 +125,7 @@ if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Warn 'Si
 
 # WebAPI-Name gegen DNS pruefen. Der haeufigste Rollout-Fehler ist eine Zone, die
 # die per PXE frisch installierten Clients (DNS kommt bei ihnen per DHCP) nicht
-# aufloesen. Nur Hinweis, kein Abbruch: der SCCM-Server nutzt evtl. einen anderen
+# aufloesen. Nur Hinweis, kein Abbruch: der MECM-Server nutzt evtl. einen anderen
 # Resolver als das Deploy-VLAN. [System.Net.Dns] statt Resolve-DnsName, damit es
 # nicht am DnsClient-Modul haengt.
 if ($webApiIsIp) {
@@ -133,8 +133,8 @@ if ($webApiIsIp) {
 } else {
     $dnsOk = $false
     try { $dnsOk = @([System.Net.Dns]::GetHostAddresses($webApiHost)).Count -gt 0 } catch { Write-Debug $_ }
-    if ($dnsOk) { Write-Ok ("DNS-Name '{0}' loest vom SCCM-Server aus auf" -f $webApiHost) }
-    else { Write-Warn ("DNS-Name '{0}' loest vom SCCM-Server NICHT auf. Im Deploy-VLAN-DNS einen Eintrag anlegen, sonst finden die Clients die WebAPI nicht (ihr DNS kommt per DHCP)." -f $webApiHost) }
+    if ($dnsOk) { Write-Ok ("DNS-Name '{0}' loest vom MECM-Server aus auf" -f $webApiHost) }
+    else { Write-Warn ("DNS-Name '{0}' loest vom MECM-Server NICHT auf. Im Deploy-VLAN-DNS einen Eintrag anlegen, sonst finden die Clients die WebAPI nicht (ihr DNS kommt per DHCP)." -f $webApiHost) }
 }
 
 # --- Registry ---------------------------------------------------------------
@@ -208,7 +208,7 @@ if ($writableByUsers) {
 
 # PackagesShare MUSS die Freigabe von PackagesRoot\files sein: der Autoimporter
 # LIEST config.json aus PackagesRoot\files (lokal), setzt aber die ContentLocation
-# der SCCM-App auf PackagesShare\<pkg> (UNC). Zeigen die beiden auf verschiedene
+# der MECM-App auf PackagesShare\<pkg> (UNC). Zeigen die beiden auf verschiedene
 # Ordner, hat jede erzeugte App leeren Content - ohne Fehler beim Anlegen, der
 # Client bekommt beim Deploy "Content not found". Definitiv geprueft: lokal einen
 # Marker schreiben und sehen, ob er ueber die Freigabe auftaucht.
@@ -332,7 +332,7 @@ if ($allRunning) {
 Write-Host ('Logs: {0}' -f $logRoot) -ForegroundColor Gray
 Write-Host ''
 Write-Host 'Naechste Schritte:' -ForegroundColor Gray
-Write-Host '  1. Im Portal die IP DIESES SCCM-Servers freischalten (Einstellungen > IP-Freigaben).' -ForegroundColor Gray
+Write-Host '  1. Im Portal die IP DIESES MECM-Servers freischalten (Einstellungen > IP-Freigaben).' -ForegroundColor Gray
 Write-Host '  2. Auch die IP des ANSIBLE-Hosts freischalten - sonst laeuft ein Deploy durch, ohne dass je eine MAC zurueckkommt (der Ansible-Host meldet die MACs ueber db_importMAC.php).' -ForegroundColor Gray
 if (-not $webApiIsIp) {
     Write-Host ('  3. DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $webApiHost) -ForegroundColor Gray

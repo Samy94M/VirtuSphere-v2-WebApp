@@ -1,8 +1,8 @@
 # MECM-Integration: Betriebshandbuch
 
 Dieses Dokument beschreibt die Integration zwischen der VirtuSphere-WebApp, dem
-MECM/SCCM-Server und den per PXE ausgerollten Windows-Clients. Zielgruppe sind
-Administratoren ohne tiefes SCCM- oder Docker-Vorwissen.
+MECM-Server und den per PXE ausgerollten Windows-Clients. Zielgruppe sind
+Administratoren ohne tiefes MECM- oder Docker-Vorwissen.
 
 ## Überblick: die Pipeline
 
@@ -10,7 +10,7 @@ Administratoren ohne tiefes SCCM- oder Docker-Vorwissen.
 Paket-Autor                MECM-Server                          VirtuSphere-WebApp            Windows-Client (PXE)
 -----------                -----------                          ------------------            --------------------
 config.json-Ordner  --->   mecm_autoimporter.ps1                deploy_packages/deploy_os
-(D:\VirtuSphere\           (erstellt SCCM-Application +   <---  (Katalog, read-only im
+(D:\VirtuSphere\           (erstellt MECM-Application +   <---  (Katalog, read-only im
  Packages\files)            Collection "Name-Version")          Portal)
                            mecm_Packages-TaskSeq-sync.ps1 --->  mecm_packages.php
                            (meldet Collections/TaskSeqs)
@@ -52,7 +52,7 @@ verknüpfen                  Collections zu)               --->  mecm_updateid.p
 ## VM außer Betrieb nehmen
 
 MECM ist der Single Point of Truth für das Lebensende eines Geräts. Die WebApp
-räumt in SCCM **nicht** automatisch auf (bewusste Entscheidung, keine
+räumt in MECM **nicht** automatisch auf (bewusste Entscheidung, keine
 Verwaltungssuite). Vorgehen:
 
 1. VM im Portal löschen (entfernt DB-Eintrag, Interfaces, Paket-Verknüpfungen
@@ -187,7 +187,7 @@ Deploy-Worker und erledigt:
 
 | Beobachtung | Bedeutung | Maßnahme |
 |---|---|---|
-| Sync-Quellen rot, Probe grün | Server läuft, Tasks melden sich nicht | Aufgabenplanung auf dem SCCM-Server prüfen |
+| Sync-Quellen rot, Probe grün | Server läuft, Tasks melden sich nicht | Aufgabenplanung auf dem MECM-Server prüfen |
 | Probe rot | Server/Netz nicht erreichbar | MECM-Server bzw. Netzwerk/Firewall prüfen |
 | Wartungsdienst rot | interner Dienst steht | `docker compose ps` auf dem Ubuntu-Host, dann `docker compose up -d maintenance-worker` |
 
@@ -209,9 +209,9 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
   editierbar (Warnhinweis am Feld zeigt den Namen, den der Client erzeugen
   würde); erst eine Änderung muss die Regel erfüllen.
 - **VM-Name (`vm_name`)**: global eindeutig über alle normalen Missionen
-  hinweg (SCCM-Gerätenamen sind global). Templates dürfen Namen doppeln;
+  hinweg (MECM-Gerätenamen sind global). Templates dürfen Namen doppeln;
   beim Klonen eines Templates werden Kollisionen vorab als Liste gemeldet.
-- **Missionsname**: ist gleichzeitig der SCCM-Collection-Name. Sobald VMs der
+- **Missionsname**: ist gleichzeitig der MECM-Collection-Name. Sobald VMs der
   Mission in MECM übermittelt/registriert sind, ist der Name gesperrt.
 - **MAC-Adressen**: kanonisches Format `AA:BB:CC:DD:EE:FF` (Großbuchstaben,
   Doppelpunkte). Lookups akzeptieren alle üblichen Schreibweisen; der
@@ -286,7 +286,7 @@ Wichtige Härtungen gegenüber den Altskripten:
 - Alle drei senden je Durchlauf einen **Heartbeat**; ein toter Task wird im
   Portal unter *Integrationen* rot.
 
-**Task neu starten** (SCCM-Server): Aufgabenplanung öffnen → Task unter
+**Task neu starten** (MECM-Server): Aufgabenplanung öffnen → Task unter
 `\` auswählen → *Ausführen*. Oder per PowerShell:
 `Start-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`.
 
@@ -323,7 +323,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Fall | Verhalten | Log |
 |---|---|---|
 | Registry-Konfiguration fehlt komplett | wartet in 60-s-Schleife auf den Installer (Selbstheilung, kein Exit) | ERROR einmalig (Default-LogRoot) |
-| WebApp/SCCM-Fehler im Durchlauf | Backoff 30 s; ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung | ERROR je Versuch |
+| WebApp/MECM-Fehler im Durchlauf | Backoff 30 s; ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung | ERROR je Versuch |
 | Heartbeat-Zustellung scheitert | still verworfen (fire-and-forget, ADR-0018) | still; Portal-Ampel wird rot |
 | Registry-Änderung zur Laufzeit | greift erst nach Task-Neustart (Konfig wird beim Start gelesen; Installer-Re-Run startet die Tasks neu) | — |
 | Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess) | Konsole only |
@@ -332,15 +332,15 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 
 | Fall | Verhalten | Log |
 |---|---|---|
-| 0 Devices von der WebApp | Leerlauf-Abkürzung, keine SCCM-Abfragen | still |
+| 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
 | VM ohne Mission / ohne DHCP-MAC | übersprungen, nächste VM | WARN |
-| MAC-Konflikt SCCM ≠ ESXi | nur melden, nie automatisch ändern | WARN „manuelle Prüfung" |
+| MAC-Konflikt MECM ≠ ESXi | nur melden, nie automatisch ändern | WARN „manuelle Prüfung" |
 | Import-Race (paralleler Scan) | toleriert; Existenz-Nachprüfung statt Fehlertext-Parsing (sprach-/versionsneutral) | still |
 | Mehrere DHCP-Interfaces an einer VM | erste MAC wird genutzt | WARN |
 | Auto-Approve scheitert / ResourceID fehlt noch | Retry im nächsten Scan | DEBUG + WARN |
 | Ziel-Collection existiert nicht | Zuweisung übersprungen | WARN |
 | Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
-| Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten SCCM-Zyklus | WARN |
+| Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
 | ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter | WARN |
 
 **Packages-Sync**
@@ -373,14 +373,14 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 Erste Anlaufstelle ist immer die Portal-Seite **Integrationen** (Klartext-Ampel
 je Quelle mit Handlungsanweisung). Häufige Fälle:
 
-**VM taucht nicht in SCCM auf**
+**VM taucht nicht in MECM auf**
 1. *Integrationen* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
-   auf dem SCCM-Server, Task „VirtuSphere MECM Devices Sync" starten.
+   auf dem MECM-Server, Task „VirtuSphere MECM Devices Sync" starten.
 2. Hat die VM eine MAC? Im Portal an der VM prüfen; ohne DHCP-MAC überspringt
    der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein).
 3. Gehört die VM zu einer Mission (nicht Template)? Templates werden bewusst
    nicht synchronisiert.
-4. Log auf dem SCCM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.
+4. Log auf dem MECM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.
 
 **Deployment hängt auf dem Client**
 1. VM-Detail im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
@@ -392,13 +392,13 @@ je Quelle mit Handlungsanweisung). Häufige Fälle:
 **Pakete verschwinden / Sync abgelehnt (409)**
 1. Im Log (Kategorie „MECM-Integration") nach „Katalog-Sync abgelehnt" suchen:
    Der Paket-Sync hätte mehr als die Schutzschwelle zurückgezogen, meist ein
-   WMI-Aussetzer oder falscher Collections-Ordner auf dem SCCM-Server.
+   WMI-Aussetzer oder falscher Collections-Ordner auf dem MECM-Server.
 2. Katalogquelle prüfen; notfalls Schwelle temporär anheben (Portal →
    Einstellungen → Paket-Sync-Schutzschwelle).
 
 **MECM-Server offline**
 - *Integrationen* zeigt „MECM-Server erreichbar" rot → Server/Netz/Firewall
-  zwischen WebApp und SCCM-Server prüfen. Probe-Ziel/-Port sind im Portal unter
+  zwischen WebApp und MECM-Server prüfen. Probe-Ziel/-Port sind im Portal unter
   Einstellungen konfigurierbar (Standard: IP des letzten Device-Sync, Port 445).
 
 **Wartungsdienst rot**

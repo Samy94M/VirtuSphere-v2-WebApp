@@ -19,11 +19,11 @@
     MECM-Admin. Der WebAPI-Name wird NICHT in die Common-ps1 gestempelt (Common
     bleibt unveraendert); die Adress-Aufloesung laeuft ueber DNS.
 
-    Muss auf dem SCCM-Server mit installierter ConfigMgr-Konsole laufen.
+    Muss auf dem MECM-Server mit installierter MECM-Konsole laufen.
     Idempotent: erneutes Ausfuehren aktualisiert Content und heilt fehlende Apps.
 
 .PARAMETER ContentShare
-    UNC-Freigabe von PackagesBase, z. B. \\SCCM-SERVER\VirtuSphere\Base\Packages.
+    UNC-Freigabe von PackagesBase, z. B. \\MECM-SERVER\VirtuSphere\Base\Packages.
     Wird als ContentLocation der Deployment-Types gesetzt.
 
 .PARAMETER PackagesBase
@@ -40,7 +40,7 @@
     Application-Ordner in der Konsole. Standard: VirtuSphere_Core.
 
 .EXAMPLE
-    .\install-VirtuSphere-Clients.ps1 -ContentShare \\SCCM-01\VirtuSphere\Base\Packages
+    .\install-VirtuSphere-Clients.ps1 -ContentShare \\MECM-01\VirtuSphere\Base\Packages
 #>
 [CmdletBinding()]
 param(
@@ -98,13 +98,13 @@ if ($writableByUsers) {
     Write-Warn ("PackagesBase '{0}' ist fuer normale Benutzer beschreibbar. Der Content laeuft als SYSTEM auf den Clients: Schreibrechte auf Administratoren/SYSTEM begrenzen." -f $PackagesBase)
 }
 
-# --- SCCM-Site initialisieren -----------------------------------------------
-Write-Step 'Initialisiere SCCM-Site'
+# --- MECM-Site initialisieren -----------------------------------------------
+Write-Step 'Initialisiere MECM-Site'
 $config = Get-VsConfig   # fuer SiteCodeFallback/LogRoot; darf $null sein
 $logRoot = if ($config) { $config.LogRoot } else { $null }
 Initialize-VsLog -Component 'client-packaging' -LogRoot $logRoot
 $siteCode = Initialize-VsCmSite -Config $config
-if (-not $siteCode) { throw 'SCCM-Site nicht initialisierbar (ConfigMgr-Konsole/Site-Drive pruefen).' }
+if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar (MECM-Konsole/Site-Drive pruefen).' }
 Write-Ok "Site-Drive $siteCode aktiv"
 
 # Application-Ordner sicherstellen (Get-/New-CMFolder erwarten RELATIVE Pfade).

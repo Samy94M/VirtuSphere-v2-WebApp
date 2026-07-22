@@ -1,22 +1,22 @@
 # VirtuSphere MECM-Integration – PowerShell
 
-Diese Skripte verbinden den MECM/SCCM-Server mit der VirtuSphere-WebApp. Sie
-laufen als geplante Aufgaben auf dem SCCM-Server (`mecm/`) bzw. werden über das
+Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
+laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
 MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
 
 Alle umgebungsspezifischen Werte (Adresse der WebApp, Pfade, Site-Code) kommen
 aus der Registry `HKLM:\SOFTWARE\VirtuSphere\MECM` und stehen **nicht** im Code.
 Diese Registry schreibt der Installer.
 
-## Erstinstallation auf dem SCCM-Server (3 Schritte)
+## Erstinstallation auf dem MECM-Server (3 Schritte)
 
-1. Dieses Verzeichnis auf den SCCM-Server kopieren, PowerShell **als
+1. Dieses Verzeichnis auf den MECM-Server kopieren, PowerShell **als
    Administrator** öffnen.
 2. Installer ausführen (Adresse und UNC-Freigabe anpassen):
 
    ```powershell
    .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
-       -PackagesShare \\SCCM-01\VirtuSphere\Packages\files
+       -PackagesShare \\MECM-01\VirtuSphere\Packages\files
    ```
 
    Optionaler Rückkanal-Token (vorher im Portal unter *Einstellungen →
@@ -26,19 +26,19 @@ Diese Registry schreibt der Installer.
    Klartext-Argument übergeben, da er sonst in der PowerShell-History und
    Prozessliste sichtbar bleibt.
 3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
-   SCCM-Servers freischalten, dann die Seite *Integrationen* beobachten – die
+   MECM-Servers freischalten, dann die Seite *Integrationen* beobachten – die
    drei Sync-Quellen sollten auf „OK" springen.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
 Skripte.
 
-## Die drei geplanten Aufgaben (SCCM-Server)
+## Die drei geplanten Aufgaben (MECM-Server)
 
 | Aufgabe | Skript | Zweck | Intervall |
 |---|---|---|---|
-| VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | VMs aus VirtuSphere nach SCCM importieren, Collections zuweisen, ResourceID zurückmelden | 10 s |
+| VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | VMs aus VirtuSphere nach MECM importieren, Collections zuweisen, ResourceID zurückmelden | 10 s |
 | VirtuSphere MECM Packages Sync | `mecm_Packages-TaskSeq-sync.ps1` | Paket-/Task-Sequence-Katalog an die WebApp melden | 60 s |
-| VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | aus `config.json`-Ordnern SCCM-Applications erzeugen | 60 s |
+| VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | aus `config.json`-Ordnern MECM-Applications erzeugen | 60 s |
 
 Alle drei laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim
 Systemstart, **ohne Laufzeitlimit** (Endlosschleifen) und mit
@@ -75,11 +75,11 @@ Common stellt bereit:
 | `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel) |
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
 | `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); das Portal erkennt tote Tasks am *Ausbleiben* des Heartbeats (ADR-0018) |
-| `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und SCCM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
+| `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und MECM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
 | `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster für die Alt-Versions-Bereinigung (`^Name-<version>$`, exakt — der Wildcard `Name*` löschte früher auch `Firefox-ESR-*`). Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
 | `Get-VsSiteCode` / `Initialize-VsCmSite` | Site-Code dreistufig ermitteln (WMI-Namespace → CMSite-PSDrive → Registry-Fallback), ConfigurationManager-Modul laden, ins Site-Drive wechseln |
 
-Außerdem ist Common die SSoT für den SCCM-Ordnernamen
+Außerdem ist Common die SSoT für den MECM-Ordnernamen
 `VirtuSphere_Applications` (`$script:VsApplicationsFolderName`): der
 Packages-Sync **liest** diesen Ordner, der Autoimporter **befüllt** ihn.
 Weil beide dieselbe Variable nutzen, können die Namen nicht auseinanderlaufen.
@@ -87,7 +87,7 @@ Weil beide dieselbe Variable nutzen, können die Namen nicht auseinanderlaufen.
 ### Struktur in der MECM-Konsole
 
 Die Skripte legen ihre Objekte in festen Ordnern ab, damit VirtuSphere-Objekte
-von manuell gepflegten SCCM-Objekten getrennt bleiben:
+von manuell gepflegten MECM-Objekten getrennt bleiben:
 
 ```
 Assets and Compliance
@@ -107,7 +107,7 @@ Software Library
 ```
 
 Voraussetzung für die Ordner-Automatik: Die Cmdlets `Get-CMFolder` und
-`New-CMFolder` gibt es erst ab der ConfigMgr-Konsole **Version 2111**. Auf
+`New-CMFolder` gibt es erst ab der MECM-Konsole **Version 2111**. Auf
 älteren Konsolen müssen die Ordner manuell angelegt werden.
 
 Wer legt was an:
@@ -132,12 +132,12 @@ Collections dagegen schon.
 
 ### Devices Sync (`mecm_new-device-sync.ps1`, alle 10 s)
 
-Synchronisiert VMs aus der VirtuSphere-Datenbank nach SCCM. Ablauf je Scan:
+Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
 
 1. Geräteliste per `GET /mecm-api.php?action=getDeviceList` laden. Bei
-   0 Devices sofort schlafen; die teuren SCCM-Vollabfragen entfallen, der
+   0 Devices sofort schlafen; die teuren MECM-Vollabfragen entfallen, der
    10-Sekunden-Normalfall ist damit fast kostenlos.
-2. SCCM-Daten **einmal pro Scan** cachen (alle Devices, Task Sequences,
+2. MECM-Daten **einmal pro Scan** cachen (alle Devices, Task Sequences,
    Collections in Hashtables) statt Einzelabfragen je Device.
 3. Ordner `VirtuSphere_OS` und `VirtuSphere_Missions` sicherstellen; für jede
    Task Sequence eine gleichnamige Collection im OS-Ordner anlegen.
@@ -145,12 +145,12 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach SCCM. Ablauf je Scan:
    - PXE-MAC aus dem ersten DHCP-Interface ermitteln (Warnung bei mehreren);
      ohne Mission oder MAC wird das Device übersprungen.
    - Mission-Collection bei Bedarf anlegen.
-   - MAC-Konflikte (SCCM ≠ ESXi) werden **nur gemeldet**, nie automatisch
+   - MAC-Konflikte (MECM ≠ ESXi) werden **nur gemeldet**, nie automatisch
      korrigiert.
    - Neues Device per `Import-CMComputerInformation` in "All Systems"
      importieren. Schlägt der Import fehl, prüft das Skript per
      Existenzabfrage auf ein Import-Race (kein Fehlertext-Parsing, da die
-     Texte je SCCM-Version und -Sprache variieren).
+     Texte je MECM-Version und -Sprache variieren).
    - ResourceID beschaffen, notfalls per `Approve-CMDevice` nachhelfen;
      ohne ResourceID: nächster Scan.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
@@ -175,7 +175,7 @@ Meldet den verfügbaren Software-Katalog an die WebApp:
 
 ### Autoimporter (`mecm_autoimporter.ps1`, alle 60 s)
 
-Erzeugt aus Paketordnern automatisch SCCM-Applications, -Collections und
+Erzeugt aus Paketordnern automatisch MECM-Applications, -Collections und
 -Deployments. Quelle: `<PackagesRoot>\files\<Paket>\config.json`,
 ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
 
@@ -273,9 +273,9 @@ Anwendungsabhängigkeiten: `client_getinfo` → `client_hostname` →
 
 - **Boundary Group vs. DP Group:** `mecm_autoimporter.ps1` verteilt Content an
   die in der Registry hinterlegte **Distribution-Point-Gruppe** (`DpGroupName`).
-  Diese Gruppe muss in SCCM existieren. Die frühere Skriptversion pflegte
+  Diese Gruppe muss in MECM existieren. Die frühere Skriptversion pflegte
   fälschlich eine gleichnamige *Boundary Group* – dieser Automatismus wurde
-  entfernt; die DP-Gruppe wird bewusst manuell in SCCM verwaltet.
+  entfernt; die DP-Gruppe wird bewusst manuell in MECM verwaltet.
 - **Gerät außer Betrieb nehmen:** MECM ist die maßgebliche Quelle. Nicht mehr
   genutzte Geräte werden **in der MECM-Konsole** gelöscht (siehe
   `docs/operations/mecm-integration.md`).

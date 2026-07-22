@@ -4,7 +4,7 @@
 # nichts davon wird ausgeliefert, nichts liegt in einem Container.
 #
 # Warum es diese Suite gibt: die PowerShell-Skripte laufen als SYSTEM in
-# Endlosschleifen auf dem SCCM-Server und auf frisch ausgerollten Clients, und sie
+# Endlosschleifen auf dem MECM-Server und auf frisch ausgerollten Clients, und sie
 # waren der einzige Code im Projekt, den nichts geprueft hat. Der teuerste Fehler
 # der Kampagne (TESTPLAN 2.2: eine VM, die MECM nicht findet, ohne Fehlermeldung)
 # sass genau an der Naht zwischen PHP und PowerShell.
@@ -51,7 +51,7 @@ BeforeAll {
     $script:VectorFile = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'tests') 'fixtures') 'mac-vectors.json'
 
     # Beide Module definieren ConvertTo-VsNormalizedMac. Sie laufen nie in
-    # derselben Sitzung (SCCM-Server vs. Client), also wird jede Implementierung
+    # derselben Sitzung (MECM-Server vs. Client), also wird jede Implementierung
     # in einem eigenen Kindscope dot-gesourct und dort aufgerufen: so ueberschreibt
     # nicht die zuletzt geladene Datei die Antwort der anderen.
     function Invoke-InFileScope {

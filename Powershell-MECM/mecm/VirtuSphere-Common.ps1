@@ -22,7 +22,7 @@ Set-StrictMode -Version 1.0
 
 $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 
-# SSoT fuer den SCCM-Ordnernamen der Paket-Collections/-Applications.
+# SSoT fuer den MECM-Ordnernamen der Paket-Collections/-Applications.
 # Packages-Sync (liest den Ordner) und Autoimporter (befuellt ihn) muessen
 # denselben Namen nutzen, sonst warnt der Sende-Guard dauerhaft.
 $script:VsApplicationsFolderName = 'VirtuSphere_Applications'
@@ -71,7 +71,7 @@ $script:VsLogComponent = 'virtusphere'
 # $env:ProgramFiles existiert nur auf Windows. Diese Zeile laeuft beim
 # Dot-Sourcen, und die Pester-Suite sourct die Datei auch unter pwsh auf
 # Linux (CI): ein Join-Path mit $null wirft dort und riss 44 Tests mit
-# (CI-Lauf 2026-07-16). Auf dem echten Ziel (SCCM-Server) unveraendert;
+# (CI-Lauf 2026-07-16). Auf dem echten Ziel (MECM-Server) unveraendert;
 # anderswo zaehlt nur, dass der Dot-Source nicht wirft, denn jedes Skript
 # setzt sein LogRoot ohnehin per Initialize-VsLog.
 $script:VsLogRoot = if ($env:ProgramFiles) {
@@ -305,7 +305,7 @@ function Send-VsHeartbeat {
 #
 # Diese Funktion existiert dreimal: hier, in clients\VirtuSphere-Client-Common.ps1
 # und als virtusphere_normalize_mac() in PHP. Die drei laufen auf verschiedenen
-# Maschinen (SCCM-Server, Client, WebApp) und koennen sich keine Datei teilen. Sie
+# Maschinen (MECM-Server, Client, WebApp) und koennen sich keine Datei teilen. Sie
 # duerfen aber nicht auseinanderlaufen: das Portal schreibt die MAC, MECM sucht sie
 # per exaktem Match: eine abweichende Schreibweise macht eine VM fuer MECM
 # unauffindbar, ohne jede Fehlermeldung (TESTPLAN-Befund 2.2).
@@ -375,7 +375,7 @@ function Get-VsSupersededNamePattern {
 }
 
 # ---------------------------------------------------------------------------
-# SCCM Site-Code + Site-Drive
+# MECM Site-Code + Site-Drive
 # ---------------------------------------------------------------------------
 function Get-VsSiteCode {
     param($Config)
@@ -417,7 +417,7 @@ function Initialize-VsCmSite {
         Set-Location ("{0}:" -f $siteCode) -ErrorAction Stop
         return $siteCode
     } catch {
-        Write-VsLog -Level ERROR -Message ("SCCM-Initialisierung fehlgeschlagen: {0}" -f $_.Exception.Message)
+        Write-VsLog -Level ERROR -Message ("MECM-Initialisierung fehlgeschlagen: {0}" -f $_.Exception.Message)
         return $null
     }
 }

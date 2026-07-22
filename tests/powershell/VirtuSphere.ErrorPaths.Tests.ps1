@@ -139,7 +139,7 @@ Describe 'Token-Redaction (statischer Vertrag ueber alle Quellen)' {
         # Der Rueckkanal-Token liegt als Klartext in der Registry und in
         # $Config. Er darf konfiguriert, gelesen und als Header gesetzt werden,
         # aber nie in eine Log- oder Konsolenausgabe fliessen: die Tageslogs
-        # liegen fuer Operatoren lesbar auf dem SCCM-Server.
+        # liegen fuer Operatoren lesbar auf dem MECM-Server.
         $sources = Get-ChildItem -Path $script:PsRoot -Recurse -Include '*.ps1', '*.psm1' -File
         @($sources).Count | Should -BeGreaterThan 0
 

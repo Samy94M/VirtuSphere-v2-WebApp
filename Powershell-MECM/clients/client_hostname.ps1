@@ -8,11 +8,11 @@
 #  - Sanitisierung bleibt als Sicherheitsnetz, weicht der bereinigte Name aber
 #    vom Soll ab, wird das als 'failed' gemeldet (nach Portal-E2 sollte das
 #    Portal solche Namen gar nicht mehr liefern)
-#  - die dreifach duplizierten SCCM-Erkennungs-Registry-Bloecke in eine
+#  - die dreifach duplizierten MECM-Erkennungs-Registry-Bloecke in eine
 #    Funktion gezogen; Get-CimInstance statt Get-WmiObject
 #
 # Exit-Codes: 0 = kein Neustart noetig, 1641 = Neustart eingeleitet, 1 = Fehler
-# SCCM-Erkennungsregel: HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate\Status = Erfolgreich
+# MECM-Erkennungsregel: HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate\Status = Erfolgreich
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
@@ -23,7 +23,7 @@ $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $detectionPath = 'HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate'
 $reportMac = Get-VsReportMac
 
-function Set-SccmDetection {
+function Set-MecmDetection {
     param([hashtable]$Values)
     try {
         if (-not (Test-Path $detectionPath)) { New-Item -Path $detectionPath -Force | Out-Null }
@@ -34,7 +34,7 @@ function Set-SccmDetection {
         Set-ItemProperty -Path $detectionPath -Name 'Version' -Value '2.0'
         foreach ($key in $Values.Keys) { Set-ItemProperty -Path $detectionPath -Name $key -Value ([string]$Values[$key]) }
     } catch {
-        Write-VsClientLog -Level WARN "SCCM-Erkennungs-Registry fehlgeschlagen: $($_.Exception.Message)"
+        Write-VsClientLog -Level WARN "MECM-Erkennungs-Registry fehlgeschlagen: $($_.Exception.Message)"
     }
 }
 
@@ -46,7 +46,7 @@ try {
     $cs = Get-CimInstance -ClassName Win32_ComputerSystem
     if ($cs.PartOfDomain) {
         Write-VsClientLog "Domain-Computer ($($cs.Domain)) - keine Umbenennung."
-        Set-SccmDetection -Values @{ Status = 'Uebersprungen'; Hostname = $current; Reason = 'Domain-Computer' }
+        Set-MecmDetection -Values @{ Status = 'Uebersprungen'; Hostname = $current; Reason = 'Domain-Computer' }
         exit 0
     }
 
@@ -75,7 +75,7 @@ try {
 
     if ($current -eq $newHostname) {
         Write-VsClientLog 'Hostname bereits korrekt.'
-        Set-SccmDetection -Values @{ Status = 'Erfolgreich'; Hostname = $current; Reason = 'Bereits korrekt' }
+        Set-MecmDetection -Values @{ Status = 'Erfolgreich'; Hostname = $current; Reason = 'Bereits korrekt' }
         if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail 'already correct' }
         exit 0
     }
@@ -83,7 +83,7 @@ try {
     if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'started' -Detail "-> $newHostname" }
     Rename-Computer -NewName $newHostname -Force -ErrorAction Stop
     Write-VsClientLog "Umbenannt: '$current' -> '$newHostname'."
-    Set-SccmDetection -Values @{ Status = 'Erfolgreich'; OldHostname = $current; NewHostname = $newHostname }
+    Set-MecmDetection -Values @{ Status = 'Erfolgreich'; OldHostname = $current; NewHostname = $newHostname }
 
     # finished VOR dem Reboot melden (danach ist der Client evtl. offline).
     if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail "renamed to $newHostname" }

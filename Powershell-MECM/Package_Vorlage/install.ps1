@@ -45,7 +45,7 @@ $logDirectory = "$($env:ProgramFiles)\APLw\Logs\"
 
 # $Fullsuccess: Gesamtstatus der Installation.
 # Startet als $true. Wird auf $false gesetzt sobald ein Teilskript fehlschlaegt.
-# Entscheidet am Ende ob der SCCM-Detection-Key (Version) in die Registry geschrieben wird.
+# Entscheidet am Ende ob der MECM-Detection-Key (Version) in die Registry geschrieben wird.
 $Fullsuccess = $true
 
 Write-Host @"
@@ -93,7 +93,7 @@ $dir_script = Get-ChildItem $scriptDirectory -Filter *.ps1 | Sort-Object Name
 # Scope (das Setzen von $Fullsuccess wirkt in beiden Varianten nach aussen), aber
 # nur beim foreach-Statement ist das auch ohne PowerShell-Detailwissen ablesbar.
 # Genau diese Frage - "wirkt das $false ueberhaupt nach draussen?" - entscheidet
-# hier darueber, ob SCCM eine fehlgeschlagene Installation als Erfolg meldet.
+# hier darueber, ob MECM eine fehlgeschlagene Installation als Erfolg meldet.
 foreach ($scriptFile in $dir_script) {
     # Zeitstempel fuer den Log-Dateinamen
     # Get-Date -Format: Formatiert das aktuelle Datum und die Uhrzeit als Text.
@@ -171,8 +171,8 @@ foreach ($scriptFile in $dir_script) {
                     $Fullsuccess = $false
                     write-host "ErrorAction ist auf $ErrorAction. Exit" -ForegroundColor DarkYellow
                     # exit 1: Beendet install.ps1 sofort mit Fehlercode 1.
-                    # SCCM wertet jeden Exit-Code ungleich 0 als fehlgeschlagene Installation.
-                    # Die Detection Clause wird nicht erfuellt - SCCM zeigt "Fehler" an.
+                    # MECM wertet jeden Exit-Code ungleich 0 als fehlgeschlagene Installation.
+                    # Die Detection Clause wird nicht erfuellt - MECM zeigt "Fehler" an.
                     exit 1
                 } else {
                     write-host "ErrorAction ist auf $ErrorAction. Fahre mit naechstem Skript fort..." -ForegroundColor DarkYellow
@@ -206,13 +206,13 @@ if((Get-ChildItem $scriptDirectory -Filter *.ps1).count -eq 0){
     write-host "Keine Skripte im Ordner $scriptDirectory gefunden!" -ForegroundColor Red
 }
 
-# SCCM Detection Clause schreiben
+# MECM Detection Clause schreiben
 # Nur wenn ALLE Skripte erfolgreich waren wird der Version-Wert in die Registry geschrieben.
-# SCCM prueft nach der Installation genau diesen Registry-Wert als Detection Clause:
+# MECM prueft nach der Installation genau diesen Registry-Wert als Detection Clause:
 #   Pfad:  HKLM\Software\APLw\{ProjectName}-{Version}
 #   Wert:  Version = "{version}"
-# Existiert dieser Wert, markiert SCCM die Application als "Installiert".
-# Fehlt er (weil $Fullsuccess = $false), zeigt SCCM "Fehler" an.
+# Existiert dieser Wert, markiert MECM die Application als "Installiert".
+# Fehlt er (weil $Fullsuccess = $false), zeigt MECM "Fehler" an.
 if($Fullsuccess){
     Set-ItemProperty -Path $registryPath -Name "Version" -Value $config.version
 }
@@ -221,8 +221,8 @@ write-host "----------------------------" -ForegroundColor Magenta
 write-host "install.ps1 finish" -ForegroundColor Magenta
 
 # Gesamtergebnis als Exit-Code zurueckgeben
-# exit 0: Alle Skripte erfolgreich - SCCM wertet die Installation als erfolgreich
-# exit 1: Mindestens ein Skript fehlgeschlagen - SCCM zeigt Fehler an
+# exit 0: Alle Skripte erfolgreich - MECM wertet die Installation als erfolgreich
+# exit 1: Mindestens ein Skript fehlgeschlagen - MECM zeigt Fehler an
 if($Fullsuccess){
     exit 0
 } else {

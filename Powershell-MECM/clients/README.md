@@ -65,7 +65,7 @@ Dateien) und verteilt den Content an eine DP-Gruppe. Es legt **kein** Deployment
 an eine Collection an — das entscheidet der Admin.
 
 ```powershell
-.\install-VirtuSphere-Clients.ps1 -ContentShare \\SCCM-SERVER\VirtuSphere\Base\Packages
+.\install-VirtuSphere-Clients.ps1 -ContentShare \\MECM-SERVER\VirtuSphere\Base\Packages
 ```
 
 Die Erkennungswerte oben sind die SSoT: sie stehen als Datentabelle in

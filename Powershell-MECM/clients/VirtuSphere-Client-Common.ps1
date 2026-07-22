@@ -239,7 +239,7 @@ function Send-VsPhase {
 #
 # Diese Funktion existiert dreimal: hier, in mecm\VirtuSphere-Common.ps1 und als
 # virtusphere_normalize_mac() in PHP. Die drei laufen auf verschiedenen Maschinen
-# (Client, SCCM-Server, WebApp) und koennen sich keine Datei teilen. Sie duerfen
+# (Client, MECM-Server, WebApp) und koennen sich keine Datei teilen. Sie duerfen
 # aber nicht auseinanderlaufen: das Portal schreibt die MAC, MECM sucht sie per
 # exaktem Match: eine abweichende Schreibweise macht eine VM fuer MECM unauffindbar,
 # ohne jede Fehlermeldung (TESTPLAN-Befund 2.2).

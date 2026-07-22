@@ -5,7 +5,7 @@
 # ----------------------------------------------------------------------------
 # Quelle: Device Collections im Ordner "VirtuSphere_Applications" (Pakete)
 # plus alle Task Sequences (Betriebssysteme). Laeuft als geplante Aufgabe
-# "VirtuSphere MECM Packages Sync" auf dem SCCM-Server.
+# "VirtuSphere MECM Packages Sync" auf dem MECM-Server.
 #
 # Haertung gegenueber der Vorversion:
 #  - durchgaengiges try/catch mit Backoff (frueher beendete der erste Fehler
@@ -51,7 +51,7 @@ while ($true) {
     try {
         if (-not $siteCode) {
             $siteCode = Initialize-VsCmSite -Config $config
-            if (-not $siteCode) { throw 'SCCM-Site nicht initialisierbar.' }
+            if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar.' }
             Write-VsLog -Message ("Site-Drive {0} aktiv" -f $siteCode)
         }
 
@@ -126,7 +126,7 @@ while ($true) {
         $consecutiveErrors++
         Write-VsLog -Level ERROR -Message ("Sync-Fehler (Versuch {0}): {1}" -f $consecutiveErrors, (Get-VsErrorDetail -ErrorRecord $_))
         if ($consecutiveErrors -ge 3) {
-            $siteCode = $null   # naechster Durchlauf initialisiert SCCM neu (Site-Drive-Recovery)
+            $siteCode = $null   # naechster Durchlauf initialisiert MECM neu (Site-Drive-Recovery)
             Start-Sleep -Seconds 60
         } else {
             Start-Sleep -Seconds 30
