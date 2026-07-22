@@ -421,7 +421,7 @@ function repo_get_vm_bundle(mysqli $db, int $vmId): ?array
     return $vm;
 }
 
-// SCCM device names are global, so a VM name may exist at most once across
+// MECM device names are global, so a VM name may exist at most once across
 // all non-template missions (templates intentionally duplicate names when
 // cloning). Application-level check only - no DB unique index is possible.
 function repo_vm_name_conflict_global(mysqli $db, string $vmName, int $excludeVmId = 0): ?array
@@ -642,7 +642,7 @@ function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int
     if (!mission_name_is_template($missionName)) {
         $conflict = repo_vm_name_conflict_global($db, $name, $excludeVmId);
         if ($conflict !== null && (int) $conflict['mission_id'] !== $missionId) {
-            $message = validator_text('validate.vm_name_taken_global', 'VM name is already used in mission ":mission" - SCCM device names must be unique.', ['mission' => (string) $conflict['mission_name']]);
+            $message = validator_text('validate.vm_name_taken_global', 'VM name is already used in mission ":mission" - MECM device names must be unique.', ['mission' => (string) $conflict['mission_name']]);
             throw new ValidationException(['vm_name' => $message], $message);
         }
     }

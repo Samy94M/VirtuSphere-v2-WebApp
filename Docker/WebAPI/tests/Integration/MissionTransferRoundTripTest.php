@@ -13,7 +13,7 @@ require_once dirname(__DIR__, 2) . '/lib/mission_transfer.php';
  * A2 mission export/import round-trip against the live DB. Proves payload
  * fidelity (VM/interface/disk/package counts), that MAC addresses never travel,
  * and that importing into the SAME environment is blocked on the global VM-name
- * uniqueness rule (SCCM device names). Cleans up its own rows by name prefix.
+ * uniqueness rule (MECM device names). Cleans up its own rows by name prefix.
  */
 final class MissionTransferRoundTripTest extends TestCase
 {

@@ -9,7 +9,7 @@ require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 
 /**
  * E2 mission-repo guards that were previously untested: the requireLocation
- * validation, the MECM rename lock (mission name doubles as the SCCM collection
+ * validation, the MECM rename lock (mission name doubles as the MECM collection
  * name) and the global VM-name conflict preflight for template clones. Runs
  * in-stack against db() and cleans up its own rows by name prefix.
  */

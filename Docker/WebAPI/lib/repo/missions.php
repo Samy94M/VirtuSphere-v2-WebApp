@@ -289,7 +289,7 @@ function repo_get_mission(mysqli $db, int $missionId): ?array
 }
 
 // True when any VM of the mission is already known to MECM - renaming the
-// mission would orphan its SCCM collection (mission name = collection name).
+// mission would orphan its MECM collection (mission name = collection name).
 function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 {
     $submitted = VIRTUSPHERE_MECM_SUBMITTED;
@@ -320,11 +320,11 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
 
     // Rename guard (E2, repo layer on purpose - page-level guards are
     // bypassable): once VMs are submitted/registered in MECM the mission name
-    // is locked because it doubles as the SCCM collection name.
+    // is locked because it doubles as the MECM collection name.
     if (array_key_exists('mission_name', $values)
         && (string) $values['mission_name'] !== (string) $mission['mission_name']
         && repo_mission_has_mecm_active_vms($db, $missionId)) {
-        $message = validator_text('validate.mission_rename_mecm_locked', 'Mission cannot be renamed: its name is the SCCM collection name and VMs of this mission are already registered in MECM.');
+        $message = validator_text('validate.mission_rename_mecm_locked', 'Mission cannot be renamed: its name is the MECM collection name and VMs of this mission are already registered in MECM.');
         throw new ValidationException(['mission_name' => $message], $message);
     }
 
@@ -369,7 +369,7 @@ function repo_clone_template_to_new_mission(mysqli $db, int $templateMissionId, 
 
     // Global name preflight (E2): report ALL colliding VM names before
     // cloning anything - the clone target is a real mission whose VM names
-    // become SCCM device names.
+    // become MECM device names.
     $stmt = $db->prepare('SELECT vm_name FROM deploy_vms WHERE mission_id = ? ORDER BY vm_name');
     $stmt->bind_param('i', $templateMissionId);
     $stmt->execute();

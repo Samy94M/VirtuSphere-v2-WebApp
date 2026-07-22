@@ -72,7 +72,7 @@ const BOUNDS_EXEMPT = [
     'help.naming_p3' => 'same NetBIOS 15',
     'settings.allowlist_description_too_long' => '255 is the VARCHAR column width, fixed by the schema',
     'validate.mission_name_invalid' => '255 is the VARCHAR column width, fixed by the schema',
-    'help.packages_os_p2' => 'the 60-second MECM sync cadence is set in the PowerShell task on the SCCM server, not here',
+    'help.packages_os_p2' => 'the 60-second MECM sync cadence is set in the PowerShell task on the MECM server, not here',
 ];
 
 /**
