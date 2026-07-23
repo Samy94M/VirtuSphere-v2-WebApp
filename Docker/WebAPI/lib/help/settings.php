@@ -24,12 +24,15 @@ declare(strict_types=1);
 
         <section class="panel">
             <h2><?php echo h(__t('settings.tab_machine_api')); ?></h2>
+            <?php // The one sentence that makes the whole tab readable: two paths, opposite directions. ?>
+            <p><?php echo h(__t('help.settings_machine_api_directions')); ?></p>
             <h3><?php echo h(__t('help.settings_allowlist_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_allowlist_p1')); ?></p>
             <p><?php echo h(__t('help.settings_allowlist_p2')); ?></p>
             <h3><?php echo h(__t('help.settings_probe_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_probe_p1', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help.settings_probe_p2', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></p>
+            <p><?php echo h(__t('help.settings_probe_modes')); ?></p>
             <h3><?php echo h(__t('help.settings_token_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_token_p1')); ?></p>
             <p><?php echo h(__t('help.settings_token_p2')); ?></p>

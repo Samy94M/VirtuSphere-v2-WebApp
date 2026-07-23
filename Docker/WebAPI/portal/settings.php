@@ -545,9 +545,25 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
     </div>
 
     <div class="stack" id="panel-machine-api" role="tabpanel" aria-labelledby="tab-machine-api" tabindex="0" data-tab-panel hidden>
+        <?php
+        // Both panels below say "MECM" and mean opposite directions, which is
+        // the single thing an operator has to know to read them: the allowlist
+        // is a door into the portal, the probe is a look out of it. Without
+        // this sentence, heartbeats arriving while the probe reads "down" looks
+        // like a contradiction instead of two independent paths.
+        ?>
+        <div class="alert alert-info"><?php echo h(__t('settings.machine_api_directions')); ?></div>
         <section class="panel">
             <h2><?php echo h(__t('settings.allowlist_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.allowlist_hint')); ?></p>
+            <?php
+            // An empty allowlist is a total outage, not an unset option: every
+            // machine endpoint answers 403, so no sync and no MAC upload work.
+            // It used to render as a grey "no entries" row that reads like a
+            // feature nobody switched on.
+            if ($allowlistEntries === []) { ?>
+                <div class="alert alert-warning"><?php echo h(__t('settings.allowlist_empty_warning')); ?></div>
+            <?php } ?>
             <div class="table-wrap" tabindex="0">
                 <table>
                     <thead><tr><th><?php echo h(__t('settings.allowlist_th_ip')); ?></th><th><?php echo h(__t('settings.allowlist_th_description')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
@@ -591,6 +607,8 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
             <h2><?php echo h(__t('settings.probe_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.probe_hint', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
             <p class="muted"><?php echo h(__t('settings.probe_scope', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></p>
+            <?php // A red probe blocks nothing; saying so stops it from being read as an outage next to the allowlist. ?>
+            <p class="muted"><?php echo h(__t('settings.probe_blocks_nothing')); ?></p>
             <?php if ($probeConfig['mode'] === VIRTUSPHERE_PROBE_MODE_MANUAL) { ?>
                 <div class="alert alert-info"><?php echo h(__t('settings.probe_manual_current', ['host' => $probeConfig['configured_host']])); ?></div>
             <?php } ?>
