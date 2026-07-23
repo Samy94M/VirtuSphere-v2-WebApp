@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
-// The integrations help panel interpolates the ESXi traffic-light thresholds
+// The system-status help panel interpolates the ESXi traffic-light thresholds
 // (ADR-0023); without this require the constants are undefined here and PHP
 // fatals mid-render, truncating every panel after it. The same panel renders the
 // cause table from connection_error_message(), the SSoT for that wording.
 require_once __DIR__ . '/../lib/deploy_constants.php';
 require_once __DIR__ . '/../lib/connection_errors.php';
+// The same panel renders the three Ampel legends through the SSoT renderer the
+// System status page itself uses, so neither side can list a state the other
+// does not (system_status.php's legend used to omit `missing`).
+require_once __DIR__ . '/../lib/system_status.php';
 // The users panel quotes the configured password minimum, not a hardcoded one.
 require_once __DIR__ . '/../lib/password_policy.php';
 // The missions panel quotes how long an import preview stays valid; that bound
@@ -30,11 +34,12 @@ $helpTabs = [
     'missions' => __t('help.tab_missions'),
     'packages' => __t('help.tab_packages'),
     'deploy' => __t('help.tab_deploy'),
-    'integrations' => __t('help.tab_integrations'),
+    'system-status' => __t('help.tab_system_status'),
     'stack' => __t('help.tab_stack'),
     'users' => __t('help.tab_users'),
 ];
 if ($canConfig) {
+    $helpTabs['credentials'] = __t('help.tab_credentials');
     $helpTabs['settings'] = __t('help.tab_settings');
 }
 
@@ -54,9 +59,10 @@ layout_header(__t('help.title'), $user, 'help');
     require __DIR__ . '/../lib/help/missions.php';
     require __DIR__ . '/../lib/help/deploy.php';
     require __DIR__ . '/../lib/help/packages.php';
-    require __DIR__ . '/../lib/help/integrations.php';
+    require __DIR__ . '/../lib/help/system_status.php';
     require __DIR__ . '/../lib/help/users.php';
     if ($canConfig) {
+        require __DIR__ . '/../lib/help/credentials.php';
         require __DIR__ . '/../lib/help/settings.php';
     }
     require __DIR__ . '/../lib/help/stack.php';

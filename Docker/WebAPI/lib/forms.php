@@ -104,5 +104,5 @@ function form_error_html(string $form, string $field): string
 
 function form_input_class(string $form, string $field): string
 {
-    return form_error($form, $field) === '' ? '' : ' class="is-invalid"';
+    return form_error($form, $field) === '' ? '' : ' class="is-invalid" aria-invalid="true"';
 }

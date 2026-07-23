@@ -109,7 +109,7 @@ try {
     $updateVm = $connection->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, updated_at = NOW() WHERE id = ?');
     $insertStatusEvent = $connection->prepare('INSERT INTO deploy_vm_status_events (vm_id, lifecycle_state, mecm_sync_state, legacy_status, note) VALUES (?, ?, ?, ?, ?)');
     $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
-    $mecmState = VIRTUSPHERE_MECM_PENDING;
+    $mecmState = VIRTUSPHERE_MECM_SYNC_PENDING;
     $legacyStatus = VIRTUSPHERE_STATUS_DEPLOYED;
     $note = 'ansible mac import';
 

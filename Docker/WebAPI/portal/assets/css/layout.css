@@ -54,7 +54,7 @@
 .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     padding: 6px 8px 18px;
     font-size: 18px;
     font-weight: 800;
@@ -62,8 +62,8 @@
 
 .brand-mark {
     display: block;
-    width: 34px;
-    height: 34px;
+    width: 48px;
+    height: 48px;
     object-fit: contain;
     flex: none;
 }

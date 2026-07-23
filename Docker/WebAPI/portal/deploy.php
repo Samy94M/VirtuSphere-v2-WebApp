@@ -198,7 +198,7 @@ foreach ($esxiCredentials as $credential) {
     $messages = [];
     foreach (esxi_capability_warnings(repo_esxi_inventory_state($connection, $credentialId)) as $warning) {
         if ($warning['level'] === 'warning') {
-            $messages[] = __t('integrations.cap_' . $warning['key']);
+            $messages[] = __t('system_status.cap_' . $warning['key']);
         }
     }
     if ($messages !== []) {

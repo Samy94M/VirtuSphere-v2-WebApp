@@ -286,7 +286,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
             $values['mission_id'] = $missionId;
             $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
             $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
-            $values['mecm_sync_state'] = VIRTUSPHERE_MECM_NOT_READY;
+            $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
             $values['updated'] = 0;
             $vmId = repo_insert_from_values($db, 'deploy_vms', $values);
 
@@ -312,7 +312,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
                 ];
             }
             repo_replace_packages($db, $vmId, $packages);
-            repo_record_vm_status_event($db, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'imported from file', $userId);
+            repo_record_vm_status_event($db, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'imported from file', $userId);
         }
 
         $report['imported'] = true;

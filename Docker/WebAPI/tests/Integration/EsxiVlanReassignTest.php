@@ -137,7 +137,7 @@ final class EsxiVlanReassignTest extends TestCase
 
     public function testReassignReportsZeroCountsForAnUnusedSourceName(): void
     {
-        // "From" is free text on the integrations page. A typo must not look like
+        // "From" is free text on the system status page. A typo must not look like
         // a successful rename; the caller turns zero counts into a warning.
         $this->makeMission('m_keep', self::PREFIX . 'live');
 

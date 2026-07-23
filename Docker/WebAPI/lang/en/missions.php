@@ -45,5 +45,5 @@ return [
     'import_err_version' => 'Unknown export version. The file comes from a different version.',
     'import_err_expired' => 'The preview expired. Please upload the file again.',
     'deviation_badge' => 'Inventory deviation',
-    'deviation_title' => 'Datacenter, datastore or VLAN not in the current ESXi inventory. Details under Integrations.',
+    'deviation_title' => 'Datacenter, datastore or VLAN not in the current ESXi inventory. Details under System status.',
 ];

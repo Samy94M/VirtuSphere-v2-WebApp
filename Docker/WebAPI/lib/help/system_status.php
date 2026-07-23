@@ -3,7 +3,18 @@
 // (nginx denies /lib/).
 declare(strict_types=1);
 ?>
-    <div class="stack" id="panel-integrations" role="tabpanel" aria-labelledby="tab-integrations" tabindex="0" data-tab-panel>
+    <div class="stack" id="panel-system-status" role="tabpanel" aria-labelledby="tab-system-status" tabindex="0" data-tab-panel>
+        <section class="panel">
+            <h2><?php echo h(__t('help.system_status_roles_heading')); ?></h2>
+            <p><?php echo h(__t('help.system_status_roles_p1')); ?></p>
+            <p><?php echo h(__t('help.system_status_single_site')); ?></p>
+            <h3><?php echo h(__t('help.system_status_signals_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help.system_status_signal_heartbeat')); ?></li>
+                <li><?php echo h(__t('help.system_status_signal_probe', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></li>
+                <li><?php echo h(__t('help.system_status_signal_combination')); ?></li>
+            </ul>
+        </section>
         <section class="panel">
             <h2><?php echo h(__t('help.firstaid_heading')); ?></h2>
             <p><?php echo h(__t('help.firstaid_p1')); ?></p>
@@ -16,37 +27,35 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2><?php echo h(__t('help.integrations_heading')); ?></h2>
-            <p><?php echo h(__t('help.integrations_p1')); ?></p>
-            <p><?php echo h(__t('help.integrations_p2')); ?></p>
-            <h3><?php echo h(__t('help.integrations_sources_heading')); ?></h3>
+            <h2><?php echo h(__t('help.system_status_heading')); ?></h2>
+            <p><?php echo h(__t('help.system_status_p1')); ?></p>
+            <p><?php echo h(__t('help.system_status_p2')); ?></p>
+            <h3><?php echo h(__t('help.system_status_sources_heading')); ?></h3>
             <ul>
-                <li><?php echo h(__t('help.integrations_source_1')); ?></li>
-                <li><?php echo h(__t('help.integrations_source_2')); ?></li>
-                <li><?php echo h(__t('help.integrations_source_3')); ?></li>
-                <li><?php echo h(__t('help.integrations_source_4', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></li>
-                <li><?php echo h(__t('help.integrations_source_5')); ?></li>
+                <li><?php echo h(__t('help.system_status_source_1')); ?></li>
+                <li><?php echo h(__t('help.system_status_source_2')); ?></li>
+                <li><?php echo h(__t('help.system_status_source_3')); ?></li>
+                <li><?php echo h(__t('help.system_status_source_4', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></li>
+                <li><?php echo h(__t('help.system_status_source_5')); ?></li>
             </ul>
-            <h3><?php echo h(__t('help.integrations_status_heading')); ?></h3>
-            <p><?php echo h(__t('help.integrations_status_p1')); ?></p>
-            <ul>
-                <?php foreach (['ok', 'warning', 'danger', 'missing', 'unknown'] as $heartbeatState): ?>
-                    <li><?php echo heartbeat_badge($heartbeatState); ?> <?php echo h(__t('integrations.legend_' . $heartbeatState)); ?></li>
-                <?php endforeach; ?>
-            </ul>
-            <h3><?php echo h(__t('help.integrations_work_heading')); ?></h3>
+            <h3><?php echo h(__t('help.system_status_status_heading')); ?></h3>
+            <p><?php echo h(__t('help.system_status_status_p1')); ?></p>
+            <?php // Same renderer as the page's own legend, so the two cannot list different states again. ?>
+            <?php system_status_legend_items('heartbeat'); ?>
+            <h3><?php echo h(__t('help.system_status_work_heading')); ?></h3>
+            <p><?php echo h(__t('help.system_status_work_0')); ?></p>
             <ol>
-                <li><?php echo h(__t('help.integrations_work_1')); ?></li>
-                <li><?php echo h(__t('help.integrations_work_2')); ?></li>
-                <li><?php echo h(__t('help.integrations_work_3')); ?></li>
-                <li><?php echo h(__t('help.integrations_work_4')); ?></li>
+                <li><?php echo h(__t('help.system_status_work_1')); ?></li>
+                <li><?php echo h(__t('help.system_status_work_2')); ?></li>
+                <li><?php echo h(__t('help.system_status_work_3')); ?></li>
+                <li><?php echo h(__t('help.system_status_work_4')); ?></li>
             </ol>
-            <h3><?php echo h(__t('help.integrations_fix_heading')); ?></h3>
+            <h3><?php echo h(__t('help.system_status_fix_heading')); ?></h3>
             <ul>
-                <li><?php echo h(__t('help.integrations_fix_1')); ?></li>
-                <li><?php echo h(__t('help.integrations_fix_2')); ?></li>
-                <li><?php echo h(__t('help.integrations_fix_3')); ?></li>
-                <li><?php echo h(__t('help.integrations_fix_4')); ?></li>
+                <li><?php echo h(__t('help.system_status_fix_1')); ?></li>
+                <li><?php echo h(__t('help.system_status_fix_2')); ?></li>
+                <li><?php echo h(__t('help.system_status_fix_3')); ?></li>
+                <li><?php echo h(__t('help.system_status_fix_4')); ?></li>
             </ul>
         </section>
 
@@ -112,11 +121,7 @@ declare(strict_types=1);
                     'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR,
                 ]));
             ?></p>
-            <ul>
-                <?php foreach (['ok', 'warning', 'danger', 'unknown'] as $esxiState): ?>
-                    <li><?php echo esxi_state_badge($esxiState); ?> <?php echo h(__t('integrations.esxi_legend_' . $esxiState)); ?></li>
-                <?php endforeach; ?>
-            </ul>
+            <?php system_status_legend_items('esxi'); ?>
             <h3><?php echo h(__t('help.esxi_test_heading')); ?></h3>
             <p><?php echo h(__t('help.esxi_test_p1')); ?></p>
             <p><?php echo h(__t('help.esxi_test_p2')); ?></p>
@@ -125,15 +130,18 @@ declare(strict_types=1);
             <p><?php echo h(__t('help.esxi_test_ansible_p1')); ?></p>
             <p><?php echo h(__t('help.esxi_test_ansible_p2')); ?></p>
             <p><?php echo h(__t('help.esxi_test_ansible_p3')); ?></p>
+            <h4><?php echo h(__t('system_status.ansible_legend_heading')); ?></h4>
+            <?php system_status_legend_items('ansible'); ?>
 
             <h3><?php echo h(__t('help.esxi_cap_heading')); ?></h3>
             <p><?php echo h(__t('help.esxi_cap_p1')); ?></p>
             <ul>
-                <li><?php echo portal_badge('warning', __t('integrations.cap_license_free')); ?> <?php echo h(__t('integrations.cap_legend_license_free')); ?></li>
-                <li><?php echo portal_badge('warning', __t('integrations.cap_in_ha_cluster')); ?> <?php echo h(__t('integrations.cap_legend_in_ha_cluster')); ?></li>
-                <li><?php echo portal_badge('info', __t('integrations.cap_in_maintenance')); ?> <?php echo h(__t('integrations.cap_legend_in_maintenance')); ?></li>
+                <li><?php echo portal_badge('warning', __t('system_status.cap_license_free')); ?> <?php echo h(__t('system_status.cap_legend_license_free')); ?></li>
+                <li><?php echo portal_badge('warning', __t('system_status.cap_in_ha_cluster')); ?> <?php echo h(__t('system_status.cap_legend_in_ha_cluster')); ?></li>
+                <li><?php echo portal_badge('info', __t('system_status.cap_in_maintenance')); ?> <?php echo h(__t('system_status.cap_legend_in_maintenance')); ?></li>
             </ul>
             <p><?php echo h(__t('help.esxi_cap_unknown')); ?></p>
+            <p><?php echo h(__t('help.esxi_inv_host_facts', ['minutes' => intdiv(VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS, 60)])); ?></p>
 
             <h3><?php echo h(__t('help.esxi_cause_heading')); ?></h3>
             <p><?php echo h(__t('help.esxi_cause_p1')); ?></p>

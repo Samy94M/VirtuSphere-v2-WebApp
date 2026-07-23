@@ -39,7 +39,7 @@ ADR-0015).
    `deploy_client_events` (FK auf `deploy_vms`, ON DELETE CASCADE) und
    `deploy_integration_heartbeats` (eine Upsert-Zeile je Quelle). Wertemengen
    als PHP-Konstanten, keine DB-ENUMs. Zeitstempel = Server-`NOW()`.
-3. **Portal**: Statusseite `portal/integrations.php` (alle angemeldeten
+3. **Portal**: Statusseite `portal/system_status.php` (alle angemeldeten
    Nutzer, read-only) mit Staleness-Ampel je Quelle; Dashboard-Kachel mit
    Worst-Status; Client-Phasen-Panel in der VM-Detailansicht. Der
    Lifecycle-Seiteneffekt von `getDeviceInfos` bleibt unangetastet;
@@ -112,3 +112,28 @@ Provisionierung hätten die Client-Phasen bei gesetztem Token 401 bekommen). Die
 Wire-Form der Endpoints bleibt unverändert; es ändert sich nur, wann ein `401`
 zurückkommt. Der Client-Token-Code (`Get-VsReportToken`, `X-VirtuSphere-Token`) wurde
 aus den Phasen-Skripten entfernt.
+
+## Amendment (2026-07-23): Systemstatus und explizites MECM-Prüfziel
+
+`portal/system_status.php` bleibt aus Kompatibilitätsgründen die URL, heißt in
+Navigation, Überschrift und Hilfe aber **Systemstatus**. Die Aussage „read-only"
+in Entscheidung 3 beschreibt den Reportkanal und dessen VM-Lebenszyklus-Grenze,
+nicht jede Bedienmöglichkeit der Seite: berechtigte Benutzer dürfen dort sichere
+Diagnose- oder Reparaturaktionen wie eine einmalige TCP-Prüfung, einen
+ESXi-Inventarauftrag oder eine bestätigte VLAN-Neuzuweisung auslösen.
+`mecm_report.php` bleibt trotzdem strikt display-only und ruft weiterhin nie
+`repo_set_vm_state()` auf.
+
+Die bisher implizite Eingabe „leerer MECM-Host = automatisch" wird im Formular
+durch `probe_mode=auto|manual` sichtbar gemacht. Aus Kompatibilitätsgründen bleibt
+die Speicherung unverändert: leer bedeutet automatisch, ein Host manuell. Der
+Automatikmodus verwendet die Absender-IP des letzten Device-Sync-Heartbeats; der
+manuelle Modus verlangt DNS, IPv4 oder IPv6. Ein gemeinsamer Probe-Helfer ist die
+SSoT für Ziel, Validierung, IPv6-Socket-URI, Timeout und Fehlerkategorien. Das
+Ergebnis liegt versioniert und redigiert in `last_detail`; Migration
+`0024_mecm_probe_detail_context` erweitert dafür nur die vorhandene Spalte.
+
+Der Systemstatus trennt MECM-Synchronisation und den Netzwerkpfad. Der
+Maintenance-Worker ist ein interner Dienst und beeinflusst den MECM-Gesamtzustand
+nicht mehr. Dashboard und Systemstatus lesen denselben request-synchronen
+Health-Snapshot. Keine Machine-API- oder PowerShell-Wire-Form ändert sich.

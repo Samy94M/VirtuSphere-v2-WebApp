@@ -50,39 +50,39 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testSuccessfulExportSequenceFinishesSucceededAndTouchesNoVm(): void
     {
         $missionId = $this->insertMission('m1');
-        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
-        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
+        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $jobId = $this->insertJob($missionId, 'export', [$vmA, $vmB], $this->resultJson('success', [$vmA, $vmB], []));
 
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vmA, $vmB]);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($vmA));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($vmB));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($vmA));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($vmB));
     }
 
     /** Matrix 2/2b: a partial import finishes the job `partial` and converges only the failed VMs. */
     public function testPartialImportFinishesPartialAndConvergesOnlyFailedVms(): void
     {
         $missionId = $this->insertMission('m2');
-        $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
-        $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$ok, $bad], $this->resultJson('partial', [$ok], [$bad]));
 
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $this->jobStatus($jobId));
         self::assertStringContainsString('MAC import partial: 1 of 2', (string) $this->job($jobId)['last_error']);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($ok));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($bad));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($bad));
     }
 
     /** Matrix 3: a wholly failed import throws, and the failure path converges job and VMs. */
     public function testWhollyFailedImportFailsJobAndAllVms(): void
     {
         $missionId = $this->insertMission('m3');
-        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
-        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$vmA, $vmB], $this->resultJson('failed', [], [$vmA, $vmB]));
         $job = $this->job($jobId);
 
@@ -98,15 +98,15 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmA, $vmB], $message);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($vmA));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($vmB));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmA));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmB));
     }
 
     /** L3: an export sequence without any recorded result fails job and VMs, never leaves `deploying`. */
     public function testMissingResultForExportSequenceFailsJobAndVms(): void
     {
         $missionId = $this->insertMission('m17a');
-        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$vmId], null);
         $job = $this->job($jobId);
 
@@ -122,7 +122,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmId], $message);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($vmId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmId));
     }
 
     /**
@@ -133,19 +133,19 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testCreateSequenceSucceedsWithoutResultAndRestoresPriorLifecycles(): void
     {
         $missionId = $this->insertMission('m17b');
-        $fresh = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY);
-        $deployed = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
+        $fresh = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $deployed = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $jobId = $this->insertJob($missionId, 'create', [$fresh, $deployed], null);
 
         $prior = deploy_worker_mark_vms_deploying($this->db, $missionId, 'deploy job ' . $jobId . ' started', [$fresh, $deployed]);
         self::assertSame([$fresh => VIRTUSPHERE_LIFECYCLE_READY, $deployed => VIRTUSPHERE_LIFECYCLE_DEPLOYED], $prior);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY], $this->vmState($fresh));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($fresh));
 
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$fresh, $deployed], $prior);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY], $this->vmState($fresh));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($deployed));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($fresh));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($deployed));
 
         // The sweep must find nothing left to converge for this mission.
         $swept = repo_sweep_orphaned_deploying_vms($this->db);
@@ -157,12 +157,12 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testRestoreNeverGuessesAnUnknownPriorState(): void
     {
         $missionId = $this->insertMission('m17c');
-        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         $restored = deploy_worker_restore_deploying_vms($this->db, $missionId, 'restore probe', [$vmId], []);
 
         self::assertSame(0, $restored);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY], $this->vmState($vmId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmId));
     }
 
     /**
@@ -173,16 +173,16 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testLateFollowUpFailureKeepsSuccessfullyImportedVms(): void
     {
         $missionId = $this->insertMission('m14');
-        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
-        $unfinished = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $unfinished = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_MODE_FULL, [$imported, $unfinished], $this->resultJson('partial', [$imported], [$unfinished]));
 
         deploy_worker_handle_failure($this->db, $this->job($jobId), self::WORKER, [$imported, $unfinished], 'Ansible command failed with exit code 2.');
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
         self::assertSame('Ansible command failed with exit code 2.', (string) $this->job($jobId)['last_error']);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($imported), 'a committed import outlives the failing job (E1)');
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($unfinished));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported), 'a committed import outlives the failing job (E1)');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($unfinished));
     }
 
     /**
@@ -193,18 +193,18 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testCancelHandlerConvergesOnlyStillDeployingVmsAndKeepsMacs(): void
     {
         $missionId = $this->insertMission('m11');
-        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $mac = '02:AB:CD:EF:00:11';
         $this->insertInterface($imported, 'WDS', $mac);
-        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], null, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
 
         deploy_worker_handle_cancelled($this->db, $this->job($jobId), [$imported, $stuck]);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId), 'a cancel must never be repainted');
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($imported));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
         self::assertSame($mac, $this->interfaceMac($imported), 'stored MACs survive the cancel convergence');
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($stuck));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
     }
 
     /**
@@ -214,15 +214,15 @@ final class DeployWorkerOutcomeTest extends TestCase
     public function testReapingAStaleJobKeepsCommittedImportsAndConvergesTheRest(): void
     {
         $missionId = $this->insertMission('reap');
-        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
-        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]), VIRTUSPHERE_DEPLOY_STATUS_RUNNING, true);
 
         deploy_worker_reap_stale_jobs($this->db);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($imported));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($stuck));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
     }
 
     private function insertMission(string $suffix): int

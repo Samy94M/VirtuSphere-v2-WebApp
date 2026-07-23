@@ -82,18 +82,18 @@ const VIRTUSPHERE_LIFECYCLE_STATES = [
 ];
 
 // MECM sync states. Must stay in sync with the mecm_sync_state ENUM.
-const VIRTUSPHERE_MECM_NOT_READY = 'not_ready';
-const VIRTUSPHERE_MECM_PENDING = 'pending';
-const VIRTUSPHERE_MECM_SUBMITTED = 'submitted';
-const VIRTUSPHERE_MECM_REGISTERED = 'registered';
-const VIRTUSPHERE_MECM_FAILED = 'failed';
+const VIRTUSPHERE_MECM_SYNC_NOT_READY = 'not_ready';
+const VIRTUSPHERE_MECM_SYNC_PENDING = 'pending';
+const VIRTUSPHERE_MECM_SYNC_SUBMITTED = 'submitted';
+const VIRTUSPHERE_MECM_SYNC_REGISTERED = 'registered';
+const VIRTUSPHERE_MECM_SYNC_FAILED = 'failed';
 
 const VIRTUSPHERE_MECM_SYNC_STATES = [
-    VIRTUSPHERE_MECM_NOT_READY,
-    VIRTUSPHERE_MECM_PENDING,
-    VIRTUSPHERE_MECM_SUBMITTED,
-    VIRTUSPHERE_MECM_REGISTERED,
-    VIRTUSPHERE_MECM_FAILED,
+    VIRTUSPHERE_MECM_SYNC_NOT_READY,
+    VIRTUSPHERE_MECM_SYNC_PENDING,
+    VIRTUSPHERE_MECM_SYNC_SUBMITTED,
+    VIRTUSPHERE_MECM_SYNC_REGISTERED,
+    VIRTUSPHERE_MECM_SYNC_FAILED,
 ];
 
 // Bulk VM-list actions cap (Paket C): reject selections larger than this.
@@ -275,6 +275,30 @@ const VIRTUSPHERE_INTEGRATION_WIRE_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
 ];
 
+// Fachliche Gruppen fuer Systemstatus und Dashboard. Die Gruppen sind
+// absichtlich getrennt: ein ausgefallener interner Wartungsdienst ist kein
+// Beweis fuer eine ausgefallene MECM-Synchronisation.
+const VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
+    VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
+    VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
+];
+const VIRTUSPHERE_INTEGRATION_MECM_NETWORK_SOURCES = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE,
+];
+const VIRTUSPHERE_INTEGRATION_INTERNAL_SOURCES = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
+];
+
+// Stable fragment targets used by settings, credentials, dashboard, help and
+// log feedback. Keeping them here prevents links from drifting away from the
+// rendered section IDs.
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM = 'mecm';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE = 'ansible';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI = 'esxi';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL = 'internal-services';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS = 'deviations';
+
 const VIRTUSPHERE_INTEGRATION_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
@@ -294,6 +318,16 @@ const VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS = 60;
 const VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS = 300;
 const VIRTUSPHERE_HEARTBEAT_INTERVAL_MIN_SECONDS = 5;
 const VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS = 3600;
+
+// SSoT for the three Ampel value sets the System status page renders. The page
+// legend and the help panel both iterate these instead of hand-listing states.
+// They used to hand-list them and had already drifted: `missing` was explained
+// in help and absent from the page's own legend, so the badge an operator can
+// actually see there had no entry to look up. Order is display order, worst
+// last so a legend reads from healthy to broken.
+const VIRTUSPHERE_HEARTBEAT_STATES = ['ok', 'warning', 'danger', 'missing', 'unknown'];
+const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
+const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
 
 // mecm-category audits from the machine surface are throttled per tag so a
 // misbehaving 10s sync loop cannot flood deploy_logs (error_log always logs).
@@ -316,6 +350,26 @@ const VIRTUSPHERE_SETTING_MECM_PROBE_PORT = 'mecm_probe_port';
 const VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS = 300;
 const VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT = 445;
 const VIRTUSPHERE_MECM_PROBE_TIMEOUT_SECONDS = 3;
+const VIRTUSPHERE_PROBE_MODE_AUTO = 'auto';
+const VIRTUSPHERE_PROBE_MODE_MANUAL = 'manual';
+const VIRTUSPHERE_PROBE_MODES = [
+    VIRTUSPHERE_PROBE_MODE_AUTO,
+    VIRTUSPHERE_PROBE_MODE_MANUAL,
+];
+const VIRTUSPHERE_MECM_PROBE_DETAIL_VERSION = 1;
+const VIRTUSPHERE_MECM_PROBE_DETAIL_TEXT_MAX = 160;
+const VIRTUSPHERE_PROBE_ERROR_DNS = 'dns';
+const VIRTUSPHERE_PROBE_ERROR_TIMEOUT = 'timeout';
+const VIRTUSPHERE_PROBE_ERROR_REFUSED = 'refused';
+const VIRTUSPHERE_PROBE_ERROR_NETWORK = 'network';
+const VIRTUSPHERE_PROBE_ERROR_UNKNOWN = 'unknown';
+const VIRTUSPHERE_PROBE_ERROR_CATEGORIES = [
+    VIRTUSPHERE_PROBE_ERROR_DNS,
+    VIRTUSPHERE_PROBE_ERROR_TIMEOUT,
+    VIRTUSPHERE_PROBE_ERROR_REFUSED,
+    VIRTUSPHERE_PROBE_ERROR_NETWORK,
+    VIRTUSPHERE_PROBE_ERROR_UNKNOWN,
+];
 // How often each worker wakes up to look for work (overridable with --sleep=N).
 // The help quotes both cadences, so they are named rather than left as literals
 // in the option defaults.

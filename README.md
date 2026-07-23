@@ -23,7 +23,7 @@ Das Portal ist server-gerendert (PHP, kein JS-Build, kein CDN) und zweisprachig:
 - Missions- und VM-Verwaltung: Infrastrukturvorlagen anlegen, kopieren, bearbeiten und löschen; Sammellöschung und MECM-ID-Reset auf der VM-Liste; CPU-/RAM-Hot-Add-Optionen.
 - Deployment: geplante und gestaffelte Deploy-Läufe mit portalseitiger Zeitzone (ADR-0022), Deploy-Log und Statusverfolgung.
 - ESXi-Inventory: von ESXi geführter VLAN-Katalog, Inventory-Abgleich mit Abweichungsreport und geführter VLAN-Neuzuordnung (ADR-0023) sowie Autostart-Policy (ADR-0025).
-- Integrationen: MECM-, Ansible- und Maschinen-API-Anbindung mit Heartbeats, Meldekanal und Ampel-Statusanzeige; die Kataloge für OS und Pakete sind MECM-geführt und im Portal schreibgeschützt (ADR-0020).
+- Integrationen: MECM-, Ansible- und Maschinen-API-Anbindung mit Heartbeats, Meldekanal und Ampel-Statusanzeige auf der Seite „Systemstatus"; die Kataloge für OS und Pakete sind MECM-geführt und im Portal schreibgeschützt (ADR-0020).
 - Betrieb und Sicherheit: RBAC, Sessions und CSRF, zentrale CSP-/Security-Header, persistente Logs mit Kategorienfilter und Aufbewahrungsfenstern (ADR-0026), Backup/Restore (ADR-0017) sowie HTTPS komplett im Portal konfigurierbar: Zertifikats-Upload (PFX/PEM), Listener-, Redirect- und HSTS-Schalter (ADR-0027); die Maschinen-API bleibt bis E3 auf HTTP.
 
 ## Status und offene Punkte

@@ -11,6 +11,7 @@ require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_capabilities.php';
 require_once __DIR__ . '/../lib/repo/ansible_preflight.php';
 require_once __DIR__ . '/../lib/ssh.php';
+require_once __DIR__ . '/../lib/system_status.php';
 
 /**
  * User-facing sentence for a connection test result. The raw transport text
@@ -60,12 +61,12 @@ function credentials_test_message(array $result): string
 /**
  * Testing an ESXi credential means pulling its inventory over the Ansible host:
  * the one path a deploy actually uses. The result is not a flash but the traffic
- * light on the integrations page, which survives the redirect and every reload.
+ * light on the System status page, which survives the redirect and every reload.
  *
  * Same call chain as saving the credential, so the deliberate single retry of an
  * auth-paused credential stays possible without weakening the lockout guard.
  *
- * @return array{0: string, 1: string} flash type and message
+ * @return array{0: string, 1: string, 2: array<string,mixed>} flash type, message and enqueue result
  */
 function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): array
 {
@@ -73,16 +74,22 @@ function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): arra
     $result = esxi_inventory_enqueue_for_credential($db, $credentialId, $userId);
 
     if (!empty($result['enqueued'])) {
-        return ['success', __t('credentials.test_esxi_queued')];
+        return ['success', __t('credentials.test_esxi_queued'), $result];
     }
     if (($result['reason'] ?? '') === 'no_ansible_credential') {
-        return ['warning', __t('credentials.test_esxi_no_ansible')];
+        return ['warning', __t('credentials.test_esxi_no_ansible'), $result];
+    }
+    if (($result['reason'] ?? '') === 'ambiguous_ansible_credential') {
+        return ['warning', __t('credentials.test_esxi_ambiguous_ansible'), $result];
+    }
+    if (($result['reason'] ?? '') === 'invalid_ansible_credential') {
+        return ['warning', __t('credentials.test_esxi_invalid_ansible'), $result];
     }
     if (($result['reason'] ?? '') === 'already_pending') {
-        return ['warning', __t('credentials.test_esxi_already_pending')];
+        return ['warning', __t('credentials.test_esxi_already_pending'), $result];
     }
 
-    return ['error', __t('credentials.test_esxi_failed')];
+    return ['error', __t('credentials.test_esxi_failed'), $result];
 }
 
 // After saving an ESXi credential: clear any auth pause and trigger an immediate
@@ -107,6 +114,7 @@ function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId
     }
 }
 
+/** @var mysqli $connection Provided by bootstrap.php. */
 $user = portal_require_user($connection);
 if (!can('credentials.manage', $user)) {
     portal_forbid($connection, $user, 'credentials.manage');
@@ -117,6 +125,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         $action = request_string($_POST, 'action');
+        if (!in_array($action, ['create', 'update', 'delete', 'test'], true)) {
+            http_response_code(400);
+            echo h(__t('common.unknown_action'));
+            exit;
+        }
         $id = request_int($_POST, 'credential_id');
         $payload = [
             'type' => $_POST['type'] ?? '',
@@ -149,12 +162,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (repo_ansible_preflight_clear($connection, $id)) {
                 $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
             }
+            if ((string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                && (string) $payload['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                && esxi_inventory_clear_ansible_selection_if_matches($connection, $id)
+            ) {
+                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'inventory ansible selection: cleared']));
+            }
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'updated credential id ' . $id . audit_change_note($credentialDiff), (int) $user['id']);
             flash_set('success', __t('credentials.flash_updated'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
         } elseif ($action === 'delete') {
+            $before = repo_credential($connection, $id) ?? [];
             repo_delete_credential($connection, $id);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'deleted credential id ' . $id, (int) $user['id']);
+            $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'deleted credential id ' . $id . ($selectionCleared ? '; inventory ansible selection cleared' : ''), (int) $user['id']);
             flash_set('success', __t('credentials.flash_deleted'));
         } elseif ($action === 'test') {
             $credential = repo_credential($connection, $id, true);
@@ -164,9 +186,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ((string) ($credential['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
                 // Asynchronous by nature: the pull is a queued job on the Ansible
                 // host, so the outcome lands in the traffic light, not in a flash.
-                [$flashType, $flashMessage] = credentials_test_esxi($connection, $id, (int) $user['id']);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'requested ESXi inventory pull for credential id ' . $id . ' (' . $flashType . ')', (int) $user['id']);
-                flash_set($flashType, $flashMessage);
+                [$flashType, $flashMessage, $enqueue] = credentials_test_esxi($connection, $id, (int) $user['id']);
+                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested ESXi inventory pull for credential id ' . $id . ' (' . ($enqueue['reason'] ?? 'queued') . ')' . (isset($enqueue['job_id']) ? '; job id ' . $enqueue['job_id'] : ''), (int) $user['id']);
+                $actionUrl = in_array(($enqueue['reason'] ?? ''), ['ambiguous_ansible_credential', 'invalid_ansible_credential', 'no_ansible_credential'], true)
+                    ? 'settings.php#panel-catalog'
+                    : system_status_url('credential-' . $id, ['inventory' => $id]);
+                flash_set($flashType, $flashMessage, '', [
+                    'url' => $actionUrl,
+                    'label' => __t('credentials.test_esxi_action'),
+                ]);
             } else {
                 // The preflight also probes the portal return route, so it needs
                 // the configured API base URL (empty is fine: that check is then
@@ -180,10 +208,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $apiBaseUrl = '';
                 }
                 $result = credential_test_connection($credential, repo_credential_secret($connection, $id), $apiBaseUrl);
-                // Persist so the credential row and the integrations page can show
+                // Persist so the credential row and the System status page can show
                 // a badge instead of only this one-shot flash. An SFTP failure has
                 // no preflight marker, so its code doubles as the component name;
-                // the integrations detail then says what broke instead of a dash.
+                // the system-status detail then says what broke instead of a dash.
                 // The allowlist verdict rides the same slot: it is the check that
                 // raised the warning, not a broken component.
                 $isAllowlistWarning = $result['ok'] && $result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST;
@@ -214,9 +242,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'tested credential id ' . $id . ': ' . $auditOutcome,
                     (int) $user['id']
                 );
-                if ($detail !== '') {
-                    error_log(sprintf('[credentials] test id=%d code=%s detail=%s', $id, $result['code'], $detail));
-                }
                 $flashType = 'error';
                 if ($result['ok']) {
                     $flashType = $isAllowlistWarning ? 'warning' : 'success';
@@ -237,24 +262,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $credentials = repo_credentials($connection);
 // Pointer badges only: the credentials page answers "is this account healthy",
-// the integrations page answers "what does this host report". One page per
+// the System status page answers "what does this host report". One page per
 // question (ADR-0023), so the detail lives there and this links to it.
 $inventoryIntervalHours = esxi_inventory_interval_hours($connection);
-$esxiStates = [];
-$ansiblePreflightStates = [];
-foreach ($credentials as $credentialRow) {
-    $credentialType = (string) ($credentialRow['type'] ?? '');
-    if ($credentialType === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
-        $esxiStates[(int) $credentialRow['id']] = repo_esxi_inventory_state($connection, (int) $credentialRow['id']);
-    } elseif ($credentialType === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) {
-        $ansiblePreflightStates[(int) $credentialRow['id']] = repo_ansible_preflight_state($connection, (int) $credentialRow['id']);
-    }
-}
-layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
+$esxiStates = repo_esxi_inventory_states($connection);
+$ansiblePreflightStates = repo_ansible_preflight_states($connection);
+layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
 ?>
 <div class="stack">
     <section class="panel">
         <h2><?php echo h(__t('credentials.create_heading')); ?></h2>
+        <p class="muted"><?php echo h(__t('credentials.scope_hint')); ?></p>
+        <p class="muted"><?php echo h(__t('credentials.mecm_scope_hint')); ?> <a href="settings.php#panel-machine-api"><?php echo h(__t('credentials.mecm_scope_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.ansible_scope_hint')); ?> <a href="settings.php#panel-deploy"><?php echo h(__t('credentials.ansible_scope_link')); ?></a></p>
         <form class="form-grid" method="post" action="credentials.php" autocomplete="off">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">
@@ -278,7 +298,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
 
     <section class="panel">
         <h2><?php echo h(__t('credentials.stored_heading')); ?></h2>
-        <p class="muted"><?php echo h(__t('credentials.test_hint')); ?> <a href="integrations.php"><?php echo h(__t('credentials.test_hint_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.test_hint')); ?> <a href="system_status.php"><?php echo h(__t('credentials.test_hint_link')); ?></a></p>
         <p class="muted"><?php echo h(__t('credentials.test_checks')); ?></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('credentials.label_type')); ?></th><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('credentials.label_host')); ?></th><th><?php echo h(__t('credentials.label_port')); ?></th><th><?php echo h(__t('credentials.label_username')); ?></th><th><?php echo h(__t('credentials.th_status')); ?></th><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
@@ -302,16 +322,19 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
                     <td><?php echo h((string) ($row['username'] ?? '')); ?></td>
                     <td>
                         <?php if ($isEsxi) {
-                            $esxiAmpel = esxi_credential_state($esxiStates[$rowId] ?? null, $inventoryIntervalHours);
+                            $esxiState = $esxiStates[$rowId] ?? null;
+                            $esxiAmpel = esxi_credential_state($esxiState, $inventoryIntervalHours);
                             ?>
-                            <a href="integrations.php#cred-<?php echo h((string) $rowId); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
+                            <a href="<?php echo h(system_status_url('credential-' . $rowId, ['inventory' => $rowId])); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
+                            <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>
                         <?php } elseif ($isAnsible) {
                             $pfState = $ansiblePreflightStates[$rowId] ?? null;
                             $pfTitle = $pfState !== null && !empty($pfState['last_checked_at'])
                                 ? __t('credentials.ansible_state_link_title', ['when' => portal_format_timestamp((string) $pfState['last_checked_at'])])
                                 : __t('credentials.ansible_state_untested_title');
                             ?>
-                            <a href="integrations.php#cred-<?php echo h((string) $rowId); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState); ?></a>
+                            <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState); ?></a>
+                            <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>
@@ -326,7 +349,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'integrations');
                                   // disables the button on submit, which would drop a button-borne
                                   // name/value from the POST. ?>
                             <input type="hidden" name="action" value="test">
-                            <button class="button button-secondary" type="submit" data-busy-label="<?php echo h(__t('credentials.btn_testing')); ?>"><?php echo h(__t('credentials.btn_test')); ?></button>
+                            <button class="button button-secondary" type="submit" data-busy-label="<?php echo h($isEsxi ? __t('credentials.btn_inventory_busy') : __t('credentials.btn_testing')); ?>"><?php echo h($isEsxi ? __t('credentials.btn_inventory') : __t('credentials.btn_test_ansible')); ?></button>
                         </form>
                         <form class="inline-form" method="post" action="credentials.php">
                             <?php echo csrf_field(); ?>

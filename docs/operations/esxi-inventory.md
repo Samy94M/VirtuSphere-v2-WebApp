@@ -6,17 +6,17 @@ Das Portal liest in regelmäßigen Abständen read-only aus den registrierten ES
 
 - Ein Systemjob im Modus `inventory` (missionslos) fährt das read-only Playbook `Ansible/inventoryESXi_playbook.yml` über den vorhandenen Deploy-Worker; nur `community.vmware`-`*_info`/`*_facts`-Module, keine Änderungen am Host.
 - Der Wartungsdienst reiht je ESXi-Zugangsdatum einen Abruf ein, wenn der letzte Erfolg älter als das Intervall ist (Einstellung `esxi_inventory_interval_hours`, Standard 6, 0 = aus).
-- Nach dem Anlegen/Ändern eines ESXi-Zugangsdatums wird sofort abgerufen; auf der Seite Integrationen gibt es einen manuellen Refresh (Recht `deploy.run`). Der Knopf „Testen" auf der Seite Zugangsdaten stößt denselben Abruf an (siehe unten).
+- Nach dem Anlegen/Ändern eines ESXi-Zugangsdatums wird sofort abgerufen; im Systemstatus gibt es einen manuellen Refresh (Recht `deploy.run`). „Inventarabruf starten" auf der Seite Zugangsdaten stößt denselben Abruf an (siehe unten).
 - „Alle aktualisieren" überspringt auth-pausierte Zugangsdaten (Kontosperren-Schutz) und weist die Anzahl im Hinweis aus. Ein pausiertes Zugangsdatum gezielt neu versuchen: sein eigener Aktualisieren-Button (bewusster Einzel-Retry) oder das Zugangsdatum speichern (hebt die Pause auf). Der Hinweis schlüsselt auch „bereits in der Warteschlange" auf und nennt bei fehlendem/mehrdeutigem Ansible-Zugangsdatum den Grund samt Einstellungs-Verweis.
 - Nach einem erfolgreichen create- oder full-Deploy (neue VMs, veränderte Datastore-Belegung) wird automatisch ein Abruf für das genutzte ESXi-Zugangsdatum eingereiht. Power-Cycle, Start und Export lösen keinen Abruf aus (sie erzeugen keine Ressourcen). Der Doppel-Einreihungs-Guard verhindert Dopplungen mit der Intervall-Automatik.
 - Ein Zugangsdatum, das noch nie erfolgreich war (falscher Host, fehlende Rechte), wird nicht bei jedem Prüf-Zyklus neu versucht, sondern erst nach Ablauf des Intervalls (Sperre auf den letzten Versuch, nicht nur den letzten Erfolg). Auth-Fehler pausieren den Auto-Abruf ganz.
-- Anzeige auf der Seite Integrationen, Abschnitt „ESXi-Inventar": je Zugangsdatum Ampel, Stand, Tabellen und Datastore-Kapazitätsbalken.
+- Anzeige im Systemstatus, Abschnitt „ESXi-Inventar": je Zugangsdatum zunächst eine kompakte Karte mit Zustand, Zeitpunkt, Fähigkeiten, Objektzahlen und offenem Auftrag. Tabellen und Kapazitäten werden erst über „Inventardetails öffnen" für genau diese Karte geladen.
 - Jeder Abruf ist ein Systemauftrag. Beendete Systemaufträge werden nach 30 Tagen samt Ausgabe entfernt, denn sie tauchen in keiner Liste auf und ihr bleibendes Ergebnis ist die Ampel. Laufende und eingereihte Aufträge werden nie angefasst.
 
 ## Setup-Reihenfolge
 
-1. Unter Zugangsdaten ein ESXi-Konto anlegen (Read-only-Rechte genügen für das Inventar, siehe unten). Genau ein Ansible-Zugangsdatum muss vorhanden sein; bei mehreren eines in den Einstellungen wählen.
-2. Ersten Abruf abwarten (Sofort-Pull nach dem Anlegen oder manueller Refresh). Die Seite Integrationen zeigt „Stand: ...".
+1. Unter Zugangsdaten ein ESXi-Konto anlegen (Read-only-Rechte genügen für das Inventar, siehe unten). Bei genau einem Ansible-Zugang wird er automatisch verwendet; bei mehreren unter Einstellungen → Kataloge und Inventar einen auswählen.
+2. Ersten Abruf abwarten (Sofort-Pull nach dem Anlegen oder manueller Abruf). Der Systemstatus zeigt Versuch, Erfolg und einen gegebenenfalls offenen Job.
 3. Erst danach greift der ESXi-owned VLAN-Katalog (Rollout-Vorbedingung): Portgruppen erscheinen als Auswahl, `vlans.php` wird read-only.
 
 ## Benötigte ESXi-Rechte
@@ -49,16 +49,16 @@ Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_*` in `lib/deplo
 
 Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` bei fehlgeschlagenem letzten Abruf, noch nie erfolgreichem Zugangsdatum oder veraltetem Erfolg (älter als `VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR` x Intervall, aktuell 2x); `danger` bei Fehlerserie ab `VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER` (aktuell 3) oder Auth-Pause. Bei Intervall 0 (Automatik aus) entfällt die Veraltet-Warnung; das Alter beweist dann nichts. Die Hilfe interpoliert dieselben Konstanten in ihrer Erklärung, Text und Verhalten können nicht auseinanderlaufen.
 
-Dieselbe Ampel erscheint an drei Stellen und wird genau einmal berechnet (`esxi_credential_state()`): als Überschrift-Badge auf Integrationen, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor" (Worst-State über alle ESXi-Zugangsdaten; fehlt ganz, wenn keines eingerichtet ist). Ein Klick auf eine gelbe Kachel darf nie auf einer grünen Detailseite landen. Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.
+Dieselbe Ampel erscheint an drei Stellen und wird aus demselben Health-Snapshot berechnet: auf der ESXi-Karte im Systemstatus, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor". Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.
 
-## „Testen" bei ESXi ist ein echter Inventar-Abruf
+## „Inventarabruf starten" bei ESXi ist ein echter Auftrag
 
-Das Portal spricht ESXi **nie** direkt an. Der Knopf „Testen" auf der Seite Zugangsdaten hebt bei einem ESXi-Zugangsdatum die Auth-Pause auf und reiht denselben Inventar-Abruf ein, den auch das Speichern auslöst: über den Ansible-Host, per pyVmomi/SOAP gegen `/sdk`, mit `validate_certs: false`. Damit prüft der Test genau den Weg, den ein Deploy nimmt.
+Das Portal spricht ESXi **nie** direkt an. „Inventarabruf starten" auf der Seite Zugangsdaten hebt bei einem ESXi-Zugangsdatum die Auth-Pause auf und reiht denselben read-only Abruf ein, den auch das Speichern auslöst: über den Ansible-Host, per pyVmomi/SOAP gegen `/sdk`, mit `validate_certs: false`. Damit läuft genau der Weg, den ein Deploy nimmt.
 
 Konsequenzen für den Betrieb:
 
 - **Die Zertifikatsvariante ist egal.** Selbstsigniert ab Werk, von der VMCA des vCenters oder von der Domänen-CA: die Prüfung ist im Playbook bewusst aus. Eine strikte TLS-Prüfung ist eine spätere Härtungsentscheidung (WP7) und gehört in eine ADR, nicht still in einen Stream-Kontext.
-- **Das Ergebnis erscheint nicht als Flash, sondern als Ampel.** Der Abruf ist ein Auftrag in der Warteschlange, kein API-Aufruf; die Meldung nach dem Klick sagt nur, dass er eingereiht wurde. Der Befund steht danach dauerhaft auf der Seite Integrationen und überlebt jeden Reload. Die Rohausgabe des Auftrags steht im Job-Log.
+- **Die Meldung und der Befund haben getrennte Aufgaben.** Der Flash unterscheidet eingereiht, bereits offen oder fehlende/uneindeutige Ansible-Auswahl. Der dauerhafte Befund steht im Systemstatus; bei eingereiht/laufend ist die Aktion deaktiviert und das Job-Log direkt verlinkt.
 - **Ein Ansible-Zugangsdatum wird weiterhin sofort geprüft** (SSH-Anmeldung plus Preflight), denn dieser Weg läuft aus dem Portal heraus.
 
 Historisch prüfte der Test `{host}:{port}/rest/appliance/system/version` mit PHPs strikter Zertifikatsprüfung. Beides war falsch: der Pfad gehört zur Management-API der vCenter Server Appliance und fehlt auf einem einzelnen ESXi (HTTP 404 trotz korrekter Zugangsdaten), und die Prüfung lehnte das ab Werk selbstsignierte Host-Zertifikat ab, das der Betrieb akzeptiert. Der Test meldete also rot bei völlig gesunden Zugangsdaten. Dieser Weg ist entfernt (ADR-0023, drittes Amendment).
@@ -77,7 +77,15 @@ Das sind **keine Fehlerkategorien**. Die Tabelle oben beschreibt einen Abruf, de
 
 **Unbekannt heißt unbekannt.** Ist eine Angabe nicht bekannt (nie abgerufen, alter Cache, Modul liefert das Feld nicht), erscheint gar kein Hinweis. Sie wird nie als „ist in Ordnung" gelesen: eine Ablehnung eines Auftrags setzt immer eine Angabe aus einem **frischen** erfolgreichen Abruf voraus. Veraltete oder fehlende Angaben warnen nur und lassen den Auftrag laufen, denn ESXi bleibt die Autorität (Cache-blockiert-nie-Regel).
 
-**Verifikation der Capability-Feldpfade am produktiven Host (einmalig nach Rollout):** manuellen Refresh auslösen, im Job-Log die Zeile `ESXi capabilities: product=... api=... license=...` lesen und mit der Anzeige auf der Seite Integrationen vergleichen. Stimmt ein Feldpfad nicht, bleibt der Wert leer und es erscheint kein Hinweis; kaputtgehen kann nichts.
+**Verifikation der Capability-Feldpfade am produktiven Host (einmalig nach Rollout):** Inventarabruf starten, im Job-Log die Zeile `ESXi capabilities: product=... api=... license=...` lesen und mit der Karte im Systemstatus vergleichen. Stimmt ein Feldpfad nicht, bleibt der Wert leer und es erscheint kein Hinweis; kaputtgehen kann nichts.
+
+Dabei gleich drei Anzeigen mitprüfen, die dieselben Facts lesen und bisher nur gegen eingespielte Testdaten belegt sind:
+
+- **Endpunktzeile auf der ESXi-Karte** („über vCenter · VMware ESXi 8.0.2"). Sie erwartet `about.apiType` mit genau `VirtualCenter` oder `HostAgent`; jeder andere Wert wird bewusst nicht geraten, dann nennt die Zeile nur die Version. `SystemStatusHostFactsTest` pinnt diese Zuordnung.
+- **Kernanzahl je Host-Zeile** unter „Inventardetails öffnen" (`ansible_processor_cores`, ersatzweise `hardware_num_cpu_cores`).
+- **Uhrabweichung** ebendort. Sie erscheint nur, wenn die Facts eine Host-Zeit liefern (`ansible_host_date_time_epoch`) **und** die Abweichung `VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS` erreicht. Bleibt sie auf einem Host mit bekannt verstellter Uhr aus, fehlt der Fact, nicht die Abweichung.
+
+Auch hier gilt durchgehend: fehlender Fact heißt keine Anzeige, nie eine erfundene Zahl.
 
 ## Autostart auf dem ESXi-Host
 
@@ -99,7 +107,7 @@ Ausführlich in ADR-0025. Kurz für den Betrieb:
 
 ## ESXi-Uhrabweichung (Diagnose)
 
-Sofern die Host-Facts eine Host-Zeit liefern, zeigt die Host-Zeile eine Uhrabweichung zum Pull-Zeitpunkt an (Warnung ab 2 Minuten). Das ist eine Diagnose, keine Live-Uhr: eine stark verstellte ESXi-Uhr kann den Domänenbeitritt frisch erzeugter VMs (Kerberos, ±5 min) brechen. Behebung über NTP auf dem ESXi-Host, nicht im Portal.
+Sofern die Host-Facts eine Host-Zeit liefern, zeigt die Host-Zeile unter „Inventardetails öffnen" (Systemstatus) eine Uhrabweichung zum Pull-Zeitpunkt an, sobald sie `VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS` erreicht; darunter wird nichts gezeigt, weil ein paar Sekunden normal sind. Dieselbe Konstante interpoliert die Hilfe in ihre Erklärung, Text und Verhalten können nicht auseinanderlaufen. Das ist eine Diagnose, keine Live-Uhr: eine stark verstellte ESXi-Uhr kann den Domänenbeitritt frisch erzeugter VMs (Kerberos, ±5 min) brechen. Behebung über NTP auf dem ESXi-Host, nicht im Portal.
 
 ## Datacenter und Datastore: Mission als Standard, VM als Ausnahme
 
@@ -157,7 +165,7 @@ Die Anzeige ist **warnend, nie blockierend** (Cache-blockiert-nie-Regel): fehlt 
 
 ## Abweichungen und VLAN-Neuzuweisung
 
-Eine Abweichung liegt vor, wenn Datacenter, Datastore oder VLAN nicht im aktuellen Inventar der jeweiligen Kategorie vorkommt. Geprüft werden Missionen (Datacenter, Datastore, WDS-VLAN), VM-Overrides (Datacenter, Datastore) und VM-Netzwerkkarten (VLAN). Eine Kategorie wird nur bewertet, wenn das Inventar mindestens einen Eintrag davon hat; ein leeres oder nie abgerufenes Inventar erzeugt also keine falschen Abweichungen. Sichtbar an drei Stellen, alle rein hinweisend (kein Deploy-Block): Tabelle „Abweichungen" auf der Seite Integrationen, Badge „Inventar-Abweichung" in der Missionsliste, Hinweis beim Einreihen eines Bereitstellungsauftrags. Der Badge leuchtet auch, wenn nur eine VM der Mission abweicht.
+Eine Abweichung liegt vor, wenn Datacenter, Datastore oder VLAN nicht im aktuellen Inventar der jeweiligen Kategorie vorkommt. Geprüft werden Missionen (Datacenter, Datastore, WDS-VLAN), VM-Overrides (Datacenter, Datastore) und VM-Netzwerkkarten (VLAN). Eine Kategorie wird nur bewertet, wenn das Inventar mindestens einen Eintrag davon hat; ein leeres oder nie abgerufenes Inventar erzeugt also keine falschen Abweichungen. Ohne ein einziges ESXi-Zugangsdatum läuft der Scan gar nicht: der Systemstatus zeigt dann „Nicht geprüft" statt einer grünen Null, denn ein nicht durchgeführter Vergleich ist kein bestandener. Eine Abweichung an einer Vorlage wird als solche markiert; sie wird erst wirksam, wenn daraus eine Mission entsteht. Sichtbar an drei Stellen, alle rein hinweisend (kein Deploy-Block): Bereich „Abweichungen" im Systemstatus, Badge „Inventar-Abweichung" in der Missionsliste, Hinweis beim Einreihen eines Bereitstellungsauftrags. Der Badge leuchtet auch, wenn nur eine VM der Mission abweicht.
 
 | Symptom | Wahrscheinliche Ursache | Maßnahme |
 |---|---|---|
@@ -165,7 +173,7 @@ Eine Abweichung liegt vor, wenn Datacenter, Datastore oder VLAN nicht im aktuell
 | VLAN fehlt im Auswahlfeld | Portgruppe existiert nicht (mehr) auf ESXi oder wurde retired | Auf ESXi prüfen; nach Anlage „Aktualisieren"; gespeicherter Wert bleibt bis dahin wählbar |
 | VLAN auf ESXi umbenannt | Erscheint als „alt retired, neu aktiv" (Rename nicht von Löschen unterscheidbar) | Geführte Massen-Neuzuweisung nutzen (siehe unten) |
 
-**Geführte VLAN-Massen-Neuzuweisung** (Integrationen, Rechte `missions.write` + `vms.write`): ändert alle Zuweisungen eines VLAN-Namens (in Missionen und VM-Netzwerkkarten) in einem Schritt auf einen aktiven Katalog-Eintrag. Feld „Von" ist Freitext (auch der alte/retired Name), „Nach" ein aktives VLAN. Die Umstellung läuft in einer Transaktion, betrifft nur Portal-Datensätze (nie ESXi) und schreibt einen aggregierten Audit-Eintrag. Das Formular erscheint nur, wenn es tatsächlich eine VLAN-Abweichung zu reparieren gibt; trifft „Von" auf keinen einzigen Datensatz (Tippfehler), erscheint eine Warnung statt einer Erfolgsmeldung. Ein Klick auf einen VLAN-Abweichungswert in der Tabelle befüllt „Von" vor und springt zum Formular. Der Bericht zeigt auch Vorlagen (gekennzeichnet), denn ein verwaistes VLAN in einer Vorlage wandert sonst unbemerkt in jede daraus erzeugte Mission; Missionslisten-Badge und Deploy-Hinweis bleiben ohne Vorlagen.
+**Geführte VLAN-Massen-Neuzuweisung** (Systemstatus, Rechte `missions.write` + `vms.write`): ändert alle Zuweisungen eines VLAN-Namens (in Missionen und VM-Netzwerkkarten) in einem Schritt auf einen aktiven Katalog-Eintrag. Feld „Von" ist Freitext (auch der alte/retired Name), „Nach" ein aktives VLAN. Die Umstellung läuft in einer Transaktion, betrifft nur Portal-Datensätze (nie ESXi) und schreibt einen aggregierten Audit-Eintrag. Das Formular erscheint nur bei einer echten VLAN-Abweichung und ist als „Korrekturaktionen" eingeklappt. Leere, identische, zu lange oder inaktive Ziele werden feldbezogen abgewiesen; ohne Treffer bleibt der eingegebene Wert erhalten. Cancel ändert nichts, Confirm schreibt Missionen und Interfaces gemeinsam.
 
 ## Teilpräsenz und VLAN-IDs im Katalog (Mehr-Host-Betrieb)
 

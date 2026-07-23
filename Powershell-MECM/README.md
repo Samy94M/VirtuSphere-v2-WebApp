@@ -26,7 +26,7 @@ Diese Registry schreibt der Installer.
    Klartext-Argument übergeben, da er sonst in der PowerShell-History und
    Prozessliste sichtbar bleibt.
 3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
-   MECM-Servers freischalten, dann die Seite *Integrationen* beobachten – die
+   MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
    drei Sync-Quellen sollten auf „OK" springen.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
@@ -43,7 +43,7 @@ Skripte.
 Alle drei laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim
 Systemstart, **ohne Laufzeitlimit** (Endlosschleifen) und mit
 Auto-Neustart bei Absturz. Jede meldet sich per Heartbeat an die WebApp; ein
-toter Task erscheint dort auf der Seite *Integrationen* als „Ausgefallen".
+toter Task erscheint dort im *Systemstatus* als „Ausgefallen".
 
 **Logs:** `%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`
 (einheitliches Format, 30 Tage Aufbewahrung).
@@ -216,7 +216,7 @@ Alle drei Dienste teilen dieselbe Überlebensstrategie:
   Taskplaner-Neustarts nach Minuten aufgebraucht und der Task bis zum Reboot
   tot.
 - **Heartbeat je Durchlauf:** macht tote Tasks auf der Portal-Seite
-  *Integrationen* sichtbar, ohne den Sync je auszubremsen.
+  *Systemstatus* sichtbar, ohne den Sync je auszubremsen.
 - **Backoff und Site-Drive-Recovery:** durchgängiges try/catch; nach
   3 Fehlern in Folge wird das Site-Drive verworfen und im nächsten Durchlauf
   neu initialisiert (fängt WMI-/Drive-Hänger ab).
@@ -279,5 +279,5 @@ Anwendungsabhängigkeiten: `client_getinfo` → `client_hostname` →
 - **Gerät außer Betrieb nehmen:** MECM ist die maßgebliche Quelle. Nicht mehr
   genutzte Geräte werden **in der MECM-Konsole** gelöscht (siehe
   `docs/operations/mecm-integration.md`).
-- **Sync hängt?** Auf der Portal-Seite *Integrationen* nachsehen; dort steht je
+- **Sync hängt?** Im Portal den *Systemstatus* öffnen; dort steht je
   Quelle eine Klartext-Handlungsanweisung.

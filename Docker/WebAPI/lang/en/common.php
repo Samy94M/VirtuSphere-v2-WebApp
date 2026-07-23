@@ -30,6 +30,11 @@ return [
     'free_suffix' => ':free free',
     'creator_unknown' => 'Unknown',
     'technical_details' => 'Technical details',
+    'help' => 'Help',
+    'unknown_action' => 'Unknown action.',
+    'duration_seconds' => ':count seconds',
+    'duration_minutes' => ':count minutes',
+    'duration_hours' => ':count hours',
 
     // Connection failures (VIRTUSPHERE_INVENTORY_ERROR_*): portal wording.
     'conn_dns' => 'The host ":host" could not be resolved. Check the host name.',

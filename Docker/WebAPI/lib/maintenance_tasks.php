@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/mecm_probe.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
@@ -145,20 +146,7 @@ function maintenance_worker_sweep_deploying_vms(mysqli $db): void
 // override, else the source IP of the last device-sync heartbeat (zero-config).
 function maintenance_worker_probe(mysqli $db): void
 {
-    $target = maintenance_worker_probe_target($db);
-    if ($target === null) {
-        // No MECM contact yet and no override - nothing to probe.
-        return;
-    }
-
-    [$host, $port] = $target;
-    [$ok, $error] = maintenance_worker_tcp_check($host, $port, VIRTUSPHERE_MECM_PROBE_TIMEOUT_SECONDS);
-    $label = 'tcp://' . $host . ':' . $port;
-    if ($ok) {
-        repo_touch_integration_heartbeat($db, VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, '', VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, $label . ' ok');
-    } else {
-        repo_mark_integration_failure($db, VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, $label . ' fail: ' . $error, VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS);
-    }
+    mecm_probe_run($db);
 }
 
 /**
@@ -166,21 +154,12 @@ function maintenance_worker_probe(mysqli $db): void
  */
 function maintenance_worker_probe_target(mysqli $db): ?array
 {
-    $host = trim(repo_setting_value($db, VIRTUSPHERE_SETTING_MECM_PROBE_HOST, ''));
-    if ($host === '') {
-        $row = repo_fetch_one($db, 'SELECT last_ip FROM deploy_integration_heartbeats WHERE source = ? LIMIT 1', 's', [VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC]);
-        $host = trim((string) ($row['last_ip'] ?? ''));
-    }
-    if ($host === '') {
+    $target = mecm_probe_target($db);
+    if ($target['host'] === null) {
         return null;
     }
 
-    $port = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT);
-    if ($port < 1 || $port > 65535) {
-        $port = VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT;
-    }
-
-    return [$host, $port];
+    return [$target['host'], $target['port']];
 }
 
 /**
@@ -188,16 +167,9 @@ function maintenance_worker_probe_target(mysqli $db): ?array
  */
 function maintenance_worker_tcp_check(string $host, int $port, int $timeoutSeconds): array
 {
-    $errno = 0;
-    $errstr = '';
-    $socket = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, $timeoutSeconds);
-    if ($socket !== false) {
-        fclose($socket);
+    $result = mecm_probe_tcp_check($host, $port, $timeoutSeconds);
 
-        return [true, ''];
-    }
-
-    return [false, $errstr !== '' ? $errstr : ('errno ' . $errno)];
+    return [$result['ok'], $result['detail']];
 }
 
 // Sparse audits: log only state transitions involving danger/missing (and the
@@ -220,7 +192,10 @@ function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
         }
 
         try {
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[maintenance-worker] integration ' . $source . ' state ' . $oldState . ' -> ' . $newState, null, 'cli');
+            $category = $source === VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE
+                ? VIRTUSPHERE_LOG_CATEGORY_SYSTEM
+                : VIRTUSPHERE_LOG_CATEGORY_MECM;
+            audit($db, $category, '[maintenance-worker] integration ' . $source . ' state ' . $oldState . ' -> ' . $newState, null, 'cli');
         } catch (Throwable $exception) {
             fwrite(STDERR, '[maintenance-worker] transition audit failed: ' . $exception->getMessage() . "\n");
         }

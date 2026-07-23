@@ -5,9 +5,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
+require_once __DIR__ . '/../lib/esxi_inventory.php';
+require_once __DIR__ . '/../lib/mecm_probe.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/repo/settings.php';
 require_once __DIR__ . '/../lib/repo/api_access.php';
+require_once __DIR__ . '/../lib/system_status.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
 if (!can('system.config', $user)) {
@@ -42,6 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'save_https_redirect' => 'https',
         'save_https_hsts' => 'https',
     ];
+
+    if (!array_key_exists($action, $actionTabs)) {
+        http_response_code(400);
+        echo h(__t('common.unknown_action'));
+        exit;
+    }
 
     if ($action === 'save_api') {
         try {
@@ -82,18 +93,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } elseif ($action === 'save_esxi_inventory') {
-        $hours = request_int($_POST, 'esxi_inventory_interval_hours', VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT);
+        $hoursRaw = request_trimmed($_POST, 'esxi_inventory_interval_hours');
+        $hours = preg_match('/^[0-9]+$/', $hoursRaw) === 1 ? (int) $hoursRaw : -1;
+        $resolution = esxi_inventory_ansible_resolution($connection);
+        $selectionRaw = request_trimmed($_POST, 'esxi_inventory_ansible_credential_id');
+        $selection = preg_match('/^[0-9]+$/', $selectionRaw) === 1 ? (int) $selectionRaw : 0;
+        $errors = [];
         if ($hours < VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MIN || $hours > VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX) {
-            $message = __t('settings.esxi_interval_invalid', [
+            $errors['esxi_inventory_interval_hours'] = __t('settings.esxi_interval_invalid', [
                 'min' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MIN,
                 'max' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX,
             ]);
-            form_remember('esxi', $_POST, ['esxi_inventory_interval_hours' => $message]);
-            flash_set('error', $message);
+        }
+        if (count($resolution['credentials']) > 1) {
+            $validIds = array_map(static fn (array $credential): int => (int) $credential['id'], $resolution['credentials']);
+            if ($selection <= 0 || !in_array($selection, $validIds, true)) {
+                $errors['esxi_inventory_ansible_credential_id'] = __t('settings.esxi_ansible_invalid');
+            }
+        }
+        if ($errors !== []) {
+            form_remember('esxi', $_POST, $errors);
+            flash_set('error', (string) reset($errors));
         } else {
             try {
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) $hours);
+                $oldSelection = (int) repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
+                if (count($resolution['credentials']) > 1) {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, (string) $selection);
+                } else {
+                    repo_delete_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
+                    $selection = 0;
+                }
                 audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated esxi inventory interval to ' . $hours . 'h', (int) $user['id']);
+                if ($oldSelection !== $selection) {
+                    audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated esxi inventory ansible credential ' . $oldSelection . ' -> ' . $selection, (int) $user['id']);
+                }
                 flash_set('success', __t('settings.esxi_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -251,26 +285,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } elseif ($action === 'save_probe') {
-        $probeHost = request_trimmed($_POST, 'probe_host');
+        $probeMode = request_string($_POST, 'probe_mode');
+        $probeHost = mecm_probe_normalize_host(request_trimmed($_POST, 'probe_host'));
         $probePort = request_trimmed($_POST, 'probe_port');
-        $portValue = $probePort === '' ? VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT : (int) $probePort;
-        $hostOk = $probeHost === ''
-            || filter_var($probeHost, FILTER_VALIDATE_IP) !== false
-            || preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/', $probeHost) === 1;
-        if (!$hostOk) {
-            $message = __t('settings.probe_host_invalid');
-            form_remember('probe', $_POST, ['probe_host' => $message]);
-            flash_set('error', $message);
-        } elseif ($portValue < 1 || $portValue > 65535) {
-            $message = __t('settings.probe_port_invalid');
-            form_remember('probe', $_POST, ['probe_port' => $message]);
-            flash_set('error', $message);
+        $probePort = $probePort === '' ? (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT : $probePort;
+        $errors = [];
+        if (!in_array($probeMode, VIRTUSPHERE_PROBE_MODES, true)) {
+            $errors['probe_mode'] = __t('settings.probe_mode_invalid');
+        } elseif ($probeMode === VIRTUSPHERE_PROBE_MODE_MANUAL && !mecm_probe_host_is_valid($probeHost)) {
+            $errors['probe_host'] = $probeHost === ''
+                ? __t('settings.probe_host_required')
+                : __t('settings.probe_host_invalid');
+        }
+        if (!mecm_probe_port_is_valid($probePort)) {
+            $errors['probe_port'] = __t('settings.probe_port_invalid');
+        }
+        if ($errors !== []) {
+            form_remember('probe', $_POST, $errors);
+            flash_set('error', (string) reset($errors));
         } else {
             try {
+                $oldHost = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_HOST, '');
+                $oldPort = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT);
+                if ($probeMode === VIRTUSPHERE_PROBE_MODE_AUTO) {
+                    $probeHost = '';
+                }
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_MECM_PROBE_HOST, $probeHost);
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, (string) $portValue);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated mecm probe target setting', (int) $user['id']);
-                flash_set('success', __t('settings.probe_saved'));
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, $probePort);
+                audit(
+                    $connection,
+                    VIRTUSPHERE_LOG_CATEGORY_SETTINGS,
+                    'updated mecm probe ' . mecm_probe_mode($oldHost) . '/' . trim($oldHost) . ':' . $oldPort
+                        . ' -> ' . $probeMode . '/' . $probeHost . ':' . $probePort,
+                    (int) $user['id']
+                );
+                $result = mecm_probe_run($connection);
+                audit(
+                    $connection,
+                    VIRTUSPHERE_LOG_CATEGORY_MECM,
+                    'mecm probe after settings save target ' . ((string) ($result['target'] ?? '') ?: '[waiting]')
+                        . ':' . $result['port'] . ' result ' . $result['status']
+                        . ($result['error_category'] !== null ? '/' . $result['error_category'] : ''),
+                    (int) $user['id']
+                );
+                $flashType = $result['status'] === 'ok' ? 'success' : 'warning';
+                $flashMessage = match ($result['status']) {
+                    'ok' => __t('settings.probe_saved_ok'),
+                    'fail' => __t('settings.probe_saved_failed'),
+                    default => __t('settings.probe_saved_waiting'),
+                };
+                flash_set($flashType, $flashMessage, '', [
+                    'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM),
+                    'label' => __t('settings.probe_status_link'),
+                ]);
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
             }
@@ -307,10 +374,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    redirect_to('settings.php#panel-' . ($actionTabs[$action] ?? 'deploy'));
+    redirect_to('settings.php#panel-' . $actionTabs[$action]);
 }
 
-$storedApiBaseUrl = repo_setting_value($connection, VIRTUSPHERE_SETTING_API_BASE_URL);
+$apiBaseUrlConfiguration = ansible_api_base_url_configuration($connection);
+$storedApiBaseUrl = $apiBaseUrlConfiguration['source'] === 'portal'
+    ? $apiBaseUrlConfiguration['value']
+    : '';
+$apiBaseUrlSource = $apiBaseUrlConfiguration['source'];
+$apiBaseUrlSourceLabel = match ($apiBaseUrlSource) {
+    'portal' => __t('settings.api_base_url_source_portal'),
+    'env' => __t('settings.api_base_url_source_env'),
+    default => __t('settings.api_base_url_source_none'),
+};
+$apiBaseUrlSourceBadge = match ($apiBaseUrlSource) {
+    'portal' => 'badge-info',
+    'env' => 'badge-neutral',
+    default => 'badge-warning',
+};
 $effectiveApiBaseUrl = '';
 $effectiveApiBaseUrlError = '';
 try {
@@ -324,8 +405,13 @@ try {
 }
 
 $reportTokenSet = repo_setting_value($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH) !== '';
-$probeHost = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_HOST);
-$probePort = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT);
+$probeConfig = mecm_probe_target($connection);
+$probeHost = $probeConfig['configured_host'];
+$probePort = (string) $probeConfig['port'];
+$probeMode = form_old('probe', 'probe_mode', $probeConfig['mode']);
+$probeHeartbeats = repo_integration_heartbeats($connection);
+$probeHeartbeat = $probeHeartbeats[VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE] ?? null;
+$probeDetail = mecm_probe_decode_detail(isset($probeHeartbeat['last_detail']) ? (string) $probeHeartbeat['last_detail'] : null);
 $retireThreshold = repo_setting_value($connection, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT);
 $reportTokenOnce = (string) ($_SESSION['machine_report_token_once'] ?? '');
 unset($_SESSION['machine_report_token_once']);
@@ -348,6 +434,12 @@ $backupIsOverdue = $backupOverdueAt !== null && $serverEpoch > $backupOverdueAt;
 $currentTimezone = portal_timezone();
 $timezoneGroups = portal_timezone_choices($currentTimezone);
 $esxiIntervalHours = repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT);
+$esxiAnsibleResolution = esxi_inventory_ansible_resolution($connection);
+$esxiSelectedAnsible = form_old(
+    'esxi',
+    'esxi_inventory_ansible_credential_id',
+    (string) $esxiAnsibleResolution['configured_id']
+);
 $sessionLifetimeMinutes = repo_setting_value($connection, VIRTUSPHERE_SETTING_SESSION_LIFETIME_MINUTES, (string) VIRTUSPHERE_SESSION_LIFETIME_MINUTES_DEFAULT);
 $passwordMinLength = repo_setting_value($connection, VIRTUSPHERE_SETTING_PASSWORD_MIN_LENGTH, (string) VIRTUSPHERE_PASSWORD_MIN_LENGTH_DEFAULT);
 
@@ -391,46 +483,64 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
     <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
         <section class="panel">
             <h2><?php echo h(__t('settings.deploy_settings_title')); ?></h2>
-            <div class="alert alert-info">
-                <strong><?php echo h(__t('settings.why_title')); ?></strong>
-                <p><?php echo h(__t('settings.why_body')); ?></p>
+            <p class="muted settings-url-intro"><?php echo h(__t('settings.api_base_url_intro')); ?></p>
+            <form class="settings-url-form" method="post" action="settings.php" autocomplete="off">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_api">
+                <label for="api-base-url"><?php echo h(__t('settings.api_base_url_label')); ?></label>
+                <div class="settings-url-input-row" data-settings-url-row>
+                    <input id="api-base-url" name="api_base_url" value="<?php echo h(form_old('settings', 'api_base_url', $storedApiBaseUrl)); ?>"<?php echo form_input_class('settings', 'api_base_url'); ?> placeholder="http://virtusphere.local:8021" required>
+                    <button class="button" type="submit"><?php echo h(__t('common.save')); ?></button>
+                </div>
+                <?php echo form_error_html('settings', 'api_base_url'); ?>
+            </form>
+            <?php if ($storedApiBaseUrl !== '') { ?>
+                <div class="settings-reset-row">
+                    <form method="post" action="settings.php">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="clear_api">
+                        <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('settings.api_base_url_reset_confirm')); ?>"><?php echo h(__t('settings.api_base_url_reset')); ?></button>
+                    </form>
+                    <span class="hint"><?php echo h(__t('settings.api_base_url_reset_hint')); ?></span>
+                </div>
+            <?php } ?>
+            <details class="settings-examples" data-settings-examples>
+                <summary><?php echo h(__t('settings.api_base_url_examples_summary')); ?></summary>
                 <ul>
                     <li><?php echo h(__t('settings.same_host_hint')); ?> <code><?php echo h(__t('settings.same_host_example')); ?></code></li>
                     <li><?php echo h(__t('settings.other_host_hint')); ?> <code><?php echo h(__t('settings.other_host_example')); ?></code></li>
                     <li><?php echo h(__t('settings.test_hint')); ?> <code><?php echo h(__t('settings.test_command')); ?></code></li>
                 </ul>
-            </div>
-            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
-                <?php echo csrf_field(); ?>
-                <input type="hidden" name="action" value="save_api">
-                <label><?php echo h(__t('settings.api_base_url_label')); ?>
-                    <input name="api_base_url" value="<?php echo h(form_old('settings', 'api_base_url', $storedApiBaseUrl)); ?>"<?php echo form_input_class('settings', 'api_base_url'); ?> placeholder="http://virtusphere.local:8021" required>
-                    <?php echo form_error_html('settings', 'api_base_url'); ?>
-                </label>
-                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
-            </form>
-            <?php if ($storedApiBaseUrl !== '') { ?>
-                <p class="muted"><?php echo h(__t('settings.api_base_url_reset_hint')); ?></p>
-                <form method="post" action="settings.php">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="clear_api">
-                    <div class="actions"><button class="button" type="submit" data-confirm="<?php echo h(__t('settings.api_base_url_reset_confirm')); ?>"><?php echo h(__t('settings.api_base_url_reset')); ?></button></div>
-                </form>
-            <?php } ?>
+            </details>
         </section>
 
         <section class="panel">
             <h2><?php echo h(__t('settings.runtime_title')); ?></h2>
-            <?php if ($effectiveApiBaseUrlError !== '') { ?>
-                <div class="alert alert-info"><?php echo h($effectiveApiBaseUrlError); ?></div>
-            <?php } else { ?>
-                <div class="table-wrap" tabindex="0"><table>
-                    <tbody>
-                        <tr><th><?php echo h(__t('settings.effective_api_url')); ?></th><td><?php echo h($effectiveApiBaseUrl); ?></td></tr>
-                        <tr><th><?php echo h(__t('settings.ansible_mode')); ?></th><td><?php echo h(__t('settings.ansible_mode_ssh')); ?></td></tr>
-                    </tbody>
-                </table></div>
-            <?php } ?>
+            <div class="runtime-grid" data-api-runtime data-api-source="<?php echo h($apiBaseUrlSource); ?>">
+                <article class="runtime-fact">
+                    <div class="runtime-fact-head">
+                        <h3><?php echo h(__t('settings.effective_api_url')); ?></h3>
+                        <span class="badge <?php echo h($apiBaseUrlSourceBadge); ?>"><?php echo h($apiBaseUrlSourceLabel); ?></span>
+                    </div>
+                    <?php if ($effectiveApiBaseUrlError === '') { ?>
+                        <code class="runtime-value" data-effective-api-url><?php echo h($effectiveApiBaseUrl); ?></code>
+                    <?php } else { ?>
+                        <div class="alert alert-warning"><?php echo h($effectiveApiBaseUrlError); ?></div>
+                    <?php } ?>
+                </article>
+                <article class="runtime-fact">
+                    <div class="runtime-fact-head">
+                        <h3><?php echo h(__t('settings.ansible_access')); ?></h3>
+                        <span class="badge badge-info"><?php echo h(__t('settings.ansible_access_per_job')); ?></span>
+                    </div>
+                    <span class="runtime-value"><?php echo h(__t('settings.ansible_access_value')); ?></span>
+                    <p class="muted"><?php echo h(__t('settings.ansible_access_detail')); ?></p>
+                    <div class="runtime-fact-links">
+                        <a href="credentials.php"><?php echo h(__t('settings.manage_credentials')); ?></a>
+                        <a href="deploy.php"><?php echo h(__t('settings.open_deploy')); ?></a>
+                    </div>
+                </article>
+            </div>
         </section>
     </div>
 
@@ -480,18 +590,56 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
         <section class="panel">
             <h2><?php echo h(__t('settings.probe_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.probe_hint', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
-            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
+            <p class="muted"><?php echo h(__t('settings.probe_scope', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></p>
+            <?php if ($probeConfig['mode'] === VIRTUSPHERE_PROBE_MODE_MANUAL) { ?>
+                <div class="alert alert-info"><?php echo h(__t('settings.probe_manual_current', ['host' => $probeConfig['configured_host']])); ?></div>
+            <?php } ?>
+            <dl class="status-facts">
+                <div><dt><?php echo h(__t('settings.probe_effective_target')); ?></dt><dd><code><?php echo h($probeConfig['host'] ?? __t('settings.probe_waiting_target')); ?></code></dd></div>
+                <div><dt><?php echo h(__t('settings.probe_port_label')); ?></dt><dd><?php echo h((string) $probeConfig['port']); ?></dd></div>
+                <?php
+                // Same row, same badge helper, so it has to be the same verdict:
+                // derive the state through virtusphere_heartbeat_staleness() like
+                // System status does. Reading last_status alone called a probe
+                // "OK" whose last check was days old, because a maintenance
+                // worker that stopped writes no failure either. Settings is where
+                // the probe is configured, so a green badge here next to a red one
+                // on System status is the worst possible place to disagree.
+                ?>
+                <div><dt><?php echo h(__t('settings.probe_result')); ?></dt><dd><?php echo $probeHeartbeat === null
+                    ? heartbeat_badge('unknown')
+                    : heartbeat_badge(virtusphere_heartbeat_staleness(
+                        isset($probeHeartbeat['last_seen_at']) ? (string) $probeHeartbeat['last_seen_at'] : null,
+                        (int) $probeHeartbeat['interval_seconds'],
+                        (string) $probeHeartbeat['last_status']
+                    )); ?></dd></div>
+                <?php if ($probeConfig['mode'] === VIRTUSPHERE_PROBE_MODE_AUTO) { ?>
+                    <div><dt><?php echo h(__t('settings.probe_auto_origin')); ?></dt><dd><?php echo h($probeConfig['source_ip'] ?? __t('settings.probe_waiting_target')); ?><?php echo $probeConfig['source_seen_at'] !== null ? ' · ' . h(portal_format_timestamp($probeConfig['source_seen_at'])) : ''; ?></dd></div>
+                <?php } ?>
+                <div><dt><?php echo h(__t('settings.probe_last_attempt')); ?></dt><dd><?php echo $probeHeartbeat !== null ? h(portal_format_timestamp($probeHeartbeat['last_checked_at'] ?? '')) : h(__t('settings.probe_never')); ?></dd></div>
+                <div><dt><?php echo h(__t('settings.probe_last_success')); ?></dt><dd><?php echo $probeHeartbeat !== null && !empty($probeHeartbeat['last_seen_at']) ? h(portal_format_timestamp($probeHeartbeat['last_seen_at'])) : h(__t('settings.probe_never')); ?></dd></div>
+            </dl>
+            <form class="form-grid probe-form" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_probe">
-                <label><?php echo h(__t('settings.probe_host_label')); ?>
-                    <input name="probe_host" value="<?php echo h(form_old('probe', 'probe_host', $probeHost)); ?>"<?php echo form_input_class('probe', 'probe_host'); ?> placeholder="<?php echo h(__t('settings.probe_host_placeholder')); ?>">
+                <fieldset class="form-grid-full probe-mode">
+                    <legend><?php echo h(__t('settings.probe_mode_label')); ?></legend>
+                    <div class="radio-card-grid">
+                        <label class="radio-card"><input type="radio" name="probe_mode" value="auto"<?php echo $probeMode === VIRTUSPHERE_PROBE_MODE_AUTO ? ' checked' : ''; ?>> <span><strong><?php echo h(__t('settings.probe_mode_auto')); ?></strong><small><?php echo h(__t('settings.probe_mode_auto_hint')); ?></small></span></label>
+                        <label class="radio-card"><input type="radio" name="probe_mode" value="manual"<?php echo $probeMode === VIRTUSPHERE_PROBE_MODE_MANUAL ? ' checked' : ''; ?>> <span><strong><?php echo h(__t('settings.probe_mode_manual')); ?></strong><small><?php echo h(__t('settings.probe_mode_manual_hint')); ?></small></span></label>
+                    </div>
+                    <?php echo form_error_html('probe', 'probe_mode'); ?>
+                </fieldset>
+                <label class="probe-host"><?php echo h(__t('settings.probe_host_label')); ?>
+                    <input name="probe_host" value="<?php echo h(form_old('probe', 'probe_host', $probeHost)); ?>"<?php echo form_input_class('probe', 'probe_host'); ?> placeholder="<?php echo h(__t('settings.probe_host_placeholder')); ?>" aria-describedby="probe-host-hint">
+                    <span class="hint" id="probe-host-hint"><?php echo h(__t('settings.probe_host_field_hint')); ?></span>
                     <?php echo form_error_html('probe', 'probe_host'); ?>
                 </label>
-                <label><?php echo h(__t('settings.probe_port_label')); ?>
-                    <input name="probe_port" type="number" min="1" max="65535" value="<?php echo h(form_old('probe', 'probe_port', $probePort)); ?>"<?php echo form_input_class('probe', 'probe_port'); ?>>
+                <label class="probe-port"><?php echo h(__t('settings.probe_port_label')); ?>
+                    <input name="probe_port" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" value="<?php echo h(form_old('probe', 'probe_port', $probePort)); ?>"<?php echo form_input_class('probe', 'probe_port'); ?>>
                     <?php echo form_error_html('probe', 'probe_port'); ?>
                 </label>
-                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
+                <div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('settings.probe_checking')); ?>"><?php echo h(__t('settings.probe_save_check')); ?></button><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('settings.probe_status_link')); ?></a></div>
             </form>
         </section>
 
@@ -560,9 +708,27 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
                     <input name="esxi_inventory_interval_hours" type="number" min="<?php echo h((string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX); ?>" value="<?php echo h(form_old('esxi', 'esxi_inventory_interval_hours', $esxiIntervalHours)); ?>"<?php echo form_input_class('esxi', 'esxi_inventory_interval_hours'); ?>>
                     <?php echo form_error_html('esxi', 'esxi_inventory_interval_hours'); ?>
                 </label>
+                <?php if ($esxiAnsibleResolution['state'] === 'none') { ?>
+                    <div class="alert alert-warning form-grid-full"><?php echo h(__t('settings.esxi_ansible_none')); ?> <a href="credentials.php"><?php echo h(__t('settings.esxi_ansible_manage')); ?></a></div>
+                <?php } elseif ($esxiAnsibleResolution['state'] === 'automatic') { ?>
+                    <div class="form-grid-full">
+                        <strong><?php echo h(__t('settings.esxi_ansible_label')); ?></strong>
+                        <p><?php echo portal_badge('info', __t('settings.esxi_ansible_automatic')); ?> <?php echo h((string) $esxiAnsibleResolution['credentials'][0]['name']); ?></p>
+                    </div>
+                <?php } else { ?>
+                    <label><?php echo h(__t('settings.esxi_ansible_label')); ?>
+                        <select name="esxi_inventory_ansible_credential_id"<?php echo form_input_class('esxi', 'esxi_inventory_ansible_credential_id'); ?> required>
+                            <option value=""><?php echo h(__t('settings.esxi_ansible_choose')); ?></option>
+                            <?php foreach ($esxiAnsibleResolution['credentials'] as $ansibleCredential) { ?>
+                                <option value="<?php echo h((string) $ansibleCredential['id']); ?>"<?php echo (string) $ansibleCredential['id'] === $esxiSelectedAnsible ? ' selected' : ''; ?>><?php echo h((string) $ansibleCredential['name']); ?> — <?php echo h((string) $ansibleCredential['host']); ?></option>
+                            <?php } ?>
+                        </select>
+                        <?php echo form_error_html('esxi', 'esxi_inventory_ansible_credential_id'); ?>
+                    </label>
+                <?php } ?>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
             </form>
-            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?></p>
+            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a></p>
         </section>
     </div>
 

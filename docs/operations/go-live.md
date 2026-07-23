@@ -54,8 +54,12 @@ Alternativen: Der Zugang liefert SSH/SFTP zum Ausführungs-Host, die URL dessen
 Rückweg zur WebApp; ein Deploy verwendet beides gemeinsam. Ein im Portal
 gespeicherter URL-Wert hat Vorrang vor `APP_PUBLIC_BASE_URL` aus der `.env`.
 Nach einem Zurücksetzen gilt die `.env` wieder, und fehlt auch sie, starten keine
-Deploy-Jobs. Die Karte **Deploy-Laufzeit** zeigt den wirksamen Wert samt Quelle;
-der Ansible-Zugang selbst wird beim Einreihen des Auftrags ausgewählt.
+Deploy-Jobs. Unter **Einstellungen → Bereitstellung** wird ein Portalwert im
+URL-Feld mit dem direkt danebenstehenden Knopf gespeichert. Beispiele und
+Verbindungstest sind dort aufklappbar; **Auf .env-Fallback zurücksetzen** ist nur
+bei einem gespeicherten Portalwert sichtbar und entfernt ihn. Die Übersicht
+**Wirksame Deploy-Konfiguration** zeigt den wirksamen Wert samt Quelle; der
+Ansible-Zugang selbst wird beim Einreihen des Auftrags ausgewählt.
 
 Auf dem Host installieren und bereitstellen:
 
@@ -68,14 +72,14 @@ Auf dem Host installieren und bereitstellen:
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
-Der Portal-Test „Testen" beim Ansible-Zugang prüft genau das (SSH-Login,
+„Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login,
 `ansible-playbook`, `python3`, `pyvmomi`, `community.vmware`) und benennt bei
 einem Fehler die fehlende Komponente. Bei gesetzter API-Basis-URL prüft er
 zusätzlich den Rückweg: die Portal-Erreichbarkeit vom Host aus und ob die
 Host-IP in den Machine-API IP-Freigaben steht; fehlt die Freigabe, warnt das
 Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.3). Die eigentlichen vSphere-Rechte liegen im
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
-erlaubt keine Schreibzugriffe, das meldet die Integrationen-Seite als Warnung).
+erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
 ---
 
@@ -203,7 +207,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Die ausgerollten Client-VMs brauchen **keinen** Eintrag: `mecm-api.php` und
    `mecm_report.php` lassen alternativ eine im Portal bekannte MAC-Adresse als
    Ausweis gelten. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
-   („Testen" beim Ansible-Zugang): fehlt er, endet der Test als Warnung mit der
+   („Verbindung und Umgebung prüfen" beim Ansible-Zugang): fehlt er, endet die Prüfung als Warnung mit der
    IP, die hier einzutragen ist.
 4. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft
    später über den Admin-Config-Flow (ADR-0012, Runbook
@@ -226,9 +230,12 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    nur die Server-Heartbeats; die Client-Phasen brauchen ihn nicht (Auth per bekannter
    MAC), er muss also nicht auf die ausgerollten VMs. Absicherung:
    `docs/operations/mecm-integration.md` (Abschnitt „Absicherung des ReportToken").
-4. **Verifikation Integrationen-Seite** (Portal → Integrationen): die drei
-   Sync-Quellen werden grün, die MECM-Erreichbarkeits-Probe grün, der
-   Wartungsdienst grün. Das ist die erste echte Abnahme von E1/E1b/E4.
+4. **Verifikation Systemstatus** (Portal → Systemstatus): die drei
+   MECM-Sync-Quellen, der getrennte Netzwerkpfad und der interne Wartungsdienst
+   werden grün. Unter Einstellungen → Machine-API steht der Probe-Modus auf
+   „Automatisch"; nur wenn die Heartbeat-Absender-IP nicht das richtige Ziel ist,
+   „Eigenes Prüfziel" wählen. Ein grüner TCP-Pfad prüft weder Anmeldung noch WMI
+   oder Scheduler-Aufgaben. Das ist die erste echte Abnahme von E1/E1b/E4.
 
 ## Schritt 6: Paket-Pipeline (E3, hier lag das Datenverlust-Risiko)
 

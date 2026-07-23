@@ -33,11 +33,11 @@ function virtusphere_lifecycle_meta(string $lifecycleState): array
 function virtusphere_mecm_sync_meta(string $mecmSyncState): array
 {
     return match ($mecmSyncState) {
-        VIRTUSPHERE_MECM_NOT_READY => ['badge' => 'neutral'],
-        VIRTUSPHERE_MECM_PENDING => ['badge' => 'warning'],
-        VIRTUSPHERE_MECM_SUBMITTED => ['badge' => 'warning'],
-        VIRTUSPHERE_MECM_REGISTERED => ['badge' => 'success'],
-        VIRTUSPHERE_MECM_FAILED => ['badge' => 'danger'],
+        VIRTUSPHERE_MECM_SYNC_NOT_READY => ['badge' => 'neutral'],
+        VIRTUSPHERE_MECM_SYNC_PENDING => ['badge' => 'warning'],
+        VIRTUSPHERE_MECM_SYNC_SUBMITTED => ['badge' => 'warning'],
+        VIRTUSPHERE_MECM_SYNC_REGISTERED => ['badge' => 'success'],
+        VIRTUSPHERE_MECM_SYNC_FAILED => ['badge' => 'danger'],
         default => ['badge' => 'neutral'],
     };
 }
@@ -47,10 +47,10 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
     if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) {
         return VIRTUSPHERE_STATUS_OS_INSTALLED;
     }
-    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecmSyncState === VIRTUSPHERE_MECM_REGISTERED) {
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
         return VIRTUSPHERE_STATUS_OS_INSTALLING;
     }
-    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecmSyncState === VIRTUSPHERE_MECM_PENDING || $mecmSyncState === VIRTUSPHERE_MECM_SUBMITTED) {
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_PENDING || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_SUBMITTED) {
         return VIRTUSPHERE_STATUS_DEPLOYED;
     }
     if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_READY) {
@@ -63,11 +63,11 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
 function virtusphere_states_from_legacy_status(string $legacyStatus): array
 {
     return match ($legacyStatus) {
-        VIRTUSPHERE_STATUS_OS_INSTALLED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_REGISTERED],
-        VIRTUSPHERE_STATUS_OS_INSTALLING => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, 'mecm_sync_state' => VIRTUSPHERE_MECM_REGISTERED],
-        VIRTUSPHERE_STATUS_DEPLOYED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'mecm_sync_state' => VIRTUSPHERE_MECM_PENDING],
-        VIRTUSPHERE_STATUS_REGISTERED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_READY, 'mecm_sync_state' => VIRTUSPHERE_MECM_NOT_READY],
-        default => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_INITIALIZING, 'mecm_sync_state' => VIRTUSPHERE_MECM_NOT_READY],
+        VIRTUSPHERE_STATUS_OS_INSTALLED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
+        VIRTUSPHERE_STATUS_OS_INSTALLING => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
+        VIRTUSPHERE_STATUS_DEPLOYED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
+        VIRTUSPHERE_STATUS_REGISTERED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_READY, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_NOT_READY],
+        default => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_INITIALIZING, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_NOT_READY],
     };
 }
 
@@ -126,6 +126,25 @@ function virtusphere_heartbeat_meta(string $staleness): array
         'missing' => ['badge' => 'warning'],
         'danger' => ['badge' => 'danger'],
         default => ['badge' => 'neutral'],
+    };
+}
+
+/**
+ * Severity order of an Ampel state, for "worst of a group" roll-ups. One ranking
+ * for every group (heartbeat sources, ESXi credentials, Ansible credentials):
+ * three copies used to exist and had already disagreed about whether `missing`
+ * outranks `warning`, which is a difference the tiles must never show.
+ */
+function virtusphere_heartbeat_state_rank(string $state): int
+{
+    return match ($state) {
+        'danger' => 4,
+        // Worse than a delayed source: it has never reported at all, while its
+        // siblings do, so nothing is going to recover on its own.
+        'missing' => 3,
+        'warning' => 2,
+        'ok' => 0,
+        default => 1,
     };
 }
 

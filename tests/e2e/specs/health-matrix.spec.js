@@ -30,7 +30,7 @@ const PHP_ERROR_MARKERS = [
 // mention `settings.php`. So the check looks for a *leaf element whose whole
 // trimmed text is a key-shaped token*, which is what an untranslated key is and
 // what embedded data never is.
-const KEY_PREFIXES = 'common|portal|missions|vms|deploy|os|packages|vlans|credentials|integrations|users|settings|logs|help|account|dashboard|validate|login';
+const KEY_PREFIXES = 'common|portal|missions|vms|deploy|os|packages|vlans|credentials|system_status|users|settings|logs|help|account|dashboard|validate|login';
 const WHOLE_KEY = new RegExp('^(?:' + KEY_PREFIXES + ')\\.[a-z0-9_]{3,}$');
 
 for (const [roleName, role] of Object.entries(ROLES)) {

@@ -51,9 +51,10 @@ final class PortalConfirmContractTest extends TestCase
         'missions.php:import_confirm' => 'creates a mission; the preview step is the confirmation',
 
         // Read-only or idempotent refreshes.
-        'credentials.php:test' => 'opens a connection and reports, writes nothing',
+        'credentials.php:test' => 'runs a diagnostic or queues a read-only inventory pull; no managed object is deleted',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
-        'integrations.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
+        'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
+        'system_status.php:run_mecm_probe' => 'runs a read-only TCP reachability check',
 
         // Edits of the record the user is already looking at, with its own form.
         'credentials.php:update' => 'edits the credential the form belongs to',

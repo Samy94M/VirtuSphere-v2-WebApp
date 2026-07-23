@@ -79,18 +79,6 @@ parameters:
 			path: portal/account.php
 
 		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 20
-			path: portal/credentials.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 9
-			path: portal/dashboard.php
-
-		-
 			message: '#^Offset decimal\-int\-string on array\<string, \(int\|string\)\> in isset\(\) does not exist\.$#'
 			identifier: isset.offset
 			count: 1
@@ -113,18 +101,6 @@ parameters:
 			identifier: variable.undefined
 			count: 1
 			path: portal/help.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 8
-			path: portal/integrations.php
-
-		-
-			message: '#^Variable \$esxiWorst on left side of \?\? always exists and is not nullable\.$#'
-			identifier: nullCoalesce.variable
-			count: 1
-			path: portal/integrations.php
 
 		-
 			message: '#^Variable \$connection might not be defined\.$#'
@@ -173,12 +149,6 @@ parameters:
 			identifier: variable.undefined
 			count: 1
 			path: portal/session_ping.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 52
-			path: portal/settings.php
 
 		-
 			message: '#^Variable \$connection might not be defined\.$#'

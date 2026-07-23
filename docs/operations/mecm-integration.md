@@ -109,9 +109,11 @@ Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 
 ### Anzeige im Portal
 
-- **Integrationen** (alle angemeldeten Nutzer): Ampel je Quelle mit letzter
-  Meldung, letzter Prüfung und Klartext-Handlungsanweisung bei Rot.
-  Dashboard zeigt den schlechtesten Status als Kachel.
+- **Systemstatus** (alle angemeldeten Nutzer, URL weiterhin
+  `portal/system_status.php`): getrennte Gruppen für MECM-Synchronisation,
+  Netzwerkpfad, Ansible, ESXi und interne Dienste mit letzter Meldung, letzter
+  Prüfung und Klartext-Handlungsanweisung. Das Dashboard liest denselben
+  Health-Snapshot.
 - **VM-Detail**: Abschnitt „Client-Phasen" mit den vier Phasen und den letzten
   20 Roh-Ereignissen.
 - MECM-relevante Audit-Einträge stehen im Log unter der Kategorie
@@ -168,27 +170,35 @@ Der Compose-Service `maintenance-worker` (Container
 `virtusphere-v2-webapp-maintenance-worker-1`) läuft dauerhaft neben dem
 Deploy-Worker und erledigt:
 
-1. **Eigen-Heartbeat** (alle 60 s): erscheint auf der Statusseite als
-   „Wartungsdienst (WebApp)". Fehlt er, läuft der Container nicht.
-2. **MECM-Erreichbarkeits-Probe** (alle 5 min): TCP-Verbindung zum
-   MECM-Server. Ziel automatisch = Absende-IP des letzten
-   Device-Sync-Heartbeats; übersteuerbar im Portal unter Einstellungen →
-   „MECM-Erreichbarkeits-Prüfung" (Host + Port, Standardport 445). Eine
-   fehlgeschlagene Prüfung schaltet die Zeile sofort auf Rot.
+1. **Eigen-Heartbeat** (alle 60 s): erscheint im Systemstatus unter
+   „Interne Dienste" als „Wartungsdienst (WebApp)". Fehlt er, läuft der
+   Container nicht. Sein Zustand verändert den MECM-Gesamtzustand nicht.
+2. **MECM-Netzwerkerreichbarkeit** (alle 5 min): reine TCP-Verbindung vom
+   Wartungsdienst zum MECM-Ziel. In Einstellungen → Machine-API ist der Modus
+   ausdrücklich wählbar: „Automatisch" nutzt die Absender-IP des letzten
+   Device-Sync-Heartbeats, „Eigenes Prüfziel" verlangt DNS, IPv4 oder IPv6.
+   Standardport 445 steht für SMB. Die Probe prüft keine MECM-Anmeldung, WMI,
+   Scheduler-Aufgabe, Katalog-Synchronisation oder den Autoimporter. Speichern
+   und „Erneut prüfen" führen zusätzlich je eine sofortige Prüfung aus.
 3. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
    Sicherheits-Protokolle (Anmeldung, Benutzer, Zugangsdaten) älter als 365 Tage,
    übrige Portal-Logs älter als 90 Tage, Anmeldeversuchs-Zähler älter als 7 Tage
    (gestaffelt nach Kategorie, siehe ADR-0026). (Früher lief die Log-Bereinigung
    huckepack bei API-Requests; jetzt läuft sie auch ohne Traffic.)
-4. **Zustandswechsel-Audits**: Nur Übergänge von/nach Rot landen im Log
-   (Kategorie „MECM-Integration"), niemals einzelne Heartbeats.
+4. **Zustandswechsel-Audits**: MECM-Quellen und automatische Probe schreiben
+   nur Übergänge von/nach problematisch in „MECM-Integration". Der
+   Maintenance-Worker schreibt seine Übergänge unter „System". Manuelle Probe
+   und Prüfung nach dem Speichern werden einmalig mit Ziel, Ergebnis- und
+   Fehlerkategorie protokolliert; erwartete DNS-/Timeout-/Refused-Ergebnisse
+   erzeugen keinen zusätzlichen PHP-Fehlerlog-Spam.
 
 **Diagnose-Kombination auf der Statusseite:**
 
 | Beobachtung | Bedeutung | Maßnahme |
 |---|---|---|
 | Sync-Quellen rot, Probe grün | Server läuft, Tasks melden sich nicht | Aufgabenplanung auf dem MECM-Server prüfen |
-| Probe rot | Server/Netz nicht erreichbar | MECM-Server bzw. Netzwerk/Firewall prüfen |
+| Probe rot, Heartbeats aktuell | Rückweg MECM → Portal funktioniert, aber der gewählte TCP-Port WebApp → MECM ist blockiert/falsch | Probe-Ziel und Firewall für Port 445 prüfen; die Tasks müssen deshalb nicht gestoppt sein |
+| Probe rot, Heartbeats alt | Server/Netz oder die Aufgaben können ausgefallen sein | Erst Ziel/Netzwerk, dann Aufgabenplanung prüfen |
 | Wartungsdienst rot | interner Dienst steht | `docker compose ps` auf dem Ubuntu-Host, dann `docker compose up -d maintenance-worker` |
 
 **Dienst neustarten** (Ubuntu-Host, Repo-Verzeichnis):
@@ -284,7 +294,7 @@ Wichtige Härtungen gegenüber den Altskripten:
   MAC-Vergleich (keine falschen Konfliktwarnungen), nutzt das eingebettete
   `mission`-Objekt aus `getDeviceList` statt N+1 `getMissionName`.
 - Alle drei senden je Durchlauf einen **Heartbeat**; ein toter Task wird im
-  Portal unter *Integrationen* rot.
+  Portal im *Systemstatus* rot.
 
 **Task neu starten** (MECM-Server): Aufgabenplanung öffnen → Task unter
 `\` auswählen → *Ausführen*. Oder per PowerShell:
@@ -370,11 +380,24 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 
 ## Troubleshooting
 
-Erste Anlaufstelle ist immer die Portal-Seite **Integrationen** (Klartext-Ampel
-je Quelle mit Handlungsanweisung). Häufige Fälle:
+Erste Anlaufstelle ist immer der **Systemstatus** (Klartext-Ampel
+je Quelle mit Handlungsanweisung). Die Handlungsanweisung ist eine
+Reparaturanweisung und steht deshalb nur an einer Zeile, die nicht `ok` ist;
+verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. Hat sich
+noch nie eine Sync-Quelle gemeldet (Gruppe steht komplett auf „Noch keine
+Daten"), entfallen die Zeilenhinweise ganz: es gibt keine Aufgabe, die man neu
+starten könnte. Der Abschnitt nennt dann einmal den Einrichtungsweg (Skripte auf
+dem MECM-Server, IP-Freigabe im Portal, dieses Dokument). Ebenso schweigt die
+TCP-Prüfung, solange sie kein wirksames Ziel hat: „Server nicht erreichbar" wäre
+eine Aussage über eine Verbindung, die nie versucht wurde. Der
+Zustand „Erwartet, nie gemeldet" (gelb) unterscheidet sich von „Noch keine
+Daten" (grau): gelb heißt, andere MECM-Quellen melden sich bereits, diese eine
+also nie eingerichtet oder nie gestartet; grau heißt, die Integration ist
+insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
+(Quellen, ESXi, Ansible) aus denselben Konstanten wie die Hilfe. Häufige Fälle:
 
 **VM taucht nicht in MECM auf**
-1. *Integrationen* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
+1. *Systemstatus* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
    auf dem MECM-Server, Task „VirtuSphere MECM Devices Sync" starten.
 2. Hat die VM eine MAC? Im Portal an der VM prüfen; ohne DHCP-MAC überspringt
    der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein).
@@ -397,9 +420,11 @@ je Quelle mit Handlungsanweisung). Häufige Fälle:
    Einstellungen → Paket-Sync-Schutzschwelle).
 
 **MECM-Server offline**
-- *Integrationen* zeigt „MECM-Server erreichbar" rot → Server/Netz/Firewall
-  zwischen WebApp und MECM-Server prüfen. Probe-Ziel/-Port sind im Portal unter
-  Einstellungen konfigurierbar (Standard: IP des letzten Device-Sync, Port 445).
+- Der *Systemstatus* zeigt den Netzwerkpfad rot → wirksames Ziel, Modus und Port
+  direkt dort prüfen. Unter Einstellungen → Machine-API kann zwischen
+  automatischer Heartbeat-Absender-IP und eigenem Ziel gewechselt werden.
+  Standard ist Port 445. Aktuelle Heartbeats bei roter Probe sind kein
+  Widerspruch: Hin- und Rückweg sowie die geprüften Protokolle sind verschieden.
 
 **Wartungsdienst rot**
 - Auf dem Ubuntu-Host: `docker compose ps`, dann

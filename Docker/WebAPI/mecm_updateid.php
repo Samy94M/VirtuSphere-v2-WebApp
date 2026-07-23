@@ -35,7 +35,7 @@ try {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
 
-    repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId);
+    repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId);
     machine_api_json(['success' => 'Data updated successfully']);
 } catch (JsonException) {
     machine_api_json(['error' => 'Invalid JSON body'], 400);

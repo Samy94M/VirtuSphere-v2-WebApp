@@ -866,7 +866,7 @@ function repo_sweep_orphaned_deploying_vms(mysqli $db): array
 {
     $deploying = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
     $failedLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
-    $failedMecm = VIRTUSPHERE_MECM_FAILED;
+    $failedMecm = VIRTUSPHERE_MECM_SYNC_FAILED;
     $note = 'convergence sweep: stuck in deploying without an active deploy job';
 
     return repo_transaction($db, static function () use ($db, $deploying, $failedLifecycle, $failedMecm, $note): array {

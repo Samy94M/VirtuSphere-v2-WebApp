@@ -292,8 +292,8 @@ function repo_get_mission(mysqli $db, int $missionId): ?array
 // mission would orphan its MECM collection (mission name = collection name).
 function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 {
-    $submitted = VIRTUSPHERE_MECM_SUBMITTED;
-    $registered = VIRTUSPHERE_MECM_REGISTERED;
+    $submitted = VIRTUSPHERE_MECM_SYNC_SUBMITTED;
+    $registered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
 
     return repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE mission_id = ? AND mecm_sync_state IN (?, ?) LIMIT 1', 'iss', [$missionId, $submitted, $registered]) !== null;
 }
@@ -463,7 +463,7 @@ function repo_clone_mission_vms(mysqli $db, int $sourceMissionId, int $targetMis
         $values['mission_id'] = $targetMissionId;
         $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
         $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
-        $values['mecm_sync_state'] = VIRTUSPHERE_MECM_NOT_READY;
+        $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
         $values['updated'] = 0;
 
         $newVmId = repo_insert_from_values($db, 'deploy_vms', $values);
@@ -479,7 +479,7 @@ function repo_clone_mission_vms(mysqli $db, int $sourceMissionId, int $targetMis
 
         $packages = repo_fetch_related($db, 'SELECT package_id AS id FROM deploy_vm_packages WHERE vm_id = ? ORDER BY package_id', (int) $sourceVm['id']);
         repo_replace_packages($db, $newVmId, $packages);
-        repo_record_vm_status_event($db, $newVmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, $reason, $userId);
+        repo_record_vm_status_event($db, $newVmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, $reason, $userId);
         $created++;
     }
 

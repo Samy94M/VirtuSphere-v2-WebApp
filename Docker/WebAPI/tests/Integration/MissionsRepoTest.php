@@ -79,7 +79,7 @@ final class MissionsRepoTest extends TestCase
     public function testRenameIsLockedWhenAVmIsRegisteredInMecm(): void
     {
         $missionId = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'locked']);
-        $this->insertVm($missionId, 'PHPUNITLOCK1', VIRTUSPHERE_MECM_REGISTERED);
+        $this->insertVm($missionId, 'PHPUNITLOCK1', VIRTUSPHERE_MECM_SYNC_REGISTERED);
 
         $this->expectException(ValidationException::class);
         repo_update_mission_checked($this->db, $missionId, ['mission_name' => self::PREFIX . 'renamed'], '');
@@ -88,7 +88,7 @@ final class MissionsRepoTest extends TestCase
     public function testRenameIsAllowedWithoutMecmRegistration(): void
     {
         $missionId = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'free']);
-        $this->insertVm($missionId, 'PHPUNITFREE1', VIRTUSPHERE_MECM_NOT_READY);
+        $this->insertVm($missionId, 'PHPUNITFREE1', VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         $result = repo_update_mission_checked($this->db, $missionId, ['mission_name' => self::PREFIX . 'free_renamed'], '');
         self::assertTrue($result);
@@ -100,12 +100,12 @@ final class MissionsRepoTest extends TestCase
     public function testCloneTemplateReportsGlobalNameConflicts(): void
     {
         $templateId = repo_create_mission($this->db, ['mission_name' => VIRTUSPHERE_TEMPLATE_PREFIX . self::PREFIX . 'tpl']);
-        $this->insertVm($templateId, 'PHPUNITCLONE1', VIRTUSPHERE_MECM_NOT_READY);
+        $this->insertVm($templateId, 'PHPUNITCLONE1', VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         // Same VM name already lives in an unrelated mission, so the clone
         // preflight must refuse before creating anything.
         $otherId = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'other']);
-        $this->insertVm($otherId, 'PHPUNITCLONE1', VIRTUSPHERE_MECM_NOT_READY);
+        $this->insertVm($otherId, 'PHPUNITCLONE1', VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         try {
             repo_clone_template_to_new_mission($this->db, $templateId, self::PREFIX . 'clone_target', 1);

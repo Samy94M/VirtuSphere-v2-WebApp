@@ -17,6 +17,7 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help.settings_api_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_api_p1')); ?></p>
             <p><?php echo h(__t('help.settings_api_p2')); ?></p>
+            <p><?php echo h(__t('help.settings_api_p3')); ?></p>
             <h3><?php echo h(__t('help.settings_runtime_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_runtime_p1')); ?></p>
         </section>
@@ -26,13 +27,13 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help.settings_allowlist_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_allowlist_p1')); ?></p>
             <p><?php echo h(__t('help.settings_allowlist_p2')); ?></p>
+            <h3><?php echo h(__t('help.settings_probe_heading')); ?></h3>
+            <p><?php echo h(__t('help.settings_probe_p1', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
+            <p><?php echo h(__t('help.settings_probe_p2', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></p>
             <h3><?php echo h(__t('help.settings_token_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_token_p1')); ?></p>
             <p><?php echo h(__t('help.settings_token_p2')); ?></p>
             <p><?php echo h(__t('help.settings_token_p3')); ?></p>
-            <h3><?php echo h(__t('help.settings_probe_heading')); ?></h3>
-            <p><?php echo h(__t('help.settings_probe_p1', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
-            <p><?php echo h(__t('help.settings_probe_p2')); ?></p>
         </section>
 
         <section class="panel">

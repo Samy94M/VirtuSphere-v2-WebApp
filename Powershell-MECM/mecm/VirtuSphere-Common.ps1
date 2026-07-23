@@ -293,7 +293,7 @@ function Send-VsHeartbeat {
         Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=heartbeat' -Method POST -Body $body -TimeoutSec 5 | Out-Null
     } catch {
         # Bewusst still - Sichtbarkeit entsteht serverseitig durch das Ausbleiben
-        # (die Ampel auf der Integrationsseite wird rot). Der Grund bleibt aber
+        # (die Ampel im Systemstatus wird rot). Der Grund bleibt aber
         # per -Debug abrufbar: ein Heartbeat, der wegen eines falschen Tokens
         # abgelehnt wird, sieht von aussen genauso aus wie ein Netzausfall.
         Write-Debug ('Heartbeat nicht zugestellt: {0}' -f (Get-VsErrorDetail -ErrorRecord $_))

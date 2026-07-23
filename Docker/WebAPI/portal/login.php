@@ -63,7 +63,7 @@ $nonce = h(virtusphere_csp_nonce());
         <span class="sr-only"><?php echo h(__t('layout.theme')); ?></span>
     </button>
 <main class="panel login-panel">
-    <img class="login-logo" src="<?php echo h(layout_asset_url('assets/img/logo-160.png')); ?>" srcset="<?php echo h(layout_asset_url('assets/img/logo-160.png')); ?> 1x, <?php echo h(layout_asset_url('assets/img/logo-160@2x.png')); ?> 2x" width="80" height="80" alt="">
+    <img class="login-logo" src="<?php echo h(layout_asset_url('assets/img/logo-160.png')); ?>" srcset="<?php echo h(layout_asset_url('assets/img/logo-160.png')); ?> 1x, <?php echo h(layout_asset_url('assets/img/logo-160@2x.png')); ?> 2x" width="129" height="129" alt="">
     <h1>VirtuSphere</h1>
     <p class="login-tagline"><?php echo h(__t('login.tagline')); ?></p>
     <?php foreach (flash_messages() as $flash) { echo flash_alert_html(is_array($flash) ? $flash : []); } ?>

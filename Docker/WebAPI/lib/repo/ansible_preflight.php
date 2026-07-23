@@ -47,6 +47,20 @@ function repo_ansible_preflight_state(mysqli $db, int $credentialId): ?array
     return repo_fetch_one($db, 'SELECT * FROM deploy_ansible_preflight_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
 }
 
+/** @return array<int, array<string,mixed>> */
+function repo_ansible_preflight_states(mysqli $db): array
+{
+    $stmt = $db->prepare('SELECT * FROM deploy_ansible_preflight_state');
+    $stmt->execute();
+
+    $states = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $states[(int) $row['credential_id']] = $row;
+    }
+
+    return $states;
+}
+
 /**
  * Drops the stored result when the credential is edited. The old result proved
  * the OLD host/account: keeping a green badge across a host change would claim

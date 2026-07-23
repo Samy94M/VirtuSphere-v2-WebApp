@@ -46,7 +46,7 @@ final class DeployVmConvergenceSweepTest extends TestCase
     public function testOrphanedDeployingVmConvergesToFailedFailedAndKeepsItsMac(): void
     {
         $missionId = $this->insertMission('orphan');
-        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $mac = '02:AA:BB:CC:DD:01';
         $this->insertInterface($vmId, 'WDS', $mac);
         $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
@@ -55,7 +55,7 @@ final class DeployVmConvergenceSweepTest extends TestCase
 
         $sweptVmIds = array_column($swept, 'vm_id');
         self::assertContains($vmId, $sweptVmIds);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_FAILED], $this->vmState($vmId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmId));
         self::assertSame($mac, $this->interfaceMac($vmId), 'a sweep must never touch stored MACs');
         self::assertSame(1, $this->sweepEventCount($vmId), 'the convergence must leave a status event');
     }
@@ -63,11 +63,11 @@ final class DeployVmConvergenceSweepTest extends TestCase
     public function testActiveJobsProtectTheirMissionsVms(): void
     {
         $runningMission = $this->insertMission('running');
-        $runningVm = $this->insertVm($runningMission, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $runningVm = $this->insertVm($runningMission, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $this->insertJob($runningMission, VIRTUSPHERE_DEPLOY_STATUS_RUNNING);
 
         $queuedMission = $this->insertMission('queued');
-        $queuedVm = $this->insertVm($queuedMission, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $queuedVm = $this->insertVm($queuedMission, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $this->insertJob($queuedMission, VIRTUSPHERE_DEPLOY_STATUS_QUEUED);
 
         $swept = repo_sweep_orphaned_deploying_vms($this->db);
@@ -75,26 +75,26 @@ final class DeployVmConvergenceSweepTest extends TestCase
         $sweptVmIds = array_column($swept, 'vm_id');
         self::assertNotContains($runningVm, $sweptVmIds);
         self::assertNotContains($queuedVm, $sweptVmIds);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY], $this->vmState($runningVm));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY], $this->vmState($queuedVm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($runningVm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($queuedVm));
     }
 
     public function testOnlyDeployingVmsAreSwept(): void
     {
         $missionId = $this->insertMission('deployed');
-        $deployedVm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
+        $deployedVm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED);
 
         $swept = repo_sweep_orphaned_deploying_vms($this->db);
 
         self::assertNotContains($deployedVm, array_column($swept, 'vm_id'));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING], $this->vmState($deployedVm), 'a committed import result outlives its terminal job');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($deployedVm), 'a committed import result outlives its terminal job');
     }
 
     public function testSweepIsIdempotent(): void
     {
         $missionId = $this->insertMission('idempotent');
-        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
 
         $firstSweptIds = array_column(repo_sweep_orphaned_deploying_vms($this->db), 'vm_id');

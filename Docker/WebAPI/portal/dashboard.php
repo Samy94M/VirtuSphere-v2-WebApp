@@ -7,18 +7,22 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/helpers.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/heartbeats.php';
-require_once __DIR__ . '/../lib/esxi_capabilities.php';
+require_once __DIR__ . '/../lib/integration_health.php';
+require_once __DIR__ . '/../lib/system_status.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
 
 $missionCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) <> ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) = ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $vmCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms');
-$mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?)', 'ss', [VIRTUSPHERE_MECM_PENDING, VIRTUSPHERE_MECM_SUBMITTED]);
-$integrationWorst = repo_integration_worst_state(repo_integration_status_rows($connection));
+$mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?)', 'ss', [VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_MECM_SYNC_SUBMITTED]);
+$healthSnapshot = integration_health_snapshot($connection);
+$integrationWorst = (string) $healthSnapshot['mecm']['state'];
 // Null when no ESXi credential exists: a tile that is permanently grey for a
 // feature nobody configured is noise, so it is not rendered at all.
-$hypervisorWorst = esxi_worst_state($connection);
+$hypervisorWorst = $healthSnapshot['esxi']['state'];
 // Mission deploys currently queued or running. Shown only to operators who can
 // reach the deploy page, and only when at least one is in flight: a permanent
 // "0" here would be the same noise the hypervisor tile above avoids.
@@ -43,9 +47,9 @@ layout_header(__t('dashboard.title'), $user, 'dashboard');
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>
-        <a class="card kpi" href="integrations.php"><span class="muted"><?php echo h(__t('dashboard.kpi_integrations')); ?></span><span class="value"><?php echo heartbeat_badge($integrationWorst); ?></span></a>
+        <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_system_status')); ?></span><span class="value"><?php echo heartbeat_badge($integrationWorst); ?></span></a>
         <?php if ($hypervisorWorst !== null) { ?>
-            <a class="card kpi" href="integrations.php"><span class="muted"><?php echo h(__t('dashboard.kpi_hypervisor')); ?></span><span class="value"><?php echo esxi_state_badge($hypervisorWorst); ?></span></a>
+            <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_hypervisor')); ?></span><span class="value"><?php echo esxi_state_badge((string) $hypervisorWorst); ?></span></a>
         <?php } ?>
     </section>
 

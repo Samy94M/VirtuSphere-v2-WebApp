@@ -10,11 +10,28 @@ const fs = require('node:fs');
 // Playwright uses its own installed browser (npx playwright install chromium,
 // the CI path). Dev hosts keep PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 offline
 // installs working because the local path resolves first.
-const LOCAL_DEFAULT =
-  'C:\\Users\\Samy\\AppData\\Local\\ms-playwright\\chromium-1223\\chrome-win64\\chrome.exe';
-const CHROMIUM =
-  process.env.PLAYWRIGHT_CHROMIUM ||
-  (fs.existsSync(LOCAL_DEFAULT) ? LOCAL_DEFAULT : undefined);
+// The revision is resolved, never pinned: `npx playwright install` prunes the
+// old revision directory, so a hardcoded one silently stops existing and the
+// whole suite falls through to a browser that is not installed either. Pick the
+// highest chromium-<rev> that actually carries an executable.
+function localChromium() {
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH
+    || path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
+  let entries;
+  try {
+    entries = fs.readdirSync(cache);
+  } catch {
+    return undefined;
+  }
+
+  return entries
+    .filter((name) => /^chromium-\d+$/.test(name))
+    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
+    .map((name) => path.join(cache, name, 'chrome-win64', 'chrome.exe'))
+    .find((exe) => fs.existsSync(exe));
+}
+
+const CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM || localChromium();
 
 // Trailing slash is load-bearing: the no-slash form triggers an nginx redirect
 // that this Chromium fails with ERR_CONNECTION_REFUSED (portal-screenshot-setup).

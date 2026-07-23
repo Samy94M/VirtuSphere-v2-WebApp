@@ -317,7 +317,7 @@ for ($i = 0; $i -lt 6; $i++) {
     Start-Sleep -Seconds 5
     if ((Test-Path $logToday) -and (Get-Item $logToday).LastWriteTimeUtc -gt $logBaseline) { $heartbeatSeen = $true ; break }
 }
-if ($heartbeatSeen) { Write-Ok 'Sync-Skripte schreiben Logs - im Portal unter "Integrationen" sollten die Ampeln gruen werden.' }
+if ($heartbeatSeen) { Write-Ok 'Sync-Skripte schreiben Logs - im Portal unter "Systemstatus" sollten die Ampeln gruen werden.' }
 else { Write-Warn 'Noch keine Sync-Logs - Aufgabenplanung und Portal-Statusseite pruefen.' }
 
 # --- Abschluss-Marker -------------------------------------------------------
@@ -338,4 +338,4 @@ if (-not $webApiIsIp) {
     Write-Host ('  3. DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $webApiHost) -ForegroundColor Gray
 }
 Write-Host ('  4. Client-Paritaet: die Client-Skripte lesen den WebAPI-Namen aus $VsDefaultDnsApi in VirtuSphere-Client-Common.ps1. Beim Default "virtusphere.lan:8021" ist nichts zu tun; weicht euer Name ab, dort denselben Wert wie hier (-WebApi "{0}") setzen.' -f $WebApi) -ForegroundColor Gray
-Write-Host '  5. Seite "Integrationen" im Portal beobachten - die Ampeln werden gruen.' -ForegroundColor Gray
+Write-Host '  5. Seite "Systemstatus" im Portal beobachten - die Ampeln werden gruen.' -ForegroundColor Gray

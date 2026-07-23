@@ -148,14 +148,14 @@ function vmListToCreate($missionId, $vmList, $mysqli)
                 $values['mission_id'] = $vmMissionId;
                 $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
                 $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
-                $values['mecm_sync_state'] = VIRTUSPHERE_MECM_NOT_READY;
+                $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
                 $values['updated'] = 0;
 
                 $vmId = repo_insert_from_values($mysqli, 'deploy_vms', $values);
                 repo_replace_interfaces($mysqli, $vmId, repo_object_get($vm, 'interfaces', []), false);
                 repo_replace_packages($mysqli, $vmId, repo_object_get($vm, 'packages', []));
                 repo_replace_disks($mysqli, $vmId, repo_object_get($vm, 'Disks', repo_object_get($vm, 'disks', [])));
-                repo_record_vm_status_event($mysqli, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'created');
+                repo_record_vm_status_event($mysqli, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'created');
                 $successCount++;
             }
 
@@ -543,7 +543,7 @@ function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $user
 
         $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, mecm_id = NULL, updated_at = NOW() WHERE id = ? AND mission_id = ?');
         $lifecycleState = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
-        $mecmSyncState = VIRTUSPHERE_MECM_PENDING;
+        $mecmSyncState = VIRTUSPHERE_MECM_SYNC_PENDING;
         $legacyStatus = VIRTUSPHERE_STATUS_DEPLOYED;
         $stmt->bind_param('sssii', $lifecycleState, $mecmSyncState, $legacyStatus, $vmId, $missionId);
         $stmt->execute();
@@ -685,13 +685,13 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
             $values['mission_id'] = $missionId;
             $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
             $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
-            $values['mecm_sync_state'] = VIRTUSPHERE_MECM_NOT_READY;
+            $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
             $values['updated'] = 0;
             $vmId = repo_insert_from_values($db, 'deploy_vms', $values);
             repo_replace_interfaces($db, $vmId, $interfaces, false);
             repo_replace_disks($db, $vmId, $disks);
             repo_replace_packages($db, $vmId, $packages);
-            repo_record_vm_status_event($db, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'created from portal', $userId);
+            repo_record_vm_status_event($db, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'created from portal', $userId);
         }
 
         return $vmId;

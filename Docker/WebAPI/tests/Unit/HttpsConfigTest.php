@@ -132,6 +132,12 @@ final class HttpsConfigTest extends TestCase
     public function testBothImagesInitializeSharedHttpsVolumesForPhpAndNginx(): void
     {
         $repoRoot = dirname(__DIR__, 4);
+        if (!is_file($repoRoot . '/Docker/php/Dockerfile')) {
+            // In the PHP container only Docker/WebAPI is mounted; the image
+            // Dockerfiles are host-only files, so this contract can only be
+            // checked on the host (or a full-repo mount).
+            self::markTestSkipped('Repo root not visible; Dockerfiles only exist outside the container mount.');
+        }
         $expected = [
             'chown 33:0 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d',
             'chmod 0770 /etc/nginx/ssl /etc/nginx/virtusphere-conf.d',

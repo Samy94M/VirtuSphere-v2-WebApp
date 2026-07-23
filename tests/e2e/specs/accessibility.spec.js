@@ -45,6 +45,18 @@ for (const pageDef of PORTAL_PAGES) {
 
       await page.goto(pageDef.path, { waitUntil: 'domcontentloaded' });
 
+      // A closed <details> is not in the accessibility tree, so axe skips its
+      // content entirely: legends, technical-detail blocks and repair forms were
+      // never scanned even though a keyboard user reaches all of them with one
+      // Enter. Everything the page can show is opened before the scan, which is
+      // strictly more coverage than the collapsed state (a hidden subtree can
+      // only lose findings, never gain them).
+      await page.evaluate(() => {
+        document.querySelectorAll('details').forEach((element) => {
+          element.open = true;
+        });
+      });
+
       const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
 
       expect(

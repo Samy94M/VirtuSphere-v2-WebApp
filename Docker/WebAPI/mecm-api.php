@@ -81,7 +81,7 @@ try {
         }
 
         $vmId = (int) $row['vm_id'];
-        repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLED, null, 'mecm client info');
+        repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLED, null, 'mecm client info');
 
         $stmt = $connection->prepare('SELECT * FROM deploy_vms WHERE id = ? LIMIT 1');
         $stmt->bind_param('i', $vmId);
@@ -102,7 +102,7 @@ try {
     }
 
     if ($action === 'getDeviceList') {
-        $result = machine_api_prepared_result($connection, 'SELECT * FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?) ORDER BY id', 'ss', [VIRTUSPHERE_MECM_PENDING, VIRTUSPHERE_MECM_SUBMITTED]);
+        $result = machine_api_prepared_result($connection, 'SELECT * FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?) ORDER BY id', 'ss', [VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_MECM_SYNC_SUBMITTED]);
         $data = [];
         while ($vm = $result->fetch_assoc()) {
             $vmId = (int) $vm['id'];

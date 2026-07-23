@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 
@@ -118,17 +119,20 @@ function esxi_capabilities_fresh(?array $state, int $intervalHours, ?int $now = 
 }
 
 /**
- * Rank of a traffic-light state, mirroring repo_integration_worst_state(). Used
- * to roll several credentials up into one dashboard tile.
+ * Rank of a traffic-light state, for rolling several credentials up into one
+ * dashboard tile.
+ *
+ * A thin alias over the SSoT in lib/status.php. It used to be a fourth copy of
+ * the same match block, and its own docblock said it was "mirroring
+ * repo_integration_worst_state()", which is the description of a drift waiting
+ * to happen: a hand-maintained mirror nothing checks. The copies had already
+ * disagreed about where `missing` sits, and while ESXi never produces that
+ * state, a tile that ranks differently from the section it links to is exactly
+ * the contradiction these traffic lights exist to prevent.
  */
 function esxi_state_rank(string $state): int
 {
-    return match ($state) {
-        'danger' => 3,
-        'warning' => 2,
-        'unknown' => 1,
-        default => 0,
-    };
+    return virtusphere_heartbeat_state_rank($state);
 }
 
 /**
@@ -137,7 +141,7 @@ function esxi_state_rank(string $state): int
  * current; it does NOT promise the host can deploy.
  *
  * There is exactly one of these because three call sites (the credential row,
- * the integrations heading and the dashboard rollup) must never disagree on the
+ * the system-status heading and the dashboard rollup) must never disagree on the
  * same colour. It answers one question: "is the inventory pull healthy?"
  *
  * A host capability (a free licence, an HA cluster, maintenance mode) does not

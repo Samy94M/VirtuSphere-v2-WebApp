@@ -61,6 +61,18 @@ final class PortalActionInventory
             $pages['portal/' . basename($path)] = (string) file_get_contents($path);
         }
 
+        // system_status.php is deliberately a controller; its forms live in the
+        // focused renderers but still post to system_status.php and therefore
+        // belong to that page's closed action inventory. Every lib module the
+        // page renders through is globbed rather than listed, so splitting a
+        // renderer for the ADR-0006 line budget cannot quietly drop its forms
+        // out of the confirm and post-guard contracts (it did: the ESXi refresh
+        // and the VLAN reassign vanished from the inventory the moment they
+        // moved into a second module).
+        foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/system_status_*panels.php') ?: [] as $renderer) {
+            $pages['portal/system_status.php'] .= (string) file_get_contents($renderer);
+        }
+
         return $pages;
     }
 }

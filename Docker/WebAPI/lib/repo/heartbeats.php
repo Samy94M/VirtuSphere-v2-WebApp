@@ -70,7 +70,7 @@ function repo_integration_any_seen(mysqli $db): bool
  *
  * @return list<array{source: string, row: array|null, state: string}>
  */
-function repo_integration_status_rows(mysqli $db): array
+function repo_integration_status_rows(mysqli $db, ?int $now = null): array
 {
     require_once __DIR__ . '/../status.php';
 
@@ -94,7 +94,8 @@ function repo_integration_status_rows(mysqli $db): array
             $state = virtusphere_heartbeat_staleness(
                 isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null,
                 (int) $row['interval_seconds'],
-                (string) $row['last_status']
+                (string) $row['last_status'],
+                $now
             );
         }
         $out[] = ['source' => $source, 'row' => $row, 'state' => $state];
@@ -103,14 +104,37 @@ function repo_integration_status_rows(mysqli $db): array
     return $out;
 }
 
+/**
+ * @param list<array{source:string,row:array|null,state:string}> $statusRows
+ * @param list<string> $sources
+ * @return list<array{source:string,row:array|null,state:string}>
+ */
+function repo_integration_rows_for_sources(array $statusRows, array $sources): array
+{
+    return array_values(array_filter(
+        $statusRows,
+        static fn (array $row): bool => in_array((string) $row['source'], $sources, true)
+    ));
+}
+
+/**
+ * @param list<array{source:string,row:array|null,state:string}> $statusRows
+ * @param list<string> $sources
+ */
+function repo_integration_group_worst_state(array $statusRows, array $sources): string
+{
+    return repo_integration_worst_state(repo_integration_rows_for_sources($statusRows, $sources));
+}
+
 // Worst state across all sources for the dashboard tile.
 function repo_integration_worst_state(array $statusRows): string
 {
-    $rank = ['danger' => 4, 'missing' => 3, 'warning' => 2, 'unknown' => 1, 'ok' => 0];
+    require_once __DIR__ . '/../status.php';
+
     $worst = 'ok';
     foreach ($statusRows as $row) {
         $state = (string) ($row['state'] ?? 'unknown');
-        if (($rank[$state] ?? 1) > ($rank[$worst] ?? 0)) {
+        if (virtusphere_heartbeat_state_rank($state) > virtusphere_heartbeat_state_rank($worst)) {
             $worst = $state;
         }
     }

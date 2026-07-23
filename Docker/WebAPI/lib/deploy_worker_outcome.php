@@ -234,7 +234,7 @@ function deploy_worker_mark_vms_deploying(mysqli $db, int $missionId, string $no
         $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, updated_at = NOW() WHERE id = ?');
         $stmt->bind_param('si', $lifecycle, $vmId);
         $stmt->execute();
-        repo_record_vm_status_event($db, $vmId, $lifecycle, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
+        repo_record_vm_status_event($db, $vmId, $lifecycle, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_SYNC_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
     }
 
     return $priorLifecycles;
@@ -272,7 +272,7 @@ function deploy_worker_restore_deploying_vms(mysqli $db, int $missionId, string 
         if ($stmt->affected_rows !== 1) {
             continue;
         }
-        repo_record_vm_status_event($db, $vmId, $prior, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
+        repo_record_vm_status_event($db, $vmId, $prior, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_SYNC_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
         $restored++;
     }
 
@@ -300,7 +300,7 @@ function deploy_worker_mark_vms_failed(mysqli $db, int $missionId, string $note,
 {
     $keep = array_flip(array_map('intval', $keepVmIds));
     $failedLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
-    $failedMecm = VIRTUSPHERE_MECM_FAILED;
+    $failedMecm = VIRTUSPHERE_MECM_SYNC_FAILED;
     $marked = 0;
 
     foreach (deploy_worker_scope_vms($db, $missionId, $vmIds) as $vm) {

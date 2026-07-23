@@ -720,7 +720,7 @@ SQL;
     },
     '0023_ansible_preflight_state' => function (mysqli $db): void {
         // Persist the on-demand Ansible preflight result so the credential row and
-        // the integrations page can show a badge instead of a one-shot flash.
+        // the system status page can show a badge instead of a one-shot flash.
         // On-demand only (no scheduler): last_checked_at is shown verbatim and the
         // reader judges staleness. last_status is a plain VARCHAR (the
         // 'ok'/'warning'/'failed' set lives in lib/repo/ansible_preflight.php),
@@ -733,6 +733,17 @@ SQL;
             CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         migrator_out('0023: created deploy_ansible_preflight_state');
+    },
+    '0024_mecm_probe_detail_context' => function (mysqli $db): void {
+        // The probe now persists a versioned, redacted JSON context instead of
+        // one legacy error sentence. Keep existing rows unchanged; widening is
+        // additive and old plain text remains readable through the fallback.
+        if (migrator_table_exists($db, 'deploy_integration_heartbeats')
+            && migrator_column_exists($db, 'deploy_integration_heartbeats', 'last_detail')
+        ) {
+            $db->query('ALTER TABLE deploy_integration_heartbeats MODIFY COLUMN last_detail VARCHAR(2048) NULL');
+        }
+        migrator_out('0024: widened integration heartbeat detail for versioned MECM probe context');
     },
 ];
 

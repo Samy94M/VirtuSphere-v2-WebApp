@@ -246,7 +246,7 @@ function backup_status_message(string $state): string
 
 /**
  * Human-readable byte size (binary units). Kept as the name the settings card,
- * the dashboard and the integrations tables already call; the implementation
+ * the dashboard and the system-status tables already call; the implementation
  * moved to lib/format.php once the inventory pickers needed the same format.
  */
 function backup_status_human_bytes(?int $bytes): string

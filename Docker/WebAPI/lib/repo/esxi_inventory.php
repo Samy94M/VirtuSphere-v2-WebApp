@@ -282,6 +282,70 @@ function repo_esxi_inventory_state(mysqli $db, int $credentialId): ?array
     return repo_fetch_one($db, 'SELECT * FROM deploy_esxi_inventory_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
 }
 
+/** @return array<int, array<string,mixed>> */
+function repo_esxi_inventory_states(mysqli $db): array
+{
+    $stmt = $db->prepare('SELECT * FROM deploy_esxi_inventory_state');
+    $stmt->execute();
+
+    $states = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $states[(int) $row['credential_id']] = $row;
+    }
+
+    return $states;
+}
+
+/**
+ * Counts all inventory kinds for every credential in one query.
+ *
+ * @return array<int,array<string,int>>
+ */
+function repo_esxi_inventory_counts(mysqli $db): array
+{
+    $stmt = $db->prepare('SELECT credential_id, kind, COUNT(*) AS item_count FROM deploy_esxi_inventory GROUP BY credential_id, kind');
+    $stmt->execute();
+
+    $counts = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $counts[(int) $row['credential_id']][(string) $row['kind']] = (int) $row['item_count'];
+    }
+
+    return $counts;
+}
+
+/**
+ * Active inventory job per ESXi credential. The unique enqueue transaction
+ * guarantees at most one queued/running row per credential.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function repo_esxi_inventory_pending_jobs(mysqli $db): array
+{
+    $stmt = $db->prepare(
+        'SELECT id, credential_esxi_id, status, correlation_id, created_at, locked_at
+         FROM deploy_jobs
+         WHERE mission_id IS NULL
+           AND status IN (?, ?)
+           AND cancelled_at IS NULL
+         ORDER BY id DESC'
+    );
+    $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $stmt->bind_param('ss', $queued, $running);
+    $stmt->execute();
+
+    $jobs = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $credentialId = (int) $row['credential_esxi_id'];
+        if ($credentialId > 0 && !isset($jobs[$credentialId])) {
+            $jobs[$credentialId] = $row;
+        }
+    }
+
+    return $jobs;
+}
+
 /**
  * Syncs the ESXi-owned VLAN catalog (deploy_vlan) from the cached portgroups
  * (ADR-0023, E4b). Present = the union of ALL cached network rows (fresh AND

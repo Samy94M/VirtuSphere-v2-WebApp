@@ -104,11 +104,122 @@
     margin-top: 14px;
 }
 
-/* A follow-up block below a form (the API base URL reset explainer and its
-   button form) must not hug the form's last row. */
-.panel > form + p,
-.panel > form + form {
+/* Deploy settings keep the task first: one compact URL row, secondary reset,
+   and examples behind progressive disclosure. Runtime facts stay read-only. */
+.settings-url-intro {
+    max-width: 92ch;
+}
+
+.settings-url-form {
+    max-width: 720px;
+}
+
+.settings-url-input-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: stretch;
+    margin-top: 6px;
+}
+
+.settings-url-input-row input {
+    min-width: 0;
+}
+
+.settings-url-input-row .button {
+    white-space: nowrap;
+}
+
+.settings-reset-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-top: 12px;
+}
+
+.settings-examples {
     margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.settings-examples > summary {
+    width: fit-content;
+    cursor: pointer;
+    color: var(--accent-strong);
+    font-weight: 700;
+}
+
+.settings-examples > summary:hover {
+    text-decoration: underline;
+}
+
+.settings-examples > ul {
+    margin: 10px 0 0;
+}
+
+.runtime-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 14px;
+}
+
+.runtime-fact {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.runtime-fact-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 12px;
+}
+
+.runtime-fact-head h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.runtime-value {
+    display: block;
+    min-width: 0;
+    margin-bottom: 8px;
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 750;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.runtime-value-muted {
+    color: var(--muted);
+}
+
+.runtime-fact > p {
+    margin: 0;
+}
+
+.runtime-fact > .alert {
+    margin: 0;
+}
+
+.runtime-fact-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: auto;
+    padding-top: 10px;
+    font-weight: 700;
 }
 
 .kpi {
@@ -247,12 +358,19 @@ button.button:disabled:hover,
 }
 
 /* Deep-link landing (e.g. the status badge on credentials linking to
-   integrations.php#cred-<id>): mark the addressed row or card so the reader
+   system_status.php#cred-<id>): mark the addressed row or card so the reader
    sees WHICH entry the link meant, not just roughly where the page scrolled.
    Theme-aware via the accent variable; color-mix is already relied on in
    base.css. */
 tr:target > td {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+tr:target,
+.inv-card:target {
+    /* Keep credential deep links below the sticky 76px topbar, with the same
+       16px breathing room used by the other fragment-navigation targets. */
+    scroll-margin-top: 92px;
 }
 
 .inv-card:target {
@@ -878,7 +996,7 @@ label > .compound-field {
     color: var(--warning);
 }
 
-/* Integrations overview strip: small solid tiles summarizing the worst state per
+/* System-status overview strip: small solid tiles summarizing the worst state per
    system (solid surface-muted, not glass, so they don't stack blur on the panel). */
 .overview-grid {
     display: grid;
@@ -1054,6 +1172,364 @@ label > .compound-field {
     background: var(--danger);
 }
 
+/* System status: compact, linkable summaries with detail only on demand. */
+.page-intro,
+.section-heading-actions,
+.inventory-card > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+}
+
+.page-intro h1,
+.section-heading-actions h2,
+.inventory-card h3 {
+    margin: 0;
+}
+
+.status-generated {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.status-overview {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.status-overview-card {
+    display: flex;
+    min-width: 0;
+    min-height: 76px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+}
+
+.status-overview-card:hover {
+    border-color: var(--accent);
+    background: var(--surface-muted);
+}
+
+.status-overview-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.status-section,
+.status-row,
+.inventory-card,
+.repair-actions {
+    scroll-margin-top: 92px;
+}
+
+.status-list {
+    display: grid;
+    gap: 10px;
+}
+
+.status-row {
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.status-row-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+}
+
+.status-row-main > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.status-row dl,
+.status-facts,
+.inventory-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: 0;
+}
+
+.status-row dl > div,
+.status-facts > div,
+.inventory-counts > div {
+    min-width: 0;
+}
+
+.status-row dt,
+.status-facts dt,
+.inventory-counts dt {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.status-row dd,
+.status-facts dd,
+.inventory-counts dd {
+    margin: 2px 0 0;
+}
+
+.status-action {
+    margin-top: 10px;
+    color: var(--muted);
+}
+
+.technical-details {
+    margin-top: 8px;
+}
+
+.technical-details pre {
+    max-height: 14rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.signal-matrix-note,
+.probe-status-card,
+.repair-actions {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.signal-matrix-note {
+    margin-bottom: 14px;
+}
+
+.probe-status-card {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.status-facts {
+    margin-top: 8px;
+}
+
+.inventory-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
+    gap: 12px;
+    /* The heading action can wrap onto its own flex row. Its internal gap does
+       not separate that row from this sibling grid, so the grid owns the
+       inter-block breathing room (ADR-0013). */
+    margin-top: 16px;
+}
+
+.inventory-card {
+    display: grid;
+    min-width: 0;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-muted);
+}
+
+.inventory-card-open {
+    grid-column: 1 / -1;
+    border-color: var(--accent);
+}
+
+.inventory-card .actions form,
+.section-heading-actions form {
+    margin: 0;
+}
+
+.inventory-counts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.inventory-counts dd {
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.capability-badges,
+.alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.inventory-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+    gap: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.inventory-detail-group {
+    min-width: 0;
+}
+
+.inventory-detail-group h4 {
+    margin: 0 0 8px;
+}
+
+.inventory-detail-group ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.break-anywhere,
+.status-row code,
+.status-facts code {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.empty-state {
+    padding: 14px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.empty-state p {
+    margin-top: 0;
+}
+
+.deviation-groups {
+    display: grid;
+    gap: 10px;
+}
+
+.deviation-groups article {
+    padding: 10px 12px;
+    border-left: 3px solid var(--warning);
+    background: var(--surface-muted);
+}
+
+.deviation-groups h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+}
+
+.deviation-groups li a {
+    text-decoration: underline;
+    text-underline-offset: 0.16em;
+}
+
+.repair-actions {
+    margin-top: 14px;
+}
+
+.repair-actions > summary,
+.status-legend > summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.radio-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.radio-card {
+    display: flex;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+    cursor: pointer;
+}
+
+.radio-card:focus-within {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.radio-card input {
+    width: auto;
+    margin-top: 3px;
+    accent-color: var(--accent);
+}
+
+.radio-card span {
+    display: grid;
+    gap: 4px;
+}
+
+.radio-card small,
+.status-time {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.probe-form {
+    grid-template-columns: minmax(280px, 2fr) minmax(110px, 0.5fr);
+}
+
+.probe-form .probe-mode,
+.probe-form > .actions {
+    grid-column: 1 / -1;
+}
+
+.probe-port {
+    max-width: 12rem;
+}
+
+.alert-actions {
+    margin-top: 8px;
+}
+
+.alert-actions .button {
+    color: var(--btn-fg);
+    text-decoration: none;
+}
+
+@media (max-width: 850px) {
+    .status-overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .status-overview,
+    .radio-card-grid,
+    .probe-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .inventory-counts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .probe-form .probe-mode,
+    .probe-form > .actions {
+        grid-column: auto;
+    }
+}
+
 .alert-info {
     color: var(--info);
 }
@@ -1150,8 +1626,8 @@ label > .compound-field {
 
 .login-logo {
     display: block;
-    width: 80px;
-    height: 80px;
+    width: 129px;
+    height: 129px;
     object-fit: contain;
     margin: 0 auto 12px;
     filter:
@@ -1616,10 +2092,13 @@ a.tab {
 /* A jump to the panel itself (every settings.php POST redirect ends in
    #panel-<tab>) additionally needs the tab row above it readable, because that
    row is the only indicator of which tab is active; 92px would park it under
-   the topbar, showing only the bottom sliver of the labels. 148px = topbar
-   clearance + one tab row + the .stack gap. */
+   the topbar, showing only the bottom sliver of the labels. The budget covers
+   TWO tab rows (topbar + 2x38px rows + gaps): help.php carries nine tabs and
+   wraps at common desktop widths, and with a one-row budget the first row
+   slides behind the translucent topbar as ghost boxes. On one-row pages the
+   larger margin only clamps the scroll to the page top, which loses nothing. */
 [data-tab-panel] {
-    scroll-margin-top: 148px;
+    scroll-margin-top: 192px;
 }
 
 /* FAQ accordion (native <details>, no JS) */

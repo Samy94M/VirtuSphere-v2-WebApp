@@ -69,7 +69,8 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('repo_purge_client_events', $worker);
         self::assertStringContainsString('removeLog', $worker);
         self::assertStringContainsString('maintenance_worker_tcp_check', $worker);
-        self::assertStringContainsString('repo_mark_integration_failure', $worker);
+        self::assertStringContainsString('mecm_probe_run', $worker);
+        self::assertStringContainsString('repo_mark_integration_failure', $this->source('lib/mecm_probe.php'));
         // Note: docker-compose.yml (which runs this worker) lives outside the
         // container mount and cannot be asserted here.
     }
@@ -140,11 +141,17 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('connection_error_message($result[', $credentials);
         self::assertStringNotContainsString("\$result['message']", $credentials);
 
-        // The fetch-state category on the integrations page is localized too,
-        // rather than printing the raw VARCHAR of the state row.
-        $integrations = $this->source('portal/integrations.php');
-        self::assertStringContainsString('connection_error_message(', $integrations);
-        self::assertStringNotContainsString("h((string) (\$state['last_error_category'] ?? ''))", $integrations);
+        // The fetch-state category on the system status page is localized too,
+        // rather than printing the raw VARCHAR of the state row. Read across all
+        // panel modules, so which module owns the ESXi card stays a layout
+        // decision instead of silently disarming this check.
+        $systemStatus = '';
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/system_status_*panels.php') ?: [] as $panelModule) {
+            $systemStatus .= (string) file_get_contents($panelModule);
+        }
+        self::assertNotSame('', $systemStatus, 'no system status panel module found');
+        self::assertStringContainsString('connection_error_message(', $systemStatus);
+        self::assertStringNotContainsString("h((string) (\$state['last_error_category'] ?? ''))", $systemStatus);
     }
 
     public function testHealthMacIndexAndDeployReaperContractsArePresent(): void

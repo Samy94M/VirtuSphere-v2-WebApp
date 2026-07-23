@@ -19,14 +19,14 @@ const PORTAL_PAGES = [
   { path: 'help.php', access: 'user' },
 
   { path: 'credentials.php', access: 'admin' },
-  // integrations.php is viewable by any signed-in user: it uses
+  // system_status.php is viewable by any signed-in user: it uses
   // portal_require_user() and gates the privileged actions per feature (inventory
   // refresh needs deploy.run, which the user role has; VLAN reassign needs
   // missions.write+vms.write; the log link needs users.manage). It renders
   // integration status, never a credential secret, so it is a user page like the
   // read-only catalog pages, not an admin page. Verified against the guards in
-  // portal/integrations.php.
-  { path: 'integrations.php', access: 'user' },
+  // portal/system_status.php.
+  { path: 'system_status.php', access: 'user' },
   { path: 'users.php', access: 'admin' },
   { path: 'settings.php', access: 'admin' },
   { path: 'logs.php', access: 'admin' },

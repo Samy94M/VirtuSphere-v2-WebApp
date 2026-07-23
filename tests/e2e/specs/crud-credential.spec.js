@@ -12,11 +12,11 @@ test.use({ storageState: ROLES.admin.storageState });
 
 const PREFIX = 'e2ecred-';
 
-function seedCredential(name, host = '127.0.0.1', port = 1) {
+function seedCredential(name, host = '127.0.0.1', port = 1, type = 'esxi') {
   const data = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$id = repo_create_credential($db, ['type' => 'esxi', 'name' => '${name}', 'host' => '${host}', 'port' => ${Number(port)}, 'username' => 'root'], 'secret123', $admin);
+$id = repo_create_credential($db, ['type' => '${type}', 'name' => '${name}', 'host' => '${host}', 'port' => ${Number(port)}, 'username' => 'root'], 'secret123', $admin);
 echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 `, ['lib/repo/credentials.php']);
   return data.id;
@@ -25,12 +25,19 @@ echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 function credentialRow(id) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT name, host, username FROM deploy_credentials WHERE id = ? LIMIT 1');
+$stmt = $db->prepare('SELECT type, name, host, port, username FROM deploy_credentials WHERE id = ? LIMIT 1');
 $id = ${Number(id)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc() ?: null) . 'JSON';
 `);
+}
+
+function credentialSecret(id) {
+  return phpJson(`
+$id = ${Number(id)};
+echo 'JSON' . json_encode(['secret' => repo_credential_secret(db(), $id)]) . 'JSON';
+`, ['lib/repo/credentials.php']).secret;
 }
 
 function idByName(name) {
@@ -49,8 +56,11 @@ echo 'JSON' . json_encode(['id' => $row ? (int) $row['id'] : 0]) . 'JSON';
 function cleanup() {
   runPhp(`
 $db = db();
-$stmt = $db->prepare("DELETE FROM deploy_credentials WHERE name LIKE ?");
+$stmt = $db->prepare("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?) OR credential_ansible_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?)");
 $like = '${PREFIX}%';
+$stmt->bind_param('ss', $like, $like);
+$stmt->execute();
+$stmt = $db->prepare("DELETE FROM deploy_credentials WHERE name LIKE ?");
 $stmt->bind_param('s', $like);
 $stmt->execute();
 echo 'CLEANED';
@@ -77,11 +87,59 @@ test('create: the credential appears in the DB and in a fresh GET', async ({ pag
   expect(id, 'row exists in the DB').toBeGreaterThan(0);
 
   await page.goto('credentials.php');
-  await expect(page.locator('tr', { hasText: name }).first(), 'the credential is listed').toBeVisible();
+  const row = page.locator('tr', { hasText: name }).first();
+  await expect(row, 'the credential is listed').toBeVisible();
+  await expect(row.locator('form:has(input[name="action"][value="test"]) button')).toHaveText(/Inventarabruf starten|Start inventory pull/);
+  await expect(row.locator(`a[href="system_status.php?inventory=${id}#credential-${id}"]`)).toBeVisible();
+  await expect(page.locator(`#credential-editor-${id} input[name="secret"]`)).toHaveValue('');
+});
+
+test('create validation: required fields, type, host, lengths and port bounds stay field-bound', async ({ page }) => {
+  await page.goto('credentials.php');
+  let form = page.locator('form:has(input[name="action"][value="create"])');
+  await form.locator('select[name="type"]').evaluate((select) => {
+    select.add(new Option('invalid', 'invalid'));
+    select.value = 'invalid';
+  });
+  await form.locator('input[name="name"]').fill('');
+  await form.locator('input[name="host"]').fill('');
+  await form.locator('input[name="port"]').fill('0');
+  await form.locator('input[name="username"]').fill('');
+  await form.locator('input[name="secret"]').fill('');
+  await form.evaluate((node) => { node.noValidate = true; });
+  await submitAndWaitForNavigation(page, form.locator('button[type="submit"]'), 'credentials.php');
+  form = page.locator('form:has(input[name="action"][value="create"])');
+  await expect(form.locator('.field-error')).toHaveCount(6);
+  expect(idByName(PREFIX + 'invalid-never-written')).toBe(0);
+
+  await form.locator('select[name="type"]').selectOption('ansible');
+  await form.locator('input[name="name"]').fill('n'.repeat(192));
+  await form.locator('input[name="host"]').fill('https://ansible.invalid/path');
+  await form.locator('input[name="port"]').fill('65536');
+  await form.locator('input[name="username"]').fill('u'.repeat(192));
+  await form.locator('input[name="secret"]').fill('secret-for-validation');
+  await form.evaluate((node) => { node.noValidate = true; });
+  await submitAndWaitForNavigation(page, form.locator('button[type="submit"]'), 'credentials.php');
+  form = page.locator('form:has(input[name="action"][value="create"])');
+  await expect(form.locator('.field-error')).toHaveCount(4);
+  await expect(form.locator('input[name="host"]')).toHaveValue('https://ansible.invalid/path');
+  await expect(form.locator('input[name="port"]')).toHaveValue('65536');
+  await expect(form.locator('input[name="secret"]'), 'a rejected secret is never echoed back').toHaveValue('');
+
+  const validName = PREFIX + 'upper-port';
+  await form.locator('input[name="name"]').fill(validName);
+  await form.locator('input[name="host"]').fill('::1');
+  await form.locator('input[name="port"]').fill('65535');
+  await form.locator('input[name="username"]').fill('ansible');
+  await form.locator('input[name="secret"]').fill('valid-secret-123');
+  await submitAndWaitForNavigation(page, form.locator('button[type="submit"]'), 'credentials.php');
+  const id = idByName(validName);
+  expect(id).toBeGreaterThan(0);
+  expect(Number(credentialRow(id).port)).toBe(65535);
 });
 
 // e2e-covers: credentials.php:update
-test('update: a host change persists and the username neighbor is untouched', async ({ page }) => {
+test('update: every editable field round-trips, blank secret stays and a later secret rotates', async ({ page }) => {
   const name = PREFIX + 'edit-1';
   const id = seedCredential(name);
 
@@ -91,32 +149,101 @@ test('update: a host change persists and the username neighbor is untouched', as
 
   const editor = page.locator(`#credential-editor-${id}`);
   await expect(editor).toBeVisible();
+  await row.locator(`button[data-row-toggle="credential-editor-${id}"]`).click();
+  await expect(editor).toBeHidden();
+  await row.locator(`button[data-row-toggle="credential-editor-${id}"]`).click();
+  await editor.locator('select[name="type"]').selectOption('esxi');
+  await editor.locator('input[name="name"]').fill(PREFIX + 'edit-renamed');
   await editor.locator('input[name="host"]').fill('127.0.0.2');
+  await editor.locator('input[name="port"]').fill('444');
+  await editor.locator('input[name="username"]').fill('administrator');
+  await expect(editor.locator('input[name="secret"]')).toHaveValue('');
   await submitAndWaitForNavigation(page, editor.locator('button[type="submit"]'), 'credentials.php');
 
   const stored = credentialRow(id);
+  expect(stored.type).toBe('esxi');
+  expect(stored.name).toBe(PREFIX + 'edit-renamed');
   expect(stored.host, 'the host change persisted').toBe('127.0.0.2');
-  expect(stored.username, 'the username neighbor is unchanged').toBe('root');
+  expect(Number(stored.port)).toBe(444);
+  expect(stored.username).toBe('administrator');
+  expect(credentialSecret(id), 'blank secret keeps the encrypted value').toBe('secret123');
+
+  await page.goto('credentials.php');
+  const renamed = page.locator('tr', { hasText: PREFIX + 'edit-renamed' }).first();
+  await renamed.locator(`button[data-row-toggle="credential-editor-${id}"]`).click();
+  const reopened = page.locator(`#credential-editor-${id}`);
+  await reopened.locator('input[name="secret"]').fill('rotated-secret-456');
+  await submitAndWaitForNavigation(page, reopened.locator('button[type="submit"]'), 'credentials.php');
+  expect(credentialSecret(id)).toBe('rotated-secret-456');
+  await page.goto('credentials.php');
+  await expect(page.locator(`#credential-editor-${id} input[name="secret"]`), 'the secret is never rendered back').toHaveValue('');
 });
 
 // e2e-covers: credentials.php:test
-test('test: a failing connection reports a categorized flash, not a crash, and writes nothing', async ({ page }) => {
+test('Ansible test: a failing connection is categorized, persisted and linked to Systemstatus', async ({ page }) => {
   const name = PREFIX + 'test-1';
-  const id = seedCredential(name); // 127.0.0.1:1 -> connection refused, fast.
+  const id = seedCredential(name, '127.0.0.1', 1, 'ansible'); // closed local SSH port, fast.
   const before = credentialRow(id);
 
   await page.goto('credentials.php');
   const row = page.locator('tr', { hasText: name }).first();
   const response = await Promise.all([
     page.waitForResponse((r) => r.url().includes('credentials.php') && r.request().method() === 'POST'),
-    row.locator('button[name="action"][value="test"]').click(),
+    row.locator('form:has(input[name="action"][value="test"]) button').click(),
   ]).then(([r]) => r);
 
   expect(response.status(), 'the failed test is not a server error').toBeLessThan(500);
   const alert = page.locator('.alert-error, .alert').first();
   await expect(alert, 'the operator sees a result sentence').toBeVisible();
+  expect(credentialRow(id), 'the connection test does not rewrite the credential').toEqual(before);
+  const refreshedRow = page.locator('tr', { hasText: name }).first();
+  await expect(refreshedRow.locator('form:has(input[name="action"][value="test"]) button')).toHaveText(/Verbindung und Umgebung prüfen|Check connection and environment/);
+  await expect(refreshedRow.locator(`a[href="system_status.php#credential-${id}"]`)).toBeVisible();
+  await expect(refreshedRow.locator('.status-time')).not.toHaveText(/Nie|Never|never/);
+  const proof = phpJson(`
+$db = db();
+$state = $db->query('SELECT last_status, last_checked_at FROM deploy_ansible_preflight_state WHERE credential_id = ${Number(id)}')->fetch_assoc();
+$audit = $db->query("SELECT category FROM deploy_logs WHERE category = 'credentials' AND log_message LIKE 'tested credential id ${Number(id)}:%' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+echo 'JSON' . json_encode(['state' => $state, 'audit' => $audit]) . 'JSON';
+`);
+  expect(proof.state.last_status).toBe('failed');
+  expect(proof.audit.category).toBe('credentials');
+});
 
-  expect(credentialRow(id), 'the test wrote nothing').toEqual(before);
+test('ESXi action: starts an inventory job and links to the exact status card', async ({ page }) => {
+  const selectionBefore = phpJson(`
+$row = repo_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
+echo 'JSON' . json_encode(['row' => $row]) . 'JSON';
+`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+  const ansibleId = seedCredential(PREFIX + 'inventory-ansible', '127.0.0.1', 1, 'ansible');
+  const esxiId = seedCredential(PREFIX + 'inventory-esxi', '127.0.0.1', 1, 'esxi');
+  try {
+    runPhp(`repo_set_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '${ansibleId}'); echo 'SELECTED';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+    await page.goto('credentials.php');
+    const row = page.locator('tr', { hasText: PREFIX + 'inventory-esxi' }).first();
+    const button = row.locator('form:has(input[name="action"][value="test"]) button');
+    await expect(button).toHaveText(/Inventarabruf starten|Start inventory pull/);
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('credentials.php') && r.request().method() === 'POST'),
+      button.click(),
+    ]);
+    await expect(page.locator('[data-flash]').first()).toBeVisible();
+    await expect(page.locator(`[data-flash] a[href="system_status.php?inventory=${esxiId}#credential-${esxiId}"]`)).toBeVisible();
+    const proof = phpJson(`
+$db = db();
+$jobs = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ${esxiId} AND credential_ansible_id = ${ansibleId}")->fetch_assoc()['c'];
+$audit = $db->query("SELECT category, log_message FROM deploy_logs WHERE category = 'deploy' AND log_message LIKE 'requested ESXi inventory pull for credential id ${esxiId}%' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+echo 'JSON' . json_encode(['jobs' => $jobs, 'audit' => $audit]) . 'JSON';
+`);
+    expect(proof.jobs).toBeGreaterThan(0);
+    expect(proof.audit.category).toBe('deploy');
+  } finally {
+    if (selectionBefore.row === null) {
+      runPhp(`repo_delete_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL); echo 'RESTORED';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+    } else {
+      runPhp(`repo_set_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '${String(selectionBefore.row?.setting_value || '')}'); echo 'RESTORED';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+    }
+  }
 });
 
 // e2e-covers: credentials.php:delete

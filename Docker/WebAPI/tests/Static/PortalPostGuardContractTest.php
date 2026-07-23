@@ -16,7 +16,7 @@ final class PortalPostGuardContractTest extends TestCase
 {
     private const GUARDED = [
         'deploy.php', 'settings.php', 'users.php', 'credentials.php', 'os.php',
-        'vlans.php', 'vms.php', 'missions.php', 'vm_edit.php', 'integrations.php',
+        'vlans.php', 'vms.php', 'missions.php', 'vm_edit.php', 'system_status.php',
         'mission_details.php', 'account.php',
     ];
 

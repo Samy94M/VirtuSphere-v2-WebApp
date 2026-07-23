@@ -193,7 +193,7 @@ const VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS = 120;
 
 // Inventory fetch traffic light (esxi_inventory_ampel): danger at this many
 // consecutive failures; a last success older than STALE_FACTOR x interval turns
-// warning. The integrations legend interpolates these same constants, so the
+// warning. The system-status legend interpolates these same constants, so the
 // user-facing text cannot drift from the code.
 const VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER = 3;
 const VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR = 2;

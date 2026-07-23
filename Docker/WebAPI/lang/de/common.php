@@ -30,6 +30,11 @@ return [
     'free_suffix' => ':free frei',
     'creator_unknown' => 'Unbekannt',
     'technical_details' => 'Technische Details',
+    'help' => 'Hilfe',
+    'unknown_action' => 'Unbekannte Aktion.',
+    'duration_seconds' => ':count Sekunden',
+    'duration_minutes' => ':count Minuten',
+    'duration_hours' => ':count Stunden',
 
     // Verbindungsfehler (VIRTUSPHERE_INVENTORY_ERROR_*): Klartext für das Portal.
     'conn_dns' => 'Der Host ":host" konnte nicht aufgelöst werden. Prüfen Sie den Hostnamen.',

@@ -54,7 +54,7 @@ async function submitAndReturnToTab(page, form, tab) {
     page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
     form.locator('button[type="submit"]').click(),
   ]);
-  await expect(page.locator('.alert-success, .alert-error').first(), 'the handler answered with a flash').toBeVisible();
+  await expect(page.locator('.alert-success, .alert-warning, .alert-error').first(), 'the handler answered with a flash').toBeVisible();
   // Visible is not enough: the tab-anchor jump used to park the flash behind
   // the sticky topbar, so every save outside the first tab looked like a
   // no-op. core.js counter-scrolls when a [data-flash] is present; pin that.
@@ -73,9 +73,57 @@ test('save_api: persists the normalized URL and returns to the deploy tab', asyn
     await form.locator('input[name="api_base_url"]').fill('http://127.0.0.1:8021');
     await submitAndReturnToTab(page, form, 'deploy');
     expect(readSetting('VIRTUSPHERE_SETTING_API_BASE_URL'), 'the URL persisted').toBe('http://127.0.0.1:8021');
+    await expect(page.locator('[data-api-runtime]'), 'the runtime card names the winning source').toHaveAttribute('data-api-source', 'portal');
+    await expect(page.locator('[data-api-runtime] .badge').first(), 'the source is visible, not only machine-readable').toHaveText(/Portal-Einstellung|Portal setting/);
+    await expect(page.locator('[data-effective-api-url]'), 'the runtime card shows the normalized effective value').toHaveText('http://127.0.0.1:8021');
   } finally {
     writeSetting('VIRTUSPHERE_SETTING_API_BASE_URL', before);
   }
+});
+
+test('deploy runtime separates API source and per-job SSH credential without mobile overflow', async ({ page }) => {
+  await openTab(page, 'deploy');
+
+  const urlRow = page.locator('[data-settings-url-row]');
+  const examples = page.locator('[data-settings-examples]');
+  const desktopLayout = await urlRow.evaluate((row) => {
+    const input = row.querySelector('input').getBoundingClientRect();
+    const button = row.querySelector('button').getBoundingClientRect();
+    return {
+      inputRight: input.right,
+      inputCenterY: input.top + input.height / 2,
+      buttonLeft: button.left,
+      buttonCenterY: button.top + button.height / 2,
+    };
+  });
+  expect(desktopLayout.buttonLeft, 'Save sits to the right of the URL field').toBeGreaterThan(desktopLayout.inputRight);
+  expect(Math.abs(desktopLayout.buttonCenterY - desktopLayout.inputCenterY), 'field and Save are vertically aligned').toBeLessThanOrEqual(1);
+  await expect(examples, 'examples do not dominate the working view').not.toHaveAttribute('open', '');
+  await examples.locator('summary').click();
+  await expect(examples.getByText(/curl .*health\.php/i), 'the connection test remains available on demand').toBeVisible();
+
+  const runtime = page.locator('[data-api-runtime]');
+  await expect(runtime.locator('.runtime-fact')).toHaveCount(2);
+  await expect(runtime.getByRole('link', { name: /Zugangsdaten|credentials/i })).toBeVisible();
+  await expect(runtime.getByRole('link', { name: /Bereitstellung|deploy/i })).toBeVisible();
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  const hasHorizontalOverflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth > document.documentElement.clientWidth
+  );
+  expect(hasHorizontalOverflow, 'the runtime cards and long effective URL reflow at 360 px').toBe(false);
+  const mobileLayout = await urlRow.evaluate((row) => {
+    const input = row.querySelector('input').getBoundingClientRect();
+    const button = row.querySelector('button').getBoundingClientRect();
+    return { inputRight: input.right, buttonLeft: button.left };
+  });
+  expect(mobileLayout.buttonLeft, 'Save remains beside the field at 360 px').toBeGreaterThan(mobileLayout.inputRight);
+  const firstRuntimeFact = runtime.locator('.runtime-fact').first();
+  await firstRuntimeFact.scrollIntoViewIfNeeded();
+  await expect(firstRuntimeFact).toBeInViewport();
+
+  await page.goto('credentials.php');
+  await expect(page.getByRole('link', { name: /Deploy-Einstellungen|deploy settings/i }), 'credentials explains that SSH login and callback URL are separate').toBeVisible();
 });
 
 // e2e-covers: settings.php:clear_api
@@ -95,6 +143,7 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
     writeSetting('VIRTUSPHERE_SETTING_API_BASE_URL', 'http://e2e-reset.example:8021');
 
     await openTab(page, 'deploy');
+    await expect(page.locator('[data-api-runtime]'), 'the stored override is visibly the active source').toHaveAttribute('data-api-source', 'portal');
     const dialog = page.locator('[data-confirm-dialog]');
     const reset = settingsForm(page, 'clear_api').locator('button[type="submit"]');
 
@@ -120,6 +169,8 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
     expect(rowCount(), 'the setting row is deleted, not blanked').toBe(0);
     await expect(settingsForm(page, 'save_api').locator('input[name="api_base_url"]'), 'the input renders empty').toHaveValue('');
     await expect(settingsForm(page, 'clear_api'), 'the reset button only renders with a stored value').toHaveCount(0);
+    const fallbackSource = await page.locator('[data-api-runtime]').getAttribute('data-api-source');
+    expect(['env', 'none'], 'after reset only .env or no configuration can be active').toContain(fallbackSource);
   } finally {
     if (before === '') {
       runPhp(`repo_delete_setting(db(), VIRTUSPHERE_SETTING_API_BASE_URL); echo 'CLEANED';`, SETTING_LIBS);
@@ -189,6 +240,84 @@ test('save_esxi_inventory: persists a changed interval', async ({ page }) => {
   }
 });
 
+test('save_esxi_inventory: multiple Ansible accounts require a valid global selection and cleanup orphans', async ({ page }) => {
+  const mark = 'e2esel-';
+  const before = phpJson(`
+$row = repo_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
+echo 'JSON' . json_encode(['row' => $row]) . 'JSON';
+`, SETTING_LIBS);
+  const seed = phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role = 'admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$a = repo_create_credential($db, ['type' => 'ansible', 'name' => '${mark}a', 'host' => '127.0.0.11', 'port' => 22, 'username' => 'ansible'], 'secret123', $admin);
+$b = repo_create_credential($db, ['type' => 'ansible', 'name' => '${mark}b', 'host' => '127.0.0.12', 'port' => 22, 'username' => 'ansible'], 'secret123', $admin);
+echo 'JSON' . json_encode(['a' => $a, 'b' => $b]) . 'JSON';
+`, ['lib/repo/credentials.php']);
+
+  try {
+    await openTab(page, 'catalog');
+    let form = settingsForm(page, 'save_esxi_inventory');
+    const select = form.locator('select[name="esxi_inventory_ansible_credential_id"]');
+    await expect(select).toBeVisible();
+    await expect(select).toHaveAttribute('required', '');
+    await select.selectOption('');
+    await form.evaluate((node) => { node.noValidate = true; });
+    await submitAndReturnToTab(page, form, 'catalog');
+    form = settingsForm(page, 'save_esxi_inventory');
+    await expect(form.locator('select[name="esxi_inventory_ansible_credential_id"] ~ .field-error')).toBeVisible();
+
+    await form.locator('select[name="esxi_inventory_ansible_credential_id"]').selectOption(String(seed.a));
+    await submitAndReturnToTab(page, form, 'catalog');
+    expect(readSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL')).toBe(String(seed.a));
+    const audit = phpJson(`
+$row = db()->query("SELECT category, log_message FROM deploy_logs WHERE category = 'settings' AND log_message LIKE 'updated esxi inventory ansible credential %' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+echo 'JSON' . json_encode($row) . 'JSON';
+`);
+    expect(audit.category).toBe('settings');
+    expect(audit.log_message).toContain(`-> ${seed.a}`);
+
+    await page.goto('credentials.php');
+    let row = page.locator('tr', { hasText: `${mark}a` }).first();
+    await row.locator('button[name="action"][value="delete"]').click();
+    const dialog = page.locator('[data-confirm-dialog]');
+    await expect(dialog).toBeVisible();
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'load' }),
+      dialog.locator('[data-confirm-accept]').click(),
+    ]);
+    expect(readSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL'), 'deleting the selected account clears the setting').toBe('');
+
+    writeSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL', String(seed.b));
+    await page.goto('credentials.php');
+    row = page.locator('tr', { hasText: `${mark}b` }).first();
+    await row.locator(`button[data-row-toggle="credential-editor-${seed.b}"]`).click();
+    const editor = page.locator(`#credential-editor-${seed.b}`);
+    await editor.locator('select[name="type"]').selectOption('esxi');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'load' }),
+      editor.locator('button[type="submit"]').click(),
+    ]);
+    expect(readSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL'), 'changing the selected account away from Ansible clears the setting').toBe('');
+    const cleanupAudit = phpJson(`
+$row = db()->query("SELECT category, log_message FROM deploy_logs WHERE category = 'credentials' AND log_message LIKE '%inventory ansible selection%cleared%' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+echo 'JSON' . json_encode($row) . 'JSON';
+`);
+    expect(cleanupAudit.category).toBe('credentials');
+  } finally {
+    if (before.row === null) {
+      runPhp(`repo_delete_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL); echo 'RESTORED';`, SETTING_LIBS);
+    } else {
+      writeSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL', before.row.setting_value);
+    }
+    runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${mark}%') OR credential_ansible_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${mark}%')");
+$db->query("DELETE FROM deploy_credentials WHERE name LIKE '${mark}%'");
+echo 'CLEANED';
+`);
+  }
+});
+
 // e2e-covers: settings.php:save_retire_threshold
 test('save_retire_threshold: persists a changed threshold', async ({ page }) => {
   const before = readSetting('VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD', String(phpConst('VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN')));
@@ -211,11 +340,63 @@ test('save_probe: persists host and port together', async ({ page }) => {
   try {
     await openTab(page, 'machine-api');
     const form = settingsForm(page, 'save_probe');
+    await form.locator('input[name="probe_mode"][value="manual"]').check();
     await form.locator('input[name="probe_host"]').fill('mecm.example.local');
     await form.locator('input[name="probe_port"]').fill('8531');
     await submitAndReturnToTab(page, form, 'machine-api');
     expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'the host persisted').toBe('mecm.example.local');
     expect(Number(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT')), 'the port persisted').toBe(8531);
+  } finally {
+    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST', beforeHost);
+    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', beforePort);
+  }
+});
+
+test('save_probe: explicit mode, sticky validation, IPv6 and automatic reset', async ({ page }) => {
+  const beforeHost = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST');
+  const beforePort = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', String(phpConst('VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT')));
+  try {
+    await openTab(page, 'machine-api');
+    let form = settingsForm(page, 'save_probe');
+    await expect(form.locator('input[name="probe_mode"]')).toHaveCount(2);
+    await form.locator('input[name="probe_mode"][value="manual"]').check();
+    await form.locator('input[name="probe_host"]').fill('bad host');
+    await form.locator('input[name="probe_port"]').fill('0');
+    await form.evaluate((node) => { node.noValidate = true; });
+    await submitAndReturnToTab(page, form, 'machine-api');
+    form = settingsForm(page, 'save_probe');
+    await expect(form.locator('input[name="probe_host"]')).toHaveValue('bad host');
+    await expect(form.locator('input[name="probe_port"]')).toHaveValue('0');
+    await expect(form.locator('.field-error')).toHaveCount(2);
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'invalid fields do not change the host').toBe(beforeHost);
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', String(phpConst('VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT'))), 'invalid fields do not change the port').toBe(beforePort);
+
+    // The text field uses a numeric mobile keyboard but deliberately retains
+    // invalid text after the server-side round trip, so the operator can see
+    // and correct the exact input instead of receiving an unexplained blank.
+    await form.locator('input[name="probe_host"]').fill('mecm.example.local');
+    await form.locator('input[name="probe_port"]').fill('abc');
+    await form.evaluate((node) => { node.noValidate = true; });
+    await submitAndReturnToTab(page, form, 'machine-api');
+    form = settingsForm(page, 'save_probe');
+    await expect(form.locator('input[name="probe_port"]')).toHaveValue('abc');
+    await expect(form.locator('input[name="probe_port"] + .field-error, input[name="probe_port"] ~ .field-error').first()).toBeVisible();
+
+    await form.locator('input[name="probe_host"]').fill('::1');
+    await form.locator('input[name="probe_port"]').fill('1');
+    await submitAndReturnToTab(page, form, 'machine-api');
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST')).toBe('::1');
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT')).toBe('1');
+    await expect(settingsForm(page, 'save_probe').locator('input[name="probe_mode"][value="manual"]')).toBeChecked();
+
+    form = settingsForm(page, 'save_probe');
+    await form.locator('input[name="probe_mode"][value="auto"]').check();
+    await form.locator('input[name="probe_host"]').fill('this-value-must-be-cleared.example');
+    await form.locator('input[name="probe_port"]').fill('');
+    await submitAndReturnToTab(page, form, 'machine-api');
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'automatic mode stores no hidden host').toBe('');
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT'), 'blank port uses the SMB default').toBe('445');
+    await expect(settingsForm(page, 'save_probe').locator('input[name="probe_mode"][value="auto"]')).toBeChecked();
   } finally {
     writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST', beforeHost);
     writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', beforePort);

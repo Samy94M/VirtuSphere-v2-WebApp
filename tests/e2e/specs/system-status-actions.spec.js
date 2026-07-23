@@ -1,4 +1,4 @@
-// TESTPLAN 3.5 / E6: the two integrations actions. The inventory refresh must
+// TESTPLAN 3.5 / E6: the two system-status actions. The inventory refresh must
 // enqueue a real system job for the clicked credential; the VLAN mass
 // reassignment only renders when a genuine deviation exists, asks first
 // (danger: it rewrites every stored assignment), and proves its Cancel branch
@@ -28,7 +28,7 @@ echo 'CLEANED';
 test.beforeAll(() => cleanup());
 test.afterAll(() => cleanup());
 
-// e2e-covers: integrations.php:refresh_inventory
+// e2e-covers: system_status.php:refresh_inventory
 test('refresh_inventory: the targeted refresh enqueues a system job for the credential', async ({ page }) => {
   const seed = phpJson(`
 $db = db();
@@ -41,11 +41,11 @@ if (!$hasAnsible) {
 echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
 `, ['lib/repo/credentials.php']);
 
-  await page.goto('integrations.php');
-  const card = page.locator('.inv-cards > *', { hasText: `${MARK}-esxi` }).first();
+  await page.goto('system_status.php');
+  const card = page.locator('.inventory-card-grid .inventory-card', { hasText: `${MARK}-esxi` }).first();
   const refresh = card.locator('form:has(input[name="action"][value="refresh_inventory"]) button');
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('integrations.php') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
     refresh.click(),
   ]);
   await expect(page.locator('.alert').first(), 'the refresh reports its outcome').toBeVisible();
@@ -62,8 +62,8 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
   expect(jobs.c, 'an inventory system job was enqueued for the credential').toBe(1);
 });
 
-// e2e-covers: integrations.php:reassign_vlan
-// e2e-covers-cancel: integrations.php:reassign_vlan
+// e2e-covers: system_status.php:reassign_vlan
+// e2e-covers-cancel: system_status.php:reassign_vlan
 test('reassign_vlan: renders only with a real deviation, Cancel keeps assignments, Confirm rewrites them', async ({ page }) => {
   const seed = phpJson(`
 $db = db();
@@ -93,7 +93,8 @@ $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `).wds_vlan;
 
-  await page.goto('integrations.php');
+  await page.goto('system_status.php');
+  await page.locator('details.repair-actions > summary').click();
   const form = page.locator('form:has(input[name="action"][value="reassign_vlan"])');
   await expect(form, 'the deviation makes the reassign form render').toBeVisible();
   await form.locator('input[name="vlan_from"]').fill('E2EVLAN-STALE');
@@ -106,10 +107,48 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
   await expect(dialog).toBeHidden();
   expect(missionVlan(), 'Cancel kept the stale assignment').toBe('E2EVLAN-STALE');
 
+  await form.locator('input[name="vlan_from"]').fill('E2EVLAN-OK');
+  await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
   await form.locator('button[type="submit"]').click();
   await expect(dialog).toBeVisible();
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('integrations.php') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page.locator('select[name="vlan_to"]'), 'identical source and target is rejected at the target field').toHaveAttribute('aria-invalid', 'true');
+  expect(missionVlan(), 'invalid equal values changed nothing').toBe('E2EVLAN-STALE');
+
+  await form.locator('input[name="vlan_from"]').evaluate((input) => input.removeAttribute('required'));
+  await form.locator('input[name="vlan_from"]').fill('');
+  await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
+  await form.locator('button[type="submit"]').click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page.locator('input[name="vlan_from"]'), 'the server reports an empty source at its field').toHaveAttribute('aria-invalid', 'true');
+  expect(missionVlan(), 'empty source changed nothing').toBe('E2EVLAN-STALE');
+
+  await form.locator('input[name="vlan_from"]').fill('E2EVLAN-NOT-ASSIGNED');
+  await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
+  await form.locator('button[type="submit"]').click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page.locator('.alert-warning').first(), 'zero matches is feedback, not a false success').toBeVisible();
+  await expect(page).toHaveURL(/system_status\.php#reassign$/);
+  await expect(form.locator('input[name="vlan_from"]'), 'zero-match input remains available for correction').toHaveValue('E2EVLAN-NOT-ASSIGNED');
+  expect(missionVlan(), 'zero matches changed nothing').toBe('E2EVLAN-STALE');
+
+  await form.locator('input[name="vlan_from"]').fill('E2EVLAN-STALE');
+  await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
+  await form.locator('button[type="submit"]').click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
     dialog.locator('[data-confirm-accept]').click(),
   ]);
   await expect(page.locator('.alert-success').first(), 'the rewrite reports missions and interfaces').toBeVisible();

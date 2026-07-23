@@ -99,8 +99,9 @@ function role_label(string $role): string
  * (exception text, command output) that the alert shows behind a collapsed
  * details element; it is never the message itself.
  */
-function flash_set(string $type, string $message, string $detail = ''): void
+function flash_set(string $type, string $message, string $detail = '', ?array $action = null): void
 {
+    $safeAction = flash_action_normalize($action);
     $queue = $_SESSION['_flash'] ?? [];
     if (!is_array($queue)) {
         $queue = [];
@@ -110,6 +111,7 @@ function flash_set(string $type, string $message, string $detail = ''): void
         if (($existing['type'] ?? '') === $type
             && ($existing['message'] ?? '') === $message
             && ($existing['detail'] ?? '') === $detail
+            && ($existing['action'] ?? null) === $safeAction
         ) {
             return;
         }
@@ -119,8 +121,42 @@ function flash_set(string $type, string $message, string $detail = ''): void
         array_shift($queue);
     }
 
-    $queue[] = ['type' => $type, 'message' => $message, 'detail' => $detail];
+    $queue[] = ['type' => $type, 'message' => $message, 'detail' => $detail, 'action' => $safeAction];
     $_SESSION['_flash'] = $queue;
+}
+
+/**
+ * Flash actions are structured data, never caller-provided HTML. Only a
+ * relative portal URL is accepted.
+ *
+ * @return array{url:string,label:string}|null
+ */
+function flash_action_normalize(?array $action): ?array
+{
+    if ($action === null) {
+        return null;
+    }
+    $url = trim((string) ($action['url'] ?? ''));
+    $label = trim((string) ($action['label'] ?? ''));
+    $hasWhitespace = str_contains($url, ' ') || str_contains($url, chr(9))
+        || str_contains($url, chr(10)) || str_contains($url, chr(13));
+    if ($url === '' || $label === '' || $hasWhitespace
+        || str_contains($url, chr(92)) || str_starts_with($url, '//')
+    ) {
+        return null;
+    }
+    $parts = parse_url($url);
+    if ($parts === false) {
+        return null;
+    }
+    $path = (string) ($parts['path'] ?? '');
+    if (isset($parts['scheme']) || isset($parts['host'])
+        || str_starts_with($path, '/') || str_contains($path, '..')
+    ) {
+        return null;
+    }
+
+    return ['url' => $url, 'label' => $label];
 }
 
 function flash_messages(): array
@@ -135,7 +171,7 @@ function flash_messages(): array
  * Single source of the alert markup, shared by the portal shell and the login
  * page. 'detail' is optional so flashes queued before a deploy still render.
  *
- * @param array<string, string> $flash
+ * @param array{type?: string, message?: string, detail?: string, action?: array<string, mixed>} $flash
  */
 function flash_alert_html(array $flash): string
 {
@@ -150,6 +186,14 @@ function flash_alert_html(array $flash): string
             . '<summary>' . h(__t('common.technical_details')) . '</summary>'
             . '<pre>' . h($detail) . '</pre>'
             . '</details>';
+    }
+
+    $action = flash_action_normalize(is_array($flash['action'] ?? null) ? $flash['action'] : null);
+    if ($action !== null) {
+        $quote = chr(34);
+        $html .= '<div class=' . $quote . 'alert-actions' . $quote . '><a class='
+            . $quote . 'button button-secondary' . $quote . ' href=' . $quote
+            . h($action['url']) . $quote . '>' . h($action['label']) . '</a></div>';
     }
 
     return $html . '</div>';
@@ -232,7 +276,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
 <div class="app-shell">
     <aside class="sidebar" aria-label="<?php echo h(__t('layout.nav_primary_label')); ?>">
         <div class="brand">
-            <img class="brand-mark" src="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>" srcset="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?> 1x, <?php echo h(layout_asset_url('assets/img/logo-64@2x.png')); ?> 2x" width="34" height="34" alt="">
+            <img class="brand-mark" src="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>" srcset="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?> 1x, <?php echo h(layout_asset_url('assets/img/logo-64@2x.png')); ?> 2x" width="48" height="48" alt="">
             <span>VirtuSphere</span>
             <button class="button button-ghost nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-label="<?php echo h(__t('layout.nav_toggle')); ?>">
                 <span aria-hidden="true">&#9776;</span>
@@ -246,7 +290,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
             <?php if (can('deploy.run', $user)) { ?>
                 <?php layout_nav_item('deploy', __t('layout.nav_deploy'), 'deploy.php', $active); ?>
             <?php } ?>
-            <?php layout_nav_item('integrations', __t('layout.nav_integrations'), 'integrations.php', $active); ?>
+            <?php layout_nav_item('system-status', __t('layout.nav_system_status'), 'system_status.php', $active); ?>
             <?php layout_nav_item('help', __t('layout.nav_help'), 'help.php', $active); ?>
         </nav>
         <?php if (can('catalog.write', $user)) { ?>
@@ -393,11 +437,11 @@ function heartbeat_badge(string $state): string
 {
     $meta = virtusphere_heartbeat_meta($state);
     $label = match ($state) {
-        'ok' => __t('integrations.status_ok'),
-        'warning' => __t('integrations.status_warning'),
-        'danger' => __t('integrations.status_danger'),
-        'missing' => __t('integrations.status_missing'),
-        default => __t('integrations.status_unknown'),
+        'ok' => __t('system_status.status_ok'),
+        'warning' => __t('system_status.status_warning'),
+        'danger' => __t('system_status.status_danger'),
+        'missing' => __t('system_status.status_missing'),
+        default => __t('system_status.status_unknown'),
     };
 
     return portal_badge((string) $meta['badge'], $label);
@@ -414,10 +458,10 @@ function esxi_state_badge(string $state): string
 {
     $meta = virtusphere_heartbeat_meta($state);
     $label = match ($state) {
-        'ok' => __t('integrations.esxi_state_ok'),
-        'warning' => __t('integrations.esxi_state_warning'),
-        'danger' => __t('integrations.esxi_state_danger'),
-        default => __t('integrations.esxi_state_unknown'),
+        'ok' => __t('system_status.esxi_state_ok'),
+        'warning' => __t('system_status.esxi_state_warning'),
+        'danger' => __t('system_status.esxi_state_danger'),
+        default => __t('system_status.esxi_state_unknown'),
     };
 
     return portal_badge((string) $meta['badge'], $label);
@@ -446,19 +490,28 @@ function ansible_preflight_ampel(?array $state): string
     };
 }
 
-/** @param array<string, mixed>|null $state */
-function ansible_preflight_badge(?array $state): string
+/**
+ * Badge for an already-derived Ansible state, so a caller holding the state
+ * (the overview roll-up, the legend) does not have to fake a preflight row to
+ * get its badge back.
+ */
+function ansible_state_badge(string $state): string
 {
-    $ampel = ansible_preflight_ampel($state);
-    $meta = virtusphere_heartbeat_meta($ampel);
-    $label = match ($ampel) {
-        'ok' => __t('integrations.ansible_state_ok'),
-        'warning' => __t('integrations.ansible_state_warning'),
-        'danger' => __t('integrations.ansible_state_danger'),
-        default => __t('integrations.ansible_state_unknown'),
+    $meta = virtusphere_heartbeat_meta($state);
+    $label = match ($state) {
+        'ok' => __t('system_status.ansible_state_ok'),
+        'warning' => __t('system_status.ansible_state_warning'),
+        'danger' => __t('system_status.ansible_state_danger'),
+        default => __t('system_status.ansible_state_unknown'),
     };
 
     return portal_badge((string) $meta['badge'], $label);
+}
+
+/** @param array<string, mixed>|null $state */
+function ansible_preflight_badge(?array $state): string
+{
+    return ansible_state_badge(ansible_preflight_ampel($state));
 }
 
 // Client deploy-phase badge (none|running|unconfirmed|finished|failed).
@@ -554,11 +607,11 @@ function client_phase_label(string $phase): string
 function integration_source_label(string $source): string
 {
     return match ($source) {
-        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('integrations.source_device_sync'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('integrations.source_packages_sync'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('integrations.source_autoimporter'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('integrations.source_mecm_server_probe'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('integrations.source_maintenance_worker'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('system_status.source_device_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.source_packages_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.source_autoimporter'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('system_status.source_mecm_server_probe'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.source_maintenance_worker'),
         default => $source,
     };
 }
@@ -566,11 +619,24 @@ function integration_source_label(string $source): string
 function integration_action_hint(string $source): string
 {
     return match ($source) {
-        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('integrations.action_device_sync'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('integrations.action_packages_sync'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('integrations.action_autoimporter'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('integrations.action_mecm_server_probe'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('integrations.action_maintenance_worker'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('system_status.action_device_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.action_packages_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.action_autoimporter'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('system_status.action_mecm_server_probe'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.action_maintenance_worker'),
         default => '',
     };
+}
+
+function portal_format_duration(int $seconds): string
+{
+    $seconds = max(0, $seconds);
+    if ($seconds > 0 && $seconds % 3600 === 0) {
+        return __t('common.duration_hours', ['count' => intdiv($seconds, 3600)]);
+    }
+    if ($seconds >= 60 && $seconds % 60 === 0) {
+        return __t('common.duration_minutes', ['count' => intdiv($seconds, 60)]);
+    }
+
+    return __t('common.duration_seconds', ['count' => $seconds]);
 }

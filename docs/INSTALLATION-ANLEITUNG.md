@@ -138,12 +138,13 @@ Bei Zugriff von einem anderen Rechner statt `127.0.0.1` die Server-IP verwenden,
 ## Betriebsreihenfolge im Portal
 
 1. Anmelden.
-2. Unter Credentials je ein `esxi`- und ein `ansible`-Credential anlegen.
-3. Ansible Credential testen; der Test prueft SSH-Login, die Toolchain (ansible-playbook, python3, pyvmomi, community.vmware), einen SFTP-Schreibtest in /tmp und, bei gesetzter API-Basis-URL, die Portal-Erreichbarkeit. Ein Fehler nennt die betroffene Komponente; das Ergebnis bleibt als Status-Marke unter Zugangsdaten und im Abschnitt "Ansible-Host" unter Integrationen sichtbar. Nach dem Bearbeiten des Zugangs wird das gespeicherte Ergebnis verworfen (Status "Nicht getestet"); danach einmal neu testen.
-4. OS, VLANs und Packages pflegen.
-5. Mission anlegen und Datacenter/Datastore/WDS VLAN setzen.
-6. Mindestens eine VM in der Mission anlegen.
-7. Deploy-Job queuen.
+2. Unter `Einstellungen -> Bereitstellung` die API-Basis-URL prüfen. Entweder gilt `APP_PUBLIC_BASE_URL` aus der `.env`, oder im Portal wird ein vorrangiger Wert eingetragen und mit dem direkt danebenstehenden Knopf gespeichert. Die Übersicht "Wirksame Deploy-Konfiguration" zeigt Wert und Quelle. Beispiele und der Verbindungstest sind aufklappbar. "Auf .env-Fallback zurücksetzen" erscheint nur bei einem gespeicherten Portalwert und entfernt diesen.
+3. Unter Credentials je ein `esxi`- und ein `ansible`-Credential anlegen. Das `ansible`-Credential ist ausschließlich der SSH/SFTP-Zugang zum Ausführungs-Host; die API-Basis-URL ist die separate Rückadresse. Ein Deploy verwendet beides gemeinsam.
+4. Beim Ansible-Zugang „Verbindung und Umgebung prüfen" ausführen; geprüft werden SSH-Login, Toolchain (ansible-playbook, python3, pyvmomi, community.vmware), ein SFTP-Schreibtest in /tmp und, bei gesetzter API-Basis-URL, die Portal-Erreichbarkeit. Ein Fehler nennt die betroffene Komponente; Ergebnis und Zeitpunkt bleiben unter Zugangsdaten und im Abschnitt „Ansible-Host" des Systemstatus sichtbar. Nach dem Bearbeiten des Zugangs wird das Ergebnis verworfen („Nicht getestet"); danach erneut prüfen. Bei mehreren Ansible-Zugängen unter Einstellungen → Kataloge und Inventar den globalen Zugang für ESXi-Inventaraufträge wählen.
+5. OS, VLANs und Packages pflegen.
+6. Mission anlegen und Datacenter/Datastore/WDS VLAN setzen.
+7. Mindestens eine VM in der Mission anlegen.
+8. Deploy-Job queuen.
 
 Wenn ein Deploy-Job nicht queued werden kann, kommt der Fehler jetzt vor dem Worker zurueck: fehlender User, Template-Mission, fehlendes Datacenter/Datastore, keine VMs oder unvollstaendige Credentials werden backendseitig blockiert.
 

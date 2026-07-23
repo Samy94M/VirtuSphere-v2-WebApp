@@ -11,7 +11,7 @@ return [
     'nav_missions' => 'Missionen',
     'nav_templates' => 'Vorlagen',
     'nav_deploy' => 'Bereitstellung',
-    'nav_integrations' => 'Integrationen',
+    'nav_system_status' => 'Systemstatus',
     'nav_help' => 'Hilfe',
     'help_page_link' => 'Hilfe',
     'help_page_title' => 'Hilfe zu dieser Seite öffnen',

@@ -45,8 +45,8 @@ final class MaintenanceReapTest extends TestCase
         $this->skipWhenForeignRunningJobsExist();
 
         $missionId = $this->insertMission($this->prefix . '_stale');
-        $importedVmId = $this->insertVm($missionId, 'vm-imported', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_PENDING);
-        $stuckVmId = $this->insertVm($missionId, 'vm-stuck', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $importedVmId = $this->insertVm($missionId, 'vm-imported', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $stuckVmId = $this->insertVm($missionId, 'vm-stuck', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         $resultJson = json_encode([
             'version' => 1,
@@ -70,11 +70,11 @@ final class MaintenanceReapTest extends TestCase
         // VM without an import converges to failed/failed.
         $imported = $this->row('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ' . $importedVmId);
         self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYED, $imported['lifecycle_state']);
-        self::assertSame(VIRTUSPHERE_MECM_PENDING, $imported['mecm_sync_state']);
+        self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $imported['mecm_sync_state']);
 
         $stuck = $this->row('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ' . $stuckVmId);
         self::assertSame(VIRTUSPHERE_LIFECYCLE_FAILED, $stuck['lifecycle_state']);
-        self::assertSame(VIRTUSPHERE_MECM_FAILED, $stuck['mecm_sync_state']);
+        self::assertSame(VIRTUSPHERE_MECM_SYNC_FAILED, $stuck['mecm_sync_state']);
     }
 
     public function testMaintenanceReapLeavesFreshJobsAlone(): void
@@ -82,7 +82,7 @@ final class MaintenanceReapTest extends TestCase
         $this->skipWhenForeignRunningJobsExist();
 
         $missionId = $this->insertMission($this->prefix . '_fresh');
-        $vmId = $this->insertVm($missionId, 'vm-live', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_NOT_READY);
+        $vmId = $this->insertVm($missionId, 'vm-live', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertStaleRunningJob($missionId, [$vmId], null, 0);
 
         maintenance_worker_reap_deploy_jobs($this->db);

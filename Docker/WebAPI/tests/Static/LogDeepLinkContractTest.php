@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
  * logs.php scopes its ?category= filter to the active tab and drops a category
  * the tab does not contain. A deep link that names only the category therefore
  * lands on the default tab and shows unrelated rows: no error, no empty list,
- * nothing php -l or the lang audit can see. `integrations.php` shipped exactly
+ * nothing php -l or the lang audit can see. `system_status.php` shipped exactly
  * that link from the day the tabs were introduced. `log_category_url()` in
  * lib/repo/log.php derives the tab from VIRTUSPHERE_LOG_TABS; this pins it as
  * the only way to build such a link.

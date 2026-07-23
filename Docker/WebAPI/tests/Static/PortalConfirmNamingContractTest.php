@@ -49,7 +49,7 @@ final class PortalConfirmNamingContractTest extends TestCase
     /** Confirms with no single target, and why naming one would be wrong. */
     private const NO_TARGET = [
         'deploy.confirm_cancel_group' => 'cancels a whole staggered batch; the batch is the target, not a row',
-        'integrations.reassign_confirm' => 'the target field (vlan_from) is an editable input, so a name rendered server-side would state a value the operator may have changed since',
+        'system_status.reassign_confirm' => 'the target field (vlan_from) is an editable input, so a name rendered server-side would state a value the operator may have changed since',
         'settings.api_base_url_reset_confirm' => 'the one stored API base URL, not a row',
         'settings.https_confirm_disable' => 'a global switch, not a row',
         'settings.https_confirm_overwrite' => 'a global switch, not a row',
@@ -68,6 +68,12 @@ final class PortalConfirmNamingContractTest extends TestCase
         $pages = [];
         foreach (glob($root . '/portal/*.php') ?: [] as $file) {
             $pages[$file] = (string) file_get_contents($file);
+        }
+        // Globbed, not listed: system_status.php renders through more than one
+        // panel module, and splitting one for the ADR-0006 budget must not drop
+        // its confirm prompts out of this contract.
+        foreach (glob($root . '/lib/system_status_*panels.php') ?: [] as $renderer) {
+            $pages[$root . '/portal/system_status.php'] .= (string) file_get_contents($renderer);
         }
         self::assertNotSame([], $pages, 'no portal pages found');
 

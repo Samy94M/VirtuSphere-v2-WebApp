@@ -8,7 +8,7 @@
 #
 # Geprueft (Wertesatz + Reihenfolge):
 #   deploy_vms.lifecycle_state   <-> VIRTUSPHERE_LIFECYCLE_*        (lib/constants.php)
-#   deploy_vms.mecm_sync_state   <-> VIRTUSPHERE_MECM_*             (lib/constants.php)
+#   deploy_vms.mecm_sync_state   <-> VIRTUSPHERE_MECM_SYNC_*        (lib/constants.php)
 #   deploy_users.role            <-> VIRTUSPHERE_ROLE_*             (lib/permissions.php)
 #   deploy_jobs.status           <-> VIRTUSPHERE_DEPLOY_STATUS_*    (lib/deploy_constants.php)
 #   deploy_credentials.type      <-> VIRTUSPHERE_CREDENTIAL_TYPE_*  (lib/credentials.php)
@@ -74,7 +74,7 @@ check_pair() { # $1=label $2=php-file $3=const-prefix $4=column
 }
 
 check_pair "Lifecycle-States"  "$LIB/constants.php"        "VIRTUSPHERE_LIFECYCLE_"       "lifecycle_state"
-check_pair "MECM-Sync-States"  "$LIB/constants.php"        "VIRTUSPHERE_MECM_"            "mecm_sync_state"
+check_pair "MECM-Sync-States"  "$LIB/constants.php"        "VIRTUSPHERE_MECM_SYNC_"       "mecm_sync_state"
 check_pair "User-Rollen"       "$LIB/permissions.php"      "VIRTUSPHERE_ROLE_"            "role"
 check_pair "Deploy-Job-Status" "$LIB/deploy_constants.php" "VIRTUSPHERE_DEPLOY_STATUS_"   "status"
 check_pair "Credential-Typen"  "$LIB/credentials.php"      "VIRTUSPHERE_CREDENTIAL_TYPE_" "type ENUM"

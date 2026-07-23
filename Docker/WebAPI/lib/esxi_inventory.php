@@ -17,28 +17,81 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/repo/settings.php';
 
 /**
- * Resolves the Ansible SSH credential used to run inventory jobs: the only one
- * if there is exactly one, else the configured setting; null when there are
- * several and none is configured (auto-pull then pauses with a settings hint).
+ * Resolves the Ansible SSH credential used by every inventory job.
+ *
+ * @return array{state:string,credential_id:?int,configured_id:int,credentials:array<int,array<string,mixed>>}
  */
-function esxi_inventory_ansible_credential_id(mysqli $db): ?int
+function esxi_inventory_ansible_resolution(mysqli $db): array
 {
     $ansible = repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
+    $configured = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
+
+    return esxi_inventory_ansible_resolve($ansible, $configured);
+}
+
+/**
+ * Pure decision core for the global Ansible credential used by ESXi inventory.
+ * Keeping this independent of the database makes all 0/1/many edge cases
+ * deterministic and gives settings, status and worker the same semantics.
+ *
+ * @param array<int,array<string,mixed>> $ansible
+ * @return array{state:string,credential_id:?int,configured_id:int,credentials:array<int,array<string,mixed>>}
+ */
+function esxi_inventory_ansible_resolve(array $ansible, int $configured): array
+{
+    $configured = max(0, $configured);
     if ($ansible === []) {
-        return null;
+        return ['state' => 'none', 'credential_id' => null, 'configured_id' => $configured, 'credentials' => []];
     }
     if (count($ansible) === 1) {
-        return (int) $ansible[0]['id'];
+        return [
+            'state' => 'automatic',
+            'credential_id' => (int) $ansible[0]['id'],
+            'configured_id' => $configured,
+            'credentials' => $ansible,
+        ];
     }
 
-    $configured = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
     foreach ($ansible as $credential) {
         if ((int) $credential['id'] === $configured && $configured > 0) {
-            return $configured;
+            return [
+                'state' => 'selected',
+                'credential_id' => $configured,
+                'configured_id' => $configured,
+                'credentials' => $ansible,
+            ];
         }
     }
 
-    return null;
+    return [
+        'state' => $configured > 0 ? 'invalid' : 'ambiguous',
+        'credential_id' => null,
+        'configured_id' => $configured,
+        'credentials' => $ansible,
+    ];
+}
+
+function esxi_inventory_ansible_credential_id(mysqli $db): ?int
+{
+    return esxi_inventory_ansible_resolution($db)['credential_id'];
+}
+
+/**
+ * Clears a dangling explicit selection after deleting an Ansible credential or
+ * changing its type. Returns true only when a setting was actually removed.
+ */
+function esxi_inventory_clear_ansible_selection_if_matches(mysqli $db, int $credentialId): bool
+{
+    if ($credentialId <= 0) {
+        return false;
+    }
+    $configured = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
+    if ($configured !== $credentialId) {
+        return false;
+    }
+    repo_delete_setting($db, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
+
+    return true;
 }
 
 /**
@@ -48,9 +101,16 @@ function esxi_inventory_ansible_credential_id(mysqli $db): ?int
  */
 function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId, ?int $userId = null): array
 {
-    $ansibleId = esxi_inventory_ansible_credential_id($db);
+    $resolution = esxi_inventory_ansible_resolution($db);
+    $ansibleId = $resolution['credential_id'];
     if ($ansibleId === null) {
-        return ['enqueued' => false, 'reason' => 'no_ansible_credential'];
+        $reason = match ($resolution['state']) {
+            'ambiguous' => 'ambiguous_ansible_credential',
+            'invalid' => 'invalid_ansible_credential',
+            default => 'no_ansible_credential',
+        };
+
+        return ['enqueued' => false, 'reason' => $reason];
     }
 
     try {
@@ -591,7 +651,7 @@ function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = nul
 }
 
 /**
- * Per-credential inventory overview for the integrations page.
+ * Per-credential inventory overview for the system status page.
  *
  * Deliberately does NOT carry a traffic-light state. The badge the portal shows
  * is esxi_credential_state() (lib/esxi_capabilities.php), which is the fetch
@@ -613,6 +673,45 @@ function esxi_inventory_overview(mysqli $db): array
     }
 
     return $out;
+}
+
+/**
+ * Compact cards in one fixed set of bulk queries. Full inventory rows are not
+ * loaded until esxi_inventory_detail() is called for one explicitly requested
+ * ESXi credential.
+ *
+ * @return array<int,array{credential:array<string,mixed>,state:?array<string,mixed>,counts:array<string,int>,pending_job:?array<string,mixed>}>
+ */
+function esxi_inventory_summaries(mysqli $db): array
+{
+    $states = repo_esxi_inventory_states($db);
+    $counts = repo_esxi_inventory_counts($db);
+    $pendingJobs = repo_esxi_inventory_pending_jobs($db);
+    $out = [];
+    foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) as $credential) {
+        $credentialId = (int) $credential['id'];
+        $out[] = [
+            'credential' => $credential,
+            'state' => $states[$credentialId] ?? null,
+            'counts' => $counts[$credentialId] ?? [],
+            'pending_job' => $pendingJobs[$credentialId] ?? null,
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * @return array<string,array<int,array<string,mixed>>>|null
+ */
+function esxi_inventory_detail(mysqli $db, int $credentialId): ?array
+{
+    $credential = repo_credential($db, $credentialId);
+    if ($credential === null || (string) $credential['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        return null;
+    }
+
+    return repo_esxi_inventory_for_credential($db, $credentialId);
 }
 
 /**

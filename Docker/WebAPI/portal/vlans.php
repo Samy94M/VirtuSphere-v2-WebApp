@@ -49,7 +49,7 @@ $presenceReport = repo_esxi_vlan_presence_report($connection);
 $eligibleHosts = $presenceReport['eligible'];
 $hostTotal = count($eligibleHosts);
 
-layout_header(__t('vlans.title'), $user, 'vlans', 'integrations');
+layout_header(__t('vlans.title'), $user, 'vlans', 'system-status');
 ?>
 <div class="stack">
     <section class="panel">

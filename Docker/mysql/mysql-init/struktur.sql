@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS deploy_integration_heartbeats (
     last_seen_at TIMESTAMP NULL,
     last_checked_at TIMESTAMP NULL,
     last_status VARCHAR(8) NOT NULL DEFAULT 'ok',
-    last_detail VARCHAR(255) NULL,
+    last_detail VARCHAR(2048) NULL,
     last_ip VARCHAR(45) NOT NULL DEFAULT '',
     interval_seconds INT NOT NULL DEFAULT 60,
     beat_count BIGINT NOT NULL DEFAULT 0
