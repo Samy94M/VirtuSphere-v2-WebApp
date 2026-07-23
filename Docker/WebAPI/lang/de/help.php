@@ -449,8 +449,8 @@ return [
     'esxi_cause_fix_authz' => 'Die Rolle des ESXi-Kontos erweitern. Für das Inventar genügen Leserechte, für Bereitstellen und Autostart nicht.',
     'esxi_cause_fix_http' => 'Kommt bei ESXi-Abrufen nicht mehr vor. Erscheint die Kategorie an einem alten Datensatz, hilft ein neuer Abruf.',
     'esxi_cause_fix_ssh' => 'Ansible-Zugangsdatum und Ansible-Host prüfen, genau wie bei einem fehlgeschlagenen Deploy.',
-    'esxi_cause_fix_parse' => 'Job-Log ansehen. Meist passt die Version der Ansible-Collection nicht zum Host.',
-    'esxi_cause_fix_config' => 'Host, Benutzername und Typ im Zugangsdatum prüfen.',
+    'esxi_cause_fix_parse' => 'Ursache unbekannt, also ins Jobprotokoll schauen: dort steht die letzte Ausgabe des Playbooks im Klartext. Häufig passt die Version der Ansible-Collection nicht zum Host.',
+    'esxi_cause_fix_config' => 'Der Abruf ist gescheitert, bevor er den Host kontaktiert hat. Host, Benutzername und Typ im Zugangsdatum prüfen; nennt das Jobprotokoll eine fehlende Datei oder ein fehlendes Modul, fehlt sie auf dem Ansible-Host und nicht auf ESXi.',
 
     'autostart_heading' => 'Autostart auf dem ESXi-Host',
     'autostart_p1' => 'Der Modus „Start VMs" schaltet die VMs einmalig ein. Der Modus „Apply ESXi autostart policy" trägt sie dagegen dauerhaft in die Autostart-Liste des Hosts ein, sodass sie nach einem Neustart oder Stromausfall von selbst hochfahren. Das ist dieselbe Liste, die der Host-Client unter „Verwalten, System, Autostart" zeigt.',

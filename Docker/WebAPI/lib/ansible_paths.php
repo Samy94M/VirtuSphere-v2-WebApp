@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/envboot.php';
 
 /**
@@ -15,14 +16,26 @@ require_once __DIR__ . '/envboot.php';
 const VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT = 'upload_mac_list.py';
 
 /**
- * Files that must be copied into every deploy work dir. Derived from the
- * playbook map so the two never drift; the MAC upload script is appended.
+ * Files that must be copied into every deploy work dir: every playbook a job
+ * can run, plus the MAC upload script.
+ *
+ * Both playbook maps, not just the mission modes. There are two, and this
+ * derived only from the first, so the ESXi inventory playbook was executed but
+ * never uploaded: the run died on "the playbook: inventoryESXi_playbook.yml
+ * could not be found", which the error categorizer then reported to the
+ * operator as "the host answered unexpectedly" -- a sentence pointing at ESXi
+ * for a file that never left this container. A mode that can be dispatched must
+ * have its playbook here, which is what AnsiblePlaybookUploadTest pins.
  *
  * @return string[]
  */
 function ansible_required_files(): array
 {
-    return array_merge(array_values(VIRTUSPHERE_PLAYBOOKS), [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT]);
+    return array_merge(
+        array_values(VIRTUSPHERE_PLAYBOOKS),
+        array_values(VIRTUSPHERE_SYSTEM_PLAYBOOKS),
+        [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT]
+    );
 }
 
 function ansible_source_dir(): string

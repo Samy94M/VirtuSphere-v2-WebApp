@@ -448,8 +448,8 @@ return [
     'esxi_cause_fix_authz' => 'Extend the role of the ESXi account. Read rights are enough for the inventory, but not for deploying or autostart.',
     'esxi_cause_fix_http' => 'No longer occurs for ESXi pulls. If the category shows on an old record, a fresh pull clears it.',
     'esxi_cause_fix_ssh' => 'Check the Ansible credential and the Ansible host, exactly as for a failed deploy.',
-    'esxi_cause_fix_parse' => 'Look at the job log. Usually the Ansible collection version does not match the host.',
-    'esxi_cause_fix_config' => 'Check host, username and type in the credential.',
+    'esxi_cause_fix_parse' => 'The cause is unknown, so read the job log: it carries the playbook output verbatim. Often the Ansible collection version does not match the host.',
+    'esxi_cause_fix_config' => 'The fetch failed before it contacted the host. Check host, username and type in the credential; if the job log names a missing file or module, it is missing on the Ansible host, not on ESXi.',
 
     'autostart_heading' => 'Autostart on the ESXi host',
     'autostart_p1' => 'The "Start VMs" mode powers the VMs on once. The "Apply ESXi autostart policy" mode instead writes them into the host autostart list for good, so they come up on their own after a reboot or a power loss. It is the same list the host client shows under "Manage, System, Autostart".',

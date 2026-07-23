@@ -329,6 +329,20 @@ function ansible_parse_inventory_hosts(mixed $facts, mixed $fetchedEpoch): array
 function ansible_categorize_inventory_error(string $output, int $exitCode): string
 {
     $lower = strtolower($output);
+    // Our own deployment, not the host's answer. A missing playbook or a
+    // missing collection means the run never reached ESXi, so it must not be
+    // reported with a sentence about the host: an inventory pull once died on
+    // "the playbook: inventoryESXi_playbook.yml could not be found" and told
+    // the operator the host had answered unexpectedly, sending them to check a
+    // network path that was never used.
+    // Both strings are ansible-playbook's own wording for "I could not load
+    // what you asked me to run". Deliberately narrow: a broader pattern would
+    // swallow a real answer from ESXi that happens to mention a module.
+    if (str_contains($lower, 'could not be found')
+        || str_contains($lower, "couldn't resolve module/action")
+    ) {
+        return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    }
     if (str_contains($lower, 'permission') || str_contains($lower, 'not authorized') || str_contains($lower, 'privilege') || str_contains($lower, 'restricted')) {
         return VIRTUSPHERE_INVENTORY_ERROR_AUTHZ;
     }

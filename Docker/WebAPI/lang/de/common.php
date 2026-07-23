@@ -44,7 +44,7 @@ return [
     'conn_authz' => 'Die Anmeldung hat funktioniert, aber dem Konto fehlen die nötigen Rechte.',
     'conn_http' => 'Der Host hat mit HTTP :status geantwortet.',
     'conn_ssh' => 'Die SSH-Verbindung zu ":host" ist fehlgeschlagen.',
-    'conn_parse' => 'Der Host hat unerwartet geantwortet.',
-    'conn_config' => 'Die Zugangsdaten sind unvollständig oder der Typ wird nicht unterstützt.',
+    'conn_parse' => 'Der Abruf ist mit einem unbekannten Fehler gescheitert. Die Ursache steht im Jobprotokoll.',
+    'conn_config' => 'Konfigurationsproblem vor dem Verbindungsaufbau: Zugangsdaten, Toolchain oder Playbooks sind unvollständig. Der Host wurde dabei nicht kontaktiert.',
     'conn_unknown' => 'Die Verbindung ist fehlgeschlagen.',
 ];

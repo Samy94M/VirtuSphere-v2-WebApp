@@ -95,4 +95,38 @@ final class AnsibleInventoryParseTest extends TestCase
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTHZ, ansible_categorize_inventory_error('Permission to perform this operation was denied.', 2));
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_PARSE, ansible_categorize_inventory_error('some other unexpected failure', 2));
     }
+
+    /**
+     * A failure of our own deployment must never be dressed up as an answer
+     * from the host. A production pull died on a playbook that was never
+     * uploaded and was reported as "the host answered unexpectedly", which sent
+     * the operator to check ESXi, the network and the credentials for a file
+     * that had not left the portal container.
+     */
+    public function testOurOwnMissingFilesAreConfigNotAnAnswerFromTheHost(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            ansible_categorize_inventory_error('ERROR! the playbook: inventoryESXi_playbook.yml could not be found', 1)
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            ansible_categorize_inventory_error("ERROR! couldn't resolve module/action 'community.vmware.vmware_datastore_info'", 1)
+        );
+    }
+
+    public function testTheHostStillOutranksOurConfigWhenItReallyAnswered(): void
+    {
+        // A permission or login failure names a real answer from ESXi, so it
+        // must keep its specific category even though the wording could brush
+        // against the config patterns.
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_AUTHZ,
+            ansible_categorize_inventory_error('Permission to perform this operation was denied.', 2)
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_AUTH,
+            ansible_categorize_inventory_error('Cannot complete login due to an incorrect user name or password.', 2)
+        );
+    }
 }

@@ -44,7 +44,7 @@ return [
     'conn_authz' => 'The login succeeded, but the account lacks the required permissions.',
     'conn_http' => 'The host answered with HTTP :status.',
     'conn_ssh' => 'The SSH connection to ":host" failed.',
-    'conn_parse' => 'The host answered unexpectedly.',
-    'conn_config' => 'The credential is incomplete or its type is not supported.',
+    'conn_parse' => 'The fetch failed with an unknown error. The cause is in the job log.',
+    'conn_config' => 'A configuration problem before the connection was made: credentials, toolchain or playbooks are incomplete. The host was not contacted.',
     'conn_unknown' => 'The connection failed.',
 ];
