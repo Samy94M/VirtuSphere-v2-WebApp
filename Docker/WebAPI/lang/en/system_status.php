@@ -116,7 +116,7 @@ return [
     'refresh_status' => 'Refresh status',
     'mecm_heading' => 'MECM',
     'mecm_hint' => 'VirtuSphere supports exactly one MECM site. Multiple allowed IP addresses are access paths, not additional MECM systems.',
-    'mecm_signal_explanation' => 'Heartbeats prove that individual MECM tasks can reach the portal. The TCP probe separately checks the portal → MECM path on port :port. Heartbeats can therefore be current while port :port is blocked, and vice versa.',
+    'mecm_signal_explanation' => 'The tasks below are PowerShell scripts running in Windows Task Scheduler on the MECM server. After each run such a script sends a short report to the portal. Those reports are what you see here: "Last report" is the most recent one, "Interval" is the rhythm in which the next is expected. If they stop, the scheduled task on the MECM server is no longer running. The network check below is a different thing and goes the other way: from the portal to the MECM server on port :port. Either can work or fail on its own.',
     'mecm_ip_mismatch' => 'Several current MECM sources report different sender IPs: :ips. This can be intentional with several network paths; verify the mapping.',
     'mecm_not_configured' => 'No MECM connection yet: none of the synchronisation tasks has ever reported. The tasks are set up on the MECM server, not in the portal; the portal only needs the IP allowlist entry for the machine API. The instructions are in docs/operations/mecm-integration.md.',
     'mecm_configure_allowlist' => 'Open IP allowlist',

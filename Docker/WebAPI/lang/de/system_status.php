@@ -116,7 +116,7 @@ return [
     'refresh_status' => 'Status aktualisieren',
     'mecm_heading' => 'MECM',
     'mecm_hint' => 'VirtuSphere unterstützt genau eine MECM-Site. Mehrere freigegebene IP-Adressen sind Zugriffswege, keine weiteren MECM-Systeme.',
-    'mecm_signal_explanation' => 'Heartbeats belegen, dass einzelne MECM-Aufgaben das Portal erreichen. Die TCP-Probe prüft getrennt den Weg Portal → MECM auf Port :port. Deshalb können Heartbeats aktuell sein, obwohl Port :port blockiert ist, und umgekehrt.',
+    'mecm_signal_explanation' => 'Die Aufgaben unten sind PowerShell-Skripte, die auf dem MECM-Server in der Windows-Aufgabenplanung laufen. Nach jedem Durchlauf schickt so ein Skript eine kurze Meldung an das Portal. Genau diese Meldungen stehen hier: „Letzte Meldung" ist die zuletzt eingegangene, „Intervall" der Takt, in dem die nächste erwartet wird. Bleiben sie aus, läuft die geplante Aufgabe auf dem MECM-Server nicht mehr. Die Netzwerkprüfung darunter ist etwas anderes und geht in die Gegenrichtung: vom Portal zum MECM-Server auf Port :port. Beides kann einzeln funktionieren oder klemmen.',
     'mecm_ip_mismatch' => 'Mehrere aktuelle MECM-Quellen melden unterschiedliche Absender-IPs: :ips. Das kann bei mehreren Netzwegen beabsichtigt sein; bitte die Zuordnung prüfen.',
     'mecm_not_configured' => 'Noch keine MECM-Anbindung: bisher hat sich keine der Synchronisationsaufgaben gemeldet. Die Aufgaben werden auf dem MECM-Server eingerichtet, nicht im Portal; das Portal braucht dafür nur die IP-Freigabe für die Machine-API. Die Anleitung dazu steht in docs/operations/mecm-integration.md.',
     'mecm_configure_allowlist' => 'IP-Freigaben öffnen',
