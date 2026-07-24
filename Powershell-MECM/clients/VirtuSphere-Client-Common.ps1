@@ -46,7 +46,7 @@ $script:VsDefaultScheme = 'http'
 $script:VsAllowSelfSignedTls = $false
 
 $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
-$script:VsLogDir = 'C:\Program Files\aplw\Logs'
+$script:VsLogDir = 'C:\Program Files\VirtuSphere\Logs'
 $script:VsLogComponent = 'client'
 $script:VsResolvedApi = $null
 

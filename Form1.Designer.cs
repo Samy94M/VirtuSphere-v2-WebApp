@@ -467,9 +467,7 @@
             this.listBoxOS.FormattingEnabled = true;
             this.listBoxOS.Items.AddRange(new object[] {
             "Windows Server 2019 Core",
-            "Windows Server 2019 Standard",
-            "Windows Server 2019 Core mit APLw",
-            "Windows Server 2019 Standard mit APLw"});
+            "Windows Server 2019 Standard"});
             this.listBoxOS.Location = new System.Drawing.Point(131, 190);
             this.listBoxOS.Name = "listBoxOS";
             this.listBoxOS.Size = new System.Drawing.Size(215, 21);

@@ -146,6 +146,33 @@ try {
 } catch { Write-Debug $_ }
 if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Warn 'Site-Code nicht automatisch erkennbar - Skripte nutzen WMI/PSDrive zur Laufzeit.' }
 
+# DP-Gruppe pruefen: der Installer nimmt den Namen nur entgegen, verteilt selbst
+# nichts. Ein Tippfehler oder ein Namenszusatz der Umgebung (im Feld gesehen: die
+# Gruppe trug ein Kuerzel der Organisation im Namen, konfiguriert war sie ohne)
+# faellt daher erst beim Autoimporter auf, und dort nur als WARN,
+# waehrend App und Deployment trotzdem entstehen. Ergebnis waere eine Anwendung
+# ohne Content auf den Verteilungspunkten: der Client bekommt eine Installation
+# angeboten, die nie startet. Nur warnen, nicht abbrechen - die Gruppe darf
+# legitim erst nach der Installation angelegt werden.
+if ($siteCode) {
+    try {
+        $dpGroups = @(Get-CimInstance -Namespace ('root\SMS\site_{0}' -f $siteCode) `
+            -ClassName 'SMS_DistributionPointGroup' -ErrorAction Stop)
+        $dpGroup = $dpGroups | Where-Object { $_.Name -eq $DpGroupName } | Select-Object -First 1
+        if (-not $dpGroup) {
+            $known = ($dpGroups | ForEach-Object { "'{0}'" -f $_.Name }) -join ', '
+            if (-not $known) { $known = '(keine)' }
+            Write-Warn ("DP-Gruppe '{0}' existiert in Site {1} NICHT. Der Autoimporter kann neue Anwendungen dann nicht verteilen: App und Deployment entstehen, der Content fehlt. Vorhandene Gruppen: {2}. Gruppe anlegen oder -DpGroupName korrigieren." -f $DpGroupName, $siteCode, $known)
+        } elseif ([int]$dpGroup.MemberCount -eq 0) {
+            Write-Warn ("DP-Gruppe '{0}' existiert, hat aber keine Verteilungspunkte. Verteilte Anwendungen erreichen damit keinen Client." -f $DpGroupName)
+        } else {
+            Write-Ok ("DP-Gruppe '{0}' gefunden ({1} Verteilungspunkte)" -f $DpGroupName, [int]$dpGroup.MemberCount)
+        }
+    } catch {
+        Write-Warn ("DP-Gruppe '{0}' nicht pruefbar: {1}" -f $DpGroupName, (Get-VsErrorDetail -ErrorRecord $_))
+    }
+}
+
 # WebAPI-Name gegen DNS pruefen. Der haeufigste Rollout-Fehler ist eine Zone, die
 # die per PXE frisch installierten Clients (DNS kommt bei ihnen per DHCP) nicht
 # aufloesen. Nur Hinweis, kein Abbruch: der MECM-Server nutzt evtl. einen anderen
@@ -181,7 +208,12 @@ if (-not (Test-Path $registryPath)) {
 # und Administratoren begrenzen (idempotent bei Re-Run).
 $acl = Get-Acl -Path $registryPath
 $acl.SetAccessRuleProtection($true, $false)
-foreach ($identity in @('NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators')) {
+# Well-Known-SIDs statt lokalisierter Kontonamen: auf einem deutschen Server
+# heissen die Anzeigenamen z. B. NT-AUTORITAET\SYSTEM und
+# VORDEFINIERT\Administratoren. LookupAccountName auf die englischen Namen
+# wirft dort IdentityNotMappedException, bevor die Installation beginnen kann.
+foreach ($sidValue in @('S-1-5-18', 'S-1-5-32-544')) {
+    $identity = New-Object System.Security.Principal.SecurityIdentifier($sidValue)
     $rule = New-Object System.Security.AccessControl.RegistryAccessRule(
         $identity, 'FullControl', 'ContainerInherit', 'None', 'Allow')
     $acl.AddAccessRule($rule)
@@ -278,7 +310,8 @@ $tasks = @(
     @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
     @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
 )
-$principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -RunLevel Highest
+# Auch der Task-Principal verwendet die sprachunabhaengige SYSTEM-SID.
+$principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 foreach ($task in $tasks) {
     $scriptFile = Join-Path $installDir $task.Script
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-ExecutionPolicy Bypass -NonInteractive -File "{0}"' -f $scriptFile)

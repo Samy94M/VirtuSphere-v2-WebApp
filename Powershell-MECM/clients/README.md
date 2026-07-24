@@ -29,6 +29,21 @@ Jedes Skript ermittelt die WebAPI-Adresse in dieser Reihenfolge:
 Folge-Skripte lesen sie von dort. Vor dem Ausrollen die beiden
 Standardadressen oben in der Common-Datei an die Umgebung anpassen.
 
+Wenn der DNS-Administrator beim ersten Rollout noch nicht verfügbar ist, kann
+die feste, aus allen Deploy-VLANs erreichbare WebApp-IP vorläufig als Fallback
+gesetzt werden:
+
+```powershell
+$script:VsDefaultDnsApi = 'virtusphere.lan:8021'
+$script:VsFallbackIpApi = '192.0.2.10:8021'
+```
+
+Der DNS-Kandidat bleibt für die spätere Umstellung erhalten. Bei HTTPS ist eine
+IP nur geeignet, wenn das Zertifikat diese IP als Subject Alternative Name
+enthält. Das vollständige Vorgehen einschließlich Server-Installer und späterem
+DNS-Wechsel steht im **Admin-Runbook** in
+[`docs/operations/mecm-integration.md`](../../docs/operations/mecm-integration.md).
+
 ## Rückkanal
 
 Jede Phase meldet `started` vor und `finished`/`failed` nach der Aktion an die
@@ -46,8 +61,8 @@ keinen Rückkanal-Token (der Token gilt nur für die Server-Heartbeats).
 | Skript | Erkennungsregel (Registry) | Wert | Exit-Codes |
 |---|---|---|---|
 | client_getinfo | `HKLM:\SOFTWARE\VirtuSphere\SetupState` | `complete` | 0 = ok, 1 = Fehler |
-| client_hostname | `HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate\Status` | `Erfolgreich`/`Uebersprungen` | 0, 1641 (Neustart), 1 |
-| client_staticip | `HKLM:\SOFTWARE\APLw-CGN\staticip\installed` | `1` | 0 = ok, 1 = Fehler |
+| client_hostname | `HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate\Status` | `Erfolgreich`/`Uebersprungen` | 0, 1641 (Neustart), 1 |
+| client_staticip | `HKLM:\SOFTWARE\VirtuSphere\staticip\installed` | `1` | 0 = ok, 1 = Fehler |
 | Set-VMDisksOnline | `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement\VMDisksOnlineStatus` | `Success` | 0 = ok, 1 = Fehler |
 
 Programm-Befehlszeile jeweils:
@@ -72,10 +87,11 @@ Die Erkennungswerte oben sind die SSoT: sie stehen als Datentabelle in
 `mecm\VirtuSphere-ClientPackaging.ps1` und werden von einem Pester-Contract-Test
 gegen den Quelltext der Client-Skripte geprüft (weicht die Tabelle von dem ab, was
 ein Skript in die Registry schreibt, gilt die App nie als installiert). Der
-WebAPI-Name wird **nicht** in die Common-ps1 gestempelt; die Auflösung läuft über
-DNS.
+WebAPI-Name wird **nicht** vom Installer in die Common-ps1 gestempelt; die zuvor
+geprüfte Common-Datei wird unverändert als Content übernommen und verwendet ihre
+Registry-/DNS-/IP-Fallback-Kette.
 
-**Logs:** `C:\Program Files\aplw\Logs\<datum>_<phase>.log` (30 Tage
+**Logs:** `C:\Program Files\VirtuSphere\Logs\<datum>_<phase>.log` (30 Tage
 Aufbewahrung).
 
 ## Wichtige Verhaltensdetails

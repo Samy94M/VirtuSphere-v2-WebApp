@@ -85,7 +85,13 @@ while ($true) {
 
     try {
         # --- VirtuSphere-Geraeteliste laden --------------------------------
-        $devices = @(Invoke-VsApi -Config $config -Path '/mecm-api.php?action=getDeviceList' -TimeoutSec 20)
+        # Windows PowerShell 5.1 gibt ein leeres JSON-Array aus
+        # Invoke-RestMethod in einem direkten @(...)-Ausdruck als EIN
+        # verschachteltes Object[] weiter. Das sah danach wie ein Device ohne
+        # Namen/Mission aus. Erst separat empfangen und ueber die Pipeline
+        # enumerieren: [] -> 0, ein Objekt -> 1, mehrere Objekte -> n.
+        $deviceResponse = Invoke-VsApi -Config $config -Path '/mecm-api.php?action=getDeviceList' -TimeoutSec 20
+        $devices = @($deviceResponse | ForEach-Object { $_ })
         $consecutiveErrors = 0
         $received = $devices.Count
         $phase = 'mecm'

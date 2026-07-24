@@ -63,7 +63,7 @@ return [
     'clientphases_step3' => 'staticip: the network is switched to the target configuration; the VM often changes VLAN in the process and is briefly unreachable.',
     'clientphases_step4' => 'disks: additional disks are brought online (optional; VMs without extra disks skip this step).',
     'clientphases_p2' => 'Every phase reports "started", "finished" or "failed". The status "Executed, confirmation pending" appears when the start was reported but the completion report has been missing for :minutes minutes. This is usually harmless: after the rename the VM reboots, after the network switch it sits in a different VLAN; in both cases the completion report simply cannot reach the portal any more.',
-    'clientphases_p3' => 'Only "Failed" with a detail text is a real error. In that case the script log directly on the affected VM under C:\\Program Files\\aplw\\Logs helps.',
+    'clientphases_p3' => 'Only "Failed" with a detail text is a real error. In that case the script log directly on the affected VM under C:\\Program Files\\VirtuSphere\\Logs helps.',
     'esxi_inv_heading' => 'ESXi inventory',
     'esxi_inv_p1' => 'The portal reads datacenters, datastores, portgroups and host capacity read-only from the registered ESXi credentials at a regular interval. The values are snapshots from the last fetch, not live monitoring. The interval is set under Settings (default :hours hours); a manual refresh and an immediate pull after adding a credential are also available.',
     'esxi_inv_p2' => 'If a fetch fails, an error category appears (unreachable, login, permissions, Ansible host, parsing). On a wrong login the automatic fetch pauses until the credential is changed (lockout protection). The cache is kept on errors; nothing is deleted.',

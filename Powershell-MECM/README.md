@@ -4,11 +4,19 @@ Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
 laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
 MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
 
-Alle umgebungsspezifischen Werte (Adresse der WebApp, Pfade, Site-Code) kommen
-aus der Registry `HKLM:\SOFTWARE\VirtuSphere\MECM` und stehen **nicht** im Code.
-Diese Registry schreibt der Installer.
+Alle umgebungsspezifischen Werte der **Server-Skripte** (Adresse der WebApp,
+Pfade, Site-Code) kommen aus der Registry
+`HKLM:\SOFTWARE\VirtuSphere\MECM` und stehen **nicht** im Server-Code. Diese
+Registry schreibt der Server-Installer. Die separat verteilten Client-Skripte
+verwenden ihre dokumentierte Registry-/DNS-/IP-Fallback-Kette.
 
 ## Erstinstallation auf dem MECM-Server (3 Schritte)
+
+Die vollständig chronologische Anleitung für wechselndes Adminpersonal steht im
+Abschnitt **„Admin-Runbook: MECM erstmals anbinden“** in
+[`docs/operations/mecm-integration.md`](../docs/operations/mecm-integration.md).
+Sie enthält die Variante ohne DNS, die Ermittlung von DP-Gruppe und Freigaben,
+beide Installer und die Abnahmecheckliste.
 
 1. Dieses Verzeichnis auf den MECM-Server kopieren, PowerShell **als
    Administrator** öffnen.
@@ -27,7 +35,13 @@ Diese Registry schreibt der Installer.
    Prozessliste sichtbar bleibt.
 3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
    MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
-   drei Sync-Quellen und der MECM-Site-Status sollten auf „OK" springen.
+   drei Sync-Quellen und der MECM-Site-Status sollten auf „OK“ springen.
+
+Ist noch kein DNS-Eintrag verfügbar, darf der Server-Installer vorläufig eine
+feste IP als `-WebApi '<WEBAPP-IP>:8021'` erhalten. Vor dem Client-Installer muss
+dann zusätzlich `$VsFallbackIpApi` in
+`clients/VirtuSphere-Client-Common.ps1` gesetzt werden. Die vollständige
+Übergangs- und spätere DNS-Wechselprozedur steht im Admin-Runbook.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
 Skripte.
@@ -205,7 +219,7 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     bei dem ein `Firefox`-Update auch `Firefox-ESR-*` löschte.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
     Install-Kommando `powershell.exe -ExecutionPolicy Bypass -File install.ps1`,
-    Registry-Detection unter `SOFTWARE\APLw\Name-Version` (HKLM bzw. HKCU je
+    Registry-Detection unter `SOFTWARE\VirtuSphere\Packages\Name-Version` (HKLM bzw. HKCU je
     nach `InstallationBehaviorType`).
   - **Collection + Deployment idempotent nachziehen** (bei
     `generateOwnDeviceColletion: "true"`): läuft auch für bestehende Apps und

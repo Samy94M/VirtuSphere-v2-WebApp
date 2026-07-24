@@ -32,14 +32,14 @@ $ErrorAction = $config.ErrorAction
 # Der Pfad enthaelt ProjectName und Version damit verschiedene Versionen nebeneinander
 # in der Registry erfasst werden koennen ohne sich zu ueberschreiben.
 if($config.InstallationBehaviorType -eq "InstallForSystem"){
-    $registryPath = "HKLM:\Software\APLw\$($projectName)-$($config.version)"
+    $registryPath = "HKLM:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
 } else {
-    $registryPath = "HKCU:\Software\APLw\$($projectName)-$($config.version)"
+    $registryPath = "HKCU:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
 }
 
 # Verzeichnis fuer Log-Dateien der einzelnen Teilskripte
 # $env:ProgramFiles: Umgebungsvariable - zeigt auf C:\Program Files
-$logDirectory = "$($env:ProgramFiles)\APLw\Logs\"
+$logDirectory = "$($env:ProgramFiles)\VirtuSphere\Logs\"
 
 ############ Ab hier nichts aendern
 
@@ -105,7 +105,7 @@ foreach ($scriptFile in $dir_script) {
     $scriptFullPath  = $scriptFile.FullName    # Vollstaendiger Pfad inkl. Laufwerk und Ordner
     $logPath         = Join-Path $logDirectory "$($scriptName)_$currentDateTime.log"
     # Join-Path: Verbindet Pfadteile korrekt mit dem richtigen Trennzeichen (\).
-    # Ergebnis z.B.: C:\Program Files\APLw\Logs\01.check-dcready.ps1_2025-04-08_14-30-00.log
+    # Ergebnis z.B.: C:\Program Files\VirtuSphere\Logs\01.check-dcready.ps1_2025-04-08_14-30-00.log
 
     # Registry-Wertname pro Skript - enthaelt Projektname und Skriptname
     # Jedes Teilskript bekommt seinen eigenen Eintrag unter dem Registry-Schluessel.
@@ -209,7 +209,7 @@ if((Get-ChildItem $scriptDirectory -Filter *.ps1).count -eq 0){
 # MECM Detection Clause schreiben
 # Nur wenn ALLE Skripte erfolgreich waren wird der Version-Wert in die Registry geschrieben.
 # MECM prueft nach der Installation genau diesen Registry-Wert als Detection Clause:
-#   Pfad:  HKLM\Software\APLw\{ProjectName}-{Version}
+#   Pfad:  HKLM\Software\VirtuSphere\Packages\{ProjectName}-{Version}
 #   Wert:  Version = "{version}"
 # Existiert dieser Wert, markiert MECM die Application als "Installiert".
 # Fehlt er (weil $Fullsuccess = $false), zeigt MECM "Fehler" an.

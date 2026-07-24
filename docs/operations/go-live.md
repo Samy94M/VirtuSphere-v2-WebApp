@@ -31,7 +31,7 @@ des Repos und müssen separat bereitstehen:
 | SSH-/Konsolenzugang zum Ubuntu-Host | sofort | Infrastruktur |
 | MECM-Server-IP | Schritt 4 (ins Portal tippen) | bekannt sein |
 | IP des Ansible-Hosts | Schritt 4 (ins Portal tippen) | bekannt sein |
-| DNS-Eintrag `virtusphere.lan` | erst Schritt 6 (Client-Rollout) | Netz-Admin, parallel möglich |
+| DNS-Eintrag `virtusphere.lan` oder dokumentierter IP-Fallback | erst Schritt 6 (Client-Rollout) | Netz-Admin; befristete IP-Variante im MECM-Admin-Runbook |
 | Report-Token (optional) | Schritt 4 | im Portal generiert |
 
 `APP_KEY`, `DB_PASS` und `MYSQL_ROOT_PASSWORD` kommen bewusst nicht per `git pull`
@@ -225,7 +225,11 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Health; alle SYSTEM, AtStartup, `MultipleInstances IgnoreNew`,
    `ExecutionTimeLimit=PT0S`). Provider und Site-Health-Intervall
    (`MECM_ProviderMachine`, `SiteHealthIntervalSeconds`) sind Registry-Werte, keine
-   Portal-Einstellungen. Details: `Powershell-MECM/README.md`.
+   Portal-Einstellungen. Die von oben nach unten ausführbare Anleitung für
+   DNS-/IP-Variante, Freigaben, DP-Gruppe, Server- und Client-Installer steht im
+   Abschnitt „Admin-Runbook: MECM erstmals anbinden“ in
+   `docs/operations/mecm-integration.md`; technische Details stehen zusätzlich in
+   `Powershell-MECM/README.md`.
 2. **MECM-Server-IP im Portal freischalten**, falls in Schritt 4 nicht schon
    geschehen: Einstellungen → IP-Freigaben. Der Installer meldet 403 mit genau
    diesem Hinweis, falls vergessen.

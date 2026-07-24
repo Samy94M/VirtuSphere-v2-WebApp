@@ -31,7 +31,7 @@ function Get-VsClientAppSpecs {
             AppName         = 'client_hostname'
             Folder          = 'client_hostname'
             Script          = 'client_hostname.ps1'
-            DetectionKey    = 'SOFTWARE\aplw-cgn\HostnameUpdate'
+            DetectionKey    = 'SOFTWARE\VirtuSphere\HostnameUpdate'
             DetectionName   = 'Status'
             # Zwei Erfolgswerte: 'Erfolgreich' (umbenannt/bereits korrekt) und
             # 'Uebersprungen' (Domaenen-Computer). Ohne den zweiten Wert wuerde ein
@@ -44,7 +44,7 @@ function Get-VsClientAppSpecs {
             AppName         = 'client_staticip'
             Folder          = 'client_staticip'
             Script          = 'client_staticip.ps1'
-            DetectionKey    = 'SOFTWARE\APLw-CGN\staticip'
+            DetectionKey    = 'SOFTWARE\VirtuSphere\staticip'
             DetectionName   = 'installed'
             # Als DWORD 1 geschrieben ([int]$Success). PropertyType MUSS 'Int64'
             # sein - New-CMDetectionClauseRegistryKeyValue kennt kein 'Integer'

@@ -12,7 +12,7 @@
 #    Funktion gezogen; Get-CimInstance statt Get-WmiObject
 #
 # Exit-Codes: 0 = kein Neustart noetig, 1641 = Neustart eingeleitet, 1 = Fehler
-# MECM-Erkennungsregel: HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate\Status = Erfolgreich
+# MECM-Erkennungsregel: HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate\Status = Erfolgreich
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
@@ -20,7 +20,7 @@ Initialize-VsClientLog -Component 'hostname'
 Write-VsClientLog 'Starte Hostname-Update'
 
 $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
-$detectionPath = 'HKLM:\SOFTWARE\aplw-cgn\HostnameUpdate'
+$detectionPath = 'HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate'
 $reportMac = Get-VsReportMac
 
 function Set-MecmDetection {

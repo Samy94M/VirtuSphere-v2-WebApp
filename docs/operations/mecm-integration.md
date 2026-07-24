@@ -28,6 +28,230 @@ verknüpfen                  Collections zu)               --->  mecm_updateid.p
   `getinfo → hostname → staticip → disks` (disks optional).
 - Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
 
+## Admin-Runbook: MECM erstmals anbinden
+
+Dieser Abschnitt ist die chronologische Arbeitsanleitung für neues oder
+wechselndes Adminpersonal. Die späteren Abschnitte erklären Architektur,
+Fehlerbilder und Sonderfälle im Detail. Zuerst werden die vier Server-Aufgaben
+installiert, danach die vier Client-Anwendungen. Der Client-Installer legt
+bewusst noch kein Deployment auf eine Collection an.
+
+### 1. Werte vor Beginn festhalten
+
+| Wert | Beispiel | Bedeutung |
+|---|---|---|
+| Ubuntu-Host | `192.0.2.10` | Host mit dem produktiven Repo und der WebApp |
+| WebAPI | `virtusphere.lan:8021` oder `192.0.2.10:8021` | Ohne `http://` oder `https://` an den Installer übergeben |
+| Schema | `http` | `http` oder `https`; HTTPS braucht ein zum Zielnamen passendes Zertifikat |
+| MECM-Server | `MECM-01` | Server, auf dem die MECM-Konsole und die Installer laufen |
+| `PackagesRoot` | `D:\VirtuSphere\Packages` | Lokale Paketablage für den Autoimporter |
+| `PackagesShare` | `\\MECM-01\VirtuSphere\Packages\files` | UNC-Pfad, der exakt auf `PackagesRoot\files` zeigt |
+| `PackagesBase` | `D:\VirtuSphere\Base\Packages` | Lokale Ablage der vier Client-Anwendungen |
+| `ContentShare` | `\\MECM-01\VirtuSphere\Base\Packages` | UNC-Pfad, der exakt auf `PackagesBase` zeigt |
+| DP-Gruppe | `DP Group - VirtuSphere-Applications` | Bestehende Distribution-Point-Gruppe für beide Installer |
+| SMS Provider | leer oder `MECM-PROVIDER-01` | Leer lassen, wenn er lokal auf dem MECM-Server liegt |
+
+`PackagesShare` und `ContentShare` sind zwei verschiedene Quellen. Eine Freigabe
+kann beide Pfade unterhalb ihres Freigabestamms abbilden; entscheidend ist, dass
+der jeweilige UNC-Pfad auf genau den angegebenen lokalen Ordner zeigt. Normale
+Benutzer dürfen dort nicht schreiben, weil der Inhalt später als SYSTEM läuft.
+
+### 2. WebAPI-Adresse festlegen: DNS oder vorläufige IP
+
+**Empfohlen: DNS.** Im DNS des Deploy-Netzes einen A-Record wie
+`virtusphere.lan` auf die feste LAN-IP des Ubuntu-Hosts anlegen. Der Name muss
+sowohl vom MECM-Server als auch von einem PXE-Client über den per DHCP gelieferten
+DNS-Server auflösbar sein.
+
+**Ohne aktuellen DNS-Zugriff:** Die Inbetriebnahme kann mit einer festen
+Ubuntu-IP fortgesetzt werden. Für den Server-Installer später
+`-WebApi '<UBUNTU-IP>:8021'` verwenden. Vor dem Client-Installer in
+`clients\VirtuSphere-Client-Common.ps1` den Fallback setzen:
+
+```powershell
+$script:VsDefaultDnsApi = 'virtusphere.lan:8021'
+$script:VsFallbackIpApi = '<UBUNTU-IP>:8021'
+```
+
+Der DNS-Kandidat darf stehen bleiben. Solange er nicht auflösbar ist, probieren
+die Clients danach die IP. Die IP muss fest oder reserviert und aus allen
+Deploy-VLANs erreichbar sein. Bei HTTPS funktioniert die IP nur, wenn das
+Zertifikat diese IP als Subject Alternative Name enthält; andernfalls zuerst
+einen passenden DNS-Namen und ein entsprechendes Zertifikat bereitstellen.
+
+Verbindung vom MECM-Server prüfen:
+
+```powershell
+Test-NetConnection <WEBAPI-HOST-ODER-IP> -Port 8021
+Invoke-RestMethod -Uri 'http://<WEBAPI-HOST-ODER-IP>:8021/portal/health.php' -TimeoutSec 5
+```
+
+Bei HTTPS `https://` und den tatsächlich veröffentlichten Port verwenden.
+
+### 3. Portal und MECM vorbereiten
+
+Im Portal unter *Einstellungen → Machine-API IP-Freigaben* mindestens die IP des
+MECM-Servers eintragen. Die IP des Ansible-Hosts ebenfalls freischalten, weil er
+die ermittelten MAC-Adressen über `db_importMAC.php` meldet. Optional unter
+*Einstellungen → Rückkanal-Token* einen Token erzeugen und sicher bereithalten.
+Den Token nie in ein Ticket, diese Dokumentation oder einen Kommandozeilenparameter
+kopieren; der Installer fragt ihn verdeckt ab.
+
+Die Registry-ACL und der geplante SYSTEM-Task verwenden intern die
+sprachunabhängigen Well-Known-SIDs `S-1-5-18` (SYSTEM) und `S-1-5-32-544`
+(lokale Administratoren). Dadurch funktioniert derselbe Installer auf deutschen
+und englischen Windows-Servern; lokalisierte Anzeigenamen gehören nicht in die
+Konfiguration.
+
+Auf dem MECM-Server die Voraussetzungen und vorhandenen Namen read-only prüfen:
+
+```powershell
+$env:SMS_ADMIN_UI_PATH
+Get-CimInstance -Namespace 'root\SMS' -ClassName '__NAMESPACE' |
+    Where-Object Name -Like 'site_*' |
+    Select-Object Name
+
+Import-Module $($env:SMS_ADMIN_UI_PATH)\..\ConfigurationManager.psd1
+$VsCmDrive = Get-PSDrive -PSProvider CMSite | Select-Object -First 1
+if (-not $VsCmDrive) { throw 'Kein MECM-CMSite-Laufwerk gefunden.' }
+Push-Location ($VsCmDrive.Name + ':\')
+try {
+    Get-CMDistributionPointGroup | Select-Object Name
+} finally {
+    Pop-Location
+}
+
+Get-SmbShare | Where-Object { -not $_.Special } | Select-Object Name, Path
+```
+
+Fehlt `SMS_ADMIN_UI_PATH`, ist die MECM-Konsole nicht korrekt installiert oder
+die Sitzung wurde vor deren Installation geöffnet. MECM-Cmdlets wie
+`Get-CMDistributionPointGroup` funktionieren nur, während der aktuelle Pfad auf
+dem `CMSite`-Laufwerk liegt; `Push-Location`/`Pop-Location` stellen den vorherigen
+Dateisystempfad danach wieder her. Gibt es noch keine passende Freigabe oder
+DP-Gruppe, diese nach den lokalen MECM-Betriebsstandards anlegen. Keine
+pauschalen Schreibrechte für `Everyone`, `Users` oder `Authenticated Users`
+vergeben. Vor der Installation muss eine Datei aus dem lokalen Quellordner über
+den vorgesehenen UNC-Pfad sichtbar sein.
+
+### 4. Vier MECM-Server-Aufgaben installieren
+
+Beispiel mit DNS:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 `
+    -WebApi 'virtusphere.lan:8021' `
+    -Scheme 'http' `
+    -PackagesRoot 'D:\VirtuSphere\Packages' `
+    -PackagesShare '\\MECM-01\VirtuSphere\Packages\files' `
+    -DpGroupName 'DP Group - VirtuSphere-Applications'
+```
+
+Beispiel ohne DNS:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 `
+    -WebApi '<UBUNTU-IP>:8021' `
+    -Scheme 'http' `
+    -PackagesRoot 'D:\VirtuSphere\Packages' `
+    -PackagesShare '\\MECM-01\VirtuSphere\Packages\files' `
+    -DpGroupName 'DP Group - VirtuSphere-Applications'
+```
+
+Liegt der SMS Provider auf einem anderen Rechner, zusätzlich
+`-ProviderMachine '<PROVIDER-HOST>'` angeben. Den Installer ohne
+`-ReportToken` starten und den vorbereiteten Token ausschließlich in der
+verdeckten Eingabe einfügen. Ein leerer Wert ist erlaubt. Der Installer ist
+idempotent und darf nach Korrekturen erneut ausgeführt werden; ein vorhandener
+Token und ein vorhandener Provider-Wert bleiben bei einem erneuten Lauf ohne
+entsprechenden Parameter erhalten.
+
+Anschließend prüfen:
+
+```powershell
+Get-ScheduledTask -TaskName 'VirtuSphere MECM *' |
+    Select-Object TaskName, State
+
+Get-ItemProperty 'HKLM:\SOFTWARE\VirtuSphere\MECM' |
+    Select-Object VirtuSphere_WebAPI, Scheme, PackagesRoot, PackagesShare,
+                  DpGroupName, MECM_SiteCode, MECM_ProviderMachine,
+                  SetupCompleted
+
+Get-ChildItem $env:ProgramFiles\VirtuSphere\Logs -Filter '*.log'
+```
+
+Alle vier Aufgaben sollen `Running` melden und alle vier Tageslogs sollen neue
+Einträge erhalten. Im Portal auf *Systemstatus* müssen Devices Sync, Packages
+Sync, Package Import und Site Health nach ihren jeweiligen Intervallen sichtbar
+werden. Ein 403 bedeutet fast immer, dass die MECM-Server-IP noch nicht in der
+Machine-API-Freigabe steht.
+
+### 5. Vier Client-Anwendungen erstellen
+
+Vorher die tatsächlich ausgelieferte Adresse kontrollieren:
+
+```powershell
+Select-String -Path '.\clients\VirtuSphere-Client-Common.ps1' `
+    -Pattern 'VsDefaultDnsApi|VsFallbackIpApi|VsDefaultScheme'
+```
+
+Bei HTTP bleibt `$script:VsDefaultScheme = 'http'`. Bei HTTPS muss dort
+`'https'` stehen oder die Client-Registry vor dem ersten API-Aufruf passend
+gesetzt werden. Dann den Client-Installer ausführen:
+
+```powershell
+.\install-VirtuSphere-Clients.ps1 `
+    -PackagesBase 'D:\VirtuSphere\Base\Packages' `
+    -ContentShare '\\MECM-01\VirtuSphere\Base\Packages' `
+    -DpGroupName 'DP Group - VirtuSphere-Applications'
+```
+
+In der MECM-Konsole danach prüfen:
+
+1. Unter *Softwarebibliothek → Anwendungsverwaltung → Anwendungen →
+   VirtuSphere_Core* existieren vier Anwendungen.
+2. Die Kette lautet `client_getinfo → client_hostname → client_staticip →
+   Set-VMDisksOnline`.
+3. `client_hostname` erkennt `Erfolgreich` **oder** `Uebersprungen`, und
+   Rückgabecode 1641 gilt als Erfolg mit Neustart.
+4. Der Contentstatus der vier Anwendungen ist auf der vorgesehenen DP-Gruppe
+   erfolgreich.
+5. Erst jetzt legt der MECM-Admin bewusst ein Required Deployment auf einer
+   Test-Collection an. Der Installer selbst deployt nichts.
+
+Auf einem Testclient müssen die Phasen in dieser Reihenfolge erfolgreich sein.
+Lokale Client-Logs liegen unter `C:\Program Files\VirtuSphere\Logs`; die Phasen erscheinen
+zusätzlich an der VM im Portal.
+
+### 6. Später von der festen IP auf DNS wechseln
+
+1. DNS-Record anlegen und Auflösung aus MECM- und Deploy-VLAN prüfen.
+2. In `VirtuSphere-Client-Common.ps1` `$VsDefaultDnsApi` auf den neuen Namen
+   setzen; den IP-Fallback erst nach erfolgreicher Abnahme leeren.
+3. `install-VirtuSphere-Clients.ps1` erneut ausführen. Er ersetzt den Content
+   und stößt für bestehende Anwendungen die DP-Aktualisierung an.
+4. `install-VirtuSphere-MECM.ps1` erneut mit dem DNS-Namen ausführen. Der Lauf
+   aktualisiert die Registry und behält einen bestehenden Report-Token.
+5. Bereits installierte Clients können die funktionierende IP in
+   `HKLM:\SOFTWARE\VirtuSphere\WebAPI` gespeichert haben. Diesen Registry-Override
+   im Rahmen eines kontrollierten Client-Deployments auf den DNS-Namen ändern;
+   neue Clients verwenden den aktualisierten Content automatisch.
+
+### 7. Übergabe- und Abnahmecheckliste
+
+- [ ] Bereitgestellte Skriptversion dokumentiert
+- [ ] WebAPI vom MECM-Server und aus dem Deploy-VLAN erreichbar
+- [ ] DNS-Name oder befristeter IP-Fallback dokumentiert
+- [ ] MECM- und Ansible-IP im Portal freigeschaltet
+- [ ] Lokale Paketpfade und ihre exakten UNC-Gegenstücke dokumentiert
+- [ ] DP-Gruppe und optionaler Remote-SMS-Provider dokumentiert
+- [ ] Vier Server-Aufgaben laufen und schreiben Tageslogs
+- [ ] Vier Quellen erscheinen im Portal-Systemstatus
+- [ ] Vier Client-Anwendungen, Detection Rules und Abhängigkeiten geprüft
+- [ ] Content auf der DP-Gruppe erfolgreich
+- [ ] Required Deployment nur auf einer Test-Collection abgenommen
+- [ ] Verantwortlicher und Termin für einen späteren DNS-Wechsel festgehalten
+
 ## Single Points of Truth (SSoT)
 
 | Domäne | SSoT |
@@ -388,7 +612,7 @@ Kernpunkte:
   gelöscht, Erfolgs-Marker `SetupState=complete` erst danach gesetzt.
 - **Idempotenz (staticip):** Re-Run überschreibt sauber und meldet echten
   Erfolg/Fehlschlag statt pauschal „installed".
-- Einheitliches Datei-Logging unter `C:\Program Files\aplw\Logs` (30 Tage).
+- Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30 Tage).
 
 ## Edge Cases der Server-Skripte (Referenz)
 
@@ -478,7 +702,7 @@ insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
    (getinfo/hostname/staticip/disks)?
 2. „Ausgeführt, Bestätigung ausstehend" ist meist harmlos (VLAN-Wechsel nach
    staticip). „Fehlgeschlagen" mit Detailtext → Client-Log unter
-   `C:\Program Files\aplw\Logs`.
+   `C:\Program Files\VirtuSphere\Logs`.
 
 **Pakete verschwinden / Sync abgelehnt (409)**
 1. Im Log (Kategorie „MECM-Integration") nach „Katalog-Sync abgelehnt" suchen:

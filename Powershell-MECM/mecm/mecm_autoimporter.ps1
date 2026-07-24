@@ -199,7 +199,7 @@ while ($true) {
                     }
                 }
 
-                $registryDetection = "SOFTWARE\APLw\{0}-{1}" -f $appName, $version
+                $registryDetection = "SOFTWARE\VirtuSphere\Packages\{0}-{1}" -f $appName, $version
                 $dtParams = @{
                     ApplicationName      = $fullName
                     DeploymentTypeName   = "{0} Deployment" -f $fullName

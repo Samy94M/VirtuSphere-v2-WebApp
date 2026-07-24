@@ -8,7 +8,7 @@
 #  - idempotent: vorhandene IP/Gateway werden vor dem Setzen entfernt, sodass
 #    ein Re-Run nicht mehr an "bereits vorhanden" stirbt (try/catch je Adapter)
 #  - ehrlicher Status: Erfolg wird pro Adapter getrackt und real gemeldet
-#    (Registry aplw-cgn\staticip + reportPhase), nicht mehr hart auf $true
+#    (Registry VirtuSphere\staticip + reportPhase), nicht mehr hart auf $true
 #  - leeres Gateway / leere DNS-Liste sauber via Parameter-Splatting
 #  - Rename-Kollisionen abgefangen; Get-CimInstance statt Get-WmiObject
 #  - reportPhase 'started' VOR der Umstellung (VLAN-Wechsel kann den Client
@@ -20,7 +20,7 @@ Initialize-VsClientLog -Component 'staticip'
 Write-VsClientLog 'Starte staticip'
 
 $interfacesRoot = 'HKLM:\SOFTWARE\VirtuSphere\Interfaces'
-$statusBase = 'HKLM:\SOFTWARE\APLw-CGN'
+$statusBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $reportMac = Get-VsReportMac
 
 function Set-StaticIpStatus {

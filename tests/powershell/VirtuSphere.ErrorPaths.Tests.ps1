@@ -14,6 +14,7 @@ BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $psRoot = Join-Path $script:RepoRoot 'Powershell-MECM'
     $script:MecmCommon = Join-Path (Join-Path $psRoot 'mecm') 'VirtuSphere-Common.ps1'
+    $script:DeviceSync = Join-Path (Join-Path $psRoot 'mecm') 'mecm_new-device-sync.ps1'
     $script:ClientCommon = Join-Path (Join-Path $psRoot 'clients') 'VirtuSphere-Client-Common.ps1'
     $script:Installer = Join-Path $psRoot 'install-VirtuSphere-MECM.ps1'
     $script:PsRoot = $psRoot
@@ -198,6 +199,26 @@ Describe 'Initialize-VsTls (TLS-Kontrakt des Clients)' {
     }
 }
 
+Describe 'Device-Sync: leere JSON-Geraeteliste unter Windows PowerShell 5.1' {
+
+    It 'normalisiert das von Invoke-RestMethod verschachtelte leere Array auf 0 Devices' {
+        # PS 5.1 liefert [] aus Invoke-RestMethod in einem direkten @(...)-Aufruf
+        # als ein skalares, leeres Object[]: der aeussere Collector zaehlt 1.
+        $emptyRestResponse = ,([object[]]@())
+        @($emptyRestResponse).Count | Should -Be 1
+
+        $devices = @($emptyRestResponse | ForEach-Object { $_ })
+        $devices.Count | Should -Be 0
+    }
+
+    It 'pinnt die Pipeline-Normalisierung im produktiven Device-Sync' {
+        $source = Get-Content -Path $script:DeviceSync -Raw
+        $source | Should -Match '\$deviceResponse\s*=\s*Invoke-VsApi'
+        $source | Should -Match '\$devices\s*=\s*@\(\$deviceResponse\s*\|\s*ForEach-Object'
+        $source | Should -Not -Match '\$devices\s*=\s*@\(Invoke-VsApi'
+    }
+}
+
 Describe 'Installer: Doppelstart- und Laufzeit-Vertrag der geplanten Aufgaben' {
 
     It 'registriert die Endlosschleifen mit MultipleInstances IgnoreNew' {
@@ -214,7 +235,14 @@ Describe 'Installer: Doppelstart- und Laufzeit-Vertrag der geplanten Aufgaben' {
 
     It 'laeuft als SYSTEM mit hoechsten Rechten' {
         (Get-Content -Path $script:Installer -Raw) |
-            Should -Match "New-ScheduledTaskPrincipal\s+-UserId\s+'NT AUTHORITY\\SYSTEM'\s+-RunLevel\s+Highest"
+            Should -Match "New-ScheduledTaskPrincipal\s+-UserId\s+'S-1-5-18'\s+-RunLevel\s+Highest"
+    }
+
+    It 'verwendet fuer die Registry-ACL sprachunabhaengige Well-Known-SIDs' {
+        $installerText = Get-Content -Path $script:Installer -Raw
+        $installerText | Should -Match "'S-1-5-18'"
+        $installerText | Should -Match "'S-1-5-32-544'"
+        $installerText | Should -Not -Match 'BUILTIN'
     }
 
     It 'startet die Tasks beim Systemstart (AtStartup)' {
@@ -260,6 +288,31 @@ Describe 'Installer: die vier geplanten Aufgaben' {
         $script:InstallerText | Should -Match "IsNullOrWhiteSpace\(\`$ProviderMachine\)"
         # Der Konfig-Key wird nie per New-Item -Force angelegt (das wische Werte).
         $script:InstallerText | Should -Not -Match 'New-Item\s+-Path\s+\$registryPath\s+-Force[^\r\n]*# *wipe'
+    }
+
+    It 'prueft die DP-Gruppe vor der Installation, statt den Namen nur entgegenzunehmen' {
+        # Im Feld gesehen: konfiguriert war 'DP Group - VirtuSphere-Applications',
+        # tatsaechlich trug die Gruppe zusaetzlich ein Organisationskuerzel im
+        # Namen. Die Installation lief gruen durch, der Autoimporter haette jede App
+        # mit Deployment und ohne Content erzeugt (Start-CMContentDistribution
+        # wirft, der Autoimporter faengt und loggt WARN). Der Installer muss den
+        # Namen daher gegen SMS_DistributionPointGroup pruefen und die
+        # vorhandenen Gruppennamen nennen, damit die richtige Schreibweise
+        # sofort sichtbar ist.
+        $script:InstallerText | Should -Match 'SMS_DistributionPointGroup'
+        $script:InstallerText | Should -Match '\$DpGroupName'
+        $script:InstallerText | Should -Match 'MemberCount'
+    }
+
+    It 'bricht bei fehlender DP-Gruppe NICHT ab (sie darf spaeter entstehen)' {
+        # Die Pruefung ist eine Warnung, kein throw: eine Umgebung darf die
+        # Gruppe nach der Installation anlegen. Ein Abbruch wuerde eine
+        # funktionierende Installation an einer nachholbaren Kleinigkeit
+        # scheitern lassen.
+        $dpBlock = [regex]::Match($script:InstallerText,
+            'SMS_DistributionPointGroup(?s).{0,1200}')
+        $dpBlock.Success | Should -BeTrue
+        $dpBlock.Value | Should -Not -Match '\bthrow\b'
     }
 }
 
