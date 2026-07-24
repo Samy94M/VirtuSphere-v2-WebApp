@@ -28,7 +28,9 @@ function runPhp(body, requires = [], options = {}) {
   return execFileSync('docker', args, {
     input: php,
     encoding: 'utf8',
-    timeout: 15000,
+    // Generous: the release browser matrix (Firefox/WebKit/Edge) can slow the
+    // docker daemon enough that a 15s exec times out (ETIMEDOUT) on Edge.
+    timeout: 60000,
   });
 }
 

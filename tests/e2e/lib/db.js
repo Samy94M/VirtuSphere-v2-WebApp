@@ -21,7 +21,10 @@ function query(sql) {
   const out = execFileSync(
     'docker',
     ['exec', CONTAINER, 'sh', '-c', script],
-    { encoding: 'utf8', timeout: 15000 }
+    // Generous: under the release browser matrix (Firefox/WebKit/Edge) the docker
+    // daemon can slow enough that a 15s exec times out (spawnSync ETIMEDOUT) on
+    // Edge. 60s keeps the seed/proof robust without masking a real hang.
+    { encoding: 'utf8', timeout: 60000 }
   );
 
   return parseTsv(out);
