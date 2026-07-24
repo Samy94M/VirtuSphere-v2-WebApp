@@ -58,6 +58,9 @@ $appFolderName = $script:VsApplicationsFolderName   # SSoT in VirtuSphere-Common
 $dpGroupName = $config.DpGroupName
 $intervalSeconds = [Math]::Max(30, $config.ImporterInterval)
 
+# Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
+$SCRIPT_VERSION = 'autoimporter/2.0'
+
 $siteCode = $null
 $lastFilesStamp = ''
 $loop = 0
@@ -77,7 +80,20 @@ function Get-VsFilesStamp {
 
 while ($true) {
     $loop++
-    Send-VsHeartbeat -Config $config -Source 'autoimporter' -IntervalSeconds $intervalSeconds
+    $cycleStart = Get-Date
+    # Neuer Lauf: run_id minten, Start melden, Abschluss im finally garantieren.
+    $runId = New-VsRunId
+    Send-VsRunReport -Config $config -Source 'autoimporter' -RunEvent 'started' -RunId $runId -IntervalSeconds $intervalSeconds -ScriptVersion $SCRIPT_VERSION
+
+    $outcome = 'ok'
+    $category = $null
+    $detail = $null
+    $folders = 0
+    $newCount = 0
+    $deletedCount = 0
+    $scanWarnings = 0   # offene Punkte -> Stamp nicht merken, naechster Lauf wiederholt
+    $unchanged = 0
+    $sleepSeconds = $intervalSeconds
 
     try {
         if (-not $siteCode) {
@@ -109,29 +125,23 @@ while ($true) {
         # Change-Detection: nur bei geaendertem files-Baum voll scannen.
         $stamp = Get-VsFilesStamp -Path $basePath
         if ($stamp -eq $lastFilesStamp) {
-            Start-Sleep -Seconds $intervalSeconds
-            continue
-        }
-
-        if (-not (Test-Path $basePath)) {
+            # Unveraendert: ein gelungener No-op-Lauf.
+            $unchanged = 1
+        } elseif (-not (Test-Path $basePath)) {
             Write-VsLog -Level WARN -Message ("Paket-Pfad nicht gefunden: {0}" -f $basePath)
             $lastFilesStamp = $stamp
-            Start-Sleep -Seconds $intervalSeconds
-            continue
-        }
+            $outcome = 'warning'
+            $category = 'source_missing'
+        } else {
+            Write-VsLog -Message ("Aenderung erkannt - Scan #{0}." -f $loop)
 
-        Write-VsLog -Message ("Aenderung erkannt - Scan #{0}." -f $loop)
+            $appOrgFolder = "{0}:\Application\{1}" -f $siteCode, $appFolderName
+            $collectionOrgFolder = "{0}:\DeviceCollection\{1}" -f $siteCode, $appFolderName
 
-        $appOrgFolder = "{0}:\Application\{1}" -f $siteCode, $appFolderName
-        $collectionOrgFolder = "{0}:\DeviceCollection\{1}" -f $siteCode, $appFolderName
-
-        $newCount = 0
-        $deletedCount = 0
-        $scanWarnings = 0   # offene Punkte -> Stamp nicht merken, naechster Lauf wiederholt
-
-        foreach ($dir in @(Get-ChildItem -Path $basePath -Directory)) {
-            $cfg = Read-VsPackageConfig -Folder $dir.FullName
-            if (-not $cfg) { continue }
+            foreach ($dir in @(Get-ChildItem -Path $basePath -Directory)) {
+                $cfg = Read-VsPackageConfig -Folder $dir.FullName
+                if (-not $cfg) { continue }
+                $folders++
 
             $appName = [string]$cfg.ProjectName
             $version = [string]$cfg.version
@@ -273,23 +283,42 @@ while ($true) {
             }
         }
 
-        if ($scanWarnings -gt 0) {
-            # Stamp nicht merken: naechster Durchlauf wiederholt die offenen
-            # Punkte (Collection/Deployment-Nachzug ist idempotent).
-            Write-VsLog -Level WARN -Message ("Scan #{0} mit {1} offenen Punkten - Wiederholung im naechsten Intervall." -f $loop, $scanWarnings)
-        } else {
-            $lastFilesStamp = $stamp
-        }
-        if ($newCount -gt 0 -or $deletedCount -gt 0) {
-            Write-VsLog -Message ("Scan #{0} fertig: {1} neu, {2} alte Versionen entfernt." -f $loop, $newCount, $deletedCount)
+            if ($scanWarnings -gt 0) {
+                # Stamp nicht merken: naechster Durchlauf wiederholt die offenen
+                # Punkte (Collection/Deployment-Nachzug ist idempotent).
+                Write-VsLog -Level WARN -Message ("Scan #{0} mit {1} offenen Punkten - Wiederholung im naechsten Intervall." -f $loop, $scanWarnings)
+                $outcome = 'warning'
+                $category = 'partial_failure'
+            } else {
+                $lastFilesStamp = $stamp
+            }
+            if ($newCount -gt 0 -or $deletedCount -gt 0) {
+                Write-VsLog -Message ("Scan #{0} fertig: {1} neu, {2} alte Versionen entfernt." -f $loop, $newCount, $deletedCount)
+            }
         }
     } catch {
-        Write-VsLog -Level ERROR -Message ("Scan-Fehler: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+        $detail = Get-VsErrorDetail -ErrorRecord $_
+        Write-VsLog -Level ERROR -Message ("Scan-Fehler: {0}" -f $detail)
+        # MECM-Init, zentrale Abfrage oder ein abgebrochener Scan.
+        $outcome = 'fail'
+        $category = 'mecm_unavailable'
         $siteCode = $null
         $lastFilesStamp = ''
-        Start-Sleep -Seconds 60
-        continue
+        $sleepSeconds = 60
+    } finally {
+        # Genau EINE Abschlussmeldung pro Iteration, auch bei continue/throw.
+        $durationMs = [int]((Get-Date) - $cycleStart).TotalMilliseconds
+        $summary = @{
+            folders     = $folders
+            created     = $newCount
+            removed     = $deletedCount
+            open_points = $scanWarnings
+            unchanged   = $unchanged
+        }
+        Send-VsRunReport -Config $config -Source 'autoimporter' -RunEvent 'completed' -RunId $runId `
+            -IntervalSeconds $intervalSeconds -Outcome $outcome -ErrorCategory $category `
+            -DurationMs $durationMs -Detail $detail -Summary $summary -ScriptVersion $SCRIPT_VERSION
     }
 
-    Start-Sleep -Seconds $intervalSeconds
+    Start-Sleep -Seconds $sleepSeconds
 }

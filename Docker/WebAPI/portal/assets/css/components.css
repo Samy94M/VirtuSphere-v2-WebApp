@@ -1305,8 +1305,6 @@ label > .compound-field {
     overflow-wrap: anywhere;
 }
 
-.signal-matrix-note,
-.probe-status-card,
 .repair-actions {
     padding: 12px 14px;
     border: 1px solid var(--border);
@@ -1314,14 +1312,28 @@ label > .compound-field {
     background: var(--surface-muted);
 }
 
-.signal-matrix-note {
-    margin-bottom: 14px;
+/* The two MECM subgroups (result reports, site status) stay visually equal but
+   clearly separated. */
+.status-subgroup + .status-subgroup {
+    margin-top: 18px;
 }
 
-.probe-status-card {
-    display: grid;
-    gap: 12px;
-    margin-top: 14px;
+/* Compact per-run counter grid inside a result-report row. */
+.status-counters {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+}
+
+.status-counters > div {
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.status-counters dt {
+    color: var(--muted);
 }
 
 .status-facts {
@@ -1445,57 +1457,32 @@ label > .compound-field {
     font-weight: 700;
 }
 
-.radio-card-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.radio-card {
-    display: flex;
-    gap: 10px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-muted);
-    cursor: pointer;
-}
-
-.radio-card:focus-within {
-    border-color: var(--accent);
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-}
-
-.radio-card input {
-    width: auto;
-    margin-top: 3px;
-    accent-color: var(--accent);
-}
-
-.radio-card span {
-    display: grid;
-    gap: 4px;
-}
-
-.radio-card small,
 .status-time {
     display: block;
     color: var(--muted);
     font-size: 12px;
 }
 
-.probe-form {
-    grid-template-columns: minmax(280px, 2fr) minmax(110px, 0.5fr);
+/* Dashboard MECM tile: two labeled signal rows that never collapse into one
+   worst-of. Overrides the oversized single-value KPI number. */
+.value-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 1rem;
+    font-weight: 600;
 }
 
-.probe-form .probe-mode,
-.probe-form > .actions {
-    grid-column: 1 / -1;
+.signal-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
 }
 
-.probe-port {
-    max-width: 12rem;
+.signal-label {
+    font-size: 0.85rem;
+    color: var(--muted);
 }
 
 .alert-actions {
@@ -1514,19 +1501,12 @@ label > .compound-field {
 }
 
 @media (max-width: 560px) {
-    .status-overview,
-    .radio-card-grid,
-    .probe-form {
+    .status-overview {
         grid-template-columns: minmax(0, 1fr);
     }
 
     .inventory-counts {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .probe-form .probe-mode,
-    .probe-form > .actions {
-        grid-column: auto;
     }
 }
 

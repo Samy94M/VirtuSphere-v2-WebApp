@@ -54,7 +54,6 @@ final class PortalConfirmContractTest extends TestCase
         'credentials.php:test' => 'runs a diagnostic or queues a read-only inventory pull; no managed object is deleted',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
-        'system_status.php:run_mecm_probe' => 'runs a read-only TCP reachability check',
 
         // Edits of the record the user is already looking at, with its own form.
         'credentials.php:update' => 'edits the credential the form belongs to',
@@ -66,7 +65,6 @@ final class PortalConfirmContractTest extends TestCase
         'settings.php:save_esxi_inventory' => 'overwrites a value shown in the same input',
         'settings.php:save_password_policy' => 'overwrites a value shown in the same input',
         'settings.php:save_session' => 'overwrites a value shown in the same input',
-        'settings.php:save_probe' => 'overwrites a value shown in the same input',
         'settings.php:save_retire_threshold' => 'overwrites a value shown in the same input',
         'settings.php:save_timezone' => 'overwrites a value shown in the same select',
 

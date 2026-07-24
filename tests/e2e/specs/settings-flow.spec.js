@@ -333,74 +333,14 @@ test('save_retire_threshold: persists a changed threshold', async ({ page }) => 
   }
 });
 
-// e2e-covers: settings.php:save_probe
-test('save_probe: persists host and port together', async ({ page }) => {
-  const beforeHost = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST');
-  const beforePort = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', String(phpConst('VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT')));
-  try {
-    await openTab(page, 'machine-api');
-    const form = settingsForm(page, 'save_probe');
-    await form.locator('input[name="probe_mode"][value="manual"]').check();
-    await form.locator('input[name="probe_host"]').fill('mecm.example.local');
-    await form.locator('input[name="probe_port"]').fill('8531');
-    await submitAndReturnToTab(page, form, 'machine-api');
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'the host persisted').toBe('mecm.example.local');
-    expect(Number(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT')), 'the port persisted').toBe(8531);
-  } finally {
-    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST', beforeHost);
-    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', beforePort);
-  }
-});
-
-test('save_probe: explicit mode, sticky validation, IPv6 and automatic reset', async ({ page }) => {
-  const beforeHost = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST');
-  const beforePort = readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', String(phpConst('VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT')));
-  try {
-    await openTab(page, 'machine-api');
-    let form = settingsForm(page, 'save_probe');
-    await expect(form.locator('input[name="probe_mode"]')).toHaveCount(2);
-    await form.locator('input[name="probe_mode"][value="manual"]').check();
-    await form.locator('input[name="probe_host"]').fill('bad host');
-    await form.locator('input[name="probe_port"]').fill('0');
-    await form.evaluate((node) => { node.noValidate = true; });
-    await submitAndReturnToTab(page, form, 'machine-api');
-    form = settingsForm(page, 'save_probe');
-    await expect(form.locator('input[name="probe_host"]')).toHaveValue('bad host');
-    await expect(form.locator('input[name="probe_port"]')).toHaveValue('0');
-    await expect(form.locator('.field-error')).toHaveCount(2);
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'invalid fields do not change the host').toBe(beforeHost);
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', String(phpConst('VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT'))), 'invalid fields do not change the port').toBe(beforePort);
-
-    // The text field uses a numeric mobile keyboard but deliberately retains
-    // invalid text after the server-side round trip, so the operator can see
-    // and correct the exact input instead of receiving an unexplained blank.
-    await form.locator('input[name="probe_host"]').fill('mecm.example.local');
-    await form.locator('input[name="probe_port"]').fill('abc');
-    await form.evaluate((node) => { node.noValidate = true; });
-    await submitAndReturnToTab(page, form, 'machine-api');
-    form = settingsForm(page, 'save_probe');
-    await expect(form.locator('input[name="probe_port"]')).toHaveValue('abc');
-    await expect(form.locator('input[name="probe_port"] + .field-error, input[name="probe_port"] ~ .field-error').first()).toBeVisible();
-
-    await form.locator('input[name="probe_host"]').fill('::1');
-    await form.locator('input[name="probe_port"]').fill('1');
-    await submitAndReturnToTab(page, form, 'machine-api');
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST')).toBe('::1');
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT')).toBe('1');
-    await expect(settingsForm(page, 'save_probe').locator('input[name="probe_mode"][value="manual"]')).toBeChecked();
-
-    form = settingsForm(page, 'save_probe');
-    await form.locator('input[name="probe_mode"][value="auto"]').check();
-    await form.locator('input[name="probe_host"]').fill('this-value-must-be-cleared.example');
-    await form.locator('input[name="probe_port"]').fill('');
-    await submitAndReturnToTab(page, form, 'machine-api');
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST'), 'automatic mode stores no hidden host').toBe('');
-    expect(readSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT'), 'blank port uses the SMB default').toBe('445');
-    await expect(settingsForm(page, 'save_probe').locator('input[name="probe_mode"][value="auto"]')).toBeChecked();
-  } finally {
-    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_HOST', beforeHost);
-    writeSetting('VIRTUSPHERE_SETTING_MECM_PROBE_PORT', beforePort);
-  }
+// The outbound MECM TCP-445 probe was removed (ADR-0018 amendment): the
+// machine-API tab is inbound only, so there is no probe form, host/port field
+// or mode radio anymore, and the reported MECM state is a link to System status.
+test('machine-api: the outbound MECM probe is gone, the status link is present', async ({ page }) => {
+  await openTab(page, 'machine-api');
+  await expect(settingsForm(page, 'save_probe')).toHaveCount(0);
+  await expect(page.locator('input[name="probe_mode"], input[name="probe_host"], input[name="probe_port"]')).toHaveCount(0);
+  await expect(page.locator('#panel-machine-api a[href*="system_status.php#mecm"]')).toBeVisible();
 });
 
 // e2e-covers: settings.php:allow_create

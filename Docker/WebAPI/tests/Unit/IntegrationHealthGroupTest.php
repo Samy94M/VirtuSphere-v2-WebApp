@@ -21,7 +21,7 @@ final class IntegrationHealthGroupTest extends TestCase
         ));
         self::assertSame([], repo_integration_rows_for_sources(
             $rows,
-            VIRTUSPHERE_INTEGRATION_MECM_NETWORK_SOURCES
+            VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES
         ));
         self::assertSame($rows, repo_integration_rows_for_sources(
             $rows,
@@ -33,12 +33,12 @@ final class IntegrationHealthGroupTest extends TestCase
     {
         $rows = [
             ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => [], 'state' => 'ok'],
-            ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, 'row' => [], 'state' => 'danger'],
+            ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => [], 'state' => 'danger'],
             ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE, 'row' => [], 'state' => 'warning'],
         ];
         $mecm = array_merge(
             repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES),
-            repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_NETWORK_SOURCES)
+            repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES)
         );
         self::assertSame('danger', repo_integration_worst_state($mecm));
         self::assertCount(2, $mecm);
@@ -54,6 +54,10 @@ final class IntegrationHealthGroupTest extends TestCase
         self::assertGreaterThan(virtusphere_heartbeat_state_rank('warning'), virtusphere_heartbeat_state_rank('missing'));
         self::assertGreaterThan(virtusphere_heartbeat_state_rank('unknown'), virtusphere_heartbeat_state_rank('missing'));
         self::assertGreaterThan(virtusphere_heartbeat_state_rank('ok'), virtusphere_heartbeat_state_rank('unknown'));
+        // A fresh legacy heartbeat is milder than a stale reporter but worse than
+        // an unconfigured source: unknown < legacy < warning.
+        self::assertGreaterThan(virtusphere_heartbeat_state_rank('legacy'), virtusphere_heartbeat_state_rank('warning'));
+        self::assertGreaterThan(virtusphere_heartbeat_state_rank('unknown'), virtusphere_heartbeat_state_rank('legacy'));
     }
 
     // The heartbeat roll-up (repo) and the ESXi/Ansible roll-ups (health

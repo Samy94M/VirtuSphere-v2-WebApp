@@ -27,26 +27,36 @@ Diese Registry schreibt der Installer.
    Prozessliste sichtbar bleibt.
 3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
    MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
-   drei Sync-Quellen sollten auf „OK" springen.
+   drei Sync-Quellen und der MECM-Site-Status sollten auf „OK" springen.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
 Skripte.
 
-## Die drei geplanten Aufgaben (MECM-Server)
+## Die vier geplanten Aufgaben (MECM-Server)
 
 | Aufgabe | Skript | Zweck | Intervall |
 |---|---|---|---|
 | VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | VMs aus VirtuSphere nach MECM importieren, Collections zuweisen, ResourceID zurückmelden | 10 s |
 | VirtuSphere MECM Packages Sync | `mecm_Packages-TaskSeq-sync.ps1` | Paket-/Task-Sequence-Katalog an die WebApp melden | 60 s |
 | VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | aus `config.json`-Ordnern MECM-Applications erzeugen | 60 s |
+| VirtuSphere MECM Site Health | `mecm_site-health.ps1` | offiziellen MECM-Site-Zustand aus `SMS_SummarizerSiteStatus` melden | 300 s |
 
-Alle drei laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim
-Systemstart, **ohne Laufzeitlimit** (Endlosschleifen) und mit
-Auto-Neustart bei Absturz. Jede meldet sich per Heartbeat an die WebApp; ein
-toter Task erscheint dort im *Systemstatus* als „Ausgefallen".
+Alle vier laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim Systemstart
+(`AtStartup`), Doppelstart-Schutz `MultipleInstances IgnoreNew`, **ohne
+Laufzeitlimit** (`PT0S`, Endlosschleifen) und mit Auto-Neustart bei Absturz.
+
+Die drei Sync-Aufgaben melden je Lauf einen **Ergebnisbericht** an
+`mecm_report.php?action=reportRun`: `started` vor der Arbeit, `completed` im
+`finally` mit Ergebnis (`ok`/`warning`/`fail`/`unknown`) und quellenspezifischen
+Zählern. Die Site-Health-Aufgabe sendet nur `completed`. Ein toter Task erscheint
+im *Systemstatus* als „Ausgefallen"; ein Alt-Skript, das nur `Send-VsHeartbeat`
+sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt". `Send-VsHeartbeat`
+bleibt für Rückwärtskompatibilität erhalten, wird von den aktuellen Skripten aber
+nicht mehr genutzt.
 
 **Logs:** `%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`
-(einheitliches Format, 30 Tage Aufbewahrung).
+(einheitliches Format, 30 Tage Aufbewahrung; Site Health:
+`<datum>_site-health.log`).
 
 ## Architektur und Funktionsweise
 
@@ -62,7 +72,7 @@ ersten Zeile per Dot-Sourcing in den eigenen Scope lädt:
 
 Das wirkt, als stünde der Inhalt von Common direkt im aufrufenden Skript.
 Danach sind dort alle Hilfsfunktionen verfügbar. Wichtig für das mentale
-Modell: Jede der drei Aufgaben ist ein **eigener PowerShell-Prozess** mit
+Modell: Jede der vier Aufgaben ist ein **eigener PowerShell-Prozess** mit
 einer **eigenen Kopie** von Common; die Prozesse teilen zur Laufzeit keinen
 Zustand (jeder hat z. B. seine eigene Log-Komponente und Korrelations-ID).
 
@@ -74,7 +84,9 @@ Common stellt bereit:
 | `Initialize-VsLog` / `Write-VsLog` | Tageslogdateien im Format `ISO-8601 \| LEVEL \| Komponente \| Kontext \| Nachricht \| Korrelations-ID`; Aufräumen nach 30 Tagen; Log-Fehler stoppen nie den Hauptprozess |
 | `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel) |
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
-| `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); das Portal erkennt tote Tasks am *Ausbleiben* des Heartbeats (ADR-0018) |
+| `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
+| `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM abfragen; reine Statusabbildung `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
+| `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); nur noch für Rückwärtskompatibilität, die aktuellen Skripte senden `reportRun` (ADR-0018) |
 | `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und MECM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
 | `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster für die Alt-Versions-Bereinigung (`^Name-<version>$`, exakt — der Wildcard `Name*` löschte früher auch `Firefox-ESR-*`). Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
 | `Get-VsSiteCode` / `Initialize-VsCmSite` | Site-Code dreistufig ermitteln (WMI-Namespace → CMSite-PSDrive → Registry-Fallback), ConfigurationManager-Modul laden, ins Site-Drive wechseln |
@@ -206,17 +218,55 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
 - Traten Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der nächste
   Durchlauf wiederholt die offenen Punkte.
 
+### Site Health (`mecm_site-health.ps1`, alle 300 s)
+
+Meldet den offiziellen, zusammengefassten MECM-Site-Zustand an die WebApp, ohne
+dass das Portal MECM selbst ansprechen muss (der frühere TCP-445-Check im Portal
+ist entfernt, ADR-0018 Amendment 2026-07-23):
+
+- Fragt über den SMS Provider `SMS_SummarizerSiteStatus` für den konfigurierten
+  Site-Code ab (Site-Code über `Get-VsSiteCode`). Die Abfrage läuft per CIM ohne
+  ConfigurationManager-Modul; das Modul wird nur für den PSDrive-Fallback der
+  Provider-Ermittlung geladen.
+- Reine Statusabbildung: `0` = OK (grün), `1` = Warnung (gelb), `2` = kritisch
+  (rot), jeder andere Rohwert = unbekannt (grau). Sendet ausschließlich
+  `completed`-Berichte, kein `started`.
+- Providerfehler (nicht erreichbar, Zugriff verweigert, Abfrage fehlgeschlagen)
+  werden als `unknown` (grau) gemeldet; Rot ist exklusiv dem von MECM bestätigten
+  Status 2 vorbehalten. `provider_unreachable` erst nach zwei aufeinanderfolgenden
+  Fehlversuchen, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
+  schreibt.
+
+**Provider und Intervall (Registry, `HKLM:\SOFTWARE\VirtuSphere\MECM`):**
+
+- `MECM_ProviderMachine`: SMS-Provider-Rechner (Installerparameter
+  `-ProviderMachine`). Leer lassen, wenn der Provider lokal auf dem Site-Server
+  liegt; die Aufgabe ermittelt ihn dann selbst.
+- `SiteHealthIntervalSeconds`: Berichtsintervall (Installerparameter
+  `-SiteHealthIntervalSeconds`), Standard 300, erlaubt 60–3600.
+
+**Berechtigungen (Remote-Provider):** Das Computerkonto des Site-Servers ist
+standardmäßig Mitglied der SMS-Admins-Gruppe auf jedem Provider; liegt der Provider
+lokal und läuft die Aufgabe als SYSTEM, ist keine Zusatzkonfiguration nötig. Liegt
+der Provider entfernt, braucht das Computerkonto die Provider-Berechtigung, und der
+Transport muss erreichbar sein: `Get-CimInstance -ComputerName` nutzt WinRM/WSMan,
+klassisches WMI braucht DCOM (RPC 135 plus dynamische Ports, Remote Activation). Ein
+fehlendes Recht wird als `provider_access_denied` (grau) gemeldet, nicht als „MECM
+kritisch".
+
 ### Gemeinsame Robustheits-Muster
 
-Alle drei Dienste teilen dieselbe Überlebensstrategie:
+Alle vier Dienste teilen dieselbe Überlebensstrategie:
 
 - **Warten statt sterben:** Fehlt beim Start die Registry-Konfiguration (oder
   beim Autoimporter der `PackagesShare`), wartet das Skript in einer
-  60-Sekunden-Schleife statt mit `exit 1` abzubrechen. Sonst wären die drei
+  60-Sekunden-Schleife statt mit `exit 1` abzubrechen. Sonst wären die
   Taskplaner-Neustarts nach Minuten aufgebraucht und der Task bis zum Reboot
   tot.
-- **Heartbeat je Durchlauf:** macht tote Tasks auf der Portal-Seite
-  *Systemstatus* sichtbar, ohne den Sync je auszubremsen.
+- **Ergebnisbericht je Durchlauf:** die Sync-Aufgaben senden `started`/`completed`,
+  die Site-Health-Aufgabe nur `completed`; das macht tote Tasks und fachliche
+  Fehlschläge auf der Portal-Seite *Systemstatus* sichtbar, ohne den Lauf je
+  auszubremsen. Ein fehlgeschlagener Bericht bricht den Lauf nie ab.
 - **Backoff und Site-Drive-Recovery:** durchgängiges try/catch; nach
   3 Fehlern in Folge wird das Site-Drive verworfen und im nächsten Durchlauf
   neu initialisiert (fängt WMI-/Drive-Hänger ab).

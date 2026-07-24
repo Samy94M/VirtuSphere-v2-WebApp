@@ -6,7 +6,6 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/system_status_page.php';
-require_once __DIR__ . '/../lib/mecm_probe.php';
 require_once __DIR__ . '/../lib/system_status_panels.php';
 require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
@@ -21,7 +20,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $snapshot = integration_health_snapshot($connection);
-$probe = mecm_probe_target($connection);
 
 // A detail query is accepted only for an ESXi credential already present in
 // the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
@@ -70,7 +68,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     </section>
 
     <?php system_status_render_overview($snapshot); ?>
-    <?php system_status_render_mecm($snapshot, $probe, $user); ?>
+    <?php system_status_render_mecm($snapshot, $user); ?>
     <?php system_status_render_ansible($snapshot, $user); ?>
     <?php system_status_render_esxi($snapshot, $user, $selectedInventoryId, $selectedInventory); ?>
     <?php system_status_render_deviations($deviations, $activeVlanNames, $user, $reassignFrom, $hasInventory); ?>

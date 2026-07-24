@@ -21,6 +21,7 @@ declare(strict_types=1);
                 8 => ['pre' => 3],
                 9 => ['pre' => 1, 'list' => ['ul', 7], 'post' => 1],
                 10 => ['pre' => 3],
+                13 => ['pre' => 2],
                 11 => ['pre' => 1, 'list' => ['ul', 6], 'post' => 1],
                 12 => ['pre' => 2],
             ];
@@ -71,7 +72,6 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help.ops_jobs_deploy', ['seconds' => VIRTUSPHERE_DEPLOY_WORKER_SLEEP_SECONDS])); ?></li>
                 <li><?php echo h(__t('help.ops_jobs_maintenance', [
                     'sleep' => VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS,
-                    'probe' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60),
                 ])); ?></li>
                 <li><?php echo h(__t('help.ops_jobs_esxi', ['hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT])); ?></li>
             </ul>

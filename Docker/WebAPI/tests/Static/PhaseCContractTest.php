@@ -41,14 +41,15 @@ final class PhaseCContractTest extends TestCase
         self::assertStringNotContainsString('repo_set_vm_state', $report);
         self::assertStringContainsString('machine_api_report_token_ok', $report);
 
-        // The report token gate is scoped to the server heartbeat channel; client
-        // phase reports (reportPhase) authenticate by known MAC only, so the token
-        // never has to be provisioned onto ephemeral deploy VMs (ADR-0018).
-        self::assertMatchesRegularExpression(
-            "/\\\$action === 'heartbeat'\\s*&&\\s*!machine_api_report_token_ok\\(/",
-            $report,
-            'report token must be enforced for heartbeat only'
-        );
+        // The report token gate covers the server sync channels (heartbeat and
+        // the reportRun result channel) but never the client phase reports
+        // (reportPhase), which authenticate by known MAC only, so the token never
+        // has to be provisioned onto ephemeral deploy VMs (ADR-0018).
+        self::assertStringContainsString("\$action === 'heartbeat' || \$action === 'reportRun'", $report);
+        self::assertStringContainsString('!machine_api_report_token_ok(', $report);
+        // reportRun is display-only telemetry too: it records run reports, never
+        // VM lifecycle state.
+        self::assertStringContainsString('repo_record_run_report', $report);
 
         $machineApi = $this->source('lib/machine_api.php');
         self::assertStringContainsString('hash_equals', $machineApi);
@@ -60,7 +61,7 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString("hash('sha256', \$token)", $settings);
     }
 
-    public function testMaintenanceWorkerOwnsRetentionAndProbe(): void
+    public function testMaintenanceWorkerOwnsRetentionAndHasNoProbe(): void
     {
         // ADR-0018: retention no longer rides on request handling.
         self::assertStringNotContainsString('removeLog($connection);', $this->source('function.php'));
@@ -68,9 +69,14 @@ final class PhaseCContractTest extends TestCase
         $worker = $this->source('lib/maintenance_tasks.php');
         self::assertStringContainsString('repo_purge_client_events', $worker);
         self::assertStringContainsString('removeLog', $worker);
-        self::assertStringContainsString('maintenance_worker_tcp_check', $worker);
-        self::assertStringContainsString('mecm_probe_run', $worker);
-        self::assertStringContainsString('repo_mark_integration_failure', $this->source('lib/mecm_probe.php'));
+
+        // The TCP-445 reachability probe was replaced by reportRun result reports
+        // and the site-health task (ADR-0018 amendment). No probe/socket path may
+        // remain in the active MECM runtime.
+        self::assertStringNotContainsString('mecm_probe', $worker);
+        self::assertStringNotContainsString('maintenance_worker_tcp_check', $worker);
+        self::assertStringNotContainsString('stream_socket_client', $worker);
+        self::assertFileDoesNotExist(dirname(__DIR__, 2) . '/lib/mecm_probe.php');
         // Note: docker-compose.yml (which runs this worker) lives outside the
         // container mount and cannot be asserted here.
     }

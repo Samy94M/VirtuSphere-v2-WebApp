@@ -19,7 +19,11 @@ $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_mis
 $vmCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms');
 $mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?)', 'ss', [VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_MECM_SYNC_SUBMITTED]);
 $healthSnapshot = integration_health_snapshot($connection);
-$integrationWorst = (string) $healthSnapshot['mecm']['state'];
+// The MECM tile shows two separate signals and never a common worst-of: a
+// critical MECM site must not present the data flow as failed, and a failed sync
+// must not claim MECM itself is critical (ADR-0018).
+$integrationState = (string) $healthSnapshot['mecm_sync']['state'];
+$mecmSiteState = (string) $healthSnapshot['mecm_site']['state'];
 // Null when no ESXi credential exists: a tile that is permanently grey for a
 // feature nobody configured is noise, so it is not rendered at all.
 $hypervisorWorst = $healthSnapshot['esxi']['state'];
@@ -47,7 +51,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard');
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>
-        <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_system_status')); ?></span><span class="value"><?php echo heartbeat_badge($integrationWorst); ?></span></a>
+        <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_system_status')); ?></span><span class="value value-signals"><?php echo portal_signal_row(__t('dashboard.kpi_integration'), $integrationState); ?><?php echo portal_signal_row(__t('dashboard.kpi_mecm_site'), $mecmSiteState); ?></span></a>
         <?php if ($hypervisorWorst !== null) { ?>
             <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_hypervisor')); ?></span><span class="value"><?php echo esxi_state_badge((string) $hypervisorWorst); ?></span></a>
         <?php } ?>

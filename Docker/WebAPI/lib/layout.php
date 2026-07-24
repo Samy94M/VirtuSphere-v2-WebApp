@@ -438,6 +438,7 @@ function heartbeat_badge(string $state): string
     $meta = virtusphere_heartbeat_meta($state);
     $label = match ($state) {
         'ok' => __t('system_status.status_ok'),
+        'legacy' => __t('system_status.status_legacy'),
         'warning' => __t('system_status.status_warning'),
         'danger' => __t('system_status.status_danger'),
         'missing' => __t('system_status.status_missing'),
@@ -445,6 +446,14 @@ function heartbeat_badge(string $state): string
     };
 
     return portal_badge((string) $meta['badge'], $label);
+}
+
+// One labeled signal row for the dashboard's split MECM tile: a short label and
+// its heartbeat badge, stacked so the two MECM signals never collapse into one
+// worst-of. Both label and badge are escaped.
+function portal_signal_row(string $label, string $state): string
+{
+    return '<span class="signal-row"><span class="signal-label">' . h($label) . '</span>' . heartbeat_badge($state) . '</span>';
 }
 
 /**
@@ -610,7 +619,7 @@ function integration_source_label(string $source): string
         VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('system_status.source_device_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.source_packages_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.source_autoimporter'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('system_status.source_mecm_server_probe'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH => __t('system_status.source_mecm_site_health'),
         VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.source_maintenance_worker'),
         default => $source,
     };
@@ -622,7 +631,6 @@ function integration_action_hint(string $source): string
         VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('system_status.action_device_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.action_packages_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.action_autoimporter'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE => __t('system_status.action_mecm_server_probe'),
         VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.action_maintenance_worker'),
         default => '',
     };
@@ -639,4 +647,16 @@ function portal_format_duration(int $seconds): string
     }
 
     return __t('common.duration_seconds', ['count' => $seconds]);
+}
+
+// Sub-second run durations are reported in milliseconds; anything longer rounds
+// to whole seconds and reuses the second/minute/hour formatter.
+function portal_format_duration_ms(int $milliseconds): string
+{
+    $milliseconds = max(0, $milliseconds);
+    if ($milliseconds < 1000) {
+        return __t('common.duration_ms', ['count' => $milliseconds]);
+    }
+
+    return portal_format_duration((int) round($milliseconds / 1000));
 }

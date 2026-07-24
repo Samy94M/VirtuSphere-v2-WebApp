@@ -6,7 +6,6 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
-require_once __DIR__ . '/../lib/mecm_probe.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/repo/settings.php';
 require_once __DIR__ . '/../lib/repo/api_access.php';
@@ -36,7 +35,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'allow_delete' => 'machine-api',
         'generate_token' => 'machine-api',
         'clear_token' => 'machine-api',
-        'save_probe' => 'machine-api',
         'save_retire_threshold' => 'catalog',
         'save_esxi_inventory' => 'catalog',
         'save_timezone' => 'system',
@@ -284,64 +282,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('error', portal_error_message($exception));
             }
         }
-    } elseif ($action === 'save_probe') {
-        $probeMode = request_string($_POST, 'probe_mode');
-        $probeHost = mecm_probe_normalize_host(request_trimmed($_POST, 'probe_host'));
-        $probePort = request_trimmed($_POST, 'probe_port');
-        $probePort = $probePort === '' ? (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT : $probePort;
-        $errors = [];
-        if (!in_array($probeMode, VIRTUSPHERE_PROBE_MODES, true)) {
-            $errors['probe_mode'] = __t('settings.probe_mode_invalid');
-        } elseif ($probeMode === VIRTUSPHERE_PROBE_MODE_MANUAL && !mecm_probe_host_is_valid($probeHost)) {
-            $errors['probe_host'] = $probeHost === ''
-                ? __t('settings.probe_host_required')
-                : __t('settings.probe_host_invalid');
-        }
-        if (!mecm_probe_port_is_valid($probePort)) {
-            $errors['probe_port'] = __t('settings.probe_port_invalid');
-        }
-        if ($errors !== []) {
-            form_remember('probe', $_POST, $errors);
-            flash_set('error', (string) reset($errors));
-        } else {
-            try {
-                $oldHost = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_HOST, '');
-                $oldPort = repo_setting_value($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, (string) VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT);
-                if ($probeMode === VIRTUSPHERE_PROBE_MODE_AUTO) {
-                    $probeHost = '';
-                }
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_MECM_PROBE_HOST, $probeHost);
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_MECM_PROBE_PORT, $probePort);
-                audit(
-                    $connection,
-                    VIRTUSPHERE_LOG_CATEGORY_SETTINGS,
-                    'updated mecm probe ' . mecm_probe_mode($oldHost) . '/' . trim($oldHost) . ':' . $oldPort
-                        . ' -> ' . $probeMode . '/' . $probeHost . ':' . $probePort,
-                    (int) $user['id']
-                );
-                $result = mecm_probe_run($connection);
-                audit(
-                    $connection,
-                    VIRTUSPHERE_LOG_CATEGORY_MECM,
-                    'mecm probe after settings save target ' . ((string) ($result['target'] ?? '') ?: '[waiting]')
-                        . ':' . $result['port'] . ' result ' . $result['status']
-                        . ($result['error_category'] !== null ? '/' . $result['error_category'] : ''),
-                    (int) $user['id']
-                );
-                $flashType = $result['status'] === 'ok' ? 'success' : 'warning';
-                $flashMessage = match ($result['status']) {
-                    'ok' => __t('settings.probe_saved_ok'),
-                    'fail' => __t('settings.probe_saved_failed'),
-                    default => __t('settings.probe_saved_waiting'),
-                };
-                flash_set($flashType, $flashMessage, '', [
-                    'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM),
-                    'label' => __t('settings.probe_status_link'),
-                ]);
-            } catch (Throwable $exception) {
-                flash_set('error', portal_error_message($exception));
-            }
-        }
     } elseif ($action === 'save_retire_threshold') {
         $threshold = request_int($_POST, 'retire_threshold');
         if ($threshold < VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN || $threshold > VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MAX) {
@@ -405,13 +345,6 @@ try {
 }
 
 $reportTokenSet = repo_setting_value($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH) !== '';
-$probeConfig = mecm_probe_target($connection);
-$probeHost = $probeConfig['configured_host'];
-$probePort = (string) $probeConfig['port'];
-$probeMode = form_old('probe', 'probe_mode', $probeConfig['mode']);
-$probeHeartbeats = repo_integration_heartbeats($connection);
-$probeHeartbeat = $probeHeartbeats[VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE] ?? null;
-$probeDetail = mecm_probe_decode_detail(isset($probeHeartbeat['last_detail']) ? (string) $probeHeartbeat['last_detail'] : null);
 $retireThreshold = repo_setting_value($connection, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT);
 $reportTokenOnce = (string) ($_SESSION['machine_report_token_once'] ?? '');
 unset($_SESSION['machine_report_token_once']);
@@ -546,11 +479,10 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
 
     <div class="stack" id="panel-machine-api" role="tabpanel" aria-labelledby="tab-machine-api" tabindex="0" data-tab-panel hidden>
         <?php
-        // Both panels below say "MECM" and mean opposite directions, which is
-        // the single thing an operator has to know to read them: the allowlist
-        // is a door into the portal, the probe is a look out of it. Without
-        // this sentence, heartbeats arriving while the probe reads "down" looks
-        // like a contradiction instead of two independent paths.
+        // The machine API is inbound only: MECM, Ansible and the deploy clients
+        // call the portal. The portal never connects out to the MECM server, so
+        // there is no MECM host or port here. Provider, site code and the report
+        // interval are configured in the Windows installer's registry.
         ?>
         <div class="alert alert-info"><?php echo h(__t('settings.machine_api_directions')); ?></div>
         <section class="panel">
@@ -604,64 +536,6 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
         </section>
 
         <section class="panel">
-            <h2><?php echo h(__t('settings.probe_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.probe_hint', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></p>
-            <p class="muted"><?php echo h(__t('settings.probe_scope', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></p>
-            <?php // A red probe blocks nothing; saying so stops it from being read as an outage next to the allowlist. ?>
-            <p class="muted"><?php echo h(__t('settings.probe_blocks_nothing')); ?></p>
-            <?php if ($probeConfig['mode'] === VIRTUSPHERE_PROBE_MODE_MANUAL) { ?>
-                <div class="alert alert-info"><?php echo h(__t('settings.probe_manual_current', ['host' => $probeConfig['configured_host']])); ?></div>
-            <?php } ?>
-            <dl class="status-facts">
-                <div><dt><?php echo h(__t('settings.probe_effective_target')); ?></dt><dd><code><?php echo h($probeConfig['host'] ?? __t('settings.probe_waiting_target')); ?></code></dd></div>
-                <div><dt><?php echo h(__t('settings.probe_port_label')); ?></dt><dd><?php echo h((string) $probeConfig['port']); ?></dd></div>
-                <?php
-                // Same row, same badge helper, so it has to be the same verdict:
-                // derive the state through virtusphere_heartbeat_staleness() like
-                // System status does. Reading last_status alone called a probe
-                // "OK" whose last check was days old, because a maintenance
-                // worker that stopped writes no failure either. Settings is where
-                // the probe is configured, so a green badge here next to a red one
-                // on System status is the worst possible place to disagree.
-                ?>
-                <div><dt><?php echo h(__t('settings.probe_result')); ?></dt><dd><?php echo $probeHeartbeat === null
-                    ? heartbeat_badge('unknown')
-                    : heartbeat_badge(virtusphere_heartbeat_staleness(
-                        isset($probeHeartbeat['last_seen_at']) ? (string) $probeHeartbeat['last_seen_at'] : null,
-                        (int) $probeHeartbeat['interval_seconds'],
-                        (string) $probeHeartbeat['last_status']
-                    )); ?></dd></div>
-                <?php if ($probeConfig['mode'] === VIRTUSPHERE_PROBE_MODE_AUTO) { ?>
-                    <div><dt><?php echo h(__t('settings.probe_auto_origin')); ?></dt><dd><?php echo h($probeConfig['source_ip'] ?? __t('settings.probe_waiting_target')); ?><?php echo $probeConfig['source_seen_at'] !== null ? ' · ' . h(portal_format_timestamp($probeConfig['source_seen_at'])) : ''; ?></dd></div>
-                <?php } ?>
-                <div><dt><?php echo h(__t('settings.probe_last_attempt')); ?></dt><dd><?php echo $probeHeartbeat !== null ? h(portal_format_timestamp($probeHeartbeat['last_checked_at'] ?? '')) : h(__t('settings.probe_never')); ?></dd></div>
-                <div><dt><?php echo h(__t('settings.probe_last_success')); ?></dt><dd><?php echo $probeHeartbeat !== null && !empty($probeHeartbeat['last_seen_at']) ? h(portal_format_timestamp($probeHeartbeat['last_seen_at'])) : h(__t('settings.probe_never')); ?></dd></div>
-            </dl>
-            <form class="form-grid probe-form" method="post" action="settings.php" autocomplete="off">
-                <?php echo csrf_field(); ?>
-                <input type="hidden" name="action" value="save_probe">
-                <fieldset class="form-grid-full probe-mode">
-                    <legend><?php echo h(__t('settings.probe_mode_label')); ?></legend>
-                    <div class="radio-card-grid">
-                        <label class="radio-card"><input type="radio" name="probe_mode" value="auto"<?php echo $probeMode === VIRTUSPHERE_PROBE_MODE_AUTO ? ' checked' : ''; ?>> <span><strong><?php echo h(__t('settings.probe_mode_auto')); ?></strong><small><?php echo h(__t('settings.probe_mode_auto_hint')); ?></small></span></label>
-                        <label class="radio-card"><input type="radio" name="probe_mode" value="manual"<?php echo $probeMode === VIRTUSPHERE_PROBE_MODE_MANUAL ? ' checked' : ''; ?>> <span><strong><?php echo h(__t('settings.probe_mode_manual')); ?></strong><small><?php echo h(__t('settings.probe_mode_manual_hint')); ?></small></span></label>
-                    </div>
-                    <?php echo form_error_html('probe', 'probe_mode'); ?>
-                </fieldset>
-                <label class="probe-host"><?php echo h(__t('settings.probe_host_label')); ?>
-                    <input name="probe_host" value="<?php echo h(form_old('probe', 'probe_host', $probeHost)); ?>"<?php echo form_input_class('probe', 'probe_host'); ?> placeholder="<?php echo h(__t('settings.probe_host_placeholder')); ?>" aria-describedby="probe-host-hint">
-                    <span class="hint" id="probe-host-hint"><?php echo h(__t('settings.probe_host_field_hint')); ?></span>
-                    <?php echo form_error_html('probe', 'probe_host'); ?>
-                </label>
-                <label class="probe-port"><?php echo h(__t('settings.probe_port_label')); ?>
-                    <input name="probe_port" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" value="<?php echo h(form_old('probe', 'probe_port', $probePort)); ?>"<?php echo form_input_class('probe', 'probe_port'); ?>>
-                    <?php echo form_error_html('probe', 'probe_port'); ?>
-                </label>
-                <div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('settings.probe_checking')); ?>"><?php echo h(__t('settings.probe_save_check')); ?></button><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('settings.probe_status_link')); ?></a></div>
-            </form>
-        </section>
-
-        <section class="panel">
             <h2><?php echo h(__t('settings.report_token_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.report_token_hint')); ?></p>
             <?php if ($reportTokenOnce !== '') { ?>
@@ -694,6 +568,12 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
                     </form>
                 <?php } ?>
             </div>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('settings.machine_api_status_title')); ?></h2>
+            <p class="muted"><?php echo h(__t('settings.machine_api_status_hint')); ?></p>
+            <div class="actions"><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('settings.machine_api_status_link')); ?></a></div>
         </section>
     </div>
 

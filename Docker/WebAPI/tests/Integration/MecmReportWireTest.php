@@ -136,9 +136,139 @@ final class MecmReportWireTest extends TestCase
             // before the IP gate, so a wrong/missing token is a deterministic 401).
             [$status] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10]);
             self::assertSame(401, $status, 'heartbeat must require the report token when configured');
+
+            // reportRun is the other server sync channel and is token-gated too.
+            [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 10]);
+            self::assertSame(401, $status, 'reportRun must require the report token when configured');
         } finally {
             repo_set_setting($db, $key, $previous);
         }
+    }
+
+    public function testReportRunValidatesItsFields(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $run = $this->runId();
+
+        $cases = [
+            [['source' => 'nope', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 10], 'Invalid source'],
+            [['source' => 'device-sync', 'event' => 'paused', 'run_id' => $run, 'interval_seconds' => 10], 'Invalid event'],
+            [['source' => 'device-sync', 'event' => 'started', 'run_id' => 'short', 'interval_seconds' => 10], 'Invalid run_id'],
+            [['source' => 'device-sync', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 0], 'Invalid interval_seconds'],
+            [['source' => 'device-sync', 'event' => 'completed', 'run_id' => $run, 'interval_seconds' => 10, 'outcome' => 'meh'], 'Invalid outcome'],
+            [['source' => 'device-sync', 'event' => 'completed', 'run_id' => $run, 'interval_seconds' => 10, 'outcome' => 'fail'], 'Invalid error_category'],
+            // The site reporter never announces a start.
+            [['source' => 'mecm-site-health', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 300], 'Invalid event'],
+        ];
+        foreach ($cases as [$payload, $expected]) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', $payload);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, $expected . ' must be a 400');
+            self::assertSame(['error' => $expected], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function testReportRunAcceptsEveryRunSourceAndRejectsNonRunSources(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach (VIRTUSPHERE_INTEGRATION_RUN_SOURCES as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => $source, 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 30, 'outcome' => 'ok']);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status, $source . ' must be accepted');
+            self::assertSame(['success' => true, 'source' => $source], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $source . ' reportRun wire shape');
+        }
+
+        // maintenance-worker is internal-only and never reports over the wire.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'maintenance-worker', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 30]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testReportRunCompletedRoundTripStreakDedupAndReset(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+
+        $runA = $this->runId();
+        // started: no result yet, report_version ratchets to V2.
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $runA, 'interval_seconds' => 10, 'script_version' => '2.0.0']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('started', $row['last_event']);
+        self::assertSame(2, (int) $row['report_version']);
+        self::assertNull($row['last_result_at']);
+
+        // completed fail: streak 1, failure timestamp, error category, summary.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $runA, 'interval_seconds' => 10, 'outcome' => 'fail', 'error_category' => 'mecm_unavailable', 'duration_ms' => 1200, 'summary' => ['received' => 5, 'imported' => 3, 'item_failures' => 2]]);
+        self::assertSame(200, $status);
+        self::assertSame(['success' => true, 'source' => 'device-sync'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        $row = $this->deviceRow($db);
+        self::assertSame('fail', $row['last_status']);
+        self::assertSame('completed', $row['last_event']);
+        self::assertSame(1, (int) $row['failure_streak']);
+        self::assertSame('mecm_unavailable', $row['last_error_category']);
+        self::assertNotNull($row['last_failure_at']);
+        self::assertNull($row['last_success_at']);
+        // MySQL normalizes JSON object key order, so compare canonically.
+        self::assertEqualsCanonicalizing(['received' => 5, 'imported' => 3, 'item_failures' => 2], json_decode((string) $row['last_summary'], true));
+
+        // Idempotent replay of the same completed run_id: acknowledged, no change.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $runA, 'interval_seconds' => 10, 'outcome' => 'ok']);
+        self::assertSame(200, $status);
+        self::assertSame(['success' => true, 'source' => 'device-sync', 'deduplicated' => true], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        $row = $this->deviceRow($db);
+        self::assertSame('fail', $row['last_status'], 'a deduplicated replay must not change the row');
+        self::assertSame(1, (int) $row['failure_streak']);
+
+        // A fresh completed ok resets the streak and stamps a success.
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 10, 'outcome' => 'ok']);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('ok', $row['last_status']);
+        self::assertSame(0, (int) $row['failure_streak']);
+        self::assertNotNull($row['last_success_at']);
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+    }
+
+    public function testReportRunStartedDoesNotOverwriteTheLastResult(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 10, 'outcome' => 'fail', 'error_category' => 'partial_failure']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 10]);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('started', $row['last_event']);
+        self::assertSame('fail', $row['last_status'], 'a start must keep the last completed result');
+        self::assertNotNull($row['last_attempt_at']);
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+    }
+
+    private function runId(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /** @return array<string,mixed> */
+    private function deviceRow(mysqli $db): array
+    {
+        $row = $db->query("SELECT * FROM deploy_integration_heartbeats WHERE source = 'device-sync'")->fetch_assoc();
+        self::assertIsArray($row);
+
+        return $row;
     }
 
     public function testEveryWireSourceIsAcceptedAndReturnsItsShapeInternalSourcesRejected(): void

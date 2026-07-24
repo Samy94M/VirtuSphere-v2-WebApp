@@ -2,23 +2,68 @@
 
 declare(strict_types=1);
 
-// The heartbeat half of the System status page: overview, MECM, Ansible and
-// internal services, plus the shared Ampel legend. The ESXi inventory cards and
-// the deviation scan live in lib/system_status_esxi_panels.php (ADR-0006).
-require_once __DIR__ . '/mecm_probe.php';
+// The heartbeat half of the System status page: overview, MECM (result reports
+// and site health), Ansible and internal services, plus the shared Ampel legend.
+// The ESXi inventory cards and the deviation scan live in
+// lib/system_status_esxi_panels.php (ADR-0006).
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/system_status.php';
 
-function system_status_probe_error_label(?string $category): string
+// Maps a reportRun error category (sync or site) to a localized label.
+function system_status_run_error_label(?string $category): string
 {
     return match ($category) {
-        VIRTUSPHERE_PROBE_ERROR_DNS => __t('system_status.probe_error_dns'),
-        VIRTUSPHERE_PROBE_ERROR_TIMEOUT => __t('system_status.probe_error_timeout'),
-        VIRTUSPHERE_PROBE_ERROR_REFUSED => __t('system_status.probe_error_refused'),
-        VIRTUSPHERE_PROBE_ERROR_NETWORK => __t('system_status.probe_error_network'),
-        VIRTUSPHERE_PROBE_ERROR_UNKNOWN => __t('system_status.probe_error_unknown'),
+        VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE => __t('system_status.err_portal_unreachable'),
+        VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE => __t('system_status.err_mecm_unavailable'),
+        VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE => __t('system_status.err_partial_failure'),
+        VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING => __t('system_status.err_source_missing'),
+        VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT => __t('system_status.err_catalog_conflict'),
+        VIRTUSPHERE_RUN_ERROR_SITE_WARNING => __t('system_status.err_site_warning'),
+        VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => __t('system_status.err_site_critical'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => __t('system_status.err_provider_access_denied'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => __t('system_status.err_provider_unreachable'),
+        VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => __t('system_status.err_query_failed'),
         default => '',
     };
+}
+
+// Localized label for one summary counter key.
+function system_status_run_summary_label(string $key): string
+{
+    return match ($key) {
+        'received' => __t('system_status.summary_received'),
+        'imported' => __t('system_status.summary_imported'),
+        'item_failures' => __t('system_status.summary_item_failures'),
+        'data_warnings' => __t('system_status.summary_data_warnings'),
+        'resource_update_failures' => __t('system_status.summary_resource_update_failures'),
+        'packages' => __t('system_status.summary_packages'),
+        'task_sequences' => __t('system_status.summary_task_sequences'),
+        'sent' => __t('system_status.summary_sent'),
+        'unchanged' => __t('system_status.summary_unchanged'),
+        'folders' => __t('system_status.summary_folders'),
+        'created' => __t('system_status.summary_created'),
+        'removed' => __t('system_status.summary_removed'),
+        'open_points' => __t('system_status.summary_open_points'),
+        default => $key,
+    };
+}
+
+/**
+ * The reporter line: legacy note, concrete script version or the plain V2 label.
+ *
+ * @param array<string,mixed> $row
+ */
+function system_status_run_reporter_note(array $row): string
+{
+    if ((string) ($row['last_event'] ?? '') === VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT) {
+        return __t('system_status.run_reporter_legacy');
+    }
+    $version = trim((string) ($row['last_script_version'] ?? ''));
+    if ($version !== '') {
+        return __t('system_status.run_reporter_version', ['version' => $version]);
+    }
+
+    return __t('system_status.run_reporter_v2');
 }
 
 /** @param array<string,mixed> $snapshot */
@@ -62,12 +107,6 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
                 ? portal_format_timestamp($row['last_checked_at'])
                 : __t('system_status.never_seen');
             $detail = trim((string) ($row['last_detail'] ?? ''));
-            $errorLabel = '';
-            if ($entry['source'] === VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE) {
-                $decoded = mecm_probe_decode_detail($detail);
-                $detail = $decoded['detail'];
-                $errorLabel = system_status_probe_error_label($decoded['error_category']);
-            }
             ?>
             <article class="status-row">
                 <div class="status-row-main">
@@ -92,7 +131,6 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
                 // group instead of five rows repeating a premature instruction.
                 $actionHint = !$suppressHints && $entry['state'] !== 'ok' ? integration_action_hint($entry['source']) : '';
                 if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php } ?>
-                <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
                 <?php if ($detail !== '') { ?>
                     <details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details>
                 <?php } ?>
@@ -102,62 +140,164 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
     <?php
 }
 
-/** @param array<string,mixed> $snapshot @param array<string,mixed> $probe */
-function system_status_render_mecm(array $snapshot, array $probe, array $user): void
+/**
+ * The MECM section is two visually equal but clearly separated subgroups that
+ * are never collapsed into one worst-of: the VirtuSphere-MECM integration (the
+ * three result reporters) and the official MECM site status. A critical site
+ * must not present the data flow as failed, and a failed sync must not claim
+ * MECM itself is critical.
+ *
+ * @param array<string,mixed> $snapshot
+ * @param array<string,mixed> $user
+ */
+function system_status_render_mecm(array $snapshot, array $user): void
 {
-    $probeRow = $snapshot['by_source'][VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE]['row'] ?? null;
-    $probeDetail = mecm_probe_decode_detail(isset($probeRow['last_detail']) ? (string) $probeRow['last_detail'] : null);
-    // `unknown` for the whole sync group means no wire source has ever reported,
-    // which is exactly "MECM is not connected yet" (a source that reported once
-    // and went quiet is warning/danger, and its siblings then read `missing`).
-    // Nothing there can be restarted, so the rows drop their repair hints and
-    // the section says once what actually has to happen. Same idea as the
-    // ESXi/Ansible sections, which already open with an empty state instead of
-    // per-row instructions.
-    $mecmUnconfigured = (string) $snapshot['mecm_sync']['state'] === 'unknown';
-    // The probe hint claims the MECM server is unreachable. Without an effective
-    // target nothing was contacted, so there is nothing to declare unreachable.
-    $probeHasTarget = ($probe['host'] ?? null) !== null;
+    $syncState = (string) $snapshot['mecm_sync']['state'];
+    $siteState = (string) $snapshot['mecm_site']['state'];
+    // `unknown` for a whole group means no source there has ever reported. On a
+    // brand-new install both groups are unknown, so a single setup empty-state
+    // replaces four repeated repair instructions; the rows drop their per-row
+    // hints in that state. A source that reported once and went quiet is
+    // warning/danger, and its silent siblings then read `missing`.
+    $setupPending = $syncState === 'unknown' && $siteState === 'unknown';
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM); ?>">
         <div class="section-heading-actions">
             <div><h2><?php echo h(__t('system_status.mecm_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.mecm_hint')); ?></p></div>
             <?php if (can('users.manage', $user)) { ?><a class="button button-secondary" href="<?php echo h(log_category_url(VIRTUSPHERE_LOG_CATEGORY_MECM)); ?>"><?php echo h(__t('system_status.open_logs')); ?></a><?php } ?>
         </div>
-        <div class="signal-matrix-note"><?php echo h(__t('system_status.mecm_signal_explanation', ['port' => (string) $probe['port']])); ?></div>
         <?php if (!empty($snapshot['mecm_ip_mismatch'])) { ?>
             <div class="alert alert-warning"><?php echo h(__t('system_status.mecm_ip_mismatch', ['ips' => implode(', ', array_keys($snapshot['mecm_fresh_ips']))])); ?></div>
         <?php } ?>
-        <?php if ($mecmUnconfigured) { ?>
+        <?php if ($setupPending) { ?>
             <div class="empty-state">
-                <p><?php echo h(__t('system_status.mecm_not_configured')); ?></p>
+                <p><?php echo h(__t('system_status.mecm_setup_empty')); ?></p>
                 <?php if (can('system.config', $user)) { ?><a class="button button-secondary" href="settings.php#panel-machine-api"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?>
             </div>
         <?php } ?>
-        <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge((string) $snapshot['mecm_sync']['state']); ?></h3>
-        <?php system_status_render_source_rows($snapshot['mecm_sync']['rows'], $mecmUnconfigured); ?>
 
-        <div class="probe-status-card">
-            <div>
-                <h3><?php echo h(__t('system_status.mecm_network_heading')); ?> <?php echo heartbeat_badge((string) $snapshot['mecm_network']['state']); ?></h3>
-                <dl class="status-facts">
-                    <div><dt><?php echo h(__t('system_status.probe_mode')); ?></dt><dd><?php echo h($probe['mode'] === VIRTUSPHERE_PROBE_MODE_AUTO ? __t('system_status.probe_mode_auto') : __t('system_status.probe_mode_manual')); ?></dd></div>
-                    <div><dt><?php echo h(__t('system_status.probe_target')); ?></dt><dd><code><?php echo h($probe['host'] ?? __t('system_status.probe_target_waiting')); ?></code></dd></div>
-                    <div><dt><?php echo h(__t('system_status.probe_port')); ?></dt><dd><?php echo h((string) $probe['port']); ?></dd></div>
-                    <?php if ($probe['mode'] === VIRTUSPHERE_PROBE_MODE_AUTO) { ?><div><dt><?php echo h(__t('system_status.probe_origin')); ?></dt><dd><?php echo h($probe['source_ip'] ?? __t('system_status.probe_target_waiting')); ?><?php echo $probe['source_seen_at'] !== null ? ' · ' . h(portal_format_timestamp($probe['source_seen_at'])) : ''; ?></dd></div><?php } ?>
-                    <?php if ($probeDetail['error_category'] !== null) { ?><div><dt><?php echo h(__t('system_status.probe_result')); ?></dt><dd><?php echo h(system_status_probe_error_label($probeDetail['error_category'])); ?></dd></div><?php } ?>
-                </dl>
-            </div>
-            <?php system_status_render_source_rows($snapshot['mecm_network']['rows'], !$probeHasTarget); ?>
-            <?php if (can('system.config', $user)) { ?>
-                <div class="actions">
-                    <form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="run_mecm_probe"><button class="button" type="submit" data-busy-label="<?php echo h(__t('system_status.probe_running')); ?>"><?php echo h(__t('system_status.probe_run')); ?></button></form>
-                    <a class="button button-secondary" href="settings.php#panel-machine-api"><?php echo h(__t('system_status.probe_configure')); ?></a>
-                </div>
-            <?php } ?>
+        <div class="status-subgroup">
+            <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge($syncState); ?></h3>
+            <p class="muted"><?php echo h(__t('system_status.mecm_sync_hint')); ?></p>
+            <?php system_status_render_run_rows($snapshot['mecm_sync']['rows'], $setupPending); ?>
+        </div>
+
+        <div class="status-subgroup">
+            <h3><?php echo h(__t('system_status.mecm_site_heading')); ?> <?php echo heartbeat_badge($siteState); ?></h3>
+            <p class="muted"><?php echo h(__t('system_status.mecm_site_hint')); ?></p>
+            <?php system_status_render_site($snapshot['mecm_site']['rows']); ?>
         </div>
     </section>
     <?php
+}
+
+/**
+ * Rich result-report rows for the three MECM sync reporters: activity badge,
+ * "running since" while a run is in progress, the reporter version or legacy
+ * note, the attempt/result/success/failure timestamps, interval, duration,
+ * source-specific counters and the sanitized technical detail.
+ *
+ * @param list<array{source:string,row:array|null,state:string}> $rows
+ */
+function system_status_render_run_rows(array $rows, bool $suppressHints = false): void
+{
+    ?>
+    <div class="status-list">
+        <?php foreach ($rows as $entry) {
+            $row = $entry['row'];
+            $state = (string) $entry['state'];
+            $event = $row !== null ? (string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT) : '';
+            $isRunning = $event === VIRTUSPHERE_RUN_EVENT_STARTED;
+            $isLegacy = $event === VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
+            $detail = trim((string) ($row['last_detail'] ?? ''));
+            $errorLabel = $row !== null ? system_status_run_error_label(isset($row['last_error_category']) ? (string) $row['last_error_category'] : null) : '';
+            $summary = ($row !== null && !empty($row['last_summary'])) ? json_decode((string) $row['last_summary'], true) : null;
+            ?>
+            <article class="status-row">
+                <div class="status-row-main">
+                    <div><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($state); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?> <span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?></div>
+                    <?php if ($row !== null) { ?><p class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></p><?php } ?>
+                    <dl>
+                        <?php if ($row !== null && !empty($row['last_attempt_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_attempt')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_attempt_at'])); ?></dd></div><?php } ?>
+                        <?php if ($row !== null && !empty($row['last_result_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_result')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_result_at'])); ?></dd></div><?php } ?>
+                        <?php if ($row !== null && $isLegacy && !empty($row['last_seen_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_seen')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_seen_at'])); ?></dd></div><?php } elseif ($row !== null && !empty($row['last_success_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_success')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_success_at'])); ?></dd></div><?php } ?>
+                        <?php if ($row !== null && !empty($row['last_failure_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_failure')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_failure_at'])); ?></dd></div><?php } ?>
+                        <div><dt><?php echo h(__t('system_status.th_interval')); ?></dt><dd><?php echo $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'; ?></dd></div>
+                        <?php if ($row !== null && $row['last_duration_ms'] !== null && $row['last_duration_ms'] !== '') { ?><div><dt><?php echo h(__t('system_status.th_duration')); ?></dt><dd><?php echo h(portal_format_duration_ms((int) $row['last_duration_ms'])); ?></dd></div><?php } ?>
+                    </dl>
+                    <?php if (is_array($summary) && $summary !== []) { ?>
+                        <dl class="status-counters">
+                            <?php foreach ($summary as $summaryKey => $summaryValue) { if (!is_string($summaryKey)) { continue; } ?><div><dt><?php echo h(system_status_run_summary_label($summaryKey)); ?></dt><dd><?php echo h((string) $summaryValue); ?></dd></div><?php } ?>
+                        </dl>
+                    <?php } ?>
+                </div>
+                <?php
+                if ($state === 'legacy') { ?><p class="status-action"><?php echo h(__t('system_status.run_legacy_hint')); ?></p><?php
+                } elseif (!$suppressHints && $state !== 'ok') {
+                    $actionHint = integration_action_hint($entry['source']);
+                    if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php }
+                } ?>
+                <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
+                <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
+            </article>
+        <?php } ?>
+    </div>
+    <?php
+}
+
+/**
+ * The MECM site-status card: site code, SMS provider, the official MECM state
+ * badge, the check/healthy/failure timestamps, the report interval and a hint
+ * that distinguishes MECM warning (yellow), MECM critical (red) and the grey
+ * provider faults (unreachable, access denied) from each other in text.
+ *
+ * @param list<array{source:string,row:array|null,state:string}> $rows
+ */
+function system_status_render_site(array $rows): void
+{
+    $entry = $rows[0] ?? null;
+    $row = $entry['row'] ?? null;
+    if ($row === null) {
+        ?><div class="empty-state"><p><?php echo h(__t('system_status.mecm_site_empty')); ?></p></div><?php
+        return;
+    }
+    $state = (string) ($entry['state'] ?? 'unknown');
+    $summary = !empty($row['last_summary']) ? json_decode((string) $row['last_summary'], true) : [];
+    $siteCode = is_array($summary) && isset($summary['site_code']) ? (string) $summary['site_code'] : '';
+    $provider = is_array($summary) && isset($summary['provider']) ? (string) $summary['provider'] : '';
+    $errorCategory = isset($row['last_error_category']) ? (string) $row['last_error_category'] : '';
+    $errorLabel = system_status_run_error_label($errorCategory);
+    $detail = trim((string) ($row['last_detail'] ?? ''));
+    ?>
+    <article class="status-row">
+        <div class="status-row-main">
+            <dl class="status-facts">
+                <div><dt><?php echo h(__t('system_status.site_code_label')); ?></dt><dd><?php echo $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'; ?></dd></div>
+                <div><dt><?php echo h(__t('system_status.site_provider_label')); ?></dt><dd><?php echo $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'; ?></dd></div>
+                <div><dt><?php echo h(__t('system_status.site_state_label')); ?></dt><dd><?php echo heartbeat_badge($state); ?><?php if ($errorLabel !== '') { ?> <span><?php echo h($errorLabel); ?></span><?php } ?></dd></div>
+                <?php if (!empty($row['last_result_at'])) { ?><div><dt><?php echo h(__t('system_status.site_last_check')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_result_at'])); ?></dd></div><?php } ?>
+                <?php if (!empty($row['last_success_at'])) { ?><div><dt><?php echo h(__t('system_status.site_last_healthy')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_success_at'])); ?></dd></div><?php } ?>
+                <?php if (!empty($row['last_failure_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_failure')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_failure_at'])); ?></dd></div><?php } ?>
+                <div><dt><?php echo h(__t('system_status.site_interval')); ?></dt><dd><?php echo h(portal_format_duration((int) $row['interval_seconds'])); ?></dd></div>
+            </dl>
+        </div>
+        <?php $hint = system_status_site_hint($errorCategory); if ($hint !== '') { ?><p class="status-action"><?php echo h($hint); ?></p><?php } ?>
+        <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
+    </article>
+    <?php
+}
+
+// Site-status feedback: MECM warning and critical both point at the MECM
+// console; the grey provider faults point at the provider and its SYSTEM rights.
+function system_status_site_hint(string $category): string
+{
+    return match ($category) {
+        VIRTUSPHERE_RUN_ERROR_SITE_WARNING, VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => __t('system_status.site_hint_console'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => __t('system_status.site_hint_access_denied'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => __t('system_status.site_hint_provider_unreachable'),
+        VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => __t('system_status.site_hint_query_failed'),
+        default => '',
+    };
 }
 
 /** @param array<string,mixed> $snapshot */

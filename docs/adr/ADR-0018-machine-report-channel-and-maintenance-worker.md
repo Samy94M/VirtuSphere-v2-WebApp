@@ -137,3 +137,58 @@ Der Systemstatus trennt MECM-Synchronisation und den Netzwerkpfad. Der
 Maintenance-Worker ist ein interner Dienst und beeinflusst den MECM-Gesamtzustand
 nicht mehr. Dashboard und Systemstatus lesen denselben request-synchronen
 Health-Snapshot. Keine Machine-API- oder PowerShell-Wire-Form ändert sich.
+
+## Amendment (2026-07-23): TCP-445-Probe abgelöst durch Ergebnisberichte und Site-Health
+
+Dieses Amendment löst ausdrücklich die TCP-Probe-Hälfte von **Entscheidung 4**
+sowie die Probe-, „Netzwerkpfad"- und `probe_mode`-Teile des unmittelbar
+vorstehenden Amendments (2026-07-23, „Systemstatus und explizites MECM-Prüfziel")
+ab. Die übrigen Aussagen beider bleiben gültig: Der Reportkanal ist strikt
+display-only und ruft nie `repo_set_vm_state()`, der Maintenance-Worker ist ein
+interner Dienst ohne Einfluss auf den MECM-Gesamtzustand, `system_status.php`
+heißt in der Bedienung Systemstatus, und berechtigte Diagnose-/Reparaturaktionen
+(ESXi-Inventarauftrag, VLAN-Neuzuweisung) bleiben erlaubt.
+
+**Warum.** Eine erfolgreiche TCP-Verbindung auf Port 445 (direktes SMB über TCP)
+beweist weder MECM-Anmeldung noch SMS Provider, WMI, Aufgabenplanung, Katalog-Sync
+oder Autoimporter; Port 445 allein ist kein MECM-Gesundheitsnachweis. Der
+offizielle zusammengefasste Site-Zustand steht stattdessen über den SMS Provider
+in `SMS_SummarizerSiteStatus.Status` bereit und entspricht Microsofts eigenem
+Beispielcode.
+
+**Was sich ändert.**
+
+- Die aktive TCP-445-Probe entfällt vollständig; das Portal baut keine ausgehende
+  Verbindung mehr zum MECM-Server auf. Es gibt kein MECM-Ziel, keinen Port und
+  keinen `probe_mode` mehr in den Einstellungen, und keine Firewallfreigabe
+  Portal → MECM:445 wird mehr benötigt.
+- `mecm_report.php` erhält additiv `action=reportRun`; `action=heartbeat` und
+  `action=reportPhase` bleiben unverändert. Die drei Sync-Aufgaben melden je Lauf
+  `started`/`completed` mit einem Ergebnis (`ok`/`warning`/`fail`/`unknown`). Eine
+  vierte Aufgabe „VirtuSphere MECM Site Health" meldet ausschließlich `completed`
+  mit dem offiziellen Site-Zustand aus `SMS_SummarizerSiteStatus`: 0 = OK (grün),
+  1 = Warnung (gelb), 2 = kritisch (rot), jeder andere Rohwert = unbekannt (grau).
+- Migration `0025_mecm_result_reporting` erweitert `deploy_integration_heartbeats`
+  additiv (u. a. `last_event`, `last_run_id`, `failure_streak`, `last_summary`);
+  es gibt **keinen Backfill**. Bestandszeilen behalten `report_version=1`, ihre
+  Alt-Zeitstempel heißen „zuletzt gesehen", nie „letzter Erfolg". Die alten
+  Probe-Settings und die historische `mecm-server-probe`-Zeile werden für ein
+  Rollback nicht gelöscht, aber von keinem aktuellen Leser mehr verwendet.
+
+**Semantik (festgeschrieben).** `last_event` ist der alleinige Treiber der
+Anzeige (Legacy vs. V2, laufend vs. abgeschlossen), nicht `report_version`. Ein
+frischer V1-Heartbeat ist gelb „Legacy: Ergebnis nicht bestätigt", auch nach einem
+Skript-Rollback. Der Client sendet sequenziell ohne Replay-Queue, deshalb ist die
+Ankunftsreihenfolge die Wahrheit; jedes `completed` mit neuer `run_id` wird
+übernommen, abgelehnt wird nur wegen Validierung oder Authentifizierung, nie wegen
+Reihenfolge. Dedup greift einzig bei identischer `run_id` mit
+`last_event='completed'` (idempotentes `200 {deduplicated:true}` ohne Zähler-
+oder Zeitstempeländerung). Ein laufender Lauf behält den letzten Abschluss als
+Badge und zeigt zusätzlich „läuft seit X"; stale greift erst nach
+`max(3 × Intervall, 60 s, VIRTUSPHERE_RUN_GRACE_SECONDS = 600)`. Providerfehler
+sind grau (unbekannt); Rot ist exklusiv dem MECM-bestätigten kritischen Status 2
+vorbehalten. `failure_streak` zählt nur aufeinanderfolgende `fail`-Abschlüsse.
+Provider, Site-Code und Berichtsintervall (`MECM_ProviderMachine`,
+`SiteHealthIntervalSeconds`) sind Registry-owned in
+`HKLM:\SOFTWARE\VirtuSphere\MECM`, keine Portal-Settings. Keine Machine-API- oder
+PowerShell-Wire-Form der Bestandsendpunkte ändert sich.

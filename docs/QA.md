@@ -102,6 +102,46 @@ The PHP container mounts `Docker/WebAPI` as `/var/www/html`, so schema baseline 
 Select-String -Path Docker\mysql\mysql-init\struktur.sql -Pattern 'deploy_interfaces_mac_lookup'
 ```
 
+## MECM Report Channel Coverage (reportRun + Site Health)
+
+The additive `action=reportRun` on `mecm_report.php` and the new "VirtuSphere MECM
+Site Health" reporter (ADR-0018, Amendment 2026-07-23) are pinned across the three
+languages that carry the contract:
+
+- **Wire (`MecmReportWireTest`, PHPUnit).** The legacy `heartbeat` stays byte-exact
+  and its response unchanged. `reportRun` covers validation, auth, the allowed
+  sources (`device-sync`, `packages-sync`, `autoimporter`, `mecm-site-health`) and
+  the `error`-keyed envelope; `started`/`completed` with site health sending only
+  `completed`; the idempotent replay of an identical completed `run_id`
+  (`200 {deduplicated:true}` with no counter or timestamp change); a completed report
+  with a new `run_id` always accepted, never rejected for arrival order; the
+  category/outcome binding for site health
+  (`site_warning`/`site_critical`/`provider_*`/`query_failed`); the size limit; and
+  no VM-lifecycle write.
+- **Status derivation and repository (PHPUnit).** `last_event` drives the badge:
+  fresh V2 `ok`/`warning`/`fail`/`unknown`, a fresh V1 heartbeat yellow as Legacy
+  (again after a script rollback), the two-clock running run with "läuft seit" and
+  stale only after `max(3 × interval, 60 s, RUN_GRACE)`, group-scoped `missing` (site
+  health does not make a sync red), and `failure_streak` counting consecutive `fail`
+  only.
+- **Pester (`VirtuSphere-Common`, `mecm_site-health`).** `Send-VsRunReport` payload,
+  header and byte-length truncation before send; token/secret redaction; the pure
+  status mapping `0→ok`, `1→warning`, `2→fail`, anything else `→unknown`; provider
+  discovery order; `provider_unreachable` only after two consecutive failures; each
+  loop turn sends at most one `started` and exactly one `completed`; the installer
+  registers exactly four task definitions, all `IgnoreNew`/SYSTEM/AtStartup/`PT0S`.
+- **Static (`PhaseCContractTest`, `MachineApiPanelContractTest`).** The
+  maintenance-worker keeps retention and no longer carries a probe/socket path (this
+  replaces the former pin on `maintenance_worker_tcp_check`); the machine-API panel
+  has no outbound path, target or port, and the allowlist stays deny-by-default.
+- **Playwright (`system-status-ampel.spec.js`, `system-status.spec.js`,
+  `settings-flow.spec.js`).** Legacy yellow (and yellow again after V2→V1); V2 green;
+  warning yellow; fail immediately red; a running attempt keeps the last result and
+  shows "läuft seit"; stale/missing/unknown; site warning/critical; a provider fault
+  grey and never labelled site-critical; sync and site health rendered separately;
+  the dashboard tile carrying two labelled badges; no probe/retry button; the removed
+  probe card/host/port/mode; and the old `save_probe` POST returning 400.
+
 ## Portal Confirmation Dialogs
 
 Confirmations are the shared `<dialog>` from `lib/layout_modals.php`, rendered once per page by `layout_footer()` and driven only by `data-confirm` (ADR-0013). The contract is an attribute agreement between markup, that module and the portal scripts (`assets/core.js`, which holds the confirm dialog), so `php -l`, `node --check`, the lang audit and the rest of the suite all stay green while it is broken. `tests/Static/PortalConfirmContractTest.php` closes that gap and runs in the normal `unit` suite. It fails when:
@@ -214,7 +254,7 @@ The `setup` project seeds an `e2e_user` account through the PHP container and ca
 - `field-roundtrip.spec.js` — a hostile-value matrix (XSS payload, attribute breakout, HTML/SQL metachars, umlauts, 4-byte emoji) through the real form: byte-exact in MySQL with no entity in storage, escaped in every render context, and a dialog handler fails the test if a script ever executes.
 - `crud-mission.spec.js` / `crud-negative.spec.js` — the entity lifecycle verified through state, plus the reference guard (deleting a credential an active job holds must refuse in the operator's language, without a 500 and without a partial cascade).
 - `accessibility.spec.js` — axe-core, WCAG 2.1/2.2 A+AA, every page in both themes.
-- `system-status-ampel.spec.js` — the statements the status page makes about its own traffic lights: the legend explains every state the page can render and lists **the same** heartbeat states as the help panel (compared across the two rendered pages, which is the only place that drift is visible), an action hint appears on a broken row and not on a healthy one, an unconnected MECM names the setup step once instead of repeating repair hints, and Settings and System status reach the same verdict on the same probe row. Drives heartbeat states through seeded rows and hands the table back intact.
+- `system-status-ampel.spec.js` — the statements the status page makes about its own traffic lights: the legend explains every state the page can render and lists **the same** heartbeat states as the help panel (compared across the two rendered pages, which is the only place that drift is visible), an action hint appears on a broken row and not on a healthy one, an unconnected MECM names the setup step once instead of repeating repair hints, and Dashboard and System status render the two separated MECM badges (Integration, MECM-Site) from the same health snapshot, a provider fault shown grey and never labelled site-critical. Drives result and site-health states through seeded rows and hands the table back intact.
 
 Two traps worth knowing before writing a spec: the layout header carries a logout form whose submit is the **first** on every page, so a `.first()` submit selector logs you out instead of saving; and the real deploy worker polls the same database, so a fixture job seeded as `queued` gets claimed and finished mid-test (seed it `running` with a fresh heartbeat when a test depends on it staying active).
 

@@ -211,18 +211,73 @@ Describe 'Installer: Doppelstart- und Laufzeit-Vertrag der geplanten Aufgaben' {
         (Get-Content -Path $script:Installer -Raw) |
             Should -Match "ExecutionTimeLimit\s*=\s*'PT0S'"
     }
+
+    It 'laeuft als SYSTEM mit hoechsten Rechten' {
+        (Get-Content -Path $script:Installer -Raw) |
+            Should -Match "New-ScheduledTaskPrincipal\s+-UserId\s+'NT AUTHORITY\\SYSTEM'\s+-RunLevel\s+Highest"
+    }
+
+    It 'startet die Tasks beim Systemstart (AtStartup)' {
+        (Get-Content -Path $script:Installer -Raw) |
+            Should -Match 'New-ScheduledTaskTrigger\s+-AtStartup'
+    }
+}
+
+Describe 'Installer: die vier geplanten Aufgaben' {
+
+    BeforeAll {
+        $script:InstallerText = Get-Content -Path $script:Installer -Raw
+    }
+
+    It 'definiert GENAU vier Task-Eintraege im $tasks-Array' {
+        # Jede Aufgabe ist ein '@{ Name = ...; Script = ... }'-Eintrag. Genau
+        # vier: eine dritte oder fuenfte waere ein unbeabsichtigter Task.
+        $taskMatches = [regex]::Matches($script:InstallerText, "@\{\s*Name\s*=\s*'VirtuSphere MECM")
+        $taskMatches.Count | Should -Be 4
+    }
+
+    It 'nennt jeden der vier Task-Namen und sein Skript: <TaskName>' -ForEach @(
+        @{ TaskName = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
+        @{ TaskName = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ TaskName = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
+        @{ TaskName = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
+    ) {
+        $script:InstallerText | Should -Match ([regex]::Escape($TaskName))
+        $script:InstallerText | Should -Match ([regex]::Escape($Script))
+    }
+
+    It 'das Site-Health-Skript existiert im mecm-Ordner' {
+        Test-Path (Join-Path (Join-Path $script:PsRoot 'mecm') 'mecm_site-health.ps1') | Should -BeTrue
+    }
+
+    It 'schreibt die beiden neuen Registry-Werte (create-if-missing, kein New-Item -Force auf den Key)' {
+        # SiteHealthIntervalSeconds und MECM_ProviderMachine sind die EINZIGEN
+        # neuen Schluessel. Der Provider wird nur bei Vorhandensein geschrieben
+        # (Preserve-on-empty wie der ReportToken), damit ein Re-Run ohne
+        # -ProviderMachine den bestehenden Wert nicht kappt.
+        $script:InstallerText | Should -Match 'SiteHealthIntervalSeconds'
+        $script:InstallerText | Should -Match 'MECM_ProviderMachine'
+        $script:InstallerText | Should -Match "IsNullOrWhiteSpace\(\`$ProviderMachine\)"
+        # Der Konfig-Key wird nie per New-Item -Force angelegt (das wische Werte).
+        $script:InstallerText | Should -Not -Match 'New-Item\s+-Path\s+\$registryPath\s+-Force[^\r\n]*# *wipe'
+    }
 }
 
 Describe 'Backoff-Vertrag der Sync-Endlosschleifen' {
 
-    It '<name> hat eine Endlosschleife und mindestens einen Catch mit Backoff-Sleep' -ForEach @(
+    It '<name> laeuft endlos, faengt Fehler ab und schlaeft je Iteration (Backoff)' -ForEach @(
         @{ name = 'mecm_new-device-sync.ps1' }
         @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
         @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
     ) {
         # Frueher beendete der erste Fehler den Sync bis zum naechsten Reboot.
-        # Der Vertrag: die Schleife laeuft endlos, und ein Fehler fuehrt in
-        # einen Catch, der schlaeft statt heiss zu drehen (Backoff).
+        # Der Vertrag: die Schleife laeuft endlos, ein Fehler fuehrt in einen
+        # Catch, und die Iteration schlaeft statt heiss zu drehen (Backoff). Seit
+        # dem Run-Report-Umbau steht der Sleep am Schleifenende ($sleepSeconds
+        # wird im Catch gesetzt), damit die Abschlussmeldung im finally VOR dem
+        # Backoff rausgeht - deshalb wird der Sleep im Schleifenrumpf geprueft,
+        # nicht mehr direkt im Catch.
         $path = Join-Path (Join-Path $script:PsRoot 'mecm') $name
         $tokens = $null
         $errors = $null
@@ -235,11 +290,13 @@ Describe 'Backoff-Vertrag der Sync-Endlosschleifen' {
         }, $true)
         @($loops).Count | Should -BeGreaterThan 0
 
-        $catchesWithSleep = $ast.FindAll({ param($n)
-            $n -is [System.Management.Automation.Language.CatchClauseAst] -and
-            $n.Extent.Text -match 'Start-Sleep'
+        $catches = $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CatchClauseAst]
         }, $true)
-        @($catchesWithSleep).Count | Should -BeGreaterThan 0
+        @($catches).Count | Should -BeGreaterThan 0
+
+        # Der Schleifenrumpf schlaeft (Intervall/Backoff), kein heisses Drehen.
+        @($loops)[0].Extent.Text | Should -Match 'Start-Sleep'
     }
 }
 

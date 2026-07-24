@@ -85,7 +85,7 @@ Playwright beweist jede **Aktion** genau einmal im echten Browser; **Felder** we
 | deploy / deploy_log | Enqueue, Scheduling, Cancel (`data-confirm-action`), Retry inkl. partial-Zweig, Live-Status bis Terminal inkl. `partial` | `deploy-actions.spec.js` |
 | os / packages / vlans | Geteilter Statusfilter, Status-Normalisierung sichtbar, MECM-owned read-only (UI und POST) | `crud-catalog.spec.js` |
 | credentials | Nie Klartext-Rendering, Verbindungstest-Kategorien, Referenzschutz lokalisiert | `crud-credential.spec.js`, `crud-negative.spec.js` |
-| system_status | Ampel, MECM-Probe, Inventory-Enqueue, Intervall, kompakte ESXi-Karten, Fehlerdetail hinter `<details>`; Legende deckt alle drei Ampeln und stimmt mit der Hilfe überein, Handlungsanweisung nur an reparierbaren Zeilen, Abweichungs-Zählung nach Anzahl bzw. „Nicht geprüft" | `system-status.spec.js`, `system-status-actions.spec.js`, `system-status-ampel.spec.js` |
+| system_status | Ampel getrennt nach Integration/MECM-Site (Legacy, Ergebnis, Site-Zustand, Providerfehler grau), Inventory-Enqueue, Intervall, kompakte ESXi-Karten, Fehlerdetail hinter `<details>`; Legende deckt alle drei Ampeln und stimmt mit der Hilfe überein, Handlungsanweisung nur an reparierbaren Zeilen, Abweichungs-Zählung nach Anzahl bzw. „Nicht geprüft" | `system-status.spec.js`, `system-status-actions.spec.js`, `system-status-ampel.spec.js` |
 | users / account | Rollen, Policy in UI und Backend identisch, Selbstpflege | `crud-users.spec.js` |
 | settings | Tab-Fragment-Redirects, One-Time-Report-Token, HTTPS-Karte (Upload, Ablehnfälle, Enable/Disable) | `settings-flow.spec.js`, `https-flow.spec.js` |
 | logs | Tab+Kategorie-Deep-Links, CSV-Export | `csv-injection.spec.js` |

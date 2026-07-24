@@ -347,7 +347,19 @@ CREATE TABLE IF NOT EXISTS deploy_integration_heartbeats (
     last_detail VARCHAR(2048) NULL,
     last_ip VARCHAR(45) NOT NULL DEFAULT '',
     interval_seconds INT NOT NULL DEFAULT 60,
-    beat_count BIGINT NOT NULL DEFAULT 0
+    beat_count BIGINT NOT NULL DEFAULT 0,
+    report_version TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    last_event VARCHAR(16) NOT NULL DEFAULT 'heartbeat',
+    last_run_id VARCHAR(32) NULL,
+    last_attempt_at TIMESTAMP NULL,
+    last_result_at TIMESTAMP NULL,
+    last_success_at TIMESTAMP NULL,
+    last_failure_at TIMESTAMP NULL,
+    last_error_category VARCHAR(64) NULL,
+    last_duration_ms INT UNSIGNED NULL,
+    failure_streak INT UNSIGNED NOT NULL DEFAULT 0,
+    last_summary JSON NULL,
+    last_script_version VARCHAR(32) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO deploy_accessToWebAPI (ipAddress, description)

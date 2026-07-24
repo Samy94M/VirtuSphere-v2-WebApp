@@ -1,5 +1,5 @@
-// System-status acceptance coverage for the explicit MECM probe, fixed-clock
-// overview, compact ESXi cards and role-safe repair actions.
+// System-status acceptance coverage for the MECM result reports and site
+// status, fixed-clock overview, compact ESXi cards and role-safe repair actions.
 
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
@@ -18,45 +18,46 @@ echo 'CLEANED';
 `);
 }
 
-function probeSnapshot() {
+// The MECM site-health row is the one row these tests seed. Snapshot it (all
+// columns) and restore it afterwards so the shared dev DB is left untouched.
+function siteSnapshot() {
   return phpJson(`
 $db = db();
-$host = repo_setting($db, VIRTUSPHERE_SETTING_MECM_PROBE_HOST);
-$port = repo_setting($db, VIRTUSPHERE_SETTING_MECM_PROBE_PORT);
-$row = $db->query("SELECT source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count FROM deploy_integration_heartbeats WHERE source = 'mecm-server-probe'")->fetch_assoc() ?: null;
-echo 'JSON' . json_encode(['host' => $host, 'port' => $port, 'row' => $row]) . 'JSON';
-`, ['lib/repo/settings.php']);
+$r = $db->query("SELECT * FROM deploy_integration_heartbeats WHERE source = 'mecm-site-health'")->fetch_assoc() ?: null;
+echo 'JSON' . json_encode(['row' => $r]) . 'JSON';
+`);
 }
 
-function restoreProbe(snapshot) {
-  const payload = Buffer.from(JSON.stringify(snapshot), 'utf8').toString('base64');
+function restoreSite(snapshot) {
+  const payload = Buffer.from(JSON.stringify(snapshot.row), 'utf8').toString('base64');
   runPhp(`
-$data = json_decode(base64_decode('${payload}'), true, 16, JSON_THROW_ON_ERROR);
 $db = db();
-foreach (['host' => VIRTUSPHERE_SETTING_MECM_PROBE_HOST, 'port' => VIRTUSPHERE_SETTING_MECM_PROBE_PORT] as $field => $key) {
-    if ($data[$field] === null) {
-        repo_delete_setting($db, $key);
-    } else {
-        repo_set_setting($db, $key, (string) $data[$field]['setting_value']);
-    }
-}
-$db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'mecm-server-probe'");
-if (is_array($data['row'])) {
-    $r = $data['row'];
-    $stmt = $db->prepare('INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    $source = (string) $r['source'];
-    $seen = $r['last_seen_at'];
-    $checked = $r['last_checked_at'];
-    $status = (string) $r['last_status'];
-    $detail = $r['last_detail'];
-    $ip = (string) $r['last_ip'];
-    $interval = (int) $r['interval_seconds'];
-    $beats = (int) $r['beat_count'];
-    $stmt->bind_param('ssssssii', $source, $seen, $checked, $status, $detail, $ip, $interval, $beats);
+$db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'mecm-site-health'");
+$row = json_decode(base64_decode('${payload}'), true, 16, JSON_THROW_ON_ERROR);
+if (is_array($row)) {
+    $cols = array_keys($row);
+    $sql = 'INSERT INTO deploy_integration_heartbeats (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')';
+    $stmt = $db->prepare($sql);
+    $stmt->bind_param(str_repeat('s', count($cols)), ...array_values($row));
     $stmt->execute();
 }
 echo 'RESTORED';
-`, ['lib/repo/settings.php']);
+`);
+}
+
+// Replaces the mecm-site-health row with one V2 completed report of the given
+// outcome/category (no summary, so no JSON escaping in the seed).
+function seedSite(outcome, category) {
+  runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'mecm-site-health'");
+$stmt = $db->prepare("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_failure_at, last_status, last_event, last_error_category, report_version, interval_seconds, last_ip, beat_count) VALUES ('mecm-site-health', NOW(), NOW(), NOW(), NOW(), ?, 'completed', ?, 2, 300, '10.0.0.5', 1)");
+$outcome = '${outcome}';
+$category = '${category}';
+$stmt->bind_param('ss', $outcome, $category);
+$stmt->execute();
+echo 'SEEDED';
+`);
 }
 
 async function csrfTokenFor(context, path) {
@@ -107,84 +108,44 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
   expect(after, 'GET refresh writes no user audit row').toBe(before);
 });
 
-// e2e-covers: system_status.php:run_mecm_probe
-test('run_mecm_probe: closed local port reports safely, audits, enforces CSRF and RBAC', async ({ page, browser }) => {
-  const snapshot = probeSnapshot();
+test('MECM section: two separate subgroups and no outbound probe control', async ({ page }) => {
+  await page.goto('system_status.php#mecm');
+  // The MECM section is two visually equal subgroups, never one worst-of.
+  await expect(page.locator('#mecm')).toContainText(/VirtuSphere-MECM-Integration|VirtuSphere MECM integration/);
+  await expect(page.locator('#mecm')).toContainText(/MECM-Site-Status|MECM site status/);
+  // The 445 probe is gone: no "Erneut prüfen"/"Check again" control, no run_mecm_probe form.
+  await expect(page.locator('form:has(input[name="action"][value="run_mecm_probe"])')).toHaveCount(0);
+  await expect(page.locator('#mecm')).not.toContainText(/Erneut prüfen|Check again/);
+});
+
+test('MECM site: a confirmed critical is red, a provider fault is grey not critical', async ({ page }) => {
+  const snapshot = siteSnapshot();
   try {
-    runPhp(`
-repo_set_setting(db(), VIRTUSPHERE_SETTING_MECM_PROBE_HOST, '127.0.0.1');
-repo_set_setting(db(), VIRTUSPHERE_SETTING_MECM_PROBE_PORT, '1');
-echo 'READY';
-`, ['lib/repo/settings.php']);
+    // MECM-confirmed critical (status 2): red, names the MECM console.
+    seedSite('fail', 'site_critical');
+    await page.goto('system_status.php');
+    await expect(page.locator('#mecm')).toContainText(/MECM meldet kritisch|MECM reports critical/);
+    await expect(page.locator('#mecm')).toContainText(/Monitoring, System Status/);
 
-    await page.goto('system_status.php#mecm');
-    const form = page.locator('form:has(input[name="action"][value="run_mecm_probe"])');
-    await expect(form).toBeVisible();
-    await Promise.all([
-      page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
-      form.locator('button[type="submit"]').click(),
-    ]);
-    await expect(page.locator('[data-flash]').first()).toBeVisible();
-    await expect(page.locator('[data-flash] a[href="system_status.php#mecm"]')).toBeVisible();
-
-    const proof = phpJson(`
-$db = db();
-$row = $db->query("SELECT last_status, last_detail FROM deploy_integration_heartbeats WHERE source = 'mecm-server-probe'")->fetch_assoc();
-$audit = $db->query("SELECT category, log_message, correlation_id FROM deploy_logs WHERE category = 'mecm' AND log_message LIKE 'manual mecm probe correlation %' ORDER BY id DESC LIMIT 1")->fetch_assoc();
-echo 'JSON' . json_encode(['row' => $row, 'audit' => $audit]) . 'JSON';
-`);
-    expect(proof.row.last_status).toBe('fail');
-    const detail = JSON.parse(proof.row.last_detail);
-    expect(detail.target).toBe('127.0.0.1');
-    expect(detail.port).toBe(1);
-    expect(detail.status).toBe('fail');
-    expect(['refused', 'network', 'unknown']).toContain(detail.error_category);
-    expect(proof.audit.category).toBe('mecm');
-    expect(proof.audit.correlation_id).toMatch(/^[a-f0-9]{16,32}$/);
-
-    // PHP-FPM listens inside the same app container on 9000. This provides a
-    // deterministic successful TCP target without reaching any external host.
-    runPhp(`
-repo_set_setting(db(), VIRTUSPHERE_SETTING_MECM_PROBE_PORT, '9000');
-echo 'READY';
-`, ['lib/repo/settings.php']);
-    await page.goto('system_status.php#mecm');
-    const successForm = page.locator('form:has(input[name="action"][value="run_mecm_probe"])');
-    await Promise.all([
-      page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
-      successForm.locator('button[type="submit"]').click(),
-    ]);
-    const success = phpJson(`
-$row = db()->query("SELECT last_status, last_seen_at, last_detail FROM deploy_integration_heartbeats WHERE source = 'mecm-server-probe'")->fetch_assoc();
-echo 'JSON' . json_encode($row) . 'JSON';
-`);
-    expect(success.last_status).toBe('ok');
-    expect(success.last_seen_at).toBeTruthy();
-    expect(JSON.parse(success.last_detail)).toMatchObject({
-      target: '127.0.0.1',
-      port: 9000,
-      status: 'ok',
-      error_category: null,
-    });
-
-    const admin = await browser.newContext({ storageState: ROLES.admin.storageState });
-    const noCsrf = await admin.request.post('system_status.php', { form: { action: 'run_mecm_probe' } });
-    expect(noCsrf.status()).toBe(400);
-    await admin.close();
-
-    const user = await browser.newContext({ storageState: ROLES.user.storageState });
-    const userPage = await user.newPage();
-    await userPage.goto('system_status.php#mecm');
-    await expect(userPage.locator('form:has(input[name="action"][value="run_mecm_probe"])')).toHaveCount(0);
-    const userToken = await csrfTokenFor(user, 'missions.php?type=missions');
-    const denied = await user.request.post('system_status.php', {
-      form: { action: 'run_mecm_probe', _csrf: userToken },
-    });
-    expect(denied.status()).toBe(403);
-    await user.close();
+    // A provider fault is an unknown outcome: grey, and must NOT read as the
+    // MECM-critical console pointer. reload() (not a same-hash goto) forces a
+    // fresh server render of the reseeded row.
+    seedSite('unknown', 'provider_access_denied');
+    await page.reload();
+    await expect(page.locator('#mecm')).toContainText(/Providerzugriff verweigert|Provider access denied/);
+    await expect(page.locator('#mecm')).not.toContainText(/Monitoring, System Status/);
+    await expect(page.locator('#mecm')).not.toContainText(/MECM meldet kritisch|MECM reports critical/);
   } finally {
-    restoreProbe(snapshot);
+    restoreSite(snapshot);
   }
+});
+
+test('Dashboard: the MECM tile shows two separate signal rows', async ({ page }) => {
+  await page.goto('dashboard.php');
+  const tile = page.locator('a.card.kpi:has(.value-signals)');
+  await expect(tile.locator('.signal-row')).toHaveCount(2);
+  await expect(tile).toContainText(/Integration/);
+  await expect(tile).toContainText(/MECM-Site|MECM site/);
 });
 
 test('ESXi cards stay compact, load one detail on demand and ignore foreign ids', async ({ page }) => {

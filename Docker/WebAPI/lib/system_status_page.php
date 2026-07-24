@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/esxi_inventory.php';
-require_once __DIR__ . '/mecm_probe.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/catalog.php';
@@ -20,32 +19,7 @@ function system_status_handle_post(mysqli $connection, array $user): void
 {
     $inventoryAction = request_string($_POST, 'action');
     $redirect = 'system_status.php';
-    if ($inventoryAction === 'run_mecm_probe') {
-        if (!can('system.config', $user)) {
-            portal_forbid($connection, $user, 'system.config');
-        }
-        $result = mecm_probe_run($connection);
-        $target = (string) ($result['target'] ?? '');
-        audit(
-            $connection,
-            VIRTUSPHERE_LOG_CATEGORY_MECM,
-            'manual mecm probe correlation ' . virtusphere_correlation_id()
-                . ' target ' . ($target !== '' ? $target : '[waiting]') . ':' . $result['port']
-                . ' result ' . $result['status']
-                . ($result['error_category'] !== null ? '/' . $result['error_category'] : ''),
-            (int) $user['id']
-        );
-        $message = match ($result['status']) {
-            'ok' => __t('system_status.probe_run_ok'),
-            'fail' => __t('system_status.probe_run_failed'),
-            default => __t('system_status.probe_run_waiting'),
-        };
-        flash_set($result['status'] === 'ok' ? 'success' : 'warning', $message, '', [
-            'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM),
-            'label' => __t('system_status.probe_result_link'),
-        ]);
-        $redirect = system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM);
-    } elseif ($inventoryAction === 'refresh_inventory') {
+    if ($inventoryAction === 'refresh_inventory') {
         if (!can('deploy.run', $user)) {
             portal_forbid($connection, $user, 'deploy.run');
         }

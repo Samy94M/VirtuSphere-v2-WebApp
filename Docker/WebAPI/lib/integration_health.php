@@ -27,12 +27,18 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
     }
 
     $syncRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES);
-    $networkRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_NETWORK_SOURCES);
+    $siteRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES);
     $internalRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_INTERNAL_SOURCES);
-    $mecmRows = array_merge($syncRows, $networkRows);
+    // The two groups keep their own state and are never collapsed on the
+    // Dashboard or the detail panel; 'mecm' is a worst-of ONLY for the System
+    // status overview nav card ("something in the MECM area needs attention").
+    $mecmRows = array_merge($syncRows, $siteRows);
 
+    // The installer registers all four MECM tasks (three syncs plus site-health)
+    // on the same host, so a fresh report arriving from a second IP is equally
+    // suspicious for any of them; the mismatch warning spans all four sources.
     $freshIps = [];
-    foreach ($syncRows as $entry) {
+    foreach ($mecmRows as $entry) {
         $row = $entry['row'];
         if ($row === null || trim((string) ($row['last_ip'] ?? '')) === '') {
             continue;
@@ -82,7 +88,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'rows' => $rows,
         'by_source' => $bySource,
         'mecm_sync' => ['rows' => $syncRows, 'state' => repo_integration_worst_state($syncRows)],
-        'mecm_network' => ['rows' => $networkRows, 'state' => repo_integration_worst_state($networkRows)],
+        'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows)],
         'mecm' => ['rows' => $mecmRows, 'state' => repo_integration_worst_state($mecmRows)],
         'internal' => ['rows' => $internalRows, 'state' => repo_integration_worst_state($internalRows)],
         'mecm_fresh_ips' => $freshIps,

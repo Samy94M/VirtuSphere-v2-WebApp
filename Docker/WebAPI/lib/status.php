@@ -121,6 +121,9 @@ function virtusphere_heartbeat_meta(string $staleness): array
 {
     return match ($staleness) {
         'ok' => ['badge' => 'success'],
+        // 'legacy' = a fresh V1 heartbeat whose result the script has not yet
+        // confirmed. Yellow like a warning, but a distinct, benign label.
+        'legacy' => ['badge' => 'warning'],
         'warning' => ['badge' => 'warning'],
         // 'missing' = expected but never seen (another source already reported).
         'missing' => ['badge' => 'warning'],
@@ -138,13 +141,148 @@ function virtusphere_heartbeat_meta(string $staleness): array
 function virtusphere_heartbeat_state_rank(string $state): int
 {
     return match ($state) {
-        'danger' => 4,
+        'danger' => 5,
         // Worse than a delayed source: it has never reported at all, while its
         // siblings do, so nothing is going to recover on its own.
-        'missing' => 3,
-        'warning' => 2,
+        'missing' => 4,
+        'warning' => 3,
+        // A fresh legacy heartbeat: the task is alive but its result is
+        // unconfirmed, milder than a stale reporter.
+        'legacy' => 2,
         'ok' => 0,
         default => 1,
+    };
+}
+
+// --- V2 result-reporting derivation (ADR-0018 reportRun) --------------------
+// Display-only, server-clock only. `last_event` is the sole driver of legacy vs
+// V2 and running vs completed; `report_version` never enters these.
+
+// Maps an integration source to its display group kind: 'sync' (the three MECM
+// sync tasks, subject to the V2/legacy result semantics), 'site' (the MECM
+// site-health reporter, completed-only) or 'internal' (the maintenance worker,
+// plain liveness that is never shown as legacy).
+function virtusphere_integration_source_kind(string $source): string
+{
+    if (in_array($source, VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES, true)) {
+        return 'sync';
+    }
+    if (in_array($source, VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES, true)) {
+        return 'site';
+    }
+
+    return 'internal';
+}
+
+// One completed run: fail is always red; otherwise the last result ages out
+// through the normal staleness thresholds and a fresh result shows its own
+// outcome (ok=green, warning=yellow, unknown=grey). An `unknown` counts as
+// activity, so its last_result_at is fresh and it stays grey until the reporter
+// actually goes silent.
+function virtusphere_run_completed_state(array $row, ?int $now = null): string
+{
+    $outcome = (string) ($row['last_status'] ?? '');
+    if ($outcome === VIRTUSPHERE_RUN_OUTCOME_FAIL) {
+        return 'danger';
+    }
+
+    $resultAt = isset($row['last_result_at']) ? (string) $row['last_result_at'] : null;
+    if ($resultAt === null || $resultAt === '') {
+        return $outcome === VIRTUSPHERE_RUN_OUTCOME_OK ? 'ok'
+            : ($outcome === VIRTUSPHERE_RUN_OUTCOME_WARNING ? 'warning' : 'unknown');
+    }
+
+    $stale = virtusphere_heartbeat_staleness($resultAt, (int) ($row['interval_seconds'] ?? 0), null, $now);
+    if ($stale === 'danger' || $stale === 'warning') {
+        return $stale;
+    }
+
+    return match ($outcome) {
+        VIRTUSPHERE_RUN_OUTCOME_OK => 'ok',
+        VIRTUSPHERE_RUN_OUTCOME_WARNING => 'warning',
+        default => 'unknown',
+    };
+}
+
+// A run in progress (two-clock model): the badge keeps the last completed
+// result, and the row is not treated as stale until the run itself exceeds
+// max(3x interval, 60s, RUN_GRACE). Beyond that the reporter is stuck and ages
+// out normally.
+function virtusphere_run_running_state(array $row, ?int $now = null): string
+{
+    $interval = (int) ($row['interval_seconds'] ?? 0);
+    $attemptAt = isset($row['last_attempt_at']) ? (string) $row['last_attempt_at'] : null;
+    $attemptTs = $attemptAt !== null && $attemptAt !== '' ? strtotime($attemptAt) : false;
+    if ($attemptTs !== false) {
+        $age = ($now ?? time()) - $attemptTs;
+        $grace = max(
+            $interval * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
+            VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
+            VIRTUSPHERE_RUN_GRACE_SECONDS
+        );
+        if ($age > $grace) {
+            $dangerAfter = max(
+                $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
+                VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS
+            );
+
+            return $age > $dangerAfter ? 'danger' : 'warning';
+        }
+    }
+
+    if (empty($row['last_result_at'])) {
+        return 'unknown';
+    }
+
+    return match ((string) ($row['last_status'] ?? '')) {
+        VIRTUSPHERE_RUN_OUTCOME_FAIL => 'danger',
+        VIRTUSPHERE_RUN_OUTCOME_OK => 'ok',
+        VIRTUSPHERE_RUN_OUTCOME_WARNING => 'warning',
+        default => 'unknown',
+    };
+}
+
+// A source that only sent a legacy heartbeat: a fresh beat is 'legacy' (yellow,
+// result not confirmed) and it ages out through the normal thresholds. Follows
+// last_event, so a script rollback from V2 back to heartbeats shows legacy again.
+function virtusphere_run_legacy_state(array $row, ?int $now = null): string
+{
+    $stale = virtusphere_heartbeat_staleness(
+        isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null,
+        (int) ($row['interval_seconds'] ?? 0),
+        isset($row['last_status']) ? (string) $row['last_status'] : null,
+        $now
+    );
+
+    return $stale === 'ok' ? 'legacy' : $stale;
+}
+
+// Central display-state derivation for one integration source row (ADR-0018).
+// $kind comes from virtusphere_integration_source_kind(); $anySeen is whether
+// any source in the SAME group has reported, so missing is derived per group.
+function virtusphere_integration_row_state(?array $row, string $kind, bool $anySeen, ?int $now = null): string
+{
+    if ($row === null) {
+        return $anySeen ? 'missing' : 'unknown';
+    }
+
+    if ($kind === 'internal') {
+        return virtusphere_heartbeat_staleness(
+            isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null,
+            (int) ($row['interval_seconds'] ?? 0),
+            isset($row['last_status']) ? (string) $row['last_status'] : null,
+            $now
+        );
+    }
+
+    if ($kind === 'site') {
+        return virtusphere_run_completed_state($row, $now);
+    }
+
+    return match ((string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT)) {
+        VIRTUSPHERE_RUN_EVENT_COMPLETED => virtusphere_run_completed_state($row, $now),
+        VIRTUSPHERE_RUN_EVENT_STARTED => virtusphere_run_running_state($row, $now),
+        default => virtusphere_run_legacy_state($row, $now),
     };
 }
 

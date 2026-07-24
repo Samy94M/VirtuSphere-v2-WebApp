@@ -16,6 +16,7 @@ require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/client_events.php';
 require_once __DIR__ . '/lib/repo/heartbeats.php';
+require_once __DIR__ . '/lib/run_report.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -34,13 +35,15 @@ if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
 }
 
 try {
-    // The report token, when configured, authenticates the server heartbeat
-    // channel only. Client phase reports (reportPhase) authenticate by their
-    // already-known MAC (see below) and deliberately do not require the token,
-    // so it never has to be provisioned onto the ephemeral deploy VMs (ADR-0018).
-    if ($action === 'heartbeat'
+    // The report token, when configured, authenticates the server sync channel:
+    // legacy heartbeats and the reportRun result channel. Client phase reports
+    // (reportPhase) authenticate by their already-known MAC (see below) and
+    // deliberately do not require the token, so it never has to be provisioned
+    // onto the ephemeral deploy VMs (ADR-0018).
+    $tokenGatedAction = $action === 'heartbeat' || $action === 'reportRun';
+    if ($tokenGatedAction
         && !machine_api_report_token_ok($connection, $_SERVER['HTTP_X_VIRTUSPHERE_TOKEN'] ?? null)) {
-        machine_api_audit_warning($connection, 'mecm_report_token', 'Rejected heartbeat with invalid token from ' . $clientIp, $clientIp);
+        machine_api_audit_warning($connection, 'mecm_report_token', 'Rejected ' . $action . ' with invalid token from ' . $clientIp, $clientIp);
         machine_api_json(['error' => 'Invalid token'], 401);
     }
 
@@ -123,6 +126,39 @@ try {
 
         repo_touch_integration_heartbeat($connection, $source, $clientIp, $interval, $detail);
         machine_api_json(['success' => true, 'source' => $source]);
+    }
+
+    if ($action === 'reportRun') {
+        if (!$ipAllowed) {
+            machine_api_forbidden($clientIp);
+        }
+
+        $validated = run_report_validate($data);
+        if (isset($validated['error'])) {
+            machine_api_json(['error' => $validated['error']], $validated['status']);
+        }
+
+        $report = $validated['report'];
+        $report['ip'] = $clientIp;
+        $result = repo_record_run_report($connection, $report);
+
+        // The one-time switch from legacy heartbeats to V2 result reports is the
+        // only per-source event worth an audit line; individual runs are not
+        // logged (ADR-0018). The ratchet guarantees it fires once per source.
+        if (!empty($result['legacy_to_v2'])) {
+            machine_api_audit_warning(
+                $connection,
+                'mecm_report_v2:' . $report['source'],
+                'reporter ' . $report['source'] . ' switched from legacy heartbeats to V2 result reports',
+                $clientIp
+            );
+        }
+
+        $response = ['success' => true, 'source' => $report['source']];
+        if (!empty($result['deduplicated'])) {
+            $response['deduplicated'] = true;
+        }
+        machine_api_json($response);
     }
 
     machine_api_json(['message' => 'Invalid action specified'], 400);

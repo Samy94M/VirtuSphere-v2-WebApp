@@ -745,6 +745,29 @@ SQL;
         }
         migrator_out('0024: widened integration heartbeat detail for versioned MECM probe context');
     },
+    '0025_mecm_result_reporting' => function (mysqli $db): void {
+        // The MECM sync tasks and the new site-health reporter announce the
+        // actual outcome of each run (mecm_report.php?action=reportRun) instead
+        // of a bare heartbeat. deploy_integration_heartbeats stays one summary
+        // row per source and is widened additively; there is no backfill, so
+        // existing rows keep report_version=1 and all V2 columns stay NULL until
+        // a V2 event fills them. `last_event` alone drives the display semantics
+        // (legacy vs V2, running vs completed); `report_version` is only an
+        // upward ratchet for the one-time legacy->V2 log entry.
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'report_version', 'TINYINT UNSIGNED NOT NULL DEFAULT 1');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_event', "VARCHAR(16) NOT NULL DEFAULT 'heartbeat'");
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_run_id', 'VARCHAR(32) NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_attempt_at', 'TIMESTAMP NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_result_at', 'TIMESTAMP NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_success_at', 'TIMESTAMP NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_failure_at', 'TIMESTAMP NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_error_category', 'VARCHAR(64) NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_duration_ms', 'INT UNSIGNED NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'failure_streak', 'INT UNSIGNED NOT NULL DEFAULT 0');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_summary', 'JSON NULL');
+        migrator_add_column($db, 'deploy_integration_heartbeats', 'last_script_version', 'VARCHAR(32) NULL');
+        migrator_out('0025: added MECM result-reporting columns to deploy_integration_heartbeats');
+    },
 ];
 
 try {

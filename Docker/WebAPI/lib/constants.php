@@ -260,31 +260,44 @@ const VIRTUSPHERE_CLIENT_EVENT_RETENTION_DAYS = 30;
 // A "started" event without a follow-up is shown as "unconfirmed" after this.
 const VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS = 900;
 
-// Integration heartbeat sources (deploy_integration_heartbeats.source).
-// Wire sources report through mecm_report.php?action=heartbeat; internal
-// sources are written by the maintenance worker only.
+// Integration result-reporting sources (deploy_integration_heartbeats.source).
+// The three MECM sync tasks and the MECM site-health reporter post results
+// through mecm_report.php?action=reportRun. The legacy action=heartbeat still
+// accepts the three sync sources for older script versions. The maintenance
+// worker writes its own internal source directly, never over the wire.
 const VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC = 'device-sync';
 const VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC = 'packages-sync';
 const VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER = 'autoimporter';
-const VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE = 'mecm-server-probe';
+const VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH = 'mecm-site-health';
 const VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE = 'maintenance-worker';
 
+// Legacy heartbeat wire sources: the three sync tasks whose older versions may
+// still call action=heartbeat. Result reports (action=reportRun) additionally
+// accept the site-health reporter.
 const VIRTUSPHERE_INTEGRATION_WIRE_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
 ];
+const VIRTUSPHERE_INTEGRATION_RUN_SOURCES = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
+    VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
+    VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
+    VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH,
+];
 
 // Fachliche Gruppen fuer Systemstatus und Dashboard. Die Gruppen sind
-// absichtlich getrennt: ein ausgefallener interner Wartungsdienst ist kein
+// absichtlich getrennt: ein kritischer MECM-Site-Zustand ist kein Beweis fuer
+// einen ausgefallenen Datenfluss, und ein ausgefallener Sync behauptet nicht,
+// MECM selbst sei kritisch. Ein ausgefallener interner Wartungsdienst ist kein
 // Beweis fuer eine ausgefallene MECM-Synchronisation.
 const VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
 ];
-const VIRTUSPHERE_INTEGRATION_MECM_NETWORK_SOURCES = [
-    VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE,
+const VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH,
 ];
 const VIRTUSPHERE_INTEGRATION_INTERNAL_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
@@ -303,7 +316,7 @@ const VIRTUSPHERE_INTEGRATION_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
-    VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE,
+    VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH,
     VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
 ];
 
@@ -324,8 +337,9 @@ const VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS = 3600;
 // They used to hand-list them and had already drifted: `missing` was explained
 // in help and absent from the page's own legend, so the badge an operator can
 // actually see there had no entry to look up. Order is display order, worst
-// last so a legend reads from healthy to broken.
-const VIRTUSPHERE_HEARTBEAT_STATES = ['ok', 'warning', 'danger', 'missing', 'unknown'];
+// last so a legend reads from healthy to broken. `legacy` is a fresh V1
+// heartbeat whose result the script has not yet confirmed (script rollout gap).
+const VIRTUSPHERE_HEARTBEAT_STATES = ['ok', 'legacy', 'warning', 'missing', 'danger', 'unknown'];
 const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
 const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
 
@@ -342,34 +356,100 @@ const VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS = 3600;
 // signal.
 const VIRTUSPHERE_LEGACY_TOKEN_AUDIT_THROTTLE_SECONDS = 300;
 
-// Maintenance worker (lib/maintenance_worker.php, ADR-0018): active MECM
-// reachability probe and retention jobs. Probe target defaults to the last
-// device-sync heartbeat IP; both are overridable through settings.
-const VIRTUSPHERE_SETTING_MECM_PROBE_HOST = 'mecm_probe_host';
-const VIRTUSPHERE_SETTING_MECM_PROBE_PORT = 'mecm_probe_port';
-const VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS = 300;
-const VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT = 445;
-const VIRTUSPHERE_MECM_PROBE_TIMEOUT_SECONDS = 3;
-const VIRTUSPHERE_PROBE_MODE_AUTO = 'auto';
-const VIRTUSPHERE_PROBE_MODE_MANUAL = 'manual';
-const VIRTUSPHERE_PROBE_MODES = [
-    VIRTUSPHERE_PROBE_MODE_AUTO,
-    VIRTUSPHERE_PROBE_MODE_MANUAL,
+// Result reporting (mecm_report.php?action=reportRun, ADR-0018): the three MECM
+// sync tasks and the site-health reporter announce the start and the actual
+// outcome of every run. The portal never connects to the MECM server; it only
+// receives these reports. Arrival order is the truth (the client sends
+// sequentially and keeps no replay queue), so a completed report is always
+// taken unless it repeats the last run_id.
+const VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT = 'heartbeat';
+const VIRTUSPHERE_RUN_EVENT_STARTED = 'started';
+const VIRTUSPHERE_RUN_EVENT_COMPLETED = 'completed';
+const VIRTUSPHERE_RUN_EVENTS = [
+    VIRTUSPHERE_RUN_EVENT_STARTED,
+    VIRTUSPHERE_RUN_EVENT_COMPLETED,
 ];
-const VIRTUSPHERE_MECM_PROBE_DETAIL_VERSION = 1;
-const VIRTUSPHERE_MECM_PROBE_DETAIL_TEXT_MAX = 160;
-const VIRTUSPHERE_PROBE_ERROR_DNS = 'dns';
-const VIRTUSPHERE_PROBE_ERROR_TIMEOUT = 'timeout';
-const VIRTUSPHERE_PROBE_ERROR_REFUSED = 'refused';
-const VIRTUSPHERE_PROBE_ERROR_NETWORK = 'network';
-const VIRTUSPHERE_PROBE_ERROR_UNKNOWN = 'unknown';
-const VIRTUSPHERE_PROBE_ERROR_CATEGORIES = [
-    VIRTUSPHERE_PROBE_ERROR_DNS,
-    VIRTUSPHERE_PROBE_ERROR_TIMEOUT,
-    VIRTUSPHERE_PROBE_ERROR_REFUSED,
-    VIRTUSPHERE_PROBE_ERROR_NETWORK,
-    VIRTUSPHERE_PROBE_ERROR_UNKNOWN,
+// Full last_event vocabulary a row can hold (drives the display semantics).
+const VIRTUSPHERE_INTEGRATION_EVENTS = [
+    VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT,
+    VIRTUSPHERE_RUN_EVENT_STARTED,
+    VIRTUSPHERE_RUN_EVENT_COMPLETED,
 ];
+
+const VIRTUSPHERE_RUN_OUTCOME_OK = 'ok';
+const VIRTUSPHERE_RUN_OUTCOME_WARNING = 'warning';
+const VIRTUSPHERE_RUN_OUTCOME_FAIL = 'fail';
+const VIRTUSPHERE_RUN_OUTCOME_UNKNOWN = 'unknown';
+const VIRTUSPHERE_RUN_OUTCOMES = [
+    VIRTUSPHERE_RUN_OUTCOME_OK,
+    VIRTUSPHERE_RUN_OUTCOME_WARNING,
+    VIRTUSPHERE_RUN_OUTCOME_FAIL,
+    VIRTUSPHERE_RUN_OUTCOME_UNKNOWN,
+];
+
+// A completed run that is not `ok` must name a known error category. The three
+// sync sources use the generic set; the site-health source uses its own set
+// with a fixed outcome binding (site_warning<->warning, site_critical<->fail,
+// the provider/query errors <->unknown, so a provider fault is grey, never
+// "MECM critical").
+const VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE = 'portal_unreachable';
+const VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE = 'mecm_unavailable';
+const VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE = 'partial_failure';
+const VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING = 'source_missing';
+const VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT = 'catalog_conflict';
+const VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES = [
+    VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE,
+    VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE,
+    VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE,
+    VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING,
+    VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT,
+];
+const VIRTUSPHERE_RUN_ERROR_SITE_WARNING = 'site_warning';
+const VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL = 'site_critical';
+const VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED = 'provider_access_denied';
+const VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE = 'provider_unreachable';
+const VIRTUSPHERE_RUN_ERROR_QUERY_FAILED = 'query_failed';
+// The site-health category<->outcome binding is fixed and validated on the wire.
+// Its keys are the full set of allowed site-health error categories (SSoT), so no
+// separate category list is kept.
+const VIRTUSPHERE_RUN_SITE_ERROR_OUTCOME = [
+    VIRTUSPHERE_RUN_ERROR_SITE_WARNING => VIRTUSPHERE_RUN_OUTCOME_WARNING,
+    VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => VIRTUSPHERE_RUN_OUTCOME_FAIL,
+    VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => VIRTUSPHERE_RUN_OUTCOME_UNKNOWN,
+    VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => VIRTUSPHERE_RUN_OUTCOME_UNKNOWN,
+    VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => VIRTUSPHERE_RUN_OUTCOME_UNKNOWN,
+];
+
+// Allowed summary object keys per source (validated on the wire). Sync counters
+// are non-negative integers; site-health carries site_code/provider strings and
+// an integer raw_status.
+const VIRTUSPHERE_RUN_SUMMARY_FIELDS = [
+    VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => [
+        'received', 'imported', 'item_failures', 'data_warnings', 'resource_update_failures',
+    ],
+    VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => [
+        'packages', 'task_sequences', 'sent', 'unchanged',
+    ],
+    VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => [
+        'folders', 'created', 'removed', 'open_points', 'unchanged',
+    ],
+    VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH => [
+        'site_code', 'provider', 'raw_status',
+    ],
+];
+// Summary keys whose value is a short string rather than a counter.
+const VIRTUSPHERE_RUN_SUMMARY_STRING_FIELDS = ['site_code', 'provider'];
+
+// Wire bounds for a run report. detail reuses the client-event body cap; the
+// client truncates it in bytes before sending so the 8 KB body limit holds.
+const VIRTUSPHERE_RUN_ID_PATTERN = '/\A[0-9a-f]{32}\z/';
+const VIRTUSPHERE_RUN_SUMMARY_VALUE_MAX = 1000000000;
+const VIRTUSPHERE_RUN_SUMMARY_STRING_MAX_CHARS = 64;
+const VIRTUSPHERE_RUN_DURATION_MS_MAX = 86400000;
+const VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_CHARS = 32;
+// While a run is in progress the row is not treated as stale until the run
+// exceeds this grace, alongside the usual 3x-interval / 60s floors.
+const VIRTUSPHERE_RUN_GRACE_SECONDS = 600;
 // How often each worker wakes up to look for work (overridable with --sleep=N).
 // The help quotes both cadences, so they are named rather than left as literals
 // in the option defaults.

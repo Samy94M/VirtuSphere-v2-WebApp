@@ -10,6 +10,8 @@ return [
     'kpi_vms' => 'VMs',
     'kpi_mecm_pending' => 'MECM ausstehend',
     'kpi_system_status' => 'MECM-Systemstatus',
+    'kpi_integration' => 'Integration',
+    'kpi_mecm_site' => 'MECM-Site',
     'kpi_hypervisor' => 'Hypervisor',
     'kpi_active_deploys' => 'Aktive Deploys',
     'recent_missions' => 'Letzte Missionen',

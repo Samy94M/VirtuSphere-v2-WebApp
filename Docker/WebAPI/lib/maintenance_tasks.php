@@ -6,7 +6,6 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/esxi_inventory.php';
-require_once __DIR__ . '/mecm_probe.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
@@ -39,10 +38,6 @@ function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = fa
 {
     if (maintenance_worker_due($state, 'self-heartbeat', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, $force)) {
         repo_touch_integration_heartbeat($db, VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE, 'cli', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, 'loop ok');
-    }
-
-    if (maintenance_worker_due($state, 'mecm-probe', VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, $force)) {
-        maintenance_worker_probe($db);
     }
 
     if (maintenance_worker_due($state, 'retention', VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS, $force)) {
@@ -142,38 +137,10 @@ function maintenance_worker_sweep_deploying_vms(mysqli $db): void
     fwrite(STDOUT, '[maintenance-worker] convergence sweep marked ' . count($swept) . " deploying VM(s) as failed\n");
 }
 
-// Active reachability check of the MECM server. Target host: explicit setting
-// override, else the source IP of the last device-sync heartbeat (zero-config).
-function maintenance_worker_probe(mysqli $db): void
-{
-    mecm_probe_run($db);
-}
-
-/**
- * @return array{0: string, 1: int}|null
- */
-function maintenance_worker_probe_target(mysqli $db): ?array
-{
-    $target = mecm_probe_target($db);
-    if ($target['host'] === null) {
-        return null;
-    }
-
-    return [$target['host'], $target['port']];
-}
-
-/**
- * @return array{0: bool, 1: string}
- */
-function maintenance_worker_tcp_check(string $host, int $port, int $timeoutSeconds): array
-{
-    $result = mecm_probe_tcp_check($host, $port, $timeoutSeconds);
-
-    return [$result['ok'], $result['detail']];
-}
-
-// Sparse audits: log only state transitions involving danger/missing (and the
-// recovery back) - never individual heartbeats (logging matrix, ADR-0018).
+// Sparse audits: log only meaningful health transitions (OK <-> warning/fail/
+// missing/unknown, and the recovery back), never individual runs (logging
+// matrix, ADR-0018). The ok<->legacy flutter of a script rollout is not logged;
+// the one-time legacy->V2 switch is logged once at report time by mecm_report.php.
 function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
 {
     foreach (repo_integration_status_rows($db) as $entry) {
@@ -186,8 +153,10 @@ function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
             continue;
         }
 
-        $involvedBad = in_array($oldState, ['danger', 'missing'], true) || in_array($newState, ['danger', 'missing'], true);
-        if (!$involvedBad) {
+        // Both benign (ok/legacy) means a script-rollout wobble, not a health
+        // change; a problem state on either side is a real transition to log.
+        $benign = ['ok', 'legacy'];
+        if (in_array($oldState, $benign, true) && in_array($newState, $benign, true)) {
             continue;
         }
 

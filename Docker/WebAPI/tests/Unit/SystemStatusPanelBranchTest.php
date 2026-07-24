@@ -181,76 +181,118 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(h(__t('system_status.action_device_sync')), (string) ob_get_clean());
     }
 
-    public function testAnUnconnectedMecmSaysSoOnceInsteadOfPerRow(): void
+    /** @param array<string,mixed> $syncGroup @param array<string,mixed> $siteGroup */
+    private function renderMecm(array $syncGroup, array $siteGroup): string
     {
         $snapshot = [
-            'by_source' => [],
             'mecm_ip_mismatch' => false,
             'mecm_fresh_ips' => [],
-            'mecm_sync' => ['state' => 'unknown', 'rows' => [
+            'mecm_sync' => $syncGroup,
+            'mecm_site' => $siteGroup,
+        ];
+        ob_start();
+        system_status_render_mecm($snapshot, ['id' => 1, 'role' => 'admin']);
+
+        return (string) ob_get_clean();
+    }
+
+    private const EMPTY_SITE = ['state' => 'unknown', 'rows' => [
+        ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => null, 'state' => 'unknown'],
+    ]];
+
+    public function testTheSetupEmptyStateShowsOnceWhenNothingReported(): void
+    {
+        $html = $this->renderMecm(
+            ['state' => 'unknown', 'rows' => [
                 ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => null, 'state' => 'unknown'],
                 ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC, 'row' => null, 'state' => 'unknown'],
             ]],
-            'mecm_network' => ['state' => 'unknown', 'rows' => [
-                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, 'row' => null, 'state' => 'unknown'],
-            ]],
-        ];
-        $probe = ['mode' => VIRTUSPHERE_PROBE_MODE_AUTO, 'host' => null, 'port' => 445, 'source_ip' => null, 'source_seen_at' => null];
+            self::EMPTY_SITE
+        );
 
-        ob_start();
-        system_status_render_mecm($snapshot, $probe, ['id' => 1, 'role' => 'admin']);
-        $html = (string) ob_get_clean();
-
-        self::assertStringContainsString(h(__t('system_status.mecm_not_configured')), $html);
-        self::assertSame(0, substr_count($html, 'status-action'), 'an unconnected MECM must not repeat repair hints per row');
-        // The rows themselves stay, so the operator still sees what is expected.
+        self::assertStringContainsString(h(__t('system_status.mecm_setup_empty')), $html);
+        self::assertSame(0, substr_count($html, 'status-action'), 'a fresh install must not repeat repair hints per row');
         self::assertStringContainsString(h(integration_source_label(VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC)), $html);
+        self::assertStringContainsString(h(__t('system_status.mecm_site_empty')), $html);
     }
 
-    public function testAConnectedMecmKeepsItsRepairHints(): void
+    public function testAConnectedSyncKeepsItsRepairHint(): void
     {
-        $snapshot = [
-            'by_source' => [],
-            'mecm_ip_mismatch' => false,
-            'mecm_fresh_ips' => [],
-            'mecm_sync' => ['state' => 'danger', 'rows' => [
-                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => ['last_seen_at' => '2026-07-23 08:00:00', 'last_checked_at' => '2026-07-23 08:00:00', 'interval_seconds' => 30, 'last_detail' => ''], 'state' => 'danger'],
+        $row = ['last_event' => 'completed', 'last_status' => 'fail', 'last_result_at' => '2026-07-23 08:00:00', 'last_failure_at' => '2026-07-23 08:00:00', 'interval_seconds' => 30, 'last_duration_ms' => null, 'last_detail' => '', 'last_error_category' => 'mecm_unavailable'];
+        $html = $this->renderMecm(
+            ['state' => 'danger', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => $row, 'state' => 'danger'],
             ]],
-            'mecm_network' => ['state' => 'danger', 'rows' => [
-                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, 'row' => ['last_seen_at' => null, 'last_checked_at' => '2026-07-23 10:00:00', 'interval_seconds' => 300, 'last_detail' => ''], 'state' => 'danger'],
-            ]],
-        ];
-        $probe = ['mode' => VIRTUSPHERE_PROBE_MODE_AUTO, 'host' => '10.0.0.5', 'port' => 445, 'source_ip' => '10.0.0.5', 'source_seen_at' => null];
+            ['state' => 'ok', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => ['last_event' => 'completed', 'last_status' => 'ok', 'last_result_at' => '2026-07-23 11:59:00', 'last_success_at' => '2026-07-23 11:59:00', 'interval_seconds' => 300, 'last_detail' => '', 'last_summary' => '{"site_code":"P01","provider":"srv01","raw_status":0}'], 'state' => 'ok'],
+            ]]
+        );
 
-        ob_start();
-        system_status_render_mecm($snapshot, $probe, ['id' => 1, 'role' => 'admin']);
-        $html = (string) ob_get_clean();
-
-        self::assertStringNotContainsString(h(__t('system_status.mecm_not_configured')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.mecm_setup_empty')), $html);
         self::assertStringContainsString(h(__t('system_status.action_device_sync')), $html);
-        self::assertStringContainsString(h(__t('system_status.action_mecm_server_probe')), $html);
+        self::assertStringContainsString(h(__t('system_status.err_mecm_unavailable')), $html);
+        // The site badge is its own signal, never a repair hint for the sync.
+        self::assertStringContainsString('P01', $html);
     }
 
-    public function testAProbeWithoutATargetDoesNotCallTheServerUnreachable(): void
+    public function testARunningSyncShowsRunningSinceAndKeepsTheLastResult(): void
     {
-        $snapshot = [
-            'by_source' => [],
-            'mecm_ip_mismatch' => false,
-            'mecm_fresh_ips' => [],
-            'mecm_sync' => ['state' => 'danger', 'rows' => []],
-            'mecm_network' => ['state' => 'danger', 'rows' => [
-                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_MECM_PROBE, 'row' => ['last_seen_at' => null, 'last_checked_at' => '2026-07-23 10:00:00', 'interval_seconds' => 300, 'last_detail' => ''], 'state' => 'danger'],
+        $row = ['last_event' => 'started', 'last_status' => 'ok', 'last_result_at' => '2026-07-23 11:00:00', 'last_success_at' => '2026-07-23 11:00:00', 'last_attempt_at' => '2026-07-23 11:59:30', 'interval_seconds' => 60, 'last_duration_ms' => null, 'last_detail' => ''];
+        $html = $this->renderMecm(
+            ['state' => 'ok', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => $row, 'state' => 'ok'],
             ]],
-        ];
-        // Auto mode, first device sync still outstanding: nothing was contacted,
-        // so nothing can be declared unreachable.
-        $probe = ['mode' => VIRTUSPHERE_PROBE_MODE_AUTO, 'host' => null, 'port' => 445, 'source_ip' => null, 'source_seen_at' => null];
+            self::EMPTY_SITE
+        );
 
-        ob_start();
-        system_status_render_mecm($snapshot, $probe, ['id' => 1, 'role' => 'admin']);
-        $html = (string) ob_get_clean();
+        self::assertStringContainsString(h(__t('system_status.run_running_since', ['time' => portal_format_timestamp('2026-07-23 11:59:30')])), $html);
+        self::assertStringContainsString(h(__t('system_status.run_reporter_v2')), $html);
+    }
 
-        self::assertStringNotContainsString(h(__t('system_status.action_mecm_server_probe')), $html);
-        self::assertStringContainsString(h(__t('system_status.probe_target_waiting')), $html);
+    public function testALegacyRowShowsTheLegacyNoteAndUpdateHint(): void
+    {
+        $row = ['last_event' => 'heartbeat', 'last_status' => 'ok', 'last_seen_at' => '2026-07-23 11:59:30', 'interval_seconds' => 60, 'last_duration_ms' => null, 'last_detail' => ''];
+        $html = $this->renderMecm(
+            ['state' => 'legacy', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => $row, 'state' => 'legacy'],
+            ]],
+            self::EMPTY_SITE
+        );
+
+        self::assertStringContainsString(h(__t('system_status.run_reporter_legacy')), $html);
+        self::assertStringContainsString(h(__t('system_status.run_legacy_hint')), $html);
+    }
+
+    public function testSiteCriticalNamesTheConsoleAndShowsTheCode(): void
+    {
+        $row = ['last_event' => 'completed', 'last_status' => 'fail', 'last_result_at' => '2026-07-23 11:59:00', 'last_failure_at' => '2026-07-23 11:59:00', 'last_error_category' => 'site_critical', 'interval_seconds' => 300, 'last_detail' => '', 'last_summary' => '{"site_code":"P01","provider":"srv01","raw_status":2}'];
+        $html = $this->renderMecm(
+            ['state' => 'ok', 'rows' => []],
+            ['state' => 'danger', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => $row, 'state' => 'danger'],
+            ]]
+        );
+
+        self::assertStringContainsString('P01', $html);
+        self::assertStringContainsString(h(__t('system_status.err_site_critical')), $html);
+        self::assertStringContainsString(h(__t('system_status.site_hint_console')), $html);
+    }
+
+    public function testASiteProviderFaultIsGreyNotCritical(): void
+    {
+        $row = ['last_event' => 'completed', 'last_status' => 'unknown', 'last_result_at' => '2026-07-23 11:59:00', 'last_error_category' => 'provider_access_denied', 'interval_seconds' => 300, 'last_detail' => '', 'last_summary' => '{"provider":"srv01"}'];
+        $html = $this->renderMecm(
+            ['state' => 'ok', 'rows' => []],
+            ['state' => 'unknown', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => $row, 'state' => 'unknown'],
+            ]]
+        );
+
+        self::assertStringContainsString(h(__t('system_status.err_provider_access_denied')), $html);
+        self::assertStringContainsString(h(__t('system_status.site_hint_access_denied')), $html);
+        // A provider fault must be textually distinct from a MECM-confirmed
+        // critical: grey, never the red critical hint.
+        self::assertStringNotContainsString(h(__t('system_status.site_hint_console')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.status_danger')), $html);
     }
 }

@@ -32,6 +32,7 @@ return [
     'technical_details' => 'Technical details',
     'help' => 'Help',
     'unknown_action' => 'Unknown action.',
+    'duration_ms' => ':count ms',
     'duration_seconds' => ':count seconds',
     'duration_minutes' => ':count minutes',
     'duration_hours' => ':count hours',

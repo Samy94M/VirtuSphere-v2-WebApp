@@ -15,7 +15,7 @@ Dieses Runbook ist daher zugleich Inbetriebnahme **und** erste echte Verifikatio
 | Ebene | Stand | Erste echte Abnahme in |
 |---|---|---|
 | PHP-Code, Migrationen 0001–0022 | lokal grün, nie produktiv | Schritt 1–2 |
-| MECM-Rückkanal, Heartbeats, Statusseite | lokal grün | Schritt 4 |
+| MECM-Rückkanal, Ergebnisberichte, Statusseite | lokal grün | Schritt 4 |
 | Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 5 |
 | PowerShell MECM-Server-Skripte | nur Parser-Check | Schritt 4 |
 | PowerShell Client-Skripte | nur Parser-Check | Schritt 6 |
@@ -218,24 +218,46 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 1. **Installer auf dem MECM-Server** ausführen:
    `Powershell-MECM/install-VirtuSphere-MECM.ps1`. Er schreibt die Registry
    `HKLM:\SOFTWARE\VirtuSphere\MECM` (Vererbung aus, Lesezugriff nur SYSTEM und
-   Administratoren), legt Ordner an, kopiert die Skripte und registriert die drei
-   selbstheilenden Aufgaben (AtStartup + 15-min-Wiederanlauf, `ExecutionTimeLimit=0`).
-   Details: `Powershell-MECM/README.md`.
+   Administratoren), legt Ordner an, kopiert die Skripte und registriert die vier
+   selbstheilenden Aufgaben (Devices Sync, Packages Sync, Package Import, Site
+   Health; alle SYSTEM, AtStartup, `MultipleInstances IgnoreNew`,
+   `ExecutionTimeLimit=PT0S`). Provider und Site-Health-Intervall
+   (`MECM_ProviderMachine`, `SiteHealthIntervalSeconds`) sind Registry-Werte, keine
+   Portal-Einstellungen. Details: `Powershell-MECM/README.md`.
 2. **MECM-Server-IP im Portal freischalten**, falls in Schritt 4 nicht schon
    geschehen: Einstellungen → IP-Freigaben. Der Installer meldet 403 mit genau
    diesem Hinweis, falls vergessen.
 3. **Optional: Report-Token** im Portal generieren (Einmal-Anzeige). Den Installer
    ohne `-ReportToken` starten, dann fragt er ihn verdeckt ab (nicht als Klartext-
    Argument übergeben). Ohne Token laufen die Skripte ungehindert. Der Token betrifft
-   nur die Server-Heartbeats; die Client-Phasen brauchen ihn nicht (Auth per bekannter
-   MAC), er muss also nicht auf die ausgerollten VMs. Absicherung:
-   `docs/operations/mecm-integration.md` (Abschnitt „Absicherung des ReportToken").
-4. **Verifikation Systemstatus** (Portal → Systemstatus): die drei
-   MECM-Sync-Quellen, der getrennte Netzwerkpfad und der interne Wartungsdienst
-   werden grün. Unter Einstellungen → Machine-API steht der Probe-Modus auf
-   „Automatisch"; nur wenn die Heartbeat-Absender-IP nicht das richtige Ziel ist,
-   „Eigenes Prüfziel" wählen. Ein grüner TCP-Pfad prüft weder Anmeldung noch WMI
-   oder Scheduler-Aufgaben. Das ist die erste echte Abnahme von E1/E1b/E4.
+   nur die Server-Berichte (`heartbeat`/`reportRun`); die Client-Phasen brauchen ihn
+   nicht (Auth per bekannter MAC), er muss also nicht auf die ausgerollten VMs.
+   Absicherung: `docs/operations/mecm-integration.md`
+   (Abschnitt „Absicherung des ReportToken").
+4. **Verifikation Systemstatus** (Portal → Systemstatus): Alle vier Aufgaben laufen
+   als SYSTEM und melden. Die drei Sync-Quellen zeigen `started`/`completed` mit
+   korrekten Zählern (Untergruppe „VirtuSphere-MECM-Integration"), die Site-Health-
+   Aufgabe zeigt den Rohstatus 0/1/2 korrekt (Untergruppe „MECM-Site-Status"). Es
+   wird **kein** MECM-Ziel als Prüfziel ins Portal getippt und **kein** grüner
+   Netzwerkpfad erwartet: das Portal spricht MECM nicht aktiv an. Gegenproben:
+   - Provider-Zugriff verweigern oder falschen Provider setzen: MECM-Site wird grau
+     (Providerfehler), **nicht** „MECM kritisch".
+   - Einen Sync-Task beenden: nur die Integration wird stale/rot, MECM-Site bleibt
+     unberührt.
+   - Site-Health-Task beenden: nur MECM-Site wird stale/rot, die Integration bleibt
+     grün.
+
+   Das ist die erste echte Abnahme von E1/E1b/E4.
+
+> **Rollout-Reihenfolge (der Zwischenzustand ist erwartet):** Zuerst Portal und
+> Migration `0025_mecm_result_reporting` deployen (der Maintenance-Worker wird dabei
+> neu erzeugt, damit kein alter Probe-Code weiterläuft), dann den aktualisierten
+> Installer ausführen. Zwischen Portal-Deploy und Installer-Lauf akzeptiert das
+> Portal noch alte Heartbeats und zeigt die betroffenen Sync-Quellen gelb als
+> „Legacy: Ergebnis nicht bestätigt". Erst nach Bestätigung der vier V2-Quellen und
+> der getrennten Badges eine eventuell vorhandene Firewallfreigabe
+> Portal → MECM:445 entfernen. Nicht „neue Skripte zuerst": ein altes Portal kennt
+> `reportRun` nicht und lehnt die Berichte mit HTTP 400 ab.
 
 ## Schritt 6: Paket-Pipeline (E3, hier lag das Datenverlust-Risiko)
 

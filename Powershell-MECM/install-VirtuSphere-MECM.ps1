@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Schreibt die Konfiguration in die Registry, legt Verzeichnisse an, kopiert
-    die Sync-Skripte nach %ProgramFiles%\VirtuSphere\mecm, registriert die drei
+    die Sync-Skripte nach %ProgramFiles%\VirtuSphere\mecm, registriert die vier
     geplanten Aufgaben (SYSTEM, hoechste Rechte, beim Systemstart, ohne
     Laufzeitlimit) und verifiziert die Erstinstallation.
 
@@ -34,6 +34,15 @@
 .PARAMETER DpGroupName
     Name der Distribution-Point-Gruppe fuer die Content-Verteilung.
 
+.PARAMETER ProviderMachine
+    Optionaler Rechnername des SMS-Providers fuer die Site-Health-Abfrage. Leer
+    lassen, wenn der MECM-Server selbst der Provider ist: das Site-Health-Skript
+    erkennt ihn dann per WMI/PSDrive. Ein Re-Run ohne diesen Parameter BEHAELT
+    einen zuvor gesetzten Wert.
+
+.PARAMETER SiteHealthIntervalSeconds
+    Abfrageintervall des Site-Health-Tasks in Sekunden (60..3600, Standard 300).
+
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
         -PackagesShare \\MECM-01\VirtuSphere\Packages\files
@@ -48,7 +57,9 @@ param(
     [string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
     [int]$DeviceSyncIntervalSeconds = 10,
     [int]$PackagesSyncIntervalSeconds = 60,
-    [int]$ImporterIntervalSeconds = 60
+    [int]$ImporterIntervalSeconds = 60,
+    [string]$ProviderMachine = '',
+    [ValidateRange(60, 3600)][int]$SiteHealthIntervalSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,6 +117,18 @@ if ([string]::IsNullOrEmpty($ReportToken)) {
 if ([string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
     $ReportToken = $existingToken
     Write-Ok 'Bestehenden Rueckkanal-Token behalten (kein neuer uebergeben).'
+}
+
+# Provider-Rechner ebenso behandeln wie den Token: ein Re-Run ohne
+# -ProviderMachine soll einen zuvor gesetzten Wert BEHALTEN, nicht mit Leer
+# ueberschreiben. Nur schreiben, wenn ein Wert vorliegt (create-if-missing).
+$existingProvider = ''
+if (Test-Path $registryPath) {
+    try { $existingProvider = [string](Get-ItemProperty -Path $registryPath -Name 'MECM_ProviderMachine' -ErrorAction Stop).MECM_ProviderMachine } catch { Write-Debug $_ }
+}
+if ([string]::IsNullOrWhiteSpace($ProviderMachine) -and -not [string]::IsNullOrWhiteSpace($existingProvider)) {
+    $ProviderMachine = $existingProvider
+    Write-Ok 'Bestehenden SMS-Provider-Rechner behalten (kein neuer uebergeben).'
 }
 
 # --- Voraussetzungen --------------------------------------------------------
@@ -178,8 +201,12 @@ $settings = @{
     DeviceSyncIntervalSeconds   = $DeviceSyncIntervalSeconds
     PackagesSyncIntervalSeconds = $PackagesSyncIntervalSeconds
     ImporterIntervalSeconds     = $ImporterIntervalSeconds
+    SiteHealthIntervalSeconds   = $SiteHealthIntervalSeconds
 }
 if ($siteCode) { $settings['MECM_SiteCode'] = $siteCode }
+# Nur schreiben, wenn ein Provider vorliegt: ein leerer Wert wuerde die lokale
+# WMI/PSDrive-Erkennung des Site-Health-Skripts aushebeln.
+if (-not [string]::IsNullOrWhiteSpace($ProviderMachine)) { $settings['MECM_ProviderMachine'] = $ProviderMachine.Trim() }
 foreach ($key in $settings.Keys) {
     $type = if ($settings[$key] -is [int]) { 'DWord' } else { 'String' }
     New-ItemProperty -Path $registryPath -Name $key -Value $settings[$key] -PropertyType $type -Force | Out-Null
@@ -249,6 +276,7 @@ $tasks = @(
     @{ Name = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
     @{ Name = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
     @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
+    @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
 )
 $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -RunLevel Highest
 foreach ($task in $tasks) {
@@ -287,38 +315,71 @@ foreach ($task in $tasks) {
     else { Write-Warn ("Status '{0}': {1}" -f $state, $task.Name) }
 }
 
-Write-Step 'Pruefe WebAPI-Erreichbarkeit'
+# Erreichbarkeit des Portals und Abfragbarkeit des SMS-Providers sind ZWEI
+# getrennte Aussagen: das Portal kann erreichbar sein, waehrend Site-Health den
+# Provider nicht abfragen darf (oder umgekehrt). Beide separat melden, und ein
+# laufender Task ist NICHT gleichbedeutend mit einem gelungenen Lauf.
+Write-Step 'Pruefe Portal-Erreichbarkeit'
 # Common ist bereits frueh dot-gesourct (Get-VsErrorDetail/-StatusCode verfuegbar).
 if ($Scheme -eq 'https') {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { Write-Debug $_ }
 }
 try {
     $health = Invoke-RestMethod -Uri ('{0}://{1}/portal/health.php' -f $Scheme, $WebApi) -TimeoutSec 5
-    Write-Ok ("WebAPI erreichbar (Status: {0})" -f $health.status)
+    Write-Ok ("Portal erreichbar (Status: {0})" -f $health.status)
 } catch {
     $code = Get-VsErrorStatusCode -ErrorRecord $_
     if ($code -eq 403) {
-        Write-Warn 'WebAPI antwortet mit 403 - IP dieses Servers im Portal unter Einstellungen > IP-Freigaben freischalten.'
+        Write-Warn 'Portal antwortet mit 403 - IP dieses Servers im Portal unter Einstellungen > IP-Freigaben freischalten.'
     } else {
         # Get-VsErrorDetail statt .Exception.Message: bei einem Fehler der WebApp
         # steht der Grund in ihrer JSON-Envelope, nicht in der Statuszeile.
-        Write-Warn ("WebAPI nicht erreichbar: {0} (Adresse/Port/Firewall/Schema pruefen)" -f (Get-VsErrorDetail -ErrorRecord $_))
+        Write-Warn ("Portal nicht erreichbar: {0} (Adresse/Port/Firewall/Schema pruefen)" -f (Get-VsErrorDetail -ErrorRecord $_))
     }
 }
 
-Write-Step 'Pruefe Heartbeat-Eingang (bis zu 30s)'
-$logToday = Join-Path $logRoot ('{0}_device-sync.log' -f (Get-Date -Format 'yyyy-MM-dd'))
-# Baseline VOR dem Warten: ein Re-Run am selben Tag findet die Logdatei von
-# vorhin. Nur ein NEUER Schreibvorgang beweist einen lebenden Sync, nicht die
-# blosse Existenz der Datei.
-$logBaseline = if (Test-Path $logToday) { (Get-Item $logToday).LastWriteTimeUtc } else { [datetime]::MinValue }
-$heartbeatSeen = $false
-for ($i = 0; $i -lt 6; $i++) {
-    Start-Sleep -Seconds 5
-    if ((Test-Path $logToday) -and (Get-Item $logToday).LastWriteTimeUtc -gt $logBaseline) { $heartbeatSeen = $true ; break }
+Write-Step 'Pruefe MECM-Site-Provider (Site-Health)'
+# Get-VsMecmSiteHealth wirft nie; ein unknown-Outcome bedeutet, dass der Provider
+# nicht abgefragt werden konnte (Rechte/Erreichbarkeit), NICHT dass die Site
+# krank ist. Das ist unabhaengig davon, ob der Site-Health-Task laeuft.
+$siteHealthProbeConfig = [pscustomobject]@{ SiteCodeFallback = $siteCode; ProviderMachine = $ProviderMachine }
+$siteHealth = Get-VsMecmSiteHealth -Config $siteHealthProbeConfig -ProviderMachine $ProviderMachine
+if ($siteHealth.Outcome -eq 'unknown') {
+    Write-Warn ("Site-Health konnte den SMS-Provider '{0}' nicht abfragen (Kategorie {1}). Rechte und Erreichbarkeit des Providers pruefen." -f $siteHealth.Provider, $siteHealth.ErrorCategory)
+} else {
+    Write-Ok ("Site-Health erreicht den Provider '{0}': Site {1}, Rohstatus {2} -> {3}." -f $siteHealth.Provider, $siteHealth.SiteCode, $siteHealth.RawStatus, $siteHealth.Outcome)
 }
-if ($heartbeatSeen) { Write-Ok 'Sync-Skripte schreiben Logs - im Portal unter "Systemstatus" sollten die Ampeln gruen werden.' }
-else { Write-Warn 'Noch keine Sync-Logs - Aufgabenplanung und Portal-Statusseite pruefen.' }
+
+Write-Step 'Pruefe Log-Aktivitaet aller vier Tasks (bis zu 40s)'
+# Ein laufender Task beweist noch keinen gelungenen Lauf. Nur ein NEUER
+# Schreibvorgang je Tageslog zeigt, dass die Schleife tatsaechlich arbeitet;
+# die blosse Existenz der Datei (Re-Run am selben Tag) reicht nicht.
+$logComponents = @('device-sync', 'packages-sync', 'autoimporter', 'site-health')
+$logPaths = @{}
+$logBaselines = @{}
+$logSeen = @{}
+foreach ($comp in $logComponents) {
+    $p = Join-Path $logRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), $comp)
+    $logPaths[$comp] = $p
+    $logBaselines[$comp] = if (Test-Path $p) { (Get-Item $p).LastWriteTimeUtc } else { [datetime]::MinValue }
+    $logSeen[$comp] = $false
+}
+for ($i = 0; $i -lt 8; $i++) {
+    Start-Sleep -Seconds 5
+    $allSeen = $true
+    foreach ($comp in $logComponents) {
+        if (-not $logSeen[$comp]) {
+            $p = $logPaths[$comp]
+            if ((Test-Path $p) -and (Get-Item $p).LastWriteTimeUtc -gt $logBaselines[$comp]) { $logSeen[$comp] = $true }
+            else { $allSeen = $false }
+        }
+    }
+    if ($allSeen) { break }
+}
+foreach ($comp in $logComponents) {
+    if ($logSeen[$comp]) { Write-Ok ("Log aktiv: {0}" -f $comp) }
+    else { Write-Warn ("Noch kein frisches Log: {0} - Aufgabenplanung und Portal-Statusseite pruefen." -f $comp) }
+}
 
 # --- Abschluss-Marker -------------------------------------------------------
 New-ItemProperty -Path $registryPath -Name 'SetupCompleted' -Value (Get-Date -Format 'o') -PropertyType String -Force | Out-Null

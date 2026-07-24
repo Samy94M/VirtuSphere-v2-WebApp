@@ -41,7 +41,7 @@ Greift nichts davon, bleiben die Felder leer; die Karte kennzeichnet den nächst
 
 ### Andere Hintergrundaufgaben
 
-Das Backup ist der einzige Cron-Job. Deploy-Worker (alle 5 s) und Wartungs-Worker (alle 15 s, darin MECM-Probe alle 5 min und der ESXi-Inventar-Abruf nach eingestelltem Intervall) sind Dauerläufer im Compose-Stack und brauchen keinen Zeitplan.
+Das Backup ist der einzige Cron-Job. Deploy-Worker (alle 5 s) und Wartungs-Worker (alle 15 s, darin die Retention-Aufräumjobs und der ESXi-Inventar-Abruf nach eingestelltem Intervall; der Wartungs-Worker führt keine MECM-Probe mehr aus) sind Dauerläufer im Compose-Stack und brauchen keinen Zeitplan.
 
 ## Statuskanal und Portal-Anzeige (ADR-0021)
 

@@ -11,7 +11,6 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help.system_status_signals_heading')); ?></h3>
             <ul>
                 <li><?php echo h(__t('help.system_status_signal_heartbeat')); ?></li>
-                <li><?php echo h(__t('help.system_status_signal_probe', ['port' => VIRTUSPHERE_MECM_PROBE_PORT_DEFAULT])); ?></li>
                 <li><?php echo h(__t('help.system_status_signal_combination')); ?></li>
             </ul>
         </section>
@@ -35,7 +34,7 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help.system_status_source_1')); ?></li>
                 <li><?php echo h(__t('help.system_status_source_2')); ?></li>
                 <li><?php echo h(__t('help.system_status_source_3')); ?></li>
-                <li><?php echo h(__t('help.system_status_source_4', ['minutes' => intdiv(VIRTUSPHERE_MECM_PROBE_INTERVAL_SECONDS, 60)])); ?></li>
+                <li><?php echo h(__t('help.system_status_source_4')); ?></li>
                 <li><?php echo h(__t('help.system_status_source_5')); ?></li>
             </ul>
             <h3><?php echo h(__t('help.system_status_status_heading')); ?></h3>

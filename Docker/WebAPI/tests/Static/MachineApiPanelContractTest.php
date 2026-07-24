@@ -5,12 +5,13 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 /**
- * The Machine-API settings panel holds two things that both say "MECM" and mean
- * opposite directions: the allowlist is who may call *into* the portal, the
- * probe is whether the portal reaches *out* to MECM. An operator who does not
- * know that reads a failing probe next to a working sync as a contradiction.
+ * The Machine-API settings panel is inbound only (ADR-0018 amendment): MECM,
+ * Ansible and the deploy clients call *into* the portal, gated by the allowlist
+ * and the report token. The portal no longer reaches *out* to MECM, so the panel
+ * carries no host, port or reachability probe; the reported MECM state lives on
+ * System status.
  *
- * The empty allowlist is the sharper problem. machine_api_ip_allowed() is
+ * The empty allowlist is the sharp case. machine_api_ip_allowed() is
  * deny-by-default, so an empty list means every machine endpoint answers 403:
  * no device sync, no package sync, no autoimporter, no MAC upload. It used to
  * render as a grey table row reading "no entries yet", which looks like an
@@ -52,29 +53,40 @@ final class MachineApiPanelContractTest extends TestCase
             $source,
             'an empty allowlist must render a warning, not only a table row'
         );
-        self::assertStringContainsString("settings.allowlist_empty_warning", $source);
+        self::assertStringContainsString('settings.allowlist_empty_warning', $source);
     }
 
-    public function testBothDirectionsAreNamedBeforeThePanels(): void
+    public function testThePanelHasNoOutboundPathTargetOrPort(): void
     {
-        self::assertStringContainsString('settings.machine_api_directions', $this->settings());
-        self::assertStringContainsString('settings.probe_blocks_nothing', $this->settings());
+        // The 445 reachability probe is gone: no probe action, no host/port field,
+        // no mode radios, no probe constants.
+        $source = $this->settings();
+        self::assertStringNotContainsString('save_probe', $source);
+        self::assertStringNotContainsString('probe_mode', $source);
+        self::assertStringNotContainsString('probe_host', $source);
+        self::assertStringNotContainsString('probe_port', $source);
+        self::assertStringNotContainsString('VIRTUSPHERE_MECM_PROBE', $source);
+        self::assertStringNotContainsString('mecm_probe', $source);
     }
 
-    public function testTheHeadingsCarryTheirDirection(): void
+    public function testTheDirectionsAndStatusHintAreNamedInThePanel(): void
     {
-        // Two headings that both start with "MECM" are why the panel read as
-        // one topic; each must now say which way the traffic goes.
-        foreach (['de' => ['eingehend', 'ausgehend'], 'en' => ['inbound', 'outbound']] as $locale => $words) {
-            $catalog = $this->catalog($locale);
-            $headings = mb_strtolower($catalog['allowlist_title'] . '|' . $catalog['probe_title']);
-            foreach ($words as $word) {
-                self::assertStringContainsString(
-                    $word,
-                    $headings,
-                    $locale . ': neither Machine-API heading says "' . $word . '"'
-                );
-            }
+        $source = $this->settings();
+        self::assertStringContainsString('settings.machine_api_directions', $source);
+        // The reported MECM state is pointed at System status, not shown here.
+        self::assertStringContainsString('settings.machine_api_status_hint', $source);
+        self::assertStringContainsString('settings.machine_api_status_link', $source);
+    }
+
+    public function testTheDirectionsSayInboundOnly(): void
+    {
+        foreach (['de' => 'eingehend', 'en' => 'inbound'] as $locale => $word) {
+            $directions = mb_strtolower($this->catalog($locale)['machine_api_directions']);
+            self::assertStringContainsString(
+                $word,
+                $directions,
+                $locale . ': the Machine-API directions must say the traffic is inbound'
+            );
         }
     }
 
@@ -82,29 +94,14 @@ final class MachineApiPanelContractTest extends TestCase
     {
         foreach (['de', 'en'] as $locale) {
             $catalog = $this->catalog($locale);
-            foreach (['machine_api_directions', 'allowlist_empty_warning', 'probe_blocks_nothing'] as $key) {
+            foreach (['machine_api_directions', 'allowlist_empty_warning', 'machine_api_status_hint'] as $key) {
                 self::assertArrayHasKey($key, $catalog, $locale . ' is missing ' . $key);
                 // Plain-language explanations for rotating admin staff, not labels.
                 self::assertGreaterThan(80, mb_strlen($catalog[$key]), $locale . '.' . $key . ' is too terse to explain anything');
             }
+            // The probe vocabulary must be gone from both locales.
+            self::assertArrayNotHasKey('probe_title', $catalog, $locale . ' still has a probe heading');
+            self::assertArrayNotHasKey('probe_mode_auto', $catalog, $locale . ' still has probe mode text');
         }
-    }
-
-    public function testTheAutoModeHintWarnsAboutAddressTranslation(): void
-    {
-        // The auto target is $_SERVER['REMOTE_ADDR'] of the last device sync,
-        // so a proxy or NAT in the path makes the portal probe that device
-        // instead of MECM. Silence about it turns a config trap into an
-        // apparent product bug.
-        $de = mb_strtolower($this->catalog('de')['probe_mode_auto_hint']);
-        self::assertTrue(
-            str_contains($de, 'proxy') || str_contains($de, 'router') || str_contains($de, 'adressumsetzung'),
-            'the German auto-mode hint must name what makes the remembered address wrong'
-        );
-        $en = mb_strtolower($this->catalog('en')['probe_mode_auto_hint']);
-        self::assertTrue(
-            str_contains($en, 'proxy') || str_contains($en, 'router') || str_contains($en, 'translation'),
-            'the English auto-mode hint must name what makes the remembered address wrong'
-        );
     }
 }

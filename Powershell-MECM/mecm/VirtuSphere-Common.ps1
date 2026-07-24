@@ -55,9 +55,13 @@ function Get-VsConfig {
         PackagesShare          = [string]$raw.PackagesShare                  # UNC fuer ContentLocation
         DpGroupName            = if ($raw.DpGroupName) { [string]$raw.DpGroupName } else { 'DP Group - VirtuSphere-Applications' }
         SiteCodeFallback       = [string]$raw.MECM_SiteCode
+        # Optionaler SMS-Provider-Rechner (Installer-Param -ProviderMachine).
+        # Leer = Get-VsProviderMachine erkennt lokal per WMI/PSDrive.
+        ProviderMachine        = [string]$raw.MECM_ProviderMachine
         DeviceSyncInterval     = if ($raw.DeviceSyncIntervalSeconds) { [int]$raw.DeviceSyncIntervalSeconds } else { 10 }
         PackagesSyncInterval   = if ($raw.PackagesSyncIntervalSeconds) { [int]$raw.PackagesSyncIntervalSeconds } else { 60 }
         ImporterInterval       = if ($raw.ImporterIntervalSeconds) { [int]$raw.ImporterIntervalSeconds } else { 60 }
+        SiteHealthInterval     = if ($raw.SiteHealthIntervalSeconds) { [int]$raw.SiteHealthIntervalSeconds } else { 300 }
         LogRoot                = if ($raw.LogRoot) { [string]$raw.LogRoot } elseif ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'VirtuSphere\Logs' } else { Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs' }
     }
 }
@@ -297,6 +301,360 @@ function Send-VsHeartbeat {
         # per -Debug abrufbar: ein Heartbeat, der wegen eines falschen Tokens
         # abgelehnt wird, sieht von aussen genauso aus wie ein Netzausfall.
         Write-Debug ('Heartbeat nicht zugestellt: {0}' -f (Get-VsErrorDetail -ErrorRecord $_))
+    }
+}
+
+# ===========================================================================
+# Run-Report-Kanal (ADR-0018): mecm_report.php?action=reportRun
+# ----------------------------------------------------------------------------
+# Loest die Legacy-Heartbeats ab. Die drei Sync-Tasks melden Start UND Ergebnis
+# jedes Laufs, der neue Site-Health-Task nur das Ergebnis. Die PHP-Seite
+# (lib/run_report.php, lib/constants.php) ist die SSoT des Wire-Contracts; die
+# Tabellen und Muster hier sind order-exakte Spiegel und duerfen nicht driften.
+# ===========================================================================
+
+# 32 Hex (klein) pro Lauf, neu je Iteration. Spiegelt VIRTUSPHERE_RUN_ID_PATTERN
+# (/\A[0-9a-f]{32}\z/). Guid('N') ist bereits klein; ToLowerInvariant sichert es.
+function New-VsRunId {
+    return ([guid]::NewGuid().ToString('N')).ToLowerInvariant()
+}
+
+# Wire-Bounds (Spiegel von lib/constants.php).
+$script:VsRunIntervalMinSeconds = 5       # VIRTUSPHERE_HEARTBEAT_INTERVAL_MIN_SECONDS
+$script:VsRunIntervalMaxSeconds = 3600    # VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS
+$script:VsRunDurationMsMax       = 86400000 # VIRTUSPHERE_RUN_DURATION_MS_MAX
+$script:VsRunScriptVersionMaxChars = 32   # VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_CHARS
+# Detail wird VOR dem Senden in BYTES gekuerzt, damit das 8-KB-Body-Limit
+# (VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES = 8192) nie bricht. 2048 Bytes lassen
+# auch bei \uXXXX-Expansion (PS 5.1 escaped Nicht-ASCII) reichlich Luft; der
+# Server kappt zusaetzlich bei 1024 Zeichen.
+$script:VsReportDetailMaxBytes = 2048
+
+# Zustellfehler des Run-Reports werden hoechstens einmal pro Fenster ins
+# Tageslog geschrieben (fire-and-forget: der Sync darf nie daran haengen).
+$script:VsReportThrottleSeconds = 300
+$script:VsReportLastFailureLog  = $null
+
+# Erlaubte Summary-Schluessel je Quelle (Spiegel VIRTUSPHERE_RUN_SUMMARY_FIELDS).
+$script:VsRunSummaryFields = @{
+    'device-sync'      = @('received', 'imported', 'item_failures', 'data_warnings', 'resource_update_failures')
+    'packages-sync'    = @('packages', 'task_sequences', 'sent', 'unchanged')
+    'autoimporter'     = @('folders', 'created', 'removed', 'open_points', 'unchanged')
+    'mecm-site-health' = @('site_code', 'provider', 'raw_status')
+}
+# Summary-Schluessel, deren Wert ein kurzer String ist statt eines Zaehlers
+# (Spiegel VIRTUSPHERE_RUN_SUMMARY_STRING_FIELDS).
+$script:VsRunSummaryStringFields = @('site_code', 'provider')
+
+# Fehlerkategorien der Sync-Quellen (Spiegel VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES).
+$script:VsRunSyncErrorCategories = @('portal_unreachable', 'mecm_unavailable', 'partial_failure', 'source_missing', 'catalog_conflict')
+# Site-Health-Kategorien mit fester Outcome-Bindung
+# (Spiegel VIRTUSPHERE_RUN_SITE_ERROR_OUTCOME): ein Providerfehler ist grau
+# (unknown), nie "MECM kritisch".
+$script:VsRunSiteErrorOutcome = @{
+    'site_warning'           = 'warning'
+    'site_critical'          = 'fail'
+    'provider_access_denied' = 'unknown'
+    'provider_unreachable'   = 'unknown'
+    'query_failed'           = 'unknown'
+}
+
+# Kuerzt einen String auf hoechstens $MaxBytes UTF-8-Bytes, ohne eine
+# Mehrbyte-Sequenz zu zerschneiden (sonst waere der Body kein gueltiges UTF-8).
+function Get-VsTruncatedUtf8 {
+    param([string]$Text, [int]$MaxBytes)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    if ($bytes.Length -le $MaxBytes) { return $Text }
+    $count = $MaxBytes
+    # Ein Fortsetzungsbyte ist 10xxxxxx (0x80..0xBF). Solange das erste
+    # ABGESCHNITTENE Byte ein solches ist, stehen wir mitten in einer Sequenz
+    # und muessen zurueck bis zur naechsten Zeichengrenze.
+    while ($count -gt 0 -and ($bytes[$count] -band 0xC0) -eq 0x80) { $count-- }
+    return [System.Text.Encoding]::UTF8.GetString($bytes, 0, $count)
+}
+
+# Bereinigt Detail-Text fuer den Run-Report: Steuerzeichen raus (wie der Server,
+# [\x00-\x1F\x7F] -> Leerzeichen), den Rueckkanal-Token redigieren, falls er je
+# im Text auftaucht, und in BYTES kuerzen. Liefert $null bei leerem Ergebnis.
+function Get-VsReportDetail {
+    param([string]$Text, [string]$Token)
+    if ([string]::IsNullOrEmpty($Text)) { return $null }
+    $clean = [regex]::Replace($Text, '[\x00-\x1F\x7F]+', ' ')
+    if (-not [string]::IsNullOrWhiteSpace($Token)) {
+        $clean = $clean.Replace($Token, '[redacted]')
+    }
+    $clean = $clean.Trim()
+    if ($clean -eq '') { return $null }
+    return (Get-VsTruncatedUtf8 -Text $clean -MaxBytes $script:VsReportDetailMaxBytes)
+}
+
+# Baut das Summary-Objekt einer Quelle aus einer Hashtable: nur Whitelist-
+# Schluessel, Zaehler als nicht-negative Ganzzahl, die zwei String-Felder als
+# String. Liefert $null, wenn nichts uebrig bleibt (ein leeres Objekt lehnt der
+# Server als Liste ab, deshalb nie senden).
+function New-VsRunSummary {
+    param(
+        [Parameter(Mandatory)][ValidateSet('device-sync', 'packages-sync', 'autoimporter', 'mecm-site-health')][string]$Source,
+        [hashtable]$Values
+    )
+    if (-not $Values) { return $null }
+    $allowed = $script:VsRunSummaryFields[$Source]
+    $clean = @{}
+    foreach ($key in @($Values.Keys)) {
+        if ($allowed -notcontains $key) { continue }
+        $val = $Values[$key]
+        if ($null -eq $val) { continue }
+        if ($script:VsRunSummaryStringFields -contains $key) {
+            $clean[$key] = [string]$val
+            continue
+        }
+        $n = 0
+        if ([int]::TryParse([string]$val, [ref]$n)) {
+            if ($n -lt 0) { $n = 0 }
+            $clean[$key] = $n
+        }
+    }
+    if ($clean.Count -eq 0) { return $null }
+    return $clean
+}
+
+# Zentrale Kategorisierung: gilt eine Fehlerkategorie fuer diese Quelle und
+# dieses Outcome? Site-Health-Kategorien sind an ein festes Outcome gebunden,
+# die Sync-Quellen teilen einen Satz. Spiegelt run_report_validate_error_category().
+function Test-VsRunErrorCategory {
+    param([string]$Source, [string]$Outcome, [string]$Category)
+    if ([string]::IsNullOrWhiteSpace($Category)) { return $false }
+    if ($Source -eq 'mecm-site-health') {
+        if (-not $script:VsRunSiteErrorOutcome.ContainsKey($Category)) { return $false }
+        return ($script:VsRunSiteErrorOutcome[$Category] -eq $Outcome)
+    }
+    return ($script:VsRunSyncErrorCategories -contains $Category)
+}
+
+# Loggt einen Zustellfehler des Run-Reports hoechstens einmal pro Throttle-
+# Fenster ins Tageslog; dazwischen bleibt es bei Write-Debug (Opt-in-Konsole).
+function Write-VsRunReportFailure {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $msg = 'Run-Report nicht zugestellt: {0}' -f (Get-VsErrorDetail -ErrorRecord $ErrorRecord)
+    $now = Get-Date
+    $due = $true
+    if ($script:VsReportLastFailureLog) {
+        if (($now - $script:VsReportLastFailureLog).TotalSeconds -lt $script:VsReportThrottleSeconds) { $due = $false }
+    }
+    if ($due) {
+        Write-VsLog -Level DEBUG -Message $msg
+        $script:VsReportLastFailureLog = $now
+    } else {
+        Write-Debug $msg
+    }
+}
+
+# Fire-and-forget Run-Report (ADR-0018): baut den Body nach dem Wire-Contract,
+# kuerzt Detail VOR dem Senden in Bytes und POSTet mit 5s-Timeout ueber
+# Invoke-VsApi (gleicher Token-/Korrelations-Header wie der Heartbeat). Ein
+# Zustellfehler wird NUR gedrosselt geloggt und NIE geworfen: der eigentliche
+# MECM-Lauf darf daran nicht haengen. Kein Replay-Queue - der Server dedupt einen
+# identisch wiederholten completed-run_id, die Ankunftsreihenfolge ist die Wahrheit.
+function Send-VsRunReport {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][ValidateSet('device-sync', 'packages-sync', 'autoimporter', 'mecm-site-health')][string]$Source,
+        # Nicht $Event: das ist eine automatische PowerShell-Variable. Das
+        # Wire-Feld heisst weiterhin "event".
+        [Parameter(Mandatory)][ValidateSet('started', 'completed')][string]$RunEvent,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][int]$IntervalSeconds,
+        [ValidateSet('ok', 'warning', 'fail', 'unknown')][string]$Outcome,
+        [string]$ErrorCategory,
+        [int]$DurationMs,
+        [string]$Detail,
+        [hashtable]$Summary,
+        [string]$ScriptVersion
+    )
+
+    # interval_seconds in die gueltige Spanne klemmen, damit ein exotisch
+    # konfiguriertes Intervall den Report nicht garantiert mit 400 verwirft.
+    $interval = [int]$IntervalSeconds
+    if ($interval -lt $script:VsRunIntervalMinSeconds) { $interval = $script:VsRunIntervalMinSeconds }
+    if ($interval -gt $script:VsRunIntervalMaxSeconds) { $interval = $script:VsRunIntervalMaxSeconds }
+
+    $body = [ordered]@{
+        source           = $Source
+        event            = $RunEvent
+        run_id           = $RunId
+        interval_seconds = $interval
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ScriptVersion)) {
+        $sv = $ScriptVersion
+        if ($sv.Length -gt $script:VsRunScriptVersionMaxChars) { $sv = $sv.Substring(0, $script:VsRunScriptVersionMaxChars) }
+        $body['script_version'] = $sv
+    }
+
+    if ($RunEvent -eq 'completed') {
+        # outcome ist bei completed Pflicht; ein fehlender Wert waere ein
+        # Programmierfehler im Aufrufer - dann ehrlich unknown melden.
+        $effectiveOutcome = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+        $body['outcome'] = $effectiveOutcome
+
+        if ($effectiveOutcome -ne 'ok' -and -not [string]::IsNullOrWhiteSpace($ErrorCategory)) {
+            $body['error_category'] = $ErrorCategory
+        }
+
+        if ($PSBoundParameters.ContainsKey('DurationMs')) {
+            $d = [int]$DurationMs
+            if ($d -lt 0) { $d = 0 }
+            if ($d -gt $script:VsRunDurationMsMax) { $d = $script:VsRunDurationMsMax }
+            $body['duration_ms'] = $d
+        }
+
+        $detailClean = Get-VsReportDetail -Text $Detail -Token $Config.ReportToken
+        if ($null -ne $detailClean) { $body['detail'] = $detailClean }
+
+        if ($Summary) {
+            $summaryClean = New-VsRunSummary -Source $Source -Values $Summary
+            if ($null -ne $summaryClean) { $body['summary'] = $summaryClean }
+        }
+    }
+
+    try {
+        Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=reportRun' -Method POST -Body $body -TimeoutSec 5 | Out-Null
+    } catch {
+        Write-VsRunReportFailure -ErrorRecord $_
+    }
+}
+
+# ---------------------------------------------------------------------------
+# MECM Site-Health (Provider-Aufloesung + SMS_SummarizerSiteStatus)
+# ---------------------------------------------------------------------------
+
+# Reine Status-Abbildung (SMS_SummarizerSiteStatus.Status -> Outcome/Kategorie):
+# 0=OK, 1=Warnung, 2=Kritisch, alles andere unbekannt. Als reine Funktion, damit
+# Pester sie ohne MECM prueft. Spiegelt VIRTUSPHERE_RUN_SITE_ERROR_OUTCOME.
+function Get-VsSiteHealthOutcome {
+    param([Parameter(Mandatory)][int]$RawStatus)
+    switch ($RawStatus) {
+        0 { return [pscustomobject]@{ Outcome = 'ok';      ErrorCategory = $null } }
+        1 { return [pscustomobject]@{ Outcome = 'warning'; ErrorCategory = 'site_warning' } }
+        2 { return [pscustomobject]@{ Outcome = 'fail';    ErrorCategory = 'site_critical' } }
+        default { return [pscustomobject]@{ Outcome = 'unknown'; ErrorCategory = 'query_failed' } }
+    }
+}
+
+# provider_unreachable wird erst nach dem ZWEITEN aufeinanderfolgenden Fehlzyklus
+# gemeldet: der erste kann ein MECM-Neustart sein, den man nicht sofort als
+# Fehler schreiben will. Vorher wird die Kategorie auf query_failed gedaempft.
+# Reine Funktion, damit Pester die Zwei-Zyklen-Regel ohne die Endlosschleife deckt.
+function Get-VsSiteHealthReportCategory {
+    param([string]$Category, [int]$ConsecutiveFailures)
+    if ($Category -eq 'provider_unreachable' -and $ConsecutiveFailures -lt 2) {
+        return 'query_failed'
+    }
+    return $Category
+}
+
+# Kategorisiert einen Provider-Fehler sprachunabhaengig ueber den HRESULT und
+# best-effort ueber den Meldungstext. NIE wird die volle MECM-Meldung uebernommen;
+# der Aufrufer meldet nur die Kategorie.
+function Get-VsProviderFaultCategory {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $msg = ''
+    $hres = 0
+    try { $msg = [string]$ErrorRecord.Exception.Message } catch { Write-Debug $_ }
+    try { if ($ErrorRecord.Exception.HResult) { $hres = [int]$ErrorRecord.Exception.HResult } } catch { Write-Debug $_ }
+
+    # 0x80070005 = Zugriff verweigert; -2147024891 als signed int.
+    if ($hres -eq -2147024891 -or $msg -match '(?i)access is denied|access denied|zugriff verweigert|E_ACCESSDENIED|0x80070005') {
+        return 'provider_access_denied'
+    }
+    # 0x800706BA = RPC-Server nicht verfuegbar; -2147023174 signed.
+    if ($hres -eq -2147023174 -or $msg -match '(?i)RPC server is unavailable|server is unavailable|cannot connect|network path|could not be resolved|not reachable|nicht erreichbar|timed out|0x800706BA') {
+        return 'provider_unreachable'
+    }
+    return 'query_failed'
+}
+
+# Loest die SMS-Provider-Maschine in fester Reihenfolge auf:
+#  1. -ProviderMachine (Installer-Param) bzw. Registry MECM_ProviderMachine,
+#  2. lokale WMI-Erkennung: antwortet root\SMS __NAMESPACE lokal, ist der lokale
+#     Rechner der Provider,
+#  3. Root des initialisierten CMSite-PSDrive,
+#  4. lokaler Rechnername als letzter Notnagel.
+function Get-VsProviderMachine {
+    param($Config, [string]$ProviderMachine)
+
+    if (-not [string]::IsNullOrWhiteSpace($ProviderMachine)) { return $ProviderMachine.Trim() }
+    if ($Config -and -not [string]::IsNullOrWhiteSpace($Config.ProviderMachine)) { return ([string]$Config.ProviderMachine).Trim() }
+
+    try {
+        $ns = Get-CimInstance -Namespace 'root\SMS' -ClassName '__NAMESPACE' -ErrorAction Stop |
+            Where-Object { $_.Name -like 'site_*' } | Select-Object -First 1
+        if ($ns) { return $env:COMPUTERNAME }
+    } catch { Write-Debug $_ }
+
+    try {
+        $drive = Get-PSDrive -PSProvider CMSite -ErrorAction Stop | Select-Object -First 1
+        if ($drive -and -not [string]::IsNullOrWhiteSpace($drive.Root)) { return [string]$drive.Root }
+    } catch { Write-Debug $_ }
+
+    return $env:COMPUTERNAME
+}
+
+# Fragt SMS_SummarizerSiteStatus fuer den konfigurierten Site-Code per CIM ab.
+# Kein ConfigurationManager-Modul noetig und keines wird geladen: der PSDrive-
+# Fallback in Get-VsProviderMachine liest hoechstens ein bereits vorhandenes
+# CMSite-PSDrive, importiert aber selbst kein Modul (in einem SYSTEM-Prozess
+# waere ein Modul-Load unnoetig schwer und fehleranfaellig). Liefert immer ein
+# Objekt (wirft nie), mit Site-Code, Provider, numerischem Rohstatus und
+# abgeleitetem Outcome/Kategorie. Reports kopieren nie die MECM-Statusmeldung -
+# nur diese vier Werte.
+function Get-VsMecmSiteHealth {
+    param($Config, [string]$ProviderMachine)
+
+    $siteCode = Get-VsSiteCode -Config $Config
+    $provider = Get-VsProviderMachine -Config $Config -ProviderMachine $ProviderMachine
+
+    $result = [pscustomobject]@{
+        SiteCode      = $siteCode
+        Provider      = $provider
+        RawStatus     = $null
+        Outcome       = 'unknown'
+        ErrorCategory = 'query_failed'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($siteCode)) {
+        return $result
+    }
+
+    try {
+        $namespace = 'root\SMS\site_{0}' -f $siteCode
+        $cimParams = @{
+            Namespace   = $namespace
+            ClassName   = 'SMS_SummarizerSiteStatus'
+            ErrorAction = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($provider) -and $provider -ne $env:COMPUTERNAME) {
+            $cimParams['ComputerName'] = $provider
+        }
+
+        $all = @(Get-CimInstance @cimParams)
+        $status = $all | Where-Object { [string]$_.SiteCode -eq $siteCode } | Select-Object -First 1
+        if (-not $status) { $status = $all | Select-Object -First 1 }
+        if (-not $status) {
+            $result.ErrorCategory = 'query_failed'
+            return $result
+        }
+
+        $raw = [int]$status.Status
+        $mapped = Get-VsSiteHealthOutcome -RawStatus $raw
+        $result.RawStatus     = $raw
+        $result.Outcome       = $mapped.Outcome
+        $result.ErrorCategory = $mapped.ErrorCategory
+        return $result
+    } catch {
+        $result.Outcome       = 'unknown'
+        $result.ErrorCategory = Get-VsProviderFaultCategory -ErrorRecord $_
+        return $result
     }
 }
 

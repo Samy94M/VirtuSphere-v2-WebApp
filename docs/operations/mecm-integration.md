@@ -21,7 +21,7 @@ verknüpfen                  Collections zu)               --->  mecm_updateid.p
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
                                                                 getDeviceInfos        staticip (Netz konfigurieren)
                                                                                         disks (Platten online)
-                           Heartbeats + Client-Phasen     --->  mecm_report.php  (ab Etappe 1)
+                     Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
 ```
 
 - Reihenfolge der Client-Phasen ist über MECM-Anwendungsabhängigkeiten fixiert:
@@ -70,10 +70,10 @@ und neuer MAC ein MAC-Konflikt, den der Device-Sync im Log meldet.
 ## Rückkanal & Heartbeats (Etappe 1)
 
 Der Endpoint `mecm_report.php` nimmt POST-Meldungen entgegen (JSON). Der optionale
-Header `X-VirtuSphere-Token` gilt nur für `action=heartbeat` (Server-Sync-Aufgaben)
-und wird nur geprüft, wenn im Portal unter Einstellungen ein Token generiert wurde.
-`action=reportPhase` (Clients) authentifiziert ausschließlich über IP-Allowlist bzw.
-bekannte MAC und braucht nie einen Token.
+Header `X-VirtuSphere-Token` gilt für die Server-Aufgaben (`action=heartbeat` und
+`action=reportRun`) und wird nur geprüft, wenn im Portal unter Einstellungen ein
+Token generiert wurde. `action=reportPhase` (Clients) authentifiziert ausschließlich
+über IP-Allowlist bzw. bekannte MAC und braucht nie einen Token.
 
 ### Heartbeat (MECM-Server, IP muss freigeschaltet sein)
 
@@ -91,6 +91,11 @@ Gültige `source`-Werte: `device-sync`, `packages-sync`, `autoimporter`.
 Antworten: `200 {"success":true,...}`, `400` bei ungültiger Quelle/Intervall,
 `403` wenn die Absender-IP nicht freigeschaltet ist (Portal → Einstellungen →
 IP-Freigaben), `401` bei falschem Token.
+
+Die aktuellen Skripte senden statt eines Heartbeats einen **Ergebnisbericht**
+(`action=reportRun`, additiv; siehe „MECM-Server: Installation & Aufgabenplanung").
+`heartbeat` bleibt für Alt-Skripte kompatibel, erscheint im Portal dann aber gelb
+als „Legacy: Ergebnis nicht bestätigt".
 
 ### Client-Phase (Windows-Client, authentifiziert per bekannter MAC)
 
@@ -110,10 +115,16 @@ Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 ### Anzeige im Portal
 
 - **Systemstatus** (alle angemeldeten Nutzer, URL weiterhin
-  `portal/system_status.php`): getrennte Gruppen für MECM-Synchronisation,
-  Netzwerkpfad, Ansible, ESXi und interne Dienste mit letzter Meldung, letzter
-  Prüfung und Klartext-Handlungsanweisung. Das Dashboard liest denselben
-  Health-Snapshot.
+  `portal/system_status.php`): getrennte Gruppen für MECM, Ansible, ESXi und
+  interne Dienste mit letzter Meldung, letztem Ergebnis und
+  Klartext-Handlungsanweisung. Der MECM-Bereich ist in zwei sichtbare Untergruppen
+  geteilt: „VirtuSphere-MECM-Integration" (die drei Ergebnisreporter der
+  Sync-Aufgaben) und „MECM-Site-Status" (der offizielle Site-Zustand aus
+  `SMS_SummarizerSiteStatus`). Es wird kein gemeinsamer Worst-Status gebildet: ein
+  kritischer Site-Zustand stellt den erfolgreichen Datenfluss nicht als
+  ausgefallen dar, ein ausgefallener Sync behauptet nicht, MECM selbst sei
+  kritisch. Das Dashboard liest denselben Health-Snapshot und zeigt in der
+  „System status"-Kachel zwei beschriftete Zeilen: „Integration" und „MECM-Site".
 - **VM-Detail**: Abschnitt „Client-Phasen" mit den vier Phasen und den letzten
   20 Roh-Ereignissen.
 - MECM-relevante Audit-Einträge stehen im Log unter der Kategorie
@@ -133,6 +144,8 @@ Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 | `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10) |
 | `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60) |
 | `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60) |
+| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health (neu; leer = lokale Ermittlung) |
+| `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
 | `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
 | `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
 
@@ -164,7 +177,16 @@ zugehörige Freigabe müssen daher schreibgeschützt für normale Benutzer sein
 (nur `SYSTEM`/`Administratoren` schreibend), sonst ist beliebige Codeausführung als
 `SYSTEM` möglich. Der Installer warnt, falls der Ordner für Benutzer beschreibbar ist.
 
-## Aktive Überwachung & Wartungs-Worker (Etappe 1b)
+## Überwachung & Wartungs-Worker (Etappe 1b)
+
+Der Datenfluss läuft ausschließlich in einer Richtung: **MECM → Portal**. Die vier
+SYSTEM-Aufgaben auf dem MECM-Server melden ihren Zustand per HTTP-POST an
+`mecm_report.php`; das Portal selbst baut **keine** ausgehende Verbindung zum
+MECM-Server auf. Der frühere 5-Minuten-TCP-Check auf Port 445 im Wartungsdienst
+ist entfernt (ADR-0018, Amendment 2026-07-23): Eine offene TCP-Verbindung bewies
+keine MECM-Anmeldung, WMI, Aufgabenplanung oder Katalog-Synchronisation. An seine
+Stelle tritt die vierte Aufgabe „VirtuSphere MECM Site Health", die den offiziellen
+Site-Zustand aus `SMS_SummarizerSiteStatus` meldet.
 
 Der Compose-Service `maintenance-worker` (Container
 `virtusphere-v2-webapp-maintenance-worker-1`) läuft dauerhaft neben dem
@@ -173,32 +195,32 @@ Deploy-Worker und erledigt:
 1. **Eigen-Heartbeat** (alle 60 s): erscheint im Systemstatus unter
    „Interne Dienste" als „Wartungsdienst (WebApp)". Fehlt er, läuft der
    Container nicht. Sein Zustand verändert den MECM-Gesamtzustand nicht.
-2. **MECM-Netzwerkerreichbarkeit** (alle 5 min): reine TCP-Verbindung vom
-   Wartungsdienst zum MECM-Ziel. In Einstellungen → Machine-API ist der Modus
-   ausdrücklich wählbar: „Automatisch" nutzt die Absender-IP des letzten
-   Device-Sync-Heartbeats, „Eigenes Prüfziel" verlangt DNS, IPv4 oder IPv6.
-   Standardport 445 steht für SMB. Die Probe prüft keine MECM-Anmeldung, WMI,
-   Scheduler-Aufgabe, Katalog-Synchronisation oder den Autoimporter. Speichern
-   und „Erneut prüfen" führen zusätzlich je eine sofortige Prüfung aus.
-3. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
+2. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
    Sicherheits-Protokolle (Anmeldung, Benutzer, Zugangsdaten) älter als 365 Tage,
    übrige Portal-Logs älter als 90 Tage, Anmeldeversuchs-Zähler älter als 7 Tage
    (gestaffelt nach Kategorie, siehe ADR-0026). (Früher lief die Log-Bereinigung
    huckepack bei API-Requests; jetzt läuft sie auch ohne Traffic.)
-4. **Zustandswechsel-Audits**: MECM-Quellen und automatische Probe schreiben
-   nur Übergänge von/nach problematisch in „MECM-Integration". Der
-   Maintenance-Worker schreibt seine Übergänge unter „System". Manuelle Probe
-   und Prüfung nach dem Speichern werden einmalig mit Ziel, Ergebnis- und
-   Fehlerkategorie protokolliert; erwartete DNS-/Timeout-/Refused-Ergebnisse
-   erzeugen keinen zusätzlichen PHP-Fehlerlog-Spam.
+3. **Zustandswechsel-Audits**: die MECM-Quellen schreiben nur Übergänge von/nach
+   problematisch in „MECM-Integration" (OK → Warnung/Fehler/Fehlt und zurück,
+   Site healthy → warning/critical/unknown und zurück, sowie einmalig der Wechsel
+   eines Reporters von Legacy auf V2). Der Maintenance-Worker schreibt seine
+   eigenen Übergänge unter „System". Einzelne Läufe, Heartbeats und vollständige
+   SMS-Provider-Antworten werden bewusst nicht protokolliert.
 
-**Diagnose-Kombination auf der Statusseite:**
+Der Wartungsdienst führt keine MECM-Erreichbarkeitsprobe mehr aus und hat kein
+MECM-Ziel und keinen Port mehr in den Einstellungen.
+
+**Diagnose-Kombination auf der Statusseite:** die Integration (Ergebnisberichte
+der Sync-Aufgaben) und der MECM-Site-Status sind getrennt zu lesen.
 
 | Beobachtung | Bedeutung | Maßnahme |
 |---|---|---|
-| Sync-Quellen rot, Probe grün | Server läuft, Tasks melden sich nicht | Aufgabenplanung auf dem MECM-Server prüfen |
-| Probe rot, Heartbeats aktuell | Rückweg MECM → Portal funktioniert, aber der gewählte TCP-Port WebApp → MECM ist blockiert/falsch | Probe-Ziel und Firewall für Port 445 prüfen; die Tasks müssen deshalb nicht gestoppt sein |
-| Probe rot, Heartbeats alt | Server/Netz oder die Aufgaben können ausgefallen sein | Erst Ziel/Netzwerk, dann Aufgabenplanung prüfen |
+| Integration rot/stale, Site-Status grün | MECM läuft, aber ein Sync-Reporter meldet nicht (Task tot oder Bericht abgelehnt) | Aufgabenplanung prüfen und die benannte Aufgabe starten; lokales Tageslog der Aufgabe lesen |
+| Integration grün, Site-Status gelb | Datenfluss ok, MECM meldet eine Warnung (Status 1) | MECM-Konsole → Monitoring → System Status |
+| Integration grün, Site-Status rot | Datenfluss ok, MECM meldet Status 2 (kritisch) | MECM-Konsole → Monitoring → System Status; das ist ein MECM-Problem, kein VirtuSphere-Problem |
+| Site-Status grau (unbekannt) | Providerfehler (nicht erreichbar oder Zugriff verweigert), **nicht** „MECM kritisch" | Providername und SYSTEM-Berechtigung prüfen (Remote-Provider siehe unten); ein „nicht erreichbar" nach MECM-Reboot löst sich von selbst |
+| Sync-Zeile gelb „Ergebnis: Warnung" | Lauf mit partiellem Fehler (ungültige MAC, fehlende Collection, 409-Schutzschwelle) | Detailtext der Zeile und MECM-Log lesen |
+| Sync-Zeile gelb „Legacy: Ergebnis nicht bestätigt" | Alt-Skript sendet nur Heartbeats, kein Ergebnis | Installer/Skripte aktualisieren |
 | Wartungsdienst rot | interner Dienst steht | `docker compose ps` auf dem Ubuntu-Host, dann `docker compose up -d maintenance-worker` |
 
 **Dienst neustarten** (Ubuntu-Host, Repo-Verzeichnis):
@@ -268,11 +290,21 @@ mit Kennzeichnung) und zeigt „Update verfügbar"-Hinweise.
 
 ## MECM-Server: Installation & Aufgabenplanung (Etappe 4)
 
-Die drei Server-Skripte liegen versioniert unter `Powershell-MECM/mecm/` und
-teilen sich `VirtuSphere-Common.ps1` (Konfiguration, Logging, Heartbeat,
-MAC-Normalisierung, Site-Code-Erkennung). Installation und Registrierung der
-geplanten Aufgaben erledigt `Powershell-MECM/install-VirtuSphere-MECM.ps1`
-(idempotent, siehe `Powershell-MECM/README.md`).
+Die vier Server-Skripte liegen versioniert unter `Powershell-MECM/mecm/` und
+teilen sich `VirtuSphere-Common.ps1` (Konfiguration, Logging, Ergebnisberichte,
+MAC-Normalisierung, Site-Code- und SMS-Provider-Ermittlung, Site-Health-Abbildung).
+Installation und Registrierung der geplanten Aufgaben erledigt
+`Powershell-MECM/install-VirtuSphere-MECM.ps1` (idempotent, siehe
+`Powershell-MECM/README.md`). Die vier registrierten Aufgaben laufen alle als
+`NT AUTHORITY\SYSTEM`, mit höchsten Rechten, `AtStartup`,
+`MultipleInstances IgnoreNew` und ohne Laufzeitlimit (`ExecutionTimeLimit=PT0S`):
+
+| Aufgabe | Skript | Meldet an `reportRun` |
+|---|---|---|
+| VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Packages Sync | `mecm_Packages-TaskSeq-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Site Health | `mecm_site-health.ps1` | nur `completed`: Site-Code, Provider, Rohstatus 0/1/2 |
 
 Wichtige Härtungen gegenüber den Altskripten:
 
@@ -293,12 +325,48 @@ Wichtige Härtungen gegenüber den Altskripten:
   Task-Sequence-Collections einmal statt pro Device, normalisierter
   MAC-Vergleich (keine falschen Konfliktwarnungen), nutzt das eingebettete
   `mission`-Objekt aus `getDeviceList` statt N+1 `getMissionName`.
-- Alle drei senden je Durchlauf einen **Heartbeat**; ein toter Task wird im
-  Portal im *Systemstatus* rot.
+- Die drei Sync-Aufgaben senden je Lauf einen **Ergebnisbericht** (`started`
+  vor der Arbeit, `completed` mit `ok`/`warning`/`fail`/`unknown` im `finally`);
+  die Site-Health-Aufgabe meldet nur `completed`. Ein toter Task wird im Portal im
+  *Systemstatus* stale/rot; ein Alt-Skript, das nur Heartbeats sendet, erscheint
+  gelb als „Legacy: Ergebnis nicht bestätigt".
 
 **Task neu starten** (MECM-Server): Aufgabenplanung öffnen → Task unter
 `\` auswählen → *Ausführen*. Oder per PowerShell:
 `Start-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`.
+
+### Site Health und SMS-Provider
+
+Die vierte Aufgabe „VirtuSphere MECM Site Health" fragt über den SMS Provider
+`SMS_SummarizerSiteStatus` für den konfigurierten Site-Code ab und meldet den
+offiziellen MECM-Site-Zustand: `0` = OK (grün), `1` = Warnung (gelb),
+`2` = kritisch (rot), jeder andere Rohwert = unbekannt (grau). Providerfehler
+(nicht erreichbar, Zugriff verweigert, Abfrage fehlgeschlagen) werden als
+`unknown` (grau) gemeldet; Rot ist exklusiv dem MECM-bestätigten Status 2
+vorbehalten. „Nicht erreichbar" wird erst nach zwei aufeinanderfolgenden
+Fehlversuchen gemeldet, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
+schreibt.
+
+Provider und Intervall sind Registry-owned (`HKLM:\SOFTWARE\VirtuSphere\MECM`),
+keine Portal-Settings:
+
+- `MECM_ProviderMachine`: SMS-Provider-Rechner. Leer lassen, wenn der Provider
+  lokal auf dem Site-Server liegt (der Normalfall); die Aufgabe ermittelt ihn dann
+  selbst.
+- `SiteHealthIntervalSeconds`: Berichtsintervall, Standard 300, erlaubt 60–3600.
+
+**Remote-Provider.** Das Computerkonto des Site-Servers ist standardmäßig Mitglied
+der SMS-Admins-Gruppe auf jedem Provider; liegt der Provider lokal und läuft die
+Aufgabe als SYSTEM, ist keine Zusatzkonfiguration nötig. Liegt der Provider auf
+einem anderen Rechner, braucht dieses Computerkonto die Provider-Berechtigung, und
+der Transport muss erreichbar sein: `Get-CimInstance -ComputerName` nutzt
+WinRM/WSMan; klassisches WMI braucht DCOM mit RPC 135 plus dynamischen Ports und
+Remote Activation. Ein fehlendes Recht meldet das Portal als
+`provider_access_denied` (grau), nicht als „MECM kritisch".
+
+Lokale Tageslogs aller vier Aufgaben liegen unter
+`%ProgramFiles%\VirtuSphere\Logs\<Datum>_<Komponente>.log` (Site Health:
+`<Datum>_site-health.log`), einheitliches Format, 30 Tage Aufbewahrung.
 
 ## Client-Anwendungen (Etappe 5)
 
@@ -334,7 +402,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 |---|---|---|
 | Registry-Konfiguration fehlt komplett | wartet in 60-s-Schleife auf den Installer (Selbstheilung, kein Exit) | ERROR einmalig (Default-LogRoot) |
 | WebApp/MECM-Fehler im Durchlauf | Backoff 30 s; ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung | ERROR je Versuch |
-| Heartbeat-Zustellung scheitert | still verworfen (fire-and-forget, ADR-0018) | still; Portal-Ampel wird rot |
+| Berichts-Zustellung scheitert | Lauf läuft weiter (der Bericht bricht ihn nie ab); lokal gedrosselt protokolliert | gedrosselt (WARN); Portal-Ampel wird stale/rot |
 | Registry-Änderung zur Laufzeit | greift erst nach Task-Neustart (Konfig wird beim Start gelesen; Installer-Re-Run startet die Tasks neu) | — |
 | Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess) | Konsole only |
 
@@ -387,9 +455,9 @@ verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. Hat sich
 noch nie eine Sync-Quelle gemeldet (Gruppe steht komplett auf „Noch keine
 Daten"), entfallen die Zeilenhinweise ganz: es gibt keine Aufgabe, die man neu
 starten könnte. Der Abschnitt nennt dann einmal den Einrichtungsweg (Skripte auf
-dem MECM-Server, IP-Freigabe im Portal, dieses Dokument). Ebenso schweigt die
-TCP-Prüfung, solange sie kein wirksames Ziel hat: „Server nicht erreichbar" wäre
-eine Aussage über eine Verbindung, die nie versucht wurde. Der
+dem MECM-Server, IP-Freigabe im Portal, dieses Dokument). Der MECM-Site-Status
+wird davon getrennt geführt: solange die Site-Health-Aufgabe nichts gemeldet hat,
+bleibt er grau (unbekannt), statt „kritisch" zu behaupten. Der
 Zustand „Erwartet, nie gemeldet" (gelb) unterscheidet sich von „Noch keine
 Daten" (grau): gelb heißt, andere MECM-Quellen melden sich bereits, diese eine
 also nie eingerichtet oder nie gestartet; grau heißt, die Integration ist
@@ -419,12 +487,15 @@ insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
 2. Katalogquelle prüfen; notfalls Schwelle temporär anheben (Portal →
    Einstellungen → Paket-Sync-Schutzschwelle).
 
-**MECM-Server offline**
-- Der *Systemstatus* zeigt den Netzwerkpfad rot → wirksames Ziel, Modus und Port
-  direkt dort prüfen. Unter Einstellungen → Machine-API kann zwischen
-  automatischer Heartbeat-Absender-IP und eigenem Ziel gewechselt werden.
-  Standard ist Port 445. Aktuelle Heartbeats bei roter Probe sind kein
-  Widerspruch: Hin- und Rückweg sowie die geprüften Protokolle sind verschieden.
+**MECM-Server offline oder Site kritisch**
+- Es gibt keine Portal-Probe mehr; das Portal spricht MECM nicht aktiv an. Fällt
+  der MECM-Server aus, bleiben zuerst die Ergebnisberichte der Sync-Aufgaben aus
+  (Integration wird stale/rot), und die Site-Health-Aufgabe kann den Provider nicht
+  mehr abfragen (MECM-Site wird grau/unbekannt, nicht rot). Ein rotes MECM-Site
+  bedeutet ausschließlich den von MECM selbst bestätigten kritischen Status 2:
+  dann MECM-Konsole → Monitoring → System Status. Ein falsch konfigurierter
+  Provider oder eine fehlende Berechtigung zeigt sich als grau (Providerfehler),
+  nicht als „kritisch".
 
 **Wartungsdienst rot**
 - Auf dem Ubuntu-Host: `docker compose ps`, dann
