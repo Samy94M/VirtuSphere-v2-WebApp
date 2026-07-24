@@ -101,3 +101,16 @@ vulnerabilities:
   - id: CVE-2026-45073
     statement: "symfony/cache 5.4 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
     expired_at: 2026-09-30
+  # --- Debian-Basis / linux-libc-dev (Kernel-Header, Build-Zeit) ---
+  # Stand 2026-07-24: linux-libc-dev sind die Kernel-Header, gegen die gebaut
+  # wird, kein laufender Kernel. Alle Container nutzen den Host-Kernel, nicht
+  # ihren eigenen; nfsd- und XFS-Bugs sind im Container zur Laufzeit nicht
+  # ausnutzbar. Betrifft baugleich mysql, phpmyadmin und die drei
+  # VirtuSphere-Images (gemeinsame Debian-Basis). Der Fix kommt mit dem
+  # naechsten Basis-Image-Refresh (linux-libc-dev >= 6.12.96-1). Owner: Samy.
+  - id: CVE-2026-53399
+    statement: "linux-libc-dev Kernel-Header (Build-Zeit); Container nutzt Host-Kernel, nfsd nicht im Container aktiv; Fix mit naechstem Basis-Image-Refresh; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-64600
+    statement: "linux-libc-dev Kernel-Header (Build-Zeit); Container nutzt Host-Kernel, XFS-Reflink im Container nicht relevant; Fix mit naechstem Basis-Image-Refresh; Owner: Samy"
+    expired_at: 2026-09-30
