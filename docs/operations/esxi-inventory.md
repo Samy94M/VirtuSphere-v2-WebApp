@@ -51,6 +51,62 @@ Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` be
 
 Dieselbe Ampel erscheint an drei Stellen und wird aus demselben Health-Snapshot berechnet: auf der ESXi-Karte im Systemstatus, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor". Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.
 
+Was die Ampel nicht beantwortet, steht als Taktzeile darunter: auf der Seite Zugangsdaten nennt jede Zeile unter Badge und Zeitpunkt, ob sich der Wert von allein erneuert. Badge über Zeitstempel heißt im Portal sonst überall „letzte Abfrage", und gepollt wird nur ESXi. Drei Dinge halten diesen Abruf an, und jedes muss die Zeile beim Namen nennen, sonst ist sie dieselbe stille Behauptung an neuer Stelle:
+
+| Blocker | Reichweite | Zeile sagt |
+|---|---|---|
+| Intervall 0 | alle Zugangsdaten | kein automatischer Abruf (Intervall 0) |
+| Kein auflösbarer Ansible-Zugang (keiner, mehrere ohne Auswahl, Auswahl gelöscht) | alle Zugangsdaten | kein automatischer Abruf, kein Ansible-Zugang gewählt |
+| Auth-Pause | dieses Zugangsdatum | pausiert, kein automatischer Abruf |
+
+Die Reihenfolge ist die, in der ein Betreiber sie beheben muss, nicht die der Prüfung: „pausiert" zu melden, während das Intervall auf 0 steht, verspräche, dass das Aufheben der Pause den Zyklus startet. Der zweite Fall ist der stillste: ohne Ansible-Host wird kein Abruf eingereiht und nicht einmal ein Versuch gestempelt, der Zeitstempel friert also ein, während die Einstellung weiter sechs Stunden liest.
+
+Wer prüft und wer anzeigt, entscheidet dabei nicht getrennt: `esxi_inventory_automation_blocker()` (`lib/esxi_automation.php`, Werteliste `VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS`) ist dieselbe Bedingung, auf die der Wartungsdienst überspringt und aus der die Zeile ihren Satz macht. Ein vierter Grund, der nur im Dienst ergänzt würde, hätte die Zeile sonst wieder einen Zyklus versprechen lassen, den es nicht gibt; die Zuordnung Grund → Satz ist ein `match` ohne Default und wird gegen die Werteliste getestet, bricht also im Build und nicht auf der Seite.
+
+## Grüner Abruf, trotzdem eine 0
+
+Ein Abruf ist kein einzelner Vorgang, sondern mehrere getrennte Abfragen: Datacenter, Datastores, Standard-Portgruppen, Distributed-Portgruppen, Host-Daten. Nur die erste ist der Verbindungstest; bleibt eine der übrigen ohne Ergebnis, läuft der Abruf trotzdem sauber zu Ende. Die Karte zeigt für diese Art dann eine 0 und die Ampel bleibt grün, denn die Ampel beantwortet ausschließlich, ob der Abruf gelaufen ist. Eine 0 neben gefüllten Zahlen ist also kein Widerspruch, sondern der Hinweis, genau eine Abfrage nachzusehen.
+
+Woher die einzelnen Zahlen kommen und was eine 0 dort bedeutet:
+
+| Zahl auf der Karte | Wird gelesen von | 0 heißt üblicherweise |
+|---|---|---|
+| Datacenter, Datastores | Host oder vCenter, je nach Zugangsdatum | Selten. Meist darf das ESXi-Konto die Objekte nicht sehen; scheitert die Datacenter-Abfrage ganz, ist der Abruf rot statt grün |
+| Portgruppen (Standard) | dem ESXi-Host selbst | Zugangsdatum zeigt auf ein vCenter statt auf den Host, oder der Portalstand ist älter als der Portgruppen-Fix (siehe Changelog) |
+| Portgruppen (Distributed) | nur vom vCenter | Normalfall an einem einzelnen ESXi-Host: dort gibt es keine Distributed-Portgruppen |
+| Hosts | dem ESXi-Host selbst | Zugangsdatum zeigt auf ein vCenter statt auf den Host |
+
+Nachsehen muss man dafür nichts raten: **jeder Abruf protokolliert selbst, welche seiner Abfragen geantwortet hat.** Im Job-Log (Systemstatus, Auftrag der jeweiligen Karte) steht direkt unter den Zahlen eine Zeile `Inventory queries:`. Sie hat genau zwei Formen:
+
+```
+Inventory queries: all 7 answered.
+Inventory queries: 6 of 7 answered, 1 without an answer - networks_standard rejected (one of the following is required: cluster_name, esxi_hostname)
+```
+
+Die erste Form heißt: alle Zahlen sind belastbar, eine 0 ist dann eine echte 0. Die zweite nennt jede stumme Abfrage beim Namen und in zwei Worten den Grund. Scheitern mehrere Abfragen an derselben Ursache, was bei einem falschen Zugangsdatum oder einer unpassenden Modulversion der Normalfall ist, stehen sie gemeinsam vor einer Meldung (`datastores, hosts rejected (...)`), statt dieselbe Meldung mehrfach zu wiederholen:
+
+| Wort | Bedeutung | Was zu tun ist |
+|---|---|---|
+| `answered` | Die Abfrage lief und hat geantwortet, auch wenn die Antwort leer war | Nichts. Eine 0 bedeutet hier wirklich „gibt es nicht" |
+| `rejected` | Die Abfrage wurde abgelehnt, oft bevor sie ESXi überhaupt erreicht hat | Die Meldung in Klammern lesen; sie stammt wörtlich vom Ansible-Modul und steht ausführlich weiter oben im selben Job-Log |
+| `skipped` | Das Playbook hatte nichts zu fragen, etwa Distributed-Portgruppen ohne bekanntes Datacenter | In der Regel nichts. Erwartet man hier Daten, zuerst die Abfrage darüber prüfen, von der sie abhängt |
+
+Die Namen in der Zeile sind die Abfragen, nicht die Kartenzahlen. Welche es gibt und was sie speisen (die Zeile selbst nennt ihre Gesamtzahl, hier steht bewusst keine zweite):
+
+| Abfrage | Speist |
+|---|---|
+| `datacenters` | die Zahl „Datacenter"; zugleich der Verbindungstest des Abrufs |
+| `datastores` | die Zahl „Datastores" samt Kapazität und freiem Speicher |
+| `networks_standard`, `networks_dvs` | gemeinsam die Zahl „Portgruppen" und den VLAN-Katalog |
+| `hosts` | die Zahl „Hosts" samt RAM, Kernen und Uhrabweichung |
+| `about`, `host_runtime` | die Hinweise zum Host (Produkt, Lizenz, HA-Cluster, Wartungsmodus), keine Kartenzahl |
+
+Eine Zeile ohne `Inventory queries:` stammt aus einem Abruf, der älter ist als dieser Bericht; sie behauptet bewusst nichts über Vollständigkeit.
+
+Für das Inventar ist ein Zugangsdatum **auf den ESXi-Host selbst** der geprüfte und empfohlene Weg; ein vCenter-Zugangsdatum liefert Datacenter und Datastores, aber weder Standard-Portgruppen noch Host-Daten.
+
+Verloren geht dabei nie etwas: ein leeres Teilergebnis lässt den vorhandenen Stand dieser Art unangetastet (Empty-Guard), und der VLAN-Katalog zieht Portgruppen erst zurück, wenn ein Abruf sie nachweislich nicht mehr meldet.
+
 ## „Inventarabruf starten" bei ESXi ist ein echter Auftrag
 
 Das Portal spricht ESXi **nie** direkt an. „Inventarabruf starten" auf der Seite Zugangsdaten hebt bei einem ESXi-Zugangsdatum die Auth-Pause auf und reiht denselben read-only Abruf ein, den auch das Speichern auslöst: über den Ansible-Host, per pyVmomi/SOAP gegen `/sdk`, mit `validate_certs: false`. Damit läuft genau der Weg, den ein Deploy nimmt.
@@ -59,7 +115,7 @@ Konsequenzen für den Betrieb:
 
 - **Die Zertifikatsvariante ist egal.** Selbstsigniert ab Werk, von der VMCA des vCenters oder von der Domänen-CA: die Prüfung ist im Playbook bewusst aus. Eine strikte TLS-Prüfung ist eine spätere Härtungsentscheidung (WP7) und gehört in eine ADR, nicht still in einen Stream-Kontext.
 - **Die Meldung und der Befund haben getrennte Aufgaben.** Der Flash unterscheidet eingereiht, bereits offen oder fehlende/uneindeutige Ansible-Auswahl. Der dauerhafte Befund steht im Systemstatus; bei eingereiht/laufend ist die Aktion deaktiviert und das Job-Log direkt verlinkt.
-- **Ein Ansible-Zugangsdatum wird weiterhin sofort geprüft** (SSH-Anmeldung plus Preflight), denn dieser Weg läuft aus dem Portal heraus.
+- **Ein Ansible-Zugangsdatum wird weiterhin sofort geprüft** (SSH-Anmeldung plus Preflight), denn dieser Weg läuft aus dem Portal heraus. Einen Scheduler hat er nicht, deshalb altert sein Ergebnis: Ein bestandener Preflight wechselt nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` (aktuell 7) Tagen auf „Unbestätigt", denn ein Grün von vor Wochen beweist nichts über heute. Ein Fehlschlag altert nie; ein bekannter Defekt darf nicht ins Graue verschwinden. Indirekt wird der Host trotzdem laufend benutzt, weil jeder ESXi-Abruf über ihn läuft, aber dieses Ergebnis landet auf der ESXi-Zeile, nicht auf dem Ansible-Badge.
 
 Historisch prüfte der Test `{host}:{port}/rest/appliance/system/version` mit PHPs strikter Zertifikatsprüfung. Beides war falsch: der Pfad gehört zur Management-API der vCenter Server Appliance und fehlt auf einem einzelnen ESXi (HTTP 404 trotz korrekter Zugangsdaten), und die Prüfung lehnte das ab Werk selbstsignierte Host-Zertifikat ab, das der Betrieb akzeptiert. Der Test meldete also rot bei völlig gesunden Zugangsdaten. Dieser Weg ist entfernt (ADR-0023, drittes Amendment).
 
@@ -182,4 +238,6 @@ Der VLAN-Katalog beantwortet je Portgruppe zwei Fragen in getrennten Spalten:
 - **„Auf ESXi" (Präsenz):** „auf allen Y Hosts" (grau, kein Handlungsbedarf) oder „auf X von Y Hosts" (gelb) mit den **fehlenden** Hosts. Y zählt nur Zugangsdaten mit mindestens einem erfolgreichen Abruf; ein nie abgerufenes Zugangsdatum kann Ab- oder Anwesenheit nicht beweisen. Ein Deploy auf einen fehlenden Host würde die Portgruppe nicht finden; die Deploy-Seite warnt dafür live bei der Host-Auswahl (nicht blockierend).
 - **„VLAN-ID":** vergleicht die IDs gleichnamiger Portgruppen über die Hosts. Einheitlich = graue Info „ID n"; unterschiedlich = rotes Badge mit Aufschlüsselung je ID und Host (gleicher Name, anderes Netz: wahrscheinliche Fehlkonfiguration auf einem der Hosts). Trunk-/Bereichs-Portgruppen werden nicht verglichen und neutral ausgewiesen; Zeilen ohne ID-Daten (Cache von vor dieser Funktion) zeigen einen Platzhalter bis zum nächsten Abruf.
 
-**Verifikation der VLAN-ID-Felder am produktiven Host (einmalig nach Rollout):** manuellen Inventory-Refresh auslösen, im Job-Log „Inventory updated ... network: N items" prüfen und auf der VLAN-Seite kontrollieren, ob IDs erscheinen. Das Playbook liefert die rohen Portgruppen-Objekte der `*_info`-Module; die Feldauswertung (`portgroup`/`portgroup_name`, `vlan_id`) liegt im PHP-Parser. Stimmen Feldpfade nicht, bleiben die Listen leer, der Empty-Guard hält den Bestand und nur die ID-Spalte bleibt stumm; kaputtgehen kann nichts.
+**Verifikation der VLAN-ID-Felder am produktiven Host (einmalig nach Rollout):** manuellen Inventory-Refresh auslösen, im Job-Log „Inventory updated ... network: N items" prüfen und auf der VLAN-Seite kontrollieren, ob IDs erscheinen. Das Playbook liefert die rohen Portgruppen-Objekte der `*_info`-Module; die Feldauswertung liegt im PHP-Parser. Die beiden Modulfamilien legen die ID unterschiedlich ab: Standard-Portgruppen führen `portgroup` und `vlan_id` direkt, Distributed-Portgruppen `portgroup_name` und einen Block `vlan_info` mit `vlan_id` und Trunk-Kennzeichen. Stimmen Feldpfade nicht, bleiben die Listen leer, der Empty-Guard hält den Bestand und nur die ID-Spalte bleibt stumm; kaputtgehen kann nichts.
+
+Distributed-Portgruppen werden für das erste gemeldete Datacenter abgerufen und sind mangels DVS in der Testumgebung nicht gegen echte Daten verifiziert.

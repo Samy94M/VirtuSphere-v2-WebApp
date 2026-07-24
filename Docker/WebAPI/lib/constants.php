@@ -341,7 +341,17 @@ const VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS = 3600;
 // heartbeat whose result the script has not yet confirmed (script rollout gap).
 const VIRTUSPHERE_HEARTBEAT_STATES = ['ok', 'legacy', 'warning', 'missing', 'danger', 'unknown'];
 const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
-const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
+// `stale` sits next to `ok` because that is what it was: a passing preflight
+// whose age has taken it out of evidence, not a new kind of problem.
+const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'stale', 'warning', 'danger', 'unknown'];
+
+// How long a passing Ansible preflight stays evidence. The test runs on click
+// only (there is no scheduler), so this is the window after which the portal
+// stops claiming the deploy chain works and says "unconfirmed" instead.
+// Deliberately its own constant rather than a multiple of the ESXi inventory
+// interval: that setting may be 0, and its 6h default would grey out a manual
+// test overnight, which trains operators to ignore the badge.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS = 7;
 
 // mecm-category audits from the machine surface are throttled per tag so a
 // misbehaving 10s sync loop cannot flood deploy_logs (error_log always logs).

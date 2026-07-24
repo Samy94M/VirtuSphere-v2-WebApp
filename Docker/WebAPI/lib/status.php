@@ -128,6 +128,9 @@ function virtusphere_heartbeat_meta(string $staleness): array
         // 'missing' = expected but never seen (another source already reported).
         'missing' => ['badge' => 'warning'],
         'danger' => ['badge' => 'danger'],
+        // 'stale' = a green result that has aged out of being evidence. Grey,
+        // not yellow: nothing is known to be broken, it is simply unconfirmed.
+        'stale' => ['badge' => 'neutral'],
         default => ['badge' => 'neutral'],
     };
 }
@@ -150,8 +153,55 @@ function virtusphere_heartbeat_state_rank(string $state): int
         // unconfirmed, milder than a stale reporter.
         'legacy' => 2,
         'ok' => 0,
+        // 'stale' shares the rank of 'unknown' (the default) on purpose: an
+        // expired green and a never-tested credential say the same thing about
+        // the present, so a roll-up must not report one as healthier.
         default => 1,
     };
+}
+
+/**
+ * Traffic-light state for an Ansible credential's last preflight test: 'ok',
+ * 'warning', 'danger' (last test failed), 'stale' (last test passed but is too
+ * old to still be evidence) or 'unknown' (never tested).
+ *
+ * The preflight has no scheduler, so without the staleness axis a green badge
+ * stayed green forever next to a timestamp from months ago, in a column whose
+ * badge-over-timestamp shape reads as "last poll" everywhere else in the portal.
+ * Only a passing result ages: a failure stays red until someone re-tests it,
+ * because ageing a known break into grey would hide it.
+ *
+ * @param array<string, mixed>|null $state
+ */
+function ansible_preflight_ampel(?array $state, ?int $now = null): string
+{
+    if ($state === null || trim((string) ($state['last_status'] ?? '')) === '') {
+        return 'unknown';
+    }
+
+    // Literal comparison rather than the constants: the value set is owned by
+    // lib/repo/ansible_preflight.php, which this module does not load.
+    $ampel = match ((string) $state['last_status']) {
+        'ok' => 'ok',
+        'warning' => 'warning',
+        default => 'danger',
+    };
+    if ($ampel === 'danger') {
+        return $ampel;
+    }
+
+    $checkedAt = trim((string) ($state['last_checked_at'] ?? ''));
+    if ($checkedAt === '') {
+        return $ampel;
+    }
+    $checkedEpoch = strtotime($checkedAt . ' UTC');
+    if ($checkedEpoch === false) {
+        return $ampel;
+    }
+
+    return (($now ?? time()) - $checkedEpoch) > VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400
+        ? 'stale'
+        : $ampel;
 }
 
 // --- V2 result-reporting derivation (ADR-0018 reportRun) --------------------

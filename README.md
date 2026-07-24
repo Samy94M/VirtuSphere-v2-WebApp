@@ -12,7 +12,12 @@ Wichtige Einstiegsdateien:
 - `docs/INSTALLATION-ANLEITUNG.md` für das Setup.
 - `docs/QA.md` für PHPUnit-, Hook-, Lang-Audit- und Git-Hygiene-Befehle.
 - `docs/CHANGELOG.md` für die Migrationshistorie.
-- `docs/operations/backup.md` für Backup/Restore (`scripts/backup.sh`, `scripts/restore_test.sh`).
+- `docs/operations/` für den laufenden Betrieb, ein Dokument je Frage:
+  - `go-live.md`: erste produktive Inbetriebnahme auf dem Ubuntu-Host, ohne Docker-Vorwissen.
+  - `esxi-inventory.md`: read-only Inventarabruf, ESXi-geführter VLAN-Katalog, Fehlerbilder und was eine 0 auf einer ESXi-Karte bedeutet.
+  - `mecm-integration.md`: Zusammenspiel von Portal, MECM-Server und PXE-Clients.
+  - `https.md`: HTTPS im Portal einschalten (Zertifikat, Listener, HSTS).
+  - `backup.md`: Backup/Restore (`scripts/backup.sh`, `scripts/restore_test.sh`).
 - `PRE-SHIP-CHECKLIST.md` für die Release-Gates.
 - `.env.example` als Vorlage; die lokale `.env` ist bewusst ignoriert.
 

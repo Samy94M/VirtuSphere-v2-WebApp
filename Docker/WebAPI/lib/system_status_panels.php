@@ -306,25 +306,37 @@ function system_status_render_ansible(array $snapshot, array $user): void
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE); ?>">
         <h2><?php echo h(__t('system_status.ansible_heading')); ?></h2>
-        <p class="muted"><?php echo h(__t('system_status.ansible_hint')); ?></p>
+        <p class="muted"><?php echo h(__t('system_status.ansible_hint', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
         <?php if ($snapshot['ansible']['rows'] === []) { ?>
             <div class="empty-state"><p><?php echo h(__t('system_status.ansible_empty')); ?></p><?php if (can('credentials.manage', $user)) { ?><a class="button button-secondary" href="credentials.php"><?php echo h(__t('system_status.ansible_test_link')); ?></a><?php } ?></div>
         <?php } else { ?>
             <div class="status-list">
             <?php foreach ($snapshot['ansible']['rows'] as $entry) {
                 $credential = $entry['credential'];
-                $state = $entry['state_row'];
-                $component = trim((string) ($state['last_component'] ?? ''));
+                // $stateRow is the stored result, $entry['state'] the derived
+                // Ampel. They were both called "state" here while only one of
+                // them may colour a badge, which is how the row came to derive
+                // its own instead of taking the snapshot's.
+                $stateRow = $entry['state_row'];
+                $component = trim((string) ($stateRow['last_component'] ?? ''));
                 ?>
                 <article class="status-row" id="credential-<?php echo h((string) $credential['id']); ?>">
-                    <div class="status-row-main"><div><strong><?php echo h((string) $credential['name']); ?></strong><?php echo ansible_preflight_badge($state); ?></div><code><?php echo h((string) $credential['host']); ?></code></div>
-                    <p><?php echo h(__t('system_status.ansible_th_last_test')); ?>: <?php echo $state !== null && !empty($state['last_checked_at']) ? h(portal_format_timestamp($state['last_checked_at'])) : h(__t('system_status.ansible_never_tested')); ?></p>
+                    <?php // The snapshot's state, not a fresh derivation from the row: re-deriving
+                          // here would put a second clock on a page whose whole point is that every
+                          // age is measured against one, and the row could then disagree with the
+                          // overview card above it across a threshold. ?>
+                    <div class="status-row-main"><div><strong><?php echo h((string) $credential['name']); ?></strong><?php echo ansible_state_badge((string) $entry['state']); ?></div><code><?php echo h((string) $credential['host']); ?></code></div>
+                    <p><?php echo h(__t('system_status.ansible_th_last_test')); ?>: <?php echo $stateRow !== null && !empty($stateRow['last_checked_at']) ? h(portal_format_timestamp($stateRow['last_checked_at'])) : h(__t('system_status.ansible_never_tested')); ?></p>
                     <?php
                     // A preflight warning stores the check that raised it in the
                     // same column a failure stores its broken component in, so
                     // "failed at: allowlist" would read as a failure of a test
                     // that in fact passed. The warning gets its own sentence.
-                    if ($entry['state'] === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?></div><?php
+                    // Read the stored result here, not the age-derived Ampel:
+                    // an old allowlist warning becomes stale, but it remains
+                    // a successful restricted test and must never be described
+                    // as a failed component merely because its evidence aged.
+                    if (($stateRow['last_status'] ?? '') === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?></div><?php
                     } elseif ($component !== '') { ?><p class="muted"><?php echo h(__t('system_status.ansible_failed_component', ['component' => $component])); ?></p><?php } ?>
                 </article>
             <?php } ?>

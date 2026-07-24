@@ -82,6 +82,164 @@ final class AnsibleInventoryParseTest extends TestCase
         self::assertCount(3, $parsed['networks']);
     }
 
+    /**
+     * DVS portgroups keep the id one level down, under `vlan_info`, and say
+     * there whether the portgroup is a trunk. Only `show_vlan_info: true` puts
+     * that block into the module output at all; without it a DVS portgroup
+     * arrives with a name and nothing else, which is a silent ID column, not an
+     * error.
+     */
+    public function testParsesDvsVlanInfoBlock(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => [],
+            'datastores' => [],
+            'networks_standard' => [],
+            'networks_dvs' => [
+                ['portgroup_name' => 'dvs-prod', 'vlan_info' => ['trunk' => false, 'pvlan' => false, 'vlan_id' => 42]],
+                ['portgroup_name' => 'dvs-untagged', 'vlan_info' => ['trunk' => false, 'pvlan' => false, 'vlan_id' => 0]],
+                // A trunk reports its range as a list of start/end pairs.
+                ['portgroup_name' => 'dvs-range', 'vlan_info' => ['trunk' => true, 'pvlan' => false, 'vlan_id' => [['start' => 1, 'end' => 4094]]]],
+                // No show_vlan_info in the run: name only, no id, no trunk claim.
+                ['portgroup_name' => 'dvs-quiet'],
+            ],
+            'hosts' => [],
+        ]);
+
+        $byName = [];
+        foreach (ansible_parse_inventory_output($out)['networks'] as $item) {
+            $byName[$item['name']] = $item['meta_json'];
+        }
+
+        self::assertSame(42, $byName['dvs-prod']['vlan_id']);
+        self::assertFalse($byName['dvs-prod']['trunk']);
+        self::assertSame(0, $byName['dvs-untagged']['vlan_id']);
+        // The trunk flag wins over the id beside it: a range is never an id.
+        self::assertNull($byName['dvs-range']['vlan_id']);
+        self::assertTrue($byName['dvs-range']['trunk']);
+        self::assertNull($byName['dvs-quiet']['vlan_id']);
+        self::assertFalse($byName['dvs-quiet']['trunk']);
+    }
+
+    /**
+     * The per-query report exists so an empty list stops being ambiguous. A
+     * rejected query (the module refused the call) and a skipped one (the
+     * playbook had nothing to ask about) both produce the same empty list as a
+     * host that genuinely has none.
+     */
+    public function testParsesPerQueryOutcomes(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => ['ha-datacenter'],
+            'datastores' => [],
+            'networks_standard' => [],
+            'networks_dvs' => [],
+            'hosts' => [],
+            'queries' => [
+                'datacenters' => ['failed' => false, 'skipped' => false, 'msg' => ''],
+                'networks_standard' => ['failed' => true, 'skipped' => false, 'msg' => 'one of the following is required: cluster_name, esxi_hostname'],
+                'networks_dvs' => ['failed' => false, 'skipped' => true, 'msg' => ''],
+            ],
+        ]);
+
+        $queries = ansible_parse_inventory_output($out)['queries'];
+        self::assertSame(VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, $queries['datacenters']['state']);
+        self::assertSame(VIRTUSPHERE_INVENTORY_QUERY_REJECTED, $queries['networks_standard']['state']);
+        self::assertStringContainsString('cluster_name', $queries['networks_standard']['message']);
+        self::assertSame(VIRTUSPHERE_INVENTORY_QUERY_SKIPPED, $queries['networks_dvs']['state']);
+    }
+
+    /**
+     * A module message can be a traceback. The summary line promises to be one
+     * line, so the newlines are collapsed before it is truncated; the verbatim
+     * text is in the playbook output above it either way.
+     */
+    public function testQueryMessageIsCollapsedToOneLine(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => [],
+            'queries' => ['hosts' => ['failed' => true, 'msg' => "Traceback:\n  File \"x.py\", line 1\r\n\tboom  boom"]],
+        ]);
+
+        $message = ansible_parse_inventory_output($out)['queries']['hosts']['message'];
+        self::assertSame('Traceback: File "x.py", line 1 boom boom', $message);
+        self::assertStringNotContainsString("\n", (string) ansible_inventory_queries_log_line(['hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => $message]]));
+    }
+
+    /** A long module message must not push the summary out of a reader's view. */
+    public function testQueryMessageIsTruncated(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => [],
+            'queries' => ['hosts' => ['failed' => true, 'msg' => str_repeat('x', VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH + 50)]],
+        ]);
+
+        $queries = ansible_parse_inventory_output($out)['queries'];
+        self::assertSame(VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH, mb_strlen($queries['hosts']['message']));
+    }
+
+    public function testQueryLogLineNamesEveryQuietQuery(): void
+    {
+        $line = ansible_inventory_queries_log_line([
+            'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+            'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'one of the following is required: cluster_name, esxi_hostname'],
+            'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_SKIPPED, 'message' => ''],
+        ]);
+
+        self::assertIsString($line);
+        self::assertStringContainsString('1 of 3 answered', $line);
+        self::assertStringContainsString('networks_standard rejected (one of the following is required', $line);
+        self::assertStringContainsString('networks_dvs skipped', $line);
+    }
+
+    /**
+     * The failure that actually happens is systematic: one wrong credential or
+     * one bad argument list silences several queries with the identical
+     * message. Rendered in the job log, repeating that sentence per query
+     * produced a wall of text that hid the names. Same failure, one entry.
+     */
+    public function testQueryLogLineGroupsQueriesThatFailedTheSameWay(): void
+    {
+        $same = 'one of the following is required: cluster_name, esxi_hostname';
+        $line = ansible_inventory_queries_log_line([
+            'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+            'datastores' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => $same],
+            'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => $same],
+            'hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'something else'],
+            'about' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_SKIPPED, 'message' => ''],
+        ]);
+
+        self::assertIsString($line);
+        self::assertStringContainsString('datastores, networks_standard rejected (' . $same . ')', $line);
+        self::assertSame(1, substr_count($line, $same), 'A shared message must be named once, not once per query.');
+        // A different message stays its own entry, and so does a other state.
+        self::assertStringContainsString('hosts rejected (something else)', $line);
+        self::assertStringContainsString('about skipped', $line);
+        self::assertStringContainsString('1 of 5 answered, 4 without an answer', $line);
+    }
+
+    /**
+     * The all-good case is logged too. A line that only ever appears when
+     * something is wrong never teaches a reader that a pull has parts, and this
+     * line is where they find out which part was quiet.
+     */
+    public function testQueryLogLineAlsoReportsACompletePull(): void
+    {
+        $line = ansible_inventory_queries_log_line([
+            'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+            'hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+        ]);
+
+        self::assertSame('Inventory queries: all 2 answered.', $line);
+    }
+
+    /** An older playbook reports nothing; claiming completeness would be a lie. */
+    public function testQueryLogLineStaysSilentWithoutTheReport(): void
+    {
+        self::assertNull(ansible_inventory_queries_log_line([]));
+        self::assertSame([], ansible_parse_inventory_queries(null));
+    }
+
     public function testMissingMarkerThrows(): void
     {
         $this->expectException(RuntimeException::class);

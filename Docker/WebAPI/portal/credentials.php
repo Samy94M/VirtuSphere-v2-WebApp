@@ -10,53 +10,10 @@ require_once __DIR__ . '/../lib/repo/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_capabilities.php';
 require_once __DIR__ . '/../lib/repo/ansible_preflight.php';
+require_once __DIR__ . '/../lib/credentials_status.php';
+require_once __DIR__ . '/../lib/credentials_test_message.php';
 require_once __DIR__ . '/../lib/ssh.php';
 require_once __DIR__ . '/../lib/system_status.php';
-
-/**
- * User-facing sentence for a connection test result. The raw transport text
- * never becomes the message: it travels in $result['detail'] and is rendered
- * behind the alert's details element.
- *
- * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>} $result
- */
-function credentials_test_message(array $result): string
-{
-    if ($result['ok']) {
-        // Green chain with an allowlist warning: the credential works, but the
-        // host's IP would be rejected by db_importMAC.php. Two keys instead of
-        // an ":ip"-with-"?" sentence, because the IP is only known when the
-        // legacy 403 echoed one.
-        if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST) {
-            $ip = trim((string) ($result['context']['ip'] ?? ''));
-            return $ip !== ''
-                ? __t('credentials.test_warn_allowlist', ['ip' => $ip])
-                : __t('credentials.test_warn_allowlist_noip');
-        }
-        return __t('credentials.test_ok_ansible');
-    }
-
-    if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP) {
-        return __t('credentials.test_err_sftp');
-    }
-
-    if ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_PREFLIGHT) {
-        $component = trim((string) ($result['context']['component'] ?? ''));
-        // The portal-reachability probe is not a "missing tool"; it points at the
-        // API base URL and the network, so it gets its own sentence.
-        if ($component === VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL) {
-            return __t('credentials.test_err_portal');
-        }
-        // A named component (pyvmomi, community.vmware, ...) points the operator
-        // straight at what to install; an unnamed failure keeps the exit code.
-        if ($component !== '') {
-            return __t('credentials.test_err_preflight_component', $result['context']);
-        }
-        return __t('credentials.test_err_preflight', $result['context']);
-    }
-
-    return connection_error_message($result['code'], $result['context']);
-}
 
 /**
  * Testing an ESXi credential means pulling its inventory over the Ansible host:
@@ -265,6 +222,13 @@ $credentials = repo_credentials($connection);
 // the System status page answers "what does this host report". One page per
 // question (ADR-0023), so the detail lives there and this links to it.
 $inventoryIntervalHours = esxi_inventory_interval_hours($connection);
+// Global, so it is resolved once: without a usable Ansible host the scheduler
+// has nothing to run the pull over and enqueues nothing for any credential.
+$ansibleHostSelected = esxi_inventory_ansible_resolution($connection)['credential_id'] !== null;
+// One clock for the whole table, like the System status snapshot: both badges
+// are age-derived, so two rows recorded at the same instant must not land on
+// opposite sides of a threshold because their time() calls differed by a second.
+$renderedAt = time();
 $esxiStates = repo_esxi_inventory_states($connection);
 $ansiblePreflightStates = repo_ansible_preflight_states($connection);
 layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
@@ -320,21 +284,23 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                     <td><?php echo h((string) ($row['host'] ?? '')); ?></td>
                     <td><?php echo ($row['port'] ?? null) !== null && (string) $row['port'] !== '' ? h((string) $row['port']) : '<span class="muted">&mdash;</span>'; ?></td>
                     <td><?php echo h((string) ($row['username'] ?? '')); ?></td>
-                    <td>
+                    <td class="status-cell">
                         <?php if ($isEsxi) {
                             $esxiState = $esxiStates[$rowId] ?? null;
-                            $esxiAmpel = esxi_credential_state($esxiState, $inventoryIntervalHours);
+                            $esxiAmpel = esxi_credential_state($esxiState, $inventoryIntervalHours, $renderedAt);
                             ?>
                             <a href="<?php echo h(system_status_url('credential-' . $rowId, ['inventory' => $rowId])); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
                             <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>
+                            <small class="status-cadence"><?php echo h(credential_cadence_esxi($inventoryIntervalHours, $esxiState, $ansibleHostSelected)); ?></small>
                         <?php } elseif ($isAnsible) {
                             $pfState = $ansiblePreflightStates[$rowId] ?? null;
                             $pfTitle = $pfState !== null && !empty($pfState['last_checked_at'])
                                 ? __t('credentials.ansible_state_link_title', ['when' => portal_format_timestamp((string) $pfState['last_checked_at'])])
                                 : __t('credentials.ansible_state_untested_title');
                             ?>
-                            <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState); ?></a>
+                            <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState, $renderedAt); ?></a>
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
+                            <small class="status-cadence"><?php echo h(credential_cadence_ansible()); ?></small>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>

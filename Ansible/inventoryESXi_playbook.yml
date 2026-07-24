@@ -35,6 +35,16 @@
       register: vs_datastores
       ignore_errors: true
 
+    # `esxi_hostname` is not optional decoration: the module's argument spec
+    # requires one of cluster_name/esxi_hostname and rejects the call before it
+    # opens a connection ("one of the following is required: cluster_name,
+    # esxi_hostname"). Without it the task failed against every endpoint,
+    # ignore_errors swallowed the failure, and the portal reported 0 portgroups
+    # for a host that had thirteen. On a direct ESXi connection the value is not
+    # matched against anything (the module takes the one host it is talking to),
+    # so the connection address satisfies the contract. Against a vCenter it
+    # would have to name the host OBJECT, which an inventory pull does not know
+    # yet; standard portgroups stay empty there, as the host facts do.
     - name: Gather standard portgroups
       community.vmware.vmware_portgroup_info:
         hostname: "{{ esxi_hostname }}"
@@ -42,21 +52,32 @@
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
         validate_certs: false
+        esxi_hostname: "{{ esxi_hostname }}"
       register: vs_portgroups
       ignore_errors: true
 
-    # `datacenter` fehlt hier bewusst: gegen einen Standalone-ESXi-Host gibt es
-    # keinen DVS, der Task scheitert dann kontrolliert (ignore_errors) und die
-    # PHP-Seite liest networks_dvs als leer. noqa nur fuer die experimentelle
-    # args-Regel von ansible-lint.
-    - name: Gather distributed portgroups # noqa: args[module]
+    # Distributed portgroups exist only under a vCenter; a standalone ESXi host
+    # has none. Omitting `datacenter` was meant to let the task fail in a
+    # controlled way there, but the module requires the argument, so the call
+    # was rejected on EVERY endpoint, vCenter included ("missing required
+    # arguments: datacenter"). It now takes the first datacenter the canary
+    # above reported and is skipped when there is none, instead of guessing a
+    # name. `show_vlan_info` is what puts the VLAN id into the result at all;
+    # DVS objects nest it under `vlan_info` while standard portgroups carry
+    # `vlan_id` at the top level (both shapes resolve in
+    # ansible_inventory_network_item()). Unverified against a real DVS: a
+    # vCenter holding several datacenters would need a loop over all of them.
+    - name: Gather distributed portgroups
       community.vmware.vmware_dvs_portgroup_info:
         hostname: "{{ esxi_hostname }}"
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
         validate_certs: false
+        datacenter: "{{ vs_datacenters.datacenter_info | map(attribute='name') | first }}"
+        show_vlan_info: true
       register: vs_dvs_portgroups
+      when: (vs_datacenters.datacenter_info | default([])) | length > 0
       ignore_errors: true
 
     - name: Gather host facts
@@ -124,6 +145,43 @@
             {{ vs_about.about_info | default({}) }}
           host_runtime: >-
             {{ vs_host_runtime.ansible_facts | default({}) }}
+          # What each single query did. Without this an empty list is three
+          # different things at once: the host really has none, the account may
+          # not look, or the call was rejected before it ever reached ESXi. The
+          # last one is how a missing module argument stayed invisible for
+          # months behind ignore_errors, so the pull now says which of its
+          # queries answered instead of leaving a 0 to be interpreted.
+          # Deliberately projected to three fields rather than forwarding the
+          # registered results whole: those carry `invocation` with every module
+          # argument, and the ESXi password has no business in a job log.
+          # `msg` itself is safe to forward: ansible-core runs remove_values()
+          # over every module result, so a no_log value (the password argument)
+          # cannot survive inside a message. The projection guards the fields
+          # that are not messages, which no scrub protects.
+          queries: >-
+            {{ {
+              'datacenters': {'failed': vs_datacenters.failed | default(false),
+                              'skipped': vs_datacenters.skipped | default(false),
+                              'msg': vs_datacenters.msg | default('')},
+              'datastores': {'failed': vs_datastores.failed | default(false),
+                             'skipped': vs_datastores.skipped | default(false),
+                             'msg': vs_datastores.msg | default('')},
+              'networks_standard': {'failed': vs_portgroups.failed | default(false),
+                                    'skipped': vs_portgroups.skipped | default(false),
+                                    'msg': vs_portgroups.msg | default('')},
+              'networks_dvs': {'failed': vs_dvs_portgroups.failed | default(false),
+                               'skipped': vs_dvs_portgroups.skipped | default(false),
+                               'msg': vs_dvs_portgroups.msg | default('')},
+              'hosts': {'failed': vs_hosts.failed | default(false),
+                        'skipped': vs_hosts.skipped | default(false),
+                        'msg': vs_hosts.msg | default('')},
+              'about': {'failed': vs_about.failed | default(false),
+                        'skipped': vs_about.skipped | default(false),
+                        'msg': vs_about.msg | default('')},
+              'host_runtime': {'failed': vs_host_runtime.failed | default(false),
+                               'skipped': vs_host_runtime.skipped | default(false),
+                               'msg': vs_host_runtime.msg | default('')}
+            } }}
 
     - name: Emit inventory marker (base64 JSON for robust parsing)
       ansible.builtin.debug:

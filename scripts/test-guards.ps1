@@ -222,7 +222,11 @@ $docSemFixtureFiles = @(
     'docs/QA.md', 'docs/QUALITY-GATES.md', 'docs/TESTPLAN.md',
     'docs/DEPLOYMENT.md', 'docs/INSTALLATION-ANLEITUNG.md',
     'docs/operations', 'docs/security',
-    'Docker/WebAPI/phpstan.neon.dist', 'docker-compose.yml', '.github/workflows/ci.yml'
+    'Docker/WebAPI/phpstan.neon.dist', 'docker-compose.yml', '.github/workflows/ci.yml',
+    # SSoT der const-mirror-Regel: ohne sie meldet jede "aktuell N"-Nennung im
+    # Doku-Scope "nicht auffindbar", und jeder andere Fall waere aus dem
+    # falschen Grund rot statt aus seiner eigenen Mutation.
+    'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/deploy_constants.php'
 )
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
 $enumList = "'queued','running','succeeded','failed','cancelled','partial'"
@@ -289,6 +293,13 @@ $cases = @(
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'docs/QA.md' 'PHPStan (level 5' 'PHPStan (level 4'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phpstan-level\]'
+    } }
+    @{ Name = 'doc-semantics.const-mirror'; Body = {
+        # Zweite Nennung derselben Zeile: sie faellt nur auf, wenn die Regel jede
+        # Nennung einzeln an ihre Zahl bindet statt einmal pro Zeile zu ersetzen.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/esxi-inventory.md' 'aktuell 2x' 'aktuell 5x'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.const-mirror\]'
     } }
     @{ Name = 'doc-semantics.sccm-terminology'; Body = {
         $fx = New-Fixture $docSemFixtureFiles

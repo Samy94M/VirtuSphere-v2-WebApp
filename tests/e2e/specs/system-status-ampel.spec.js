@@ -103,11 +103,20 @@ test('the page legend explains every Ampel state the page can render, and says t
     legendGroup(page, 2),
   ]);
 
-  // The state sets are owned by lib/constants.php; the legend must show all of
-  // them, not the ones somebody remembered. The heartbeat set gained `legacy`.
-  expect(heartbeat).toHaveLength(6);
-  expect(esxi).toHaveLength(4);
-  expect(ansible).toHaveLength(4);
+  // The state sets are owned by lib/constants.php, so the expected sizes are
+  // read from there instead of restated here. Restating them made this spec the
+  // fourth place a state set was written down: adding `stale` to the Ansible
+  // Ampel turned a green suite red on two numbers that named no decision.
+  const sizes = phpJson(`
+echo 'JSON' . json_encode([
+    'heartbeat' => count(VIRTUSPHERE_HEARTBEAT_STATES),
+    'esxi' => count(VIRTUSPHERE_ESXI_AMPEL_STATES),
+    'ansible' => count(VIRTUSPHERE_ANSIBLE_AMPEL_STATES),
+]) . 'JSON';
+`);
+  expect(heartbeat).toHaveLength(sizes.heartbeat);
+  expect(esxi).toHaveLength(sizes.esxi);
+  expect(ansible).toHaveLength(sizes.ansible);
 
   const missing = heartbeat.find((label) => /Erwartet, nie gemeldet|Expected, never reported/.test(label));
   expect(missing, 'the `missing` state must have a legend entry on the page itself').toBeTruthy();
@@ -116,7 +125,7 @@ test('the page legend explains every Ampel state the page can render, and says t
 
   // Every group is explained by a sentence, not left as a bare badge.
   const items = page.locator('details.status-legend ul.ampel-legend li');
-  await expect(items).toHaveCount(14);
+  await expect(items).toHaveCount(sizes.heartbeat + sizes.esxi + sizes.ansible);
   for (const text of await items.allTextContents()) {
     expect(text.replace(/\s+/g, ' ').trim().length, `legend entry "${text}" has no explanation`).toBeGreaterThan(20);
   }

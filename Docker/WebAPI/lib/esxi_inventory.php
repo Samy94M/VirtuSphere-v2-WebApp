@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/esxi_automation.php';
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
@@ -722,7 +723,11 @@ function esxi_inventory_detail(mysqli $db, int $credentialId): ?array
 function esxi_inventory_enqueue_due(mysqli $db): int
 {
     $hours = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT);
-    if ($hours <= 0) {
+    $ansibleHostSelected = esxi_inventory_ansible_resolution($db)['credential_id'] !== null;
+    // Same predicate the Credentials page names in its cadence line, so the two
+    // cannot disagree about when this loop runs. The global blockers are checked
+    // once with a null state before any credential is read.
+    if (esxi_inventory_automation_blocker($hours, null, $ansibleHostSelected) !== null) {
         return 0;
     }
     $intervalSeconds = $hours * 3600;
@@ -732,7 +737,7 @@ function esxi_inventory_enqueue_due(mysqli $db): int
     foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) as $credential) {
         $credentialId = (int) $credential['id'];
         $state = repo_esxi_inventory_state($db, $credentialId);
-        if ($state !== null && (int) $state['paused_until_credential_change'] === 1) {
+        if (esxi_inventory_automation_blocker($hours, $state, $ansibleHostSelected) !== null) {
             continue;
         }
         // Interval gate on the last ATTEMPT (success or failure), not just the

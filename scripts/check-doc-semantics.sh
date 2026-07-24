@@ -18,6 +18,8 @@
 #   8. Stillgelegte Backup-Pfade (Docker/scripts/backup|restore.sh) nur mit
 #      Stilllegungs-Marker in derselben Zeile.
 #   9. Aktive Doku und PowerShell verwenden nur die MECM-Terminologie.
+#  10. "`VIRTUSPHERE_X` ... aktuell N"-Nennungen == numerischer Wert der
+#      Konstante in lib/constants.php bzw. lib/deploy_constants.php.
 #
 # Bewusst NICHT geprueft (datierte Dokumente, die einen Stand beschreiben
 # sollen): docs/audits/, docs/CHANGELOG.md, docs/adr/. Nicht maschinell
@@ -125,6 +127,37 @@ for f in $active_docs; do
   if grep -nE 'Docker/scripts/(backup|restore)\.sh' "$f" 2>/dev/null | grep -viE 'stillgelegt|retired|hard-fail|brechen|bricht' >&2; then
     fail backup-path "$f referenziert Docker/scripts/backup.sh|restore.sh ohne Stilllegungs-Marker; kanonisch sind scripts/backup.sh + scripts/restore_test.sh (ADR-0017/E5)."
   fi
+done
+
+# --- 10. "`KONSTANTE` (aktuell N)" gegen den PHP-Wert ---------------------------
+# Betriebsdoku nennt einen Schwellwert gern als "`VIRTUSPHERE_X` (aktuell 3)".
+# Das ist die Doku-Variante der check-bounds-sync-Fehlerklasse: die Konstante
+# wandert, der Satz laeuft weiter und liegt ab da falsch. Geprueft wird nur die
+# Form, die den Namen mitliefert, also genau die Stellen, die einen Vergleich
+# ueberhaupt zulassen; eine Zahl ohne Konstantennamen bleibt Review-Sache.
+const_ssot_files='Docker/WebAPI/lib/constants.php Docker/WebAPI/lib/deploy_constants.php'
+for f in $active_docs; do
+  # grep -o statt sed s///: eine Zeile nennt oft zwei Konstanten ("... STALE_FACTOR
+  # ..., aktuell 2x); danger ab ... FAILURE_STREAK_DANGER (aktuell 3)"), und eine
+  # Substitution pro Zeile haette die erste stillschweigend uebergangen. Das
+  # `[^`]*` zwischen Name und Zahl kann keinen zweiten Namen ueberspringen, so
+  # dass jede Nennung an ihre eigene Zahl gebunden bleibt, mit oder ohne Klammer.
+  grep -oE '`VIRTUSPHERE_[A-Z0-9_]+`[^`]*aktuell [0-9]+' "$f" 2>/dev/null \
+    | sed -E 's/^`([A-Z0-9_]+)`.*aktuell ([0-9]+)$/\1 \2/' | while read -r name claimed; do
+    actual=''
+    for ssot in $const_ssot_files; do
+      [ -f "$ssot" ] || continue
+      value=$(sed -n "s/^const $name = \([0-9][0-9]*\);.*/\1/p" "$ssot" | head -n 1)
+      [ -n "$value" ] && actual="$value"
+    done
+    if [ -z "$actual" ]; then
+      echo "$f nennt \`$name\` mit einem Ist-Wert, aber die Konstante ist in keinem SSoT-File numerisch auffindbar." >&2
+      echo "MISMATCH"
+    elif [ "$actual" != "$claimed" ]; then
+      echo "$f behauptet $name = $claimed, tatsaechlich $actual." >&2
+      echo "MISMATCH"
+    fi
+  done | grep -q MISMATCH && fail const-mirror "$f nennt einen anderen Konstantenwert als der Code; an der Nennung fixen, nicht am SSoT."
 done
 
 # --- 9. Terminologie: SCCM ist ausgemustert, aktiver Text sagt MECM -------------

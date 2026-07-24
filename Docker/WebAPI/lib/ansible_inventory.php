@@ -68,6 +68,11 @@ function ansible_inventory_remote_command(string $remoteDir, bool $verbose = fal
  * a number to a range. Field extraction lives here, not in Jinja, because PHP
  * is unit-testable without an ESXi host.
  *
+ * The two module families disagree on where the id sits: standard portgroups
+ * carry `vlan_id` at the top level, DVS ones nest it under `vlan_info` next to
+ * an explicit `trunk` flag. That flag wins over any id beside it, because a
+ * trunk's id field holds a range.
+ *
  * @return array{name:string, meta_json:?array{vlan_id:?int, trunk:bool}}|null null without a usable name
  */
 function ansible_inventory_network_item(mixed $raw, string $source): ?array
@@ -87,9 +92,13 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
         return null;
     }
 
-    $vlanRaw = $raw['vlan_id'] ?? $raw['vlan'] ?? null;
+    $vlanInfo = is_array($raw['vlan_info'] ?? null) ? $raw['vlan_info'] : [];
+    $vlanRaw = $raw['vlan_id'] ?? $raw['vlan'] ?? $vlanInfo['vlan_id'] ?? null;
     $vlanId = null;
-    $trunk = false;
+    $trunk = !empty($vlanInfo['trunk']);
+    if ($trunk) {
+        $vlanRaw = null;
+    }
     if (is_int($vlanRaw) || (is_string($vlanRaw) && preg_match('/^\d+$/', trim($vlanRaw)) === 1)) {
         $vlanId = (int) $vlanRaw;
     } elseif ($vlanRaw !== null && $vlanRaw !== '') {
@@ -103,7 +112,7 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
  * Parses the base64-JSON marker the inventory playbook prints into the cache
  * shape. Throws when the marker is missing/corrupt (worker records "parse").
  *
- * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>}
+ * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>, capabilities:array<string,mixed>, queries:array<string,array{state:string,message:string}>}
  */
 function ansible_parse_inventory_output(string $stdout): array
 {
@@ -162,7 +171,113 @@ function ansible_parse_inventory_output(string $stdout): array
         'networks' => $networks,
         'hosts' => ansible_parse_inventory_hosts($data['hosts'] ?? [], $data['fetched_epoch'] ?? null),
         'capabilities' => ansible_parse_inventory_capabilities($data['about'] ?? [], $data['host_runtime'] ?? []),
+        'queries' => ansible_parse_inventory_queries($data['queries'] ?? []),
     ];
+}
+
+/**
+ * What every single query of one pull did. A pull is several separate queries
+ * and only the first is the connection canary, so it can succeed while one
+ * query answered nothing at all. An empty list cannot say which of the three
+ * happened (the host has none / the account may not look / the call was
+ * rejected before reaching ESXi), and that ambiguity is what let a rejected
+ * portgroup query read as "this host has no portgroups" for months.
+ *
+ * Absent for a pull whose playbook predates the report; the caller then says
+ * nothing rather than claiming every query answered.
+ *
+ * @return array<string, array{state:string, message:string}>
+ */
+function ansible_parse_inventory_queries(mixed $raw): array
+{
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $queries = [];
+    foreach ($raw as $name => $entry) {
+        $name = trim((string) $name);
+        if ($name === '' || !is_array($entry)) {
+            continue;
+        }
+        $state = VIRTUSPHERE_INVENTORY_QUERY_ANSWERED;
+        if (!empty($entry['failed'])) {
+            $state = VIRTUSPHERE_INVENTORY_QUERY_REJECTED;
+        } elseif (!empty($entry['skipped'])) {
+            $state = VIRTUSPHERE_INVENTORY_QUERY_SKIPPED;
+        }
+        // Collapsed to one line before truncation: a module message may carry a
+        // traceback, and a summary line that silently becomes twelve lines is
+        // no longer the one line an operator can scan. The full text stays in
+        // the playbook output above it either way.
+        // Bytewise on purpose: `\s` without /u cannot match inside a UTF-8
+        // sequence, so it collapses newlines without the /u failure mode of
+        // returning null on malformed input and losing the message entirely.
+        $message = trim((string) preg_replace('/\s+/', ' ', (string) ($entry['msg'] ?? '')));
+        $queries[$name] = [
+            'state' => $state,
+            'message' => mb_substr($message, 0, VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH),
+        ];
+    }
+
+    return $queries;
+}
+
+/**
+ * The job-log line that turns a 0 from a verdict into a fact with a reason.
+ * Written on every successful pull, including the all-good case: a reader who
+ * only ever sees the line when something is wrong does not learn that a pull
+ * has parts, and this line is where an operator finds out which part was quiet.
+ *
+ * Queries that failed the same way are named together. Rendered in the actual
+ * job log, the ungrouped version turned a systematic failure into fourteen
+ * lines of the same sentence, which hides the one thing the line is for: which
+ * queries were silent.
+ *
+ * English like every other job-log line (operator diagnostics, not portal
+ * prose). Null for a pull without the report, so an old playbook stays silent
+ * instead of claiming completeness it never measured.
+ */
+function ansible_inventory_queries_log_line(array $queries): ?string
+{
+    if ($queries === []) {
+        return null;
+    }
+
+    // Grouped by state and message, because the common failure is systematic:
+    // a wrong credential, a module version or a bad argument list hits several
+    // queries with the identical sentence, and repeating it once per query
+    // buried the six names that matter under six copies of the same text.
+    $groups = [];
+    $quiet = 0;
+    foreach ($queries as $name => $query) {
+        $state = (string) ($query['state'] ?? '?');
+        if ($state === VIRTUSPHERE_INVENTORY_QUERY_ANSWERED) {
+            continue;
+        }
+        $quiet++;
+        $message = trim((string) ($query['message'] ?? ''));
+        $groups[$state . "\0" . $message][] = (string) $name;
+    }
+
+    $total = count($queries);
+    if ($quiet === 0) {
+        return sprintf('Inventory queries: all %d answered.', $total);
+    }
+
+    $parts = [];
+    foreach ($groups as $key => $names) {
+        [$state, $message] = explode("\0", $key, 2);
+        $parts[] = implode(', ', $names) . ' ' . $state . ($message !== '' ? ' (' . $message . ')' : '');
+    }
+
+    return sprintf(
+        'Inventory queries: %d of %d answered, %d without an answer - %s',
+        $total - $quiet,
+        $total,
+        $quiet,
+        implode('; ', $parts)
+    );
 }
 
 /**

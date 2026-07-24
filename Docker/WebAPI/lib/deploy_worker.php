@@ -357,8 +357,8 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // Parse marker (may throw -> "parse") then apply the cache atomically.
         $parsed = ansible_parse_inventory_output($fullOutput);
         $summary = repo_esxi_inventory_apply($db, $credentialId, $parsed);
-        repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities'] ?? null);
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($parsed['capabilities'] ?? [], true));
+        repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities']);
+        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($parsed['capabilities'], true));
         // VLAN catalog is ESXi-owned (E4b): resync from the union of cached
         // portgroups after every successful pull (retire not delete).
         $vlanSync = repo_esxi_vlan_sync($db);
@@ -369,6 +369,13 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             $parts[] = $kind . ': ' . ($info['kept_empty'] ? 'kept (empty result)' : ($info['written'] . ' items'));
         }
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Inventory updated for credential ' . $credentialId . ' - ' . implode(', ', $parts));
+        // Directly after the counts, because that is where a 0 is read and
+        // where its reason belongs. Absent for a pull from a playbook that
+        // predates the per-query report.
+        $queryLine = ansible_inventory_queries_log_line($parsed['queries']);
+        if ($queryLine !== null) {
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $queryLine);
+        }
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     } catch (DeployWorkerCancelled $cancelled) {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Inventory job cancelled.');

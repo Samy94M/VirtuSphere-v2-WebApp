@@ -477,29 +477,6 @@ function esxi_state_badge(string $state): string
 }
 
 /**
- * Traffic-light state for an Ansible credential's last preflight test: 'ok',
- * 'danger' (last test failed) or 'unknown' (never tested). There is deliberately
- * no staleness axis: the preflight is on-demand, so age is shown as a timestamp
- * rather than folded into the colour (an old green is still the last known good).
- *
- * @param array<string, mixed>|null $state
- */
-function ansible_preflight_ampel(?array $state): string
-{
-    if ($state === null || trim((string) ($state['last_status'] ?? '')) === '') {
-        return 'unknown';
-    }
-
-    // Literal comparison like the 'ok' case: the value set is owned by
-    // lib/repo/ansible_preflight.php, which layout deliberately does not load.
-    return match ((string) $state['last_status']) {
-        'ok' => 'ok',
-        'warning' => 'warning',
-        default => 'danger',
-    };
-}
-
-/**
  * Badge for an already-derived Ansible state, so a caller holding the state
  * (the overview roll-up, the legend) does not have to fake a preflight row to
  * get its badge back.
@@ -509,6 +486,7 @@ function ansible_state_badge(string $state): string
     $meta = virtusphere_heartbeat_meta($state);
     $label = match ($state) {
         'ok' => __t('system_status.ansible_state_ok'),
+        'stale' => __t('system_status.ansible_state_stale'),
         'warning' => __t('system_status.ansible_state_warning'),
         'danger' => __t('system_status.ansible_state_danger'),
         default => __t('system_status.ansible_state_unknown'),
@@ -518,9 +496,9 @@ function ansible_state_badge(string $state): string
 }
 
 /** @param array<string, mixed>|null $state */
-function ansible_preflight_badge(?array $state): string
+function ansible_preflight_badge(?array $state, ?int $now = null): string
 {
-    return ansible_state_badge(ansible_preflight_ampel($state));
+    return ansible_state_badge(ansible_preflight_ampel($state, $now));
 }
 
 // Client deploy-phase badge (none|running|unconfirmed|finished|failed).

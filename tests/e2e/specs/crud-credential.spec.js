@@ -272,3 +272,149 @@ test('delete: Cancel keeps the row, Confirm removes it', async ({ page }) => {
   expect(credentialRow(id), 'Confirm deleted the credential').toBeNull();
   await expect(page.locator('tr', { hasText: name }), 'the row is gone from the list').toHaveCount(0);
 });
+
+/** Writes a preflight result whose age the test controls. */
+function seedPreflight(id, status, daysAgo) {
+  runPhp(`
+$db = db();
+$db->query("INSERT INTO deploy_ansible_preflight_state (credential_id, last_status, last_checked_at, last_component)
+  VALUES (${Number(id)}, '${status}', DATE_SUB(NOW(), INTERVAL ${Number(daysAgo)} DAY), NULL)
+  ON DUPLICATE KEY UPDATE last_status = VALUES(last_status), last_checked_at = VALUES(last_checked_at)");
+echo 'SEEDED';
+`);
+}
+
+/**
+ * Reads and writes the global "which Ansible host runs inventory pulls"
+ * setting. The cadence test has to own it for its duration: other specs seed
+ * extra Ansible credentials and point this setting at them, and a selection
+ * left dangling resolves to "no host", which is itself one of the cadence
+ * branches. Ambient state would decide which sentence the row renders.
+ */
+function inventoryAnsibleSetting(value = null) {
+  return phpJson(`
+$db = db();
+$key = VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL;
+$before = repo_setting_value($db, $key, '');
+${value === null ? '' : `repo_set_setting($db, $key, '${String(Number(value))}');`}
+echo 'JSON' . json_encode(['before' => $before]) . 'JSON';
+`, ['lib/deploy_constants.php', 'lib/repo/settings.php']).before;
+}
+
+function cleanupStatusRows() {
+  runPhp(`
+$db = db();
+$like = '${PREFIX}%';
+foreach (['deploy_ansible_preflight_state', 'deploy_esxi_inventory_state'] as $table) {
+    $stmt = $db->prepare("DELETE FROM {$table} WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?)");
+    $stmt->bind_param('s', $like);
+    $stmt->execute();
+}
+echo 'CLEANED';
+`);
+}
+
+// The status column stacks a badge over a timestamp, which reads as "last poll"
+// everywhere else in the portal. Only ESXi is polled. These two facts are what
+// the cadence line and the ageing Ansible badge exist to state, and both are
+// only observable in the rendered row, which is why they are pinned here rather
+// than in a unit test. Locale-independent on purpose: the assertions compare
+// rendered values against each other instead of quoting DE or EN prose.
+test('the status column says whether it refreshes itself, and an old Ansible result stops claiming OK', async ({ page }) => {
+  const esxiName = PREFIX + 'cadence-esxi';
+  const ansibleName = PREFIX + 'cadence-ansible';
+  const esxiId = seedCredential(esxiName);
+  const ansibleId = seedCredential(ansibleName, '10.99.0.7', 22, 'ansible');
+  // Own the global selection instead of assuming a clean database: whether the
+  // scheduler resolves a host is one of the branches under test, so it must be
+  // set here rather than inherited from whatever ran before.
+  const selectionBefore = inventoryAnsibleSetting(ansibleId);
+
+  const config = phpJson(`
+echo 'JSON' . json_encode([
+    'hours' => esxi_inventory_interval_hours(db()),
+    'window' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS,
+]) . 'JSON';
+`, ['lib/esxi_inventory.php']);
+
+  try {
+    seedPreflight(ansibleId, 'ok', 0);
+
+    await page.goto('credentials.php');
+    const cadenceOf = (name) => page.locator('tr', { hasText: name }).first().locator('.status-cadence');
+    const badgeOf = (name) => page.locator('tr', { hasText: name }).first().locator('.badge');
+
+    // Every row states its cadence; the two types must not state the same one,
+    // which is exactly what the identical badge/timestamp shape used to imply.
+    const esxiCadence = (await cadenceOf(esxiName).innerText()).trim();
+    const ansibleCadence = (await cadenceOf(ansibleName).innerText()).trim();
+    expect(esxiCadence.length, 'the ESXi row states a cadence').toBeGreaterThan(0);
+    expect(ansibleCadence, 'polled and on-click rows must not claim the same cadence').not.toBe(esxiCadence);
+    expect(esxiCadence, 'the polled row names its interval').toContain(String(config.hours));
+    expect(ansibleCadence, 'the on-click row names its expiry window').toContain(String(config.window));
+
+    // The ageing axis: same recorded result, only older, must not read the same.
+    const freshBadge = (await badgeOf(ansibleName).innerText()).trim();
+    seedPreflight(ansibleId, 'ok', config.window + 1);
+    await page.reload();
+    const staleBadge = (await badgeOf(ansibleName).innerText()).trim();
+    expect(staleBadge, 'a preflight older than the window stops reading as the fresh one').not.toBe(freshBadge);
+
+    // A failure must not age into the same grey: that would hide a known break.
+    seedPreflight(ansibleId, 'failed', config.window + 1);
+    await page.reload();
+    const agedFailure = (await badgeOf(ansibleName).innerText()).trim();
+    expect(agedFailure, 'an old failure keeps its own state').not.toBe(staleBadge);
+
+    // Blocker 1, per row: a paused ESXi credential is skipped by the scheduler,
+    // so the row must stop naming the interval instead of promising a cycle
+    // that is not running for it.
+    runPhp(`
+$db = db();
+$db->query("INSERT INTO deploy_esxi_inventory_state (credential_id, last_attempt_at, last_status, failure_streak, paused_until_credential_change)
+  VALUES (${Number(esxiId)}, NOW(), 'failed', 3, 1)
+  ON DUPLICATE KEY UPDATE paused_until_credential_change = 1");
+echo 'PAUSED';
+`);
+    await page.reload();
+    const pausedCadence = (await cadenceOf(esxiName).innerText()).trim();
+    expect(pausedCadence, 'a paused credential does not keep claiming the interval').not.toBe(esxiCadence);
+    expect(pausedCadence, 'a paused credential no longer names an interval').not.toContain(String(config.hours));
+
+    // Blocker 2, global: with the selection cleared and more than one Ansible
+    // credential present, the pull has no host to run over and nothing is
+    // enqueued for ANY credential. The row must name that instead of the pause,
+    // because un-pausing would not start the cycle either.
+    runPhp(`
+$db = db();
+$db->query("UPDATE deploy_esxi_inventory_state SET paused_until_credential_change = 0 WHERE credential_id = ${Number(esxiId)}");
+echo 'UNPAUSED';
+`);
+    const secondAnsible = seedCredential(PREFIX + 'cadence-ansible-2', '10.99.0.8', 22, 'ansible');
+    expect(secondAnsible, 'the second Ansible credential was created').toBeGreaterThan(0);
+    inventoryAnsibleSetting(0);
+    await page.reload();
+    const blockedCadence = (await cadenceOf(esxiName).innerText()).trim();
+    expect(blockedCadence, 'an unresolvable Ansible selection stops the promise').not.toBe(esxiCadence);
+    expect(blockedCadence, 'a blocked scheduler no longer names an interval').not.toContain(String(config.hours));
+    expect(blockedCadence, 'the blocked reason differs from the paused reason').not.toBe(pausedCadence);
+
+    // The cadence line needed a width floor on the status cell, or it broke
+    // across four lines and even the timestamp wrapped mid-date. A floor inside
+    // a table is how a page starts pushing sideways instead of reflowing
+    // (WCAG 1.4.10), so the floor has to stay contained in .table-wrap.
+    await page.setViewportSize({ width: 360, height: 800 });
+    const narrow = await page.evaluate(() => ({
+      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      wrapScrolls: (() => {
+        const wrap = document.querySelector('.table-wrap');
+        return wrap ? wrap.scrollWidth > wrap.clientWidth : false;
+      })(),
+    }));
+    expect(narrow.pageOverflow, 'the status cell floor does not widen the page at 360 px').toBe(false);
+    expect(narrow.wrapScrolls, 'the wide table scrolls inside its own wrapper instead').toBe(true);
+  } finally {
+    inventoryAnsibleSetting(Number(selectionBefore) || 0);
+    cleanupStatusRows();
+  }
+});

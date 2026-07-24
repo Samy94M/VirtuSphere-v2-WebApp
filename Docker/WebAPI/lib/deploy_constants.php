@@ -147,6 +147,20 @@ const VIRTUSPHERE_INVENTORY_KINDS = [
     VIRTUSPHERE_INVENTORY_KIND_HOST,
 ];
 
+// Outcome of a single query inside one inventory pull. A pull is several
+// separate queries and only the first one (datacenters) is the connection
+// canary, so a pull can succeed while one query answered nothing. These three
+// words are what separates "the host has none" from "my call never got there",
+// which an empty list alone cannot say. Job-log vocabulary, not a portal
+// vocabulary: nothing here colours a badge or blocks anything.
+const VIRTUSPHERE_INVENTORY_QUERY_ANSWERED = 'answered';
+const VIRTUSPHERE_INVENTORY_QUERY_REJECTED = 'rejected';
+const VIRTUSPHERE_INVENTORY_QUERY_SKIPPED = 'skipped';
+// The module's own message is kept for the log, but only its beginning: the
+// full playbook output is already in the same job log, and one runaway message
+// must not push the summary line out of a reader's view.
+const VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH = 200;
+
 // Connection failure categories: the shared vocabulary for the inventory fetch
 // (stored in deploy_esxi_inventory_state.last_error_category) and the credential
 // connection test. Two classifiers feed it, because their inputs differ:
@@ -172,6 +186,21 @@ const VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES = [
     VIRTUSPHERE_INVENTORY_ERROR_SSH,
     VIRTUSPHERE_INVENTORY_ERROR_PARSE,
     VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+];
+
+// Why the interval automation would skip an ESXi credential. The scheduler
+// decides with these and the Credentials page names them, so a fourth blocker
+// cannot reach one of the two without the other. Order is the order an operator
+// has to fix them in, not the order of the checks: a global switch outranks a
+// per-credential pause, because un-pausing cannot start a cycle that the
+// interval or the missing Ansible host has already stopped.
+const VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF = 'interval_off';
+const VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST = 'no_ansible_host';
+const VIRTUSPHERE_ESXI_AUTOMATION_PAUSED = 'paused';
+const VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS = [
+    VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF,
+    VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST,
+    VIRTUSPHERE_ESXI_AUTOMATION_PAUSED,
 ];
 
 // Inventory settings + defaults.

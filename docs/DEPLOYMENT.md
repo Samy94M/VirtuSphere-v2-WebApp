@@ -22,7 +22,7 @@ Required on the Ubuntu host:
 | Free licence (incl. 8.0 U3e) | inventory only | Broadcom's free hypervisor exposes a read-only API. Inventory pulls work; creating VMs and writing the autostart policy do not. The portal reads the licence from the host and warns before a job runs. |
 | Host in a vSphere HA cluster | deploy yes, autostart no | ESXi disables autostart on HA cluster members; the HA restart priority owns startup there. |
 | Standalone host | full support | `datacenter_name` must resolve to `ha-datacenter`; the portal derives it from the credential's inventory when the mission leaves it empty. |
-| vCenter (`api_type = VirtualCenter`) | deploy yes, autostart with care | DRS/vMotion can move a VM off the host whose autostart list names it. Autostart assumes a static host. |
+| vCenter (`api_type = VirtualCenter`) | deploy yes, autostart with care, inventory partial | DRS/vMotion can move a VM off the host whose autostart list names it. Autostart assumes a static host. The inventory pull reads datacenters, datastores and distributed portgroups, but standard portgroups and host capacity come from the host itself and stay empty; register the ESXi host for a complete inventory. |
 
 The portal reports the host's product, version, licence and HA/maintenance state in System status after the first successful inventory pull (ADR-0023, ADR-0025). The URL remains `portal/system_status.php` for compatibility.
 

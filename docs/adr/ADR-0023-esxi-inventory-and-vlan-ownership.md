@@ -77,6 +77,30 @@ The two open questions this ADR left behind (the connection test's TLS strictnes
 - **Visibility follows the existing convention.** The system status page keeps the detail (a capability line plus at most three badges: free licence and HA cluster warn, maintenance informs). The credentials page gets a pointer badge that links there. The dashboard gets a "Hypervisor" tile rolling the worst state over all ESXi credentials, hidden entirely when no ESXi credential exists. The deploy page renders the capability warning of the chosen credential in its own island, disjoint from the per-host value warning by construction: one names what the mission wants and the host lacks, the other names what the host itself cannot do.
 - **One traffic light, computed once.** `esxi_credential_state()` is the fetch health, read by every badge: the credential row, the integrations heading and the dashboard rollup, which must never disagree on the same colour. It answers one question, "is the inventory pull healthy?", and a host capability does not colour it. A free licence, an HA cluster and maintenance mode are properties of a *successful* pull, so they surface as their own badges and gate deploys through the ADR-0025 preflight, not through this light. An earlier revision of this amendment lifted a healthy pull to `warning` on a blocking capability so a green tile would not read "all clear"; that made amber mean two unrelated things (a stale fetch and a licensing fact) and buried the fetch signal the light exists for, so the lift was removed. Deploy-blocking is enforced where it belongs, in the preflight; a fetch failure is `danger` on its own.
 
+## Amendment (2026-07-24): a pull reports which of its queries answered
+
+The tolerance this ADR granted the optional `*_info` modules (a failing one
+yields an empty list instead of failing the pull) had no counterpart: nothing
+recorded *that* a query had failed. An empty list therefore meant three
+different things at once, and a portgroup query that the module rejected on its
+argument spec read for months as "this host has no portgroups".
+
+- **Tolerated failure now costs a report.** The playbook forwards `failed`,
+  `skipped` and `msg` per query; the parser maps them to `answered`, `rejected`
+  or `skipped`, and the worker writes one job-log line under the counts. The
+  fields are projected rather than passed through whole, because a module result
+  carries `invocation` with every argument.
+- **The report is a log line, not a state.** Nothing is stored, no badge is
+  coloured, no job is refused. The traffic light keeps answering one question
+  ("did the pull run?"), consistent with the amendment above that removed the
+  capability lift for the same reason. Surfacing partial pulls in the UI is a
+  separate decision, and it would need this data first.
+- **The good case is logged too.** A line that only appears on failure never
+  teaches a reader that a pull has parts. `all N answered` is the sentence that
+  makes the other one legible.
+- **Silence beats a claim.** A pull from a playbook without the report yields no
+  line at all, rather than asserting a completeness it never measured.
+
 ## Amendment (2026-07-23): compact System-status cards and Ansible selection
 
 - **One global Ansible execution credential for inventory.** With zero Ansible

@@ -27,7 +27,7 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
     /** Jinja filters/keywords and Ansible builtins that never name our data. */
     private const NON_DATA_TOKENS = [
         'default', 'int', 'bool', 'length', 'list', 'map', 'attribute',
-        'selectattr', 'rejectattr', 'combine', 'dict2items', 'flatten',
+        'first', 'selectattr', 'rejectattr', 'combine', 'dict2items', 'flatten',
         'to_json', 'to_nice_json', 'b64encode', 'trim', 'lookup',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',
         'true', 'false', 'True', 'False', 'none', 'None',

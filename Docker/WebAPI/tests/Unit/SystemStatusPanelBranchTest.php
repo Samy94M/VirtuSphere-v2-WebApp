@@ -114,6 +114,14 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.ansible_state_warning'), $html);
     }
 
+    public function testAStaleAllowlistWarningDoesNotTurnIntoAClaimedFailure(): void
+    {
+        $html = $this->renderAnsible('stale', ['last_status' => 'warning', 'last_component' => 'allowlist', 'last_checked_at' => '2026-07-01 10:00:00']);
+        self::assertStringContainsString(__t('system_status.ansible_allowlist_detail'), $html);
+        self::assertStringNotContainsString(__t('system_status.ansible_failed_component', ['component' => 'allowlist']), $html);
+        self::assertStringContainsString(__t('system_status.ansible_state_stale'), $html);
+    }
+
     public function testAPreflightFailureStillNamesItsBrokenComponent(): void
     {
         $html = $this->renderAnsible('danger', ['last_status' => 'failed', 'last_component' => 'pyvmomi', 'last_checked_at' => '2026-07-23 10:00:00']);

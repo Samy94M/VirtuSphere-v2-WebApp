@@ -74,6 +74,79 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         }
     }
 
+    /**
+     * The blind spot `ignore_errors` opens: a task whose arguments the module
+     * rejects fails before it ever reaches ESXi, and the pull still counts as a
+     * success with an empty list. `vmware_portgroup_info` requires one of
+     * cluster_name/esxi_hostname, `vmware_dvs_portgroup_info` requires
+     * datacenter (`ansible-playbook` answers "one of the following is required"
+     * / "missing required arguments" against the pinned collection). Neither
+     * was passed, so the portal showed 0 portgroups for a host with thirteen
+     * and nothing anywhere reported a problem.
+     *
+     * The match must be anchored to the argument line: every task in this
+     * playbook already carries `hostname: "{{ esxi_hostname }}"`, so a
+     * substring search for the argument name passes on the broken shape too.
+     *
+     * @return iterable<string, array{0:string, 1:string}>
+     */
+    public static function inventoryRequiredArguments(): iterable
+    {
+        yield 'standard portgroups' => ['vmware_portgroup_info', '(esxi_hostname|cluster_name)'];
+        yield 'distributed portgroups' => ['vmware_dvs_portgroup_info', 'datacenter'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('inventoryRequiredArguments')]
+    public function testInventoryInfoTasksPassTheArgumentsTheirModuleRequires(string $module, string $argument): void
+    {
+        $source = $this->playbooks()['inventoryESXi_playbook.yml'] ?? '';
+        self::assertNotSame('', $source);
+
+        $found = false;
+        foreach ($this->tasks($source) as $task) {
+            if (!str_contains($task, $module . ':')) {
+                continue;
+            }
+            $found = true;
+            self::assertMatchesRegularExpression(
+                '/^\s+' . $argument . ':\s*\S/m',
+                $task,
+                sprintf('%s is called without the argument its module requires; the task can only ever fail.', $module)
+            );
+        }
+
+        self::assertTrue($found, sprintf('No task calls %s (zero-match must not pass).', $module));
+    }
+
+    /**
+     * Every query the inventory pull makes must report its own outcome. The
+     * `queries` block of the marker is what lets the job log say why a count is
+     * 0; a task added later that is not listed there would be exactly as silent
+     * as the portgroup task was, and its emptiness would again read as an
+     * answer from the host.
+     */
+    public function testEveryInventoryQueryReportsItsOutcome(): void
+    {
+        $source = $this->playbooks()['inventoryESXi_playbook.yml'] ?? '';
+        self::assertNotSame('', $source);
+
+        self::assertSame(
+            1,
+            preg_match('/^\s*queries:\s*>-\R(.+?)^\s*- name:/ms', $source, $block),
+            'The inventory playbook must carry a queries block reporting each query outcome.'
+        );
+
+        preg_match_all('/^\s*register:\s*(\w+)/m', $source, $registered);
+        self::assertGreaterThanOrEqual(7, count($registered[1]), 'Register scan found fewer tasks than the playbook contains.');
+        foreach ($registered[1] as $name) {
+            self::assertStringContainsString(
+                $name . '.failed',
+                $block[1],
+                sprintf('Task result %s is not reported in the queries block, so its empty result would be indistinguishable from an answer.', $name)
+            );
+        }
+    }
+
     public function testEveryCommandTaskIsClassified(): void
     {
         $commandTasks = 0;

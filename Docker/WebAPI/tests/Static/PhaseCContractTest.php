@@ -142,7 +142,14 @@ final class PhaseCContractTest extends TestCase
         // credential_test_connection() returns a code plus an operator detail.
         // A page that echoes a 'message' key instead is both untranslated and,
         // since that key no longer exists, a fatal on every connection test.
+        // Page plus its helper modules, for the same reason the panel scan below
+        // globs: the mapper moved into lib/credentials_test_message.php when the
+        // page hit its line budget, and a check that names one file would have
+        // gone quiet about the code it was written to guard instead of failing.
         $credentials = $this->source('portal/credentials.php');
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/credentials_*.php') ?: [] as $module) {
+            $credentials .= (string) file_get_contents($module);
+        }
         self::assertStringContainsString('function credentials_test_message', $credentials);
         self::assertStringContainsString('connection_error_message($result[', $credentials);
         self::assertStringNotContainsString("\$result['message']", $credentials);

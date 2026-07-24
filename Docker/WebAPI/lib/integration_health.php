@@ -9,6 +9,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/credentials.php';
@@ -59,12 +60,10 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
     foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) as $credential) {
         $credentialId = (int) $credential['id'];
         $stateRow = $preflightStates[$credentialId] ?? null;
-        $state = match ((string) ($stateRow['last_status'] ?? '')) {
-            VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK => 'ok',
-            VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING => 'warning',
-            VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_FAILED => 'danger',
-            default => 'unknown',
-        };
+        // Same derivation as the badge on the Credentials page. This used to be
+        // a second copy of that match, so the staleness axis would have landed
+        // on one page only and the two would have disagreed about the same row.
+        $state = ansible_preflight_ampel($stateRow, $now);
         if ($ansibleWorst === null || virtusphere_heartbeat_state_rank($state) > virtusphere_heartbeat_state_rank($ansibleWorst)) {
             $ansibleWorst = $state;
         }

@@ -54,4 +54,10 @@ return [
     'esxi_state_link_title' => 'Details zum letzten Inventar-Abruf ansehen',
     'ansible_state_link_title' => 'Letzter Preflight-Test: :when',
     'ansible_state_untested_title' => 'Ansible-Zugang noch nicht getestet',
+    'cadence_esxi' => 'automatisch alle :hours Stunden',
+    'cadence_esxi_one' => 'automatisch jede Stunde',
+    'cadence_esxi_off' => 'kein automatischer Abruf (Intervall 0)',
+    'cadence_esxi_paused' => 'pausiert, kein automatischer Abruf',
+    'cadence_esxi_no_ansible' => 'kein automatischer Abruf, kein Ansible-Zugang gewählt',
+    'cadence_manual' => 'nur auf Klick, :days Tage gültig',
 ];

@@ -1457,10 +1457,20 @@ label > .compound-field {
     font-weight: 700;
 }
 
-.status-time {
+.status-time,
+.status-cadence {
     display: block;
     color: var(--muted);
     font-size: 12px;
+}
+
+/* Credentials table: the status cell stacks a badge, a timestamp and the
+   cadence note, while the actions column beside it holds three buttons and
+   takes every pixel it can. Without a floor the cell is squeezed until even the
+   timestamp breaks mid-date, which is where the cadence line stops reading as a
+   sentence. The table scrolls inside .table-wrap, so the floor costs nothing. */
+.status-cell {
+    min-width: 190px;
 }
 
 /* Dashboard MECM tile: two labeled signal rows that never collapse into one

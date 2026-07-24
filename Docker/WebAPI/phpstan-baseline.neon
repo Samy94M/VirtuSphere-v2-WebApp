@@ -19,12 +19,6 @@ parameters:
 			path: lib/connection_errors.php
 
 		-
-			message: '#^Offset ''capabilities'' on array\{datacenters\: array\<int, string\>, datastores\: array\<int, array\<string, mixed\>\>, networks\: array\<int, array\<string, mixed\>\>, hosts\: array\<int, array\<string, mixed\>\>\} on left side of \?\? does not exist\.$#'
-			identifier: nullCoalesce.offset
-			count: 2
-			path: lib/deploy_worker.php
-
-		-
 			message: '#^Variable \$canUsers might not be defined\.$#'
 			identifier: variable.undefined
 			count: 1
@@ -239,9 +233,3 @@ parameters:
 			identifier: offsetAccess.notFound
 			count: 3
 			path: tests/Unit/DeployModeGateTest.php
-
-		-
-			message: '#^Offset ''capabilities'' does not exist on array\{datacenters\: array\<int, string\>, datastores\: array\<int, array\<string, mixed\>\>, networks\: array\<int, array\<string, mixed\>\>, hosts\: array\<int, array\<string, mixed\>\>\}\.$#'
-			identifier: offsetAccess.notFound
-			count: 2
-			path: tests/Unit/EsxiCapabilitiesTest.php

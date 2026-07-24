@@ -54,4 +54,10 @@ return [
     'esxi_state_link_title' => 'Show the details of the last inventory pull',
     'ansible_state_link_title' => 'Last preflight test: :when',
     'ansible_state_untested_title' => 'Ansible credential not tested yet',
+    'cadence_esxi' => 'automatic, every :hours hours',
+    'cadence_esxi_one' => 'automatic, every hour',
+    'cadence_esxi_off' => 'no automatic pull (interval 0)',
+    'cadence_esxi_paused' => 'paused, no automatic pull',
+    'cadence_esxi_no_ansible' => 'no automatic pull, no Ansible credential selected',
+    'cadence_manual' => 'on click only, valid for :days days',
 ];
