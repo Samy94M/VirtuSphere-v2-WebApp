@@ -85,7 +85,9 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
 ## Schritt 1: Stack hochfahren
 
-1. Repo auf den Ubuntu-Host holen (`git clone`/`git pull`, Branch `main`).
+1. Repo auf den Ubuntu-Host holen (Branch `main`). Der Host erreicht GitHub
+   nicht; der Code kommt per Bundle über den internen Gitea, siehe „Code auf den
+   Host bringen und Releases nachziehen" am Ende dieses Dokuments.
 2. `.env` anlegen (Vorlage: `.env.example`). Starke Werte für `APP_KEY`,
    `DB_PASS`, `MYSQL_ROOT_PASSWORD` setzen; `WEB_HTTP_PORT=8021` bestätigen.
 3. Stack starten und **alle fünf** Container prüfen, besonders den in E1b neu
@@ -319,6 +321,59 @@ Das Passwort bleibt trotzdem kompromittiert: die Datei stammt aus dem **Initial-
 - [ ] Existiert das Konto `testkonto` auf dem genannten MySQL-Host noch? Wenn ja: **löschen** oder Passwort rotieren.
 - [ ] Prüfen, ob dieses Passwort anderswo wiederverwendet wurde (der Wert steht in der Git-Historie, `git log -p -- functions.psm1`).
 - [ ] Erst danach ist die Frage erledigt. Ein Repo-Rewrite (`filter-repo`) ist nur sinnvoll, wenn das Repo den Kunden je verlässt; die Rotation ist in jedem Fall Pflicht.
+
+## Code auf den Host bringen und Releases nachziehen
+
+Der Produktionshost erreicht GitHub nicht (ausgehender Proxy); interne
+LAN-Adressen gehen daran vorbei. Der Code läuft deshalb über den internen Gitea
+auf demselben Host, und der Sprung von der Entwicklungsmaschine dorthin geht per
+`git bundle` auf einem USB-Stick, nie per `scp -r` des Repo-Ordners: ein
+abgebrochener Verzeichnisbaum sieht vollständig aus, und Git legt seine Packs
+read-only an, sodass ein zweiter Versuch genau an der Objektdatenbank scheitert.
+
+Auf der Entwicklungsmaschine bündeln. `HEAD` muss mit ins Bundle, sonst klont es
+ohne Branch und mit leerem Arbeitsbaum:
+
+```bash
+git bundle create virtusphere-main.bundle HEAD main
+git bundle verify virtusphere-main.bundle
+```
+
+Auf dem Host aus dem Bundle nach Gitea spiegeln. `git clone` setzt `origin` auf
+die Bundle-Datei, deshalb `set-url` statt `remote add`:
+
+```bash
+git clone ~/virtusphere-main.bundle ~/vs-neu
+cd ~/vs-neu
+git remote set-url origin <interner-gitea>/VirtuSphere-v2-WebApp.git
+git push origin main
+```
+
+Danach den scharfen Checkout nachziehen. Das ist zugleich der Weg für jedes
+weitere Release:
+
+```bash
+cd /opt/VirtuSphere-v2-WebApp
+git pull --ff-only
+docker compose exec -T php php /var/www/html/lib/migrate.php --check  # offene Migrationen?
+docker compose exec -T php php /var/www/html/lib/migrate.php          # anwenden, falls offen
+docker compose restart php deploy-worker maintenance-worker webserver
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8021/portal/login.php
+```
+
+Der Anwendungscode liegt per Bind-Mount im Container
+(`./Docker/WebAPI:/var/www/html`) und ist nach dem Pull sofort wirksam; neue
+Images braucht es nur bei geändertem Dockerfile oder geänderter Basis-Version.
+
+Der `webserver` gehört zwingend in dieselbe Neustartzeile. Startet nur `php` neu,
+hält nginx die alte Container-Adresse fest, und das Portal antwortet trotz
+gesundem PHP-Container mit HTTP 502 (dieselbe Ursache wie in Schritt 3a). Ein 502
+unmittelbar nach einem Update heißt fast immer, dass dieser Neustart fehlt; der
+Smoke-Test oben muss 200 liefern.
+
+Ändert ein Release den Machine-API-Vertrag, gilt die Reihenfolge: erst Portal und
+Migration, dann die Skripte auf den Integrationsservern. Ein altes Portal lehnt
+neue Aktionen mit HTTP 400 ab, ein neues Portal nimmt alte Meldungen weiter an.
 
 ## Offene Entscheidungen & Restrisiken
 
