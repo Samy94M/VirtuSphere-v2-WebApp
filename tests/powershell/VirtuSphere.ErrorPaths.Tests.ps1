@@ -316,6 +316,64 @@ Describe 'Installer: die vier geplanten Aufgaben' {
     }
 }
 
+Describe 'Kein Organisationskuerzel in Registry- und Programmpfaden' {
+
+    # Die Skripte laufen in fremden Umgebungen, deren Organisationskuerzel wir
+    # nicht kennen und nie erraten koennen. Ein Kuerzel in einem Registry- oder
+    # Logpfad ist damit keine Kosmetik, sondern eine falsche Zusicherung: der
+    # Pfad gehoert VirtuSphere, nicht dem Kunden, bei dem er zuerst entstanden
+    # ist. Zwei Client-Phasen trugen ihre Erkennungsschluessel jahrelang unter
+    # dem Kuerzel der Erstumgebung, waehrend die beiden anderen Phasen schon
+    # unter SOFTWARE\VirtuSphere lagen. Der Vertrag prueft die Klasse, nicht die
+    # einzelnen Kuerzel: eine Denyliste kennt immer nur die schon gesehenen.
+    BeforeAll {
+        $script:AllPsFiles = @(Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse -File)
+    }
+
+    It 'jeder SOFTWARE-Registry-Zweig liegt unter VirtuSphere' {
+        $offenders = foreach ($file in $script:AllPsFiles) {
+            $text = Get-Content -Path $file.FullName -Raw
+            foreach ($m in [regex]::Matches($text, '(?i)HK(?:LM|CU):?\\Software\\([A-Za-z0-9_.-]+)')) {
+                if ($m.Groups[1].Value -ne 'VirtuSphere') {
+                    "{0}: {1}" -f $file.Name, $m.Value
+                }
+            }
+        }
+        $offenders | Should -BeNullOrEmpty
+    }
+
+    It 'jeder Programmpfad liegt unter VirtuSphere' {
+        $patterns = @(
+            '(?i)Program ?Files\)?[''"]?\\([A-Za-z0-9_.-]+)'
+            '(?i)Join-Path\s+\$env:ProgramFiles\s+[''"]([A-Za-z0-9_.-]+)'
+        )
+        $offenders = foreach ($file in $script:AllPsFiles) {
+            $text = Get-Content -Path $file.FullName -Raw
+            foreach ($pattern in $patterns) {
+                foreach ($m in [regex]::Matches($text, $pattern)) {
+                    if ($m.Groups[1].Value -ne 'VirtuSphere') {
+                        "{0}: {1}" -f $file.Name, $m.Value
+                    }
+                }
+            }
+        }
+        $offenders | Should -BeNullOrEmpty
+    }
+
+    It 'die vier Client-Erkennungsschluessel der Spec liegen unter VirtuSphere' {
+        # Die Spec ist die SSoT fuer die MECM-Erkennungsregeln. Ein Kuerzel hier
+        # wandert in die Application am Server und ist danach nur noch dort zu
+        # korrigieren, nicht mehr im Repository.
+        $specs = Invoke-InFileScope -Path (Join-Path (Join-Path $script:PsRoot 'mecm') 'VirtuSphere-ClientPackaging.ps1') -Body {
+            Get-VsClientAppSpecs
+        }
+        $specs.Count | Should -Be 4
+        foreach ($spec in $specs) {
+            $spec.DetectionKey | Should -Match '^SOFTWARE\\VirtuSphere(\\|$)'
+        }
+    }
+}
+
 Describe 'Backoff-Vertrag der Sync-Endlosschleifen' {
 
     It '<name> laeuft endlos, faengt Fehler ab und schlaeft je Iteration (Backoff)' -ForEach @(
