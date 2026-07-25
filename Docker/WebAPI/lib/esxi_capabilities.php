@@ -119,23 +119,6 @@ function esxi_capabilities_fresh(?array $state, int $intervalHours, ?int $now = 
 }
 
 /**
- * Rank of a traffic-light state, for rolling several credentials up into one
- * dashboard tile.
- *
- * A thin alias over the SSoT in lib/status.php. It used to be a fourth copy of
- * the same match block, and its own docblock said it was "mirroring
- * repo_integration_worst_state()", which is the description of a drift waiting
- * to happen: a hand-maintained mirror nothing checks. The copies had already
- * disagreed about where `missing` sits, and while ESXi never produces that
- * state, a tile that ranks differently from the section it links to is exactly
- * the contradiction these traffic lights exist to prevent.
- */
-function esxi_state_rank(string $state): int
-{
-    return virtusphere_heartbeat_state_rank($state);
-}
-
-/**
  * The traffic light shown for one ESXi credential anywhere in the portal: its
  * fetch health, and nothing else. Green means the last pull succeeded and is
  * current; it does NOT promise the host can deploy.
@@ -157,35 +140,6 @@ function esxi_state_rank(string $state): int
 function esxi_credential_state(?array $state, int $intervalHours, ?int $now = null): string
 {
     return esxi_inventory_ampel($state, $intervalHours, $now);
-}
-
-/**
- * Worst hypervisor state across every ESXi credential, for the dashboard tile.
- * Null when no ESXi credential exists at all: a permanently grey tile for a
- * feature nobody configured is noise, so the caller hides it instead.
- *
- * This is fetch health only, the same as esxi_credential_state(): the tile is
- * green when every host's inventory pull is healthy, even if one of them has a
- * free licence. A deploy-blocking capability is not a fetch problem; it surfaces
- * as a badge and is enforced by esxi_autostart_preflight(), not by this colour.
- */
-function esxi_worst_state(mysqli $db): ?string
-{
-    $credentials = repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
-    if ($credentials === []) {
-        return null;
-    }
-
-    $intervalHours = esxi_inventory_interval_hours($db);
-    $worst = 'ok';
-    foreach ($credentials as $credential) {
-        $state = esxi_credential_state(repo_esxi_inventory_state($db, (int) $credential['id']), $intervalHours);
-        if (esxi_state_rank($state) > esxi_state_rank($worst)) {
-            $worst = $state;
-        }
-    }
-
-    return $worst;
 }
 
 /**

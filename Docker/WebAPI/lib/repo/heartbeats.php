@@ -188,13 +188,6 @@ function repo_integration_heartbeats(mysqli $db): array
     return $out;
 }
 
-// True once any source has ever reported - from then on missing sources are
-// rendered as "expected but never seen" (warning) instead of neutral.
-function repo_integration_any_seen(mysqli $db): bool
-{
-    return (int) repo_scalar($db, 'SELECT COUNT(*) FROM deploy_integration_heartbeats') > 0;
-}
-
 /**
  * Display rows for the status page/dashboard: source, stored row and derived
  * state (ok|legacy|warning|danger|missing|unknown). "missing" is derived per

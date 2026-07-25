@@ -60,16 +60,14 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
     return VIRTUSPHERE_STATUS_INITIALIZING;
 }
 
-function virtusphere_states_from_legacy_status(string $legacyStatus): array
-{
-    return match ($legacyStatus) {
-        VIRTUSPHERE_STATUS_OS_INSTALLED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
-        VIRTUSPHERE_STATUS_OS_INSTALLING => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
-        VIRTUSPHERE_STATUS_DEPLOYED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
-        VIRTUSPHERE_STATUS_REGISTERED => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_READY, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_NOT_READY],
-        default => ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_INITIALIZING, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_NOT_READY],
-    };
-}
+// The boundary is emit-only, so there is no inverse of the mapping above. Every
+// machine-API write names both states explicitly and passes the legacy string
+// as a literal alongside them (mecm-api.php, mecm_updateid.php,
+// db_importMAC.php); nothing ever derives the pair back from a legacy string.
+// An inverse existed and was never called, which is worse than none: it would
+// have answered a question no caller asked, from a table nothing checked. An
+// endpoint that starts accepting a legacy string needs one plus an ADR-0008
+// note, because collapsing five strings onto two axes is not lossless.
 
 function virtusphere_is_lifecycle_state(string $state): bool
 {

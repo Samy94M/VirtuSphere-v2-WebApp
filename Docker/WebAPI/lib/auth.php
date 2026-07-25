@@ -376,20 +376,11 @@ function can(string $permission, ?array $user = null): bool
     return role_has_permission((string) ($user['role'] ?? VIRTUSPHERE_ROLE_USER), $permission);
 }
 
-function require_admin(?mysqli $db = null): array
-{
-    $user = require_login($db);
-    if (!can('users.manage', $user)) {
-        // portal_forbid() instead of a bare exit('Forbidden'): the rejection is
-        // an untranslated, unstyled English word otherwise, and - worse - the
-        // denial never reaches the auth audit channel, so an operator probing
-        // admin pages leaves no trace. Every other guard in the portal already
-        // goes through this helper.
-        portal_forbid($db ?? db(), $user, 'users.manage');
-    }
-
-    return $user;
-}
+// No require_admin() wrapper: every page pairs portal_require_user() with its
+// own can() gate, so the permission a page enforces is the permission its
+// buttons check. A wrapper that hardcoded 'users.manage' invited a second,
+// coarser answer to that question. A denial still goes through portal_forbid(),
+// which localizes it and writes the auth audit line a bare exit() never did.
 
 function change_own_password(mysqli $db, int $userId, string $currentPassword, string $newPassword): bool
 {

@@ -20,7 +20,6 @@ return [
     'host_placeholder' => 'https://esxi.local or ansible.local',
     'port_placeholder' => '443 or 22',
     'secret_keep_placeholder' => 'Leave blank to keep',
-    'btn_test' => 'Test',
     'btn_testing' => 'Testing…',
     'btn_test_ansible' => 'Check connection and environment',
     'btn_inventory' => 'Start inventory pull',

@@ -201,10 +201,6 @@
     overflow-wrap: anywhere;
 }
 
-.runtime-value-muted {
-    color: var(--muted);
-}
-
 .runtime-fact > p {
     margin: 0;
 }
@@ -366,16 +362,10 @@ tr:target > td {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-tr:target,
-.inv-card:target {
+tr:target {
     /* Keep credential deep links below the sticky 76px topbar, with the same
        16px breathing room used by the other fragment-navigation targets. */
     scroll-margin-top: 92px;
-}
-
-.inv-card:target {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
 }
 
 .button.button-secondary,
@@ -890,6 +880,11 @@ label > .compound-field {
     list-style: none;
 }
 
+/* virtusphere_client_phase_state() has five values and there are four modifiers
+   below on purpose: `none` (the phase has never reported) IS this neutral base,
+   so .phase-step-none deliberately has no rule of its own. A phase nothing has
+   said anything about must not be coloured; only a reported state earns a
+   border colour. */
 .phase-step {
     display: flex;
     align-items: flex-start;
@@ -996,155 +991,23 @@ label > .compound-field {
     color: var(--warning);
 }
 
-/* System-status overview strip: small solid tiles summarizing the worst state per
-   system (solid surface-muted, not glass, so they don't stack blur on the panel). */
-.overview-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
-    gap: 12px;
-    justify-content: start;
-}
-
-.overview-tile {
-    display: grid;
-    gap: 6px;
-    justify-items: start;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-muted);
-}
-
-.overview-tile-label {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-}
-
-/* The red action hint attached to its status row reads as belonging to the source
-   above it, so it drops the floating alert margin. */
-.status-action {
-    margin: 0;
-}
-
-/* One shared colour key for both traffic lights: meaning column plus the live
-   badges each table uses for that severity. */
-.legend-key {
-    display: grid;
-    grid-template-columns: minmax(110px, max-content) 1fr 1fr;
-    gap: 10px 16px;
-    align-items: center;
-    margin: 0 0 14px;
-    /* The 1fr columns bottom out at their widest badge, which exceeds a narrow
-       phone viewport; like every wide table, the key then scrolls inside its
-       own container instead of widening the page (WCAG 1.4.10). The div
-       carries tabindex="0" so the scroll is keyboard-reachable. */
-    overflow-x: auto;
-}
-
-.legend-key .lk-head {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-}
-
-.legend-key .lk-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.legend-caps {
+/* One shared colour key for both traffic lights: one row per severity, badge
+   inline and the meaning flowing after it, wrapping under itself. Rendered by
+   system_status_ampel_legend() on system_status.php and on the help page, so
+   both teach the same colours from the same markup. list-style:none because the
+   badge already carries the row; a browser bullet in front of it reads as a
+   second marker. */
+.ampel-legend {
     list-style: none;
     margin: 0;
     padding-left: 0;
     display: grid;
     gap: 8px;
-}
-
-/* Badge inline, description flows after it and wraps under itself: keeps every
-   row consistent regardless of how wide the badge or how long the text is. */
-.legend-caps li {
     line-height: 1.5;
 }
 
-.legend-caps .badge {
+.ampel-legend .badge {
     margin-right: 6px;
-}
-
-/* ESXi inventory (ADR-0023): per-credential cards + thin datastore capacity bars. */
-.inv-cards {
-    /* min(340px, 100%): on a phone narrower than the 340px card floor the card
-       shrinks to the container instead of overflowing the page (WCAG 1.4.10);
-       the datastore table inside keeps its own scroll wrapper. */
-    grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
-    align-items: start;
-}
-
-/* Solid surface-muted card inside the glass panel (ADR-0013: glass only once). */
-.inv-card {
-    display: grid;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-muted);
-}
-
-.inv-card-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
-}
-
-.inv-card-head h3 {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 16px;
-}
-
-.inv-card-head .inline-form {
-    margin-left: auto;
-}
-
-.inv-card p {
-    margin: 0;
-}
-
-.inv-card h4 {
-    margin: 0;
-    font-size: 13px;
-    color: var(--muted);
-}
-
-.inv-card ul {
-    margin: 0;
-    padding-left: 18px;
-}
-
-/* The datastore table sits inside a ~340px card; the global 720px min-width would
-   force a scrollbar on three short columns. Let it size to its content instead. */
-.inv-card .table-wrap table {
-    min-width: 0;
-}
-
-.inv-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.inv-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
 }
 
 .capacity-bar {
@@ -1289,9 +1152,25 @@ label > .compound-field {
     margin: 2px 0 0;
 }
 
+/* The action hint attached to its status row reads as belonging to the source
+   above it, so it drops the paragraph's own floating margin and keeps only the
+   gap to the row. */
 .status-action {
-    margin-top: 10px;
+    margin: 10px 0 0;
     color: var(--muted);
+}
+
+/* The failure message of a status source: an alert that belongs to the card it
+   sits in, not a floating page-level one, so it takes the danger colour and
+   border of .alert-error without the glass surface and the 14px bottom margin.
+   Without a rule at all this rendered as ordinary body text, which is how the
+   one line that says a source is broken read like a caption. */
+.alert-inline {
+    margin: 10px 0 0;
+    border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: var(--danger);
 }
 
 .technical-details {
@@ -1724,9 +1603,6 @@ label > .compound-field {
     }
 }
 
-.hidden-template {
-    display: none;
-}
 .badge-danger {
     color: var(--danger);
 }

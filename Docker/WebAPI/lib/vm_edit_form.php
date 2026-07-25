@@ -223,7 +223,7 @@ function vm_guest_os_option_label(array $option): string
 function vm_edit_render_status_panel(array $vm, array $clientPhaseSummary, array $clientEvents): void
 {
     ?>
-        <section class="panel vm-status-panel">
+        <section class="panel">
             <div class="vm-status-head">
                 <h2><?php echo h(__t('vm_edit.heading_status')); ?></h2>
                 <?php echo status_badge((string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED)); ?>

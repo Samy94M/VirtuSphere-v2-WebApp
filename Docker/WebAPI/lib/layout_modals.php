@@ -66,7 +66,7 @@ function layout_session_modal(): void
         </div>
     </div>
 </dialog>
-<form class="session-logout-form" method="post" action="logout.php" data-session-logout-form hidden>
+<form method="post" action="logout.php" data-session-logout-form hidden>
     <?php echo csrf_field(); ?>
 </form>
 <script type="application/json" data-i18n-session nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php

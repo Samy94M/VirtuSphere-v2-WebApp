@@ -20,7 +20,6 @@ return [
     'host_placeholder' => 'https://esxi.local oder ansible.local',
     'port_placeholder' => '443 oder 22',
     'secret_keep_placeholder' => 'Leer lassen zum Beibehalten',
-    'btn_test' => 'Testen',
     'btn_testing' => 'Teste…',
     'btn_test_ansible' => 'Verbindung und Umgebung prüfen',
     'btn_inventory' => 'Inventarabruf starten',

@@ -18,15 +18,6 @@ function credential_normalize_type(string $type): string
     return $type;
 }
 
-function credential_port_or_null(mixed $value): ?int
-{
-    $validator = new Validator();
-    $port = $validator->optionalIntRange('port', $value, validator_label('port', 'Port'), 1, 65535);
-    $validator->throwIfInvalid();
-
-    return $port;
-}
-
 function credential_validate_host_literal(Validator $validator, string $field, string $host, string $label): void
 {
     if (preg_match('/[\x00-\x20\x7F]/', $host) === 1) {

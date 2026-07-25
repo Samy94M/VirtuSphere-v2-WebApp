@@ -59,7 +59,7 @@ $refreshUrl = $selectedInventoryId > 0
 
 layout_header(__t('system_status.title'), $user, 'system-status', 'system-status');
 ?>
-<div class="stack system-status-page">
+<div class="stack">
     <section class="page-intro">
         <div>
             <h1><?php echo h(__t('system_status.heading')); ?></h1>

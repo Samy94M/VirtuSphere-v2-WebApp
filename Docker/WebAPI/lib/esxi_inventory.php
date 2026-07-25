@@ -520,34 +520,15 @@ function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = nul
 }
 
 /**
- * Per-credential inventory overview for the system status page.
- *
- * Deliberately does NOT carry a traffic-light state. The badge the portal shows
- * is esxi_credential_state() (lib/esxi_capabilities.php), which is the fetch
- * health. Returning a second state field here would hand a caller a parallel
- * "ampel" to render, and the two would eventually disagree on the same page.
- *
- * @return array<int, array{credential:array<string,mixed>, state:?array<string,mixed>, inventory:array<string,array<int,array<string,mixed>>>}>
- */
-function esxi_inventory_overview(mysqli $db): array
-{
-    $out = [];
-    foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) as $credential) {
-        $credentialId = (int) $credential['id'];
-        $out[] = [
-            'credential' => $credential,
-            'state' => repo_esxi_inventory_state($db, $credentialId),
-            'inventory' => repo_esxi_inventory_for_credential($db, $credentialId),
-        ];
-    }
-
-    return $out;
-}
-
-/**
  * Compact cards in one fixed set of bulk queries. Full inventory rows are not
  * loaded until esxi_inventory_detail() is called for one explicitly requested
  * ESXi credential.
+ *
+ * Carries the raw `state` row and deliberately NOT a traffic-light state. The
+ * badge the portal shows is esxi_credential_state() (lib/esxi_capabilities.php),
+ * which is the fetch health. Returning a second state field here would hand a
+ * caller a parallel "ampel" to render, and the two would eventually disagree on
+ * the same page.
  *
  * @return array<int,array{credential:array<string,mixed>,state:?array<string,mixed>,counts:array<string,int>,pending_job:?array<string,mixed>}>
  */

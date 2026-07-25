@@ -72,6 +72,11 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
 
     $esxiRows = esxi_inventory_summaries($db);
     $intervalHours = esxi_inventory_interval_hours($db);
+    // Stays null when no ESXi credential exists at all, and the dashboard hides
+    // its tile on that: a permanently grey tile for a feature nobody configured
+    // is noise. Fetch health only, like every other rollup here; a free licence
+    // or an HA cluster is a property of a *successful* pull and surfaces as its
+    // own badge (esxi_capability_warnings()), never as this colour.
     $esxiWorst = null;
     foreach ($esxiRows as &$entry) {
         $entry['health'] = esxi_inventory_ampel($entry['state'], $intervalHours, $now);

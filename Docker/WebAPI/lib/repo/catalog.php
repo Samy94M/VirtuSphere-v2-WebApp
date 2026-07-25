@@ -46,17 +46,6 @@ function repo_vlan_name_exists(mysqli $db, string $name, int $excludeId = 0): bo
     return $row !== null;
 }
 
-function repo_package_name_exists(mysqli $db, string $name, int $excludeId = 0): bool
-{
-    if ($excludeId > 0) {
-        $row = repo_fetch_one($db, 'SELECT id FROM deploy_packages WHERE package_name = ? AND id <> ? LIMIT 1', 'si', [$name, $excludeId]);
-    } else {
-        $row = repo_fetch_one($db, 'SELECT id FROM deploy_packages WHERE package_name = ? LIMIT 1', 's', [$name]);
-    }
-
-    return $row !== null;
-}
-
 function repo_validate_os_values(mysqli $db, mixed $name, mixed $status, int $excludeId = 0): array
 {
     $validator = new Validator();
@@ -91,24 +80,11 @@ function repo_validate_vlan_values(mysqli $db, mixed $name, int $excludeId = 0):
     return $values;
 }
 
-function repo_validate_package_values(mysqli $db, mixed $name, mixed $version, mixed $status, int $excludeId = 0): array
-{
-    $validator = new Validator();
-    $values = [
-        'package_name' => $validator->requireString('package_name', $name, validator_label('package_name', 'Package name'), 255),
-        'package_version' => $validator->optionalString('package_version', $version, validator_label('package_version', 'Package version'), 255),
-        'package_status' => $validator->requireString('package_status', $status, validator_label('package_status', 'Package status'), 255),
-    ];
-    $validator->throwIfInvalid();
-    $values['package_status'] = catalog_normalize_status($values['package_status']);
-
-    if (repo_package_name_exists($db, $values['package_name'], $excludeId)) {
-        $message = validator_text('validate.name_taken', ':field already exists.', ['field' => validator_label('package_name', 'Package name')]);
-        throw new ValidationException(['package_name' => $message], $message);
-    }
-
-    return $values;
-}
+// No package validator here on purpose: the package catalog is MECM-owned and
+// read-only in the portal (ADR-0020), so the only writer is mecm_packages.php,
+// which stores VIRTUSPHERE_CATALOG_STATUS_DEFAULT rather than operator input.
+// A portal write path would need one, built like repo_validate_os_values()
+// above, including its catalog_normalize_status() call.
 
 // Default excludes retired rows: before E3 those rows were hard-DELETEd, so
 // filtering matches the previous effective behavior of every caller

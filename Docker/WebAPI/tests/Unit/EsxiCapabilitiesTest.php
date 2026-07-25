@@ -181,11 +181,17 @@ final class EsxiCapabilitiesTest extends TestCase
 
     // --- rollup ------------------------------------------------------------
 
+    /**
+     * The ESXi rollup ranks through the SSoT in lib/status.php, not through a
+     * module-local copy: the dashboard tile and the system-status section it
+     * links to must order the same states the same way. esxi_state_rank() was a
+     * thin alias over this and is gone with its only caller.
+     */
     public function testStateRankOrdersDangerAboveWarningAboveUnknown(): void
     {
-        self::assertGreaterThan(esxi_state_rank('warning'), esxi_state_rank('danger'));
-        self::assertGreaterThan(esxi_state_rank('unknown'), esxi_state_rank('warning'));
-        self::assertGreaterThan(esxi_state_rank('ok'), esxi_state_rank('unknown'));
+        self::assertGreaterThan(virtusphere_heartbeat_state_rank('warning'), virtusphere_heartbeat_state_rank('danger'));
+        self::assertGreaterThan(virtusphere_heartbeat_state_rank('unknown'), virtusphere_heartbeat_state_rank('warning'));
+        self::assertGreaterThan(virtusphere_heartbeat_state_rank('ok'), virtusphere_heartbeat_state_rank('unknown'));
     }
 
     /**

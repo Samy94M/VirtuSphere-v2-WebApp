@@ -22,7 +22,6 @@ return [
     'edit' => 'Bearbeiten',
     'create' => 'Erstellen',
     'remove' => 'Entfernen',
-    'type' => 'Typ',
     'yes' => 'Ja',
     'no' => 'Nein',
     'export_csv' => 'CSV-Export',
