@@ -10,6 +10,8 @@ return [
     'create_heading_mission' => 'Create mission',
     'create_heading_template' => 'Create template',
     'name_no_spaces_title' => 'Name must not contain spaces.',
+    'th_datastore' => 'Datastore',
+    'th_datacenter' => 'Datacenter',
     'err_prefix_reserved' => 'Normal mission names must not start with the template prefix.',
     'err_mission_id_required' => 'Mission ID is required.',
     'flash_created_mission' => 'Mission entry created. Add datastore and domain to finish setup.',

@@ -104,6 +104,42 @@ final class SystemStatusHostFactsTest extends TestCase
         ]));
     }
 
+    public function testAnUnknownFreeSpaceIsNamedAsUnknownAndNeverAsZero(): void
+    {
+        // The defect: `(int) null` rendered a row that knows nothing as a
+        // confident "0 B free" next to a full capacity, which reads as a full
+        // datastore. deploy_storage_state() has always called the same NULL
+        // `unknown`; two renderers of one fact may not disagree.
+        $line = system_status_datastore_size(['capacity_bytes' => 1_000_000_000_000, 'free_bytes' => null]);
+
+        self::assertSame(__t('system_status.inv_free_unknown_of', ['total' => backup_status_human_bytes(1_000_000_000_000)]), $line);
+        self::assertStringNotContainsString('0 B', $line);
+    }
+
+    public function testAKnownFreeSpaceStillRendersBothNumbers(): void
+    {
+        self::assertSame(
+            __t('system_status.inv_free_of', [
+                'free' => backup_status_human_bytes(400_000_000_000),
+                'total' => backup_status_human_bytes(1_000_000_000_000),
+            ]),
+            system_status_datastore_size(['capacity_bytes' => 1_000_000_000_000, 'free_bytes' => 400_000_000_000])
+        );
+
+        // A real zero is a fact and must survive: a full datastore says so.
+        self::assertStringContainsString(
+            backup_status_human_bytes(0),
+            system_status_datastore_size(['capacity_bytes' => 1_000_000_000_000, 'free_bytes' => 0])
+        );
+    }
+
+    public function testARowWithoutACapacityRendersNoSizeLine(): void
+    {
+        // Nothing to state: an old cache row, or a kind that carries no bytes.
+        self::assertSame('', system_status_datastore_size(['capacity_bytes' => null, 'free_bytes' => 400]));
+        self::assertSame('', system_status_datastore_size([]));
+    }
+
     public function testAHostRowWithoutUsableMetaIsSilent(): void
     {
         // An older cache row, a pull whose fact task failed, or a column that

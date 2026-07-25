@@ -15,6 +15,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/ansible.php';
+require_once __DIR__ . '/esxi_datastore_health.php';
 // --- ESXi inventory (ADR-0023) -------------------------------------------------
 
 /**
@@ -145,6 +146,7 @@ function ansible_parse_inventory_output(string $stdout): array
             'name' => $name,
             'capacity_bytes' => $capacity !== null ? (int) $capacity : null,
             'free_bytes' => $free !== null ? (int) $free : null,
+            'meta_json' => ansible_inventory_datastore_health($ds),
         ];
     }
 
@@ -173,6 +175,99 @@ function ansible_parse_inventory_output(string $stdout): array
         'capabilities' => ansible_parse_inventory_capabilities($data['about'] ?? [], $data['host_runtime'] ?? []),
         'queries' => ansible_parse_inventory_queries($data['queries'] ?? []),
     ];
+}
+
+/**
+ * Health of one raw datastore object, kept as its cache meta. `capacity` and
+ * `freeSpace` say how big it is; these two say whether that size means anything
+ * right now, and the parser used to throw them away.
+ *
+ * Field paths follow the documented vmware_datastore_info output and carry
+ * fallbacks like the size fields do. Both are tri-state: a field the module did
+ * not report stays absent, so the reader says "not known" instead of guessing
+ * "healthy" for a datastore that may be in maintenance (ADR-0023 tri-state
+ * contract). Null when neither field arrived, which keeps meta_json NULL rather
+ * than writing an object full of nulls.
+ *
+ * @param array<string, mixed> $raw
+ * @return array<string, mixed>|null
+ */
+function ansible_inventory_datastore_health(array $raw): ?array
+{
+    $meta = [];
+    foreach (['accessible', 'is_accessible'] as $key) {
+        if (array_key_exists($key, $raw)) {
+            $meta['accessible'] = $raw[$key];
+            break;
+        }
+    }
+    foreach (['maintenanceMode', 'maintenance_mode'] as $key) {
+        if (array_key_exists($key, $raw)) {
+            $meta['maintenance'] = $raw[$key];
+            break;
+        }
+    }
+
+    return $meta !== [] ? $meta : null;
+}
+
+/**
+ * The job-log line for the datastore health of one pull, in the shape of
+ * `Inventory queries:` and `ESXi capabilities:` above.
+ *
+ * Written on every successful pull including the all-good case, and for the
+ * same reason those two are: a field path that silently stopped matching looks
+ * exactly like a fleet where nothing is in maintenance, and only a line that
+ * also speaks when everything is fine lets an operator tell the two apart. That
+ * is the lesson of the portgroup query that reported 0 for months.
+ *
+ * English, like every other job-log line (operator diagnostics, not portal
+ * prose). Null when the pull carried no datastores at all: there is nothing to
+ * report on, and the item counts above already say so.
+ *
+ * @param array<int, array<string, mixed>> $datastores parsed cache items
+ */
+function ansible_inventory_datastore_health_log_line(array $datastores): ?string
+{
+    $total = count($datastores);
+    if ($total === 0) {
+        return null;
+    }
+
+    $withAccessible = 0;
+    $withMaintenance = 0;
+    $inMaintenance = [];
+    $inaccessible = [];
+    foreach ($datastores as $datastore) {
+        $health = esxi_datastore_health($datastore['meta_json'] ?? null);
+        if ($health['accessible'] !== null) {
+            $withAccessible++;
+        }
+        if ($health['maintenance'] !== null) {
+            $withMaintenance++;
+        }
+        if ($health['maintenance'] === true) {
+            $inMaintenance[] = (string) ($datastore['name'] ?? '?');
+        }
+        if ($health['accessible'] === false) {
+            $inaccessible[] = (string) ($datastore['name'] ?? '?');
+        }
+    }
+
+    $line = sprintf(
+        'Datastore health: %d datastore(s), accessibility reported for %d, maintenance mode reported for %d.',
+        $total,
+        $withAccessible,
+        $withMaintenance
+    );
+    if ($inMaintenance !== []) {
+        $line .= ' In maintenance: ' . implode(', ', $inMaintenance) . '.';
+    }
+    if ($inaccessible !== []) {
+        $line .= ' Inaccessible: ' . implode(', ', $inaccessible) . '.';
+    }
+
+    return $line;
 }
 
 /**

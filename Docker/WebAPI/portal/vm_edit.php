@@ -12,6 +12,8 @@ require_once __DIR__ . '/../lib/repo/client_events.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/vm_edit_form.php';
+// For the deep link to the ESXi card of a credential that was never pulled.
+require_once __DIR__ . '/../lib/system_status.php';
 
 $user = portal_require_user($connection);
 $missionId = request_int($_GET, 'mission_id', request_int($_POST, 'mission_id'));
@@ -143,6 +145,12 @@ $datacenterInheritLabel = $missionDatacenter !== ''
 $hideVmDatacenter = $vmDatacenterValue === ''
     && esxi_inventory_options_are_exact($vmDatacenterOptions)
     && count($vmDatacenterOptions['names']) === 1;
+// The same notes the mission editor renders, over the same pickers. This page
+// carried none at all, so an override chosen here could pin the VM to a value
+// that exists on one host of a mixed fleet without anything saying so.
+$vmLocationNotes = esxi_inventory_location_notes(
+    $hideVmDatacenter ? [$vmDatastoreOptions] : [$vmDatastoreOptions, $vmDatacenterOptions]
+);
 $interfaces = $vm['interfaces'] ?? vm_default_interfaces($mission);
 $disks = $vm['disks'] ?? vm_default_disks();
 $title = $vmId > 0 ? __t('vm_edit.title_edit') : __t('vm_edit.title_add');
@@ -255,6 +263,18 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
                         ]); ?></label>
                     <?php } ?>
                     <p class="hint"><span class="hint-subject"><?php echo h(implode(' / ', $locationHintSubject)); ?>:</span> <?php echo h(__t('vm_edit.location_hint')); ?></p>
+                    <?php if ($vmLocationNotes !== []) { ?>
+                        <?php // Exhaustive match, no default: a new note token has to be
+                              // given a sentence rather than disappearing silently. ?>
+                        <p class="hint"><?php echo h(implode(' ', array_map(static fn (string $note): string => match ($note) {
+                            'host_choice' => __t('vm_edit.location_host_choice_hint'),
+                            'buckets' => __t('vm_edit.location_bucket_hint'),
+                            'never_pulled' => __t('vm_edit.location_never_pulled_hint'),
+                        }, $vmLocationNotes))); ?></p>
+                    <?php } ?>
+                    <?php if (in_array('never_pulled', $vmLocationNotes, true)) { ?>
+                        <p class="hint"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('vm_edit.location_status_link')); ?></a></p>
+                    <?php } ?>
                 </div>
                 <label><?php echo h(__t('portal.vm_guest_os_label')); ?><select name="vm_guest_id" <?php echo $canWrite ? '' : 'disabled'; ?>>
                     <?php $guestIdValue = (string) ($vm['vm_guest_id'] ?? VIRTUSPHERE_VM_DEFAULTS['guest_id']); ?>

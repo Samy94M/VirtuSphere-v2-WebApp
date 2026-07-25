@@ -29,7 +29,7 @@ Der Backend/Ops-Stand vom 2026-07-05 ist fuer lokale Tests nutzbar:
 - VM-Speicherpfade validieren Namen, OS, RAM/CPU, Disks, Interfaces, DNS und MAC serverseitig.
 - Credentials validieren Typ, Name, Host/URL, Port, Username, Secret-Pflicht und Duplicate-Namen je Typ.
 - Missionen, OS, VLANs und Packages validieren Pflichtfelder, Laengen, Dubletten und fehlende IDs backendseitig.
-- Deploy-Jobs werden vor dem Queuen auf User, Mission, Datacenter, Datastore, mindestens eine VM und vollstaendige ESXi-/Ansible-Credentials geprueft.
+- Deploy-Jobs werden vor dem Queuen auf User, Mission, mindestens eine VM und vollstaendige ESXi-/Ansible-Credentials geprueft. Datacenter und Datastore werden nur fuer Modi verlangt, die einen Standort lesen; der Modus `autostart` schreibt allein die Startreihenfolge des Hosts und kommt ohne beide aus.
 - Login schuetzt zusaetzlich gegen viele Fehlversuche von derselben IP.
 
 Der Portal-UX-Slice ergaenzt dazu Sticky-Formulare mit Fehlern pro Feld (OS, VLANs, Packages, Credentials, Benutzer, Missionen, Settings und VM-Editor), Suche und IP-Filter im Log-Viewer sowie die Benutzeridentitaet in der Topbar als kompakter Konto-Link. Bewusst offen bleibt nur noch das rein visuelle Portal-Design (Settings-Optik, weitere Formularanordnung und Navigationsfeinschliff), das der Frontend-Kollege auf Basis der bestehenden Portal-Struktur weiterfuehren kann.
@@ -146,7 +146,7 @@ Bei Zugriff von einem anderen Rechner statt `127.0.0.1` die Server-IP verwenden,
 7. Mindestens eine VM in der Mission anlegen.
 8. Deploy-Job queuen.
 
-Wenn ein Deploy-Job nicht queued werden kann, kommt der Fehler jetzt vor dem Worker zurueck: fehlender User, Template-Mission, fehlendes Datacenter/Datastore, keine VMs oder unvollstaendige Credentials werden backendseitig blockiert.
+Wenn ein Deploy-Job nicht queued werden kann, kommt der Fehler jetzt vor dem Worker zurueck: fehlender User, Template-Mission, keine VMs oder unvollstaendige Credentials werden backendseitig blockiert. Ein fehlendes Datacenter oder Datastore blockiert nur die Modi, die einen Standort lesen, nicht `autostart`; Portal und Backend pruefen dabei dieselbe Bedingung.
 
 ## Logs und Fehlerreferenzen
 

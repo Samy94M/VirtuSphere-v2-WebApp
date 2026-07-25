@@ -22,7 +22,7 @@ require_once __DIR__ . '/format.php';
  */
 
 /**
- * @param array{grouped:bool, groups:array<int,array{credential_name:string,names:array<int,string>,free_by_key?:array<string,?int>}>, names:array<int,string>, free_by_key?:array<string,?int>} $options
+ * @param array{buckets?:array<int,array<string,mixed>>, names:array<int,string>, free_by_key?:array<string,?int>} $options
  * @param array{
  *     name:string, value:string, empty_label:string, unknown_suffix:string,
  *     required?:bool, disabled?:bool, input_placeholder?:string
@@ -61,31 +61,79 @@ function inventory_select_field(array $options, array $config): void
         <?php if ($showUnknown) { ?>
             <option value="<?php echo h($value); ?>" selected><?php echo h($value); ?> (<?php echo h($config['unknown_suffix']); ?>)</option>
         <?php } ?>
-        <?php if ($options['grouped']) { ?>
-            <?php foreach ($options['groups'] as $group) { ?>
-                <optgroup label="<?php echo h($group['credential_name']); ?>">
-                    <?php foreach ($group['names'] as $optionName) { inventory_select_option($optionName, $value, $group['free_by_key'] ?? []); } ?>
+        <?php if (esxi_inventory_options_are_bucketed($options)) { ?>
+            <?php foreach ($options['buckets'] as $bucket) { ?>
+                <optgroup label="<?php echo h(inventory_bucket_label($bucket)); ?>">
+                    <?php foreach ($bucket['names'] as $optionName) { inventory_select_option($optionName, $value, $bucket['free_by_key'] ?? [], $bucket['unusable_by_key'] ?? []); } ?>
                 </optgroup>
             <?php } ?>
         <?php } else { ?>
-            <?php foreach ($options['names'] as $optionName) { inventory_select_option($optionName, $value, $options['free_by_key'] ?? []); } ?>
+            <?php foreach ($options['names'] as $optionName) { inventory_select_option($optionName, $value, $options['free_by_key'] ?? [], $options['unusable_by_key'] ?? []); } ?>
         <?php } ?>
     </select>
     <?php
 }
 
 /**
- * One option. The value is always the bare name; the free space of the last pull
- * is label decoration and is omitted when the kind carries no bytes (datacenters)
- * or the row predates the column.
+ * Group heading of one presence bucket. It answers the question the operator
+ * has at this field, "does this value survive the host choice I make later",
+ * rather than the one the old per-credential grouping answered, "who reported
+ * it". Exhaustive match, no default: a fourth scope has to be given a sentence
+ * here rather than silently rendering as an unlabelled group.
+ *
+ * @param array{scope:string, credentials:array<int,array{name:string,host:string}>} $bucket
+ */
+function inventory_bucket_label(array $bucket): string
+{
+    $hosts = implode(', ', array_map('inventory_credential_label', $bucket['credentials']));
+
+    return match ($bucket['scope']) {
+        'all' => __t('common.inventory_bucket_all'),
+        'some' => __t('common.inventory_bucket_some', ['hosts' => $hosts]),
+        'only' => __t('common.inventory_bucket_only', ['host' => $hosts]),
+    };
+}
+
+/**
+ * "esxi-prod-02 (10.0.5.12)". The address is dropped when the credential has
+ * none; a trailing empty bracket would state a fact nobody has.
+ *
+ * @param array{name:string, host:string} $credential
+ */
+function inventory_credential_label(array $credential): string
+{
+    $name = trim($credential['name']);
+    $host = trim($credential['host']);
+    if ($name === '') {
+        return $host;
+    }
+
+    return $host !== '' ? $name . ' (' . $host . ')' : $name;
+}
+
+/**
+ * One option. The value is always the bare name; everything after it is label
+ * decoration.
+ *
+ * A datastore that a reporting host holds in maintenance says so instead of
+ * showing a free number, because its size is not space a deploy can use. An
+ * unknown free value shows nothing at all rather than a "0 B" or an "unknown"
+ * suffix: the kinds without bytes (datacenters) would carry it on every single
+ * option, and a suffix on every row states nothing while hiding the ones that do
+ * (portal display restraint). The two are mutually exclusive by construction:
+ * an unusable name never carries a free number.
  *
  * @param array<string, ?int> $freeByKey
+ * @param array<string, bool> $unusableByKey
  */
-function inventory_select_option(string $optionName, string $value, array $freeByKey): void
+function inventory_select_option(string $optionName, string $value, array $freeByKey, array $unusableByKey = []): void
 {
-    $free = $freeByKey[esxi_inventory_name_key($optionName)] ?? null;
+    $key = esxi_inventory_name_key($optionName);
+    $free = $freeByKey[$key] ?? null;
     $label = $optionName;
-    if ($free !== null) {
+    if (!empty($unusableByKey[$key])) {
+        $label .= ' (' . __t('common.maintenance_suffix') . ')';
+    } elseif ($free !== null) {
         $label .= ' (' . __t('common.free_suffix', ['free' => virtusphere_human_bytes($free)]) . ')';
     }
     ?>

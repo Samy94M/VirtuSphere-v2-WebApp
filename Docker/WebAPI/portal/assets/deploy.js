@@ -380,7 +380,15 @@
                     var showBar = freeBytes !== null && capacity !== null && capacity > 0;
                     bar.hidden = !showBar;
                     if (showBar) {
-                        applyCapacityFill(bar.querySelector('.capacity-fill'), (capacity - freeBytes + bytes) / capacity * 100);
+                        var pct = Math.max(0, Math.min(100, Math.round((capacity - freeBytes + bytes) / capacity * 100)));
+                        applyCapacityFill(bar.querySelector('.capacity-fill'), pct);
+                        // Same accessible name the server-rendered bar carries: the
+                        // colour is the whole warning otherwise, and a bar without a
+                        // name is nothing at all to a screen reader. The sentence
+                        // comes from the island, only the number is filled in here.
+                        var usage = (data.labels.usage_aria || '').replace(':pct', String(pct));
+                        bar.setAttribute('aria-label', usage);
+                        bar.setAttribute('title', usage);
                     }
                 }
                 if (verdict) {

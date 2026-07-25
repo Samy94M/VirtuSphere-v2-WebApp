@@ -21,9 +21,9 @@ Hard constraints: the portal must stay LAN-only, server-rendered and read-only t
 
 **The deploy never waits for a fresh ESXi read.** An inventory pull is a queued job (SSH preflight, SFTP upload, a remote `ansible-playbook` run), not an API call, and making a deploy depend on one would invert the cache-never-blocks guarantee above. Resolution reads the cache of the chosen credential instead.
 
-Both fields offer a hard picker from the inventory plus free text, because unlike VLAN they have no catalog table and no admin UI: with an empty or stale cache a pure dropdown would lock the operator out. (Superseded by the second amendment below: the free text now appears only while the inventory of that kind is empty.) A value outside the inventory is caught by the deviation report afterwards, not prevented up front. The "not in the inventory" label and the deviation report share one predicate (`esxi_inventory_value_unknown()`), so an empty inventory of a kind never accuses a stored value.
+Both fields offer a hard picker from the inventory plus free text, because unlike VLAN they have no catalog table and no admin UI: with an empty or stale cache a pure dropdown would lock the operator out. (Superseded by the second amendment below: the free text now appears only while the inventory of that kind is empty.) A value outside the inventory is caught by the deviation report afterwards, not prevented up front. The deviation report and every warning path go through one predicate, `esxi_inventory_value_unknown()`, so an empty inventory of a kind never accuses a stored value. The picker's fallback option is deliberately the one exception: it matches exactly, so a stored value differing only in case keeps its own spelling as a selected option instead of silently snapping to the inventory's on the next save. Because the warn side stays case-insensitive, that option can never produce a warning; it only makes an unwarned difference visible. The same exception applies to the VLAN select.
 
-A mission stores no ESXi credential (the target host is chosen at deploy time), so the picker is a union. What drives the UI is whether the credentials **disagree**, not how many exist: identical name sets render flat (three standalone hosts all reporting `ha-datacenter` must not become three optgroups showing one entry each), differing ones group per credential. Preselecting the lone datastore and hiding the per-VM datacenter control require the union to be **exact**, meaning all credentials agree *and* every configured credential has contributed at least once; a never-pulled credential cannot prove what it holds.
+A mission stores no ESXi credential (the target host is chosen at deploy time), so the picker is a union. What drives the UI is whether the credentials **disagree**, not how many exist: identical name sets render flat (three standalone hosts all reporting `ha-datacenter` must not become three optgroups showing one entry each). How differing ones are grouped is settled by the 2026-07-25 amendment below. Preselecting the lone datastore and hiding the per-VM datacenter control require the union to be **exact**, meaning all credentials agree *and* every configured credential has contributed at least once; a never-pulled credential cannot prove what it holds.
 
 **Per-disk datastore is out of scope, not merely unbuilt.** The top-level `datastore` parameter of `community.vmware.vmware_guest` takes precedence over `disk[].datastore` and makes it be disregarded; `createVMs-ESXi_playbook.yml` sets exactly that parameter. A per-disk field would therefore ship as a silently dead option. Changing it requires a playbook rewrite plus verification against a productive host. A consequence of the same asymmetry: only the create playbook reads `datastore_name`, while all four playbooks read `datacenter_name`, so a datastore override only takes effect when the VM is created.
 
@@ -124,3 +124,51 @@ argument spec read for months as "this host has no portgroups".
 - **Terminology only, not a wire change.** The existing URL stays
   `system_status.php`, while the visible page is System status. Mission/VM data,
   machine APIs, playbook fields and PowerShell contracts are unchanged.
+
+## Amendment (2026-07-25): presence buckets instead of origin, and datastore health
+
+- **The picker groups by risk, not by origin.** An `<optgroup>` per credential
+  answered "who reported this". The operator's question at that field is "does
+  this value survive the host choice I make later", and on a mixed fleet the two
+  diverge: a datastore shared by four hosts appeared four times, identically, and
+  carried `selected` in each group, so the browser silently kept the last one.
+  `esxi_inventory_presence_buckets()` assigns every name to exactly one of
+  `all` / `some` / `only`, which removes the duplicates by construction rather
+  than by a de-duplication pass. Group labels carry credential **name and
+  address**, because a fleet named `esxi1`..`esxi6` is not something an operator
+  can map to a machine.
+- **The proof denominator is the credentials that pulled, not the ones that hold
+  rows.** `repo_esxi_inventory_pulled_credential_ids()` counts
+  `last_success_at IS NOT NULL`, the same rule as the VLAN presence report. A
+  host that pulled successfully and genuinely reports no datastore stays in the
+  denominator; counting groups would have promoted every other host's datastore
+  to "present everywhere" with a whole host unaccounted for. Without a single
+  successful pull nothing is labelled `all`.
+- **`exact` is untouched.** It remains the sole source for preselecting a lone
+  value and hiding a per-VM control. The buckets decide presentation only; the
+  two answer different questions and must not be collapsed.
+- **Free space and usability follow the worst reporting host.** The target host
+  is still open, so a shared name shows the smallest free value reported, and a
+  name that even one reporting host holds in maintenance shows no number at all.
+- **Datastore health needs no schema.** The pull always carried `accessible` and
+  `maintenanceMode`; the parser threw both away. They are kept in the existing
+  per-item `meta_json`, tri-state like the capability facts: a missing field
+  reads as "not known" and is never guessed to be healthy, and an unknown health
+  never withdraws a number the cache does have (cache-never-blocks).
+  `esxi_datastore_usable_free_bytes()` is the one reader of both ways a number
+  can be absent, shared by the inventory detail, the deploy verdict and the
+  picker label; a NULL free value used to render as a confident "0 B free" in
+  one of them and as "unknown" in another.
+- **The pull logs its health facts, including the good case.** One
+  `Datastore health:` line per pull, next to `Inventory queries:` and for the
+  same reason: a field path that stops matching looks exactly like a fleet with
+  nothing in maintenance, and only a line that also speaks when everything is
+  fine tells the two apart.
+- **The notes at the field describe what is rendered.** The multi-credential hint
+  used to hang on `exact` while the grouping hung on disagreement, so six
+  credentials with one pulled produced "grouped per credential" over a flat list.
+  `esxi_inventory_location_notes()` derives its tokens from the rendered option
+  sets, and the VM editor shows the same notes as the mission editor, which
+  previously showed none at all. A never-pulled credential is named at the field
+  with a link to its System-status card, so the free-text dead end this ADR
+  accepted knowingly is explained where it is met.

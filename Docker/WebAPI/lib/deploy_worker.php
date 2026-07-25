@@ -376,6 +376,13 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         if ($queryLine !== null) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $queryLine);
         }
+        // Same reason and same place: a datastore health field path that stops
+        // matching looks exactly like a fleet with nothing in maintenance, and
+        // only a line that also speaks in the good case tells them apart.
+        $healthLine = ansible_inventory_datastore_health_log_line($parsed['datastores']);
+        if ($healthLine !== null) {
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $healthLine);
+        }
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     } catch (DeployWorkerCancelled $cancelled) {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Inventory job cancelled.');

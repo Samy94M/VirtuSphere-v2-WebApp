@@ -27,7 +27,7 @@ Two constraints shape the whole feature. Autostart is a **write** to the hypervi
 
 **Preflight refuses only on fresh evidence.** The capability facts from the inventory cache (ADR-0023 amendment 3) decide, and the cache-never-blocks rule keeps holding: unknown or stale facts warn and let the job run, because ESXi is the authority and a job that fails loudly on the host beats a job the portal refused on a month-old assumption. Two exceptions, both requiring a fact from a fresh successful pull:
 
-- `license_free` → **refuse**, in every mode. The write API does not exist there and the module's own error is not one an operator can act on.
+- `license_free` → **refuse**, in every mode that reaches this preflight. The write API does not exist there and the module's own error is not one an operator can act on. The preflight runs only for a job that would write the policy (`autostart`, or `full` on a mission that enabled it), so a `create`/`start`/`export`/`powercycle` run against a free-licence host is not refused up front and fails on the host instead. "Every mode" therefore describes the verdict, not the reach: extending the refusal to every deploy is a separate decision, because it would turn a capability fact into a gate for jobs that never write autostart. The portal's warning and the capability legend state the reach, not the shorthand.
 - `in_ha_cluster` → **refuse** in mode `autostart` (the operator asked for exactly the thing that cannot work), **skip the step and continue** in mode `full` (the operator asked for a deploy, and losing the VMs over an ineffective autostart step would be a poor trade).
 
 Either way the facts are written to the job log first, fresh or not, so the run is explainable afterwards even when the verdict was "go ahead".

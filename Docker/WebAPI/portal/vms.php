@@ -107,11 +107,26 @@ $canWrite = can('vms.write', $user);
     'status' => portal_sort_text('vm_status'),
 ], 'name');
 
+// The two per-VM location overrides, compact and only where one is set.
+$vmLocationOverride = static function (array $vm): string {
+    $parts = array_filter([
+        trim((string) ($vm['vm_datastore'] ?? '')),
+        trim((string) ($vm['vm_datacenter'] ?? '')),
+    ], static fn (string $value): bool => $value !== '');
+
+    return implode(' / ', $parts);
+};
+
 // CSV list export (A3): read-only GET download, streams and exits before layout.
+// The two override columns are always present here, unlike the table column
+// below: the export is where a collective answer to "which VM sits somewhere
+// else" belongs, and a column that appears only sometimes would make two
+// downloads of the same list disagree on their shape.
 if (($_GET['export'] ?? '') === 'csv') {
     $header = [
         __t('common.name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.th_ram'),
-        __t('common.status'), __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
+        __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
+        __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
     ];
     $csvRows = [];
     foreach ($rows as $vm) {
@@ -122,6 +137,8 @@ if (($_GET['export'] ?? '') === 'csv') {
             (string) ($vm['vm_cpu'] ?? ''),
             (string) ($vm['vm_ram'] ?? ''),
             (string) ($vm['vm_status'] ?? ''),
+            (string) ($vm['vm_datastore'] ?? ''),
+            (string) ($vm['vm_datacenter'] ?? ''),
             (string) ($vm['mecm_sync_state'] ?? ''),
             (string) count($vm['interfaces'] ?? []),
             (string) count($vm['disks'] ?? []),
@@ -130,6 +147,17 @@ if (($_GET['export'] ?? '') === 'csv') {
     }
     audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'exported vm list of mission id ' . $missionId . ' as CSV (' . count($csvRows) . ' row(s))', (int) $user['id']);
     portal_send_csv('vms-' . (string) $mission['mission_name'], $header, $csvRows);
+}
+
+// The table column exists only when a VM actually deviates. An override is the
+// exception, and a column of dashes states nothing while pushing the columns
+// that do off a narrow screen (portal display restraint).
+$hasLocationOverride = false;
+foreach ($rows as $vmRow) {
+    if ($vmLocationOverride($vmRow) !== '') {
+        $hasLocationOverride = true;
+        break;
+    }
 }
 
 layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission')) . ': ' . (string) $mission['mission_name'], $user, $isTemplate ? 'templates' : 'missions');
@@ -168,7 +196,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'status', __t('common.status'), $sort, $dir, $vmSortParams);
-                ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
                     <tr>
@@ -179,6 +207,9 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_ram'] ?? ''); ?></td>
                         <td><?php echo status_badge((string) ($vm['vm_status'] ?? '')); ?></td>
+                        <?php if ($hasLocationOverride) { $override = $vmLocationOverride($vm); ?>
+                            <td><?php echo $override !== '' ? h($override) : '&mdash;'; ?></td>
+                        <?php } ?>
                         <td><?php echo mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? '')); ?> <span class="muted"><?php echo h((string) ($vm['updated'] ?? 0)); ?></span></td>
                         <td><?php echo h((string) count($vm['interfaces'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
@@ -204,7 +235,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="<?php echo $canWrite ? 12 : 11; ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo ($canWrite ? 12 : 11) + ($hasLocationOverride ? 1 : 0); ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

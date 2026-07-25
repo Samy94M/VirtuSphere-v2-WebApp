@@ -11,6 +11,8 @@ require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
+// For the deep link to the ESXi card of a credential that was never pulled.
+require_once __DIR__ . '/../lib/system_status.php';
 
 $user = portal_require_user($connection);
 $missionId = request_int($_GET, 'id');
@@ -131,7 +133,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // even if retired/unknown (decoupling, ADR-0023). Datacenter/datastore are the
 // same kind of hard select over the inventory cache (see inventory_field.php).
 $vlans = repo_active_vlans($connection);
-$storedVlan = (string) ($mission['wds_vlan'] ?? '');
+// Through form_old() like every other field of this form: read straight from the
+// row, a failed validation elsewhere silently reverted a changed VLAN to the
+// stored one and nothing said so.
+$storedVlan = form_old('update', 'wds_vlan', (string) ($mission['wds_vlan'] ?? ''));
 $datacenterOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATACENTER);
 $datastoreOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATASTORE);
 
@@ -154,10 +159,15 @@ if (!$isTemplate && $datastoreValue === '' && esxi_inventory_options_are_exact($
 $hideMissionDatacenter = $datacenterValue === ''
     && esxi_inventory_options_are_exact($datacenterOptions)
     && count($datacenterOptions['names']) === 1;
-// Only warn when the credentials really disagree, or when one of them has never
-// been pulled. Three hosts that all report the same names need no warning.
-$showTargetHostHint = $datacenterOptions['credential_count'] > 1
-    && (!esxi_inventory_options_are_exact($datacenterOptions) || !esxi_inventory_options_are_exact($datastoreOptions));
+// Derived from what the two fields actually render, never from the credential
+// count: with six credentials of which one was pulled the list is flat, and the
+// note used to announce a grouping that was not on screen. A hidden datacenter
+// is not in the set, because a note may not describe a control nobody sees.
+$renderedLocationOptions = [$datastoreOptions];
+if (!$hideMissionDatacenter) {
+    $renderedLocationOptions[] = $datacenterOptions;
+}
+$locationNotes = esxi_inventory_location_notes($renderedLocationOptions);
 
 layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission_details.title_mission'), $user, $isTemplate ? 'templates' : 'missions', 'missions');
 ?>
@@ -199,14 +209,20 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                             __t('mission_details.datacenter_optional_hint'),
                         ];
                     }
-                    if ($showTargetHostHint) {
+                    if ($locationNotes !== []) {
                         $multiCredentialSubject = [__t('mission_details.label_datastore')];
                         if (!$hideMissionDatacenter) {
                             $multiCredentialSubject[] = __t('mission_details.label_datacenter');
                         }
+                        // Exhaustive match, no default: a new note token has to
+                        // be given a sentence rather than disappearing silently.
                         $locationHints[] = [
                             implode(' / ', $multiCredentialSubject),
-                            __t('mission_details.location_multi_credential_hint'),
+                            implode(' ', array_map(static fn (string $note): string => match ($note) {
+                                'host_choice' => __t('mission_details.location_host_choice_hint'),
+                                'buckets' => __t('mission_details.location_bucket_hint'),
+                                'never_pulled' => __t('mission_details.location_never_pulled_hint'),
+                            }, $locationNotes)),
                         ];
                     }
                     // A lone datastore without prose is an ordinary field, not a group.
@@ -234,6 +250,12 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                 <?php } ?>
                 <?php foreach ($locationHints as [$hintSubject, $hintText]) { ?>
                     <p class="hint"><span class="hint-subject"><?php echo h($hintSubject); ?>:</span> <?php echo h($hintText); ?></p>
+                <?php } ?>
+                <?php if (in_array('never_pulled', $locationNotes, true)) { ?>
+                    <?php // The note above names the cause; this is the one place that
+                          // can fix it, so the field links there instead of leaving the
+                          // operator to find the page. ?>
+                    <p class="hint"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('mission_details.location_status_link')); ?></a></p>
                 <?php } ?>
                 <?php if ($groupLocationFields) { ?></div><?php } ?>
                 <label><?php echo h(__t('mission_details.label_domain')); ?><input name="domain" value="<?php echo h(form_old('update', 'domain', (string) ($mission['domain'] ?? ''))); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('mission_details.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $isTemplate ? '' : 'required'; ?> <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'domain'); ?></label>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_page.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
@@ -16,6 +17,11 @@ require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory.php';
  * reports exactly one datacenter (a standalone host's implicit ha-datacenter).
  * Zero (never pulled) or several (vCenter) is not a guess the portal may make.
  * The datastore stays mandatory throughout. Prefix-scoped cleanup.
+ *
+ * The portal gate (lib/deploy_page.php) is a twin of the repository gate and is
+ * exercised here against the same fixtures, because the two used to disagree
+ * about `autostart`: the repo skipped the location requirement for it, the
+ * portal did not, and the portal answers first.
  */
 final class DeployDatacenterResolutionTest extends TestCase
 {
@@ -111,6 +117,46 @@ final class DeployDatacenterResolutionTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         repo_deploy_assert_mission_ready($this->db, $mission, $credentialId);
+    }
+
+    public function testTheAutostartModePassesThePortalGateWithoutAnyDatacenter(): void
+    {
+        // The failing case in a mixed fleet: a mission with no datacenter, mode
+        // autostart, against a credential that was never pulled. The autostart
+        // playbook reads no location at all, so refusing here would answer a
+        // question nobody asked, and the backend would have queued the job.
+        $neverPulled = $this->makeCredential('auto_none');
+        $vcenter = $this->makeCredential('auto_many');
+        $this->setDatacenters($vcenter, ['DC-Nord', 'DC-Sued']);
+        $mission = $this->makeMission('');
+
+        foreach ([$neverPulled, $vcenter, 0] as $credentialId) {
+            deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
+        }
+        self::assertTrue(true, 'the portal gate let every autostart case through');
+    }
+
+    public function testTheRepositoryGateAgreesWithThePortalOnAutostart(): void
+    {
+        // Both halves of the twin, same fixture: whatever one accepts the other
+        // must accept, or the operator meets a refusal that has no backend.
+        $credentialId = $this->makeCredential('auto_twin');
+        $mission = $this->makeMission('');
+
+        repo_deploy_assert_mission_ready($this->db, $mission, $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
+        deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
+        self::assertTrue(true);
+    }
+
+    public function testALocationReadingModeStillFailsThePortalGate(): void
+    {
+        // The regression guard for the fix above: skipping the gate for
+        // autostart must not skip it for everything else.
+        $credentialId = $this->makeCredential('auto_full');
+        $mission = $this->makeMission('');
+
+        $this->expectException(ValidationException::class);
+        deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_FULL);
     }
 
     private function makeCredential(string $suffix): int

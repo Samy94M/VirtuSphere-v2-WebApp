@@ -39,9 +39,14 @@ $selectedInventory = $selectedInventoryId > 0
 // Without an inventory there is nothing to compare against, so the scan is
 // skipped and the panel says so; an empty result would otherwise be rendered as
 // a clean bill of health nobody checked.
+//
+// Templates included (ADR-0023 amendment): they cannot deploy, so the mission
+// list badge and the deploy hint leave them out, but a stale VLAN or datastore
+// that lives only in a template propagates into every mission cloned from it.
+// This report is the one place that has to show it, flagged as a template.
 $hasInventory = $snapshot['esxi']['rows'] !== [];
 $deviations = $hasInventory
-    ? esxi_inventory_mission_deviations($connection)
+    ? esxi_inventory_mission_deviations($connection, true)
     : [];
 $activeVlanNames = array_map(
     static fn (array $vlan): string => (string) $vlan['vlan_name'],

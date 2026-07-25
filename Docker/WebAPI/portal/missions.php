@@ -127,12 +127,23 @@ $rows = array_values(array_filter(getMissions($connection), static function (arr
 // CSV list export (A3): read-only GET download of the current list. Streams and
 // exits before any layout output.
 if (($_GET['export'] ?? '') === 'csv') {
-    $header = [__t('common.name'), __t('common.status'), __t('common.vms'), __t('common.updated')];
+    // Datastore and datacenter ride along here and nowhere else on this page:
+    // "which mission sits where" has no collective answer in the portal, and an
+    // operator with six hosts had to open every mission to build one. The export
+    // is the right place for that, precisely because the rendered list stays
+    // restrained. An empty datacenter is the derived case (resolved from the
+    // target host at deploy time), so the cell is empty rather than invented.
+    $header = [
+        __t('common.name'), __t('common.status'), __t('missions.th_datastore'),
+        __t('missions.th_datacenter'), __t('common.vms'), __t('common.updated'),
+    ];
     $csvRows = [];
     foreach ($rows as $mission) {
         $csvRows[] = [
             (string) ($mission['mission_name'] ?? ''),
             (string) ($mission['mission_status'] ?? ''),
+            (string) ($mission['hypervisor_datastorage'] ?? ''),
+            (string) ($mission['hypervisor_datacenter'] ?? ''),
             (string) ($mission['vm_count'] ?? 0),
             portal_format_timestamp($mission['updated_at'] ?? ''),
         ];

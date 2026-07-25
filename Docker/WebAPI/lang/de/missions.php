@@ -10,6 +10,8 @@ return [
     'create_heading_mission' => 'Mission erstellen',
     'create_heading_template' => 'Vorlage erstellen',
     'name_no_spaces_title' => 'Name darf keine Leerzeichen enthalten.',
+    'th_datastore' => 'Datastore',
+    'th_datacenter' => 'Datacenter',
     'err_prefix_reserved' => 'Normale Missionsnamen dürfen nicht mit dem Vorlagen-Präfix beginnen.',
     'err_mission_id_required' => 'Missions-ID ist erforderlich.',
     'flash_created_mission' => 'Missionseintrag erstellt. Ergänze Datastore und Domäne zum Abschluss.',

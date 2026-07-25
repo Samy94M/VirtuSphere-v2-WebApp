@@ -93,6 +93,60 @@ function system_status_host_facts(array $row): string
     return $html;
 }
 
+/**
+ * Size line of one cached datastore row. A NULL free value is a hole in the
+ * cache (never pulled, a host that refused the property), and `(int) null`
+ * rendered it as a confident "0 B free" right next to a full capacity: the one
+ * reading an operator must not get from a row that knows nothing.
+ *
+ * The third caller of esxi_datastore_usable_free_bytes(), so this line, the
+ * deploy verdict and the picker label answer "how much space is here" with one
+ * rule: a datastore in maintenance has a size but no usable free space either.
+ *
+ * @param array<string, mixed> $row
+ */
+function system_status_datastore_size(array $row): string
+{
+    $capacity = $row['capacity_bytes'] ?? null;
+    if ($capacity === null) {
+        return '';
+    }
+    $free = esxi_datastore_usable_free_bytes(
+        $row['free_bytes'] !== null ? (int) $row['free_bytes'] : null,
+        $row['meta_json'] ?? null
+    );
+    if ($free === null) {
+        return __t('system_status.inv_free_unknown_of', ['total' => backup_status_human_bytes((int) $capacity)]);
+    }
+
+    return __t('system_status.inv_free_of', [
+        'free' => backup_status_human_bytes($free),
+        'total' => backup_status_human_bytes((int) $capacity),
+    ]);
+}
+
+/**
+ * The maintenance badge of one cached datastore row, or ''. Named next to the
+ * size line rather than folded into it: "free: unknown" says the number is
+ * missing, this says why, and the operator's next step differs (wait for the
+ * maintenance to end versus check why the pull reported nothing).
+ *
+ * @param array<string, mixed> $row
+ */
+function system_status_datastore_health_badge(array $row): string
+{
+    $health = esxi_datastore_health($row['meta_json'] ?? null);
+    $html = '';
+    if ($health['maintenance'] === true) {
+        $html .= ' ' . portal_badge('warning', __t('system_status.inv_ds_maintenance'));
+    }
+    if ($health['accessible'] === false) {
+        $html .= ' ' . portal_badge('danger', __t('system_status.inv_ds_inaccessible'));
+    }
+
+    return $html;
+}
+
 /** @param array<string,array<int,array<string,mixed>>> $detail */
 function system_status_render_inventory_detail(array $detail): void
 {
@@ -105,7 +159,7 @@ function system_status_render_inventory_detail(array $detail): void
         $rows = $detail[$kind] ?? [];
         ?>
         <div class="inventory-detail-group"><h4><?php echo h($label); ?> (<?php echo h((string) count($rows)); ?>)</h4>
-        <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { ?><li><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE && $row['capacity_bytes'] !== null) { ?> <small><?php echo h(__t('system_status.inv_free_of', ['free' => backup_status_human_bytes((int) $row['free_bytes']), 'total' => backup_status_human_bytes((int) $row['capacity_bytes'])])); ?></small><?php } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
+        <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { $isDatastore = $kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE; $size = $isDatastore ? system_status_datastore_size($row) : ''; ?><li><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php if ($size !== '') { ?> <small><?php echo h($size); ?></small><?php } ?><?php if ($isDatastore) { echo system_status_datastore_health_badge($row); } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
         </div>
         <?php
     }
@@ -190,8 +244,9 @@ function system_status_render_deviations(array $deviations, array $activeVlanNam
                 <article>
                     <h3>
                         <a href="mission_details.php?id=<?php echo h((string) $entry['mission_id']); ?>"><?php echo h((string) $entry['mission_name']); ?></a>
-                        <?php // A deviation on a template is not an outage: it becomes one only when a mission is created from it. ?>
-                        <?php if (mission_name_is_template((string) $entry['mission_name'])) { echo ' ' . portal_badge('info', __t('system_status.dev_template_badge')); } ?>
+                        <?php // A deviation on a template is not an outage: it becomes one only when a mission is created from it.
+                              // The flag the scan computed, not a second str_starts_with: one predicate, one answer. ?>
+                        <?php if (!empty($entry['is_template'])) { echo ' ' . portal_badge('info', __t('system_status.dev_template_badge')); } ?>
                         <?php if (!empty($entry['vm_name'])) { ?> · <a href="vm_edit.php?mission_id=<?php echo h((string) $entry['mission_id']); ?>&amp;vm_id=<?php echo h((string) $entry['vm_id']); ?>"><?php echo h((string) $entry['vm_name']); ?></a><?php } ?>
                     </h3>
                     <ul><?php foreach ($entry['issues'] as $issue) { ?>

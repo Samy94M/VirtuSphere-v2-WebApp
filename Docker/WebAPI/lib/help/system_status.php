@@ -164,6 +164,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_system_status.esxi_inv_zero_p2')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_zero_p3')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_zero_p4')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p5')); ?></p>
 
             <h3><?php echo h(__t('help_system_status.esxi_inv_catalog_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.esxi_inv_catalog_presence')); ?></p>

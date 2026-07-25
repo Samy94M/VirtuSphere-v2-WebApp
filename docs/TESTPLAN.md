@@ -15,6 +15,8 @@ Dieses Dokument ist seither nur noch ein Wegweiser; es sammelt keine Checkboxen 
 | Entscheidungen | `docs/adr/README.md` (Kampagnen-relevant: ADR-0028 bis ADR-0032) |
 | Seiten- und Aktions-Inventar (vormals Anhang A) | `docs/QUALITY-GATES.md` plus die geschlossenen Kataloge der Contract-Tests (`PortalConfirmContractTest`, `PortalPostGuardContractTest`) und die E2E-Suite `tests/e2e/specs/` |
 | Feld-Wertematrix (vormals Anhang B) | erschöpfend in `ValidatorRulesTest`, je Render-Kontext in `tests/e2e/specs/field-roundtrip.spec.js` |
+| ESXi-Standortauswahl (Risiko-Gruppen, Beweis-Nenner, Datastore-Health, Picker-Markup) | `EsxiInventoryPresenceBucketsTest`, `EsxiInventoryOptionFlagsTest`, `EsxiDatastoreHealthTest`, `EsxiInventoryOptionsTest`, `InventorySelectFieldTest` |
+| Zwillinge, die auseinanderlaufen können (Portal↔Repo-Gate, PHP↔`deploy.js`, Maske↔Spaltenliste) | `DeployDatacenterResolutionTest`, `DeployStorageMirrorContractTest`, `MissionFormStickyContractTest`, `DeployFormStateContractTest` |
 | YAML-Injection-Matrix (vormals Anhang C) | `AnsibleServerlistYamlSafetyTest` plus das `yaml-roundtrip`-Gate (`tests/fixtures/golden-mission.json`) |
 | Lastprofil und Schwellen | `tests/load/README.md` |
 | Befund-Historie und Release-Notes | `docs/audits/2026-07-hardening.md`, `docs/CHANGELOG.md` |

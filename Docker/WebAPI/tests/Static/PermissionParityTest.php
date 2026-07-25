@@ -9,7 +9,13 @@ final class PermissionParityTest extends TestCase
     public function testPermissionLiteralsAreDeclared(): void
     {
         $root = dirname(__DIR__, 2);
-        $files = glob($root . '/portal/*.php') ?: [];
+        // Both trees, not just the pages: a page-specific helper module
+        // (lib/system_status_page.php, lib/vm_edit_form.php, the panel
+        // renderers) carries its own can() gates, and scanning only portal/*.php
+        // meant a typo in one of those literals silently allowed nobody, which
+        // looks exactly like a permission nobody was granted.
+        $files = array_merge(glob($root . '/portal/*.php') ?: [], glob($root . '/lib/*.php') ?: []);
+        self::assertNotSame([], $files);
         $unknown = [];
 
         foreach ($files as $file) {

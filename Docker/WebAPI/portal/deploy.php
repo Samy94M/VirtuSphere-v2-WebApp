@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
 require_once __DIR__ . '/../lib/deploy_form_state.php';
+require_once __DIR__ . '/../lib/deploy_page.php';
 require_once __DIR__ . '/../lib/deploy_storage.php';
 require_once __DIR__ . '/../lib/repo/credentials.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -18,31 +19,6 @@ require_once __DIR__ . '/../lib/esxi_capabilities.php';
 $user = portal_require_user($connection);
 if (!can('deploy.run', $user)) {
     portal_forbid($connection, $user, 'deploy.run');
-}
-
-/**
- * Portal-side twin of the repo gate. The repo throws English RuntimeExceptions as
- * operator diagnostics; the user gets a localized field error naming the actual
- * reason. A mission may leave its datacenter empty only when the ESXi credential
- * chosen here reports exactly one (ADR-0023).
- */
-function deploy_assert_datacenter_resolvable(mysqli $db, int $missionId, int $esxiCredentialId): void
-{
-    $mission = $missionId > 0 ? repo_get_mission($db, $missionId) : null;
-    if ($mission === null || trim((string) ($mission['hypervisor_datacenter'] ?? '')) !== '') {
-        return;
-    }
-
-    $candidates = repo_esxi_datacenters_for_credential($db, $esxiCredentialId);
-    if (count($candidates) === 1) {
-        return;
-    }
-
-    $message = $candidates === []
-        ? __t('deploy.err_datacenter_no_inventory')
-        : __t('deploy.err_datacenter_ambiguous', ['names' => implode(', ', $candidates)]);
-
-    throw new ValidationException(['credential_esxi_id' => __t('deploy.err_datacenter_unresolved')], $message);
 }
 
 // From the same source as the rest of the form (lib/deploy_form_state.php).
@@ -75,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Before the branch on purpose: the preview path never reaches a
             // readiness gate, so without this a mission whose datacenter cannot
             // be resolved would show a schedule preview and only fail on confirm.
-            deploy_assert_datacenter_resolvable($connection, $missionIdPost, $esxiId);
+            deploy_assert_datacenter_resolvable($connection, $missionIdPost, $esxiId, request_string($_POST, 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL));
 
             if ($schedule['has_schedule'] && !$confirmed) {
                 // Show a preview of the computed start times; do NOT redirect so
@@ -197,18 +173,27 @@ if ($selectedMission !== null && $esxiCredentials !== []) {
 // not have. Both are warn-only. Independent of the mission, so it is built for
 // every credential regardless of the selection.
 $capabilityWarnings = [];
+// One query for every credential's state instead of one per credential: the
+// same bulk read the credentials page already uses.
+$esxiStates = repo_esxi_inventory_states($connection);
 foreach ($esxiCredentials as $credential) {
     $credentialId = (int) $credential['id'];
     $messages = [];
-    foreach (esxi_capability_warnings(repo_esxi_inventory_state($connection, $credentialId)) as $warning) {
+    foreach (esxi_capability_warnings($esxiStates[$credentialId] ?? null) as $warning) {
         if ($warning['level'] === 'warning') {
-            $messages[] = __t('system_status.cap_' . $warning['key']);
+            // The legend sentence, not the short badge label: the consequence
+            // belongs to the capability, not to the wrapper. The wrapper used to
+            // end in "the job is not blocked", which is false for a free licence
+            // (ADR-0025 refuses an autostart write outright), and no single
+            // sentence can be true for every capability that may land here.
+            // Same key the help renders, so warning and help cannot disagree.
+            $messages[] = __t('system_status.cap_legend_' . $warning['key']);
         }
     }
     if ($messages !== []) {
         $capabilityWarnings[(string) $credentialId] = __t('deploy.capability_warn', [
             'host' => (string) ($credential['name'] ?? ('#' . $credentialId)),
-            'notes' => implode('; ', $messages),
+            'notes' => implode(' ', $messages),
         ]);
     }
 }
@@ -217,8 +202,26 @@ foreach ($esxiCredentials as $credential) {
 // deploy.js needs to keep it live. Warn-only, like every other inventory signal on
 // this page: the free-space numbers are as old as the last pull, and no deploy is
 // ever blocked by them (ADR-0023).
-$storageRows = $selectedMission !== null ? ansible_storage_by_datastore($selectedMission, $missionVms) : [];
+//
+// Over the VMs the form actually has checked, not the whole mission: the
+// schedule preview has always computed the requirement of the selection, and a
+// queue form that adds up VMs the operator unchecked states a different number
+// for the same job.
+$storageRows = $selectedMission !== null
+    ? ansible_storage_by_datastore($selectedMission, deploy_selected_vms($missionVms, array_keys(deploy_form_vm_selection() ?? [])))
+    : [];
 $storageIsland = deploy_storage_island($connection, $storageRows, $esxiCredentials);
+
+// Everything below is what the page shows BEFORE deploy.js runs. Without it the
+// immediate-job path rendered empty warning boxes and dash-filled storage cells
+// for a credential that was already chosen, while the schedule preview (rendered
+// server-side) showed the full picture for the same input. JS refreshes all of
+// it on the first change; this is the starting state, and the only state a
+// browser without JavaScript ever sees.
+$selectedEsxiId = deploy_form_value('credential_esxi_id');
+$initialHostWarning = $hostWarnings[$selectedEsxiId] ?? '';
+$initialCapabilityWarning = $capabilityWarnings[$selectedEsxiId] ?? '';
+$initialCapacity = $selectedEsxiId !== '' ? deploy_datastore_capacity($connection, (int) $selectedEsxiId) : [];
 
 // datetime-local `min` in portal wall time keeps most past-time mistakes out.
 $scheduleMinLocal = (new DateTimeImmutable('now', new DateTimeZone(portal_timezone())))->format('Y-m-d\TH:i');
@@ -314,7 +317,6 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 </select>
             </label>
             <label><?php echo h(__t('deploy.label_esxi')); ?>
-                <?php $selectedEsxiId = deploy_form_value('credential_esxi_id'); ?>
                 <select name="credential_esxi_id" required data-deploy-esxi <?php echo $esxiCredentials === [] ? 'disabled' : ''; ?>>
                     <option value=""><?php echo h(__t('deploy.select_esxi')); ?></option>
                     <?php foreach ($esxiCredentials as $credential) { ?>
@@ -338,8 +340,12 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                     // input; "</script>" must not break out of the island.
                     echo json_encode($hostWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
                 ?></script>
-                <?php // form-grid-full spans the row; without it the alert becomes a narrow cell beside the selects. ?>
-                <p class="alert alert-warning form-grid-full" data-deploy-host-warning hidden></p>
+                <?php // form-grid-full spans the row; without it the alert becomes a narrow cell beside the selects.
+                      // role="status" (implies aria-live="polite"): deploy.js swaps the text on
+                      // every credential change, and a warning that only appears visually is
+                      // one a screen-reader user never learns about before submitting. The
+                      // element is in the tree from the start, so the later fill is announced. ?>
+                <p class="alert alert-warning form-grid-full" role="status" data-deploy-host-warning <?php echo $initialHostWarning === '' ? 'hidden' : ''; ?>><?php echo h($initialHostWarning); ?></p>
             <?php } ?>
             <?php if ($capabilityWarnings !== []) { ?>
                 <?php // Disjoint from the host warnings above: those name mission values
@@ -347,7 +353,7 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 <script type="application/json" data-deploy-capability-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php
                     echo json_encode($capabilityWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
                 ?></script>
-                <p class="alert alert-warning form-grid-full" data-deploy-capability-warning hidden></p>
+                <p class="alert alert-warning form-grid-full" role="status" data-deploy-capability-warning <?php echo $initialCapabilityWarning === '' ? 'hidden' : ''; ?>><?php echo h($initialCapabilityWarning); ?></p>
             <?php } ?>
             <?php $selectedMode = deploy_form_value('mode', VIRTUSPHERE_DEPLOY_MODE_FULL); ?>
             <label><?php echo h(__t('deploy.label_mode')); ?>
@@ -418,7 +424,7 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
             <?php if ($storageRows !== []) { ?>
                 <div class="form-grid-full" data-storage-live>
                     <span class="field-label"><?php echo h(__t('deploy.storage_heading')); ?></span>
-                    <?php deploy_render_storage_table($storageRows, null); ?>
+                    <?php deploy_render_storage_table($storageRows, $initialCapacity, true); ?>
                     <?php if ($storageIsland !== null) { ?>
                         <script type="application/json" data-deploy-storage nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php
                             // JSON_HEX_TAG: datastore names come from ESXi and are

@@ -50,7 +50,16 @@ final class SystemStatusPanelBranchTest extends TestCase
             $list[] = ['field' => 'vlan', 'value' => 'VLAN_' . (700 + $i)];
         }
 
-        return [['mission_id' => 7, 'mission_name' => $missionName, 'vm_id' => null, 'vm_name' => '', 'issues' => $list]];
+        // is_template is part of the scan's output shape, not something the
+        // renderer re-derives from the name: one predicate, one answer.
+        return [[
+            'mission_id' => 7,
+            'mission_name' => $missionName,
+            'is_template' => mission_name_is_template($missionName),
+            'vm_id' => null,
+            'vm_name' => '',
+            'issues' => $list,
+        ]];
     }
 
     public function testWithoutInventoryTheScanReportsNotCheckedInsteadOfZero(): void
@@ -90,6 +99,18 @@ final class SystemStatusPanelBranchTest extends TestCase
 
         $mission = $this->renderDeviations($this->deviation('PROD-WEB', 1), true);
         self::assertStringNotContainsString(__t('system_status.dev_template_badge'), $mission);
+    }
+
+    public function testTheTemplateBadgeFollowsTheScanFlagAndNotTheName(): void
+    {
+        // The scan owns the predicate (mission_name_is_template trims to match
+        // stored names). A renderer that re-derived it from the name would be a
+        // second implementation of the same rule, free to disagree with the
+        // scope decision that produced the entry.
+        $entry = $this->deviation('PROD-WEB', 1);
+        $entry[0]['is_template'] = true;
+
+        self::assertStringContainsString(__t('system_status.dev_template_badge'), $this->renderDeviations($entry, true));
     }
 
     /** @param array<string,mixed>|null $stateRow */

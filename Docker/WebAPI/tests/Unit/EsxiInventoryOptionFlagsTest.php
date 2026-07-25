@@ -7,9 +7,9 @@ use PHPUnit\Framework\TestCase;
 require_once dirname(__DIR__, 2) . '/lib/esxi_inventory.php';
 
 /**
- * ADR-0023: the datacenter/datastore pickers group per credential only when the
- * credentials really disagree, and preselect only when the union describes every
- * possible deploy target. The number of credentials alone decides neither.
+ * ADR-0023: the datacenter/datastore pickers preselect only when the union
+ * describes every possible deploy target. The number of credentials alone does
+ * not decide it, and neither does the number that happen to hold rows.
  */
 final class EsxiInventoryOptionFlagsTest extends TestCase
 {
@@ -28,58 +28,40 @@ final class EsxiInventoryOptionFlagsTest extends TestCase
         return esxi_inventory_option_flags($groups, array_values($names), $credentialCount);
     }
 
-    public function testThreeStandaloneHostsAllReportingHaDatacenterStayFlatAndExact(): void
+    public function testThreeStandaloneHostsAllReportingHaDatacenterAreExact(): void
     {
-        // The case that matters in practice: grouping would print the same single
-        // entry three times and imply a difference that does not exist.
-        $flags = $this->flags([['ha-datacenter'], ['ha-datacenter'], ['ha-datacenter']], 3);
-
-        self::assertFalse($flags['grouped']);
-        self::assertTrue($flags['exact'], 'every host offers it, so the deploy target does not matter');
+        // The case that matters in practice: every host offers it, so whichever
+        // host the deploy picks, the value is there.
+        self::assertTrue($this->flags([['ha-datacenter'], ['ha-datacenter'], ['ha-datacenter']], 3)['exact']);
     }
 
-    public function testSingleCredentialIsFlatAndExact(): void
+    public function testSingleCredentialIsExact(): void
     {
-        $flags = $this->flags([['datastore1']], 1);
-
-        self::assertFalse($flags['grouped']);
-        self::assertTrue($flags['exact']);
+        self::assertTrue($this->flags([['datastore1']], 1)['exact']);
     }
 
-    public function testDisagreeingCredentialsAreGroupedAndNotExact(): void
+    public function testDisagreeingCredentialsAreNotExact(): void
     {
-        $flags = $this->flags([['datastore1', 'ssd-fast'], ['datastore1']], 2);
-
-        self::assertTrue($flags['grouped']);
-        self::assertFalse($flags['exact'], 'ssd-fast only exists on one host');
+        self::assertFalse($this->flags([['datastore1', 'ssd-fast'], ['datastore1']], 2)['exact'], 'ssd-fast only exists on one host');
     }
 
     public function testANeverPulledCredentialBlocksExactness(): void
     {
-        // Two credentials configured, only one has inventory rows. The list is
-        // flat (nothing to compare against) but cannot be trusted as complete.
-        $flags = $this->flags([['ha-datacenter']], 2);
-
-        self::assertFalse($flags['grouped']);
-        self::assertFalse($flags['exact']);
+        // Two credentials configured, only one has inventory rows: the list
+        // cannot be trusted as complete.
+        self::assertFalse($this->flags([['ha-datacenter']], 2)['exact']);
     }
 
     public function testCaseVariantsAcrossHostsCountAsAgreement(): void
     {
         // The inventory de-duplicates case-insensitively, so the union has one
         // entry and both hosts must be seen as reporting it.
-        $flags = $this->flags([['ha-datacenter'], ['HA-Datacenter']], 2);
-
-        self::assertFalse($flags['grouped']);
-        self::assertTrue($flags['exact']);
+        self::assertTrue($this->flags([['ha-datacenter'], ['HA-Datacenter']], 2)['exact']);
     }
 
-    public function testEmptyInventoryIsNeitherGroupedNorExact(): void
+    public function testEmptyInventoryIsNotExact(): void
     {
-        $flags = $this->flags([], 1);
-
-        self::assertFalse($flags['grouped']);
-        self::assertFalse($flags['exact'], 'an empty picker must not preselect or hide anything');
+        self::assertFalse($this->flags([], 1)['exact'], 'an empty picker must not preselect or hide anything');
     }
 
     public function testAnEmptyInventoryNeverMarksAValueAsUnknown(): void
@@ -94,5 +76,30 @@ final class EsxiInventoryOptionFlagsTest extends TestCase
     {
         self::assertFalse(esxi_inventory_value_unknown('DC-NORD', ['dc-nord' => true]));
         self::assertTrue(esxi_inventory_value_unknown('DC-Sued', ['dc-nord' => true]));
+    }
+
+    public function testTheUnionKeepsTheFirstSpellingOfACaseVariant(): void
+    {
+        // Two hosts reporting the same datastore differently. Which spelling the
+        // picker shows may not depend on the credential name the groups are
+        // sorted by: an operator renaming a credential would silently relabel an
+        // option. Same rule as esxi_inventory_missing_values().
+        $union = esxi_inventory_name_union([
+            ['names' => ['DataStore1', 'ssd-fast']],
+            ['names' => ['datastore1']],
+        ]);
+
+        self::assertSame(['DataStore1', 'ssd-fast'], $union['names']);
+        self::assertSame(['datastore1' => true, 'ssd-fast' => true], $union['name_set']);
+    }
+
+    public function testTheUnionDropsEmptyNamesAndSurvivesAGroupWithoutAny(): void
+    {
+        // A credential that was pulled but holds no row of this kind still shows
+        // up as a group; it must not add an empty option or fatal.
+        $union = esxi_inventory_name_union([['names' => []], ['names' => ['  ', 'ds1']]]);
+
+        self::assertSame(['ds1'], $union['names']);
+        self::assertSame(['names' => [], 'name_set' => []], esxi_inventory_name_union([]));
     }
 }

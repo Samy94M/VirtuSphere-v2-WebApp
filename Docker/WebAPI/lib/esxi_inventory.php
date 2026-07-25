@@ -11,6 +11,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_automation.php';
+// The picker's option/bucket logic (ADR-0006 split); required here so every
+// existing caller of esxi_inventory_options() keeps its single include.
+require_once __DIR__ . '/esxi_inventory_options.php';
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
@@ -169,142 +172,6 @@ function esxi_inventory_name_set(mysqli $db, string $kind): array
     return $set;
 }
 
-/**
- * Option source for the datacenter/datastore pickers. A mission does not store an
- * ESXi credential; the target host is picked at deploy time, so the options are a
- * union over all credentials. What matters is not how many credentials exist but
- * whether they actually disagree:
- *
- * - All contributing credentials report the same names (three standalone hosts
- *   that all report `ha-datacenter`): grouping would show the same single entry
- *   three times and imply a difference that is not there. The list stays flat.
- * - They disagree: options are grouped per credential, so it stays visible which
- *   host contributed which name.
- *
- * `exact` additionally requires that *every* configured credential contributed.
- * Only then does the union describe every possible deploy target, and only then
- * may the caller preselect a lone value or hide a per-VM override that could not
- * change anything. A credential that was never pulled cannot prove what it has.
- *
- * `name_set` is the same lower-cased map esxi_inventory_name_set() builds, so a
- * caller can ask esxi_inventory_value_unknown() instead of rolling its own
- * comparison. The picker label and the deviation report must never disagree.
- *
- * `free_by_key` decorates the datastore options with the free space of the last
- * pull. It is a label, never a value: the option still submits the plain name.
- *
- * @return array{credential_count:int, grouped:bool, exact:bool, groups:array<int,array{credential_id:int, credential_name:string, names:array<int,string>, free_by_key:array<string,?int>}>, names:array<int,string>, name_set:array<string,true>, free_by_key:array<string,?int>}
- */
-function esxi_inventory_options(mysqli $db, string $kind): array
-{
-    $credentialCount = count(repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI));
-    $groups = repo_esxi_inventory_names_by_credential($db, $kind);
-
-    $names = [];
-    foreach ($groups as $group) {
-        foreach ($group['names'] as $name) {
-            $names[esxi_inventory_name_key($name)] = $name;
-        }
-    }
-    $nameSet = array_fill_keys(array_keys($names), true);
-    $names = array_values($names);
-    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
-
-    return esxi_inventory_option_flags($groups, $names, $credentialCount) + [
-        'credential_count' => $credentialCount,
-        'groups' => $groups,
-        'names' => $names,
-        'name_set' => $nameSet,
-        'free_by_key' => esxi_inventory_free_union($groups),
-    ];
-}
-
-/**
- * Free space per name across the credentials, for the flat (ungrouped) picker.
- * The smallest reported value wins: the target host is only chosen at deploy
- * time, so a datastore name that several hosts report may end up on the tightest
- * of them. Nulls carry no information (never pulled, or a kind that has no
- * bytes) and are skipped; a name that is null everywhere stays null and renders
- * without a suffix. Pure, so the min-across-hosts rule is testable without a
- * database.
- *
- * @param array<int, array{free_by_key?: array<string, ?int>}> $groups
- * @return array<string, ?int> name key => free bytes
- */
-function esxi_inventory_free_union(array $groups): array
-{
-    $free = [];
-    foreach ($groups as $group) {
-        foreach ($group['free_by_key'] ?? [] as $key => $bytes) {
-            if (!array_key_exists($key, $free)) {
-                $free[$key] = $bytes;
-                continue;
-            }
-            if ($bytes === null) {
-                continue;
-            }
-            $free[$key] = $free[$key] === null ? $bytes : min($free[$key], $bytes);
-        }
-    }
-
-    return $free;
-}
-
-/**
- * Derives the two display decisions from the grouped inventory. Pure, so the
- * "three standalone hosts all report ha-datacenter" case is testable without a
- * database.
- *
- * @param array<int, array{names:array<int,string>}> $groups
- * @param array<int, string> $names union of all group names, de-duplicated
- * @return array{grouped:bool, exact:bool}
- */
-function esxi_inventory_option_flags(array $groups, array $names, int $credentialCount): array
-{
-    $agree = esxi_inventory_groups_agree($groups, count($names));
-
-    return [
-        'grouped' => !$agree && count($groups) > 1,
-        'exact' => $agree && $names !== [] && count($groups) === $credentialCount,
-    ];
-}
-
-/**
- * True when every credential reports the same set of names, i.e. grouping the
- * options by credential would add no information. Comparing each group's
- * de-duplicated size against the union's size is enough: a group can never hold a
- * name outside the union, so equal sizes mean equal sets.
- *
- * @param array<int, array{names:array<int,string>}> $groups
- */
-function esxi_inventory_groups_agree(array $groups, int $unionSize): bool
-{
-    if ($groups === []) {
-        return false;
-    }
-
-    foreach ($groups as $group) {
-        $distinct = [];
-        foreach ($group['names'] as $name) {
-            $distinct[esxi_inventory_name_key($name)] = true;
-        }
-        if (count($distinct) !== $unionSize) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/**
- * True when the picker lists exactly what the deploy could use, whichever ESXi
- * credential is chosen at deploy time.
- */
-function esxi_inventory_options_are_exact(array $options): bool
-{
-    return $options['exact'];
-}
-
 /** True when a non-empty value is absent from a non-empty inventory name set. */
 function esxi_inventory_value_unknown(string $value, array $nameSet): bool
 {
@@ -382,11 +249,20 @@ function esxi_inventory_mission_missing_by_credential(mysqli $db, int $missionId
         $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_NETWORK][] = trim((string) ($row['vlan'] ?? ''));
     }
 
-    // Union sets once; values unknown to the whole union are subtracted from
-    // every per-credential list below (disjoint-warnings rule).
-    $unionSets = [];
-    foreach (array_keys($valuesByKind) as $kind) {
-        $unionSets[$kind] = esxi_inventory_name_set($db, $kind);
+    // One query for every credential and every kind this function compares, and
+    // the union is folded out of the same rows. The previous shape read a whole
+    // per-credential inventory inside the credential loop plus one union query
+    // per kind, so the cost of two warning boxes grew with the host count.
+    $kinds = array_keys($valuesByKind);
+    $setsByCredential = repo_esxi_inventory_name_sets_by_credential($db, $kinds);
+
+    // Values unknown to the whole union are subtracted from every per-credential
+    // list below (disjoint-warnings rule).
+    $unionSets = array_fill_keys($kinds, []);
+    foreach ($setsByCredential as $credentialSets) {
+        foreach ($credentialSets as $kind => $set) {
+            $unionSets[$kind] += $set;
+        }
     }
     $unionMissing = [];
     foreach (esxi_inventory_missing_values($valuesByKind, $unionSets) as $value) {
@@ -396,15 +272,7 @@ function esxi_inventory_mission_missing_by_credential(mysqli $db, int $missionId
     $out = [];
     foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) as $credential) {
         $credentialId = (int) $credential['id'];
-        $inventory = repo_esxi_inventory_for_credential($db, $credentialId);
-        $credentialSets = [];
-        foreach (array_keys($valuesByKind) as $kind) {
-            $set = [];
-            foreach ($inventory[$kind] ?? [] as $row) {
-                $set[esxi_inventory_name_key((string) $row['name'])] = true;
-            }
-            $credentialSets[$kind] = $set;
-        }
+        $credentialSets = ($setsByCredential[$credentialId] ?? []) + array_fill_keys($kinds, []);
         $missing = array_values(array_filter(
             esxi_inventory_missing_values($valuesByKind, $credentialSets),
             static fn (string $value): bool => !isset($unionMissing[esxi_inventory_name_key($value)])
