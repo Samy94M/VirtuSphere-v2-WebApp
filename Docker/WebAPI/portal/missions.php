@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/format.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
@@ -59,7 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $size = (int) ($file['size'] ?? 0);
             if ($size <= 0 || $size > VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES) {
-                throw new RuntimeException(__t('missions.import_err_too_large'));
+                throw new RuntimeException(__t('missions.import_err_too_large', [
+                    'max' => virtusphere_human_bytes(VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES),
+                ]));
             }
             $raw = file_get_contents((string) $file['tmp_name']);
             if ($raw === false || $raw === '') {

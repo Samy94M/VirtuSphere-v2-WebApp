@@ -89,7 +89,10 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help.settings_backup_heading')); ?></h3>
             <p><?php echo h(__t('help.settings_backup_p1')); ?></p>
             <p><?php echo h(__t('help.settings_backup_p2')); ?></p>
-            <p><?php echo h(__t('help.settings_backup_p3')); ?></p>
+            <p><?php echo h(__t('help.settings_backup_p3', [
+                'pct' => VIRTUSPHERE_BACKUP_DISK_LOW_PCT,
+                'grace' => portal_format_duration(VIRTUSPHERE_BACKUP_GRACE_SECONDS),
+            ])); ?></p>
             <p><?php echo h(__t('help.settings_backup_p4')); ?></p>
         </section>
     </div>

@@ -336,6 +336,30 @@ $cases = @(
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_bounds' => 'Wartet 424242 Sekunden auf den Worker.',`n];"
         Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.spelled-out\].*zz_guard_bounds'
     } }
+    @{ Name = 'bounds-sync.array-element'; Body = {
+        # An array element carries the unit in its key, not in a constant name.
+        # Before the allowlist, "50 GB" in the storage help was invisible for two
+        # independent reasons: the value lives in VIRTUSPHERE_VM_DEFAULTS and "GB"
+        # was not a unit word.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_array' => 'Standard sind 50 GB je Festplatte.',`n];"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) "\[bounds-sync\.spelled-out\].*zz_guard_array.*VM_DEFAULTS"
+    } }
+    @{ Name = 'bounds-sync.product-constant'; Body = {
+        # A constant written as a product, read in the unit the prose uses. Both
+        # halves have to work: evaluating 2 * 1024 * 1024 and deriving MB from it.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_bytes' => 'Die Datei darf hoechstens 2 MB gross sein.',`n];"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) "\[bounds-sync\.spelled-out\].*zz_guard_bytes.*MISSION_IMPORT_MAX_BYTES"
+    } }
+    @{ Name = 'bounds-sync.unreadable-array'; Body = {
+        # An allowlisted array the script can no longer parse must fail loudly.
+        # Silently skipping it leaves the elements unchecked while the guard keeps
+        # reporting green, which is worse than never having had the check.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/defaults.php' 'const VIRTUSPHERE_VM_DEFAULTS' 'const VIRTUSPHERE_VM_DEFAULTS_RENAMED'
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.unreadable-array\].*VIRTUSPHERE_VM_DEFAULTS'
+    } }
     @{ Name = 'bounds-sync.stale-exempt'; Body = {
         $fx = New-Fixture $boundsFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/validate.php' "'netbios_hostname'" "'zz_renamed_netbios'"

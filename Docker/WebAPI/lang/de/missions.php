@@ -41,7 +41,7 @@ return [
     'import_blocked_note' => 'Der Import ist blockiert, bis die oben genannten Punkte gelöst sind.',
     'import_flash_done' => 'Mission importiert. Übernommene VMs: :count.',
     'import_err_no_file' => 'Bitte eine Missions-Datei (JSON) auswählen.',
-    'import_err_too_large' => 'Die Datei ist zu groß (Grenze 2 MB).',
+    'import_err_too_large' => 'Die Datei ist zu groß (Grenze :max).',
     'import_err_read' => 'Die Datei konnte nicht gelesen werden.',
     'import_err_json' => 'Die Datei ist kein gültiges JSON.',
     'import_err_version' => 'Unbekannte Exportversion. Die Datei stammt aus einer anderen Version.',

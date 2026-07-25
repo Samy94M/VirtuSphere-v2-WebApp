@@ -263,14 +263,14 @@ return [
     'settings_backup_heading' => 'Backup status',
     'settings_backup_p1' => 'The backup card shows the last run of the nightly backup: state, schedule, next run, age, sizes, free disk space and the retention. The host creates the backup via cron (script backup.sh); the portal only displays the status and cannot trigger or download a backup.',
     'settings_backup_p2' => 'Schedule and next run come from the cron entry that backup.sh reports on every run, so they are not an estimate. If that report is missing (for example a backup started by hand on a host without a cron entry), the card says so explicitly and derives the expectation from the last run instead.',
-    'settings_backup_p3' => 'States: OK (last run succeeded), Failed (check the log), Stale (the expected run did not happen within a two-hour grace window, check cron), Low disk space (under 10 percent free), Unknown (the script has never run or the status mount is missing). When not OK, a banner also appears on the dashboard.',
+    'settings_backup_p3' => 'States: OK (last run succeeded), Failed (check the log), Stale (the expected run did not happen within a grace window of :grace, check cron), Low disk space (under :pct percent free), Unknown (the script has never run or the status mount is missing). When not OK, a banner also appears on the dashboard.',
     'settings_backup_p4' => 'Retention: every run writes two files, the database dump and the configuration archive. For each of them the newest runs are kept (14 by default) and the script deletes older ones right after the backup. On a daily schedule that means you can go back roughly 14 days. The files live on the Docker host under Docker/backups/, not in the portal.',
 
     'transfer_heading' => 'Export and import a mission',
     'transfer_p1' => 'On a mission detail page you can export it as a JSON file (with VMs, network interfaces, disks and package links). The mission list re-imports such a file and creates a new mission. This is a transfer path between environments, not a backup.',
     'transfer_p2' => 'MAC addresses and MECM ids are never exported or imported; imported VMs start freshly registered. Before importing, a preview shows the counts as well as missing VLANs or already-used VM names.',
     'transfer_p3' => 'Missing VLANs and globally already-used VM names block the import (MECM device names must be unique); packages that are not found are only skipped and reported. The preview is valid for :minutes minutes.',
-    'transfer_p4' => 'The new mission name must be unique and must not contain spaces; if it is already taken, just enter a different one in the preview. The uploaded file may be at most 2 MB in size.',
+    'transfer_p4' => 'The new mission name must be unique and must not contain spaces; if it is already taken, just enter a different one in the preview. The uploaded file may be at most :max in size.',
     'transfer_p5' => 'The "CSV export" button above the lists is unrelated: it only downloads the currently displayed table, for example for reports in Excel. CSV files cannot be imported; the import only accepts the JSON file from a mission export.',
 
     'ops_heading' => 'Day-to-day operations',
@@ -316,7 +316,7 @@ return [
     'deploy_schedule_p3' => 'When a time or a stagger is set, a preview of the computed start times appears before queuing. "Cancel group" stops all still-waiting jobs of a batch; a job that is already running finishes.',
 
     'deploy_storage_heading' => 'Storage requirements when queuing',
-    'deploy_storage_p1' => 'As soon as a mission is selected, the form shows how much disk space the job will use per target datastore. It counts the provisioned sizes of all disks of the checked VMs, so ten machines with 50 GB each add up to 500 GB. VMs with their own datastore get their own row. A VM without its own disks is created with the default disk (50 GB, thick) and counted at that size in the storage estimate.',
+    'deploy_storage_p1' => 'As soon as a mission is selected, the form shows how much disk space the job will use per target datastore. It counts the provisioned sizes of all disks of the checked VMs, so ten machines at the default size of :size each add up to ten times that. VMs with their own datastore get their own row. A VM without its own disks is created with the default disk (:size, thick) and counted at that size in the storage estimate.',
     'deploy_storage_p2' => 'Once an ESXi credential is chosen, the table compares the requirement against the free space of the last inventory pull and marks every row as sufficient or as probably too small. Unchecking VMs recalculates the totals immediately. If the credential reports no free space for a datastore, the assessment stays open; a missing number is never read as 0 anywhere.',
     'deploy_storage_p3' => 'This is a snapshot and never blocks a job. The numbers are as old as the last pull, and thin disks initially use less than their provisioned size. For a scheduled job the same table appears again in the schedule preview before you confirm.',
     'deploy_storage_p4' => 'A datastore in maintenance mode is marked as such, and its free space does not count: the assessment stays open instead of promising room where nothing can be created right now. The same holds for a datastore the credential reports as not reachable. If a pull does not deliver these facts at all, nothing is guessed; the numbers stay as reported, and a job then fails visibly on the ESXi host rather than going wrong silently.',
@@ -333,7 +333,7 @@ return [
 
     'bulk_heading' => 'Several VMs at once',
     'bulk_p1' => 'In the VM list you can select several VMs with checkboxes and delete them together or reset their MECM ID. Deleting only removes the portal records, never anything on the hypervisor.',
-    'bulk_p2' => 'Individual VMs are skipped and named with a reason in the result, for example when the mission currently has an active deploy job or a VM lacks the imported MAC needed for the MECM-ID reset. At most 200 VMs per action.',
+    'bulk_p2' => 'Individual VMs are skipped and named with a reason in the result, for example when the mission currently has an active deploy job or a VM lacks the imported MAC needed for the MECM-ID reset. At most :cap VMs per action.',
 
     'hotplug_heading' => 'CPU/RAM hot-add',
     'hotplug_p1' => 'The VM editor lets you enable hot-add for CPU and RAM (on by default). This later allows adding CPU/RAM while the VM runs, but it is only applied when the VM is created on ESXi; existing VMs are not reconfigured. The guest operating system must support hot-add.',

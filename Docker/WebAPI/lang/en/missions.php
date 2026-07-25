@@ -41,7 +41,7 @@ return [
     'import_blocked_note' => 'The import is blocked until the issues above are resolved.',
     'import_flash_done' => 'Mission imported. VMs carried over: :count.',
     'import_err_no_file' => 'Please choose a mission file (JSON).',
-    'import_err_too_large' => 'The file is too large (limit 2 MB).',
+    'import_err_too_large' => 'The file is too large (limit :max).',
     'import_err_read' => 'The file could not be read.',
     'import_err_json' => 'The file is not valid JSON.',
     'import_err_version' => 'Unknown export version. The file comes from a different version.',
