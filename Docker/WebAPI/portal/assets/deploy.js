@@ -89,13 +89,50 @@
         window.setTimeout(poll, 2000);
     }
 
+    // The queue form's own values as a query string, so changing the mission can
+    // stay a full page load (the VM list, the storage table and the per-host
+    // warnings only exist server-side, per mission) without emptying the form the
+    // operator already filled in. lib/deploy_form_state.php reads them back.
+    //
+    // Taken from the live controls, never from a field list: a field added to
+    // deploy.php travels without a change here. form.elements rather than
+    // FormData, because FormData drops disabled controls and the power-cycle wait
+    // time deliberately keeps its typed value while a non-power mode disables it.
+    // Skipped on purpose: an unchecked box, whose absence IS "off" on the PHP
+    // side, and vm_ids[], which names the VMs of the mission being left.
+    function deployQueueQuery(form, missionId) {
+        var params = new URLSearchParams();
+        if (missionId) {
+            params.set('mission_id', missionId);
+        }
+        Array.prototype.forEach.call(form.elements, function (field) {
+            var name = field.name;
+            if (!name || name === '_csrf' || name === 'action' || name === 'mission_id' || name === 'vm_ids[]') {
+                return;
+            }
+            if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) {
+                return;
+            }
+            if (field.value === '') {
+                return;
+            }
+            params.set(name, field.value);
+        });
+
+        return params.toString();
+    }
+
+    function deployNavigate(form, missionId) {
+        var query = deployQueueQuery(form, missionId);
+        window.location = 'deploy.php' + (query ? '?' + query : '');
+    }
+
     // Mission select navigates; select-all flips the VM checkboxes. Registered
     // before initDeployStorage() so its recompute sees the flipped state.
     document.addEventListener('change', function (event) {
         var deployMission = event.target.closest('[data-deploy-mission]');
         if (deployMission) {
-            var missionId = deployMission.value;
-            window.location = 'deploy.php' + (missionId ? '?mission_id=' + encodeURIComponent(missionId) : '');
+            deployNavigate(deployMission.form, deployMission.value);
             return;
         }
 
@@ -107,6 +144,25 @@
             }
         }
     });
+
+    // The job filter submits the same mission_id as the queue form's select, so
+    // it re-renders that form as well. Without carrying its values, looking at
+    // another mission's job history empties the form above it, which is the same
+    // loss the mission select used to cause.
+    function initDeployJobFilter() {
+        var filter = document.querySelector('[data-deploy-filter]');
+        var mission = document.querySelector('[data-deploy-mission]');
+        if (!filter || !mission || !mission.form) {
+            return;
+        }
+        filter.addEventListener('submit', function (event) {
+            var picked = filter.querySelector('select[name="mission_id"]');
+            // "All missions" is 0 here, not an empty value.
+            var missionId = picked && picked.value !== '0' ? picked.value : '';
+            event.preventDefault();
+            deployNavigate(mission.form, missionId);
+        });
+    }
 
     // Binds one credential-keyed warning island to one alert paragraph. The PHP
     // island maps ESXi credential ids to pre-localized texts; picking a listed
@@ -363,6 +419,7 @@
     }
 
     initDeployLogPolling();
+    initDeployJobFilter();
     initDeployHostWarning();
     initDeploySchedule();
     initCapacityBars();

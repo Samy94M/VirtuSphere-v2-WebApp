@@ -46,6 +46,23 @@ function form_has_state(string $form): bool
     return isset(form_state()[$form]);
 }
 
+/**
+ * The whole remembered payload of a form. A page whose fields can come from
+ * more than one source (the deploy queue form: a POST it answers directly, this
+ * stash, or a query string) picks its source once and then reads every field
+ * from it, instead of asking per field. Per-field precedence would let an
+ * absent checkbox fall through to an older source that still carried it, and an
+ * absent key is exactly how a checkbox says "off".
+ *
+ * @return array<string, mixed>
+ */
+function form_old_all(string $form): array
+{
+    $state = form_state();
+
+    return is_array($state[$form]['old'] ?? null) ? $state[$form]['old'] : [];
+}
+
 function form_old(string $form, string $field, string $default = ''): string
 {
     $state = form_state();

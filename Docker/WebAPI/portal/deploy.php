@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
+require_once __DIR__ . '/../lib/deploy_form_state.php';
 require_once __DIR__ . '/../lib/deploy_storage.php';
 require_once __DIR__ . '/../lib/repo/credentials.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -44,7 +45,10 @@ function deploy_assert_datacenter_resolvable(mysqli $db, int $missionId, int $es
     throw new ValidationException(['credential_esxi_id' => __t('deploy.err_datacenter_unresolved')], $message);
 }
 
-$selectedMissionId = request_int($_GET, 'mission_id');
+// From the same source as the rest of the form (lib/deploy_form_state.php).
+// Reading only $_GET left the preview render and the JS-less submit drawing one
+// mission's form around another mission's VM list.
+$selectedMissionId = (int) deploy_form_value('mission_id', '0');
 
 $redirectBase = 'deploy.php' . ($selectedMissionId > 0 ? '?mission_id=' . $selectedMissionId : '');
 $deployPreview = null;
@@ -271,11 +275,11 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="start">
                 <input type="hidden" name="confirmed" value="1">
-                <?php foreach (['mission_id', 'credential_esxi_id', 'credential_ansible_id', 'mode', 'powercycle_wait', 'start_mode', 'scheduled_at', 'stagger_minutes'] as $field) { ?>
-                    <input type="hidden" name="<?php echo h($field); ?>" value="<?php echo h(request_string($_POST, $field)); ?>">
+                <?php foreach (VIRTUSPHERE_DEPLOY_QUEUE_FIELDS as $field) { ?>
+                    <input type="hidden" name="<?php echo h($field); ?>" value="<?php echo h(deploy_form_value($field)); ?>">
                 <?php } ?>
-                <?php if (!empty($_POST['verbose'])) { ?><input type="hidden" name="verbose" value="1"><?php } ?>
-                <?php foreach ((array) ($_POST['vm_ids'] ?? []) as $vid) { ?><input type="hidden" name="vm_ids[]" value="<?php echo h((string) (int) $vid); ?>"><?php } ?>
+                <?php if (deploy_form_value('verbose') === '1') { ?><input type="hidden" name="verbose" value="1"><?php } ?>
+                <?php foreach (array_keys(deploy_form_vm_selection() ?? []) as $vid) { ?><input type="hidden" name="vm_ids[]" value="<?php echo h((string) (int) $vid); ?>"><?php } ?>
                 <div class="actions">
                     <button class="button" type="submit"><?php echo h(__t('deploy.preview_confirm')); ?></button>
                     <a class="button button-secondary" href="<?php echo h($redirectBase); ?>"><?php echo h(__t('common.cancel')); ?></a>
@@ -310,7 +314,7 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 </select>
             </label>
             <label><?php echo h(__t('deploy.label_esxi')); ?>
-                <?php $selectedEsxiId = form_old('schedule', 'credential_esxi_id', ''); ?>
+                <?php $selectedEsxiId = deploy_form_value('credential_esxi_id'); ?>
                 <select name="credential_esxi_id" required data-deploy-esxi <?php echo $esxiCredentials === [] ? 'disabled' : ''; ?>>
                     <option value=""><?php echo h(__t('deploy.select_esxi')); ?></option>
                     <?php foreach ($esxiCredentials as $credential) { ?>
@@ -320,10 +324,11 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 <?php echo form_error_html('schedule', 'credential_esxi_id'); ?>
             </label>
             <label><?php echo h(__t('deploy.label_ansible')); ?>
+                <?php $selectedAnsibleId = deploy_form_value('credential_ansible_id'); ?>
                 <select name="credential_ansible_id" required <?php echo $ansibleCredentials === [] ? 'disabled' : ''; ?>>
                     <option value=""><?php echo h(__t('deploy.select_ansible')); ?></option>
                     <?php foreach ($ansibleCredentials as $credential) { ?>
-                        <option value="<?php echo h((string) $credential['id']); ?>"><?php echo h($credential['name'] ?? ''); ?></option>
+                        <option value="<?php echo h((string) $credential['id']); ?>" <?php echo $selectedAnsibleId === (string) $credential['id'] ? 'selected' : ''; ?>><?php echo h($credential['name'] ?? ''); ?></option>
                     <?php } ?>
                 </select>
             </label>
@@ -344,13 +349,13 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 ?></script>
                 <p class="alert alert-warning form-grid-full" data-deploy-capability-warning hidden></p>
             <?php } ?>
-            <?php $stickyMode = form_old('schedule', 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL); ?>
+            <?php $selectedMode = deploy_form_value('mode', VIRTUSPHERE_DEPLOY_MODE_FULL); ?>
             <label><?php echo h(__t('deploy.label_mode')); ?>
                 <select name="mode" required
                         data-stagger-modes="<?php echo h(implode(',', VIRTUSPHERE_DEPLOY_STAGGER_MODES)); ?>"
                         data-powercycle-modes="<?php echo h(implode(',', ansible_modes_using_powercycle())); ?>">
                     <?php foreach (virtusphere_deploy_mode_labels() as $modeValue => $modeLabel) { ?>
-                        <option value="<?php echo h($modeValue); ?>" <?php echo $stickyMode === (string) $modeValue ? 'selected' : ''; ?>><?php echo h($modeLabel); ?></option>
+                        <option value="<?php echo h($modeValue); ?>" <?php echo $selectedMode === (string) $modeValue ? 'selected' : ''; ?>><?php echo h($modeLabel); ?></option>
                     <?php } ?>
                 </select>
                 <small class="hint" data-stagger-lock hidden><?php echo h(__t('deploy.stagger_lock_hint')); ?></small>
@@ -360,13 +365,13 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                   // verbose hint runs under both. ?>
             <div class="field-group">
                 <label><?php echo h(__t('deploy.label_powercycle_wait')); ?>
-                    <input type="number" name="powercycle_wait" value="<?php echo h(form_old('schedule', 'powercycle_wait', (string) VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MAX); ?>" data-powercycle-input>
+                    <input type="number" name="powercycle_wait" value="<?php echo h(deploy_form_value('powercycle_wait', (string) VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MAX); ?>" data-powercycle-input>
                     <small class="hint" data-powercycle-lock hidden><span class="hint-subject"><?php echo h(__t('deploy.label_powercycle_wait')); ?>:</span> <?php echo h(__t('deploy.powercycle_lock_hint')); ?></small>
                 </label>
                 <div class="field-stack">
                     <span class="field-label"><?php echo h(__t('deploy.verbose_heading')); ?></span>
                     <label class="checkbox-item">
-                        <input type="checkbox" name="verbose" value="1" <?php echo form_old('schedule', 'verbose', '') === '1' ? 'checked' : ''; ?>>
+                        <input type="checkbox" name="verbose" value="1" <?php echo deploy_form_value('verbose') === '1' ? 'checked' : ''; ?>>
                         <?php echo h(__t('deploy.label_verbose')); ?>
                     </label>
                 </div>
@@ -380,14 +385,14 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                     <p class="hint"><?php echo h(__t('deploy.vms_empty')); ?></p>
                 <?php } else { ?>
                     <?php
-                        // Sticky selection after a validation failure: reflect exactly
-                        // what was posted, so a corrected resubmit does not silently
-                        // widen to the whole mission. Without remembered state (first
-                        // render) every VM starts checked, the original behaviour.
-                        $stickyVmState = form_has_state('schedule');
-                        $postedVmIds = $stickyVmState ? array_flip(form_old_array('schedule', 'vm_ids')) : [];
-                        $vmIsChecked = static function (int $id) use ($stickyVmState, $postedVmIds): bool {
-                            return !$stickyVmState || isset($postedVmIds[(string) $id]);
+                        // Reflect exactly what was submitted, so a corrected resubmit
+                        // does not silently widen to the whole mission. null means the
+                        // render carries no selection (a first render, and a mission
+                        // change, whose checkboxes named another mission's VMs): then
+                        // every VM starts checked, the original behaviour.
+                        $vmSelection = deploy_form_vm_selection();
+                        $vmIsChecked = static function (int $id) use ($vmSelection): bool {
+                            return $vmSelection === null || isset($vmSelection[$id]);
                         };
                         $allVmsChecked = true;
                         foreach ($missionVms as $vmCheck) {
@@ -428,23 +433,24 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                   // deploy.js): the timezone note and the pending warning belong under
                   // them, not as a stray full-width row later. ?>
             <div class="field-group">
+                <?php $isScheduled = deploy_form_value('start_mode', 'now') === 'scheduled'; ?>
                 <div class="field-stack">
                     <span class="field-label"><?php echo h(__t('deploy.schedule_heading')); ?></span>
                     <label class="checkbox-item">
-                        <input type="radio" name="start_mode" value="now" data-schedule-mode <?php echo form_old('schedule', 'start_mode', 'now') === 'scheduled' ? '' : 'checked'; ?>>
+                        <input type="radio" name="start_mode" value="now" data-schedule-mode <?php echo $isScheduled ? '' : 'checked'; ?>>
                         <?php echo h(__t('deploy.schedule_now')); ?>
                     </label>
                     <label class="checkbox-item">
-                        <input type="radio" name="start_mode" value="scheduled" data-schedule-mode <?php echo form_old('schedule', 'start_mode', 'now') === 'scheduled' ? 'checked' : ''; ?>>
+                        <input type="radio" name="start_mode" value="scheduled" data-schedule-mode <?php echo $isScheduled ? 'checked' : ''; ?>>
                         <?php echo h(__t('deploy.schedule_at')); ?>
                     </label>
-                    <label data-schedule-at <?php echo form_old('schedule', 'start_mode', 'now') === 'scheduled' ? '' : 'hidden'; ?>><?php echo h(__t('deploy.schedule_at_label')); ?>
-                        <input type="datetime-local" name="scheduled_at" min="<?php echo h($scheduleMinLocal); ?>" value="<?php echo h(form_old('schedule', 'scheduled_at', '')); ?>">
+                    <label data-schedule-at <?php echo $isScheduled ? '' : 'hidden'; ?>><?php echo h(__t('deploy.schedule_at_label')); ?>
+                        <input type="datetime-local" name="scheduled_at" min="<?php echo h($scheduleMinLocal); ?>" value="<?php echo h(deploy_form_value('scheduled_at')); ?>">
                         <?php echo form_error_html('schedule', 'scheduled_at'); ?>
                     </label>
                 </div>
                 <label><?php echo h(__t('deploy.stagger_label')); ?>
-                    <input type="number" name="stagger_minutes" min="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MAX); ?>" value="<?php echo h(form_old('schedule', 'stagger_minutes', '')); ?>" data-stagger-input placeholder="<?php echo h(__t('deploy.stagger_placeholder')); ?>">
+                    <input type="number" name="stagger_minutes" min="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MAX); ?>" value="<?php echo h(deploy_form_value('stagger_minutes')); ?>" data-stagger-input placeholder="<?php echo h(__t('deploy.stagger_placeholder')); ?>">
                     <small class="hint"><?php echo h(__t('deploy.stagger_hint')); ?></small>
                     <?php echo form_error_html('schedule', 'stagger_minutes'); ?>
                 </label>
@@ -460,7 +466,9 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
     <section class="panel">
         <div class="actions">
             <h2><?php echo h(__t('deploy.jobs_heading')); ?></h2>
-            <form class="inline-form" method="get" action="deploy.php">
+            <?php // The filter writes the same mission_id as the queue form's select, so
+                  // it re-renders that form too; deploy.js carries its values along. ?>
+            <form class="inline-form" method="get" action="deploy.php" data-deploy-filter>
                 <label class="filter-field"><?php echo h(__t('deploy.filter')); ?>
                     <select name="mission_id">
                         <option value="0"><?php echo h(__t('deploy.all_missions')); ?></option>

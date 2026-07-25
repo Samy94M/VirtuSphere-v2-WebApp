@@ -103,6 +103,29 @@ final class PortalComboHooksTest extends TestCase
         }
     }
 
+    public function testAppJsHandlesEveryDeployMissionNavigationAttributeTheMarkupUses(): void
+    {
+        // Both controls that write mission_id navigate, and both must carry the
+        // queue form's values along (lib/deploy_form_state.php reads them back).
+        // A renamed hook turns the navigation back into the reset it used to be:
+        // the page still works, the operator just fills the form in again.
+        $appJs = $this->assetsJs();
+
+        $used = [];
+        foreach ($this->markup() as $contents) {
+            foreach (['data-deploy-mission', 'data-deploy-filter'] as $attribute) {
+                if (str_contains($contents, $attribute)) {
+                    $used[$attribute] = true;
+                }
+            }
+        }
+
+        self::assertNotSame([], $used, 'the deploy mission-navigation markup disappeared entirely');
+        foreach (array_keys($used) as $attribute) {
+            self::assertStringContainsString($attribute, $appJs, $attribute . ' is rendered but never read');
+        }
+    }
+
     public function testAppJsHandlesEveryDeployStorageAttributeTheMarkupUses(): void
     {
         // The deploy storage table is rendered by PHP and then kept live by JS on
