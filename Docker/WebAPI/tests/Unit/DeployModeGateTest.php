@@ -84,6 +84,30 @@ final class DeployModeGateTest extends TestCase
         }
     }
 
+    public function testTheLocationPredicateReadsAModeTheWayTheValidatorsWriteIt(): void
+    {
+        // Three gates ask this question and only two of them received a
+        // normalized mode. The predicate was a bare inequality, so `AUTOSTART`
+        // answered "needs a location" and the page refused a job the enqueue
+        // path would have taken: a disagreeing twin that no gate could see.
+        foreach (virtusphere_user_deploy_modes() as $mode) {
+            self::assertSame(
+                virtusphere_deploy_mode_needs_location($mode),
+                virtusphere_deploy_mode_needs_location(' ' . strtoupper($mode) . ' '),
+                $mode
+            );
+        }
+    }
+
+    public function testAnUnknownModeThrowsInsteadOfInheritingTheLocationAnswer(): void
+    {
+        // The default arm a bare inequality had: every unrecognised string was
+        // silently told it needs a location, so a location-free mode added later
+        // would have been refused by all three gates with nothing breaking.
+        $this->expectException(LogicException::class);
+        virtusphere_deploy_mode_needs_location('teleport');
+    }
+
     public function testTheWorkerSideGateAgreesWithTheEnqueueGate(): void
     {
         $missionWithoutLocation = ['hypervisor_datacenter' => '', 'hypervisor_datastorage' => ''];

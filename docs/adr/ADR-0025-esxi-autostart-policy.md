@@ -38,6 +38,8 @@ Either way the facts are written to the job log first, fresh or not, so the run 
 
 **A gate may only ask what its mode needs.** `autostart` reads neither `datacenter_name` nor `datastore_name`, so `virtusphere_deploy_mode_needs_location()` skips the location requirement for it, in the enqueue gate and its worker-side twin alike. Refusing to write a host's boot order because the mission has no datastore would have been a gate answering the wrong question.
 
+**The predicate reads a mode the way the validators write it, and refuses to guess.** Three gates ask it (the page, the repository, the Ansible layer) and only two of them were handed a normalized value: the page passed `$_POST['mode']` in raw, while `deploy_job_payload()` and `deploy_parse_schedule()` lower-case and trim first. Against a bare `$mode !== 'autostart'` that made `AUTOSTART` mean "needs a location", so the portal refused a job the enqueue path would have taken: the disagreeing twin this gate exists to prevent, one layer above it. The predicate now normalizes its own input and throws on a mode it does not know, instead of answering "needs a location" for every spelling it fails to recognise — that silent default would have made a location-free mode added later refusable by all three gates with nothing breaking. `DeployModeGateTest` walks the postable modes through it in both spellings, and `DeployDatacenterResolutionTest` compares the two gates' verdicts per mode rather than merely running both.
+
 **The collection is pinned in the repository.** `Ansible/requirements.yml` names `community.vmware` 6.2.0, the version verified to carry `vmware_host_auto_start` and `vmware_about_info`. `docs/DEPLOYMENT.md` gained the support matrix the project never had.
 
 ## Consequences

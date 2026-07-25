@@ -278,9 +278,22 @@ function virtusphere_user_deploy_modes(): array
  * the host's boot configuration and touches neither, so refusing it because a
  * mission has no datastore would be a gate answering the wrong question.
  * Everything else creates, powers or exports VMs and needs a location.
+ *
+ * It reads the mode the way the validators write it, because three gates ask
+ * this question (the page, the repository, the Ansible layer) and a bare
+ * inequality answered "needs a location" for every spelling it did not
+ * recognise. A mode differing only in case therefore made the page refuse what
+ * the enqueue path would accept. An unknown mode throws rather than inheriting
+ * that answer: a location-free mode added later must be given one here, and
+ * DeployModeGateTest walks the mode list so the omission fails the build.
  */
 function virtusphere_deploy_mode_needs_location(string $mode): bool
 {
+    $mode = strtolower(trim($mode));
+    if (!in_array($mode, virtusphere_deploy_modes(), true)) {
+        throw new LogicException('Unknown deploy mode: ' . $mode . '.');
+    }
+
     return $mode !== VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
 }
 

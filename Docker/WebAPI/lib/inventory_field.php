@@ -22,7 +22,14 @@ require_once __DIR__ . '/format.php';
  */
 
 /**
- * @param array{buckets?:array<int,array<string,mixed>>, names:array<int,string>, free_by_key?:array<string,?int>} $options
+ * The two decoration maps are required, exactly as esxi_inventory_options()
+ * declares them: this docblock is a mirror of that producer, and the last time
+ * it was hand-edited it kept `free_by_key?` optional and lost `unusable_by_key`
+ * altogether. Optional would cost the only static guarantee available here, that
+ * a producer dropping or renaming a key breaks the build at the call sites
+ * instead of quietly taking the maintenance suffix off the flat picker.
+ *
+ * @param array{buckets?:array<int,array<string,mixed>>, names:array<int,string>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $options
  * @param array{
  *     name:string, value:string, empty_label:string, unknown_suffix:string,
  *     required?:bool, disabled?:bool, input_placeholder?:string
@@ -68,7 +75,7 @@ function inventory_select_field(array $options, array $config): void
                 </optgroup>
             <?php } ?>
         <?php } else { ?>
-            <?php foreach ($options['names'] as $optionName) { inventory_select_option($optionName, $value, $options['free_by_key'] ?? [], $options['unusable_by_key'] ?? []); } ?>
+            <?php foreach ($options['names'] as $optionName) { inventory_select_option($optionName, $value, $options['free_by_key'], $options['unusable_by_key']); } ?>
         <?php } ?>
     </select>
     <?php
@@ -81,7 +88,13 @@ function inventory_select_field(array $options, array $config): void
  * it". Exhaustive match, no default: a fourth scope has to be given a sentence
  * here rather than silently rendering as an unlabelled group.
  *
- * @param array{scope:string, credentials:array<int,array{name:string,host:string}>} $bucket
+ * The scope is spelled out rather than typed `string`: it arrives through
+ * carriers that widen to array<string,mixed>, so nothing on the way here checks
+ * the three values, and a bare `string` made the default-free match above a
+ * promise no analyser could keep. EsxiInventoryPresenceBucketsTest walks the
+ * producer's scopes through this function, so a fourth one fails the build.
+ *
+ * @param array{scope:'all'|'some'|'only', credentials:array<int,array{name:string,host:string}>} $bucket
  */
 function inventory_bucket_label(array $bucket): string
 {

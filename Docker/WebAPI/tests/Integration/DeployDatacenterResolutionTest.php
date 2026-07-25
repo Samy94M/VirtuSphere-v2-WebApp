@@ -68,8 +68,11 @@ final class DeployDatacenterResolutionTest extends TestCase
         $this->setDatacenters($credentialId, ['ha-datacenter']);
         $mission = $this->makeMission('');
 
+        // The gate returns void, so "it did not throw" is the whole outcome and
+        // is declared as such. assertTrue(true) said the same thing while
+        // remaining green even if the call above were deleted.
+        self::expectNotToPerformAssertions();
         repo_deploy_assert_mission_ready($this->db, $mission, $credentialId);
-        self::assertTrue(true, 'gate accepted the host fallback');
     }
 
     public function testAnEmptyMissionDatacenterIsRejectedWithoutInventory(): void
@@ -96,8 +99,8 @@ final class DeployDatacenterResolutionTest extends TestCase
         $credentialId = $this->makeCredential('unpulled2');
         $mission = $this->makeMission('DC-Nord');
 
+        self::expectNotToPerformAssertions();
         repo_deploy_assert_mission_ready($this->db, $mission, $credentialId);
-        self::assertTrue(true);
     }
 
     public function testOmittingTheCredentialKeepsTheStrictOldBehaviour(): void
@@ -130,22 +133,70 @@ final class DeployDatacenterResolutionTest extends TestCase
         $this->setDatacenters($vcenter, ['DC-Nord', 'DC-Sued']);
         $mission = $this->makeMission('');
 
-        foreach ([$neverPulled, $vcenter, 0] as $credentialId) {
+        // Both directions per fixture, because "autostart passes" alone stays
+        // green if the loop source is emptied or the vCenter's datacenters are
+        // dropped: nothing in the accepting branch ever reads them. Refusing the
+        // same three for a location-reading mode is what makes the fixtures
+        // load-bearing.
+        $cases = [$neverPulled, $vcenter, 0];
+        $accepted = [];
+        $refused = [];
+        foreach ($cases as $credentialId) {
             deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
+            $accepted[] = $credentialId;
+            try {
+                deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_FULL);
+                self::fail('a location-reading mode must still be refused for credential ' . $credentialId);
+            } catch (ValidationException $exception) {
+                // The field key, not the message: the message is localized.
+                self::assertSame(['credential_esxi_id'], array_keys($exception->errors()), (string) $credentialId);
+                $refused[] = $credentialId;
+            }
         }
-        self::assertTrue(true, 'the portal gate let every autostart case through');
+        self::assertSame($cases, $accepted, 'the portal gate let every autostart case through');
+        self::assertSame($cases, $refused, 'and refused every one of them for a mode that reads a location');
     }
 
-    public function testTheRepositoryGateAgreesWithThePortalOnAutostart(): void
+    /**
+     * A gate's verdict as a value, so the two can be compared instead of merely
+     * both being run. An infrastructure failure is re-thrown rather than counted
+     * as a refusal: mysqli_sql_exception also extends RuntimeException, and a
+     * broken prepare would otherwise make both gates "refuse" and the agreement
+     * pass having exercised nothing.
+     */
+    private function gateAccepts(callable $gate): bool
+    {
+        try {
+            $gate();
+
+            return true;
+        } catch (mysqli_sql_exception $exception) {
+            throw $exception;
+        } catch (RuntimeException $exception) {
+            return false;
+        }
+    }
+
+    public function testTheTwoGatesAgreeOnEveryPostableMode(): void
     {
         // Both halves of the twin, same fixture: whatever one accepts the other
-        // must accept, or the operator meets a refusal that has no backend.
+        // must accept, or the operator meets a refusal that has no backend. The
+        // predecessor ran both gates for autostart and asserted neither verdict,
+        // so it could not have seen them disagree. Walking the mode list rather
+        // than naming two modes is what makes a mode added later covered here.
         $credentialId = $this->makeCredential('auto_twin');
         $mission = $this->makeMission('');
 
-        repo_deploy_assert_mission_ready($this->db, $mission, $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
-        deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, VIRTUSPHERE_DEPLOY_MODE_AUTOSTART);
-        self::assertTrue(true);
+        foreach (virtusphere_user_deploy_modes() as $mode) {
+            // A mission without a datacenter against a credential that never
+            // pulled: refused by exactly the modes that read a location.
+            $expected = !virtusphere_deploy_mode_needs_location($mode);
+            $repo = $this->gateAccepts(fn () => repo_deploy_assert_mission_ready($this->db, $mission, $credentialId, $mode));
+            $portal = $this->gateAccepts(fn () => deploy_assert_datacenter_resolvable($this->db, (int) $mission['id'], $credentialId, $mode));
+
+            self::assertSame($expected, $repo, $mode);
+            self::assertSame($repo, $portal, $mode);
+        }
     }
 
     public function testALocationReadingModeStillFailsThePortalGate(): void

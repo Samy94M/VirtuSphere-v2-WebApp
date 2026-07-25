@@ -16,6 +16,8 @@ require_once __DIR__ . '/../lib/repo/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_capabilities.php';
 
+/** @var mysqli $connection Provided by bootstrap.php. */
+
 $user = portal_require_user($connection);
 if (!can('deploy.run', $user)) {
     portal_forbid($connection, $user, 'deploy.run');
@@ -39,8 +41,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $missionIdPost = request_int($_POST, 'mission_id');
             $esxiId = request_int($_POST, 'credential_esxi_id');
             $ansibleId = request_int($_POST, 'credential_ansible_id');
+            // Normalized once, then used everywhere this handler needs it. The
+            // gate below used to read $_POST a second time and un-normalized,
+            // so a mode differing only in case took a different branch here
+            // than in the enqueue path that follows it: the portal refused an
+            // autostart job the backend would have queued, which is the
+            // disagreeing-twin defect the gate exists to prevent.
+            $mode = deploy_job_normalize_mission_mode(request_string($_POST, 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL));
             $payloadData = [
-                'mode' => $_POST['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL,
+                'mode' => $mode,
                 'verbose' => $_POST['verbose'] ?? false,
                 'vm_ids' => is_array($_POST['vm_ids'] ?? null) ? $_POST['vm_ids'] : [],
                 'powercycle_wait' => $_POST['powercycle_wait'] ?? VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT,
@@ -51,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Before the branch on purpose: the preview path never reaches a
             // readiness gate, so without this a mission whose datacenter cannot
             // be resolved would show a schedule preview and only fail on confirm.
-            deploy_assert_datacenter_resolvable($connection, $missionIdPost, $esxiId, request_string($_POST, 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL));
+            deploy_assert_datacenter_resolvable($connection, $missionIdPost, $esxiId, $mode);
 
             if ($schedule['has_schedule'] && !$confirmed) {
                 // Show a preview of the computed start times; do NOT redirect so

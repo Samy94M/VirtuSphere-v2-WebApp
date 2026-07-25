@@ -5,6 +5,9 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/esxi_inventory.php';
+// The group heading is rendered here too: a scope the producer can emit must
+// have a sentence, and only the label function knows whether it does.
+require_once dirname(__DIR__, 2) . '/lib/inventory_field.php';
 
 /**
  * The location picker groups its options by **how many credentials report a
@@ -264,5 +267,33 @@ final class EsxiInventoryPresenceBucketsTest extends TestCase
         // a note nobody reads.
         $proven = ['names' => ['ds1'], 'exact' => true, 'buckets' => [['scope' => 'all']], 'credential_count' => 2, 'eligible_count' => 2];
         self::assertSame([], esxi_inventory_location_notes([$proven]));
+    }
+
+    public function testEveryScopeTheProducerCanEmitHasAGroupHeading(): void
+    {
+        // inventory_bucket_label() picks its sentence with a default-free match,
+        // and its docblock promises that a fourth scope fails the build. Nothing
+        // kept that promise: the type is narrowed now, and this walks the scopes
+        // the producer actually emits through the label, the way
+        // CredentialStatusCadenceTest walks the automation blockers.
+        //
+        // One fixture per scope: 'all' on both hosts, 'some' on two of three,
+        // 'only' on one.
+        $groups = [
+            $this->group('esxi-01', ['ds-everywhere', 'ds-pair']),
+            $this->group('esxi-02', ['ds-everywhere', 'ds-pair']),
+            $this->group('esxi-03', ['ds-everywhere', 'ds-local']),
+        ];
+        $buckets = esxi_inventory_presence_buckets($groups, 3);
+
+        $scopes = array_map(static fn (array $bucket): string => (string) $bucket['scope'], $buckets);
+        sort($scopes);
+        self::assertSame(['all', 'only', 'some'], $scopes, 'the fixture must produce all three scopes');
+
+        foreach ($buckets as $bucket) {
+            $label = inventory_bucket_label($bucket);
+            self::assertNotSame('', trim($label), $bucket['scope'] . ' must have a group heading');
+            self::assertNotSame($bucket['scope'], $label, $bucket['scope'] . ' must render a sentence, not its own token');
+        }
     }
 }

@@ -73,18 +73,6 @@ parameters:
 			path: portal/account.php
 
 		-
-			message: '#^Offset decimal\-int\-string on array\<string, \(int\|string\)\> in isset\(\) does not exist\.$#'
-			identifier: isset.offset
-			count: 1
-			path: portal/deploy.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 31
-			path: portal/deploy.php
-
-		-
 			message: '#^Variable \$connection might not be defined\.$#'
 			identifier: variable.undefined
 			count: 5
@@ -173,18 +161,6 @@ parameters:
 			identifier: nullCoalesce.variable
 			count: 2
 			path: tests/Integration/AccessLegacyRbacTest.php
-
-		-
-			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true and ''gate accepted the…'' will always evaluate to true\.$#'
-			identifier: staticMethod.alreadyNarrowedType
-			count: 1
-			path: tests/Integration/DeployDatacenterResolutionTest.php
-
-		-
-			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true will always evaluate to true\.$#'
-			identifier: staticMethod.alreadyNarrowedType
-			count: 1
-			path: tests/Integration/DeployDatacenterResolutionTest.php
 
 		-
 			message: '#^Unreachable statement \- code above always terminates\.$#'

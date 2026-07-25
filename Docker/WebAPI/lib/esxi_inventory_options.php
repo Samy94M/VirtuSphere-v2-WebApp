@@ -76,14 +76,14 @@ function esxi_inventory_options(mysqli $db, string $kind): array
  * which pinned a display detail to the credential name the groups are sorted by,
  * and an operator may rename a credential at any time.
  *
- * @param array<int, array{names?:array<int,string>}> $groups
+ * @param array<int, array{names:array<int,string>}> $groups
  * @return array{names:array<int,string>, name_set:array<string,true>}
  */
 function esxi_inventory_name_union(array $groups): array
 {
     $names = [];
     foreach ($groups as $group) {
-        foreach ($group['names'] ?? [] as $name) {
+        foreach ($group['names'] as $name) {
             $key = esxi_inventory_name_key((string) $name);
             if ($key !== '' && !isset($names[$key])) {
                 $names[$key] = (string) $name;
@@ -132,15 +132,15 @@ function esxi_inventory_name_union(array $groups): array
  *
  * Pure, so every 0/1/many case is testable without a database.
  *
- * @param array<int, array{credential_id?:int, credential_name?:string, credential_host?:string, names?:array<int,string>, free_by_key?:array<string,?int>, unusable_keys?:array<string,bool>}> $groups
- * @return array<int, array{scope:string, credentials:array<int,array{id:int,name:string,host:string}>, names:array<int,string>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>}>
+ * @param array<int, array{credential_id?:int, credential_name?:string, credential_host?:string, names:array<int,string>, free_by_key?:array<string,?int>, unusable_keys?:array<string,bool>}> $groups
+ * @return array<int, array{scope:'all'|'some'|'only', credentials:array<int,array{id:int,name:string,host:string}>, names:array<int,string>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>}>
  */
 function esxi_inventory_presence_buckets(array $groups, int $eligibleCount): array
 {
     // name key => [spelling, reporting group indexes]
     $presence = [];
     foreach ($groups as $index => $group) {
-        foreach ($group['names'] ?? [] as $name) {
+        foreach ($group['names'] as $name) {
             $key = esxi_inventory_name_key((string) $name);
             if ($key === '') {
                 continue;
@@ -364,7 +364,7 @@ function esxi_inventory_groups_agree(array $groups, int $unionSize): bool
 
     foreach ($groups as $group) {
         $distinct = [];
-        foreach ($group['names'] ?? [] as $name) {
+        foreach ($group['names'] as $name) {
             $distinct[esxi_inventory_name_key((string) $name)] = true;
         }
         if (count($distinct) !== $unionSize) {
@@ -411,7 +411,12 @@ function esxi_inventory_options_are_bucketed(array $options): bool
  * an unpulled credential is exactly the case that needs explaining.
  *
  * @param array<int, array<string, mixed>> $optionSets the option arrays actually rendered
- * @return array<int, string> note tokens in reading order
+ * The token set is closed and spelled out in the return type, not merely in the
+ * three appends below: the two renderers pick their sentence with a
+ * default-free `match`, so a fourth token has to break the build at both of
+ * them rather than reach a page that has nothing to say about it.
+ *
+ * @return list<'host_choice'|'buckets'|'never_pulled'> note tokens in reading order
  */
 function esxi_inventory_location_notes(array $optionSets): array
 {

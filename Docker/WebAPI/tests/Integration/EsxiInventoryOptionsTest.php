@@ -184,10 +184,16 @@ final class EsxiInventoryOptionsTest extends TestCase
             }
         }
 
-        self::assertSame([self::PREFIX . 'ds-only-a'], $perHost[$b] ?? [], 'host B is one that cannot serve this datastore');
+        // Read once: the map is deliberately sparse (a credential with nothing
+        // missing has no key at all), and the second guarded read of the same
+        // offset only looked defensive - the first one had already narrowed it,
+        // so the guard was dead while reading as if it still protected the line.
+        $missingOnB = $perHost[$b] ?? [];
+
+        self::assertSame([self::PREFIX . 'ds-only-a'], $missingOnB, 'host B is one that cannot serve this datastore');
         self::assertArrayNotHasKey($a, $perHost, 'host A has it, so it has nothing to warn about');
         self::assertSame([self::PREFIX . 'vlan-nowhere'], $union, 'the VLAN exists nowhere, so only the union warning names it');
-        self::assertSame([], array_intersect($union, $perHost[$b] ?? []), 'the two boxes must never name the same value');
+        self::assertSame([], array_intersect($union, $missingOnB), 'the two boxes must never name the same value');
     }
 
     /** @param array<int, array<string, mixed>> $buckets */

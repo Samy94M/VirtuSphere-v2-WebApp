@@ -35,6 +35,24 @@ final class CssClassContractTest extends TestCase
      */
     private const UNSTYLED_HOOKS = [];
 
+    /**
+     * Accessor instead of direct const reads: with the list empty, PHPStan
+     * would otherwise flag every check against it as statically impossible,
+     * and the checks must survive for the day an entry returns. Same shape as
+     * E2eActionCoverageContractTest::pendingActions(), which solves the
+     * identical empty-allowlist problem two files over.
+     *
+     * The @return is not what silences the analyser; it is what keeps $reason a
+     * string for trim() in the stale-entry test below, so it must not be
+     * dropped as decoration.
+     *
+     * @return array<string, string>
+     */
+    private static function unstyledHooks(): array
+    {
+        return self::UNSTYLED_HOOKS;
+    }
+
     private function repoRoot(): string
     {
         return str_replace('\\', '/', dirname(__DIR__, 2));
@@ -176,7 +194,7 @@ final class CssClassContractTest extends TestCase
                 continue;
             }
 
-            if (isset($styled[$token]) || array_key_exists($token, self::UNSTYLED_HOOKS)) {
+            if (isset($styled[$token]) || array_key_exists($token, self::unstyledHooks())) {
                 continue;
             }
 
@@ -194,14 +212,19 @@ final class CssClassContractTest extends TestCase
             $report,
             "markup renders a class no stylesheet has a rule for.\n"
             . "A trailing * is a dynamically built family: at least one selector must start with that prefix.\n"
-            . 'Add the rule, drop the class from the markup, or declare it in UNSTYLED_HOOKS with its reason.'
+            . "Add the rule or drop the class from the markup.\n"
+            // The escape hatch is only reachable for an exact token: the *
+            // branch above books its offender and continues before the lookup.
+            // Offering it for a family sent an operator to an entry that would
+            // never be consulted and left them red without a further word.
+            . 'An exact class may instead be declared in UNSTYLED_HOOKS with its reason; a * family cannot.'
         );
     }
 
     public function testTheUnstyledHookListHasNoStaleEntries(): void
     {
         $rendered = $this->renderedClasses();
-        foreach (self::UNSTYLED_HOOKS as $class => $reason) {
+        foreach (self::unstyledHooks() as $class => $reason) {
             self::assertNotSame('', trim($reason), $class . ' must carry the reason it is unstyled');
             self::assertArrayHasKey($class, $rendered, 'UNSTYLED_HOOKS names a class the portal no longer renders: ' . $class);
         }
