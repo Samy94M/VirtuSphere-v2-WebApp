@@ -98,6 +98,15 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'mecm_fresh_ips' => $freshIps,
         'mecm_ip_mismatch' => count($freshIps) > 1,
         'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst],
-        'esxi' => ['rows' => $esxiRows, 'state' => $esxiWorst, 'interval_hours' => $intervalHours],
+        // ansible_selected is what esxi_inventory_automation_blocker() needs as
+        // its third input, and it is resolved here rather than in the renderer:
+        // this function already resolves the interval, and no other renderer on
+        // the page reaches into the database itself.
+        'esxi' => [
+            'rows' => $esxiRows,
+            'state' => $esxiWorst,
+            'interval_hours' => $intervalHours,
+            'ansible_selected' => esxi_inventory_ansible_resolution($db)['credential_id'] !== null,
+        ],
     ];
 }

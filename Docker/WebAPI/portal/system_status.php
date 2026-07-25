@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/system_status_page.php';
+require_once __DIR__ . '/../lib/system_status_shared_panels.php';
 require_once __DIR__ . '/../lib/system_status_panels.php';
 require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
@@ -60,15 +61,15 @@ $refreshUrl = $selectedInventoryId > 0
 layout_header(__t('system_status.title'), $user, 'system-status', 'system-status');
 ?>
 <div class="stack">
+    <?php // The topbar (lib/layout.php) already renders the page title and the
+          // help link for this page. A second <h1> here made the page's own title
+          // larger than the one in the chrome above it and gave the document two
+          // top-level headings; a second help button pointed at the same anchor.
+          // What is left is the one line the chrome cannot know. ?>
     <section class="page-intro">
-        <div>
-            <h1><?php echo h(__t('system_status.heading')); ?></h1>
-            <p class="muted"><?php echo h(__t('system_status.hint')); ?></p>
-            <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time></p>
-        </div>
+        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.hint')); ?></p>
         <div class="actions">
             <a class="button" href="<?php echo h($refreshUrl); ?>"><?php echo h(__t('system_status.refresh_status')); ?></a>
-            <a class="button button-secondary" href="help.php#panel-system-status"><?php echo h(__t('common.help')); ?></a>
         </div>
     </section>
 

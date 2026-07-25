@@ -75,13 +75,12 @@
     gap: var(--space-3) var(--space-4);
 }
 
-.page-intro h1,
 .inventory-card h3 {
     margin: 0;
 }
 
 .status-generated {
-    margin: var(--space-2) 0 0;
+    margin: 0;
     color: var(--muted);
     font-size: 13px;
 }
@@ -141,44 +140,58 @@
     background: var(--surface-muted);
 }
 
-.status-row-main {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-4);
-}
-
-.status-row-main > div:first-child {
+/* The row's identity line: name, traffic light, and whatever short note belongs
+   to the state itself. No justify-content, because with space-between the head
+   pushed a two-item line apart and a three-item line into thirds, so the same
+   card looked like a different kind of card depending on what it had to say. */
+.status-row-head {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-2);
     align-items: center;
+    gap: var(--space-2) var(--space-3);
 }
 
-.status-row dl,
-.status-facts,
-.inventory-counts {
-    display: flex;
-    flex-wrap: wrap;
+/* auto-fit collapses the empty tracks, so n fields share n equal columns. The
+   fact lists are fixed-length by construction (system_status_shared_panels.php),
+   which is what makes the same field sit under the same field across the cards
+   of one group; a conditionally rendered field would shift every column after it
+   by one and the alignment would be a coincidence again. */
+.status-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
     gap: var(--space-2) var(--space-4);
     margin: 0;
 }
 
-.status-row dl > div,
+/* Four numbers, not four columns of the page: on a fleet with a single
+   credential the card fills the whole grid width, and 1fr each spread the
+   counts across 1300 px with nothing between them to read. */
+.inventory-counts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    max-width: 34rem;
+    margin: 0;
+}
+
+/* Inside an inventory card the list holds two timestamps, and two 1fr tracks put
+   the second one in the middle of a card that can be 700 px wide. Same ceiling
+   as the counts above it, so both blocks end on the same edge. */
+.inventory-card .status-facts {
+    max-width: 34rem;
+}
+
 .status-facts > div,
 .inventory-counts > div {
     min-width: 0;
 }
 
-.status-row dt,
 .status-facts dt,
 .inventory-counts dt {
     color: var(--muted);
     font-size: 12px;
 }
 
-.status-row dd,
 .status-facts dd,
 .inventory-counts dd {
     margin: var(--space-1) 0 0;
@@ -242,6 +255,12 @@
     color: var(--muted);
 }
 
+/* The counters are the one <dl> here that is not a .status-facts grid, so it
+   carries its own reset against the UA indent of a definition list. */
+.status-counters dd {
+    margin: 0;
+}
+
 .inventory-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
@@ -265,15 +284,6 @@
 
 .inventory-card .actions form {
     margin: 0;
-}
-
-/* Four numbers, not four columns of the page: on a fleet with a single
-   credential the card fills the whole grid width, and 1fr each spread the
-   counts across 1300 px with nothing between them to read. */
-.inventory-counts {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    max-width: 34rem;
 }
 
 .inventory-counts dd {
@@ -309,7 +319,6 @@
 }
 
 .break-anywhere,
-.status-row code,
 .status-facts code {
     overflow-wrap: anywhere;
     word-break: break-word;

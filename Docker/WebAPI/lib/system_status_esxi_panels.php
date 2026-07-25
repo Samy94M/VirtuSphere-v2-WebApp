@@ -14,9 +14,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/backup_status.php';
 require_once __DIR__ . '/connection_errors.php';
+require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/esxi_capabilities.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_shared_panels.php';
 
 /**
  * What the last successful pull talked to: "through vCenter, VMware ESXi 8.0.2".
@@ -168,6 +170,8 @@ function system_status_render_inventory_detail(array $detail): void
 /** @param array<string,mixed> $snapshot */
 function system_status_render_esxi(array $snapshot, array $user, int $selectedId, ?array $selectedDetail): void
 {
+    $intervalHours = (int) ($snapshot['esxi']['interval_hours'] ?? 0);
+    $ansibleSelected = (bool) ($snapshot['esxi']['ansible_selected'] ?? false);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI); ?>">
         <div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.inv_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.inv_hint')); ?></p></div>
@@ -187,14 +191,31 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                 <header><div><h3><?php echo h((string) $credential['name']); ?></h3><code class="break-anywhere"><?php echo h((string) $credential['host']); ?></code></div><?php echo esxi_state_badge((string) $entry['health']); ?></header>
                 <?php $capabilityFacts = system_status_capability_facts($state); ?>
                 <?php if ($capabilityFacts !== '') { ?><p class="muted"><?php echo h(__t('system_status.cap_heading')); ?>: <?php echo h($capabilityFacts); ?></p><?php } ?>
-                <div class="capability-badges"><?php echo system_status_capability_badges($state); ?></div>
+                <?php // Rendered unconditionally this empty div still took a track of the
+                      // card grid, so a healthy host carried a gap above its numbers that
+                      // nothing was in. ?>
+                <?php $capabilityBadges = system_status_capability_badges($state); ?>
+                <?php if ($capabilityBadges !== '') { ?><div class="capability-badges"><?php echo $capabilityBadges; ?></div><?php } ?>
                 <dl class="inventory-counts">
                     <div><dt><?php echo h(__t('system_status.inv_th_hosts')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_HOST] ?? 0)); ?></dd></div>
                     <div><dt><?php echo h(__t('system_status.inv_th_datacenters')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_DATACENTER] ?? 0)); ?></dd></div>
                     <div><dt><?php echo h(__t('system_status.inv_th_datastores')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_DATASTORE] ?? 0)); ?></dd></div>
                     <div><dt><?php echo h(__t('system_status.inv_th_networks')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_NETWORK] ?? 0)); ?></dd></div>
                 </dl>
-                <p><?php echo h(__t('system_status.inv_last_attempt')); ?>: <?php echo $state !== null && !empty($state['last_attempt_at']) ? h(portal_format_timestamp($state['last_attempt_at'])) : h(__t('system_status.inv_never')); ?><br><?php echo h(__t('system_status.inv_last_success')); ?>: <?php echo $state !== null && !empty($state['last_success_at']) ? h(portal_format_timestamp($state['last_success_at'])) : h(__t('system_status.inv_never')); ?></p>
+                <?php echo system_status_fact_list([
+                    ['label' => __t('system_status.inv_last_attempt'), 'html' => ($state !== null && !empty($state['last_attempt_at']))
+                        ? h(portal_format_timestamp($state['last_attempt_at']))
+                        : h(__t('system_status.inv_never'))],
+                    ['label' => __t('system_status.inv_last_success'), 'html' => ($state !== null && !empty($state['last_success_at']))
+                        ? h(portal_format_timestamp($state['last_success_at']))
+                        : h(__t('system_status.inv_never'))],
+                ]); ?>
+                <?php // Which cycle actually refreshes these two timestamps, named by the
+                      // same predicate the scheduler skips on. "No live monitoring" was
+                      // true and useless: it did not say that a paused credential, a
+                      // missing Ansible host or a zero interval each stop the pull for a
+                      // different reason, and each needs a different fix. ?>
+                <small class="status-cadence"><?php echo h(credential_cadence_esxi($intervalHours, $state, $ansibleSelected)); ?></small>
                 <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && !empty($state['last_error_category'])) { ?><div class="alert alert-error"><?php echo h(connection_error_message((string) $state['last_error_category'], ['host' => (string) $credential['host']])); ?></div><?php } ?>
                 <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert alert-warning"><?php echo h(__t('system_status.inv_paused')); ?></div><?php } ?>
                 <?php if ($pending !== null) { ?><p><?php echo portal_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'info' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="deploy_log.php?id=<?php echo h((string) $pending['id']); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?></a><?php } ?></p><?php } ?>

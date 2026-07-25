@@ -83,7 +83,11 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
 
   const response = await page.goto('system_status.php');
   expect(response.status()).toBe(200);
-  await expect(page.locator('#main h1')).toHaveText(/Systemstatus|System status/);
+  // Exactly one <h1>, and it is the topbar's. The page used to render a second
+  // one of its own, larger than the chrome's because nothing styled it, so the
+  // document had two top-level headings saying the same thing.
+  await expect(page.locator('h1')).toHaveCount(1);
+  await expect(page.locator('h1')).toHaveText(/Systemstatus|System status/);
   await expect(page.locator('nav a[href="system_status.php"]')).toHaveText(/Systemstatus|System status/);
   await expect(page.locator('.status-overview-card')).toHaveCount(4);
   for (const target of ['#mecm', '#ansible', '#esxi', '#internal-services']) {
@@ -106,6 +110,26 @@ $stmt->execute();
 echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]) . 'JSON';
 `).c;
   expect(after, 'GET refresh writes no user audit row').toBe(before);
+});
+
+test('MECM sync cards: the same field sits in the same column in every card', async ({ page }) => {
+  await page.goto('system_status.php#mecm');
+
+  // Three reporters, one fixed six-field list each. The fields used to render
+  // only when they had a value, so a card with a duration had one column more
+  // than its neighbours and the whole block started somewhere else; this is the
+  // geometry assertion ADR-0013 asks for on a repaired spacing boundary.
+  const columns = await page.locator('#mecm .status-subgroup').first().evaluate((group) => {
+    const rows = [...group.querySelectorAll('article.status-row')];
+    return rows.map((row) => [...row.querySelectorAll('.status-facts dt')]
+      .map((dt) => Math.round(dt.getBoundingClientRect().x)));
+  });
+
+  expect(columns.length, 'the sync subgroup holds the three reporter rows').toBe(3);
+  for (const row of columns) {
+    expect(row.length, 'every reporter renders all six fields, missing ones as a dash').toBe(6);
+    expect(row, 'the fields of one card line up with the fields of the card above').toEqual(columns[0]);
+  }
 });
 
 test('MECM section: two separate subgroups and no outbound probe control', async ({ page }) => {

@@ -6,8 +6,10 @@ declare(strict_types=1);
 // and site health), Ansible and internal services, plus the shared Ampel legend.
 // The ESXi inventory cards and the deviation scan live in
 // lib/system_status_esxi_panels.php (ADR-0006).
+require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_shared_panels.php';
 
 // Maps a reportRun error category (sync or site) to a localized label.
 function system_status_run_error_label(?string $category): string
@@ -109,14 +111,18 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
             $detail = trim((string) ($row['last_detail'] ?? ''));
             ?>
             <article class="status-row">
-                <div class="status-row-main">
-                    <div><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state']); ?></div>
-                    <dl>
-                        <div><dt><?php echo h(__t('system_status.th_last_seen')); ?></dt><dd><?php echo h($lastSeen); ?></dd></div>
-                        <?php if ($lastChecked !== $lastSeen) { ?><div><dt><?php echo h(__t('system_status.th_last_checked')); ?></dt><dd><?php echo h($lastChecked); ?></dd></div><?php } ?>
-                        <div><dt><?php echo h(__t('system_status.th_interval')); ?></dt><dd><?php echo $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'; ?></dd></div>
-                    </dl>
-                </div>
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state']); ?></div>
+                <?php
+                // Fixed fields, including the check that equals the report: a
+                // column that appears only when the two timestamps differ moved
+                // every following column one place to the left, so the same
+                // label sat under a different one in the row above.
+                echo system_status_fact_list([
+                    ['label' => __t('system_status.th_last_seen'), 'html' => h($lastSeen)],
+                    ['label' => __t('system_status.th_last_checked'), 'html' => h($lastChecked)],
+                    ['label' => __t('system_status.th_interval'), 'html' => $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'],
+                ]);
+                ?>
                 <?php
                 // The hint is a repair instruction, not a description, so it is
                 // only true while the source is not OK. Printed unconditionally
@@ -214,23 +220,36 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
             $summary = ($row !== null && !empty($row['last_summary'])) ? json_decode((string) $row['last_summary'], true) : null;
             ?>
             <article class="status-row">
-                <div class="status-row-main">
-                    <div><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($state); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?> <span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?></div>
-                    <?php if ($row !== null) { ?><p class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></p><?php } ?>
-                    <dl>
-                        <?php if ($row !== null && !empty($row['last_attempt_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_attempt')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_attempt_at'])); ?></dd></div><?php } ?>
-                        <?php if ($row !== null && !empty($row['last_result_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_result')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_result_at'])); ?></dd></div><?php } ?>
-                        <?php if ($row !== null && $isLegacy && !empty($row['last_seen_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_seen')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_seen_at'])); ?></dd></div><?php } elseif ($row !== null && !empty($row['last_success_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_success')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_success_at'])); ?></dd></div><?php } ?>
-                        <?php if ($row !== null && !empty($row['last_failure_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_failure')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_failure_at'])); ?></dd></div><?php } ?>
-                        <div><dt><?php echo h(__t('system_status.th_interval')); ?></dt><dd><?php echo $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'; ?></dd></div>
-                        <?php if ($row !== null && $row['last_duration_ms'] !== null && $row['last_duration_ms'] !== '') { ?><div><dt><?php echo h(__t('system_status.th_duration')); ?></dt><dd><?php echo h(portal_format_duration_ms((int) $row['last_duration_ms'])); ?></dd></div><?php } ?>
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($state); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
+                <?php
+                // All six fields, always, in this order. They used to appear only
+                // when they had a value, so the number of columns differed per
+                // reporter (the package sync has a duration, the others may not)
+                // and the three cards of one group started their block at three
+                // different x positions. A missing value is an em dash and keeps
+                // its column: it says nothing is stored, not that nothing
+                // happened.
+                //
+                // The one deliberate exception to "same field under same field":
+                // a legacy reporter has no success timestamp, only the heartbeat
+                // it last sent, so the third column carries the other label. The
+                // position is the contract, the label is the truth.
+                echo system_status_fact_list([
+                    ['label' => __t('system_status.th_last_attempt'), 'html' => system_status_fact_time($row['last_attempt_at'] ?? null)],
+                    ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
+                    $isLegacy
+                        ? ['label' => __t('system_status.th_last_seen'), 'html' => system_status_fact_time($row['last_seen_at'] ?? null)]
+                        : ['label' => __t('system_status.th_last_success'), 'html' => system_status_fact_time($row['last_success_at'] ?? null)],
+                    ['label' => __t('system_status.th_last_failure'), 'html' => system_status_fact_time($row['last_failure_at'] ?? null)],
+                    ['label' => __t('system_status.th_interval'), 'html' => $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'],
+                    ['label' => __t('system_status.th_duration'), 'html' => ($row !== null && $row['last_duration_ms'] !== null && $row['last_duration_ms'] !== '') ? h(portal_format_duration_ms((int) $row['last_duration_ms'])) : '&mdash;'],
+                ]);
+                ?>
+                <?php if (is_array($summary) && $summary !== []) { ?>
+                    <dl class="status-counters">
+                        <?php foreach ($summary as $summaryKey => $summaryValue) { if (!is_string($summaryKey)) { continue; } ?><div><dt><?php echo h(system_status_run_summary_label($summaryKey)); ?></dt><dd><?php echo h((string) $summaryValue); ?></dd></div><?php } ?>
                     </dl>
-                    <?php if (is_array($summary) && $summary !== []) { ?>
-                        <dl class="status-counters">
-                            <?php foreach ($summary as $summaryKey => $summaryValue) { if (!is_string($summaryKey)) { continue; } ?><div><dt><?php echo h(system_status_run_summary_label($summaryKey)); ?></dt><dd><?php echo h((string) $summaryValue); ?></dd></div><?php } ?>
-                        </dl>
-                    <?php } ?>
-                </div>
+                <?php } ?>
                 <?php
                 if ($state === 'legacy') { ?><p class="status-action"><?php echo h(__t('system_status.run_legacy_hint')); ?></p><?php
                 } elseif (!$suppressHints && $state !== 'ok') {
@@ -270,17 +289,22 @@ function system_status_render_site(array $rows): void
     $detail = trim((string) ($row['last_detail'] ?? ''));
     ?>
     <article class="status-row">
-        <div class="status-row-main">
-            <dl class="status-facts">
-                <div><dt><?php echo h(__t('system_status.site_code_label')); ?></dt><dd><?php echo $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'; ?></dd></div>
-                <div><dt><?php echo h(__t('system_status.site_provider_label')); ?></dt><dd><?php echo $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'; ?></dd></div>
-                <div><dt><?php echo h(__t('system_status.site_state_label')); ?></dt><dd><?php echo heartbeat_badge($state); ?><?php if ($errorLabel !== '') { ?> <span><?php echo h($errorLabel); ?></span><?php } ?></dd></div>
-                <?php if (!empty($row['last_result_at'])) { ?><div><dt><?php echo h(__t('system_status.site_last_check')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_result_at'])); ?></dd></div><?php } ?>
-                <?php if (!empty($row['last_success_at'])) { ?><div><dt><?php echo h(__t('system_status.site_last_healthy')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_success_at'])); ?></dd></div><?php } ?>
-                <?php if (!empty($row['last_failure_at'])) { ?><div><dt><?php echo h(__t('system_status.th_last_failure')); ?></dt><dd><?php echo h(portal_format_timestamp($row['last_failure_at'])); ?></dd></div><?php } ?>
-                <div><dt><?php echo h(__t('system_status.site_interval')); ?></dt><dd><?php echo h(portal_format_duration((int) $row['interval_seconds'])); ?></dd></div>
-            </dl>
-        </div>
+        <?php
+        // Seven fixed fields, same shape as the sync rows above. This card used
+        // to be the one whose only child was the list, so neither the
+        // space-between of the old head nor its first-child rule applied and the
+        // block sat left while the job cards sat right: an asymmetry that was
+        // pure accident and read as a difference in kind.
+        echo system_status_fact_list([
+            ['label' => __t('system_status.site_code_label'), 'html' => $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'],
+            ['label' => __t('system_status.site_provider_label'), 'html' => $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'],
+            ['label' => __t('system_status.site_state_label'), 'html' => heartbeat_badge($state) . ($errorLabel !== '' ? ' <span>' . h($errorLabel) . '</span>' : '')],
+            ['label' => __t('system_status.site_last_check'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
+            ['label' => __t('system_status.site_last_healthy'), 'html' => system_status_fact_time($row['last_success_at'] ?? null)],
+            ['label' => __t('system_status.th_last_failure'), 'html' => system_status_fact_time($row['last_failure_at'] ?? null)],
+            ['label' => __t('system_status.site_interval'), 'html' => h(portal_format_duration((int) $row['interval_seconds']))],
+        ]);
+        ?>
         <?php $hint = system_status_site_hint($errorCategory); if ($hint !== '') { ?><p class="status-action"><?php echo h($hint); ?></p><?php } ?>
         <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
     </article>
@@ -305,8 +329,16 @@ function system_status_render_ansible(array $snapshot, array $user): void
 {
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE); ?>">
-        <h2><?php echo h(__t('system_status.ansible_heading')); ?></h2>
-        <p class="muted"><?php echo h(__t('system_status.ansible_hint', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+        <?php // The same heading shape as the MECM, ESXi and internal panels: the
+              // link to the credentials page is this section's action and belongs
+              // beside the title, not as a loose paragraph under the last row. ?>
+        <div class="section-heading-actions">
+            <div><h2><?php echo h(__t('system_status.ansible_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.ansible_hint')); ?></p></div>
+            <?php // Not in the empty case: the empty-state below already carries this
+                  // link as its call to action, and two identical buttons above each
+                  // other read as two different destinations. ?>
+            <?php if ($snapshot['ansible']['rows'] !== [] && can('credentials.manage', $user)) { ?><a class="button button-secondary" href="credentials.php"><?php echo h(__t('system_status.ansible_test_link')); ?></a><?php } ?>
+        </div>
         <?php if ($snapshot['ansible']['rows'] === []) { ?>
             <div class="empty-state"><p><?php echo h(__t('system_status.ansible_empty')); ?></p><?php if (can('credentials.manage', $user)) { ?><a class="button button-secondary" href="credentials.php"><?php echo h(__t('system_status.ansible_test_link')); ?></a><?php } ?></div>
         <?php } else { ?>
@@ -325,8 +357,19 @@ function system_status_render_ansible(array $snapshot, array $user): void
                           // here would put a second clock on a page whose whole point is that every
                           // age is measured against one, and the row could then disagree with the
                           // overview card above it across a threshold. ?>
-                    <div class="status-row-main"><div><strong><?php echo h((string) $credential['name']); ?></strong><?php echo ansible_state_badge((string) $entry['state']); ?></div><code><?php echo h((string) $credential['host']); ?></code></div>
-                    <p><?php echo h(__t('system_status.ansible_th_last_test')); ?>: <?php echo $stateRow !== null && !empty($stateRow['last_checked_at']) ? h(portal_format_timestamp($stateRow['last_checked_at'])) : h(__t('system_status.ansible_never_tested')); ?></p>
+                    <div class="status-row-head"><strong><?php echo h((string) $credential['name']); ?></strong><?php echo ansible_state_badge((string) $entry['state']); ?></div>
+                    <?php echo system_status_fact_list([
+                        ['label' => __t('system_status.ansible_th_host'), 'html' => '<code>' . h((string) $credential['host']) . '</code>'],
+                        ['label' => __t('system_status.ansible_th_last_test'), 'html' => ($stateRow !== null && !empty($stateRow['last_checked_at']))
+                            ? h(portal_format_timestamp($stateRow['last_checked_at']))
+                            : h(__t('system_status.ansible_never_tested'))],
+                    ]); ?>
+                    <?php // A badge over a timestamp reads as "last poll" everywhere else in
+                          // the portal, and the preflight is the one status here that nothing
+                          // refreshes. The line says so, from the same helper the Credentials
+                          // page uses, so the two pages cannot describe the same row
+                          // differently. ?>
+                    <small class="status-cadence"><?php echo h(credential_cadence_ansible()); ?></small>
                     <?php
                     // A preflight warning stores the check that raised it in the
                     // same column a failure stores its broken component in, so
@@ -341,7 +384,6 @@ function system_status_render_ansible(array $snapshot, array $user): void
                 </article>
             <?php } ?>
             </div>
-            <?php if (can('credentials.manage', $user)) { ?><p><a href="credentials.php"><?php echo h(__t('system_status.ansible_test_link')); ?></a></p><?php } ?>
         <?php } ?>
     </section>
     <?php
