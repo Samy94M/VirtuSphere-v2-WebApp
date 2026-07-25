@@ -42,6 +42,11 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_system_status.system_status_status_p1')); ?></p>
             <?php // Same renderer as the page's own legend, so the two cannot list different states again. ?>
             <?php system_status_legend_items('heartbeat'); ?>
+            <?php // What a dash in a row means. The fields are rendered unconditionally
+                  // (lib/system_status_shared_panels.php) so the same field stays in the
+                  // same column; that only reads correctly if the placeholder is
+                  // explained once, here, instead of guessed at per card. ?>
+            <p><?php echo h(__t('help_system_status.system_status_status_p2')); ?></p>
             <h3><?php echo h(__t('help_system_status.system_status_work_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_work_0')); ?></p>
             <ol>
@@ -104,6 +109,10 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_system_status.esxi_inv_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.esxi_inv_p1', ['hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT])); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_p2')); ?></p>
+            <?php // The cadence line each inventory card carries. The card names the
+                  // blocker that actually stops the pull (esxi_inventory_automation_blocker());
+                  // this says why the named one is the one to fix first. ?>
+            <p><?php echo h(__t('help_system_status.esxi_inv_cadence')); ?></p>
             <h3><?php echo h(__t('help_system_status.esxi_inv_rights_heading')); ?></h3>
             <ul>
                 <li><?php echo h(__t('help_system_status.esxi_inv_rights_read')); ?></li>

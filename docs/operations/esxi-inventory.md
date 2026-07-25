@@ -10,7 +10,7 @@ Das Portal liest in regelmäßigen Abständen read-only aus den registrierten ES
 - „Alle aktualisieren" überspringt auth-pausierte Zugangsdaten (Kontosperren-Schutz) und weist die Anzahl im Hinweis aus. Ein pausiertes Zugangsdatum gezielt neu versuchen: sein eigener Aktualisieren-Button (bewusster Einzel-Retry) oder das Zugangsdatum speichern (hebt die Pause auf). Der Hinweis schlüsselt auch „bereits in der Warteschlange" auf und nennt bei fehlendem/mehrdeutigem Ansible-Zugangsdatum den Grund samt Einstellungs-Verweis.
 - Nach einem erfolgreichen create- oder full-Deploy (neue VMs, veränderte Datastore-Belegung) wird automatisch ein Abruf für das genutzte ESXi-Zugangsdatum eingereiht. Power-Cycle, Start und Export lösen keinen Abruf aus (sie erzeugen keine Ressourcen). Der Doppel-Einreihungs-Guard verhindert Dopplungen mit der Intervall-Automatik.
 - Ein Zugangsdatum, das noch nie erfolgreich war (falscher Host, fehlende Rechte), wird nicht bei jedem Prüf-Zyklus neu versucht, sondern erst nach Ablauf des Intervalls (Sperre auf den letzten Versuch, nicht nur den letzten Erfolg). Auth-Fehler pausieren den Auto-Abruf ganz.
-- Anzeige im Systemstatus, Abschnitt „ESXi-Inventar": je Zugangsdatum zunächst eine kompakte Karte mit Zustand, Zeitpunkt, Fähigkeiten, Objektzahlen und offenem Auftrag. Tabellen und Kapazitäten werden erst über „Inventardetails öffnen" für genau diese Karte geladen.
+- Anzeige im Systemstatus, Abschnitt „ESXi-Inventar": je Zugangsdatum zunächst eine kompakte Karte mit Zustand, Objektzahlen, den Zeitpunkten von Versuch und Erfolg, der Taktzeile darunter (welche Gründe sie nennt, steht in der Blocker-Tabelle weiter unten) und einem offenen Auftrag. Fähigkeits-Marken erscheinen nur, wenn der Abruf welche gemeldet hat. Tabellen und Kapazitäten werden erst über „Inventardetails öffnen" für genau diese Karte geladen.
 - Jeder Abruf ist ein Systemauftrag. Beendete Systemaufträge werden nach 30 Tagen samt Ausgabe entfernt, denn sie tauchen in keiner Liste auf und ihr bleibendes Ergebnis ist die Ampel. Laufende und eingereihte Aufträge werden nie angefasst.
 
 ## Setup-Reihenfolge
@@ -51,7 +51,7 @@ Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` be
 
 Dieselbe Ampel erscheint an drei Stellen und wird aus demselben Health-Snapshot berechnet: auf der ESXi-Karte im Systemstatus, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor". Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.
 
-Was die Ampel nicht beantwortet, steht als Taktzeile darunter: auf der Seite Zugangsdaten nennt jede Zeile unter Badge und Zeitpunkt, ob sich der Wert von allein erneuert. Badge über Zeitstempel heißt im Portal sonst überall „letzte Abfrage", und gepollt wird nur ESXi. Drei Dinge halten diesen Abruf an, und jedes muss die Zeile beim Namen nennen, sonst ist sie dieselbe stille Behauptung an neuer Stelle:
+Was die Ampel nicht beantwortet, steht als Taktzeile darunter: auf der Seite Zugangsdaten und auf der Inventarkarte im Systemstatus nennt jede Zeile unter Badge und Zeitpunkt, ob sich der Wert von allein erneuert. Badge über Zeitstempel heißt im Portal sonst überall „letzte Abfrage", und gepollt wird nur ESXi. Drei Dinge halten diesen Abruf an, und jedes muss die Zeile beim Namen nennen, sonst ist sie dieselbe stille Behauptung an neuer Stelle:
 
 | Blocker | Reichweite | Zeile sagt |
 |---|---|---|

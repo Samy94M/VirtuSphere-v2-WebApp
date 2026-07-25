@@ -993,7 +993,7 @@ label > .compound-field {
 
 /* One shared colour key for both traffic lights: one row per severity, badge
    inline and the meaning flowing after it, wrapping under itself. Rendered by
-   system_status_ampel_legend() on system_status.php and on the help page, so
+   system_status_legend_items() on system_status.php and on the help page, so
    both teach the same colours from the same markup. list-style:none because the
    badge already carries the row; a browser bullet in front of it reads as a
    second marker, and with the marker gone the 20px indent `.panel ul` adds for
