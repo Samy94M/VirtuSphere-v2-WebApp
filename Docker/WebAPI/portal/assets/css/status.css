@@ -14,7 +14,57 @@
  * renderer), and the generic .empty-state / .section-heading-actions, which the
  * next page would otherwise have to fetch back or duplicate. This file owns the
  * inner rhythm of the status blocks, not their shell.
+ *
+ * Every gap, padding, margin and radius here is a token from base.css. There are
+ * no px literals left to drift, and StatusSpacingContractTest rejects the first
+ * one that comes back.
  */
+
+/* Spacing belongs to the container, not to the child (ADR-0013). Each status
+   block is a vertical stack whose gap owns the distance between its parts, so a
+   paragraph, a hint line or a details block below a row cannot bring a second
+   margin of its own and be spaced twice. The child rules below therefore give
+   their margins up entirely rather than being reset in bulk: a blanket
+   `.status-section p { margin: 0 }` would carry (0,1,1) and beat the (0,1,0) of
+   .status-action and .alert-inline, which is exactly the cascade trap that left
+   two margin-top declarations on this page dead for months. */
+.status-section {
+    display: grid;
+    gap: var(--space-4);
+    align-content: start;
+}
+
+.status-section > * {
+    min-width: 0;
+}
+
+/* Panel defaults assume a flow layout: a heading, a paragraph and an alert each
+   bring their own bottom margin. Inside the stacks above that margin would be
+   added to the gap, so the elements that now sit in one hand it back. Each of
+   these ties the specificity of its components.css counterpart and wins on file
+   order, which is why status.css must stay the later <link>. */
+.status-section > h2,
+.status-section > h3,
+.status-section > p,
+.status-subgroup h3,
+.status-row > p,
+.inventory-card > p,
+.status-section .alert {
+    margin: 0;
+}
+
+.status-subgroup {
+    display: grid;
+    gap: var(--space-2);
+}
+
+/* The heading copy of a section: title and its one-line hint. A grid rather than
+   a margin, for the same reason as everything else here. */
+.status-section .section-heading-actions > div {
+    display: grid;
+    gap: var(--space-1);
+    align-content: start;
+}
 
 .page-intro,
 .inventory-card > header {
@@ -22,7 +72,7 @@
     align-items: flex-start;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 12px 18px;
+    gap: var(--space-3) var(--space-4);
 }
 
 .page-intro h1,
@@ -31,7 +81,7 @@
 }
 
 .status-generated {
-    margin: 8px 0 0;
+    margin: var(--space-2) 0 0;
     color: var(--muted);
     font-size: 13px;
 }
@@ -39,19 +89,21 @@
 .status-overview {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
+    gap: var(--space-3);
 }
 
+/* No min-height: the card holds a label and a badge, and a floor sized for a
+   two-line label made every one of the four twice as tall as its content on the
+   page whose whole complaint is that it spends its area on air. */
 .status-overview-card {
     display: flex;
     min-width: 0;
-    min-height: 76px;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 14px;
+    gap: var(--space-2);
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     background: var(--surface);
     color: var(--text);
     text-decoration: none;
@@ -76,14 +128,16 @@
 
 .status-list {
     display: grid;
-    gap: 10px;
+    gap: var(--space-2);
 }
 
 .status-row {
+    display: grid;
     min-width: 0;
-    padding: 12px 14px;
+    gap: var(--space-2);
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--surface-muted);
 }
 
@@ -92,13 +146,13 @@
     align-items: flex-start;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 10px 16px;
+    gap: var(--space-2) var(--space-4);
 }
 
 .status-row-main > div:first-child {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
     align-items: center;
 }
 
@@ -107,7 +161,7 @@
 .inventory-counts {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 20px;
+    gap: var(--space-2) var(--space-4);
     margin: 0;
 }
 
@@ -127,32 +181,25 @@
 .status-row dd,
 .status-facts dd,
 .inventory-counts dd {
-    margin: 2px 0 0;
+    margin: var(--space-1) 0 0;
 }
 
 /* The action hint attached to its status row reads as belonging to the source
-   above it, so it drops the paragraph's own floating margin and keeps only the
-   gap to the row. */
+   above it. Its distance is the row stack's gap; it brings none of its own. */
 .status-action {
-    margin: 10px 0 0;
     color: var(--muted);
 }
 
 /* The failure message of a status source: an alert that belongs to the card it
    sits in, not a floating page-level one, so it takes the danger colour and
-   border of .alert-error without the glass surface and the 14px bottom margin.
+   border of .alert-error without the glass surface and the bottom margin.
    Without a rule at all this rendered as ordinary body text, which is how the
    one line that says a source is broken read like a caption. */
 .alert-inline {
-    margin: 10px 0 0;
     border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
-    border-radius: 8px;
-    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
     color: var(--danger);
-}
-
-.technical-details {
-    margin-top: 8px;
 }
 
 .technical-details pre {
@@ -162,30 +209,32 @@
     overflow-wrap: anywhere;
 }
 
+/* One rule, not two: the padded box and its distance to the block above used to
+   be declared several hundred lines apart, which is how one of them can be
+   changed without the other being read. */
 .repair-actions {
-    padding: 12px 14px;
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--surface-muted);
 }
 
-/* The two MECM subgroups (result reports, site status) stay visually equal but
-   clearly separated. */
-.status-subgroup + .status-subgroup {
-    margin-top: 18px;
-}
-
-/* Compact per-run counter grid inside a result-report row. */
+/* Compact per-run counter grid inside a result-report row. The counters are a
+   different kind of value from the facts above them (per-run totals, not
+   timestamps), so they keep a visible rule; the extra margin on top of the
+   stack gap is what makes that rule read as a divider and not as a border. */
 .status-counters {
-    margin-top: 8px;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 16px;
+    gap: var(--space-2) var(--space-4);
+    margin: var(--space-2) 0 0;
+    padding: var(--space-2) 0 0;
+    border-top: 1px solid var(--border);
 }
 
 .status-counters > div {
     display: flex;
-    gap: 6px;
+    gap: var(--space-2);
     font-size: 12px;
 }
 
@@ -193,27 +242,19 @@
     color: var(--muted);
 }
 
-.status-facts {
-    margin-top: 8px;
-}
-
 .inventory-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
-    gap: 12px;
-    /* The heading action can wrap onto its own flex row. Its internal gap does
-       not separate that row from this sibling grid, so the grid owns the
-       inter-block breathing room (ADR-0013). */
-    margin-top: 16px;
+    gap: var(--space-3);
 }
 
 .inventory-card {
     display: grid;
     min-width: 0;
-    gap: 12px;
-    padding: 14px;
+    gap: var(--space-2);
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     background: var(--surface-muted);
 }
 
@@ -226,9 +267,13 @@
     margin: 0;
 }
 
+/* Four numbers, not four columns of the page: on a fleet with a single
+   credential the card fills the whole grid width, and 1fr each spread the
+   counts across 1300 px with nothing between them to read. */
 .inventory-counts {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 34rem;
 }
 
 .inventory-counts dd {
@@ -239,14 +284,14 @@
 .capability-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-2);
 }
 
 .inventory-details {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-    gap: 12px;
-    padding-top: 12px;
+    gap: var(--space-3);
+    padding: var(--space-3) 0 0;
     border-top: 1px solid var(--border);
 }
 
@@ -255,12 +300,12 @@
 }
 
 .inventory-detail-group h4 {
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
 }
 
 .inventory-detail-group ul {
     margin: 0;
-    padding-left: 18px;
+    padding: 0 0 0 var(--space-4);
 }
 
 .break-anywhere,
@@ -272,27 +317,24 @@
 
 .deviation-groups {
     display: grid;
-    gap: 10px;
+    gap: var(--space-2);
 }
 
 .deviation-groups article {
-    padding: 10px 12px;
+    padding: var(--space-2) var(--space-3);
     border-left: 3px solid var(--warning);
+    border-radius: var(--radius-md);
     background: var(--surface-muted);
 }
 
 .deviation-groups h3 {
-    margin: 0 0 6px;
+    margin: 0 0 var(--space-1);
     font-size: 15px;
 }
 
 .deviation-groups li a {
     text-decoration: underline;
     text-underline-offset: 0.16em;
-}
-
-.repair-actions {
-    margin-top: 14px;
 }
 
 .repair-actions > summary,

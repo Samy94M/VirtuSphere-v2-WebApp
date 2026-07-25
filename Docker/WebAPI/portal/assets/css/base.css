@@ -24,6 +24,18 @@
     --bg-accent-glow:
         radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
         radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 10%, transparent), transparent 55%);
+    /* Spacing scale (ADR-0013). Four steps and one radius, derived from what the
+       status block actually needed rather than set in advance: a token nobody
+       uses on its first day is the same drift as a rule without markup, only in
+       the direction no guard sees. StatusSpacingContractTest fails on an unused
+       step, so the scale can only grow with a caller.
+       Themed values live in the dark block below; these do not. An indent is not
+       a colour. */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --radius-md: 8px;
 }
 
 :root[data-theme="dark"] {

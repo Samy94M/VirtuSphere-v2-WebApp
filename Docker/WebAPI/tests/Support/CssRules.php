@@ -129,11 +129,16 @@ final class CssRules
     /**
      * The declarations of one rule body.
      *
+     * The property pattern accepts the leading double dash and digits of a
+     * custom property (`--space-1`), not only plain CSS names: the token scale
+     * is declared in a rule body like everything else, and a reader that cannot
+     * see it would report an empty :root instead of a missing step.
+     *
      * @return array<string, string> property => value
      */
     public static function declarations(string $body): array
     {
-        preg_match_all('/(-?[a-z][-a-z]*)\s*:\s*([^;]+)/i', $body, $matches, PREG_SET_ORDER);
+        preg_match_all('/(-{0,2}[a-z][-a-z0-9]*)\s*:\s*([^;]+)/i', $body, $matches, PREG_SET_ORDER);
 
         $declarations = [];
         foreach ($matches as $match) {
