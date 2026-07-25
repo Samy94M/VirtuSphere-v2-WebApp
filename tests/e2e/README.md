@@ -31,7 +31,9 @@ The `setup` project seeds the `e2e_user` account (role `user`) through the PHP c
 ## What it covers
 
 - `specs/auth.setup.js` — seeds the user role, authenticates admin + user.
-- `specs/health-matrix.spec.js` (TESTPLAN 3.1) — every page in `lib/pages.js` × {light, dark} × {admin, user}: loads with the right access outcome, no PHP error/notice in the HTML, no console error or CSP violation, no request off `127.0.0.1` (air-gap proof), no raw `module.key` leaking as text.
+- `specs/health-matrix.spec.js` (TESTPLAN 3.1) — every page in `lib/pages.js` × {light, dark} × {admin, user}: loads with the right access outcome, does not redirect away (a redirect answers 200 from its target, so everything after would be checked under the wrong page's name), no PHP error/notice in the HTML, no console error or CSP violation, no request off `127.0.0.1` (air-gap proof), no raw `module.key` leaking as text. The key prefixes come from the catalog filenames, not from a list.
+
+A page in `lib/pages.js` that only renders something concrete with a parameter carries a `query` builder; the ids come from `lib/matrix-seed.js`, which both the health and the a11y matrix seed once per file under their own prefix. That is what puts `mission_details.php`, `vm_edit.php` and `deploy.php` *with* a mission into both matrices: without a mission the deploy page has neither a storage table nor warning boxes in the DOM at all.
 
 DB assertions (later specs) go through `lib/db.js`, which shells into the MySQL container with `docker exec` because its port is deliberately unpublished.
 

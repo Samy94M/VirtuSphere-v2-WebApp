@@ -75,6 +75,8 @@ Playwright beweist jede **Aktion** genau einmal im echten Browser; **Felder** we
 
 `health-matrix.spec.js` prüft **jede** Portalseite basal (Ladezustand je Rolle, kein PHP-Fehlertext, keine Konsolen-/CSP-Fehler, kein Off-Host-Request, kein roher i18n-Key, beide Themes); `accessibility.spec.js` scannt jede Seite mit Axe in beiden Themes; `rbac-csrf.spec.js` beweist die Ablehnungs-Diagonale (fehlendes/fremdes Token, unberechtigte Rolle, anonym) quer über die POST-Actions. Die Spalte nennt die darüber hinaus vertiefende Spec.
 
+Das Seiteninventar liegt in `tests/e2e/lib/pages.js`. Eine Seite, die ohne Parameter nichts Konkretes rendert, trägt dort einen `query`-Bauer und bekommt ihre IDs aus `tests/e2e/lib/matrix-seed.js`; so stehen `mission_details.php`, `vm_edit.php` und `deploy.php` **mit** Mission in der Matrix, letzteres, weil ohne Mission weder Speichertabelle noch Warnboxen im DOM existieren. Beide Matrizen prüfen zusätzlich, dass die Seite nicht wegleitet: ein Redirect antwortet mit 200 von seinem Ziel, und alle weiteren Prüfungen liefen dann unter falschem Namen gegen eine andere Seite. Die i18n-Präfixe leitet der Spec aus den Katalog-Dateinamen ab statt sie zu listen und bricht ab, wenn die Ableitung leer ist. Geprüft wird dabei die vom Browser ausgehandelte Sprache; dass die andere dieselben Schlüssel hat, sichert `lang-audit --ci` (Parität), nicht ein zweiter Durchlauf.
+
 | Seite | Besonderer Prüffokus | Vertiefende Spec |
 |---|---|---|
 | login/logout/session_ping | Fixation/Rotation, `ip_locked`, serverseitige Invalidierung, CSRF-Exemption | `session-security.spec.js` |

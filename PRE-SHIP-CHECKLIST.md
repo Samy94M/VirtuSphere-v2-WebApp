@@ -14,6 +14,7 @@ Vor jedem Release-/Meilenstein-Abschluss durchgehen. Diese Datei bleibt eine **l
 - [ ] Tastatur-, Fokus- und Screenreader-Durchgang der Kernflüsse in beiden Themes (Login, Mission anlegen, VM bearbeiten, Deploy starten).
 - [ ] PowerShell-SYSTEM-Smoke in einer Wegwerf-Windows-VM; Installer-Lebenszyklus (Erstinstallation, Re-Run, Upgrade, Deinstallation).
 - [ ] MECM-Staging-Abnahme und reales Ansible-/ESXi-Staging mit zweitem Idempotenzlauf.
+  - [ ] Datastore-Health gegen den produktiven Host belegt: nach dem ersten echten Inventar-Abruf im Job-Log die Zeile `Datastore health:` lesen (steht neben `Inventory queries:`, auch im Gutfall) und prüfen, dass Erreichbarkeit und Wartungsmodus für **alle** Datastores ankamen, nicht nur für einen Teil. `accessible`/`maintenanceMode` sind gegen die Moduldoku gebaut; offline lässt sich nur die Argumentliste prüfen, nicht die Form der Antwort (ADR-0023). Ein Feldpfad, der nicht mehr trifft, sieht ohne diese Zeile aus wie eine Flotte ohne Wartung. Bedeutung der Zeile: `docs/operations/esxi-inventory.md`.
 - [ ] Keine Secrets/Logs/Build-Artefakte neu getrackt: `git status --short` und `git ls-files | grep -iE '\.(env|pfx|pem|key|log)$'` leer.
 - [ ] `docs/CHANGELOG.md` für den Meilenstein aktualisiert.
 - [ ] Go-live-Schritte aus `docs/operations/go-live.md` geplant (IP-Allowlist für MECM- und Ansible-Host, Erstpasswort-Datei löschen, DB-Konto-Rotation).

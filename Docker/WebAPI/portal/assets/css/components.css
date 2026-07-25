@@ -996,8 +996,10 @@ label > .compound-field {
    system_status_ampel_legend() on system_status.php and on the help page, so
    both teach the same colours from the same markup. list-style:none because the
    badge already carries the row; a browser bullet in front of it reads as a
-   second marker. */
-.ampel-legend {
+   second marker, and with the marker gone the 20px indent `.panel ul` adds for
+   it is just a hanging left edge. Selector doubled to outrank that rule, which
+   is two class levels deep; the legend always sits inside a .panel. */
+.ampel-legend.ampel-legend {
     list-style: none;
     margin: 0;
     padding-left: 0;

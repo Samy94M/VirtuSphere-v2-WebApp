@@ -10,10 +10,12 @@
 
 const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
-const { PORTAL_PAGES } = require('../lib/pages');
+const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');
+const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
 
 const THEMES = ['light', 'dark'];
+const MARK = 'e2ea11y';
 
 // The rule sets the portal commits to. Best-practice rules are deliberately out:
 // they encode opinions (e.g. one <main> per page) rather than the AA bar.
@@ -32,9 +34,22 @@ function describeViolations(violations) {
 // health matrix, and axe has nothing to say about a 403.
 test.use({ storageState: ROLES.admin.storageState });
 
+// Own prefix, so this file and the health matrix can seed the same shared dev
+// database without either one deleting the other's rows.
+let seeded = null;
+
+test.beforeAll(() => {
+  cleanupMatrixFixtures(MARK);
+  seeded = seedMatrixFixtures(MARK);
+});
+
+test.afterAll(() => {
+  cleanupMatrixFixtures(MARK);
+});
+
 for (const pageDef of PORTAL_PAGES) {
   for (const theme of THEMES) {
-    test(`a11y: ${pageDef.path} (${theme})`, async ({ page }) => {
+    test(`a11y: ${pageLabel(pageDef)} (${theme})`, async ({ page }) => {
       await page.addInitScript((t) => {
         try {
           window.localStorage.setItem('virtusphere.theme', t);
@@ -43,7 +58,7 @@ for (const pageDef of PORTAL_PAGES) {
         }
       }, theme);
 
-      await page.goto(pageDef.path, { waitUntil: 'domcontentloaded' });
+      await page.goto(pageUrl(pageDef, seeded), { waitUntil: 'domcontentloaded' });
 
       // A closed <details> is not in the accessibility tree, so axe skips its
       // content entirely: legends, technical-detail blocks and repair forms were
@@ -61,7 +76,7 @@ for (const pageDef of PORTAL_PAGES) {
 
       expect(
         results.violations,
-        `accessibility violations on ${pageDef.path} (${theme}):\n${describeViolations(results.violations)}`
+        `accessibility violations on ${pageLabel(pageDef)} (${theme}):\n${describeViolations(results.violations)}`
       ).toEqual([]);
     });
   }
