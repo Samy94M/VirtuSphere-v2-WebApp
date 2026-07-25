@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../Support/CssRules.php';
+
 /**
  * The modal axis (ADR-0013) lives in CSS, which no linter in this repo reads.
  * php -l, node --check and the whole unit suite stay green while a dialog drifts
@@ -31,8 +33,6 @@ use PHPUnit\Framework\TestCase;
  */
 final class ModalAxisContractTest extends TestCase
 {
-    private const CSS = 'portal/assets/css/components.css';
-
     /**
      * Properties that decide where modal content sits. A rule may only declare
      * one of these if it owns that decision below.
@@ -56,96 +56,39 @@ final class ModalAxisContractTest extends TestCase
         '.modal-actions' => ['justify-content' => 'center'],
     ];
 
-    private function css(): string
-    {
-        $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/' . self::CSS;
-        self::assertFileExists($path, self::CSS . ' must exist');
-
-        return (string) file_get_contents($path);
-    }
-
-    /**
-     * Comments in components.css quote the declarations these tests reason about
-     * ("fit-content", "text-align: left"), so scanning them raw would read the
-     * prose instead of the rules.
-     */
-    private function stripComments(string $css): string
-    {
-        return preg_replace('#/\*.*?\*/#s', '', $css) ?? $css;
-    }
-
-    /**
-     * Flatten the stylesheet to `selector => declarations`, descending into
-     * at-rules. A regex over the whole file cannot do this: `@media (...) {`
-     * would match as a selector and swallow the first rule nested inside it.
-     *
-     * @return array<int, array{selector: string, body: string}>
-     */
-    private function rules(string $css): array
-    {
-        $rules = [];
-        $length = strlen($css);
-        $prelude = '';
-
-        for ($i = 0; $i < $length; $i++) {
-            if ($css[$i] !== '{') {
-                $prelude .= $css[$i];
-                continue;
-            }
-
-            $depth = 1;
-            $body = '';
-            for ($i++; $i < $length && $depth > 0; $i++) {
-                if ($css[$i] === '{') {
-                    $depth++;
-                } elseif ($css[$i] === '}') {
-                    if (--$depth === 0) {
-                        break;
-                    }
-                }
-                $body .= $css[$i];
-            }
-
-            $selector = trim(preg_replace('/\s+/', ' ', $prelude) ?? $prelude);
-            $prelude = '';
-
-            if (str_starts_with($selector, '@')) {
-                // @media/@supports wrap rules; @keyframes wrap `from`/`to` blocks,
-                // which carry no selector we guard. Both are safe to descend into.
-                foreach ($this->rules($body) as $nested) {
-                    $rules[] = $nested;
-                }
-                continue;
-            }
-
-            $rules[] = ['selector' => $selector, 'body' => $body];
-        }
-
-        return $rules;
-    }
-
     /** @return array<string, string> property => value */
     private function declarations(string $body): array
     {
-        preg_match_all('/(-?[a-z][-a-z]*)\s*:\s*([^;]+)/i', $body, $matches, PREG_SET_ORDER);
-
-        $declarations = [];
-        foreach ($matches as $match) {
-            $declarations[strtolower($match[1])] = trim($match[2]);
-        }
-
-        return $declarations;
+        return CssRules::declarations($body);
     }
 
-    /** @return array<int, array{selector: string, body: string}> */
+    /**
+     * Every modal rule in every portal stylesheet, in load order.
+     *
+     * Globbed rather than read from one hardcoded path: the file a rule lives in
+     * is a layout decision (the status block moved to its own stylesheet), while
+     * "only the shared rules place modal content" is the contract. Pinned to
+     * components.css this guard would have gone quiet the moment someone moved
+     * the modal rules, which is the failure mode it exists to prevent one level
+     * down.
+     *
+     * @return list<array{selector: string, body: string}>
+     */
     private function modalRules(): array
     {
-        $rules = array_values(array_filter(
-            $this->rules($this->stripComments($this->css())),
-            static fn (array $rule): bool => str_contains($rule['selector'], 'modal'),
-        ));
+        $sheets = CssRules::stylesheets(dirname(__DIR__, 2));
+        self::assertNotSame([], $sheets, 'no stylesheet was read; the assets path moved');
 
-        self::assertNotSame([], $rules, 'the modal component disappeared from ' . self::CSS);
+        $rules = [];
+        foreach ($sheets as $css) {
+            foreach (CssRules::rules(CssRules::stripComments($css)) as $rule) {
+                if (str_contains($rule['selector'], 'modal')) {
+                    $rules[] = $rule;
+                }
+            }
+        }
+
+        self::assertNotSame([], $rules, 'the modal component disappeared from portal/assets/css');
 
         return $rules;
     }

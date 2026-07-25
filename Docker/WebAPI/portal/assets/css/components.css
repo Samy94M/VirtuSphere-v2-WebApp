@@ -1037,10 +1037,11 @@ label > .compound-field {
     background: var(--danger);
 }
 
-/* System status: compact, linkable summaries with detail only on demand. */
-.page-intro,
-.section-heading-actions,
-.inventory-card > header {
+/* A section heading whose actions sit beside the copy and wrap under it once
+   they no longer fit. Generic on purpose: the page-specific status blocks moved
+   to status.css, this shape did not, so the next page does not have to fetch it
+   back out of a page stylesheet or restate it. */
+.section-heading-actions {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -1048,252 +1049,12 @@ label > .compound-field {
     gap: 12px 18px;
 }
 
-.page-intro h1,
-.section-heading-actions h2,
-.inventory-card h3 {
+.section-heading-actions h2 {
     margin: 0;
 }
 
-.status-generated {
-    margin: 8px 0 0;
-    color: var(--muted);
-    font-size: 13px;
-}
-
-.status-overview {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.status-overview-card {
-    display: flex;
-    min-width: 0;
-    min-height: 76px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface);
-    color: var(--text);
-    text-decoration: none;
-}
-
-.status-overview-card:hover {
-    border-color: var(--accent);
-    background: var(--surface-muted);
-}
-
-.status-overview-card:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.status-section,
-.status-row,
-.inventory-card,
-.repair-actions {
-    scroll-margin-top: 92px;
-}
-
-.status-list {
-    display: grid;
-    gap: 10px;
-}
-
-.status-row {
-    min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-muted);
-}
-
-.status-row-main {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px 16px;
-}
-
-.status-row-main > div:first-child {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-
-.status-row dl,
-.status-facts,
-.inventory-counts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 20px;
-    margin: 0;
-}
-
-.status-row dl > div,
-.status-facts > div,
-.inventory-counts > div {
-    min-width: 0;
-}
-
-.status-row dt,
-.status-facts dt,
-.inventory-counts dt {
-    color: var(--muted);
-    font-size: 12px;
-}
-
-.status-row dd,
-.status-facts dd,
-.inventory-counts dd {
-    margin: 2px 0 0;
-}
-
-/* The action hint attached to its status row reads as belonging to the source
-   above it, so it drops the paragraph's own floating margin and keeps only the
-   gap to the row. */
-.status-action {
-    margin: 10px 0 0;
-    color: var(--muted);
-}
-
-/* The failure message of a status source: an alert that belongs to the card it
-   sits in, not a floating page-level one, so it takes the danger colour and
-   border of .alert-error without the glass surface and the 14px bottom margin.
-   Without a rule at all this rendered as ordinary body text, which is how the
-   one line that says a source is broken read like a caption. */
-.alert-inline {
-    margin: 10px 0 0;
-    border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
-    border-radius: 8px;
-    padding: 8px 10px;
-    color: var(--danger);
-}
-
-.technical-details {
-    margin-top: 8px;
-}
-
-.technical-details pre {
-    max-height: 14rem;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.repair-actions {
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-muted);
-}
-
-/* The two MECM subgroups (result reports, site status) stay visually equal but
-   clearly separated. */
-.status-subgroup + .status-subgroup {
-    margin-top: 18px;
-}
-
-/* Compact per-run counter grid inside a result-report row. */
-.status-counters {
-    margin-top: 8px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 16px;
-}
-
-.status-counters > div {
-    display: flex;
-    gap: 6px;
-    font-size: 12px;
-}
-
-.status-counters dt {
-    color: var(--muted);
-}
-
-.status-facts {
-    margin-top: 8px;
-}
-
-.inventory-card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
-    gap: 12px;
-    /* The heading action can wrap onto its own flex row. Its internal gap does
-       not separate that row from this sibling grid, so the grid owns the
-       inter-block breathing room (ADR-0013). */
-    margin-top: 16px;
-}
-
-.inventory-card {
-    display: grid;
-    min-width: 0;
-    gap: 12px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface-muted);
-}
-
-.inventory-card-open {
-    grid-column: 1 / -1;
-    border-color: var(--accent);
-}
-
-.inventory-card .actions form,
 .section-heading-actions form {
     margin: 0;
-}
-
-.inventory-counts {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.inventory-counts dd {
-    font-size: 20px;
-    font-weight: 700;
-}
-
-.capability-badges,
-.alert-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.inventory-details {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-    gap: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-}
-
-.inventory-detail-group {
-    min-width: 0;
-}
-
-.inventory-detail-group h4 {
-    margin: 0 0 8px;
-}
-
-.inventory-detail-group ul {
-    margin: 0;
-    padding-left: 18px;
-}
-
-.break-anywhere,
-.status-row code,
-.status-facts code {
-    overflow-wrap: anywhere;
-    word-break: break-word;
 }
 
 .empty-state {
@@ -1305,37 +1066,6 @@ label > .compound-field {
 
 .empty-state p {
     margin-top: 0;
-}
-
-.deviation-groups {
-    display: grid;
-    gap: 10px;
-}
-
-.deviation-groups article {
-    padding: 10px 12px;
-    border-left: 3px solid var(--warning);
-    background: var(--surface-muted);
-}
-
-.deviation-groups h3 {
-    margin: 0 0 6px;
-    font-size: 15px;
-}
-
-.deviation-groups li a {
-    text-decoration: underline;
-    text-underline-offset: 0.16em;
-}
-
-.repair-actions {
-    margin-top: 14px;
-}
-
-.repair-actions > summary,
-.status-legend > summary {
-    cursor: pointer;
-    font-weight: 700;
 }
 
 .status-time,
@@ -1377,28 +1107,15 @@ label > .compound-field {
 }
 
 .alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     margin-top: 8px;
 }
 
 .alert-actions .button {
     color: var(--btn-fg);
     text-decoration: none;
-}
-
-@media (max-width: 850px) {
-    .status-overview {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 560px) {
-    .status-overview {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .inventory-counts {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
 }
 
 .alert-info {

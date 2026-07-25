@@ -261,6 +261,11 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
     <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/base.css')); ?>">
     <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/layout.css')); ?>">
     <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/components.css')); ?>">
+    <?php // status.css owns the System status page's inner rhythm and must load
+          // after components.css: several of its rules are specificity-equal with
+          // their counterparts there and win only on position
+          // (StatusSpacingContractTest). ?>
+    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/status.css')); ?>">
     <script nonce="<?php echo $nonce; ?>">
         try {
             var theme = localStorage.getItem('virtusphere.theme');
