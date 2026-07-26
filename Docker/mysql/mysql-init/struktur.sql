@@ -115,6 +115,11 @@ CREATE TABLE IF NOT EXISTS deploy_packages (
     package_version VARCHAR(255) NOT NULL,
     package_status VARCHAR(255) NOT NULL,
     retired_at TIMESTAMP NULL,
+    -- Set when the version relink moved this row's VM assignments to a successor.
+    -- The purge additionally requires NULL here: the relink removes the very
+    -- reference the purge protection reads, so without this marker the row lost
+    -- its protection through the one mechanism that made it worth protecting.
+    assignments_relinked_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY package_name_unique (package_name),

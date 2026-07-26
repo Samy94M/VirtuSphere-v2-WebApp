@@ -49,3 +49,41 @@ surface remains legacy-only until the E3 retirement decision (ADR-0009, ADR-0019
   stored `vm_os` (`mecm_new-device-sync.ps1`), and a referenced OS is purge-protected.
 - `PermissionParityTest` lists `os.php` under `catalog.write` again because the
   delete action makes it a write handler; `packages.php` stays fully read-only.
+
+## Amendment 2026-07-26: the relink is bounded, and "purge-protected" means what it says
+
+Two sentences of this decision were true separately and wrong together.
+
+"Existing assignments are relinked to the successor on a version bump" was
+implemented for **every** retired row, and the successor was chosen with
+`ORDER BY id DESC`, i.e. by row id. So a package that had merely dropped out of
+one payload, which is what a MECM hiccup or an admin mid-edit looks like, had its
+assignments rewritten to whatever else shared its basename, possibly to an older
+version.
+
+"The purge already protects referenced rows" reads
+`id NOT IN (SELECT package_id FROM deploy_vm_packages)`, i.e. *currently*
+referenced. The relink had just removed that reference. The protection was
+therefore lifted by the one mechanism that made the row worth protecting: the
+rows with assignments were exactly the ones the purge could delete, and after
+`VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` a re-import created a fresh id with no
+history. The deletion was justified as safe *because* linked rows are kept, and
+that held for every row except the interesting ones.
+
+Decided:
+
+- **The relink only follows a real version bump.** The successor must be a row
+  that THIS payload created for the first time, and its version must be strictly
+  higher, compared with `version_compare()` and not by row id. Without a new row
+  there is no upgrade, so a transient catalog outage changes no assignment at all;
+  the row is still retired, the picker keeps it selectable for the VMs that hold
+  it, and the VM editor shows the upgrade hint. The sync says so in the audit log
+  rather than staying silent about a no-op.
+- **A retired row whose assignments the relink moved away is never purged.**
+  `deploy_packages.assignments_relinked_at` (migration 0027) records it, and the
+  purge requires it to be NULL in addition to the existing reference check. The
+  criterion is "was never assigned", not "is not assigned right now".
+- A package re-import continues to touch no VM state whatsoever: no
+  `deploy_vms`, no `mecm_sync_state`, no `updated`. That was true by accident and
+  is pinned by `PackageSyncScopeContractTest` now, because it is the guarantee an
+  operator relies on when a catalog sync runs every minute.

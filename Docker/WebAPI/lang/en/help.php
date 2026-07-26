@@ -99,6 +99,10 @@ return [
 
     'deploy_heading' => 'Deploy modes',
     'deploy_requirements_p1' => 'A mission can only be queued once it has at least one VM and a datastore set; only the "Apply ESXi autostart policy" mode works without a datastore. Only one job runs per mission at a time; another is possible only after it finishes or is cancelled.',
+    // A second paragraph because the first half of the answer belongs to the
+    // mission and the second to the portal: the greyed-out button has four more
+    // possible causes, living on three other pages.
+    'deploy_requirements_p2' => 'A job also needs a mission, an ESXi credential, an Ansible credential and an API base URL. If any of them is missing, the form names exactly the missing ones one by one and links to the page where each is created; the "Queue job" button stays greyed out until then. Anyone who may not open the linked page still sees the reason, just without the link.',
     'deploy_p1' => 'Queuing a deploy job requires choosing one of these modes:',
     'deploy_mode_full' => 'Full pipeline: complete run. Create VMs, power-cycle, export MACs, start. When the mission enabled autostart, the autostart policy is written last.',
     'deploy_mode_autostart' => 'Apply ESXi autostart policy: writes the mission autostart policy to the host, without creating or starting VMs.',
@@ -120,7 +124,8 @@ return [
     'packages_heading' => 'Packages & versions',
     'packages_p1' => 'Packages are not created in the portal but on the MECM server. There the autoimporter reads every package folder with its config.json (required fields ProjectName and version) and builds an MECM application including a device collection. Its name is composed from both fields: ProjectName, a hyphen, then the version, for example "Firefox-115.0". The package sync reports exactly these collection names via HTTP to the portal, which only displays the catalog and links packages to VMs.',
     'packages_p1b' => 'The portal reverses this composition to show base name and version separately and to keep multiple versions of the same package distinguishable. It splits at the last hyphen: everything before it is the base name, everything after it is the version. This is necessary because the base name itself may contain hyphens (such as "Adobe-Reader-DC") while the version may not. Only under this rule is the last hyphen unambiguously the boundary between name and version. For package maintenance on the MECM server this means: in config.json the version must not contain a hyphen, while the ProjectName may.',
-    'packages_p2' => 'If a package disappears from MECM it is not deleted but marked as "Retired"; existing VM assignments are kept. If an active successor version exists, assignments are relinked to it automatically. Retired packages without any assignment are removed for good after :days days.',
+    'packages_p2' => 'If a package disappears from MECM it is not deleted but marked as "Retired"; existing VM assignments are kept. An assignment is relinked only on a real version bump, that is when the same sync brings a newly appearing higher version of that package. If a package is merely missing for a while, because MECM is not answering or somebody is working in it, the assignment stays untouched: the package is retired, still visible in the VM editor, and a note names the newer version available. So a human always decides which version a VM gets.',
+    'packages_p2b' => 'Retired packages are removed for good after :days days, but only those that were never assigned to a VM. A row whose assignments were once relinked to a successor is kept permanently; otherwise a VM\'s history would become untraceable once the cleanup window passed.',
     'packages_p3' => 'The package list can be filtered by status (Active/Retired). The VM editor hides retired packages; if a VM is still linked to a retired version it stays visible and a hint shows the newer version that is available.',
 
     'packages_os_heading' => 'Operating systems',

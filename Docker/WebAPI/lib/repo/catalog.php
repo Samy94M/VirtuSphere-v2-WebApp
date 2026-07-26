@@ -187,11 +187,23 @@ function repo_vm_package_upgrade_hints(mysqli $db, int $vmId): array
     return $hints;
 }
 
-// Purge (maintenance worker): retired > N days AND unreferenced. Linked
-// retired rows are kept forever - deleting them would cascade assignments.
+/**
+ * Purge (maintenance worker): retired > N days AND never assigned. Deleting a
+ * row that carries assignments would cascade them away, which is why ADR-0020
+ * calls the deletion safe.
+ *
+ * "Never assigned" and not "not currently assigned": the second is what the
+ * clause `id NOT IN (SELECT package_id FROM deploy_vm_packages)` asks, and the
+ * version relink in mecm_packages.php removes exactly that reference when it
+ * moves assignments to a successor. So the protection was lifted by the one
+ * mechanism that made the row worth protecting: the rows that HAD assignments
+ * were precisely the ones the purge could delete, a re-import then created a
+ * fresh id, and the old row's history was gone. assignments_relinked_at is the
+ * durable record of that, and it keeps the row.
+ */
 function repo_purge_retired_packages(mysqli $db, int $afterDays = VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS): int
 {
-    $stmt = $db->prepare('DELETE FROM deploy_packages WHERE package_status = ? AND retired_at IS NOT NULL AND retired_at < DATE_SUB(NOW(), INTERVAL ? DAY) AND id NOT IN (SELECT package_id FROM deploy_vm_packages)');
+    $stmt = $db->prepare('DELETE FROM deploy_packages WHERE package_status = ? AND retired_at IS NOT NULL AND retired_at < DATE_SUB(NOW(), INTERVAL ? DAY) AND assignments_relinked_at IS NULL AND id NOT IN (SELECT package_id FROM deploy_vm_packages)');
     $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
     $stmt->bind_param('si', $retired, $afterDays);
     $stmt->execute();

@@ -5,6 +5,9 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+// The purge is part of the contract here: it and the relink compose into the one
+// path that could lose an assignment for good.
+require_once dirname(__DIR__, 2) . '/lib/repo/catalog.php';
 
 // E3 hardening contract: retire instead of delete, assignment relink on
 // version bumps, threshold brake. Runs in-stack (db() + HTTP against
@@ -116,24 +119,151 @@ final class PackageSyncTest extends TestCase
         self::assertNull($v1Again['retired_at']);
     }
 
-    public function testRelinkKeepsExactlyOneLinkWhenVmHadBothVersions(): void
+    /**
+     * A package that merely vanished from one payload is a GAP, not an upgrade,
+     * so the assignment stays where the operator put it.
+     *
+     * This is the decision that replaced the old behaviour, and it is the reason
+     * the relink is bounded to "the successor is new in this payload". Before, a
+     * transient MECM outage (a hiccup, an admin mid-edit) rewrote assignments to
+     * whatever else shared the basename, and the row it moved them off then lost
+     * its purge protection. Both versions already existing is exactly the case
+     * that used to look like an upgrade and is not one.
+     */
+    public function testATransientDisappearanceLeavesTheAssignmentAlone(): void
     {
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
         $v1 = $this->packageRow(self::PREFIX . '-1.0');
         $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
 
-        $this->db->query("INSERT INTO deploy_missions (mission_name, mission_status) VALUES ('phpunit_e3_mission', 'active')");
-        $missionId = $this->db->insert_id;
-        $this->db->query("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES ({$missionId}, 'PHPUNIT-E3', 'PHPUNIT-E3')");
-        $vmId = $this->db->insert_id;
-        $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . (int) $v1['id'] . '), (' . $vmId . ', ' . (int) $v2['id'] . ')');
-
+        // v1 drops out of the payload while v2 is nothing new.
         [$status] = $this->post($this->payload([self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
 
-        $links = $this->db->query('SELECT package_id FROM deploy_vm_packages WHERE vm_id = ' . $vmId)->fetch_all(MYSQLI_ASSOC);
-        self::assertSame([(int) $v2['id']], array_map(static fn (array $r): int => (int) $r['package_id'], $links), 'PK collision case must leave exactly the new link');
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($vmId), 'no newer row appeared, so nothing was an upgrade to follow');
+        self::assertSame('Retired', $this->packageRow(self::PREFIX . '-1.0')['package_status'], 'the row is still retired; only the assignment is untouched');
+        self::assertNull($this->packageRow(self::PREFIX . '-1.0')['assignments_relinked_at'], 'nothing was relinked, so nothing is marked');
+    }
+
+    /**
+     * The successor is the higher VERSION, not the higher row id. A catalog whose
+     * versions were imported out of order (a re-created package, a backported
+     * fix) moved the assignment to the wrong, possibly older package.
+     */
+    public function testTheSuccessorIsChosenByVersionAndNotByRowId(): void
+    {
+        // Insert 3.0 FIRST so the newest row id carries the LOWER version.
+        [$status] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . '-3.0']));
+        self::assertSame(200, $status);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        $v3 = $this->packageRow(self::PREFIX . '-3.0');
+        // Force the id order to disagree with the version order.
+        $this->db->query('UPDATE deploy_packages SET id = id + 1000 WHERE id = ' . (int) $v2['id']);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        self::assertGreaterThan((int) $v3['id'], (int) $v2['id'], 'the fixture needs the lower version on the higher id');
+
+        $vmId = $this->seedVmWithPackages([(int) $v2['id']]);
+
+        // v2 disappears, and 4.0 arrives as the genuinely new row.
+        [$status] = $this->post($this->payload([self::PREFIX . '-3.0', self::PREFIX . '-4.0']));
+        self::assertSame(200, $status);
+        $v4 = $this->packageRow(self::PREFIX . '-4.0');
+
+        self::assertSame([(int) $v4['id']], $this->linkedPackageIds($vmId), 'the assignment must follow the highest version created by this payload');
+    }
+
+    /** A VM holding both versions ends up with one link, not a duplicate. */
+    public function testAVmHoldingBothVersionsKeepsExactlyTheSuccessorLink(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
+
+        // Second payload creates 2.0 (new) and drops 1.0: a real version bump.
+        // The VM is linked to both beforehand, which is the PK collision case.
+        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
+        self::assertSame(200, $status);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . (int) $v2['id'] . ')');
+
+        // Now 1.0 goes away together with a newly created 3.0.
+        [$status] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . '-3.0']));
+        self::assertSame(200, $status);
+        $v3 = $this->packageRow(self::PREFIX . '-3.0');
+
+        $links = $this->linkedPackageIds($vmId);
+        self::assertNotContains((int) $v1['id'], $links, 'the relinked row must not keep a second link for the same package');
+        self::assertContains((int) $v3['id'], $links);
+    }
+
+    /**
+     * The composition that could lose a package for good: the relink removes the
+     * reference, and the purge protected the row only while that reference
+     * existed. ADR-0020 calls the deletion safe BECAUSE linked rows are kept, and
+     * that held for every row except the ones that had assignments.
+     */
+    public function testThePurgeKeepsARowWhoseAssignmentsTheRelinkMovedAway(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
+        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
+
+        [$status] = $this->post($this->payload([self::PREFIX . '-2.0']));
+        self::assertSame(200, $status);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        self::assertSame([(int) $v2['id']], $this->linkedPackageIds($vmId), 'a real version bump still relinks');
+
+        $v1After = $this->packageRow(self::PREFIX . '-1.0');
+        self::assertNotNull($v1After['assignments_relinked_at'], 'the relink has to record that it removed the reference');
+
+        // Age it well past the purge window and run the real purge.
+        $this->db->query('UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ' . (VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10) . ' DAY) WHERE id = ' . (int) $v1['id']);
+        repo_purge_retired_packages($this->db);
+
+        self::assertNotNull($this->packageRow(self::PREFIX . '-1.0'), 'a row that carried assignments must survive the purge');
+    }
+
+    /** The counter-direction: a retired row that never carried one is still purged. */
+    public function testThePurgeStillRemovesARowThatNeverCarriedAnAssignment(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . 'Lonely-1.0', self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+        $lonely = $this->packageRow(self::PREFIX . 'Lonely-1.0');
+        self::assertNotNull($lonely);
+
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+
+        $this->db->query('UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ' . (VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10) . ' DAY) WHERE id = ' . (int) $lonely['id']);
+        repo_purge_retired_packages($this->db);
+
+        self::assertNull($this->packageRow(self::PREFIX . 'Lonely-1.0'), 'the purge must still do its job for an unassigned row');
+    }
+
+    /** @param list<int> $packageIds */
+    private function seedVmWithPackages(array $packageIds): int
+    {
+        $this->db->query("INSERT INTO deploy_missions (mission_name, mission_status) VALUES ('phpunit_e3_mission', 'active')");
+        $missionId = $this->db->insert_id;
+        $this->db->query("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES ({$missionId}, 'PHPUNIT-E3', 'PHPUNIT-E3')");
+        $vmId = (int) $this->db->insert_id;
+        foreach ($packageIds as $packageId) {
+            $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . $packageId . ')');
+        }
+
+        return $vmId;
+    }
+
+    /** @return list<int> */
+    private function linkedPackageIds(int $vmId): array
+    {
+        $rows = $this->db->query('SELECT package_id FROM deploy_vm_packages WHERE vm_id = ' . $vmId . ' ORDER BY package_id')->fetch_all(MYSQLI_ASSOC);
+
+        return array_map(static fn (array $row): int => (int) $row['package_id'], $rows);
     }
 
     public function testMassRetireIsRejectedWith409(): void

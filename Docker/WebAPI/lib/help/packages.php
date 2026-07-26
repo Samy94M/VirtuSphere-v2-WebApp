@@ -9,7 +9,12 @@ declare(strict_types=1);
             <p><?php echo h(__t('help.packages_p1')); ?></p>
             <p><?php echo h(__t('help.packages_p1b')); ?></p>
             <?php // Interpolates the constant the purge uses, so text and behaviour cannot drift. ?>
-            <p><?php echo h(__t('help.packages_p2', ['days' => VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS])); ?></p>
+            <?php // Split in two: what happens to an ASSIGNMENT (a decision an
+                  // operator has to understand) and what happens to the retired
+                  // ROW after the cleanup window. The purge days belong to the
+                  // second sentence only. ?>
+            <p><?php echo h(__t('help.packages_p2')); ?></p>
+            <p><?php echo h(__t('help.packages_p2b', ['days' => VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS])); ?></p>
             <p><?php echo h(__t('help.packages_p3')); ?></p>
         </section>
         <section class="panel">

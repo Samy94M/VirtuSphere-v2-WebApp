@@ -790,6 +790,20 @@ SQL;
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         migrator_out('0026: created deploy_audit_throttle (indexed rate-limit store per category/tag/scope)');
     },
+    '0027_package_relink_provenance' => function (mysqli $db): void {
+        // Marks a retired package row whose VM assignments the version relink
+        // moved away (ADR-0020 amendment). The purge protects a retired row while
+        // `id NOT IN (SELECT package_id FROM deploy_vm_packages)` fails, i.e.
+        // while it is still assigned - and the relink had just removed exactly
+        // that reference. So the protection was lifted by the one mechanism that
+        // made the row worth protecting, the row was deleted after the purge
+        // window, and a re-import created a fresh id with no history.
+        //
+        // NULL means "the relink never took an assignment off this row", which is
+        // what the purge now additionally requires.
+        migrator_add_column($db, 'deploy_packages', 'assignments_relinked_at', 'TIMESTAMP NULL');
+        migrator_out('0027: added deploy_packages.assignments_relinked_at (purge protection for relinked rows)');
+    },
 ];
 
 try {

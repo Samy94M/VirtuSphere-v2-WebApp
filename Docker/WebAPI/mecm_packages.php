@@ -76,13 +76,39 @@ function packages_retire_guard(mysqli $db, string $table, string $nameColumn, st
     }
 }
 
-// After a version bump the retired row's assignments move to the newest
-// active row of the same basename. UPDATE IGNORE + DELETE covers VMs that
-// were linked to both old and new version (composite PK collision).
-function packages_relink_upgrades(mysqli $db, array $retiredRows, string $clientIp): int
+/**
+ * Moves a retired row's VM assignments to its successor, but ONLY on a real
+ * version bump: the successor has to be a row this very payload created for the
+ * first time, and its version has to be higher than the retired one's.
+ *
+ * Both conditions are the fix for a defect that could lose an assignment for
+ * good, in three composing steps:
+ *
+ *  - the successor was chosen with `ORDER BY id DESC`, i.e. by ROW ID and not by
+ *    version. On any catalog where the versions were not imported in ascending
+ *    order, the assignment moved to the wrong, possibly older package.
+ *  - it ran for every retired row, so a package that was merely missing from one
+ *    payload (a MECM hiccup, an admin mid-edit) had its assignments rewritten to
+ *    whatever else shared its basename. A transient catalog outage must not
+ *    rewrite assignments at all, which is what the "new in this payload"
+ *    condition guarantees: nothing new appeared, so nothing is an upgrade.
+ *  - it then removed the old reference, and repo_purge_retired_packages()
+ *    protects a retired row exactly while that reference exists. The relink
+ *    therefore lifted the protection itself, the row was deleted after the purge
+ *    window, and a re-import created a fresh id. ADR-0020 justifies the deletion
+ *    as safe *because* linked rows are kept - and that held for every row except
+ *    the ones that had assignments. assignments_relinked_at is the durable
+ *    marker the purge now also reads.
+ *
+ * $newPackageIds are the ids this payload inserted (not updated), keyed by id.
+ *
+ * @param array<int, true> $newPackageIds
+ */
+function packages_relink_upgrades(mysqli $db, array $retiredRows, array $newPackageIds, string $clientIp): int
 {
     $relinked = 0;
     $summary = [];
+    $skipped = [];
     $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
 
     foreach ($retiredRows as $row) {
@@ -90,20 +116,41 @@ function packages_relink_upgrades(mysqli $db, array $retiredRows, string $client
         if ($basename === '') {
             continue;
         }
-        $successor = repo_fetch_one($db, 'SELECT id, package_name FROM deploy_packages WHERE package_basename = ? AND package_status <> ? AND id <> ? ORDER BY id DESC LIMIT 1', 'ssi', [$basename, $retired, (int) $row['id']]);
+
+        $oldId = (int) $row['id'];
+        $successor = packages_pick_successor($db, $basename, (string) $row['package_version'], $oldId, $newPackageIds, $retired);
         if ($successor === null) {
+            // Deliberate no-op: without a newer row created by THIS payload there
+            // is no upgrade to follow, so the assignment stays where the operator
+            // put it. The row is retired, the picker keeps it selectable for the
+            // VMs that hold it, and the VM editor shows the upgrade hint.
+            $skipped[] = (string) $row['package_name'];
             continue;
         }
 
-        $oldId = (int) $row['id'];
         $newId = (int) $successor['id'];
+        // UPDATE IGNORE skips the rows whose VM already holds the successor
+        // (composite PK collision); those are then deleted, because keeping them
+        // would leave the VM with two links for one package. Scoped to exactly
+        // those VMs, not "everything still pointing at the old id": an unscoped
+        // DELETE also removed rows the UPDATE had failed on for any other reason.
         $stmt = $db->prepare('UPDATE IGNORE deploy_vm_packages SET package_id = ? WHERE package_id = ?');
         $stmt->bind_param('ii', $newId, $oldId);
         $stmt->execute();
         $moved = $stmt->affected_rows;
-        $stmt = $db->prepare('DELETE FROM deploy_vm_packages WHERE package_id = ?');
-        $stmt->bind_param('i', $oldId);
+
+        $stmt = $db->prepare('DELETE FROM deploy_vm_packages WHERE package_id = ? AND vm_id IN (SELECT vm_id FROM (SELECT vm_id FROM deploy_vm_packages WHERE package_id = ?) AS held)');
+        $stmt->bind_param('ii', $oldId, $newId);
         $stmt->execute();
+        $collapsed = $stmt->affected_rows;
+
+        if ($moved > 0 || $collapsed > 0) {
+            // The marker is what keeps the purge from deleting a row whose only
+            // protection this relink just removed.
+            $stmt = $db->prepare('UPDATE deploy_packages SET assignments_relinked_at = NOW() WHERE id = ?');
+            $stmt->bind_param('i', $oldId);
+            $stmt->execute();
+        }
 
         if ($moved > 0) {
             $relinked += $moved;
@@ -111,15 +158,59 @@ function packages_relink_upgrades(mysqli $db, array $retiredRows, string $client
         }
     }
 
-    if ($summary !== []) {
-        try {
+    try {
+        if ($summary !== []) {
             audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[mecm_packages] package relink: ' . implode('; ', $summary), null, $clientIp);
-        } catch (Throwable $exception) {
-            machine_api_log_warning('mecm_packages', 'relink audit failed: ' . $exception->getMessage());
         }
+        if ($skipped !== []) {
+            // Said out loud, because "nothing happened" is the new behaviour and
+            // an operator who expected a relink needs to see that it was a
+            // decision and not a failure.
+            audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[mecm_packages] retired without relink (no newer version in this payload): ' . implode(', ', $skipped), null, $clientIp);
+        }
+    } catch (Throwable $exception) {
+        machine_api_log_warning('mecm_packages', 'relink audit failed: ' . $exception->getMessage());
     }
 
     return $relinked;
+}
+
+/**
+ * The successor of one retired row, or null when there is none to follow.
+ *
+ * Two conditions, both necessary: the candidate must be one of the ids this
+ * payload created (so a transient disappearance cannot move anything), and its
+ * version must be strictly higher than the retired row's, compared with
+ * version_compare() rather than by row id. Among several new candidates the
+ * highest version wins.
+ *
+ * @param array<int, true> $newPackageIds
+ * @return array<string, mixed>|null
+ */
+function packages_pick_successor(mysqli $db, string $basename, string $retiredVersion, int $retiredId, array $newPackageIds, string $retired): ?array
+{
+    if ($newPackageIds === []) {
+        return null;
+    }
+
+    $stmt = $db->prepare('SELECT id, package_name, package_version FROM deploy_packages WHERE package_basename = ? AND package_status <> ? AND id <> ?');
+    $stmt->bind_param('ssi', $basename, $retired, $retiredId);
+    $stmt->execute();
+
+    $best = null;
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $candidate) {
+        if (!isset($newPackageIds[(int) $candidate['id']])) {
+            continue;
+        }
+        if (version_compare((string) $candidate['package_version'], $retiredVersion, '<=')) {
+            continue;
+        }
+        if ($best === null || version_compare((string) $candidate['package_version'], (string) $best['package_version'], '>')) {
+            $best = $candidate;
+        }
+    }
+
+    return $best;
 }
 
 $clientIp = machine_api_client_ip();
@@ -179,13 +270,13 @@ try {
         // to their successors after the upsert.
         $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
         if ($packageNames === []) {
-            $stmt = $connection->prepare('SELECT id, package_name, package_basename FROM deploy_packages WHERE package_status <> ?');
+            $stmt = $connection->prepare('SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ?');
             $stmt->bind_param('s', $retired);
         } else {
             $placeholders = implode(',', array_fill(0, count($packageNames), '?'));
             $types = 's' . str_repeat('s', count($packageNames));
             $params = array_merge([$retired], $packageNames);
-            $stmt = $connection->prepare("SELECT id, package_name, package_basename FROM deploy_packages WHERE package_status <> ? AND package_name NOT IN ({$placeholders})");
+            $stmt = $connection->prepare("SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ? AND package_name NOT IN ({$placeholders})");
             $stmt->bind_param($types, ...$params);
         }
         $stmt->execute();
@@ -202,12 +293,24 @@ try {
     }
 
     $packageStatus = VIRTUSPHERE_CATALOG_STATUS_DEFAULT;
+    // The ids this payload CREATED, as opposed to re-confirmed. Only they can be
+    // the successor of a version bump: without something new, a package missing
+    // from the payload is a gap and not an upgrade, and rewriting assignments on
+    // a gap is how a transient MECM outage used to move them.
+    //
+    // affected_rows after INSERT ... ON DUPLICATE KEY UPDATE is 1 for an insert
+    // and 2 (or 0) for an update, so it distinguishes the two exactly. insert_id
+    // is only meaningful in the insert case.
+    $newPackageIds = [];
     foreach ($packageNames as $name) {
         $split = repo_package_split_name($name);
         // Re-appearing names automatically un-retire (retired_at = NULL).
         $stmt = $connection->prepare('INSERT INTO deploy_packages (package_name, package_basename, package_version, package_status, retired_at) VALUES (?, ?, ?, ?, NULL) ON DUPLICATE KEY UPDATE package_basename = VALUES(package_basename), package_version = VALUES(package_version), package_status = VALUES(package_status), retired_at = NULL');
         $stmt->bind_param('ssss', $name, $split['basename'], $split['version'], $packageStatus);
         $stmt->execute();
+        if ($stmt->affected_rows === 1) {
+            $newPackageIds[(int) $connection->insert_id] = true;
+        }
     }
 
     foreach ($osNames as $name) {
@@ -217,7 +320,7 @@ try {
     }
 
     if ($retiredPackageRows !== []) {
-        packages_relink_upgrades($connection, $retiredPackageRows, $clientIp);
+        packages_relink_upgrades($connection, $retiredPackageRows, $newPackageIds, $clientIp);
     }
 
     $connection->commit();
