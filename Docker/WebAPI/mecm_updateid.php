@@ -15,7 +15,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 $clientIp = machine_api_client_ip();
 if (!machine_api_ip_allowed($connection, $clientIp)) {
-    machine_api_forbidden($clientIp);
+    machine_api_forbidden($clientIp, $connection);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

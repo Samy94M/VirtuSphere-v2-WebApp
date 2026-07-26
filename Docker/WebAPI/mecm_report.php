@@ -77,7 +77,7 @@ try {
         }
 
         if (!$ipAllowed && !machine_api_mac_allowed($connection, $mac)) {
-            machine_api_forbidden($clientIp);
+            machine_api_forbidden($clientIp, $connection);
         }
 
         $stmt = $connection->prepare('SELECT vm_id FROM deploy_interfaces WHERE mac = ? LIMIT 1');
@@ -106,7 +106,7 @@ try {
 
     if ($action === 'heartbeat') {
         if (!$ipAllowed) {
-            machine_api_forbidden($clientIp);
+            machine_api_forbidden($clientIp, $connection);
         }
 
         $source = (string) ($data['source'] ?? '');
@@ -130,7 +130,7 @@ try {
 
     if ($action === 'reportRun') {
         if (!$ipAllowed) {
-            machine_api_forbidden($clientIp);
+            machine_api_forbidden($clientIp, $connection);
         }
 
         $validated = run_report_validate($data);

@@ -60,6 +60,19 @@ function legacy_vm_delete_response(mysqli $connection, mixed $vmList, string $ac
 
 $token = legacy_string('token');
 if (!verifyToken($token, $connection)) {
+    // The SUCCESSFUL token issuance was logged and the rejection was not, which
+    // is the wrong direction: a valid login is routine, a rejected token is
+    // either a stale desktop client or somebody probing. The token itself never
+    // reaches the log (redaction is the whole point of the throttle scope being
+    // the IP), and the same window keeps a looping client from flooding it.
+    machine_api_audit_warning(
+        $connection,
+        'legacy_token_denied',
+        'Rejected legacy token from ' . (machine_api_client_ip() ?: 'an unknown IP') . ' for action ' . (request_string($_GET, 'action', request_string($_POST, 'action')) ?: '(none)'),
+        machine_api_client_ip(),
+        VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
+        machine_api_client_ip()
+    );
     header('HTTP/1.1 418 I\'m a teapot');
     legacy_json('Access Forbidden', 418);
 }

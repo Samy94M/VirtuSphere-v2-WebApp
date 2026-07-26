@@ -565,7 +565,12 @@ function Write-VsRunReportFailure {
         if (($now - $script:VsReportLastFailureLog).TotalSeconds -lt $script:VsReportThrottleSeconds) { $due = $false }
     }
     if ($due) {
-        Write-VsLog -Level DEBUG -Message $msg
+        # WARN, nicht DEBUG. Ein verlorener Run-Report heisst: die Statusseite
+        # weiss von diesem Lauf nichts und faerbt die Zeile mit der Zeit gelb bis
+        # rot, waehrend die Aufgabe tadellos laeuft. Auf DEBUG war das im
+        # Tageslog nicht zu sehen, und die Doku behauptete ohnehin WARN. Gedrosselt
+        # bleibt es: ein dauerhaft unerreichbares Portal soll das Log nicht fluten.
+        Write-VsLog -Level WARN -Message $msg
         $script:VsReportLastFailureLog = $now
     } else {
         Write-Debug $msg

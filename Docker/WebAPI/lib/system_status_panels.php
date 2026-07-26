@@ -8,6 +8,7 @@ declare(strict_types=1);
 // lib/system_status_esxi_panels.php (ADR-0006).
 require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/repo/log.php';
+require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
 
@@ -166,6 +167,13 @@ function system_status_render_mecm(array $snapshot, array $user): void
     // hints in that state. A source that reported once and went quiet is
     // warning/danger, and its silent siblings then read `missing`.
     $setupPending = $syncState === 'unknown' && $siteState === 'unknown';
+    // "Nothing has ever reported" has three causes that used to render as one grey
+    // row: never installed, installed but the first run is still pending, and
+    // installed but REFUSED at the IP gate. The third is the commonest setup
+    // mistake in the product, and a refusal is the one piece of positive evidence
+    // that tells it apart: somebody IS knocking. Naming the IP turns the row into
+    // the fix, because that IP is exactly what has to go on the allowlist.
+    $denials = (array) ($snapshot['machine_api_denials'] ?? []);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM); ?>">
         <div class="section-heading-actions">
@@ -175,10 +183,25 @@ function system_status_render_mecm(array $snapshot, array $user): void
         <?php if (!empty($snapshot['mecm_ip_mismatch'])) { ?>
             <div class="alert alert-warning"><?php echo h(__t('system_status.mecm_ip_mismatch', ['ips' => implode(', ', array_keys($snapshot['mecm_fresh_ips']))])); ?></div>
         <?php } ?>
+        <?php if ($denials !== []) { ?>
+            <?php // Rendered whether or not the group is grey: a refusal is a finding
+                  // even next to sources that otherwise report, because it means one
+                  // more host is being turned away than the rows show. ?>
+            <div class="alert alert-warning">
+                <?php echo h(__t('system_status.machine_api_denied', [
+                    'ips' => implode(', ', array_map(static fn (array $row): string => (string) $row['ip'], $denials)),
+                    'when' => portal_format_timestamp((string) $denials[0]['last_at']),
+                ])); ?>
+                <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?>
+                <?php if (can('users.manage', $user)) { ?><a href="<?php echo h(log_category_url(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API)); ?>"><?php echo h(__t('system_status.machine_api_open_log')); ?></a><?php } ?>
+            </div>
+        <?php } ?>
         <?php if ($setupPending) { ?>
             <div class="empty-state">
-                <p><?php echo h(__t('system_status.mecm_setup_empty')); ?></p>
-                <?php if (can('system.config', $user)) { ?><a class="button button-secondary" href="settings.php#panel-machine-api"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?>
+                <?php // The sentence differs by which of the three causes applies: with a
+                      // refusal on record, "probably not set up yet" is simply false. ?>
+                <p><?php echo h($denials === [] ? __t('system_status.mecm_setup_empty') : __t('system_status.mecm_setup_denied')); ?></p>
+                <?php if (can('system.config', $user)) { ?><a class="button button-secondary" href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?>
             </div>
         <?php } ?>
 
@@ -379,7 +402,10 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     // an old allowlist warning becomes stale, but it remains
                     // a successful restricted test and must never be described
                     // as a failed component merely because its evidence aged.
-                    if (($stateRow['last_status'] ?? '') === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?></div><?php
+                    // Its last sentence names another page, so the box carries the way
+                    // there, gated like that page and under the label the MECM empty
+                    // state already uses: one destination, one name.
+                    if (($stateRow['last_status'] ?? '') === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?></div><?php
                     } elseif ($component !== '') { ?><p class="muted"><?php echo h(__t('system_status.ansible_failed_component', ['component' => $component])); ?></p><?php } ?>
                 </article>
             <?php } ?>

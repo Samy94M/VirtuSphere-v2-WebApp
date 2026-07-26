@@ -43,7 +43,10 @@ return [
     'legend_warning' => 'Report overdue (more than :multiplier times the interval).',
     'legend_danger' => 'Source down or last check failed. Follow the action hint.',
     'legend_missing' => 'Other sources already report, this one never has. Check its setup.',
-    'legend_unknown' => 'No data yet. Integration probably not set up.',
+    // Named exactly one cause ("probably not set up") for a state that three
+    // completely different situations produce. For a task running every minute
+    // against a closed IP gate, that was wrong.
+    'legend_unknown' => 'No data yet: this source has never reported. Three causes look the same here: never set up, set up with the first run still pending, or set up and refused. If an access was refused, a note above names the IP.',
     'inv_heading' => 'ESXi inventory',
     'inv_hint' => 'Datacenters, datastores, portgroups and hosts, read only from the registered ESXi credentials.',
     'inv_empty' => 'No ESXi credentials yet. Add an ESXi account under Credentials and the inventory is pulled automatically.',
@@ -130,6 +133,11 @@ return [
     'mecm_hint' => 'Data flow and site state of the one connected MECM site.',
     'mecm_ip_mismatch' => 'Several current MECM sources report different sender IPs: :ips. This can be intentional with several network paths; verify the mapping.',
     'mecm_setup_empty' => 'No MECM connection yet: neither a synchronisation task nor the site-health reporter has reported. The four tasks are set up on the MECM server, not in the portal; the portal only needs the IP allowlist entry for the machine API. The instructions are in docs/operations/mecm-integration.md.',
+    // The same grey state, but with evidence: somebody is knocking and being
+    // turned away. "Probably not set up yet" would simply be false here.
+    'mecm_setup_denied' => 'The MECM connection appears to be set up but is being refused: accesses have arrived and failed at the machine API IP allowlist (see the note above). So the tasks are running, their server is just not allowed to talk to the portal yet. Allow the IP named there and the first source reports within its interval.',
+    'machine_api_denied' => 'Refused machine access from :ips, last one at :when. Those addresses are not on the machine API IP allowlist; while that is the case, no sync, no MECM ID and no result report arrives from them.',
+    'machine_api_open_log' => 'Open refused accesses in the log',
     'mecm_configure_allowlist' => 'Open IP allowlist',
     'mecm_sync_heading' => 'VirtuSphere MECM integration',
     'mecm_sync_hint' => 'The start and outcome of every run of the three synchronisation tasks on the MECM server.',

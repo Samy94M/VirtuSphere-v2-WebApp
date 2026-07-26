@@ -186,6 +186,18 @@ Sync, Package Import und Site Health nach ihren jeweiligen Intervallen sichtbar
 werden. Ein 403 bedeutet fast immer, dass die MECM-Server-IP noch nicht in der
 Machine-API-Freigabe steht.
 
+**Das muss man nicht mehr erraten.** Jede abgewiesene Maschinenanfrage schreibt
+eine Zeile in die Logkategorie `machine_api` (Protokolle → Sicherheit), gedrosselt
+pro IP, mit der abgewiesenen IP und dem Endpunkt. Steht dort etwas, während die
+Systemstatus-Zeilen grau bleiben, ist die Antwort eindeutig: die Aufgaben laufen,
+ihre IP fehlt in der Freigabe. Der Systemstatus sagt das dann auch selbst, statt
+„vermutlich noch nicht eingerichtet" zu behaupten. Vorher war das die schlimmste
+Stille im Produkt: `machine_api_forbidden()` schrieb weder Audit noch error_log
+noch Zähler, sechs Endpunkte hingen daran, und der häufigste Einrichtungsfehler
+überhaupt sah im Portal genau wie ein Server aus, auf dem MECM nie installiert
+wurde. Der Fehlerbericht konnte es auch nicht melden, weil `reportRun` hinter
+derselben Sperre sitzt.
+
 ### 5. Vier Client-Anwendungen erstellen
 
 Vorher die tatsächlich ausgelieferte Adresse kontrollieren:

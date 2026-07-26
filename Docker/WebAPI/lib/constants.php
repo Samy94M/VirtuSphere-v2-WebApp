@@ -413,6 +413,12 @@ const VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS = 7;
 // mecm-category audits from the machine surface are throttled per tag so a
 // misbehaving 10s sync loop cannot flood deploy_logs (error_log always logs).
 const VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS = 3600;
+// How far back the System status looks for refused machine accesses. A day,
+// deliberately much wider than the audit throttle window: the point is to
+// recognise "somebody is being turned away" over a shift, not to count attempts.
+// A task that polls every minute leaves one throttled row per hour, so a day
+// still shows a handful even for a single misconfigured host.
+const VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS = 86400;
 
 // Successful legacy-token issuance is throttled per (user, IP) window so a client
 // that re-authenticates in a loop instead of caching its hour-valid token cannot

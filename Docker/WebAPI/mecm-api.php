@@ -69,7 +69,7 @@ try {
         // Canonical lookup (E2): separator/case variants match the stored form.
         $mac = virtusphere_normalize_mac($mac) ?? $mac;
         if (!$ipAllowed && !machine_api_mac_allowed($connection, $mac)) {
-            machine_api_forbidden($clientIp);
+            machine_api_forbidden($clientIp, $connection);
         }
 
         $stmt = $connection->prepare('SELECT vm_id FROM deploy_interfaces WHERE mac = ? LIMIT 1');
@@ -98,7 +98,7 @@ try {
     }
 
     if (!$ipAllowed) {
-        machine_api_forbidden($clientIp);
+        machine_api_forbidden($clientIp, $connection);
     }
 
     if ($action === 'getDeviceList') {

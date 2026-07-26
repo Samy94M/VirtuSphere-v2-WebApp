@@ -209,6 +209,43 @@ function repo_count_logs(mysqli $db, string $search = '', string $ip = '', array
 }
 
 /**
+ * The IPs whose machine access was refused within the given window, newest
+ * first, with the time of the most recent refusal.
+ *
+ * This is what lets the System status tell three states apart that all rendered
+ * as the same grey "no data yet": never configured, configured but the first run
+ * is still pending, and configured but REJECTED. The third is the commonest
+ * setup mistake in the product - a missing IP allowlist entry - and it looked
+ * exactly like a server on which MECM was never installed. A refusal is
+ * positive evidence that somebody is knocking, so it is the one signal that
+ * distinguishes them.
+ *
+ * @return list<array{ip: string, last_at: string, hits: int}>
+ */
+function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400, int $limit = 5): array
+{
+    $limit = max(1, min(50, $limit));
+    $category = VIRTUSPHERE_LOG_CATEGORY_MACHINE_API;
+    $stmt = $db->prepare(
+        'SELECT ip, MAX(created_at) AS last_at, COUNT(*) AS hits
+         FROM deploy_logs
+         WHERE category = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'
+         GROUP BY ip
+         ORDER BY last_at DESC
+         LIMIT ' . $limit
+    );
+    $stmt->bind_param('si', $category, $withinSeconds);
+    $stmt->execute();
+
+    $rows = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $rows[] = ['ip' => (string) $row['ip'], 'last_at' => (string) $row['last_at'], 'hits' => (int) $row['hits']];
+    }
+
+    return $rows;
+}
+
+/**
  * @param array<int, string> $categories
  */
 function repo_recent_logs(mysqli $db, int $limit = 50, int $offset = 0, string $search = '', string $ip = '', array $categories = []): array

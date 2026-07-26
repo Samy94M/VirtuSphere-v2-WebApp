@@ -14,6 +14,8 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/heartbeats.php';
+// Refused machine accesses are what separates "rejected" from "never set up".
+require_once __DIR__ . '/repo/log.php';
 
 /**
  * @return array<string,mixed>
@@ -97,6 +99,12 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'internal' => ['rows' => $internalRows, 'state' => repo_integration_worst_state($internalRows)],
         'mecm_fresh_ips' => $freshIps,
         'mecm_ip_mismatch' => count($freshIps) > 1,
+        // Refused machine accesses within the last day. Without this, "configured
+        // but rejected" and "never configured" render identically as a grey row,
+        // and the commonest setup mistake in the product is invisible: the task
+        // runs every minute against a closed IP gate, and the portal looks like a
+        // server where MECM was never installed.
+        'machine_api_denials' => repo_recent_machine_api_denials($db, VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS),
         'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst],
         // ansible_selected is what esxi_inventory_automation_blocker() needs as
         // its third input, and it is resolved here rather than in the renderer:

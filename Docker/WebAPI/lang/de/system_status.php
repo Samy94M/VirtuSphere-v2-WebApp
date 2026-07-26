@@ -43,7 +43,10 @@ return [
     'legend_warning' => 'Meldung überfällig (mehr als das :multiplier-fache des Intervalls).',
     'legend_danger' => 'Quelle ausgefallen oder letzte Prüfung fehlgeschlagen. Handlungsanweisung beachten.',
     'legend_missing' => 'Andere Quellen melden sich bereits, diese hat sich noch nie gemeldet. Einrichtung prüfen.',
-    'legend_unknown' => 'Noch keine Daten. Integration vermutlich noch nicht eingerichtet.',
+    // Nannte genau eine Ursache („vermutlich noch nicht eingerichtet") für einen
+    // Zustand, den drei völlig verschiedene Lagen erzeugen. Für eine Aufgabe, die
+    // im Minutentakt gegen eine geschlossene IP-Sperre läuft, war das falsch.
+    'legend_unknown' => 'Noch keine Daten: diese Quelle hat sich nie gemeldet. Drei Ursachen sehen hier gleich aus: nie eingerichtet, eingerichtet und erster Lauf noch offen, oder eingerichtet und abgewiesen. Wurde ein Zugriff abgewiesen, steht darüber ein Hinweis mit der IP.',
     'inv_heading' => 'ESXi-Inventar',
     'inv_hint' => 'Datacenter, Datastores, Portgruppen und Hosts, read-only aus den registrierten ESXi-Zugangsdaten.',
     'inv_empty' => 'Noch keine ESXi-Zugangsdaten hinterlegt. Unter Zugangsdaten ein ESXi-Konto anlegen, dann wird automatisch abgerufen.',
@@ -130,6 +133,11 @@ return [
     'mecm_hint' => 'Datenfluss und Site-Zustand der einen angebundenen MECM-Site.',
     'mecm_ip_mismatch' => 'Mehrere aktuelle MECM-Quellen melden unterschiedliche Absender-IPs: :ips. Das kann bei mehreren Netzwegen beabsichtigt sein; bitte die Zuordnung prüfen.',
     'mecm_setup_empty' => 'Noch keine MECM-Anbindung: bisher hat sich weder eine Synchronisationsaufgabe noch der Site-Health-Reporter gemeldet. Die vier Aufgaben werden auf dem MECM-Server eingerichtet, nicht im Portal; das Portal braucht dafür nur die IP-Freigabe für die Machine-API. Die Anleitung dazu steht in docs/operations/mecm-integration.md.',
+    // Dieselbe graue Lage, aber mit Beweis: es klopft jemand und wird abgewiesen.
+    // „Vermutlich noch nicht eingerichtet" wäre hier schlicht falsch.
+    'mecm_setup_denied' => 'Die MECM-Anbindung ist offenbar eingerichtet, wird aber abgewiesen: es sind Zugriffe angekommen und an der IP-Freigabe der Machine-API gescheitert (siehe Hinweis oben). Die Aufgaben laufen also, nur darf ihr Server noch nicht mit dem Portal sprechen. Die genannte IP freigeben, dann meldet sich die erste Quelle innerhalb ihres Intervalls.',
+    'machine_api_denied' => 'Abgewiesene Maschinenzugriffe von :ips, letzter am :when. Diese Adressen sind nicht in den IP-Freigaben der Machine-API; solange das so ist, kommt von dort kein Sync, keine MECM-ID und kein Ergebnisbericht an.',
+    'machine_api_open_log' => 'Abgewiesene Zugriffe im Protokoll öffnen',
     'mecm_configure_allowlist' => 'IP-Freigaben öffnen',
     'mecm_sync_heading' => 'VirtuSphere-MECM-Integration',
     'mecm_sync_hint' => 'Beginn und Ergebnis jedes Laufs der drei Synchronisationsaufgaben auf dem MECM-Server.',

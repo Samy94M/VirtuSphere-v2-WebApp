@@ -48,9 +48,45 @@ function machine_api_mac_allowed(mysqli $db, string $mac): bool
     return $stmt->get_result()->num_rows > 0;
 }
 
-// Emits the exact legacy 403 response (including the client IP echo) and exits.
-function machine_api_forbidden(string $ip): void
+/**
+ * Emits the exact legacy 403 response (including the client IP echo) and exits.
+ *
+ * It used to be that single line and nothing else: no audit row, no error_log, no
+ * counter, and the function did not even take a database connection. Its 401
+ * sibling audits. Six endpoints hang off it, and the consequence is that the
+ * single commonest setup mistake in the whole product - a missing IP allowlist
+ * entry - looked in the portal EXACTLY like a server on which MECM was never
+ * installed: a grey "no data yet" row and silence. The error report could not
+ * report it either, because reportRun sits behind the same gate.
+ *
+ * $db is optional so the legacy scripts that refuse before their connection
+ * exists can still call it; without a connection the line still reaches
+ * error_log, which is strictly more than before.
+ *
+ * The wire response is unchanged, byte for byte: the German sentence and the
+ * echoed IP are the frozen contract that the Ansible preflight probe parses.
+ */
+function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint = ''): void
 {
+    $tag = 'machine_api_denied';
+    $where = $endpoint !== '' ? $endpoint : basename((string) ($_SERVER['SCRIPT_NAME'] ?? 'machine-api'));
+    // request_string, not a raw cast: this line runs BEFORE the IP gate is
+    // passed, so `?action[]=x` from any host would turn a refusal into a 500 plus
+    // an unauthenticated system audit row - one per request (lib/request.php).
+    $action = request_string($_GET, 'action');
+    $message = 'Refused ' . $where . ($action !== '' ? '?action=' . $action : '') . ' from ' . ($ip !== '' ? $ip : 'an unknown IP')
+        . ': not on the machine API IP allowlist (and no known MAC presented).';
+
+    if ($db instanceof mysqli) {
+        // Throttled per (category, tag, IP): a task that polls every ten seconds
+        // must not flood the log, and another host's first refusal must still get
+        // through. The category is the security one, because that is the question
+        // this answers.
+        machine_api_audit_warning($db, $tag, $message, $ip, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, $ip);
+    } else {
+        machine_api_log_warning($tag, $message);
+    }
+
     machine_api_json(['error' => 'Zugriff verweigert. Ihre IP: ' . $ip], 403);
 }
 

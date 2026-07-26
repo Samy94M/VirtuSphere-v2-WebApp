@@ -4,13 +4,32 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../status.php';
 
+/**
+ * Records one state transition. The insert is best-effort by design: the state
+ * itself matters more than its history line, and an unwritable history row must
+ * not fail a deploy.
+ *
+ * But the catch is narrowed to mysqli_sql_exception and re-throws on a
+ * DEADLOCK/lock-timeout. Those two are the errors that mean "this transaction
+ * cannot continue": swallowing them let a caller carry on inside a transaction
+ * the server had already rolled back, so the outer commit wrote an empty middle -
+ * the VM state without its event, or worse, half of a multi-statement write. A
+ * caller that hits a deadlock has to see it and retry the whole unit.
+ */
 function repo_record_vm_status_event(mysqli $db, int $vmId, string $lifecycleState, string $mecmSyncState, string $legacyStatus, ?string $note = null, ?int $userId = null): void
 {
     try {
         $stmt = $db->prepare('INSERT INTO deploy_vm_status_events (vm_id, lifecycle_state, mecm_sync_state, legacy_status, note, created_by) VALUES (?, ?, ?, ?, ?, ?)');
         $stmt->bind_param('issssi', $vmId, $lifecycleState, $mecmSyncState, $legacyStatus, $note, $userId);
         $stmt->execute();
-    } catch (Throwable $exception) {
+    } catch (mysqli_sql_exception $exception) {
+        // 1213 deadlock, 1205 lock wait timeout: MySQL has discarded the
+        // transaction (1213) or the statement is in an unknown state (1205).
+        // Continuing would commit an empty middle.
+        if (in_array($exception->getCode(), [1213, 1205], true)) {
+            throw $exception;
+        }
+
         $refId = function_exists('virtusphere_error_reference') ? virtusphere_error_reference() : 'no-ref';
         error_log(sprintf(
             '[status_events] ref=%s skipped vm_id=%d lifecycle=%s mecm=%s legacy=%s: %s',
