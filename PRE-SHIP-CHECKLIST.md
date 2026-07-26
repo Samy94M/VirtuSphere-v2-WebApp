@@ -22,10 +22,9 @@ Vor jedem Release-/Meilenstein-Abschluss durchgehen. Diese Datei bleibt eine **l
   - [ ] Datastore-Health gegen den produktiven Host belegt: nach dem ersten echten Inventar-Abruf im Job-Log die Zeile `Datastore health:` lesen (steht neben `Inventory queries:`, auch im Gutfall) und prüfen, dass Erreichbarkeit und Wartungsmodus für **alle** Datastores ankamen, nicht nur für einen Teil. `accessible`/`maintenanceMode` sind gegen die Moduldoku gebaut; offline lässt sich nur die Argumentliste prüfen, nicht die Form der Antwort (ADR-0023). Ein Feldpfad, der nicht mehr trifft, sieht ohne diese Zeile aus wie eine Flotte ohne Wartung. Bedeutung der Zeile: `docs/operations/esxi-inventory.md`.
 - [ ] Keine Secrets/Logs/Build-Artefakte neu getrackt: `git status --short` und `git ls-files | grep -iE '\.(env|pfx|pem|key|log)$'` leer.
 - [ ] `docs/CHANGELOG.md` für den Meilenstein aktualisiert.
-- [ ] Go-live-Schritte aus `docs/operations/go-live.md` geplant (IP-Allowlist für MECM- und Ansible-Host, Erstpasswort-Datei löschen, DB-Konto-Rotation).
+- [ ] Go-live-Schritte aus `docs/operations/go-live.md` geplant (IP-Allowlist für MECM- und Ansible-Host, `SEED_ADMIN_*`-Werte nach dem ersten Login aus der `.env` entfernen sofern dieser Seed-Weg genutzt wurde, DB-Konto-Rotation).
 
 ## Meilenstein-gebundene Punkte (offen bis zur jeweiligen Etappe)
 
 - [ ] Clean-Checkout-Releaseprobe auf frischem Host (Ubuntu) als Release-Nachweis.
-- [ ] E3-Legacy-Retirement: Desktop-Client, `access.php`, `api/login.php`, `deploy_tokens` physisch entfernen (nur nach akzeptierter E3-Entscheidung, ADR-0019).
-- [ ] Visuelles Frontend-Design-Handoff abgeschlossen (ADR-0013).
+- [ ] E3-Legacy-Retirement umgesetzt: Desktop-Client, `access.php`, Token-Schema physisch entfernt (Entscheidung ist angenommen, Beschlussdatum in ADR-0019; Wire-Tests und ADR vor dem Löschen).

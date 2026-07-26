@@ -99,25 +99,40 @@ Installer bietet `-Scheme https`, und die Client-Skripte haben mit
   trägt, ist schlechter als ehrliches HTTP: es sieht verschlüsselt aus und ist
   von jedem im Netz beantwortbar. Ein Zertifikatswechsel bleibt damit eine
   bewusste Handlung, weil der Abruf fehlschlägt, bis der neue Abdruck eingetragen
-  ist.
+  ist. Genau benannt ist der PowerShell-Pin dabei ein **Zusatzweg neben der
+  Kettenprüfung, kein Ersatz**: Besteht ein präsentiertes Zertifikat die normale
+  Windows-Kettenprüfung, wird es auch mit gesetztem Pin akzeptiert
+  (`VirtuSphere-Common.ps1`, Callback prüft zuerst `SslPolicyErrors::None`). Der
+  Pin erweitert das Vertrauen also um genau ein zusätzliches Zertifikat; er
+  schränkt es nicht auf dieses eine ein. Der Ansible-Upload verhält sich anders:
+  dort ersetzt ein gesetzter `cert_sha256` die Kettenprüfung vollständig.
 
 ### Umstellen
 
 1. HTTPS im Portal einschalten (Abschnitte oben).
 2. Auf dem MECM-Server:
    `install-VirtuSphere-MECM.ps1 -Scheme https -CertThumbprint <SHA-1 ohne Trennzeichen> ...`.
-   Der Fingerabdruck ist der, den `certlm.msc` beim Portal-Zertifikat anzeigt;
-   Leerzeichen und Doppelpunkte dürfen mitkopiert werden. Bei einem Zertifikat aus
+   Der Fingerabdruck ist der, den `certlm.msc` beim Portal-Zertifikat anzeigt,
+   allerdings **ohne Leerzeichen und Doppelpunkte**: der Installer validiert
+   exakt 40 Hex-Zeichen und lehnt mitkopierte Trennzeichen ab (nur ein bereits
+   in der Registry liegender Wert wird beim Lesen nachträglich bereinigt). Bei
+   einem Zertifikat aus
    einer PKI, der der Server schon vertraut, den Parameter weglassen: dann gilt
    die normale Kettenprüfung, und die ist die stärkere Antwort. Ein Re-Run des
    Installers ohne diese Parameter behält beide Werte.
 3. Auf dem Ansible-Host nichts. Der Deploy-Worker trägt den SHA-256-Fingerabdruck
    des Portal-Zertifikats bei jedem Auftrag selbst in `upload_mac_list.py` ein
    (`cert_sha256`), sofern die API-Basis-URL `https://` ist und ein Zertifikat
-   installiert ist. Wer der Domänen-CA vertrauen will, legt sie statt dessen in
-   den System-Truststore (`/usr/local/share/ca-certificates/` +
-   `update-ca-certificates`); dann bleibt der Wert leer und die normale Prüfung
-   greift.
+   installiert ist; das gilt **immer**, auch für ein CA-signiertes Zertifikat
+   (`ansible_portal_cert_fingerprint()` unterscheidet die Herkunft nicht). Ein
+   in den System-Truststore gelegtes CA-Bundle
+   (`/usr/local/share/ca-certificates/` + `update-ca-certificates`) ändert daran
+   nichts: der Pin ersetzt beim MAC-Upload die Kettenprüfung, der Truststore
+   bleibt für diesen Kanal wirkungslos. Leer bleibt der Wert nur, wenn das Portal
+   sein Zertifikats-Metadatum nicht lesen kann; dann greift die normale
+   Kettenprüfung. Praktische Folge: Nach einem Zertifikatswechsel im Portal
+   pinnen neue Aufträge automatisch das neue Zertifikat, ein Handgriff auf dem
+   Ansible-Host entfällt.
 4. **API-Basis-URL im Portal auf `https://...` umstellen** (Einstellungen →
    Bereitstellung). Ohne diesen Schritt schreibt der Worker weiterhin eine
    http-Rückrufadresse in jedes Deploy-Artefakt.

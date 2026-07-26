@@ -77,8 +77,8 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Interna nicht erreichbar (/lib,/vendor,/tests,/logs → 403) | automatisiert | `health-contract`-Gate (/tests=403) + nginx deny-Regeln |
 | Audit-Log für Auth-, Rechte- und CSRF-Ereignisse | automatisiert | `portal_guard_post`/`portal_forbid` + `AuditEventsTest`; E2E-Ablehnungen erzeugen Audit-Zeilen |
 | Secret-Scan über volle Git-Historie, null unerklärte Funde | automatisiert | `secret-scan`-Gate (Release-Lane), Allowlist-Vertrag `.gitleaks.toml` |
-| Dependency-/Image-CVE-Gates, SBOM, Digest-Pins | **offen (Etappe 8, AP8)** | composer audit läuft (Fast); Rest gebucht |
-| Container-Härtung gepinnt (read_only, cap_drop, no-new-privileges) | teils | Compose gesetzt; Contract-Test dafür: **offen (AP8)** |
+| Dependency-/Image-CVE-Gates, SBOM, Digest-Pins | automatisiert | composer audit (Fast); `sbom`- und `image-cve`-Gates (Release-Lane, Trivy/Syft mit befristeten Ausnahmen in `.trivyignore.yaml`) |
+| Container-Härtung gepinnt (read_only, cap_drop, no-new-privileges) | automatisiert | Compose gesetzt; `compose-hardening`-Gate in allen Lanes (`scripts/check-compose-hardening.ps1`) |
 
 ## WSTG-Zuordnung (Kurzindex)
 

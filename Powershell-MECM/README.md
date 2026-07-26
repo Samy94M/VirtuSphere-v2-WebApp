@@ -243,13 +243,18 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   - **Collection + Deployment idempotent nachziehen** (bei
     `generateOwnDeviceColletion: "true"`): läuft auch für bestehende Apps und
     heilt frühere Teilfehler (App vorhanden, Collection/Deployment fehlt).
-    Content-Verteilung an die DP-Gruppe nur bei neuen Apps, da erneutes
-    Verteilen selbst Fehler wirft.
+    Content-Verteilung an die DP-Gruppe, solange `Test-VsContentDistributed`
+    den Content dort nicht sieht, auch für bestehende Apps; ein Fehlschlag ist
+    ein offener Punkt (`package_content_failed`) und wird im nächsten
+    Durchlauf wiederholt.
   - Optionales Available-Deployment an die Collection aus `DeployTo`
     (fehlende Ziel-Collection ist ein Konfigurationsfehler; Warnung ohne
     Dauer-Retry).
-- Traten Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der nächste
-  Durchlauf wiederholt die offenen Punkte.
+- Traten **gezählte** Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der
+  nächste Durchlauf wiederholt die offenen Punkte. Die `DeployTo`-Warnung zählt
+  bewusst nicht: sie ist ein Konfigurationsfehler ohne Dauer-Retry, der Stamp
+  wird trotz ihr gemerkt und erst eine geänderte `config.json` löst den
+  nächsten Versuch aus.
 
 ### Site Health (`mecm_site-health.ps1`, alle 300 s)
 

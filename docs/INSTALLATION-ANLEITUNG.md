@@ -1,6 +1,6 @@
 # Installation Anleitung
 
-Diese Anleitung beschreibt den Ubuntu/Docker-Betrieb der VirtuSphere PHP-Web-App. Sie ist fuer Test- und Staging-Umgebungen gedacht und dokumentiert den aktuellen Backend/Ops-Stand. Die spaetere HTTPS-/Produktivhaertung aus WP7 ersetzt nur den HTTPS-Interim, nicht den grundlegenden Ablauf.
+Diese Anleitung beschreibt den Ubuntu/Docker-Betrieb der VirtuSphere PHP-Web-App. Sie ist fuer Test- und Staging-Umgebungen gedacht und dokumentiert den aktuellen Backend/Ops-Stand. HTTPS wird nachtraeglich komplett im Portal aktiviert (Abschnitt "HTTPS" unten); der grundlegende Ablauf hier bleibt davon unberuehrt.
 
 ## Begriffe kurz erklaert
 
@@ -34,7 +34,7 @@ Der Backend/Ops-Stand vom 2026-07-05 ist fuer lokale Tests nutzbar:
 
 Der Portal-UX-Slice ergaenzt dazu Sticky-Formulare mit Fehlern pro Feld (OS, VLANs, Packages, Credentials, Benutzer, Missionen, Settings und VM-Editor), Suche und IP-Filter im Log-Viewer sowie die Benutzeridentitaet in der Topbar als kompakter Konto-Link. Bewusst offen bleibt nur noch das rein visuelle Portal-Design (Settings-Optik, weitere Formularanordnung und Navigationsfeinschliff), das der Frontend-Kollege auf Basis der bestehenden Portal-Struktur weiterfuehren kann.
 
-Abschlusspruefung: Der Backend/Ops-Plan und das Findings-/SSoT-Update sind im aktuellen Arbeitsbaum umgesetzt. Nicht als erledigt gelten nur die bewusst spaeteren Grenzen: WP7/HTTPS-Finalisierung, E3-Retirement der Legacy-Token-API, rein visuelles Frontend-Design und ein frischer Ubuntu-/Clean-Checkout-Probelauf von `Docker/scripts/setup.sh` als Release-Nachweis. Die lokalen Setup-Aequivalente wurden ueber Docker Build/Start, `migrate.php --check`, Migration und Healthcheck verifiziert.
+Abschlusspruefung: Der Backend/Ops-Plan und das Findings-/SSoT-Update sind umgesetzt; HTTPS-Konfiguration und das visuelle Portal-Design sind inzwischen ebenfalls fertig, und der Stack lief in einer Erstinbetriebnahme auf dem Produktionshost. Offen bleiben das E3-Retirement der Legacy-Token-API (Entscheidung angenommen 2026-07-26, Rueckbau folgt) und die Clean-Checkout-Releaseprobe als formaler Release-Nachweis. Die lokalen Setup-Aequivalente wurden ueber Docker Build/Start, `migrate.php --check`, Migration und Healthcheck verifiziert.
 
 ## Voraussetzungen
 
@@ -140,7 +140,7 @@ Bei Zugriff von einem anderen Rechner statt `127.0.0.1` die Server-IP verwenden,
 1. Anmelden.
 2. Unter `Einstellungen -> Bereitstellung` die API-Basis-URL prüfen. Entweder gilt `APP_PUBLIC_BASE_URL` aus der `.env`, oder im Portal wird ein vorrangiger Wert eingetragen und mit dem direkt danebenstehenden Knopf gespeichert. Die Übersicht "Wirksame Deploy-Konfiguration" zeigt Wert und Quelle. Beispiele und der Verbindungstest sind aufklappbar. "Auf .env-Fallback zurücksetzen" erscheint nur bei einem gespeicherten Portalwert und entfernt diesen.
 3. Unter Credentials je ein `esxi`- und ein `ansible`-Credential anlegen. Das `ansible`-Credential ist ausschließlich der SSH/SFTP-Zugang zum Ausführungs-Host; die API-Basis-URL ist die separate Rückadresse. Ein Deploy verwendet beides gemeinsam.
-4. Beim Ansible-Zugang „Verbindung und Umgebung prüfen" ausführen; geprüft werden SSH-Login, Toolchain (ansible-playbook, python3, pyvmomi, community.vmware), ein SFTP-Schreibtest in /tmp und, bei gesetzter API-Basis-URL, die Portal-Erreichbarkeit. Ein Fehler nennt die betroffene Komponente; Ergebnis und Zeitpunkt bleiben unter Zugangsdaten und im Abschnitt „Ansible-Host" des Systemstatus sichtbar. Nach dem Bearbeiten des Zugangs wird das Ergebnis verworfen („Nicht getestet"); danach erneut prüfen. Bei mehreren Ansible-Zugängen unter Einstellungen → Kataloge und Inventar den globalen Zugang für ESXi-Inventaraufträge wählen.
+4. Beim Ansible-Zugang „Verbindung und Umgebung prüfen" ausführen; geprüft werden SSH-Login, Toolchain (ansible-playbook, python3, pyvmomi, requests, community.vmware), ein SFTP-Schreibtest in /tmp und, bei gesetzter API-Basis-URL, die Portal-Erreichbarkeit. Ein Fehler nennt die betroffene Komponente; Ergebnis und Zeitpunkt bleiben unter Zugangsdaten und im Abschnitt „Ansible-Host" des Systemstatus sichtbar. Nach dem Bearbeiten des Zugangs wird das Ergebnis verworfen („Nicht getestet"); danach erneut prüfen. Bei mehreren Ansible-Zugängen unter Einstellungen → Kataloge und Inventar den globalen Zugang für ESXi-Inventaraufträge wählen.
 5. OS, VLANs und Packages pflegen.
 6. Mission anlegen und Datacenter/Datastore/WDS VLAN setzen.
 7. Mindestens eine VM in der Mission anlegen.
@@ -232,7 +232,7 @@ Jeder Backup-Lauf schreibt zusaetzlich eine Statuszeile nach `Docker/backups/sta
 
 HTTPS wird komplett im Portal konfiguriert (Einstellungen, Tab "HTTPS": Zertifikats-Upload als PFX oder PEM plus drei Schalter fuer Listener, Umleitung und HSTS; ADR-0027). HTTP-first bleibt der Startzustand: ohne hochgeladenes Zertifikat aendert sich nichts.
 
-Einmalige Host-Voraussetzungen: `WEB_HTTPS_PORT` in `.env` setzen (Vorlage `.env.example`) und `docker compose up -d` ausfuehren, damit Portmapping und Shared-Volume-Mounts entstehen. `Docker/nginx/ssl` und `Docker/nginx/conf.d` muessen fuer uid 33 (`www-data`) schreibbar sein, z. B. `chown 33:33` auf dem Docker-Host. Ablauf, Erneuerung und Stoerungsbilder: `docs/operations/https.md`. Die Maschinen-Schnittstelle bleibt bis zur E3-Entscheidung auf HTTP (ADR-0019, Kandidat 5).
+Einmalige Host-Voraussetzungen: `WEB_HTTPS_PORT` in `.env` setzen (Vorlage `.env.example`) und `docker compose up -d` ausfuehren, damit Portmapping und Shared-Volume-Mounts entstehen. `Docker/nginx/ssl` und `Docker/nginx/conf.d` muessen fuer uid 33 (`www-data`) schreibbar sein, z. B. `chown 33:33` auf dem Docker-Host. Ablauf, Erneuerung und Stoerungsbilder: `docs/operations/https.md`. Die Maschinen-Schnittstelle wird nie umgeleitet; ihre Skripte koennen HTTPS und wechseln erst mit, wenn sie ausdruecklich umgestellt werden (`docs/operations/https.md`, Abschnitt "Umstellen"). Ein HTTPS-Zwang fuer die Maschinen-API bleibt eine eigene Entscheidung (ADR-0019, Kandidat 5).
 
 ## Air-Gap Hinweis
 

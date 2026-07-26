@@ -6,19 +6,23 @@ MECM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolg
 
 ## Wichtig vorab: „committet" heißt nicht „verifiziert"
 
-Der gesamte Anwendungskern (Portal, Deploy-Worker, Ansible-Anbindung) und die
-MECM-Integration wurden bisher **nur gegen den lokalen Docker-Stack** geprüft. Die
-PowerShell-Skripte (`Powershell-MECM/`) wurden ausschließlich vom Parser
-syntaktisch abgenommen, **nie auf einem echten MECM-Server oder Client ausgeführt**.
-Dieses Runbook ist daher zugleich Inbetriebnahme **und** erste echte Verifikation.
+Der Anwendungskern (Portal, Deploy-Worker, Ansible-Anbindung) und die
+MECM-Integration sind gegen den lokalen Docker-Stack sowie in einer
+Erstinbetriebnahme des Stacks auf dem Produktionshost geprüft. Die
+PowerShell-Skripte (`Powershell-MECM/`) durchlaufen Parser-Check **und**
+Pester-Verhaltenstests (`VirtuSphere.RunReport.Tests.ps1`, Integration-Lane),
+wurden aber **nie auf einem echten MECM-Server oder Client ausgeführt**: die
+MECM-Cmdlets selbst sind offline nur als Argumentliste prüfbar. Dieses Runbook
+ist daher zugleich Inbetriebnahme **und** erste echte Verifikation der
+Maschinenkette.
 
 | Ebene | Stand | Erste echte Abnahme in |
 |---|---|---|
-| PHP-Code und alle Migrationen | lokal grün, nie produktiv | Schritt 1–2 |
+| PHP-Code und alle Migrationen | lokal und auf dem Prod-Host grün | Schritt 1–2 |
 | MECM-Rückkanal, Ergebnisberichte, Statusseite | lokal grün | Schritt 4 |
 | Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 5 |
-| PowerShell MECM-Server-Skripte | nur Parser-Check | Schritt 4 |
-| PowerShell Client-Skripte | nur Parser-Check | Schritt 6 |
+| PowerShell MECM-Server-Skripte | Parser- und Pester-geprüft, nie gegen echtes MECM | Schritt 4 |
+| PowerShell Client-Skripte | Parser- und Pester-geprüft, nie auf echtem Client | Schritt 6 |
 
 ## Was NICHT aus `git pull` kommt
 
