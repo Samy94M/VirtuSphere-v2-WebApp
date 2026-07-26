@@ -32,6 +32,79 @@ final class SystemStatusPanelBranchTest extends TestCase
         }
     }
 
+    /** @param array<string,mixed> $state @param array<string,mixed>|null $pending */
+    private function renderEsxi(array $state, ?array $pending = null): string
+    {
+        $snapshot = ['esxi' => [
+            'interval_hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT,
+            'ansible_selected' => true,
+            'deploy_worker_alive' => true,
+            'rows' => [[
+                'credential' => ['id' => 23, 'name' => 'esxi-23', 'host' => 'esxi-23.example.test'],
+                'state' => $state,
+                'pending_job' => $pending,
+                'counts' => [],
+                'health' => (string) ($state['last_status'] ?? '') === 'failed' ? 'warning' : 'ok',
+            ]],
+        ]];
+        ob_start();
+        system_status_render_esxi($snapshot, ['id' => 1, 'role' => 'admin'], 0, null);
+
+        return (string) ob_get_clean();
+    }
+
+    /** @return array<string,mixed> */
+    private function inventoryState(string $status, ?int $jobId): array
+    {
+        return [
+            'last_status' => $status,
+            'last_attempt_at' => '2026-07-26 11:23:57',
+            'last_success_at' => $status === 'ok' ? '2026-07-26 11:23:57' : null,
+            'last_error_category' => $status === 'failed' ? VIRTUSPHERE_INVENTORY_ERROR_PARSE : null,
+            'last_job_id' => $jobId,
+            'failure_streak' => $status === 'failed' ? 1 : 0,
+            'paused_until_credential_change' => 0,
+        ];
+    }
+
+    public function testAFailedInventoryResultLinksTheExactJobThatProducedIt(): void
+    {
+        $html = $this->renderEsxi($this->inventoryState('failed', 9717));
+
+        self::assertStringContainsString('href="deploy_log.php?id=9717"', $html);
+        self::assertStringContainsString(h(__t('system_status.inv_open_failed_job_log')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.inv_job_log_unavailable')), $html);
+    }
+
+    public function testARetainedSuccessfulResultKeepsItsDiagnosticLogReachable(): void
+    {
+        $html = $this->renderEsxi($this->inventoryState('ok', 9718));
+
+        self::assertStringContainsString('href="deploy_log.php?id=9718"', $html);
+        self::assertStringContainsString(h(__t('system_status.inv_open_last_job_log')), $html);
+    }
+
+    public function testAnExpiredFailedJobRendersAFallbackInsteadOfADeadLink(): void
+    {
+        $html = $this->renderEsxi($this->inventoryState('failed', null));
+
+        self::assertStringContainsString(h(__t('system_status.inv_job_log_unavailable')), $html);
+        self::assertStringNotContainsString('deploy_log.php?id=', $html);
+    }
+
+    public function testAPendingRetryAndThePreviousFailureKeepDistinctLogLinks(): void
+    {
+        $html = $this->renderEsxi($this->inventoryState('failed', 9717), [
+            'id' => 9719,
+            'status' => VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+        ]);
+
+        self::assertStringContainsString('href="deploy_log.php?id=9717"', $html);
+        self::assertStringContainsString('href="deploy_log.php?id=9719"', $html);
+        self::assertStringContainsString(h(__t('system_status.inv_open_failed_job_log')), $html);
+        self::assertStringContainsString(h(__t('system_status.inv_open_job_log')), $html);
+    }
+
     /** @param array<int,array<string,mixed>> $deviations */
     private function renderDeviations(array $deviations, bool $hasInventory): string
     {

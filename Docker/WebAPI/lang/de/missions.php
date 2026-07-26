@@ -35,6 +35,8 @@ return [
     'import_missing_vlans' => 'Fehlende VLANs (Import blockiert, bitte zuerst anlegen):',
     'import_vm_conflicts' => 'VM-Namen bereits in anderen Missionen vergeben:',
     'import_missing_packages' => 'Pakete nicht im Katalog gefunden (werden übersprungen):',
+    'import_vlans_link' => 'VLAN-Katalog öffnen',
+    'import_packages_link' => 'Paketkatalog öffnen',
     'import_new_name_label' => 'Name der neuen Mission',
     'import_name_conflict' => 'Dieser Name existiert bereits. Bitte einen anderen wählen.',
     'import_confirm_btn' => 'Import bestätigen',

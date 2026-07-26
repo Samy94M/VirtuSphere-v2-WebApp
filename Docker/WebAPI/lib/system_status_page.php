@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/catalog.php';
+require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 
 /**
@@ -73,7 +75,7 @@ function system_status_handle_post(mysqli $connection, array $user): void
                 default => __t('system_status.inv_refresh_no_ansible'),
             };
             flash_set('warning', $message, '', [
-                'url' => 'settings.php#panel-catalog',
+                'url' => settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG),
                 'label' => __t('system_status.inv_configure_ansible'),
             ]);
         } else {
@@ -88,7 +90,7 @@ function system_status_handle_post(mysqli $connection, array $user): void
                 $parts[] = __t('system_status.inv_refresh_failed', ['count' => $failed]);
             }
             $flashAction = count($jobIds) === 1
-                ? ['url' => 'deploy_log.php?id=' . $jobIds[0], 'label' => __t('system_status.inv_open_job_log')]
+                ? ['url' => deploy_job_log_url($jobIds[0]), 'label' => __t('system_status.inv_open_job_log')]
                 : ['url' => $redirect, 'label' => __t('system_status.inv_open_card')];
             flash_set($enqueued > 0 ? 'success' : 'warning', implode(' ', $parts), '', $flashAction);
         }

@@ -16,6 +16,7 @@ require_once __DIR__ . '/backup_status.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/esxi_capabilities.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
@@ -219,12 +220,25 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                       // missing Ansible host or a zero interval each stop the pull for a
                       // different reason, and each needs a different fix. ?>
                 <small class="status-cadence"><?php echo h(credential_cadence_esxi($intervalHours, $state, $ansibleSelected, $deployWorkerAlive)); ?></small>
-                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && !empty($state['last_error_category'])) { ?><div class="alert alert-error"><?php echo h(connection_error_message((string) $state['last_error_category'], ['host' => (string) $credential['host']])); ?></div><?php } ?>
+                <?php $lastJobId = $state !== null ? (int) ($state['last_job_id'] ?? 0) : 0; ?>
+                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && !empty($state['last_error_category'])) { ?>
+                    <div class="alert alert-error">
+                        <?php echo h(connection_error_message((string) $state['last_error_category'], ['host' => (string) $credential['host']])); ?>
+                        <?php if ($lastJobId > 0 && can('deploy.run', $user)) { ?>
+                            <a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?></a>
+                        <?php } elseif (can('deploy.run', $user)) { ?>
+                            <?php echo h(__t('system_status.inv_job_log_unavailable')); ?>
+                        <?php } ?>
+                    </div>
+                <?php } ?>
+                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'ok' && $lastJobId > 0 && can('deploy.run', $user)) { ?>
+                    <p><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_last_job_log')); ?></a></p>
+                <?php } ?>
                 <?php // The pause names its own release condition, and that condition is
                       // met on another page: without the link the row states a fix and
                       // hides where it happens. ?>
                 <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert alert-warning"><?php echo h(__t('system_status.inv_paused')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_open_credentials')); ?></a><?php } ?></div><?php } ?>
-                <?php if ($pending !== null) { ?><p><?php echo portal_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'info' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="deploy_log.php?id=<?php echo h((string) $pending['id']); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?></a><?php } ?></p><?php } ?>
+                <?php if ($pending !== null) { ?><p><?php echo portal_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'info' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="<?php echo h(deploy_job_log_url((int) $pending['id'])); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?></a><?php } ?></p><?php } ?>
                 <div class="actions">
                     <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?></a><?php } ?>
                     <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?></button></form><?php } ?>

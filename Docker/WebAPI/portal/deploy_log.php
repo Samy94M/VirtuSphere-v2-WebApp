@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
 
 $user = portal_require_user($connection);
@@ -54,6 +55,7 @@ foreach ($logs as $log) {
     $lastSeq = max($lastSeq, (int) $log['seq']);
 }
 $isTerminal = in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
+$originUrl = deploy_job_origin_url($job);
 // An empty log on an old finished job is almost certainly the retention prune,
 // not a job that printed nothing. Saying so beats an unexplained empty table.
 // The ' UTC' suffix is the house rule for DB timestamps: today PHP and MySQL
@@ -67,14 +69,14 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
 <div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>">
     <section class="panel">
         <div class="actions">
-            <a class="button button-secondary" href="deploy.php<?php echo (int) $job['mission_id'] > 0 ? '?mission_id=' . h((string) $job['mission_id']) : ''; ?>"><?php echo h(__t('common.back')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($originUrl); ?>"><?php echo h(__t('common.back')); ?></a>
             <?php // A system job (ESXi inventory) has no mission; the link would have gone to id=0. ?>
             <?php if ((int) $job['mission_id'] > 0) { ?>
                 <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $job['mission_id']); ?>"><?php echo h(__t('common.mission')); ?></a>
             <?php } ?>
-            <a class="button button-secondary" href="deploy_log.php?id=<?php echo h((string) $job['id']); ?>"><?php echo h(__t('common.refresh')); ?></a>
+            <a class="button button-secondary" href="<?php echo h(deploy_job_log_url((int) $job['id'])); ?>"><?php echo h(__t('common.refresh')); ?></a>
             <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, true)) { ?>
-                <form class="inline-form" method="post" action="deploy.php?mission_id=<?php echo h((string) $job['mission_id']); ?>">
+                <form class="inline-form" method="post" action="deploy.php<?php echo (int) $job['mission_id'] > 0 ? '?mission_id=' . h((string) $job['mission_id']) : ''; ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="cancel">
                     <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">

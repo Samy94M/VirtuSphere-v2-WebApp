@@ -35,6 +35,8 @@ return [
     'import_missing_vlans' => 'Missing VLANs (import blocked, please create them first):',
     'import_vm_conflicts' => 'VM names already used in other missions:',
     'import_missing_packages' => 'Packages not found in the catalog (they will be skipped):',
+    'import_vlans_link' => 'Open VLAN catalog',
+    'import_packages_link' => 'Open package catalog',
     'import_new_name_label' => 'Name of the new mission',
     'import_name_conflict' => 'This name already exists. Please choose another one.',
     'import_confirm_btn' => 'Confirm import',

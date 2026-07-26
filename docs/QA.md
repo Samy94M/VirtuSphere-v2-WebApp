@@ -185,9 +185,15 @@ Alignment is derived from the text length rather than restated per dialog. `fit-
 
 Each guard was run against a deliberately broken stylesheet, so each is known to *fail* and not merely to pass. Two traps worth knowing if you repeat that: the file is CRLF, so a `\n` in a mutation pattern silently matches nothing, and `overflow-wrap: anywhere` occurs three times in it, so an unanchored substitution breaks a foreign rule and leaves the modal test rightly green.
 
-## Settings Tab Redirects
+## Settings Tab Redirects and Deep Links
 
 `settings.php` re-opens the posting form's tab after the POST redirect via a URL fragment (`settings.php#panel-<tab>`, restored by `initTabs` in `assets/core.js`). The `$actionTabs` map next to the action dispatch is the SSoT for which form lives in which tab. `tests/Static/SettingsTabRedirectContractTest.php` runs in the normal `unit` suite and fails when a postable action has no map entry (its redirect would fall back to the first tab, hiding sticky field errors and the one-time report token in a hidden panel), when a map entry names an action no form posts any more, or when a mapped tab has no rendered tabpanel.
+
+Links *into* the page have the same failure mode and used to be hand-written at eight call sites, the redirect above among them: a missing or misspelled fragment opens the first tab, so the operator lands on a settings page that does not contain the field the message pointing there just named, without an error. `settings_url()` (`lib/settings_page.php`) is the only builder, validating the anchor against `VIRTUSPHERE_SETTINGS_TABS` and `VIRTUSPHERE_SETTINGS_SECTIONS` (the sections are ids *inside* a tab, like the dashboard backup banner's `panel-backup`; `initTabs` opens the owning tab and scrolls to them). `tests/Static/SettingsDeepLinkContractTest.php` rejects a hand-written `settings.php#` outside the builder and walks the constants against the rendered panel ids in both directions. This is the twin of the log deep link rule; see `LogDeepLinkContractTest`.
+
+## Messages That Name a Fix
+
+A portal message that states a prerequisite or an instruction carries the link that satisfies it, gated on the *target's* permission while the sentence stays ungated. On the deploy page the blocker list is also the queue gate (`deploy_prerequisite_notices()`, `tests/Unit/DeployPrerequisiteNoticesTest.php`), so a disabled button cannot exist without a box saying why, and the API-base-URL box is chosen by the resolver's flag rather than by its message text: an exception with an empty message would otherwise block the queue and explain nothing. Connection-test results whose fix lives on another page carry a flash action (`credentials_test_action()`, `tests/Unit/CredentialsTestActionTest.php`); results fixed on the Ansible host deliberately carry none.
 
 ## Correlation IDs (ADR-0032)
 

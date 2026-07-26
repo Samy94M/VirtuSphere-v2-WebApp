@@ -5,7 +5,12 @@ declare(strict_types=1);
 return [
     'title' => 'Deploy',
     'queue_heading' => 'Queue deploy job',
-    'requirements_hint' => 'A mission, ESXi credential, Ansible credential and API base URL are required before a deploy job can be queued.',
+    'req_missions' => 'No mission exists yet. A deploy job needs a mission that has VMs.',
+    'req_missions_link' => 'Open missions',
+    'req_esxi' => 'No ESXi credential exists yet.',
+    'req_ansible' => 'No Ansible credential exists yet.',
+    'req_credentials_link' => 'Open credentials',
+    'req_api_base_url_link' => 'Open deploy settings',
     'label_mission' => 'Mission',
     'select_mission' => 'Select mission',
     'label_esxi' => 'ESXi credential',
@@ -43,6 +48,7 @@ return [
     'label_vms' => 'VMs (empty = whole mission)',
     'vms_hint' => 'Only the checked VMs are processed. With no selection the job applies to the whole mission.',
     'vms_empty' => 'This mission has no VMs.',
+    'vms_empty_link' => 'Open the mission VMs',
     'vms_select_mission_first' => 'Select a mission above to list its VMs.',
     'vms_toggle_all' => 'Select all',
     'mac_present' => 'MAC present',
@@ -101,7 +107,10 @@ return [
     'storage_no_datastore' => 'no datastore set',
     'storage_usage_aria' => 'Usage after this job: :pct percent',
     'storage_hint' => 'Provisioned disk sizes of the selected VMs per target datastore, compared against the free space of the last inventory pull. Thin disks use less at first. This is a snapshot and never blocks the deploy.',
-    'inventory_deviation_warn' => 'Note: the datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values (details under System status).',
+    // The pointer to System status is the link beside the sentence now, not a
+    // parenthesis inside it: otherwise the message names the page twice.
+    'inventory_deviation_warn' => 'Note: the datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values.',
+    'inventory_deviation_link' => 'View the inventory under System status',
     'host_missing_warn' => 'Note: not in the inventory of the selected host ":host" but present on other hosts: :values. The deploy is not blocked; please check the host choice.',
     'err_datacenter_unresolved' => 'Datacenter cannot be determined.',
     'err_datacenter_no_inventory' => 'The mission has no datacenter and the selected ESXi credential has no inventory yet. Refresh it under System status or set the datacenter on the mission.',

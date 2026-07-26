@@ -7,6 +7,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help.deploy_heading')); ?></h2>
             <p><?php echo h(__t('help.deploy_requirements_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_requirements_p2')); ?></p>
             <p><?php echo h(__t('help.deploy_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help.deploy_mode_full')); ?></li>

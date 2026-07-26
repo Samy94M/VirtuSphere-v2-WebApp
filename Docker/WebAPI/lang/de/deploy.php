@@ -5,7 +5,12 @@ declare(strict_types=1);
 return [
     'title' => 'Bereitstellung',
     'queue_heading' => 'Bereitstellungsauftrag einreihen',
-    'requirements_hint' => 'Eine Mission, ein ESXi-Zugang, ein Ansible-Zugang und eine API-Basis-URL sind erforderlich, bevor ein Bereitstellungsauftrag eingereiht werden kann.',
+    'req_missions' => 'Es ist noch keine Mission vorhanden. Ein Bereitstellungsauftrag braucht eine Mission mit VMs.',
+    'req_missions_link' => 'Missionen öffnen',
+    'req_esxi' => 'Es ist noch kein ESXi-Zugang vorhanden.',
+    'req_ansible' => 'Es ist noch kein Ansible-Zugang vorhanden.',
+    'req_credentials_link' => 'Zugangsdaten öffnen',
+    'req_api_base_url_link' => 'Deploy-Einstellungen öffnen',
     'label_mission' => 'Mission',
     'select_mission' => 'Mission auswählen',
     'label_esxi' => 'ESXi-Zugang',
@@ -43,6 +48,7 @@ return [
     'label_vms' => 'VMs (leer = ganze Mission)',
     'vms_hint' => 'Nur die angehakten VMs werden bearbeitet. Ohne Auswahl gilt der Auftrag für die ganze Mission.',
     'vms_empty' => 'Diese Mission hat keine VMs.',
+    'vms_empty_link' => 'VMs der Mission öffnen',
     'vms_select_mission_first' => 'Zuerst oben eine Mission wählen, um die VMs anzuzeigen.',
     'vms_toggle_all' => 'Alle auswählen',
     'mac_present' => 'MAC vorhanden',
@@ -101,7 +107,10 @@ return [
     'storage_no_datastore' => 'kein Datastore gesetzt',
     'storage_usage_aria' => 'Belegung nach diesem Auftrag: :pct Prozent',
     'storage_hint' => 'Provisionierte Festplattengrößen der ausgewählten VMs je Ziel-Datastore, verglichen mit dem freien Speicher aus dem letzten Inventar-Abruf. Thin-Festplatten belegen anfangs weniger. Die Anzeige ist eine Momentaufnahme und blockiert den Deploy nicht.',
-    'inventory_deviation_warn' => 'Hinweis: Datacenter, Datastore oder VLAN dieser Mission kommt nicht im aktuellen ESXi-Inventar vor. Der Deploy wird nicht blockiert; bitte die Werte prüfen (Details im Systemstatus).',
+    // Der Verweis auf den Systemstatus steht als Link daneben, nicht mehr als
+    // Klammerzusatz im Satz: sonst nennt die Meldung die Seite zweimal.
+    'inventory_deviation_warn' => 'Hinweis: Datacenter, Datastore oder VLAN dieser Mission kommt nicht im aktuellen ESXi-Inventar vor. Der Deploy wird nicht blockiert; bitte die Werte prüfen.',
+    'inventory_deviation_link' => 'Inventar im Systemstatus ansehen',
     'host_missing_warn' => 'Hinweis: Nicht im Inventar des gewählten Hosts ":host", aber auf anderen Hosts vorhanden: :values. Der Deploy wird nicht blockiert; bitte die Host-Wahl prüfen.',
     'err_datacenter_unresolved' => 'Datacenter nicht bestimmbar.',
     'err_datacenter_no_inventory' => 'Die Mission hat kein Datacenter, und für den gewählten ESXi-Zugang liegt noch kein Inventar vor. Bitte im Systemstatus aktualisieren oder das Datacenter in der Mission setzen.',

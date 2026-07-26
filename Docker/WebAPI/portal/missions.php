@@ -226,14 +226,17 @@ layout_header($title, $user, $active, 'missions');
                     </tbody>
                 </table></div>
 
+                <?php // Both catalog findings tell the operator to create something; the
+                      // catalog is a different page and a different permission, so the
+                      // link is gated like the page that owns the fix. ?>
                 <?php if ($report['missing_vlans'] !== []) { ?>
-                    <div class="alert alert-error"><strong><?php echo h(__t('missions.import_missing_vlans')); ?></strong> <?php echo h(implode(', ', $report['missing_vlans'])); ?></div>
+                    <div class="alert alert-error"><strong><?php echo h(__t('missions.import_missing_vlans')); ?></strong> <?php echo h(implode(', ', $report['missing_vlans'])); ?><?php if (can('catalog.write', $user)) { ?> <a href="vlans.php"><?php echo h(__t('missions.import_vlans_link')); ?></a><?php } ?></div>
                 <?php } ?>
                 <?php if ($report['vm_name_conflicts'] !== []) { ?>
                     <div class="alert alert-error"><strong><?php echo h(__t('missions.import_vm_conflicts')); ?></strong> <?php echo h(implode(', ', $report['vm_name_conflicts'])); ?></div>
                 <?php } ?>
                 <?php if ($report['missing_packages'] !== []) { ?>
-                    <div class="alert alert-warning"><strong><?php echo h(__t('missions.import_missing_packages')); ?></strong> <?php echo h(implode(', ', $report['missing_packages'])); ?></div>
+                    <div class="alert alert-warning"><strong><?php echo h(__t('missions.import_missing_packages')); ?></strong> <?php echo h(implode(', ', $report['missing_packages'])); ?><?php if (can('catalog.write', $user)) { ?> <a href="packages.php"><?php echo h(__t('missions.import_packages_link')); ?></a><?php } ?></div>
                 <?php } ?>
 
                 <form class="form-grid" method="post" action="missions.php?type=missions">

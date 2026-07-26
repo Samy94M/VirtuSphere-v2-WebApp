@@ -314,7 +314,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    redirect_to('settings.php#panel-' . $actionTabs[$action]);
+    // Through the builder, so a map entry naming a tab the page does not render
+    // is loud instead of silently landing every save on the first tab. It throws
+    // after the write, which is the right way round: the save is done and the
+    // flash is queued, and SettingsDeepLinkContractTest keeps it unreachable.
+    redirect_to(settings_url($actionTabs[$action]));
 }
 
 $apiBaseUrlConfiguration = ansible_api_base_url_configuration($connection);

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
 require_once __DIR__ . '/../lib/deploy_form_state.php';
 require_once __DIR__ . '/../lib/deploy_page.php';
+require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_storage.php';
 require_once __DIR__ . '/../lib/repo/credentials.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -15,6 +16,7 @@ require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/esxi_capabilities.php';
+require_once __DIR__ . '/../lib/system_status.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -91,10 +93,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     redirect_to($redirectBase);
                 }
                 flash_set('success', __t('deploy.flash_queued'));
-                redirect_to('deploy_log.php?id=' . $jobId);
+                redirect_to(deploy_job_log_url($jobId));
             }
         } elseif ($action === 'cancel') {
             $jobId = request_int($_POST, 'job_id');
+            $job = repo_deploy_job($connection, $jobId);
+            if ($job !== null && ($job['mission_id'] ?? null) === null) {
+                // Inventory logs originate on System status and never appear in
+                // the mission-job list. Keep success and error redirects on the
+                // page that owns the job, including a failed cancel attempt.
+                $redirectBase = deploy_job_origin_url($job);
+            }
             repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'cancelled deploy job id ' . $jobId, (int) $user['id']);
             flash_set('success', __t('deploy.flash_cancelled'));
@@ -110,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newJobId = repo_retry_deploy_job($connection, $jobId, (int) $user['id']);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'queued deploy job id ' . $newJobId . ' (retry of job id ' . $jobId . ')', (int) $user['id']);
             flash_set('success', __t('deploy.flash_retried'));
-            redirect_to('deploy_log.php?id=' . $newJobId);
+            redirect_to(deploy_job_log_url($newJobId));
         } else {
             redirect_to($redirectBase);
         }
@@ -146,11 +155,20 @@ try {
     $apiBaseUrlReady = false;
     $apiBaseUrlError = portal_error_message($exception);
 }
-$canQueue = $missions !== [] && $esxiCredentials !== [] && $ansibleCredentials !== [] && $apiBaseUrlReady;
+// One predicate for the boxes above the form and for the button below it: the
+// gate IS the notice list. Two hand-kept copies would let a prerequisite grey
+// the button out with nothing on screen saying why.
+$deployNotices = deploy_prerequisite_notices(
+    $missions !== [],
+    $esxiCredentials !== [],
+    $ansibleCredentials !== [],
+    $apiBaseUrlReady,
+    $apiBaseUrlError
+);
 // A selected mission with no VMs has nothing to enqueue; the vms_empty hint below
 // explains the disabled button. The repo gate is the JS-less backstop.
 $selectedMissionEmpty = $selectedMission !== null && $missionVms === [];
-$canQueue = $canQueue && !$selectedMissionEmpty;
+$canQueue = $deployNotices === [] && !$selectedMissionEmpty;
 
 // Warn (never block) when the selected mission references datacenter/datastore/
 // VLAN values that are not in the ESXi inventory (E4.4).
@@ -303,17 +321,16 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
 
     <section class="panel">
         <h2><?php echo h(__t('deploy.queue_heading')); ?></h2>
-        <?php // Only when a base resource is truly missing. A missing API base URL has
-              // its own actionable box below, and an empty mission is explained by its
-              // own hint, so neither should also trigger this generic list. ?>
-        <?php if ($missions === [] || $esxiCredentials === [] || $ansibleCredentials === []) { ?>
-            <div class="alert alert-info"><?php echo h(__t('deploy.requirements_hint')); ?></div>
-        <?php } ?>
-        <?php if (!$apiBaseUrlReady) { ?>
-            <div class="alert alert-info"><?php echo h($apiBaseUrlError); ?></div>
+        <?php // One box per missing prerequisite, each carrying the page that clears
+              // it (lib/deploy_page.php). An empty mission is explained by its own
+              // hint at the VM field, so it does not belong in this list. ?>
+        <?php foreach ($deployNotices as $notice) { ?>
+            <div class="alert alert-info"><?php echo h($notice['message']); ?><?php if ($notice['permission'] === '' || can($notice['permission'], $user)) { ?> <a href="<?php echo h($notice['url']); ?>"><?php echo h($notice['label']); ?></a><?php } ?></div>
         <?php } ?>
         <?php if ($selectedMissionDeviates) { ?>
-            <div class="alert alert-warning"><?php echo h(__t('deploy.inventory_deviation_warn')); ?></div>
+            <?php // The sentence ends by naming the page that holds the details, so it
+                  // carries the way there rather than leaving the operator to find it. ?>
+            <div class="alert alert-warning"><?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>
         <?php } ?>
         <form class="form-grid" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
             <?php echo csrf_field(); ?>
@@ -408,7 +425,9 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                 <?php if ($selectedMission === null) { ?>
                     <p class="hint"><?php echo h(__t('deploy.vms_select_mission_first')); ?></p>
                 <?php } elseif ($missionVms === []) { ?>
-                    <p class="hint"><?php echo h(__t('deploy.vms_empty')); ?></p>
+                    <?php // This one disables the button too, so it names the mission's
+                          // VM list rather than leaving the operator to find it. ?>
+                    <p class="hint"><?php echo h(__t('deploy.vms_empty')); ?><?php if (can('vms.write', $user)) { ?> <a href="vms.php?mission_id=<?php echo h((string) $selectedMissionId); ?>"><?php echo h(__t('deploy.vms_empty_link')); ?></a><?php } ?></p>
                 <?php } else { ?>
                     <?php
                         // Reflect exactly what was submitted, so a corrected resubmit
@@ -527,7 +546,7 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                     <td><?php echo h($job['user_name'] ?? ($job['user_id'] ?? '')); ?></td>
                     <td><?php echo h(portal_format_timestamp($job['updated_at'] ?? '')); ?></td>
                     <td class="actions">
-                        <a class="button button-secondary" href="deploy_log.php?id=<?php echo h((string) $job['id']); ?>"><?php echo h(__t('deploy.log')); ?></a>
+                        <a class="button button-secondary" href="<?php echo h(deploy_job_log_url((int) $job['id'])); ?>"><?php echo h(__t('deploy.log')); ?></a>
                         <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, true)) { ?>
                             <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
                                 <?php echo csrf_field(); ?>

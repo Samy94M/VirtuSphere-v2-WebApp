@@ -230,6 +230,30 @@ echo 'JSON' . json_encode(['esxi' => $esxi, 'ansible' => $ansible, 'job' => (int
   await expect(page.locator('.inventory-details')).toHaveCount(0);
   await page.goto('system_status.php?inventory=999999#esxi');
   await expect(page.locator('.inventory-card-open')).toHaveCount(0);
+
+  runPhp(`
+$db = db();
+$jobId = ${Number(seed.job)};
+$esxiId = ${Number(seed.esxi)};
+$db->query("UPDATE deploy_jobs SET status = 'failed', last_error = '[parse] e2e failure', scheduled_at = NULL, updated_at = NOW() WHERE id = $jobId");
+$stmt = $db->prepare("INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (?, 1, 'stderr', '[parse] e2e failure')");
+$stmt->bind_param('i', $jobId);
+$stmt->execute();
+repo_esxi_inventory_record_failure($db, $esxiId, VIRTUSPHERE_INVENTORY_ERROR_PARSE, $jobId);
+echo 'FAILED';
+`, ['lib/repo/esxi_inventory.php']);
+
+  await page.goto(`system_status.php#credential-${seed.esxi}`);
+  const failedCard = page.locator(`#credential-${seed.esxi}`);
+  const failedLog = failedCard.locator(`.alert-error a[href="deploy_log.php?id=${seed.job}"]`);
+  await expect(failedLog, 'the durable failure links the exact job that produced it').toBeVisible();
+  await failedLog.click();
+  await expect(page).toHaveURL(new RegExp(`deploy_log\\.php\\?id=${seed.job}$`));
+  await expect(page.locator('table .log-line')).toContainText(/e2e failure/);
+  const origin = `system_status.php?inventory=${seed.esxi}#credential-${seed.esxi}`;
+  await expect(page.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', origin);
+  await page.getByRole('link', { name: /Zurück|Back/ }).click();
+  await expect(page).toHaveURL(new RegExp(`inventory=${seed.esxi}#credential-${seed.esxi}$`));
 });
 
 test('unknown Systemstatus POST action is rejected with HTTP 400', async ({ browser }) => {
