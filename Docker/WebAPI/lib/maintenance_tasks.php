@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/log_rotation.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
@@ -98,6 +99,18 @@ function maintenance_worker_run_jobs(mysqli $db, array &$state, bool $force, arr
             $purgedSystemJobs = repo_purge_finished_system_jobs($db);
             if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs > 0) {
                 fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . " finished system jobs\n");
+            }
+        });
+    }
+
+    if (maintenance_worker_due($state, 'log-rotation', VIRTUSPHERE_MAINTENANCE_LOG_ROTATION_INTERVAL_SECONDS, $force)) {
+        maintenance_worker_job('log-rotation', $failures, static function (): void {
+            // The two FILE logs the DB retention above cannot cover (ADR-0026
+            // amendment). Errors surface through the pass verdict; the System
+            // status deliberately shows no extra rotation row.
+            $rotated = virtusphere_rotate_logs();
+            if ($rotated > 0) {
+                fwrite(STDOUT, '[maintenance-worker] rotated ' . $rotated . " log file(s)\n");
             }
         });
     }

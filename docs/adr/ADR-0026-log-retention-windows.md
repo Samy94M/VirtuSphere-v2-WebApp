@@ -56,3 +56,30 @@ interpolieren die Konstanten, damit Text und Verhalten nicht auseinanderlaufen.
   `tests/Unit/LogRetentionTest.php` pinnt, dass das Sicherheitsfenster genau auth/users/
   credentials abdeckt und die Fenster geordnet und positiv bleiben.
 - Keine Schema-Migration nötig: reine Anwendungslogik.
+
+## Amendment (2026-07-27): rotation for the two file logs
+
+The windows above purge database rows. The two FILE logs had no counterpart:
+`logs/error.log` (the error handler appends with `FILE_APPEND`) and the PHP
+engine log from the ini grew without bound, and the ini itself documented
+"rotated by nothing" - on a LAN appliance the disk eventually is the incident.
+
+Decision: the maintenance worker rotates both size-based
+(`lib/log_rotation.php`, job `log-rotation`). Constants own the numbers
+(`VIRTUSPHERE_LOG_ROTATE_MAX_BYTES` 10 MiB, `VIRTUSPHERE_LOG_ROTATE_GENERATIONS`
+5, hourly check interval); generations shift `error.log -> .1 -> ... -> .5`
+and the oldest falls off. Boundaries of record:
+
+- Rotation only touches real children of the resolved log directory: an
+  engine log configured elsewhere is not selected, and a symlink inside the
+  directory pointing outside is an error, never a target.
+- One rotation at a time per directory (`logs/.rotation.lock`, `flock`); a
+  held lock reads as idle, never as a second rotation.
+- A missing file is idleness (a fresh install has no error log). Permission
+  and rename failures throw and reach the operator through the existing
+  maintenance verdict; deliberately no extra System status row (display
+  restraint), and no portal text spells out the numbers (bounds rule).
+- Writers survive the rename because both append paths open the file per
+  write; a racing write lands in the renamed or the fresh file, never nowhere.
+- Pinned by `tests/Unit/LogRotationTest.php` (boundary, generation shift,
+  containment, lock, missing-file idleness).

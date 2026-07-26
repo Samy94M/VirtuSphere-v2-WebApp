@@ -530,6 +530,14 @@ const VIRTUSPHERE_DEPLOY_WORKER_SLEEP_SECONDS = 5;
 const VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS = 15;
 const VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS = 60;
 const VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS = 3600;
+// File log rotation (ADR-0026 amendment): logs/error.log and the PHP engine
+// log grew without bound - the retention job purges DB rows only, and the ini
+// itself documented "rotated by nothing". Rotated by the maintenance worker;
+// errors surface through the existing maintenance verdict, deliberately no
+// extra System status row (display restraint).
+const VIRTUSPHERE_MAINTENANCE_LOG_ROTATION_INTERVAL_SECONDS = 3600;
+const VIRTUSPHERE_LOG_ROTATE_MAX_BYTES = 10485760; // 10 MiB per file
+const VIRTUSPHERE_LOG_ROTATE_GENERATIONS = 5;      // error.log.1 .. .5
 // The deploy worker's heartbeat cadence for the System status row. Deliberately
 // not its sleep interval: it sleeps every few seconds and would write hundreds
 // of rows an hour, while the staleness thresholds are multiples of the reported
