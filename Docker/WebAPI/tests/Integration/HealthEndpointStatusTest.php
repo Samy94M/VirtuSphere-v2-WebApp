@@ -109,8 +109,10 @@ final class HealthEndpointStatusTest extends TestCase
             self::markTestSkipped('VirtuSphere test stack is not reachable.');
         }
 
+        // $http_response_header is populated by the wrapper on every answered
+        // request; file_get_contents returning a body proves there was one.
         $status = 0;
-        foreach ($http_response_header ?? [] as $header) {
+        foreach ($http_response_header as $header) {
             if (preg_match('#^HTTP/\S+\s+(\d{3})#', $header, $match) === 1) {
                 $status = (int) $match[1];
             }
