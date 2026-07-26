@@ -199,6 +199,66 @@ Describe 'Initialize-VsTls (TLS-Kontrakt des Clients)' {
     }
 }
 
+Describe 'Resolve-VsApi trennt Adresswahl von Gesundheit' {
+
+    # Der Befund: health.php antwortete bei "degraded" mit 503, Invoke-RestMethod
+    # wirft unter PS 5.1 bei 5xx, und damit galt das Portal fuer JEDES
+    # Client-Skript auf JEDER VM als unerreichbar. Ein einzelner haengender
+    # Bereitstellungsauftrag konnte die ganze Client-Kette stilllegen.
+    #
+    # Die Regel, die das dauerhaft verhindert, liegt auf der Client-Seite und gilt
+    # unabhaengig davon, was health.php kuenftig sendet: ein Statuscode beweist,
+    # dass die Adresse stimmt. Nur ein Transportfehler (kein Statuscode) ist ein
+    # Grund, die naechste Adresse zu probieren.
+
+    It 'wertet HTTP <code> als "Adresse stimmt"' -ForEach @(
+        @{ code = 503 }   # health.php "degraded" vor dem Fix: der Ausgangsbefund
+        @{ code = 500 }
+        @{ code = 403 }   # IP nicht freigegeben: die Adresse ist trotzdem richtig
+        @{ code = 404 }
+    ) {
+        $answered = Invoke-InFileScope -Path $script:ClientCommon -Arguments @((New-FakeHttpError -StatusCode $code)) -Body {
+            param($record)
+            Test-VsApiAnswered -ErrorRecord $record
+        }
+
+        $answered | Should -BeTrue
+    }
+
+    It 'wertet einen Transportfehler ohne Statuscode als "Adresse stimmt nicht"' {
+        # DNS-Fehler, Verbindung abgelehnt, Timeout, TLS-Handshake: kein Response,
+        # also kein Beweis, dass dort ueberhaupt etwas horcht.
+        $transportError = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'Der Remotename konnte nicht aufgeloest werden.' } }
+
+        $answered = Invoke-InFileScope -Path $script:ClientCommon -Arguments @($transportError) -Body {
+            param($record)
+            Test-VsApiAnswered -ErrorRecord $record
+        }
+
+        $answered | Should -BeFalse
+    }
+
+    It 'benutzt genau dieses Praedikat in Resolve-VsApi' {
+        # Ohne diesen Pin lebt die Entscheidung wieder als Inline-Bedingung in der
+        # Schleife, und der Test oben prueft eine Funktion, die niemand aufruft.
+        $source = Get-Content -Path $script:ClientCommon -Raw
+        $source | Should -Match 'function Resolve-VsApi[\s\S]*?Test-VsApiAnswered -ErrorRecord \$_'
+    }
+
+    It 'hat Get-VsErrorStatusCode als Zwilling der MECM-Seite (ADR-0029)' {
+        # Beide Seiten teilen keinen Code, also muss der Zwilling existieren und
+        # dasselbe liefern; ohne ihn faellt die Regel oben lautlos auf "jeder
+        # Fehler ist unerreichbar" zurueck.
+        foreach ($file in @($script:ClientCommon, $script:MecmCommon)) {
+            $code = Invoke-InFileScope -Path $file -Arguments @((New-FakeHttpError -StatusCode 503)) -Body {
+                param($record)
+                Get-VsErrorStatusCode -ErrorRecord $record
+            }
+            $code | Should -Be 503
+        }
+    }
+}
+
 Describe 'Device-Sync: leere JSON-Geraeteliste unter Windows PowerShell 5.1' {
 
     It 'normalisiert das von Invoke-RestMethod verschachtelte leere Array auf 0 Devices' {

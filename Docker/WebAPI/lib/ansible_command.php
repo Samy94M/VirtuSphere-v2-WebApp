@@ -299,9 +299,22 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
 
     $apiBaseUrl = trim($apiBaseUrl);
     if ($apiBaseUrl !== '') {
+        // An HTTP status of any kind proves the route: only a transport error
+        // means the host cannot reach the portal. urlopen() raises HTTPError on
+        // 4xx/5xx, so the bare call failed this component for a portal that was
+        // answering perfectly well but reporting itself degraded, and the deploy
+        // died in its preflight over a health nuance. Same rule as
+        // Test-VsApiAnswered on the client side and as health.php's own 200 for
+        // `degraded`: three layers, one predicate.
         $healthUrl = rtrim($apiBaseUrl, '/') . '/portal/health.php';
         $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL] = 'VS_PF_URL=' . ansible_sh_quote($healthUrl)
-            . ' python3 -c ' . ansible_sh_quote('import os, urllib.request; urllib.request.urlopen(os.environ["VS_PF_URL"], timeout=5)') . ' 2>&1';
+            . ' python3 -c ' . ansible_sh_quote(
+                'import os, urllib.request, urllib.error' . "\n"
+                . 'try:' . "\n"
+                . '    urllib.request.urlopen(os.environ["VS_PF_URL"], timeout=5)' . "\n"
+                . 'except urllib.error.HTTPError as error:' . "\n"
+                . '    print("portal answered HTTP %d" % error.code)' . "\n"
+            ) . ' 2>&1';
 
         $macUploadUrl = rtrim($apiBaseUrl, '/') . '/db_importMAC.php';
         $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST] = 'VS_PF_MAC_URL=' . ansible_sh_quote($macUploadUrl)

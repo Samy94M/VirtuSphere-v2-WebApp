@@ -151,13 +151,11 @@ docker compose exec -T php php /var/www/html/lib/migrate.php
 
 ## Health endpoint
 
-`/portal/health.php` returns JSON for automation. The response includes:
+`/portal/health.php` returns JSON for automation: `status` (`ok`, `degraded` or `error`), `db` and the coarse `php` version. `status` is `degraded` when the application or PHP error-log directory is unwritable, or when a running deploy job has not reported for `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` (the reaper's own constant, so both agree on what stale means).
 
-- `db`: database connectivity.
-- `logs`: writability of the application log directory and PHP engine error-log directory.
-- `worker`: count of running deploy jobs, stale running jobs and the latest worker heartbeat.
+**The HTTP status is 200 for `ok` and for `degraded`; only a database/bootstrap failure answers 503** (`status: "error"`, a generic service-unavailable message, the exception in the server-side log). This endpoint is an address probe before it is a health report: the MECM installer, every client script's `Resolve-VsApi` and the Ansible host's deploy preflight all ask it "are you there", and PowerShell 5.1's `Invoke-RestMethod` throws on a 5xx while discarding the body. While `degraded` answered 503, a single stale deploy job made the portal look unreachable to the entire machine chain, and the PHPUnit integration suite skipped itself. The client side holds the same rule independently: a status code of any kind proves the address, only a transport error moves on to the next candidate (`Test-VsApiAnswered`).
 
-A degraded log or worker state returns HTTP 503 with `status: "degraded"`; a database/bootstrap failure returns `status: "error"` with a generic service-unavailable message and logs the internal exception server-side.
+The body deliberately carries nothing else. Job counts, heartbeat timestamps and the backup age used to be here, unauthenticated, for any host in the deploy VLAN; they are read in the portal instead.
 
 ## Backend validation and login throttling
 

@@ -6,7 +6,6 @@ require_once __DIR__ . '/../lib/envboot.php';
 require_once __DIR__ . '/../lib/headers.php';
 require_once __DIR__ . '/../lib/db.php';
 require_once __DIR__ . '/../lib/deploy_constants.php';
-require_once __DIR__ . '/../lib/backup_status.php';
 
 virtusphere_send_security_headers();
 header('Content-Type: application/json; charset=utf-8');
@@ -16,11 +15,6 @@ header('Content-Type: application/json; charset=utf-8');
 // trivial. Der einzige maschinelle Konsument (install-VirtuSphere-MECM.ps1)
 // liest nur `.status`. Gepinnt durch VersionExposureContractTest.
 const HEALTH_PHP_VERSION = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
-
-function health_bool_status(bool $ok): string
-{
-    return $ok ? 'ok' : 'error';
-}
 
 function health_statement_row(mysqli $db, string $sql, string $types = '', array $params = []): array
 {
@@ -34,62 +28,60 @@ function health_statement_row(mysqli $db, string $sql, string $types = '', array
     return is_array($row) ? $row : [];
 }
 
-function health_log_checks(): array
+/** Both log destinations the app writes to must be writable. */
+function health_logs_ok(): bool
 {
-    $logDir = dirname(__DIR__) . '/logs';
     $phpErrorLog = (string) ini_get('error_log');
     $phpLogDir = $phpErrorLog !== '' ? dirname($phpErrorLog) : '';
+    $appLogDir = dirname(__DIR__) . '/logs';
 
-    $appLogWritable = is_dir($logDir) && is_writable($logDir);
-    $phpLogWritable = $phpLogDir !== '' && is_dir($phpLogDir) && is_writable($phpLogDir);
-
-    return [
-        'status' => health_bool_status($appLogWritable && $phpLogWritable),
-        'app_log_dir' => $appLogWritable ? 'ok' : 'error',
-        'php_error_log_dir' => $phpLogWritable ? 'ok' : 'error',
-    ];
+    return is_dir($appLogDir) && is_writable($appLogDir)
+        && $phpLogDir !== '' && is_dir($phpLogDir) && is_writable($phpLogDir);
 }
 
-function health_worker_checks(mysqli $db): array
+/**
+ * Whether a running deploy job has stopped reporting. "Stale" means the same
+ * thing here as it does to the reaper, and it reads the reaper's own constant to
+ * say so: the hardcoded 2 MINUTE called jobs stale that the reaper still
+ * considered alive, so this endpoint reported `degraded` for a healthy deploy
+ * whose playbook simply had not printed for three minutes.
+ */
+function health_workers_ok(mysqli $db): bool
 {
     $status = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-    $row = health_statement_row($db, 'SELECT COUNT(*) AS running_jobs, SUM(CASE WHEN heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL 2 MINUTE) THEN 1 ELSE 0 END) AS stale_running_jobs, MAX(heartbeat_at) AS latest_heartbeat_at FROM deploy_jobs WHERE status = ?', 's', [$status]);
-    $running = (int) ($row['running_jobs'] ?? 0);
-    $stale = (int) ($row['stale_running_jobs'] ?? 0);
+    $stale = VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS;
+    $row = health_statement_row(
+        $db,
+        'SELECT SUM(CASE WHEN heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND) THEN 1 ELSE 0 END) AS stale_running_jobs FROM deploy_jobs WHERE status = ?',
+        'is',
+        [$stale, $status]
+    );
 
-    return [
-        'status' => $stale > 0 ? 'degraded' : 'ok',
-        'running_jobs' => $running,
-        'stale_running_jobs' => $stale,
-        'latest_heartbeat_at' => $row['latest_heartbeat_at'] ?? null,
-    ];
+    return (int) ($row['stale_running_jobs'] ?? 0) === 0;
 }
 
 try {
     $db = db();
     health_statement_row($db, 'SELECT 1 AS ok');
 
-    $logs = health_log_checks();
-    $worker = health_worker_checks($db);
-    $status = ($logs['status'] === 'ok' && $worker['status'] === 'ok') ? 'ok' : 'degraded';
-    if ($status !== 'ok') {
-        http_response_code(503);
-    }
-
-    // Informative only: backup health never changes the HTTP status. The portal
-    // surfaces it in the settings card and dashboard banner (ADR-0021).
-    $backup = backup_status_read();
-
+    // 200, including for `degraded`. This endpoint is an ADDRESS PROBE before it
+    // is a health report: the MECM installer, every client script's
+    // Resolve-VsApi and the Ansible host's preflight all ask it "are you there",
+    // and PowerShell 5.1's Invoke-RestMethod THROWS on a 5xx while discarding the
+    // body. A degraded portal therefore looked unreachable to the whole machine
+    // chain, so one stale deploy job - or a worker restart - could stop every
+    // client script on every VM at once, and the same 503 made the integration
+    // suite skip itself silently. Only the catch branch below answers 503, where
+    // it means what a 503 means: this service cannot serve requests.
+    //
+    // The nuance is not lost, it is in the body, which is where a health report
+    // belongs. The body carries nothing an unauthenticated caller in the deploy
+    // VLAN has no business knowing: job counts, heartbeat timestamps and the
+    // backup age used to be here and are read from the portal instead.
     echo json_encode([
-        'status' => $status,
+        'status' => (health_logs_ok() && health_workers_ok($db)) ? 'ok' : 'degraded',
         'db' => 'ok',
         'php' => HEALTH_PHP_VERSION,
-        'logs' => $logs,
-        'worker' => $worker,
-        'backup' => [
-            'status' => $backup['state'],
-            'age_seconds' => $backup['age_seconds'],
-        ],
     ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
     error_log('[health] ' . $exception::class . ': ' . $exception->getMessage());

@@ -143,6 +143,19 @@ function Initialize-VsTls {
 }
 
 # Ermittelt eine erreichbare API-Adresse (health-Probe). $null wenn keine geht.
+#
+# Das ist eine ADRESSWAHL, keine Gesundheitspruefung: die Frage ist "antwortet
+# unter dieser Adresse die WebApp", nicht "ist ihr gerade wohl". Jede HTTP-Antwort
+# beantwortet die erste Frage mit ja, auch eine mit Statuscode 4xx oder 5xx, denn
+# einen Statuscode kann nur liefern, wer erreichbar ist.
+#
+# Das war der Unterschied zwischen einem gedrosselten Portal und einem
+# abgeschalteten Client: Invoke-RestMethod wirft unter PS 5.1 bei 5xx, health.php
+# antwortete bei "degraded" mit 503, und damit galt das Portal fuer JEDES
+# Client-Skript auf JEDER VM als unerreichbar. Ein einzelner haengender
+# Bereitstellungsauftrag konnte so die ganze Kette stilllegen. health.php
+# antwortet inzwischen 200 fuer "degraded"; diese Seite haelt dieselbe Regel
+# unabhaengig davon ein, weil sie fuer jede kuenftige Fehlerantwort gilt.
 function Resolve-VsApi {
     if ($script:VsResolvedApi) { return $script:VsResolvedApi }
     Initialize-VsTls
@@ -152,14 +165,42 @@ function Resolve-VsApi {
             Set-VsResolvedApi -Api $candidate
             return $candidate
         } catch {
-            # Naechste Adresse probieren. Der Grund bleibt per -Debug abrufbar:
-            # "alle Kandidaten unerreichbar" ist sonst nicht davon zu
-            # unterscheiden, dass das Portal auf HTTPS steht und der Client noch
-            # http spricht.
+            $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
+            if (Test-VsApiAnswered -ErrorRecord $_) {
+                Write-VsClientLog -Level WARN ("Portal unter {0} antwortet mit HTTP {1}; Adresse wird trotzdem benutzt: {2}" -f $candidate, $statusCode, (Get-VsErrorDetail -ErrorRecord $_))
+                Set-VsResolvedApi -Api $candidate
+                return $candidate
+            }
+            # Der Grund bleibt per -Debug abrufbar: "alle Kandidaten
+            # unerreichbar" ist sonst nicht davon zu unterscheiden, dass das
+            # Portal auf HTTPS steht und der Client noch http spricht.
             Write-Debug ('Kandidat {0} nicht erreichbar: {1}' -f $candidate, $_)
         }
     }
     return $null
+}
+
+# HTTP-Statuscode einer fehlgeschlagenen Anfrage, oder $null wenn die Anfrage den
+# Server nie erreicht hat. Zwilling der gleichnamigen Funktion in
+# mecm\VirtuSphere-Common.ps1 (ADR-0029: die beiden Seiten teilen keinen Code,
+# weil die Client-Skripte einzeln per MECM-Paket auf die VM kommen).
+function Get-VsErrorStatusCode {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    try {
+        $response = $ErrorRecord.Exception.Response
+        if ($response -and $response.StatusCode) { return [int]$response.StatusCode }
+    } catch { Write-Debug $_ }
+    return $null
+}
+
+# Ob eine fehlgeschlagene Probe die ADRESSE bestaetigt hat: einen Statuscode kann
+# nur liefern, wer erreichbar ist, auch bei 4xx und 5xx. Nur ein Transportfehler
+# (DNS, Verbindung abgelehnt, Timeout, TLS-Handshake) hat keinen, und nur der ist
+# ein Grund, die naechste Adresse zu probieren. Eigene Funktion, damit genau diese
+# Entscheidung pruefbar ist, ohne Invoke-RestMethod zu ersetzen.
+function Test-VsApiAnswered {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    return $null -ne (Get-VsErrorStatusCode -ErrorRecord $ErrorRecord)
 }
 
 # Liest den Antwort-Body aus einer fehlgeschlagenen Anfrage (siehe die
