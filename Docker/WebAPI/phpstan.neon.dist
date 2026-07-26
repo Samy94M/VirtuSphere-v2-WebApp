@@ -9,6 +9,12 @@ includes:
 
 parameters:
     level: 5
+    # Ohne Deckel startet PHPStan je CPU einen Worker (16 auf dem Dev-Host) und
+    # die Docker-VM (8 GiB, geteilt mit den Stacks) killt Worker per OOM
+    # (exit 137, "Result is incomplete because of severe errors"). Vier Prozesse
+    # bleiben unter dem Budget und aendern keine Befunde, nur die Laufzeit.
+    parallel:
+        maximumNumberOfProcesses: 4
     paths:
         - lib
         - portal
