@@ -19,7 +19,7 @@ const MARK = 'e2edform';
 // Every field of the queue form, with a value that is not its default, so a
 // field that silently falls back to the default fails instead of passing.
 const FILLED = {
-  mode: 'powercycle', // staggerable AND power-cycling: neither lock disables a field
+  mode: 'powercycle', // staggerable and power-cycling, and it disables the start wait
   powercycle_wait: '42',
   // Deliberately the one field the chosen mode DOES disable: powercycle runs no
   // start playbook. A disabled-but-filled control is exactly what FormData drops
@@ -84,11 +84,22 @@ async function fillQueueForm(page, ids, scheduledAt) {
   const form = queueForm(page);
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
-  // Mode first: it is what enables the wait time and the staggering.
-  await form.locator('select[name="mode"]').selectOption(FILLED.mode);
+  // 'full' first, because it is the one mode that enables BOTH wait fields, so
+  // both can be typed the way an operator types them. Then the mode changes to
+  // the one under test, which disables the start wait while keeping the typed
+  // value: that is the state the carrier has to survive.
+  //
+  // Filling a disabled input directly is not an option, with or without `force`:
+  // the keystrokes go to whatever still holds focus, so the value lands in the
+  // neighbouring field. This spec read 4299 in the power-cycle wait for exactly
+  // that reason, and blamed the page for it.
+  await form.locator('select[name="mode"]').selectOption('full');
   await form.locator('input[name="powercycle_wait"]').fill(FILLED.powercycle_wait);
-  // force: the mode above disables this input; filling it anyway is the point.
-  await form.locator('input[name="start_wait"]').fill(FILLED.start_wait, { force: true });
+  await form.locator('input[name="start_wait"]').fill(FILLED.start_wait);
+  await form.locator('select[name="mode"]').selectOption(FILLED.mode);
+  // The precondition of the rule this spec proves. Without it the "disabled but
+  // filled" case silently degrades into an ordinary enabled field.
+  await expect(form.locator('input[name="start_wait"]'), 'the mode disables the start wait').toBeDisabled();
   await form.locator('input[name="verbose"]').check();
   // The datetime field is hidden until the radio unhides it.
   await form.locator('input[name="start_mode"][value="scheduled"]').check();

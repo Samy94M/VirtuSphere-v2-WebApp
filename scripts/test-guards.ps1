@@ -229,7 +229,10 @@ $docSemFixtureFiles = @(
     'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/deploy_constants.php',
     # SSoT der env-key-Regel: ohne .env.example meldet sie no-ssot, und jeder
     # andere Fall waere aus dem falschen Grund rot.
-    '.env.example'
+    '.env.example',
+    # SSoT der Hardware-Version: dasselbe Argument. Ohne das Playbook meldet
+    # Regel 15 no-ssot und faerbt jeden anderen Fall mit.
+    'Ansible/createVMs-ESXi_playbook.yml'
 )
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
 $enumList = "'queued','running','succeeded','failed','cancelled','partial'"
@@ -344,6 +347,44 @@ $cases = @(
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'docs/operations/go-live.md' 'APP_BIND_IP' 'APP_IRGENDWAS'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.env-key-unnamed\]'
+    } }
+    @{ Name = 'doc-semantics.migration-range'; Body = {
+        # Die Bereichsform, die die Zaehlregel nicht fing: beide Enden sind
+        # konkrete Namen, also sah die Spanne wie eine fachliche Referenz aus und
+        # veraltete trotzdem mit der naechsten Migration.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Erwartet: Migrationen 0001-0028 angewandt.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.migration-range\]'
+    } }
+    @{ Name = 'doc-semantics.doc-ascii-umlaut'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Backup laeuft taeglich und ist fuer den Betrieb noetig.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
+    } }
+    @{ Name = 'doc-semantics.doc-ascii-umlaut-in-code'; Body = {
+        # Gegenrichtung: derselbe Text in Backticks ist ein zitierter Wert. Ein
+        # PowerShell-Skript vergleicht wirklich gegen 'Uebersprungen'; dort einen
+        # Umlaut zu erzwingen wuerde die Doku falsch machen, und eine Regel, die
+        # das verlangt, wird abgeschaltet statt befolgt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Skript meldet ``Uebersprungen``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'doc-semantics.hw-version-matrix'; Body = {
+        # Das Paar, nicht die Zahl: eine Hardware-Version, deren ESXi-Untergrenze
+        # die Support-Matrix nicht nennt, verspricht Hosts, auf denen die
+        # VM-Erstellung hart fehlschlaegt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Ansible/createVMs-ESXi_playbook.yml' 'version: 21' 'version: 19'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-matrix\]'
+    } }
+    @{ Name = 'doc-semantics.hw-version-unknown'; Body = {
+        # Eine Version, fuer die niemand eine Untergrenze belegt hat, ist kein
+        # gruener Lauf: sonst haette ein kuenftiges vmx-22 die Regel still
+        # stillgelegt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Ansible/createVMs-ESXi_playbook.yml' 'version: 21' 'version: 22'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-unknown\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {

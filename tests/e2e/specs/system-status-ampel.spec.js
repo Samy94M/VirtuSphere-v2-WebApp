@@ -89,6 +89,39 @@ echo 'RESTORED';
 `);
 }
 
+// The machine-API denial trace feeds the SAME MECM card as the heartbeats: with a
+// refusal on record the setup empty-state says "set up but refused" instead of
+// "not connected yet". A test that asserts one of those two sentences therefore
+// has to own both inputs. It did not, and the suite went red the first time the
+// PHPUnit run before it had left a denial row inside the 24-hour window: the page
+// was right, the spec was asserting a state it had not arranged.
+function denialSnapshot() {
+  return phpJson(`
+$db = db();
+$rows = [];
+$res = $db->query("SELECT * FROM deploy_logs WHERE category = '" . VIRTUSPHERE_LOG_CATEGORY_MACHINE_API . "'");
+while ($row = $res->fetch_assoc()) { $rows[] = $row; }
+echo 'JSON' . json_encode($rows) . 'JSON';
+`);
+}
+
+function restoreDenials(rows) {
+  const payload = Buffer.from(JSON.stringify(rows), 'utf8').toString('base64');
+  runPhp(`
+$rows = json_decode(base64_decode('${payload}'), true, 16, JSON_THROW_ON_ERROR);
+$db = db();
+$db->query("DELETE FROM deploy_logs WHERE category = '" . VIRTUSPHERE_LOG_CATEGORY_MACHINE_API . "'");
+foreach ($rows as $row) {
+    $cols = array_keys($row);
+    $sql = 'INSERT INTO deploy_logs (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')';
+    $stmt = $db->prepare($sql);
+    $stmt->bind_param(str_repeat('s', count($cols)), ...array_values($row));
+    $stmt->execute();
+}
+echo 'RESTORED';
+`);
+}
+
 /** Badge texts of one legend group, in render order. */
 async function legendGroup(page, index) {
   return page.locator('details.status-legend ul.ampel-legend').nth(index).locator('.badge').allTextContents();
@@ -175,12 +208,15 @@ echo 'SEEDED';
 
 test('an unconnected MECM states the setup step once instead of repeating repair hints per row', async ({ page }) => {
   const snapshot = heartbeatSnapshot();
+  const denials = denialSnapshot();
   try {
     // Both MECM groups must be unknown for the shared setup empty-state, so the
-    // site-health source is cleared alongside the three sync sources.
+    // site-health source is cleared alongside the three sync sources. The denial
+    // trace goes too: "never connected" is exactly the absence of one.
     runPhp(`
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('${WIRE_SOURCES.join("','")}', 'mecm-site-health')");
+$db->query("DELETE FROM deploy_logs WHERE category = '" . VIRTUSPHERE_LOG_CATEGORY_MACHINE_API . "'");
 echo 'SEEDED';
 `);
 
@@ -215,6 +251,46 @@ echo 'SEEDED';
     ).toHaveCount(1);
   } finally {
     restoreHeartbeats(snapshot);
+    restoreDenials(denials);
+  }
+});
+
+// The other half of the same card, and the one the operator meets more often: the
+// commonest setup mistake in the product is a missing IP allowlist entry, and
+// without a refusal on record it looked exactly like a server where MECM was
+// never installed. A refusal is the one piece of positive evidence that tells the
+// two apart, so the page has to say something different. Only a browser shows
+// which of the two sentences a given state produces.
+test('a refused MECM says so instead of claiming it is probably not set up yet', async ({ page }) => {
+  const snapshot = heartbeatSnapshot();
+  const denials = denialSnapshot();
+  try {
+    runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('${WIRE_SOURCES.join("','")}', 'mecm-site-health')");
+$db->query("DELETE FROM deploy_logs WHERE category = '" . VIRTUSPHERE_LOG_CATEGORY_MACHINE_API . "'");
+audit($db, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, '[forbidden] e2e denial', null, '10.99.0.42');
+echo 'SEEDED';
+`, ['lib/repo/log.php']);
+
+    await page.goto('system_status.php');
+
+    // Not "no connection yet": the tasks are running, their host is just not
+    // allowed to talk to the portal.
+    const callout = page.locator('#mecm .empty-state').filter({
+      hasText: /wird aber abgewiesen|is being refused/,
+    });
+    await expect(callout).toHaveCount(1);
+    await expect(
+      page.locator('#mecm .empty-state').filter({ hasText: /Noch keine MECM-Anbindung|No MECM connection yet/ }),
+    ).toHaveCount(0);
+
+    // The refused IP is named, because that IP is exactly what goes on the
+    // allowlist; a warning that withholds it is a warning the operator cannot act on.
+    await expect(page.locator('#mecm .alert-warning')).toContainText('10.99.0.42');
+  } finally {
+    restoreHeartbeats(snapshot);
+    restoreDenials(denials);
   }
 });
 

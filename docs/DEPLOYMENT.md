@@ -18,6 +18,7 @@ Required on the Ubuntu host:
 | Dimension | Supported | Notes |
 |---|---|---|
 | ESXi / vSphere | 7.0, 8.0 | The range `community.vmware` 6.x targets. Older releases are out of general support. |
+| ESXi for **creating** VMs | 8.0 Update 2 or newer | `createVMs-ESXi_playbook.yml` creates VMs at hardware version 21, and Broadcom documents vmx-21 as not compatible with ESXi releases before 8.0 Update 2. On an older host the create step fails hard, so this floor is narrower than the row above on purpose: inventory, autostart and power-cycling work from 7.0, only creation does not. The legacy desktop client shipped the same 21, which is why nobody met this: it proves the hosts in the field are already 8.0 U2 or newer, not that 7.0 works. `check-doc-semantics.sh` (rule 15) fails the build if the playbook's version and this floor drift apart. |
 | Licence | any licensed edition (Standard, Enterprise Plus, VCF) | The write API is what deploy and autostart need. |
 | Free licence (incl. 8.0 U3e) | inventory only | Broadcom's free hypervisor exposes a read-only API. Inventory pulls work; creating VMs and writing the autostart policy do not. The portal reads the licence from the host and warns before a job runs. |
 | Host in a vSphere HA cluster | deploy yes, autostart no | ESXi disables autostart on HA cluster members; the HA restart priority owns startup there. |

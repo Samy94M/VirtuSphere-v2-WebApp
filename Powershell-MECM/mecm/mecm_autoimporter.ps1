@@ -202,9 +202,7 @@ while ($true) {
                 }
             }
 
-            # --- Application anlegen (falls neu) ---------------------------
-            $isNew = -not (Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue)
-            # --- Self-Healing der install.ps1 (bei JEDEM Scan) -----------------
+            # --- Self-Healing der install.ps1 (bei JEDEM Scan) -------------
             #
             # Nicht mehr nur bei $isNew: die Vorlage gewinnt laut Vertrag, aber der
             # $isNew-Zweig gab ihr genau einen Versuch. Ein Fehlschlag dort war
@@ -224,6 +222,8 @@ while ($true) {
                 }
             }
 
+            # --- Application anlegen (falls neu) ---------------------------
+            $isNew = -not (Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue)
             if ($isNew) {
                 Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
                 New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null

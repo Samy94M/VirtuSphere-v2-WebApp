@@ -14,7 +14,7 @@ Dieses Runbook ist daher zugleich Inbetriebnahme **und** erste echte Verifikatio
 
 | Ebene | Stand | Erste echte Abnahme in |
 |---|---|---|
-| PHP-Code, Migrationen 0001–0022 | lokal grün, nie produktiv | Schritt 1–2 |
+| PHP-Code und alle Migrationen | lokal grün, nie produktiv | Schritt 1–2 |
 | MECM-Rückkanal, Ergebnisberichte, Statusseite | lokal grün | Schritt 4 |
 | Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 5 |
 | PowerShell MECM-Server-Skripte | nur Parser-Check | Schritt 4 |
@@ -179,8 +179,10 @@ docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php       
 docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check # muss sauber melden
 ```
 
-Erwartet: Migrationen 0001–0022 angewandt, `--check` ohne Drift. (Auf ubuntu-102
-am 2026-07-22 einmal produktiv bestätigt: alle 22 sauber, `--check: ok`.)
+Erwartet: `--check` meldet `migrations pending=0` und keine Drift. Die Anzahl
+steht hier bewusst nicht: sie wächst mit jeder Migration, und eine Zahl im
+Runbook lässt eine korrekte Installation falsch aussehen. Der Befehl ist die
+Aussage. (Auf ubuntu-102 am 2026-07-22 einmal produktiv bestätigt.)
 
 ## Schritt 3: Backup einrichten (vor dem ersten echten Datenbestand)
 

@@ -394,13 +394,15 @@ jeweiligen Parameter behält den eingestellten Wert; ein Skript-Update setzt
 einen getunten Takt also nicht zurück. SSoT der Spannen ist
 `$script:VsIntervalBounds` in `mecm\VirtuSphere-Common.ps1`.
 
-Hinweis HTTP/HTTPS: Die API-Aufrufe der Skripte laufen bewusst ueber HTTP; das
-Portal-HTTPS aus WP7 leitet sie nie um (ADR-0027). Kommt bei E3 die
-HTTPS-Umstellung der Maschinen-API (ADR-0019, Kandidat 5), aendern sich nur
-die Registry-URL auf `https://` und eine einmalige
-`[Net.ServicePointManager]::SecurityProtocol = Tls12`-Zeile in den Skripten;
-ein Zertifikat pro Client ist nicht noetig, weil domänengebundene Maschinen
-der Domaenen-CA automatisch vertrauen.
+Hinweis HTTP/HTTPS: Die API-Aufrufe der Skripte laufen standardmäßig über HTTP,
+und das Portal-HTTPS leitet sie nie um (ADR-0027). HTTPS ist für die
+Maschinenkette aber nicht mehr Ausblick, sondern eingebaut: `-Scheme https` am
+Installer schreibt das Schema in die Registry, `Initialize-VsTls` setzt TLS 1.2 in
+**jeder** der vier Aufgaben (nicht nur im Installerprozess, der in seinem eigenen
+läuft), und einem selbstsignierten Zertifikat wird über den hinterlegten
+Fingerabdruck `-CertThumbprint` vertraut statt über abgeschaltete Prüfung. Ein
+Zertifikat pro Client ist nicht nötig: domänengebundene Maschinen vertrauen der
+Domänen-CA automatisch. Details in `docs/operations/https.md`.
 
 #### Absicherung des ReportToken
 

@@ -236,6 +236,88 @@ else
   fail no-ssot "$env_example, $compose_file oder $runbook fehlt; ohne alle drei ist die .env-Abdeckung nicht pruefbar."
 fi
 
+# --- 13. Migrationsstand auch in der Bereichsform -------------------------------
+#
+# Regel 4 faengt "Migrationsstand 0020" und "28 Migrationen", nicht aber die Form,
+# in der ein Dokument den Umfang als Spanne behauptet ("Migrationen 0001-0028",
+# "migrations 0001 bis 0028"). Die veraltet genauso mit der naechsten Migration,
+# sieht aber wie eine fachliche Referenz aus, weil beide Enden konkrete Namen sind.
+# Eine einzelne Nennung bleibt erlaubt, eine Spanne nicht.
+for f in $active_docs; do
+  if grep -nE '\b0[0-9]{3} ?(-|–|bis|to|\.\.\.?) ?0[0-9]{3}\b' "$f" >&2; then
+    fail migration-range "$f behauptet einen Migrationsumfang als Spanne; die veraltet mit der naechsten Migration. Eine einzelne Migration namentlich zu nennen bleibt erlaubt."
+  fi
+done
+
+# --- 14. Deutsche Dokumente schreiben echte Umlaute -----------------------------
+#
+# Dieselbe Regel, die fuer den Portalkatalog schon gilt (ADR-0014): ue/ae/oe statt
+# ue/ae/oe liest sich wie eine Kodierungsstoerung und ist in einem Dokument, das ein
+# wechselnder Administrator unter Druck liest, genau die falsche Stelle fuer Zweifel
+# am Text. Geprueft wird eine Wortliste statt eines Musters, weil "neue" und
+# "Steuerung" legitim sind: nur Schreibweisen, die im Deutschen nie richtig sind.
+#
+# Code faellt vorher heraus (Zeilen gezaehlt, nicht geloescht, damit die
+# Zeilennummer stimmt): ein Bezeichner in Backticks oder in einem Codeblock ist ein
+# zitierter Wert, kein Prosatext. `client_hostname erkennt \`Uebersprungen\`` nennt
+# ein String-Literal, das ein PowerShell-Skript wirklich so vergleicht; dort einen
+# Umlaut zu erzwingen wuerde die Doku falsch machen.
+umlaut_words='fuer|ueber|Ueber|waehrend|naechst|moeglich|Moeglich|koenn|Koenn|wuerde|Wuerde|gehoert|loesch|Loesch|oeffn|Oeffn|aender|Aender|Groesse|pruef|Pruef|ausfuehr|Ausfuehr|zurueck|Zurueck|muess|Muess|Loesung|Schluessel|Verzoeger|maessig|gemaess|hoechst|spaeter|gueltig|Gueltig|erfuellt|Uebersicht|bestaetig|Bestaetig|zusaetzlich|Zusaetzlich|taeglich|urspruenglich|beruecksichtig|verfuegbar|Verfuegbar|noetig|Noetig|stoer|Stoer'
+for f in $active_docs; do
+  # docs/INSTALLATION-ANLEITUNG.md ist bewusst ausgenommen: die durchgehende
+  # Umlaut-Korrektur dieses Dokuments ist als eigenes Arbeitspaket eingeplant
+  # (P2). Die Ausnahme steht hier statt im Stillen, damit sie mit dem Paket
+  # verschwindet und nicht mit ihm vergessen wird.
+  [ "$f" = 'docs/INSTALLATION-ANLEITUNG.md' ] && continue
+  prose=$(awk '/^[[:space:]]*```/ { fence = !fence; print ""; next } { print (fence ? "" : $0) }' "$f" \
+    | sed 's/`[^`]*`//g')
+  if printf '%s\n' "$prose" | grep -nE "\b($umlaut_words)" >&2; then
+    fail doc-ascii-umlaut "$f schreibt Umlaute als ue/ae/oe (Zeilennummern oben, Code ausgenommen); deutsche Dokumente benutzen echte Umlaute wie der Portalkatalog."
+  fi
+done
+
+# --- 15. Hardware-Version des createVMs-Playbooks vs. Support-Matrix ------------
+#
+# Das Playbook verdrahtet `version: 21`. vmx-21 ist laut Broadcom "not compatible
+# with versions of ESXi prior to 8.0 Update 2", die Support-Matrix in
+# docs/DEPLOYMENT.md verspricht aber ESXi 7.0 und 8.0. Dass der Altclient dieselbe
+# 21 ausliefert und im Feld funktioniert, beweist nur, dass die Hosts im Feld schon
+# 8.0 U2 oder neuer sind: ein erster Kunde auf 7.0 laeuft in einen harten
+# Fehlschlag bei der VM-Erstellung, und unsere eigene Zusage ist die Ursache.
+#
+# Geprueft wird deshalb das Paar, nicht die Zahl: das Playbook ist die SSoT, und die
+# Matrix muss die Untergrenze nennen, die diese Zahl verlangt.
+create_playbook='Ansible/createVMs-ESXi_playbook.yml'
+matrix_doc='docs/DEPLOYMENT.md'
+if [ -f "$create_playbook" ] && [ -f "$matrix_doc" ]; then
+  hw_version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$create_playbook" | head -n 1)
+  if [ -z "$hw_version" ]; then
+    fail no-ssot "$create_playbook nennt keine hardware version mehr; Regel 15 kann die Support-Matrix nicht mehr dagegen halten."
+  else
+    # Die Untergrenze je vmx-Version. Waechst die Liste, waechst die Doku mit.
+    case "$hw_version" in
+      21) esxi_floor='8.0 Update 2' ;;
+      20) esxi_floor='8.0' ;;
+      19) esxi_floor='7.0 Update 2' ;;
+      *)  esxi_floor='' ;;
+    esac
+    if [ -z "$esxi_floor" ]; then
+      fail hw-version-unknown "$create_playbook setzt hardware version $hw_version, fuer die Regel 15 keine ESXi-Untergrenze kennt; Untergrenze belegen und hier eintragen."
+    else
+      # Nur die Zeilen, die von der Erstellung reden. Ein "8.0" irgendwo in der
+      # Matrix ist kein Beleg: die Zeile ueber der Erstellungsgrenze nennt die
+      # allgemein unterstuetzten Versionen, und die ist genau die Aussage, die zu
+      # weit ist.
+      create_rows=$(grep -iE 'creating|hardware version' "$matrix_doc" || true)
+      if ! printf '%s\n' "$create_rows" | grep -qF "$esxi_floor"; then
+        fail hw-version-matrix "$create_playbook erzeugt VMs mit hardware version $hw_version (verlangt ESXi $esxi_floor), aber $matrix_doc nennt diese Untergrenze nicht dort, wo es um die Erstellung geht; die Support-Matrix verspricht damit Hosts, auf denen die VM-Erstellung hart fehlschlaegt."
+      fi
+    fi
+  fi
+else
+  fail no-ssot "$create_playbook oder $matrix_doc fehlt; die Hardware-Version ist nicht gegen die Support-Matrix pruefbar."
+fi
+
 # --- 9. Terminologie: SCCM ist ausgemustert, aktiver Text sagt MECM -------------
 term_scope="$active_docs"
 for p in Powershell-MECM tests/powershell PSScriptAnalyzerSettings.psd1 \
