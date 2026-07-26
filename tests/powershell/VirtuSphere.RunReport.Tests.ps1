@@ -585,6 +585,128 @@ Describe 'Kein Skript entfernt die Mitgliedschaft eines Geraets' {
     }
 }
 
+# TLS 1.2 setzte AUSSCHLIESSLICH der Installer, in seinem eigenen Prozess. Die
+# vier Aufgaben laufen in eigenen Prozessen, und unter Windows PowerShell 5.1 ist
+# der Vorgabewert von SecurityProtocol je nach Windows-Version zu alt (SSL3/TLS1).
+# Ein Portal auf TLS 1.2+ haette die vier Aufgaben also mit einem Handshake-Fehler
+# stillgelegt, obwohl Scheme=https laengst konfigurierbar war und der Installer
+# gruen meldete: sein Probelauf bewies etwas, das seine Aufgaben nicht konnten.
+Describe 'TLS-Vorbereitung der MECM-Aufgaben' {
+    BeforeAll {
+        # Ein echtes, kurzlebiges selbstsigniertes Zertifikat im Speicher. Kein
+        # New-SelfSignedCertificate: das braucht Windows und schreibt in den
+        # Zertifikatsspeicher; CertificateRequest laeuft auch unter pwsh auf Linux.
+        function New-SelfSignedTestCertificate {
+            param([string]$Subject)
+            $key = [System.Security.Cryptography.RSA]::Create(2048)
+            $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                $Subject,
+                $key,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            return $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+        }
+    }
+
+    BeforeEach {
+        $script:SavedCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+        $script:SavedProtocol = [System.Net.ServicePointManager]::SecurityProtocol
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+    }
+    AfterEach {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $script:SavedCallback
+        [System.Net.ServicePointManager]::SecurityProtocol = $script:SavedProtocol
+    }
+
+    It '<name> ruft Initialize-VsTls im eigenen Prozess auf' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        Get-ScriptText -Name $name | Should -Match 'Initialize-VsTls -Config \$config'
+    }
+
+    It 'tut bei http nichts (kein Callback, keine Protokollaenderung noetig)' {
+        Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Initialize-VsTls -Config ([pscustomobject]@{ Scheme = 'http'; CertThumbprint = 'A' * 40 })
+        }
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
+    }
+
+    It 'setzt bei https TLS 1.2' {
+        Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Initialize-VsTls -Config ([pscustomobject]@{ Scheme = 'https'; CertThumbprint = '' })
+        }
+        ([System.Net.ServicePointManager]::SecurityProtocol -band [Net.SecurityProtocolType]::Tls12) | Should -Not -Be 0
+    }
+
+    It 'setzt OHNE Fingerabdruck keinen Callback (normale Kettenpruefung bleibt)' {
+        # Ohne hinterlegten Fingerabdruck ist die normale Pruefung die staerkere
+        # Antwort; ein Callback waere hier nur eine Gelegenheit, sie zu verlieren.
+        Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Initialize-VsTls -Config ([pscustomobject]@{ Scheme = 'https'; CertThumbprint = '' })
+        }
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
+    }
+
+    It 'akzeptiert MIT Fingerabdruck genau das hinterlegte, selbstsignierte Zertifikat' {
+        # Der Kern der Entscheidung: hinterlegt statt Pruefung abgeschaltet. Ein
+        # Zertifikatswechsel schlaegt damit fehl, bis jemand den neuen Abdruck
+        # eintraegt, statt still vertraut zu werden.
+        #
+        # Zwei ECHTE selbstsignierte Zertifikate, kein Stub: der Callback-Parameter
+        # ist als X509Certificate typisiert, PowerShell wandelt ein pscustomobject
+        # also in ein leeres Zertifikat um und GetCertHashString() wirft. Genau die
+        # Lage, die hier geprueft werden soll, waere damit nicht pruefbar.
+        $trusted = New-SelfSignedTestCertificate -Subject 'CN=vs-pester-tls-a'
+        $rogue = New-SelfSignedTestCertificate -Subject 'CN=vs-pester-tls-b'
+        $expected = $trusted.GetCertHashString()
+
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($expected) -Body {
+            param($thumb)
+            Initialize-VsTls -Config ([pscustomobject]@{ Scheme = 'https'; CertThumbprint = $thumb })
+        }
+        $callback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+        $callback | Should -Not -BeNullOrEmpty
+
+        # Policy-Fehler, also genau die Lage bei einem selbstsignierten Zertifikat.
+        $untrusted = [System.Net.Security.SslPolicyErrors]::RemoteCertificateChainErrors
+
+        $callback.Invoke($null, $trusted, $null, $untrusted) | Should -BeTrue
+        $callback.Invoke($null, $rogue, $null, $untrusted) | Should -BeFalse
+        $callback.Invoke($null, $null, $null, $untrusted) | Should -BeFalse
+    }
+
+    It 'nimmt ein Zertifikat ohne Policy-Fehler ohnehin an' {
+        # Ein gueltiges PKI-Zertifikat darf der Pin nicht aussperren.
+        Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Initialize-VsTls -Config ([pscustomobject]@{ Scheme = 'https'; CertThumbprint = 'B' * 40 })
+        }
+        $callback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+        $callback.Invoke($null, $null, $null, [System.Net.Security.SslPolicyErrors]::None) | Should -BeTrue
+    }
+
+    It 'liest den Fingerabdruck aus der Registry-Konfiguration' {
+        # Get-VsConfig normalisiert Trennzeichen weg, damit ein aus certlm.msc
+        # kopierter Abdruck mit Leerzeichen genauso funktioniert.
+        $probe = 'HKCU:\Software\_vs_tls_' + [guid]::NewGuid().ToString('N')
+        New-Item -Path $probe -Force | Out-Null
+        try {
+            New-ItemProperty -Path $probe -Name 'VirtuSphere_WebAPI' -Value 'portal.lan:8443' -PropertyType String -Force | Out-Null
+            New-ItemProperty -Path $probe -Name 'CertThumbprint' -Value 'a1 b2:c3-d4 e5f6 0718293a4b5c6d7e8f9012345678' -PropertyType String -Force | Out-Null
+            $thumb = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($probe) -Body {
+                param($path)
+                $script:VsRegistryPath = $path
+                (Get-VsConfig).CertThumbprint
+            }
+            $thumb | Should -Be 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+        } finally {
+            Remove-Item -Path $probe -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'Ursachenvokabular der Warnlaeufe' {
     It 'ValidateSet von Add-VsRunCause und $VsRunCauseVocabulary sind deckungsgleich' {
         # Zwei Spiegel derselben Liste: ohne diesen Walk kann ein neuer Code im

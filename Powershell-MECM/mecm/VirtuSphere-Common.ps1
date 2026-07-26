@@ -50,6 +50,12 @@ function Get-VsConfig {
         # MECM-Integration: die Maschinen-API ist zwar redirect-exempt, aber wer
         # HTTP abschaltet, schaltet die Sync-Skripte mit ab.
         Scheme                 = if ($raw.Scheme) { [string]$raw.Scheme } else { 'http' }
+        # SHA-1-Fingerabdruck des Portal-Zertifikats, ohne Trennzeichen. Nur fuer
+        # Scheme=https relevant und dann die EINZIGE Art, einem selbstsignierten
+        # Zertifikat zu vertrauen: hinterlegt statt Pruefung abgeschaltet. Leer
+        # heisst normale Kettenpruefung (also ein Zertifikat aus einer PKI, der
+        # der Rechner schon vertraut).
+        CertThumbprint         = ([string]$raw.CertThumbprint) -replace '[^0-9A-Fa-f]', ''
         ReportToken            = [string]$raw.ReportToken                    # optional
         PackagesRoot           = if ($raw.PackagesRoot) { [string]$raw.PackagesRoot } else { 'D:\VirtuSphere\Packages' }
         PackagesShare          = [string]$raw.PackagesShare                  # UNC fuer ContentLocation
@@ -174,6 +180,61 @@ function Get-VsApiBaseUrl {
     param([Parameter(Mandatory)]$Config)
     $scheme = if ($Config.Scheme) { [string]$Config.Scheme } else { 'http' }
     return ('{0}://{1}' -f $scheme, $Config.WebApi)
+}
+
+# TLS-Vorbereitung fuer Windows PowerShell 5.1. Zwilling der gleichnamigen
+# Funktion in clients\VirtuSphere-Client-Common.ps1 (ADR-0029 erlaubt Zwillinge
+# ausdruecklich: die Client-Skripte kommen einzeln per MECM-Paket auf die VM und
+# koennen diese Datei nicht laden).
+#
+# Warum es das hier ueberhaupt braucht: die Client-Seite machte es richtig, die
+# Serverseite nicht. TLS 1.2 setzte AUSSCHLIESSLICH der Installer, in seinem
+# eigenen Prozess; die vier Aufgaben laufen in eigenen Prozessen, und unter
+# PS 5.1 ist der Vorgabewert von SecurityProtocol je nach Windows-Version zu alt
+# (SSL3/TLS1). Ein Portal auf TLS 1.2+ haette die vier Aufgaben also mit einem
+# Handshake-Fehler stillgelegt, waehrend Scheme=https laengst konfigurierbar war.
+#
+# Selbstsigniert wird ueber den HINTERLEGTEN FINGERABDRUCK vertraut, nicht durch
+# Abschalten der Pruefung: ein Zertifikatswechsel bleibt damit eine bewusste
+# Handlung (der Abruf schlaegt fehl, bis der neue Fingerabdruck eingetragen ist)
+# statt einer dauerhaft blinden Verbindung, die jeder im Netz beantworten kann.
+function Initialize-VsTls {
+    param($Config)
+
+    $scheme = if ($Config -and $Config.Scheme) { [string]$Config.Scheme } else { 'http' }
+    if ($scheme -ne 'https') { return }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    } catch { Write-Debug $_ }
+
+    $pinned = if ($Config) { [string]$Config.CertThumbprint } else { '' }
+    if ([string]::IsNullOrWhiteSpace($pinned)) { return }
+
+    $expected = $pinned.ToUpperInvariant()
+    try {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
+            param($senderObject, $certificate, $chain, $sslPolicyErrors)
+            # Alle vier Parameter schreibt die Delegatensignatur von
+            # RemoteCertificateValidationCallback vor, auch die zwei, die diese
+            # Entscheidung nicht braucht: der Pin schaut auf das Zertifikat selbst,
+            # nicht auf die Kette (die bei selbstsigniert ohnehin fehlschlaegt).
+            $null = $senderObject, $chain
+            if ($sslPolicyErrors -eq [System.Net.Security.SslPolicyErrors]::None) { return $true }
+            if (-not $certificate) { return $false }
+            # GetCertHashString() ist der SHA-1-Fingerabdruck ohne Trennzeichen,
+            # dieselbe Form, die die MECM-Konsole und certlm.msc anzeigen. Wirft es
+            # (kaputtes Handle, kein Zertifikat), ist die Antwort NEIN: ein
+            # Fingerabdruck, den wir nicht lesen koennen, ist keiner, der passt.
+            try {
+                $actual = $certificate.GetCertHashString()
+            } catch {
+                Write-Debug $_
+                return $false
+            }
+            return ($actual.ToUpperInvariant() -eq $expected)
+        }.GetNewClosure()
+    } catch { Write-Debug $_ }
 }
 
 # Normalisiert und validiert eine WebApi-Adresse auf die kanonische host:port-Form

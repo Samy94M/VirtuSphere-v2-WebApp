@@ -69,22 +69,58 @@ Watcher-Durchlauf; kein Container-Neustart nötig.
   funktionsfähig bleiben oder betroffene Browser müssen die Richtlinie
   manuell löschen (Chrome: `chrome://net-internals/#hsts`).
 
-## Ausblick: Maschinen-API auf HTTPS (nach E3)
+## Maschinen-API auf HTTPS: was ausgeliefert ist
 
-Bewusst nicht Teil von WP7 (ADR-0019, Kandidat 5). Wenn die Umstellung bei
-E3 entschieden wird, ist sie rein clientseitig:
+Dieser Abschnitt beschrieb die Maschinenkette lange als „Ausblick nach E3" und
+schickte den Administrator dabei zum falschen Registry-Wert. Beides war unwahr:
+die Kette kann TLS, und die Umstellung ist konfigurierbar.
 
-- **PowerShell/MECM**: Registry-URL (`HKLM:\SOFTWARE\VirtuSphere\MECM`) auf
-  `https://` ändern und einmalig `[Net.ServicePointManager]::SecurityProtocol
-  = [Net.SecurityProtocolType]::Tls12` ergänzen (PowerShell-5.1-Pflicht).
-  Domänengebundene Clients vertrauen der Domänen-CA automatisch; es wird
-  kein Zertifikat pro Client verteilt.
-- **Ubuntu-Ansible-Host**: Root-CA der Domäne in den System-Truststore
-  (`/usr/local/share/ca-certificates/` + `update-ca-certificates`) und die
-  URL für `upload_mac_list.py` umstellen; die Python-Standardbibliothek
-  prüft Zertifikate standardmäßig korrekt.
-- **Server**: nichts; der 8443-Listener bedient die API-Pfade bereits mit.
-  Am Ende der Migration entfällt nur der HTTP-Port.
+**Was schon vorher da war:** `Get-VsConfig` liest den Registry-Wert `Scheme`, der
+Installer bietet `-Scheme https`, und die Client-Skripte haben mit
+`Get-VsApiScheme` und ihrer eigenen TLS-Initialisierung genau das richtige Muster.
+
+**Was gefehlt hat und jetzt da ist:**
+
+- **TLS 1.2 in jedem Aufgabenprozess.** Es setzte ausschließlich der *Installer*,
+  in seinem eigenen Prozess. Die vier Aufgaben laufen in eigenen Prozessen, und
+  unter Windows PowerShell 5.1 ist der Vorgabewert von `SecurityProtocol` je nach
+  Windows-Version zu alt. Ein TLS-Portal hätte die vier Aufgaben also mit einem
+  Handshake-Fehler stillgelegt, während der Installer grün meldete: sein Probelauf
+  bewies etwas, das seine Aufgaben nicht konnten. `Initialize-VsTls` in
+  `mecm\VirtuSphere-Common.ps1` (Zwilling der Client-Funktion, ADR-0029) wird
+  jetzt von allen vier Aufgaben und vom Installer über dieselbe Funktion gerufen.
+- **Der MAC-Rückruf kann TLS.** `Ansible/upload_mac_list.py` hatte kein
+  `import ssl` und ein nacktes `urlopen`. Gegen ein selbstsigniertes Zertifikat
+  wäre also genau der Kanal gescheitert, der allein über Erfolg oder Misserfolg
+  eines Deploys entscheidet, und zwar mit der Meldung „Netzwerkfehler".
+- **Ein selbstsigniertes Zertifikat wird über den hinterlegten Fingerabdruck
+  vertraut, nicht durch abgeschaltete Prüfung.** Niemand hatte entschieden, wie
+  ihm zu vertrauen ist, und „Prüfung aus" auf dem Kanal, der die MAC-Adressen
+  trägt, ist schlechter als ehrliches HTTP: es sieht verschlüsselt aus und ist
+  von jedem im Netz beantwortbar. Ein Zertifikatswechsel bleibt damit eine
+  bewusste Handlung, weil der Abruf fehlschlägt, bis der neue Abdruck eingetragen
+  ist.
+
+### Umstellen
+
+1. HTTPS im Portal einschalten (Abschnitte oben).
+2. Auf dem MECM-Server:
+   `install-VirtuSphere-MECM.ps1 -Scheme https -CertThumbprint <SHA-1 ohne Trennzeichen> ...`.
+   Der Fingerabdruck ist der, den `certlm.msc` beim Portal-Zertifikat anzeigt;
+   Leerzeichen und Doppelpunkte dürfen mitkopiert werden. Bei einem Zertifikat aus
+   einer PKI, der der Server schon vertraut, den Parameter weglassen: dann gilt
+   die normale Kettenprüfung, und die ist die stärkere Antwort. Ein Re-Run des
+   Installers ohne diese Parameter behält beide Werte.
+3. Auf dem Ansible-Host nichts. Der Deploy-Worker trägt den SHA-256-Fingerabdruck
+   des Portal-Zertifikats bei jedem Auftrag selbst in `upload_mac_list.py` ein
+   (`cert_sha256`), sofern die API-Basis-URL `https://` ist und ein Zertifikat
+   installiert ist. Wer der Domänen-CA vertrauen will, legt sie statt dessen in
+   den System-Truststore (`/usr/local/share/ca-certificates/` +
+   `update-ca-certificates`); dann bleibt der Wert leer und die normale Prüfung
+   greift.
+4. **API-Basis-URL im Portal auf `https://...` umstellen** (Einstellungen →
+   Bereitstellung). Ohne diesen Schritt schreibt der Worker weiterhin eine
+   http-Rückrufadresse in jedes Deploy-Artefakt.
 
 Unberührt bleiben in jedem Fall: Worker→Ansible (SSH/SFTP, kein TLS-Bezug)
 und Ansible→ESXi (ESXis eigenes API-Zertifikat).

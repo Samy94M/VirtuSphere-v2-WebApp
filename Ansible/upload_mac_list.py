@@ -1,13 +1,26 @@
+import hashlib
 import json
 import socket
+import ssl
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, Request, build_opener, urlopen
 
 file_path = './vm_infos.json'
 api_base_url = 'http://{{apiUrl}}'
 mission_id = '{{missionId}}'
 job_id = '{{jobId}}'
 correlation_id = '{{correlationId}}'
+# SHA-256 fingerprint of the portal certificate, hex without separators, patched
+# in by ansible_patch_upload_script() when the portal runs on HTTPS with a
+# self-signed certificate. Empty means ordinary chain validation.
+#
+# Why this exists at all: this script had no ssl import and a bare urlopen(). The
+# MAC callback is the one channel that decides whether a deploy succeeded, so
+# against a self-signed certificate it would have failed with "Netzwerkfehler" and
+# no deploy would ever have completed on a TLS portal. Pinned rather than
+# unverified: an "accept everything" context on the channel that carries the MAC
+# addresses is worse than plain HTTP, because it looks encrypted.
+cert_sha256 = '{{certSha256}}'
 
 EXIT_SUCCESS = 0
 EXIT_PARTIAL = 20
@@ -128,6 +141,73 @@ def decode_response(raw_response):
     return response
 
 
+def short_reason(error, limit=200):
+    """One short line from an exception, control characters stripped."""
+    text = ' '.join(str(error).split())
+    return text[:limit]
+
+
+def normalized_fingerprint(value):
+    """Hex fingerprint without separators, lowercase. Empty for anything unusable."""
+    text = ''.join(c for c in str(value).lower() if c in '0123456789abcdef')
+    return text if len(text) == 64 else ''
+
+
+def build_https_opener(pinned_fingerprint):
+    """
+    Opener for an HTTPS portal.
+
+    With a pinned fingerprint the chain and hostname checks are switched off and
+    replaced by an exact comparison of the certificate's SHA-256: that is what a
+    self-signed certificate needs, and it is strictly stronger than the usual
+    "just disable verification", because only ONE certificate is accepted and a
+    swap fails loudly instead of silently trusting a new one.
+
+    Without one, the default verifying context applies (a certificate from a PKI
+    this host already trusts).
+    """
+    if not pinned_fingerprint:
+        return build_opener(HTTPSHandler(context=ssl.create_default_context()))
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    class PinnedHandler(HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(self._pinned_connection, req)
+
+        def _pinned_connection(self, host, **kwargs):
+            import http.client
+
+            connection = http.client.HTTPSConnection(host, context=context, **kwargs)
+            original_connect = connection.connect
+
+            def connect_and_verify():
+                original_connect()
+                der = connection.sock.getpeercert(binary_form=True)
+                actual = hashlib.sha256(der).hexdigest()
+                if actual != pinned_fingerprint:
+                    connection.close()
+                    raise ssl.SSLError(
+                        'Portal-Zertifikat weicht vom hinterlegten Fingerabdruck ab '
+                        '(erwartet %s..., erhalten %s...).' % (pinned_fingerprint[:16], actual[:16])
+                    )
+
+            connection.connect = connect_and_verify
+            return connection
+
+    return build_opener(PinnedHandler())
+
+
+def default_opener(url, pinned_fingerprint=''):
+    """The opener for this URL: plain urlopen for http, a TLS opener for https."""
+    if not str(url).lower().startswith('https://'):
+        return urlopen
+
+    return build_https_opener(normalized_fingerprint(pinned_fingerprint)).open
+
+
 def send_request(request, opener=urlopen):
     for attempt in range(2):
         try:
@@ -151,15 +231,25 @@ def send_request(request, opener=urlopen):
         except HTTPError as error:
             if 500 <= error.code < 600 and attempt == 0:
                 continue
+            # The body stays unlogged on purpose (pinned by
+            # test_http_4xx_is_not_retried_and_never_logs_the_body): a raw
+            # response can be an nginx page or a proxy error, and this text lands
+            # in the job log. Surfacing the portal's own {"error":...} field is a
+            # separate, deliberate change (WP-12), not a side effect of TLS work.
             print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
             return EXIT_HTTP_ERROR, None
         except (URLError, socket.timeout, TimeoutError) as error:
             if is_timeout_error(error) and attempt == 0:
                 continue
-            print('MAC-Upload abgebrochen: Netzwerkfehler.')
+            # The reason matters here too: a pinned-certificate mismatch and an
+            # unplugged cable both used to read "Netzwerkfehler".
+            print(f'MAC-Upload abgebrochen: Netzwerkfehler. {short_reason(error)}')
             return EXIT_HTTP_ERROR, None
-        except Exception:
-            print('MAC-Upload abgebrochen: unerwarteter Transportfehler.')
+        except ssl.SSLError as error:
+            print(f'MAC-Upload abgebrochen: TLS-Fehler. {short_reason(error)}')
+            return EXIT_HTTP_ERROR, None
+        except Exception as error:
+            print(f'MAC-Upload abgebrochen: unerwarteter Transportfehler. {short_reason(error)}')
             return EXIT_HTTP_ERROR, None
 
     return EXIT_HTTP_ERROR, None
@@ -170,13 +260,19 @@ def send_data_to_server(
     base_url,
     mission_value=mission_id,
     job_value=job_id,
-    opener=urlopen,
+    opener=None,
+    pinned_fingerprint=None,
 ):
     data = load_vm_infos(path)
     if data is None:
         return EXIT_LOCAL_DATA_ERROR
 
     url = base_url.rstrip('/') + '/db_importMAC.php?action=updateInterface'
+    # Chosen from the URL, not configured: an http portal keeps the plain opener,
+    # an https one gets a verifying (or pinned) TLS context. The tests inject
+    # their own opener and never reach this.
+    if opener is None:
+        opener = default_opener(url, cert_sha256 if pinned_fingerprint is None else pinned_fingerprint)
     body = json.dumps(build_payload(data, mission_value, job_value)).encode('utf-8')
     request = Request(url, data=body, headers={'Content-Type': 'application/json'}, method='POST')
     exit_code, response = send_request(request, opener)

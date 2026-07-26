@@ -227,6 +227,65 @@ class UploadMacListTest(unittest.TestCase):
         self.assertEqual(1, len(opener.requests))
         self.assertIn('Netzwerkfehler', output)
 
+    def test_a_network_error_names_its_reason(self):
+        # A pinned-certificate mismatch and an unplugged cable both used to read
+        # "Netzwerkfehler" and nothing else. The reason is the script's OWN text
+        # (the exception message), not a server response body, so the rule that
+        # the response body stays unlogged is untouched.
+        exit_code, output, _ = self.run_upload([URLError('certificate verify failed')])
+
+        self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
+        self.assertIn('certificate verify failed', output)
+
+
+class TlsContextTest(unittest.TestCase):
+    """
+    The MAC callback is the one channel that decides whether a deploy succeeded,
+    and this script had no `import ssl` and a bare urlopen(). Against a
+    self-signed portal certificate it would have failed with a network error and
+    no deploy would ever have completed on a TLS portal.
+    """
+
+    def test_http_keeps_the_plain_opener(self):
+        # Nothing about the HTTP path may change: that is the shipped default.
+        self.assertIs(UPLOAD.urlopen, UPLOAD.default_opener('http://portal.lan:8021/x'))
+
+    def test_https_gets_a_tls_opener(self):
+        opener = UPLOAD.default_opener('https://portal.lan:8443/x')
+
+        self.assertIsNot(UPLOAD.urlopen, opener)
+        self.assertTrue(callable(opener))
+
+    def test_an_unpinned_https_url_verifies_the_chain(self):
+        # No fingerprint means a certificate from a PKI the host already trusts,
+        # and then the default verifying context is the STRONGER answer. It must
+        # not silently degrade to "verify nothing".
+        built = UPLOAD.build_https_opener('')
+        handler = next(h for h in built.handlers if isinstance(h, UPLOAD.HTTPSHandler))
+        context = getattr(handler, '_context', None)
+
+        self.assertIsNotNone(context, 'the handler must carry an SSL context')
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(UPLOAD.ssl.CERT_REQUIRED, context.verify_mode)
+
+    def test_only_a_full_sha256_fingerprint_is_accepted_as_a_pin(self):
+        # A truncated or garbled value must NOT be treated as a pin, because a
+        # pin is the only thing that switches the chain check off: a half-read
+        # registry value would otherwise disable verification silently.
+        self.assertEqual('', UPLOAD.normalized_fingerprint(''))
+        self.assertEqual('', UPLOAD.normalized_fingerprint('{{certSha256}}'))
+        self.assertEqual('', UPLOAD.normalized_fingerprint('ab:cd'))
+        self.assertEqual('', UPLOAD.normalized_fingerprint('f' * 63))
+
+        colons = ':'.join(['AB'] * 32)
+        self.assertEqual('ab' * 32, UPLOAD.normalized_fingerprint(colons))
+        self.assertEqual('f' * 64, UPLOAD.normalized_fingerprint('F' * 64))
+
+    def test_the_unpatched_template_placeholder_is_not_a_pin(self):
+        # The shipped file carries the placeholder; if that counted as a pin, an
+        # unpatched copy would run with verification disabled.
+        self.assertEqual('', UPLOAD.normalized_fingerprint(UPLOAD.cert_sha256))
+
 
 if __name__ == '__main__':
     unittest.main()

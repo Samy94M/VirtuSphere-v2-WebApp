@@ -56,8 +56,22 @@ final class AnsibleMacExportContractTest extends TestCase
     {
         $script = $this->source('upload_mac_list.py');
 
-        self::assertStringContainsString('from urllib.request import Request, urlopen', $script);
-        self::assertStringNotContainsString('import requests', $script);
+        // Air-gap rule (.claude/rules/ansible.md): stdlib HTTP only, never
+        // `requests`. Pinned as "every imported module is on the stdlib list"
+        // rather than as one exact import line: the line grew when the script
+        // learned TLS, and a contract that breaks on adding `import ssl` tests
+        // its own wording instead of the rule.
+        $allowed = ['hashlib', 'http.client', 'io', 'json', 'socket', 'ssl', 'urllib.error', 'urllib.request'];
+        // One capture group for both forms: `from X import ...` and `import X`.
+        // Indented imports count too, or a lazy import inside a function would be
+        // the one place the rule does not reach.
+        preg_match_all('/^\s*(?:from|import)\s+([\w.]+)/m', $script, $imports);
+        self::assertNotSame([], $imports[1], 'no imports found; the scan stopped working');
+        foreach (array_unique($imports[1]) as $module) {
+            self::assertContains($module, $allowed, sprintf('upload_mac_list.py imports "%s", which is not on the air-gap stdlib list.', $module));
+        }
+        self::assertStringContainsString('from urllib.request import', $script);
+        self::assertStringContainsString('urlopen', $script);
         self::assertStringContainsString('EXIT_SUCCESS = 0', $script);
         self::assertStringContainsString('EXIT_PARTIAL = 20', $script);
         self::assertStringContainsString('EXIT_FAILED = 21', $script);

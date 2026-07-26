@@ -67,6 +67,12 @@
 param(
     [Parameter(Mandatory)][string]$WebApi,
     [ValidateSet('http', 'https')][string]$Scheme = 'http',
+    # SHA-1-Fingerabdruck des Portal-Zertifikats, ohne Trennzeichen (so wie
+    # certlm.msc ihn anzeigt). Nur mit -Scheme https sinnvoll und dann der EINZIGE
+    # vorgesehene Weg, einem selbstsignierten Zertifikat zu vertrauen: hinterlegt
+    # statt Pruefung abgeschaltet. Leer lassen, wenn das Zertifikat aus einer PKI
+    # kommt, der dieser Server schon vertraut.
+    [ValidatePattern('^([0-9A-Fa-f]{40})?$')][string]$CertThumbprint = '',
     [string]$PackagesRoot = 'D:\VirtuSphere\Packages',
     [Parameter(Mandatory)][string]$PackagesShare,
     [string]$ReportToken = '',
@@ -245,6 +251,7 @@ Write-Step 'Schreibe Registry-Konfiguration'
 $settings = @{
     VirtuSphere_WebAPI          = $WebApi
     Scheme                      = $Scheme
+    CertThumbprint              = $CertThumbprint.ToUpperInvariant()
     PackagesRoot                = $PackagesRoot
     PackagesShare               = $PackagesShare
     ReportToken                 = $ReportToken
@@ -269,6 +276,37 @@ foreach ($intervalName in @($settings.Keys | Where-Object { $_ -like '*IntervalS
     if ($null -eq $keep -or [int]$keep -eq $settings[$intervalName]) { continue }
     $settings[$intervalName] = [int]$keep
     Write-Ok ('{0}: eingestellte {1} s behalten (Parameter nicht angegeben)' -f $intervalName, [int]$keep)
+}
+# Dieselbe Regel fuer die Textwerte, die ein Administrator bewusst setzt. Nur die
+# vier Intervalle und -ProviderMachine ueberlebten einen Re-Run: ein
+# Skript-Update mit dem Pflichtminimum an Parametern setzte damit stillschweigend
+# das Schema auf http zurueck (und schaltete auf einem TLS-Portal die ganze
+# Integration ab), ebenso den Fingerabdruck, die DP-Gruppe und den Paketpfad.
+# Ein Wert, den man einstellen kann, muss ein Update ueberleben, das ihn nicht
+# nennt - genau wie ein Intervall.
+$parameterToSetting = @{
+    Scheme         = 'Scheme'
+    CertThumbprint = 'CertThumbprint'
+    DpGroupName    = 'DpGroupName'
+    PackagesRoot   = 'PackagesRoot'
+    # Ein Re-Run ohne -ReportToken loeschte den Token: der Meldekanal verlor
+    # damit still seine Authentisierung. Ausdruecklich '' uebergeben leert ihn
+    # weiterhin, weil dann $PSBoundParameters den Namen enthaelt.
+    ReportToken    = 'ReportToken'
+}
+foreach ($parameterName in $parameterToSetting.Keys) {
+    if ($PSBoundParameters.ContainsKey($parameterName)) { continue }
+    $settingName = $parameterToSetting[$parameterName]
+    $keep = if ($existingConfig) { [string]$existingConfig.$settingName } else { '' }
+    if ([string]::IsNullOrWhiteSpace($keep) -or $keep -eq [string]$settings[$settingName]) { continue }
+    $settings[$settingName] = $keep
+    # Den Token nicht ins Log schreiben.
+    $shown = if ($settingName -eq 'ReportToken') { '[vorhanden]' } else { $keep }
+    Write-Ok ('{0}: eingestellten Wert "{1}" behalten (Parameter nicht angegeben)' -f $settingName, $shown)
+    # Die Variablen nachziehen, die der Rest des Skripts benutzt (Verzeichnisse
+    # unter PackagesRoot, die Portal-Probe mit Scheme). Sonst schreibt die
+    # Registry den behaltenen Wert, waehrend das Skript mit dem Default weiterlaeuft.
+    Set-Variable -Name $parameterName -Value $keep -Scope Script
 }
 if ($siteCode) { $settings['MECM_SiteCode'] = $siteCode }
 # Nur schreiben, wenn ein Provider vorliegt: ein leerer Wert wuerde die lokale
@@ -389,9 +427,13 @@ foreach ($task in $tasks) {
 # laufender Task ist NICHT gleichbedeutend mit einem gelungenen Lauf.
 Write-Step 'Pruefe Portal-Erreichbarkeit'
 # Common ist bereits frueh dot-gesourct (Get-VsErrorDetail/-StatusCode verfuegbar).
-if ($Scheme -eq 'https') {
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { Write-Debug $_ }
-}
+# Dieselbe Vorbereitung wie in jedem Aufgabenprozess, ueber dieselbe Funktion:
+# TLS 1.2 plus, bei hinterlegtem Fingerabdruck, das Pinning. Vorher setzte der
+# Installer nur das Protokoll und tat das als Einziger, weshalb die vier Aufgaben
+# auf einem TLS-Portal am Handshake scheiterten, die Installation aber gruen
+# meldete - der Probelauf des Installers bewies etwas, das seine Aufgaben nicht
+# konnten.
+Initialize-VsTls -Config ([pscustomobject]@{ Scheme = $Scheme; CertThumbprint = $CertThumbprint })
 try {
     $health = Invoke-RestMethod -Uri ('{0}://{1}/portal/health.php' -f $Scheme, $WebApi) -TimeoutSec 5
     Write-Ok ("Portal erreichbar (Status: {0})" -f $health.status)

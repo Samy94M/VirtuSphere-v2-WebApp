@@ -388,25 +388,67 @@ function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $miss
     // the job's), so callers do not need to thread it through.
     $correlationId ??= virtusphere_correlation_id();
 
-    $expectedApiLine = 'api_base_url = ' . ansible_python_string($apiBaseUrl);
-    $expectedMissionLine = 'mission_id = ' . ansible_python_string((string) $missionId);
-    $expectedJobLine = 'job_id = ' . ansible_python_string((string) $jobId);
-    $expectedCorrelationLine = 'correlation_id = ' . ansible_python_string($correlationId);
+    // The portal's own certificate fingerprint, but only when the callback URL is
+    // actually https: the MAC callback is the one channel that decides whether a
+    // deploy succeeded, and against a self-signed certificate an unpinned upload
+    // would fail with a bare network error. Empty for http and for a certificate
+    // from a PKI the Ansible host already trusts (then the default chain check
+    // applies, which is the stronger of the two).
+    $certFingerprint = ansible_portal_cert_fingerprint($apiBaseUrl);
+
+    $expected = [
+        'api_base_url = ' . ansible_python_string($apiBaseUrl),
+        'mission_id = ' . ansible_python_string((string) $missionId),
+        'job_id = ' . ansible_python_string((string) $jobId),
+        'correlation_id = ' . ansible_python_string($correlationId),
+        'cert_sha256 = ' . ansible_python_string($certFingerprint),
+    ];
     $script = preg_replace("/^api_base_url = .*$/m", 'api_base_url = ' . ansible_python_string($apiBaseUrl), $script, 1);
     $script = preg_replace("/^mission_id = .*$/m", 'mission_id = ' . ansible_python_string((string) $missionId), (string) $script, 1);
     $script = preg_replace('/^job_id = .*$/m', 'job_id = ' . ansible_python_string((string) $jobId), (string) $script, 1);
     $script = preg_replace('/^correlation_id = .*$/m', 'correlation_id = ' . ansible_python_string($correlationId), (string) $script, 1);
-    if (
-        $script === null
-        || !str_contains($script, $expectedApiLine)
-        || !str_contains($script, $expectedMissionLine)
-        || !str_contains($script, $expectedJobLine)
-        || !str_contains($script, $expectedCorrelationLine)
-    ) {
+    $script = preg_replace('/^cert_sha256 = .*$/m', 'cert_sha256 = ' . ansible_python_string($certFingerprint), (string) $script, 1);
+    if ($script === null) {
         throw new RuntimeException('Cannot patch upload_mac_list.py.');
+    }
+    foreach ($expected as $line) {
+        if (!str_contains($script, $line)) {
+            throw new RuntimeException('Cannot patch upload_mac_list.py.');
+        }
     }
 
     ansible_write_file($path, $script);
+}
+
+/**
+ * SHA-256 fingerprint of the portal's installed certificate, hex without
+ * separators, for pinning the MAC callback. Empty string whenever pinning does
+ * not apply or cannot be established:
+ *
+ *  - the callback URL is http (nothing to pin),
+ *  - no certificate is installed (the portal is not serving TLS at all),
+ *  - the metadata cannot be read (then the Ansible host does its normal chain
+ *    check, which is the stronger answer, and a self-signed certificate fails
+ *    loudly rather than being trusted blindly).
+ *
+ * The last case is why this never throws: a fingerprint we cannot determine must
+ * degrade to "verify properly", never to "verify nothing".
+ */
+function ansible_portal_cert_fingerprint(string $apiBaseUrl): string
+{
+    if (!str_starts_with(strtolower(trim($apiBaseUrl)), 'https://')) {
+        return '';
+    }
+
+    require_once __DIR__ . '/https_config.php';
+    $metadata = https_installed_metadata();
+    $fingerprint = (string) ($metadata['fingerprint'] ?? '');
+
+    // https_cert_metadata() formats it with colons for display; the wire form is
+    // bare lowercase hex, which is what hashlib.sha256().hexdigest() produces.
+    $bare = strtolower((string) preg_replace('/[^0-9A-Fa-f]/', '', $fingerprint));
+
+    return strlen($bare) === 64 ? $bare : '';
 }
 
 function ansible_vm_string(array $vm, string $key, string|int $default): string

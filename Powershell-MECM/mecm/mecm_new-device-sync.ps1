@@ -33,6 +33,9 @@ if (-not $config) {
     Write-VsLog -Message 'Registry-Konfiguration gefunden - starte.'
 }
 Initialize-VsLog -Component 'device-sync' -LogRoot $config.LogRoot
+# TLS 1.2 und, bei Scheme=https mit hinterlegtem Fingerabdruck, das Pinning. Muss
+# in JEDEM Aufgabenprozess passieren: der Installer setzte es nur in seinem.
+Initialize-VsTls -Config $config
 Write-VsLog -Message '=== Device-Sync gestartet ==='
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
