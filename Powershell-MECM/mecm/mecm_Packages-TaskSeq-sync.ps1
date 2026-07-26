@@ -40,7 +40,7 @@ Write-VsLog -Message '=== Packages-Sync gestartet ==='
 $SCRIPT_VERSION = 'packages-sync/2.0'
 
 $folderName = $script:VsApplicationsFolderName   # SSoT in VirtuSphere-Common.ps1
-$intervalSeconds = [Math]::Max(10, $config.PackagesSyncInterval)
+$intervalSeconds = Resolve-VsInterval -Source 'packages-sync' -Configured $config.PackagesSyncInterval
 $forceSyncEverySeconds = 3600
 
 $siteCode = $null

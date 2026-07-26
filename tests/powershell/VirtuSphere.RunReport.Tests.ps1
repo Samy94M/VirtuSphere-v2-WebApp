@@ -26,6 +26,19 @@ BeforeAll {
         } $Path $Body $Arguments
     }
 
+    # Quelltext und AST der vier Report-Skripte. Auf Dateiebene, weil zwei
+    # Describe-Bloecke sie lesen (Schleifenstruktur und Intervall-Aufloesung).
+    function Get-ScriptText {
+        param([string]$Name)
+        Get-Content -Path (Join-Path (Join-Path $script:PsRoot 'mecm') $Name) -Raw
+    }
+    function Get-ScriptAst {
+        param([string]$Name)
+        $tokens = $null; $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Join-Path $script:PsRoot 'mecm') $Name), [ref]$tokens, [ref]$errors)
+    }
+
     # Fuehrt Send-VsRunReport mit einem gestubbten Invoke-VsApi aus und liefert
     # den erfassten Body zurueck (die Zustellung wird abgefangen, nicht gesendet).
     function Get-SentBody {
@@ -425,19 +438,6 @@ Describe 'Throttle-Konstante ist gepinnt' {
 }
 
 Describe 'Schleifenstruktur der vier Report-Skripte' {
-    BeforeAll {
-        function Get-ScriptText {
-            param([string]$Name)
-            Get-Content -Path (Join-Path (Join-Path $script:PsRoot 'mecm') $Name) -Raw
-        }
-        function Get-ScriptAst {
-            param([string]$Name)
-            $tokens = $null; $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-                (Join-Path (Join-Path $script:PsRoot 'mecm') $Name), [ref]$tokens, [ref]$errors)
-        }
-    }
-
     It '<name> sendet je Iteration <started> started und <completed> completed' -ForEach @(
         @{ name = 'mecm_new-device-sync.ps1';      started = 1; completed = 1 }
         @{ name = 'mecm_Packages-TaskSeq-sync.ps1'; started = 1; completed = 1 }
@@ -474,5 +474,320 @@ Describe 'Schleifenstruktur der vier Report-Skripte' {
         $text = Get-ScriptText -Name $name
         $text | Should -Match 'Send-VsRunReport'
         $text | Should -Not -Match 'Send-VsHeartbeat'
+    }
+}
+
+# Eine VM verlaesst die MECM-Warteschlange ausschliesslich durch die
+# ResourceID-Rueckmeldung an mecm_updateid.php, das sie auf `registered` setzt;
+# getDeviceList liefert sie danach nicht mehr. Die Meldung lief unbedingt, also
+# fiel eine VM dauerhaft aus der Warteschlange, obwohl ihre OS-, Paket- oder
+# Mission-Collection fehlte: auf dem Client ein PXE-Boot ohne Task Sequence, im
+# Portal eine fertig registrierte VM, und niemand schob mehr nach.
+Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
+    BeforeAll {
+        $script:DeviceSyncText = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        $script:DeviceSyncAst = Get-ScriptAst -Name 'mecm_new-device-sync.ps1'
+    }
+
+    It 'zaehlt fehlgeschlagene Zuweisungen je Device' {
+        # Ein Zaehler pro Device, nicht pro Lauf: ein Lauf ueber zehn VMs darf
+        # nicht neun gute Meldungen wegen der zehnten unterdruecken.
+        $script:DeviceSyncText | Should -Match '\$targetsSkipped\s*=\s*0'
+        ([regex]::Matches($script:DeviceSyncText, '\$targetsSkipped\+\+')).Count | Should -BeGreaterOrEqual 2
+    }
+
+    It 'meldet die ResourceID nur, wenn keine Zuweisung uebersprungen wurde' {
+        # Der Aufruf muss HINTER einer Bedingung liegen, die auf den Zaehler
+        # schaut. Als Reihenfolgepruefung im Text, weil genau die Reihenfolge der
+        # Befund war: die Meldung stand vorher unbedingt danach.
+        $script:DeviceSyncText | Should -Match '(?s)\$targetsSkipped -gt 0.*?continue.*?mecm_updateid\.php'
+    }
+
+    It 'behandelt einen MAC-Konflikt als Fehlschlag des Devices, nicht als Notiz' {
+        # MECM wartet dann auf eine MAC, die beim PXE-Boot nie kommt; die VM aus
+        # der Warteschlange zu nehmen macht das unbehebbar.
+        $script:DeviceSyncText | Should -Match "(?s)MAC-Konflikt.*?\`$itemFailures\+\+"
+    }
+
+    It 'laesst die drei MECM-Vollabfragen bei einem Providerfehler werfen' -ForEach @(
+        @{ cmdlet = 'Get-CMDevice -Fast' }
+        @{ cmdlet = 'Get-CMTaskSequence -Fast' }
+        @{ cmdlet = 'Get-CMDeviceCollection' }
+    ) {
+        # Ohne -ErrorAction Stop ist ein Providerfehler nicht von "MECM ist leer"
+        # zu unterscheiden: der Lauf laeuft mit leeren Caches weiter, importiert
+        # jedes Device erneut und meldet jede Zielcollection als fehlend.
+        $pattern = [regex]::Escape($cmdlet) + ' -ErrorAction Stop'
+        $script:DeviceSyncText | Should -Match $pattern
+    }
+
+    It 'sendet auf dem Warnpfad ein Detail statt $null' {
+        # "Datenwarnungen: 3" ohne Detail nennt keine VM, rendert den
+        # Aufklappblock nicht, und der naechste saubere Lauf ueberschreibt die 3.
+        $script:DeviceSyncText | Should -Match '\$detail\s*=\s*Format-VsRunDetail -Causes \$causes'
+        $script:DeviceSyncText | Should -Match 'New-VsRunCauseList'
+    }
+
+    It 'haengt an jeden Zaehler-Hochzaehler auch eine Ursache' {
+        # Ein Zaehler ohne Ursache ist die Zahl ohne Namen, also der Befund
+        # selbst. Geprueft wird das Verhaeltnis: jeder ++ eines gemeldeten
+        # Zaehlers braucht ein Add-VsRunCause in Reichweite.
+        $counted = ([regex]::Matches($script:DeviceSyncText, '\$(dataWarnings|itemFailures|resourceUpdateFailures)\+\+')).Count
+        $causes = ([regex]::Matches($script:DeviceSyncText, 'Add-VsRunCause')).Count
+        $causes | Should -BeGreaterOrEqual ($counted - 1)  # der Sammelfall am Ende zaehlt ohne eigene Ursache
+    }
+}
+
+Describe 'Ursachenvokabular der Warnlaeufe' {
+    It 'ValidateSet von Add-VsRunCause und $VsRunCauseVocabulary sind deckungsgleich' {
+        # Zwei Spiegel derselben Liste: ohne diesen Walk kann ein neuer Code im
+        # ValidateSet landen, ohne im Vokabular zu stehen (oder umgekehrt), und
+        # der Aufruf schlaegt erst auf dem MECM-Server fehl.
+        $vocabulary = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsRunCauseVocabulary }
+
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:MecmCommon, [ref]$null, [ref]$null)
+        $function = $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Add-VsRunCause'
+        }, $true) | Select-Object -First 1
+        $function | Should -Not -BeNullOrEmpty
+
+        $validateSet = $function.Body.ParamBlock.Parameters |
+            Where-Object { $_.Name.VariablePath.UserPath -eq 'Cause' } |
+            ForEach-Object { $_.Attributes } |
+            Where-Object { $_.TypeName.Name -eq 'ValidateSet' } |
+            ForEach-Object { $_.PositionalArguments.Value }
+
+        @($validateSet) | Should -Not -BeNullOrEmpty
+        (@($validateSet) | Sort-Object) -join ',' | Should -Be ((@($vocabulary) | Sort-Object) -join ',')
+    }
+
+    It 'nennt Ziel und Collection im Detail' {
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target 'WEB01' -Collection 'Firefox-115.0'
+            Format-VsRunDetail -Causes $causes
+        }
+
+        $detail | Should -Be 'collection_missing target=WEB01 collection=Firefox-115.0'
+    }
+
+    It 'deckelt die Liste und sagt, wie viele fehlen' {
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            1..15 | ForEach-Object { Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target ('VM{0:D2}' -f $_) }
+            Format-VsRunDetail -Causes $causes
+        }
+
+        ([regex]::Matches($detail, 'mac_missing')).Count | Should -Be 10
+        $detail | Should -Match '\(\+5 weitere\)'
+    }
+
+    It 'liefert $null fuer einen Lauf ohne Ursachen' {
+        # Sonst sendet ein sauberer Lauf ein leeres Detail, und die Karte klappt
+        # einen leeren Block auf.
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Format-VsRunDetail -Causes (New-VsRunCauseList)
+        }
+
+        $detail | Should -BeNullOrEmpty
+    }
+}
+
+# Der Takt, in dem eine Aufgabe laeuft, und der Takt, den sie meldet, muessen
+# dieselbe Zahl sein: die Statusseite faerbt die Zeile ab dem Dreifachen der
+# GEMELDETEN Zahl ein, und die Hilfe verspricht, dass dort der Wert steht, der
+# "tatsaechlich gilt". Drei der vier Skripte klemmten frueher nur nach unten,
+# waehrend Send-VsRunReport beidseitig klemmt - ein Intervall ueber 3600 s liess
+# die Aufgabe langsamer laufen als die Seite behauptete, ab 3 h dauerhaft gelb.
+Describe 'Intervall-Aufloesung (Resolve-VsInterval und ihre Spiegel)' {
+    BeforeAll {
+        $script:Installer = Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1'
+
+        function Get-InstallerParameter {
+            param([string]$Name)
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $script:Installer, [ref]$tokens, [ref]$errors)
+            $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $Name }
+        }
+
+        function Get-ValidateRange {
+            param([string]$Name)
+            $attribute = (Get-InstallerParameter -Name $Name).Attributes |
+                Where-Object { $_.TypeName.Name -eq 'ValidateRange' }
+            if (-not $attribute) { return $null }
+            @{
+                Min = [int]$attribute.PositionalArguments[0].Value
+                Max = [int]$attribute.PositionalArguments[1].Value
+            }
+        }
+
+        function Get-Bounds {
+            Invoke-InFileScope -Path $script:MecmCommon -Body {
+                $out = @{}
+                foreach ($key in $script:VsIntervalBounds.Keys) {
+                    $out[$key] = @{
+                        Floor   = [int]$script:VsIntervalBounds[$key].Floor
+                        Setting = [string]$script:VsIntervalBounds[$key].Setting
+                        Ceiling = [int]$script:VsRunIntervalMaxSeconds
+                    }
+                }
+                $out
+            }
+        }
+
+        function Invoke-Resolve {
+            param([string]$Source, [int]$Configured)
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($Source, $Configured) -Body {
+                param($s, $c)
+                Initialize-VsLog -Component 'pester-interval' -LogRoot ([System.IO.Path]::GetTempPath())
+                Resolve-VsInterval -Source $s -Configured $c
+            }
+        }
+
+        # Faengt ab, was Resolve-VsInterval protokolliert, statt es in die
+        # Tagesdatei zu schreiben.
+        function Get-ClampLog {
+            param([int]$Configured)
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($Configured) -Body {
+                param($c)
+                Initialize-VsLog -Component 'pester-interval' -LogRoot ([System.IO.Path]::GetTempPath())
+                $script:lines = @()
+                function Write-VsLog { param($Message, $Level) $script:lines += ('{0}|{1}' -f $Level, $Message) }
+                Resolve-VsInterval -Source 'autoimporter' -Configured $c | Out-Null
+                [pscustomobject]@{ Lines = @($script:lines) }
+            }
+        }
+    }
+
+    It 'laesst einen Wert innerhalb der Spanne unveraendert: <source> <value>' -ForEach @(
+        @{ source = 'device-sync';      value = 10 }
+        @{ source = 'packages-sync';    value = 60 }
+        @{ source = 'autoimporter';     value = 60 }
+        @{ source = 'mecm-site-health'; value = 300 }
+        @{ source = 'device-sync';      value = 3600 }
+    ) {
+        Invoke-Resolve -Source $source -Configured $value | Should -Be $value
+    }
+
+    It 'hebt einen Wert unter der Untergrenze auf die Untergrenze: <source>' -ForEach @(
+        @{ source = 'device-sync';      floor = 5 }
+        @{ source = 'packages-sync';    floor = 10 }
+        @{ source = 'autoimporter';     floor = 30 }
+        @{ source = 'mecm-site-health'; floor = 60 }
+    ) {
+        Invoke-Resolve -Source $source -Configured 1 | Should -Be $floor
+    }
+
+    It 'senkt einen Wert ueber der Obergrenze auf 3600: <source>' -ForEach @(
+        @{ source = 'device-sync' }
+        @{ source = 'packages-sync' }
+        @{ source = 'autoimporter' }
+        @{ source = 'mecm-site-health' }
+    ) {
+        # Der Fall, der die Statusseite luegen liess: 7200 geschlafen, 3600 gemeldet.
+        Invoke-Resolve -Source $source -Configured 7200 | Should -Be 3600
+    }
+
+    It 'protokolliert die Korrektur samt Registry-Wert (kein stilles Klemmen)' {
+        # Ein pscustomobject als Huelle: eine nackte Liste wuerde die Pipeline
+        # entrollen, und eine leere Liste kaeme als $null zurueck - der Test
+        # "schweigt" darunter waere dann nicht falsifizierbar.
+        $logged = Get-ClampLog -Configured 7200
+        @($logged.Lines).Count | Should -Be 1
+        # WARN, nicht INFO: eine stillschweigend geaenderte Einstellung soll im
+        # Tageslog auffallen, nicht zwischen den Laufmeldungen verschwinden.
+        $logged.Lines[0] | Should -Match '^WARN\|'
+        $logged.Lines[0] | Should -Match '7200'
+        $logged.Lines[0] | Should -Match '3600'
+        $logged.Lines[0] | Should -Match 'ImporterIntervalSeconds'
+    }
+
+    It 'schweigt, wenn nichts zu korrigieren war' {
+        @((Get-ClampLog -Configured 60).Lines).Count | Should -Be 0
+    }
+
+    It 'wirft bei einer unbekannten Quelle (Tippfehler faellt im Test auf, nicht nachts)' {
+        { Invoke-Resolve -Source 'device_sync' -Configured 10 } | Should -Throw
+    }
+
+    It '<name> holt sein Intervall ueber Resolve-VsInterval, nicht ueber eine eigene Klammer' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        $text = Get-ScriptText -Name $name
+        $text | Should -Match 'Resolve-VsInterval'
+        # Eine eigene Math-Klammer waere wieder eine zweite Spanne neben der Tabelle.
+        $text | Should -Not -Match '\$intervalSeconds\s*=\s*\[Math\]'
+    }
+
+    It '<name> meldet genau den Takt, in dem es schlaeft' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        $text = Get-ScriptText -Name $name
+        # Jede Uebergabe von IntervalSeconds - als Parameter (-IntervalSeconds)
+        # oder als Hashtable-Schluessel am Zeilenanfang - traegt die Variable,
+        # die auch den Sleep speist. Das Muster nimmt bewusst jedes Argument
+        # ($\S+), nicht nur eine Variable: ein Literal waere sonst kein Treffer
+        # und der Test schwiege genau zu dem Fall, den er verhindern soll.
+        # Erwaehnungen in Kommentaren (SiteHealthIntervalSeconds) faengt es
+        # nicht, weil dort weder ein '-' davor noch ein '=' dahinter steht.
+        $passed = [regex]::Matches($text, '(?m)(?:^\s*|-)IntervalSeconds\s*=?\s*(\S+)')
+        @($passed).Count | Should -BeGreaterThan 0
+        foreach ($match in $passed) {
+            $match.Groups[1].Value | Should -Be '$intervalSeconds'
+        }
+        $text | Should -Match '\$sleepSeconds\s*=\s*\$intervalSeconds|Start-Sleep -Seconds \$intervalSeconds'
+    }
+
+    It 'der Installer lehnt ausserhalb der Spanne ab, statt sie spaeter still zu klemmen: <source>' -ForEach @(
+        @{ source = 'device-sync' }
+        @{ source = 'packages-sync' }
+        @{ source = 'autoimporter' }
+        @{ source = 'mecm-site-health' }
+    ) {
+        $bounds = (Get-Bounds)[$source]
+        $range = Get-ValidateRange -Name $bounds.Setting
+        $range | Should -Not -BeNullOrEmpty -Because "$($bounds.Setting) braucht ein ValidateRange"
+        $range.Min | Should -Be $bounds.Floor
+        $range.Max | Should -Be $bounds.Ceiling
+    }
+
+    It 'die Standardwerte von Installer und Get-VsConfig sind dieselben: <setting>' -ForEach @(
+        @{ setting = 'DeviceSyncIntervalSeconds';   property = 'DeviceSyncInterval';   expected = 10 }
+        @{ setting = 'PackagesSyncIntervalSeconds'; property = 'PackagesSyncInterval'; expected = 60 }
+        @{ setting = 'ImporterIntervalSeconds';     property = 'ImporterInterval';     expected = 60 }
+        @{ setting = 'SiteHealthIntervalSeconds';   property = 'SiteHealthInterval';   expected = 300 }
+    ) {
+        # Die Doku-Tabelle (docs/operations/mecm-integration.md) nennt dieselben
+        # Zahlen; der Installer ist die SSoT, Get-VsConfig nur der Notnagel.
+        $default = (Get-InstallerParameter -Name $setting).DefaultValue.Extent.Text
+        [int]$default | Should -Be $expected
+
+        $fallback = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($property) -Body {
+            param($prop)
+            $script:VsRegistryPath = 'HKCU:\Software\_vs_interval_absent_' + [guid]::NewGuid().ToString('N')
+            # Ohne VirtuSphere_WebAPI liefert Get-VsConfig $null; der Fallback
+            # wird deshalb ueber einen Schluessel MIT Adresse und OHNE Intervall
+            # gelesen.
+            New-Item -Path $script:VsRegistryPath -Force | Out-Null
+            New-ItemProperty -Path $script:VsRegistryPath -Name 'VirtuSphere_WebAPI' `
+                -Value 'virtusphere.lan:8021' -PropertyType String -Force | Out-Null
+            $value = (Get-VsConfig).$prop
+            Remove-Item -Path $script:VsRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+            $value
+        }
+        $fallback | Should -Be $expected
+    }
+
+    It 'jeder Setting-Name der Tabelle ist ein echter Installer-Parameter' {
+        foreach ($entry in (Get-Bounds).Values) {
+            Get-InstallerParameter -Name $entry.Setting | Should -Not -BeNullOrEmpty
+        }
     }
 }

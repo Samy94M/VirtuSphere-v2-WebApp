@@ -330,6 +330,53 @@ $script:VsRunScriptVersionMaxChars = 32   # VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_C
 # Server kappt zusaetzlich bei 1024 Zeichen.
 $script:VsReportDetailMaxBytes = 2048
 
+# Untergrenze je Aufgabe: darunter kostet ein Lauf mehr als er einbringt (der
+# Device-Sync fragt eine Liste ab, der Autoimporter kopiert Dateien und legt
+# Applications an). Die Obergrenze ist fuer alle die des Wire-Contracts, denn
+# ein Intervall, das der Report nicht tragen kann, wird beim Melden geklemmt -
+# die Statusseite nennt dann einen Takt, in dem die Aufgabe gar nicht laeuft.
+# Diese Tabelle ist die SSoT: die ValidateRange-Attribute von
+# install-VirtuSphere-MECM.ps1 spiegeln sie, VirtuSphere.RunReport.Tests.ps1
+# pinnt beide Seiten gegeneinander.
+$script:VsIntervalBounds = [ordered]@{
+    'device-sync'      = @{ Floor = 5;  Setting = 'DeviceSyncIntervalSeconds' }
+    'packages-sync'    = @{ Floor = 10; Setting = 'PackagesSyncIntervalSeconds' }
+    'autoimporter'     = @{ Floor = 30; Setting = 'ImporterIntervalSeconds' }
+    'mecm-site-health' = @{ Floor = 60; Setting = 'SiteHealthIntervalSeconds' }
+}
+
+# Liefert den Takt, in dem die Aufgabe wirklich laeuft UND den sie meldet: eine
+# Zahl, nie zwei. Ein Wert ausserhalb der Spanne wird geklemmt und die Korrektur
+# protokolliert. Still zu klemmen hiesse, den Sleep und den Report auseinander
+# laufen zu lassen: die Statusseite verspricht ("welcher Wert tatsaechlich
+# gilt", help.stack_a6_p1) genau diesen einen Wert, und ab dem Dreifachen der
+# gemeldeten Zahl faerbt sie die Zeile ein - eine Aufgabe stuende dauerhaft auf
+# "Verzoegert", waehrend sie exakt das tut, was eingestellt wurde.
+function Resolve-VsInterval {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][int]$Configured
+    )
+
+    if (-not $script:VsIntervalBounds.Contains($Source)) {
+        throw ('Resolve-VsInterval: unbekannte Quelle {0}' -f $Source)
+    }
+    $floor = [int]$script:VsIntervalBounds[$Source].Floor
+    $ceiling = $script:VsRunIntervalMaxSeconds
+
+    $effective = $Configured
+    if ($effective -lt $floor) { $effective = $floor }
+    if ($effective -gt $ceiling) { $effective = $ceiling }
+
+    if ($effective -ne $Configured) {
+        Write-VsLog -Level WARN -Message (
+            'Eingestelltes Intervall {0}s liegt ausserhalb der erlaubten Spanne {1}..{2}s - es gilt {3}s. Registry-Wert {4} korrigieren.' -f
+                $Configured, $floor, $ceiling, $effective, $script:VsIntervalBounds[$Source].Setting)
+    }
+
+    return $effective
+}
+
 # Zustellfehler des Run-Reports werden hoechstens einmal pro Fenster ins
 # Tageslog geschrieben (fire-and-forget: der Sync darf nie daran haengen).
 $script:VsReportThrottleSeconds = 300
@@ -357,6 +404,81 @@ $script:VsRunSiteErrorOutcome = @{
     'provider_access_denied' = 'unknown'
     'provider_unreachable'   = 'unknown'
     'query_failed'           = 'unknown'
+}
+
+# --- Ursachen eines Warnlaufs ----------------------------------------------
+#
+# Die Systemstatus-Karte zeigt "Datenwarnungen: 3" und klappt darunter das
+# `detail` auf. Device-Sync und Autoimporter sendeten dort `-Detail $null`: die
+# Zahl nannte keine VM, der Aufklappblock wurde gar nicht gerendert, und der
+# naechste saubere Lauf ueberschrieb die 3 mit 0. Damit war die Warnung
+# vollstaendig wertlos, obwohl VM- und Collection-Name schon auf der Leitung
+# lagen.
+#
+# Das Vokabular ist GESCHLOSSEN. Der Text landet unveraendert auf einer
+# Portalseite, also darf er nicht aus einer Exception-Message stammen: die traegt
+# je MECM-Version und -Sprache anderen Wortlaut und irgendwann einen Pfad oder
+# einen Kontonamen. Ein Code plus die Namen, um die es geht, ist alles, was der
+# Operator braucht, um die Zeile zu finden.
+$script:VsRunCauseVocabulary = @(
+    'mission_missing',           # VM ohne Mission: nichts zuzuweisen
+    'mac_missing',               # VM ohne DHCP-MAC: PXE kann nie greifen
+    'mac_conflict',              # MECM kennt eine andere MAC als das Portal
+    'device_import_failed',      # Import-CMComputerInformation fehlgeschlagen
+    'collection_missing',        # Zielcollection existiert nicht
+    'collection_assign_failed',  # Add-CMDeviceCollectionDirectMembershipRule fehlgeschlagen
+    'collection_update_failed',  # Invoke-CMCollectionUpdate fehlgeschlagen
+    'collection_folder_failed',  # Ordner/Verschieben fehlgeschlagen
+    'resource_id_pending',       # MECM hat noch keine ResourceID vergeben
+    'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
+    'package_config_invalid',    # config.json unlesbar oder Pflichtfeld fehlt
+    'package_content_failed',    # Content-Verteilung fehlgeschlagen
+    'package_source_missing'     # files-Pfad des Paketordners fehlt
+)
+
+function New-VsRunCauseList {
+    return New-Object System.Collections.Generic.List[string]
+}
+
+# Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
+# Strings, damit ein Tippfehler beim Aufruf sofort auffaellt; die Liste oben ist
+# die SSoT und wird von der Pester-Suite in beide Richtungen dagegen gehalten.
+function Add-VsRunCause {
+    param(
+        [Parameter(Mandatory)]$Causes,
+        [Parameter(Mandatory)]
+        [ValidateSet('mission_missing', 'mac_missing', 'mac_conflict', 'device_import_failed',
+            'collection_missing', 'collection_assign_failed', 'collection_update_failed',
+            'collection_folder_failed', 'resource_id_pending', 'resource_update_failed',
+            'package_config_invalid', 'package_content_failed', 'package_source_missing')]
+        [string]$Cause,
+        [string]$Target = '',
+        [string]$Collection = ''
+    )
+    if ($null -eq $Causes) { return }
+
+    $parts = @($Cause)
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { $parts += ('target={0}' -f $Target.Trim()) }
+    if (-not [string]::IsNullOrWhiteSpace($Collection)) { $parts += ('collection={0}' -f $Collection.Trim()) }
+    $Causes.Add(($parts -join ' '))
+}
+
+# Fasst die Ursachen eines Laufs zu EINER Detailzeile zusammen. Gedeckelt, weil
+# ein Lauf ueber hundert VMs sonst eine Detailzeile erzeugt, die der Server
+# ohnehin abschneidet: dann besser ehrlich sagen, wie viele nicht dastehen.
+# Liefert $null bei leerer Liste, damit ein sauberer Lauf kein leeres Detail
+# sendet.
+function Format-VsRunDetail {
+    param($Causes, [int]$MaxCauses = 10)
+    if ($null -eq $Causes -or @($Causes).Count -eq 0) { return $null }
+
+    $all = @($Causes)
+    $shown = @($all | Select-Object -First $MaxCauses)
+    $line = $shown -join '; '
+    if ($all.Count -gt $shown.Count) {
+        $line += ('; (+{0} weitere)' -f ($all.Count - $shown.Count))
+    }
+    return $line
 }
 
 # Kuerzt einen String auf hoechstens $MaxBytes UTF-8-Bytes, ohne eine

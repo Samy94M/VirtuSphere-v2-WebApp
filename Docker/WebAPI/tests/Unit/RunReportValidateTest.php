@@ -111,6 +111,42 @@ final class RunReportValidateTest extends TestCase
         self::assertSame('2.0.0', $r['report']['script_version']);
     }
 
+    /**
+     * The warning path of device-sync and the autoimporter used to send
+     * `detail: null`, so the System status card showed "data warnings: 3" and
+     * never named a single VM. They now send a cause line built from a closed
+     * vocabulary (Format-VsRunDetail), naming the VM and the collection. That
+     * needs no wire change, and this pins it: the shape those scripts emit must
+     * survive validation unchanged, including the separators the operator reads.
+     */
+    public function testAcceptsTheCauseVocabularyDetailOfAWarningRun(): void
+    {
+        $detail = 'collection_missing target=WEB01 collection=Firefox-115.0; mac_conflict target=DB02; (+4 weitere)';
+
+        $r = run_report_validate($this->base([
+            'event' => 'completed', 'outcome' => 'warning', 'error_category' => 'partial_failure',
+            'summary' => ['received' => 6, 'imported' => 1, 'item_failures' => 2, 'data_warnings' => 4],
+            'detail' => $detail,
+        ]));
+
+        self::assertArrayHasKey('report', $r, 'the warning detail must not be rejected');
+        self::assertSame($detail, $r['report']['detail'], 'the cause line must arrive verbatim; the operator reads it');
+        self::assertSame('partial_failure', $r['report']['error_category']);
+        self::assertSame(4, $r['report']['summary']['data_warnings']);
+    }
+
+    /** A detail longer than the column allows is cut, never rejected: the run itself is not the problem. */
+    public function testALongCauseListIsTruncatedRatherThanRefused(): void
+    {
+        $r = run_report_validate($this->base([
+            'event' => 'completed', 'outcome' => 'warning', 'error_category' => 'partial_failure',
+            'detail' => str_repeat('mac_missing target=VM01; ', 500),
+        ]));
+
+        self::assertArrayHasKey('report', $r);
+        self::assertSame(VIRTUSPHERE_CLIENT_EVENT_DETAIL_MAX_CHARS, mb_strlen((string) $r['report']['detail']));
+    }
+
     public function testAcceptsSiteCriticalWithStringSummary(): void
     {
         $r = run_report_validate([

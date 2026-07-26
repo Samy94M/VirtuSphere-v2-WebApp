@@ -44,7 +44,9 @@ dann zusätzlich `$VsFallbackIpApi` in
 Übergangs- und spätere DNS-Wechselprozedur steht im Admin-Runbook.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
-Skripte.
+Skripte. Die vier Intervalle und `MECM_ProviderMachine` behalten dabei ihren
+eingestellten Wert, wenn der jeweilige Parameter nicht angegeben wird; ein
+Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 
 ## Die vier geplanten Aufgaben (MECM-Server)
 
@@ -58,6 +60,14 @@ Skripte.
 Alle vier laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim Systemstart
 (`AtStartup`), Doppelstart-Schutz `MultipleInstances IgnoreNew`, **ohne
 Laufzeitlimit** (`PT0S`, Endlosschleifen) und mit Auto-Neustart bei Absturz.
+
+Die Intervalle sind Registry-owned (Installerparameter, Spalte oben = Standard)
+und je Aufgabe auf 5/10/30/60 s bis 3600 s begrenzt; die Spanne steht in
+`$script:VsIntervalBounds` (`mecm\VirtuSphere-Common.ps1`), der Installer
+spiegelt sie in `ValidateRange`. Ein Wert außerhalb wird beim Start geklemmt
+**und protokolliert**: die Aufgabe darf nie in einem anderen Takt laufen als in
+dem, den sie meldet und den der Systemstatus als geltend anzeigt. Ein Re-Run des
+Installers ohne den jeweiligen Parameter behält den eingestellten Wert.
 
 Die drei Sync-Aufgaben melden je Lauf einen **Ergebnisbericht** an
 `mecm_report.php?action=reportRun`: `started` vor der Arbeit, `completed` im
@@ -98,6 +108,7 @@ Common stellt bereit:
 | `Initialize-VsLog` / `Write-VsLog` | Tageslogdateien im Format `ISO-8601 \| LEVEL \| Komponente \| Kontext \| Nachricht \| Korrelations-ID`; Aufräumen nach 30 Tagen; Log-Fehler stoppen nie den Hauptprozess |
 | `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel) |
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
+| `Resolve-VsInterval` | löst das konfigurierte Intervall **einmal** auf, für den Sleep und den Report: Untergrenze je Aufgabe aus `$script:VsIntervalBounds`, Obergrenze aus dem Wire-Contract, und eine WARN-Zeile, wenn geklemmt wurde. Die Statusseite färbt die Zeile nach dem *gemeldeten* Takt, also darf keine Aufgabe in einem anderen laufen |
 | `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
 | `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM abfragen; reine Statusabbildung `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
 | `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); nur noch für Rückwärtskompatibilität, die aktuellen Skripte senden `reportRun` (ADR-0018) |

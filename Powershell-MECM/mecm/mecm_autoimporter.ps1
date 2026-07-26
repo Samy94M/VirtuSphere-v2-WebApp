@@ -56,7 +56,7 @@ $templatePath = Join-Path $config.PackagesRoot 'Package_Vorlage'
 $networkPath = $config.PackagesShare
 $appFolderName = $script:VsApplicationsFolderName   # SSoT in VirtuSphere-Common.ps1
 $dpGroupName = $config.DpGroupName
-$intervalSeconds = [Math]::Max(30, $config.ImporterInterval)
+$intervalSeconds = Resolve-VsInterval -Source 'autoimporter' -Configured $config.ImporterInterval
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'autoimporter/2.0'

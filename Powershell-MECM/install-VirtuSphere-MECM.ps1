@@ -10,7 +10,9 @@
     geplanten Aufgaben (SYSTEM, hoechste Rechte, beim Systemstart, ohne
     Laufzeitlimit) und verifiziert die Erstinstallation.
 
-    Idempotent: erneutes Ausfuehren aktualisiert Konfiguration und Skripte.
+    Idempotent: erneutes Ausfuehren aktualisiert Konfiguration und Skripte; die
+    vier Intervalle behalten dabei ihren eingestellten Wert, wenn der jeweilige
+    Parameter nicht angegeben wird (siehe .NOTES).
 
 .PARAMETER WebApi
     Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
@@ -40,12 +42,26 @@
     erkennt ihn dann per WMI/PSDrive. Ein Re-Run ohne diesen Parameter BEHAELT
     einen zuvor gesetzten Wert.
 
+.PARAMETER DeviceSyncIntervalSeconds
+    Abfrageintervall des Device-Sync-Tasks in Sekunden (5..3600, Standard 10).
+
+.PARAMETER PackagesSyncIntervalSeconds
+    Abfrageintervall des Packages-Sync-Tasks in Sekunden (10..3600, Standard 60).
+
+.PARAMETER ImporterIntervalSeconds
+    Abfrageintervall des Autoimporters in Sekunden (30..3600, Standard 60).
+
 .PARAMETER SiteHealthIntervalSeconds
     Abfrageintervall des Site-Health-Tasks in Sekunden (60..3600, Standard 300).
 
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
         -PackagesShare \\MECM-01\VirtuSphere\Packages\files
+
+.NOTES
+    Die vier Intervalle behalten bei einem Re-Run ohne den jeweiligen Parameter
+    ihren eingestellten Wert (wie -ProviderMachine). Ein Skript-Update setzt
+    einen bewusst getunten Takt also nicht auf den Standard zurueck.
 #>
 [CmdletBinding()]
 param(
@@ -55,9 +71,13 @@ param(
     [Parameter(Mandatory)][string]$PackagesShare,
     [string]$ReportToken = '',
     [string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
-    [int]$DeviceSyncIntervalSeconds = 10,
-    [int]$PackagesSyncIntervalSeconds = 60,
-    [int]$ImporterIntervalSeconds = 60,
+    # Die Spannen spiegeln $script:VsIntervalBounds in mecm\VirtuSphere-Common.ps1
+    # (Untergrenze je Aufgabe, Obergrenze aus dem Wire-Contract). Hier abzulehnen
+    # statt spaeter still zu klemmen: sonst laeuft die Aufgabe in einem anderen
+    # Takt als dem, den der Administrator gesetzt und die Statusseite zeigt.
+    [ValidateRange(5, 3600)][int]$DeviceSyncIntervalSeconds = 10,
+    [ValidateRange(10, 3600)][int]$PackagesSyncIntervalSeconds = 60,
+    [ValidateRange(30, 3600)][int]$ImporterIntervalSeconds = 60,
     [string]$ProviderMachine = '',
     [ValidateRange(60, 3600)][int]$SiteHealthIntervalSeconds = 300
 )
@@ -234,6 +254,21 @@ $settings = @{
     PackagesSyncIntervalSeconds = $PackagesSyncIntervalSeconds
     ImporterIntervalSeconds     = $ImporterIntervalSeconds
     SiteHealthIntervalSeconds   = $SiteHealthIntervalSeconds
+}
+# Ein Re-Run ohne den Parameter BEHAELT das eingestellte Intervall (wie
+# -ProviderMachine eine Zeile tiefer). Sonst setzt jedes Skript-Update einen
+# bewusst getunten Takt stillschweigend auf den Standard zurueck, und die
+# Statusseite meldet den neuen Wert als Tatsache. Wer zurueck auf den Standard
+# will, gibt den Parameter ausdruecklich an.
+$existingConfig = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue
+# Die Namen kommen aus $settings, nicht aus einer zweiten Liste: ein kuenftiges
+# fuenftes Intervall waere sonst genau hier vergessen.
+foreach ($intervalName in @($settings.Keys | Where-Object { $_ -like '*IntervalSeconds' })) {
+    if ($PSBoundParameters.ContainsKey($intervalName)) { continue }
+    $keep = if ($existingConfig) { $existingConfig.$intervalName } else { $null }
+    if ($null -eq $keep -or [int]$keep -eq $settings[$intervalName]) { continue }
+    $settings[$intervalName] = [int]$keep
+    Write-Ok ('{0}: eingestellte {1} s behalten (Parameter nicht angegeben)' -f $intervalName, [int]$keep)
 }
 if ($siteCode) { $settings['MECM_SiteCode'] = $siteCode }
 # Nur schreiben, wenn ein Provider vorliegt: ein leerer Wert wuerde die lokale

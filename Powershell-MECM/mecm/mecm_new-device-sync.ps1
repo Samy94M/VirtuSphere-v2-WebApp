@@ -38,7 +38,7 @@ Write-VsLog -Message '=== Device-Sync gestartet ==='
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'device-sync/2.0'
 
-$intervalSeconds = [Math]::Max(5, $config.DeviceSyncInterval)
+$intervalSeconds = Resolve-VsInterval -Source 'device-sync' -Configured $config.DeviceSyncInterval
 $siteCode = $null
 $consecutiveErrors = 0
 $loop = 0
@@ -82,6 +82,9 @@ while ($true) {
     $dataWarnings = 0
     $resourceUpdateFailures = 0
     $sleepSeconds = $intervalSeconds
+    # Ursachen dieses Laufs mit VM- und Collection-Namen. Ohne sie zeigte die
+    # Portalkarte "Datenwarnungen: 3" ohne eine einzige VM zu nennen.
+    $causes = New-VsRunCauseList
 
     try {
         # --- VirtuSphere-Geraeteliste laden --------------------------------
@@ -110,13 +113,22 @@ while ($true) {
             Write-VsLog -Message ("Scan #{0}: {1} Devices von VirtuSphere geladen." -f $loop, $devices.Count)
 
             # --- MECM-Daten EINMAL je Scan cachen ------------------------------
+            #
+            # -ErrorAction Stop auf allen drei Vollabfragen: ohne sie ist ein
+            # Providerfehler nicht von "MECM ist leer" zu unterscheiden. Der Lauf
+            # lief dann mit leeren Caches weiter und tat lauter falsche Dinge, die
+            # alle nach Datenfehlern aussahen: jedes Device schien nicht in MECM
+            # zu existieren (Re-Import), jede Zielcollection schien zu fehlen, und
+            # keine Task-Sequence-Collection wurde angelegt. Der Wurf hier landet
+            # im catch des Laufs und wird als mecm_unavailable gemeldet, was der
+            # Wahrheit entspricht.
             $mecmDevices = @{}
-            foreach ($d in @(Get-CMDevice -Fast | Select-Object Name, MACAddress, ResourceID)) {
+            foreach ($d in @(Get-CMDevice -Fast -ErrorAction Stop | Select-Object Name, MACAddress, ResourceID)) {
                 if ($d.Name) { $mecmDevices[$d.Name] = $d }
             }
-            $taskSequences = @(Get-CMTaskSequence -Fast | Select-Object -ExpandProperty Name)
+            $taskSequences = @(Get-CMTaskSequence -Fast -ErrorAction Stop | Select-Object -ExpandProperty Name)
             $collectionCache = @{}
-            foreach ($c in @(Get-CMDeviceCollection | Select-Object Name, CollectionID)) {
+            foreach ($c in @(Get-CMDeviceCollection -ErrorAction Stop | Select-Object Name, CollectionID)) {
                 if ($c.Name) { $collectionCache[$c.Name] = $c.CollectionID }
             }
             $collectionsToUpdate = @{}
@@ -129,6 +141,7 @@ while ($true) {
                     try { New-CMFolder -Name $folderName -ParentFolderPath 'DeviceCollection' -ErrorAction Stop | Out-Null } catch {
                         Write-VsLog -Level WARN -Context $folderName -Message ("Collection-Ordner konnte nicht angelegt werden: {0}" -f $_.Exception.Message)
                         $dataWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Target $folderName
                     }
                 }
             }
@@ -142,6 +155,7 @@ while ($true) {
                     } catch {
                         Write-VsLog -Level WARN -Context $tsName -Message ("Task-Sequence-Collection konnte nicht angelegt werden: {0}" -f $_.Exception.Message)
                         $dataWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Collection $tsName
                     }
                 }
             }
@@ -161,11 +175,13 @@ while ($true) {
                 if ([string]::IsNullOrWhiteSpace($missionName)) {
                     Write-VsLog -Level WARN -Context $deviceName -Message ("Mission fehlt (Id {0}) - Device uebersprungen." -f $device.mission_id)
                     $dataWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'mission_missing' -Target $deviceName
                     continue
                 }
                 if (-not $deviceMac) {
                     Write-VsLog -Level WARN -Context $deviceName -Message 'Keine MAC-Adresse - Device uebersprungen.'
                     $dataWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target $deviceName
                     continue
                 }
 
@@ -177,15 +193,23 @@ while ($true) {
                     } catch {
                         Write-VsLog -Level WARN -Context $missionName -Message ("Mission-Collection fehlgeschlagen: {0}" -f $_.Exception.Message)
                         $dataWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $missionName
                     }
                 }
 
-                # MAC-Konflikt (normalisiert) nur melden, nie automatisch handeln
+                # MAC-Konflikt (normalisiert): MECM kennt eine andere MAC als das
+                # Portal. Das ist ein Fehlschlag fuer DIESES Device, nicht bloss
+                # eine Notiz: die ResourceID zurueckzumelden nimmt die VM aus
+                # getDeviceList, und danach schiebt niemand mehr nach, waehrend
+                # MECM auf eine MAC wartet, die beim PXE-Boot nie kommt. Also
+                # bleibt die VM in der Warteschlange, bis ein Mensch entscheidet.
                 if ($mecmDevices.ContainsKey($deviceName)) {
                     $mecmMac = ConvertTo-VsNormalizedMac ([string]$mecmDevices[$deviceName].MACAddress)
                     if ($mecmMac -and $mecmMac -ne $deviceMac) {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("MAC-Konflikt: MECM={0} ESXi={1} - manuelle Pruefung noetig." -f $mecmMac, $deviceMac)
-                        $dataWarnings++
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("MAC-Konflikt: MECM={0} ESXi={1} - manuelle Pruefung noetig, Device bleibt in der Warteschlange." -f $mecmMac, $deviceMac)
+                        $itemFailures++
+                        Add-VsRunCause -Causes $causes -Cause 'mac_conflict' -Target $deviceName
+                        continue
                     }
                 }
 
@@ -205,6 +229,7 @@ while ($true) {
                         } else {
                             Write-VsLog -Level ERROR -Context $deviceName -Message ("Import fehlgeschlagen: {0}" -f $_.Exception.Message)
                             $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause 'device_import_failed' -Target $deviceName
                             continue
                         }
                     }
@@ -224,6 +249,8 @@ while ($true) {
                 }
                 if (-not $resourceId) {
                     Write-VsLog -Level WARN -Context $deviceName -Message 'Noch keine ResourceID - naechster Scan.'
+                    $dataWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'resource_id_pending' -Target $deviceName
                     continue
                 }
 
@@ -233,10 +260,16 @@ while ($true) {
                 foreach ($pkg in @($device.packages)) { if ($pkg.package_name) { $targets.Add([string]$pkg.package_name) } }
                 $targets.Add($missionName)
 
+                # Zaehlt die Zuweisungen, die NICHT gesessen haben. Der Zaehler
+                # entscheidet danach, ob die ResourceID gemeldet werden darf.
+                $targetsSkipped = 0
+
                 foreach ($target in $targets) {
                     if (-not $collectionCache.ContainsKey($target)) {
                         Write-VsLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target)
                         $dataWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $target
+                        $targetsSkipped++
                         continue
                     }
                     $collectionId = $collectionCache[$target]
@@ -248,11 +281,30 @@ while ($true) {
                         } catch {
                             Write-VsLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target, $_.Exception.Message)
                             $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_assign_failed' -Target $deviceName -Collection $target
+                            $targetsSkipped++
                         }
                     }
                 }
 
-                # ResourceID zurueckmelden
+                # ResourceID NUR melden, wenn jede Zuweisung gesessen hat.
+                #
+                # mecm_updateid.php ist der einzige Weg aus der Warteschlange: es
+                # setzt die VM auf `registered`, und getDeviceList liefert sie
+                # danach nicht mehr. Die Meldung lief bisher unbedingt, also fiel
+                # eine VM dauerhaft aus der Warteschlange, obwohl ihre OS-, Paket-
+                # oder Mission-Collection fehlte. Auf dem Client sah das aus wie
+                # ein PXE-Boot ohne Task Sequence oder eine Installation ohne
+                # Pakete, und im Portal wie eine fertig registrierte VM. Kein
+                # Wire-Change: derselbe Aufruf, nur nicht mehr fuer ein Device,
+                # dessen Zuweisung unvollstaendig ist. Es bleibt in getDeviceList
+                # und der naechste Scan versucht es erneut.
+                if ($targetsSkipped -gt 0) {
+                    Write-VsLog -Level ERROR -Context $deviceName -Message ("{0} von {1} Zuweisungen unvollstaendig - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $targetsSkipped, $targets.Count)
+                    $itemFailures++
+                    continue
+                }
+
                 try {
                     Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body @{
                         deviceName       = $deviceName
@@ -262,6 +314,7 @@ while ($true) {
                 } catch {
                     Write-VsLog -Level WARN -Context $deviceName -Message ("ResourceID-Update fehlgeschlagen: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
                     $resourceUpdateFailures++
+                    Add-VsRunCause -Causes $causes -Cause 'resource_update_failed' -Target $deviceName
                 }
             }
 
@@ -270,6 +323,7 @@ while ($true) {
                 try { Invoke-CMCollectionUpdate -Name $name -ErrorAction Stop | Out-Null } catch {
                     Write-VsLog -Level WARN -Context $name -Message ("Collection-Update nicht angestossen (Mitgliedschaft greift erst beim naechsten MECM-Zyklus): {0}" -f $_.Exception.Message)
                     $dataWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'collection_update_failed' -Collection $name
                 }
             }
 
@@ -279,9 +333,13 @@ while ($true) {
         }
 
         # Teil-Fehler eines sonst gelungenen Scans -> warning/partial_failure.
+        # Das Detail nennt dabei VM und Collection: eine Zahl ohne Ursache ist
+        # das, was die Karte vorher zeigte, und der naechste saubere Lauf
+        # ueberschreibt sie.
         if ($itemFailures -gt 0 -or $dataWarnings -gt 0 -or $resourceUpdateFailures -gt 0) {
             $outcome = 'warning'
             $category = 'partial_failure'
+            $detail = Format-VsRunDetail -Causes $causes
         }
     } catch {
         $consecutiveErrors++

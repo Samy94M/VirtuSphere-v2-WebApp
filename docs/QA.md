@@ -130,6 +130,11 @@ languages that carry the contract:
   discovery order; `provider_unreachable` only after two consecutive failures; each
   loop turn sends at most one `started` and exactly one `completed`; the installer
   registers exactly four task definitions, all `IgnoreNew`/SYSTEM/AtStartup/`PT0S`.
+  Interval resolution: every task reports the cadence it sleeps on (each
+  `IntervalSeconds` argument carries the same variable as the sleep, a literal
+  fails), `Resolve-VsInterval` clamps to the per-task range and logs the
+  correction at WARN, and the installer's `ValidateRange` plus its four parameter
+  defaults are pinned against `$script:VsIntervalBounds` and `Get-VsConfig`.
 - **Static (`PhaseCContractTest`, `MachineApiPanelContractTest`).** The
   maintenance-worker keeps retention and no longer carries a probe/socket path (this
   replaces the former pin on `maintenance_worker_tcp_check`); the machine-API panel

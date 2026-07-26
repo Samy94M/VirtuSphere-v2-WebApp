@@ -13,6 +13,92 @@ final class MecmReportWireTest extends TestCase
 {
     use ClientIpAllowlist;
 
+    /** @var list<array<string,mixed>>|null */
+    private static ?array $heartbeatRows = null;
+
+    /**
+     * These tests report the way a real MECM task would, so they write real
+     * rows into the shared dev database, and nothing put them back: afterwards
+     * System status showed four sources on an interval no script had sent (the
+     * fixture 30 s) with a reporter generation that never ran on this host, and
+     * the next person to read the page asked why. Same contract as
+     * restoreClientIpAllowlistIfTouched(): a wire test restores what it touched.
+     * Scoped to the sources this class reports for, so the maintenance worker,
+     * which really is beating in this stack, keeps its own row.
+     */
+    public static function setUpBeforeClass(): void
+    {
+        self::$heartbeatRows = self::readHeartbeatRows();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        $rows = self::$heartbeatRows;
+        self::$heartbeatRows = null;
+        if ($rows === null) {
+            return;
+        }
+
+        $db = db(true);
+        $sources = self::reportedSources();
+        $in = implode(',', array_fill(0, count($sources), '?'));
+        $delete = $db->prepare('DELETE FROM deploy_integration_heartbeats WHERE source IN (' . $in . ')');
+        $delete->bind_param(str_repeat('s', count($sources)), ...$sources);
+        $delete->execute();
+
+        foreach ($rows as $row) {
+            $columns = array_keys($row);
+            $insert = $db->prepare(
+                'INSERT INTO deploy_integration_heartbeats (' . implode(',', $columns) . ') '
+                . 'VALUES (' . implode(',', array_fill(0, count($columns), '?')) . ')'
+            );
+            $insert->bind_param(str_repeat('s', count($columns)), ...array_values($row));
+            $insert->execute();
+        }
+    }
+
+    /**
+     * @return list<array<string,mixed>>|null null when the stack is unreachable,
+     *   which is also the case in which nothing was written and nothing needs
+     *   restoring.
+     */
+    private static function readHeartbeatRows(): ?array
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+
+        try {
+            $db = db(true);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $sources = self::reportedSources();
+        $in = implode(',', array_fill(0, count($sources), '?'));
+        // SELECT *, never a column list: a list would silently drop whatever
+        // column the table gains next, which is exactly how the E2E restore
+        // turned every row back into a legacy heartbeat row.
+        $statement = $db->prepare('SELECT * FROM deploy_integration_heartbeats WHERE source IN (' . $in . ')');
+        $statement->bind_param(str_repeat('s', count($sources)), ...$sources);
+        $statement->execute();
+
+        $rows = [];
+        $result = $statement->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
+    /** @return list<string> */
+    private static function reportedSources(): array
+    {
+        return array_values(array_unique(array_merge(
+            VIRTUSPHERE_INTEGRATION_RUN_SOURCES,
+            VIRTUSPHERE_INTEGRATION_WIRE_SOURCES
+        )));
+    }
+
     protected function setUp(): void
     {
         $health = @file_get_contents(virtusphere_test_base_url() . '/portal/health.php');

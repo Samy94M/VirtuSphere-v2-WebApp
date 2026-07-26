@@ -42,9 +42,9 @@ Write-VsLog -Message '=== Site-Health gestartet ==='
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'site-health/1.0'
 
-# Intervall aus der Registry (SiteHealthIntervalSeconds), Default 300s, in die
-# erlaubte Spanne 60..3600 geklemmt.
-$intervalSeconds = [Math]::Min(3600, [Math]::Max(60, [int]$config.SiteHealthInterval))
+# Intervall aus der Registry (SiteHealthIntervalSeconds), Default 300s; die
+# Spanne und das Protokollieren einer Korrektur liegen in Resolve-VsInterval.
+$intervalSeconds = Resolve-VsInterval -Source 'mecm-site-health' -Configured $config.SiteHealthInterval
 
 # provider_unreachable erst nach zwei Fehlzyklen: der Zaehler ueberlebt die
 # Iteration.

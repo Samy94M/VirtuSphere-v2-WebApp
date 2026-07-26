@@ -54,12 +54,19 @@ echo 'CLEANED';
 test.beforeAll(() => cleanupSeeded());
 test.afterAll(() => cleanupSeeded());
 
-/** Full heartbeat table, so a test may drive states and hand it back intact. */
+// Full heartbeat table, so a test may drive states and hand it back intact.
+// SELECT * and a column list derived from the row, never a hand-written one:
+// the eight columns this used to name were the eight it knew in 2026-06, so
+// every restore silently dropped last_event, report_version and the four result
+// timestamps to their defaults. The rows came back as *legacy heartbeat* rows,
+// which is a state the page renders differently, and every local run left the
+// dev database claiming an interval and a reporter generation that no script
+// had sent. Same shape as siteSnapshot()/restoreSite() in system-status.spec.js.
 function heartbeatSnapshot() {
   return phpJson(`
 $db = db();
 $rows = [];
-$res = $db->query('SELECT source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count FROM deploy_integration_heartbeats');
+$res = $db->query('SELECT * FROM deploy_integration_heartbeats');
 while ($row = $res->fetch_assoc()) { $rows[] = $row; }
 echo 'JSON' . json_encode($rows) . 'JSON';
 `);
@@ -71,17 +78,11 @@ function restoreHeartbeats(rows) {
 $rows = json_decode(base64_decode('${payload}'), true, 16, JSON_THROW_ON_ERROR);
 $db = db();
 $db->query('DELETE FROM deploy_integration_heartbeats');
-$stmt = $db->prepare('INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-foreach ($rows as $r) {
-    $source = (string) $r['source'];
-    $seen = $r['last_seen_at'];
-    $checked = $r['last_checked_at'];
-    $status = (string) $r['last_status'];
-    $detail = $r['last_detail'];
-    $ip = (string) $r['last_ip'];
-    $interval = (int) $r['interval_seconds'];
-    $beats = (int) $r['beat_count'];
-    $stmt->bind_param('ssssssii', $source, $seen, $checked, $status, $detail, $ip, $interval, $beats);
+foreach ($rows as $row) {
+    $cols = array_keys($row);
+    $sql = 'INSERT INTO deploy_integration_heartbeats (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')';
+    $stmt = $db->prepare($sql);
+    $stmt->bind_param(str_repeat('s', count($cols)), ...array_values($row));
     $stmt->execute();
 }
 echo 'RESTORED';

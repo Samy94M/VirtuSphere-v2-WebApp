@@ -365,13 +365,22 @@ Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 | `ReportToken` | optionaler Token für `X-VirtuSphere-Token` |
 | `DpGroupName` | Distribution-Point-Gruppe für die Content-Verteilung |
 | `LogRoot` | Log-Verzeichnis der Server-Skripte |
-| `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10) |
-| `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60) |
-| `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60) |
+| `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10, erlaubt 5–3600) |
+| `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60, erlaubt 10–3600) |
+| `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60, erlaubt 30–3600) |
 | `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health (neu; leer = lokale Ermittlung) |
 | `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
 | `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
 | `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
+
+Hinweis Intervalle: Der Installer lehnt einen Wert außerhalb der Spanne ab
+(`ValidateRange`); ein von Hand in die Registry geschriebener Wert wird beim
+Start der Aufgabe geklemmt und die Korrektur ins Tageslog geschrieben. Der Takt,
+in dem die Aufgabe läuft, ist damit immer derselbe wie der, den sie meldet und
+den der Systemstatus in der Zeile zeigt. Ein Re-Run des Installers ohne den
+jeweiligen Parameter behält den eingestellten Wert; ein Skript-Update setzt
+einen getunten Takt also nicht zurück. SSoT der Spannen ist
+`$script:VsIntervalBounds` in `mecm\VirtuSphere-Common.ps1`.
 
 Hinweis HTTP/HTTPS: Die API-Aufrufe der Skripte laufen bewusst ueber HTTP; das
 Portal-HTTPS aus WP7 leitet sie nie um (ADR-0027). Kommt bei E3 die
@@ -578,6 +587,8 @@ keine Portal-Settings:
   lokal auf dem Site-Server liegt (der Normalfall); die Aufgabe ermittelt ihn dann
   selbst.
 - `SiteHealthIntervalSeconds`: Berichtsintervall, Standard 300, erlaubt 60–3600.
+  Wie die drei Sync-Intervalle: außerhalb der Spanne lehnt der Installer ab, ein
+  Registry-Wert von Hand wird beim Start geklemmt und protokolliert.
 
 **Remote-Provider.** Das Computerkonto des Site-Servers ist standardmäßig Mitglied
 der SMS-Admins-Gruppe auf jedem Provider; liegt der Provider lokal und läuft die
@@ -636,14 +647,18 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 |---|---|---|
 | 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
 | VM ohne Mission / ohne DHCP-MAC | übersprungen, nächste VM | WARN |
-| MAC-Konflikt MECM ≠ ESXi | nur melden, nie automatisch ändern | WARN „manuelle Prüfung" |
+| MAC-Konflikt MECM ≠ ESXi | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „manuelle Prüfung" |
 | Import-Race (paralleler Scan) | toleriert; Existenz-Nachprüfung statt Fehlertext-Parsing (sprach-/versionsneutral) | still |
 | Mehrere DHCP-Interfaces an einer VM | erste MAC wird genutzt | WARN |
 | Auto-Approve scheitert / ResourceID fehlt noch | Retry im nächsten Scan | DEBUG + WARN |
-| Ziel-Collection existiert nicht | Zuweisung übersprungen | WARN |
+| Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |
+| Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
 | Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
 | Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
-| ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter | WARN |
+| ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |
+| MECM-Vollabfrage (Devices/Task Sequences/Collections) scheitert | Lauf bricht ab und meldet `mecm_unavailable`; **kein** Weiterlaufen mit leeren Caches | ERROR |
+
+**Die ResourceID ist die Tür aus der Warteschlange.** `mecm_updateid.php` setzt die VM auf `registered`, und `getDeviceList` liefert sie danach nicht mehr; nichts schiebt sie erneut ein. Deshalb meldet der Device-Sync die ResourceID nur, wenn **jede** Zuweisung dieser VM gesessen hat, also OS-, Paket- und Mission-Collection. Vorher lief die Meldung unbedingt: eine VM mit fehlender Paket-Collection fiel dauerhaft aus der Warteschlange, bootete per PXE ohne Task Sequence oder installierte ohne ihre Pakete, und im Portal stand sie als fertig registriert. Ein unvollständiger Lauf zählt jetzt `item_failures`, meldet `warning`/`partial_failure` und nennt im `detail` VM und Collection.
 
 **Packages-Sync**
 
