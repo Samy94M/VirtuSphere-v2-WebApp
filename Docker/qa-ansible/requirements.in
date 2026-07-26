@@ -9,3 +9,13 @@
 ansible-core~=2.19.0
 ansible-lint
 pyvmomi>=8.0.3.0.1
+# requests ist keine Kuer: jedes community.vmware-Modul, das die Playbooks
+# benutzen, importiert vmware_rest_client, und der bricht ohne requests mit
+# "Failed to import the required Python library (requests)" ab - vor der
+# Argumentpruefung. Es fehlte hier und in den dokumentierten Host-Voraussetzungen,
+# also konnte das Image die eigenen Module nie laden und ein nach Doku
+# aufgesetzter Ansible-Host haette den kompletten ESXi-Teil nicht ausgefuehrt.
+# pyvmomi zieht es nicht mit. Gepruefte Untergrenze: die Version, mit der alle
+# zehn Module die Verbindungsphase erreichen; das Gate ansible-module-contract
+# beweist es bei jedem Lauf.
+requests>=2.32.0

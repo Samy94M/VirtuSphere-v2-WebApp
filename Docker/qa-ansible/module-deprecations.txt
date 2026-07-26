@@ -1,0 +1,20 @@
+# Bekannte Deprecations der gepinnten community.vmware-Version.
+#
+# Eine Zeile je Modul: <modul> <removal_version> <nachfolger>
+#
+# module-contract.sh liest meta/runtime.yml der INSTALLIERTEN Collection und
+# haelt sie gegen diese Liste. Ein Modul, das upstream neu als deprecated oder
+# tombstoned markiert wird, faellt damit im Gate auf, statt beim Kunden. Eine
+# Zeile, die kein Playbook mehr benutzt, faellt ebenfalls auf: eine Ausnahme, die
+# ins Leere zeigt, deckt kuenftig das falsche Modul.
+#
+# Diese Liste ist kein Freibrief, sondern eine Notiz mit Frist. Der Nachfolger
+# steht dabei, damit die Portierung nicht neu recherchiert werden muss.
+#
+# vmware_guest_powerstate: benutzt von startVMs-ESXi_playbook.yml und
+# powercycleVMs-ESXi_playbook.yml. Der Nachfolger liegt in vmware.vmware 2.9.0,
+# die als Abhaengigkeit des Pins mitinstalliert wird. Portiert wird, sobald der
+# Power-Pfad gegen einen echten Host geprueft werden kann (ADR-0023/ADR-0025
+# verlangen das fuer ESXi-Feldpfade), nicht blind: die Probe beweist, dass ein
+# Modul laedt, nicht dass es dasselbe tut.
+vmware_guest_powerstate 7.0.0 vmware.vmware.vm_powerstate

@@ -27,6 +27,37 @@ final class AnsiblePreflightTest extends TestCase
         self::assertStringContainsString(' && ', $command);
     }
 
+    public function testEveryPythonLibraryTheCollectionNeedsIsProbedInOneInterpreter(): void
+    {
+        // The preflight checked pyvmomi and then asked ansible-doc whether the
+        // collection is present. ansible-doc only reads documentation, so it
+        // succeeds on a host where not a single module can run: every
+        // community.vmware module the playbooks call imports the collection's
+        // vmware_rest_client, which aborts with "Failed to import the required
+        // Python library (requests)" before it reads an argument. pyvmomi does
+        // not pull requests in, so the test reported a healthy host and six of
+        // the seven inventory queries would have answered "0 datastores" under
+        // ignore_errors.
+        //
+        // What the collection really needs is proven where the collection is
+        // installed: check.ps1 -Gate ansible-module-contract calls every used
+        // module against 127.0.0.1:443 in the QA image. This test only keeps the
+        // portal's side from silently losing a probe again, because
+        // Docker/qa-ansible is not mounted into the PHP container and a glob on
+        // it here would be permanently empty.
+        $checks = ansible_preflight_checks();
+
+        foreach (['pyvmomi', 'requests'] as $library) {
+            self::assertArrayHasKey($library, $checks, $library . ' has no preflight component');
+        }
+        // One interpreter: two libraries importable in two different pythons are
+        // not a working host, and the deploy runs whatever `python3` resolves to.
+        foreach (['pyvmomi', 'requests'] as $library) {
+            self::assertStringStartsWith('python3 -c ', $checks[$library]);
+        }
+        self::assertStringContainsString('import requests', $checks['requests']);
+    }
+
     public function testLenientProbeUsesVmwareGuestAndStrictUsesAutostartModule(): void
     {
         $lenient = ansible_preflight_command();

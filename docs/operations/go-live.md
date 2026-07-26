@@ -68,12 +68,13 @@ Auf dem Host installieren und bereitstellen:
 | SSH-Login für das Konto, Schreibrecht in `~` und `/tmp` | Job-Arbeitsverzeichnis unter `/tmp/virtusphere-job-*` |
 | `ansible-playbook` (ansible-core) und `python3` | führt die Playbooks aus |
 | Python-Modul `pyvmomi` | vSphere-Anbindung (`pip install pyvmomi`) |
+| Python-Modul `requests` | jedes `community.vmware`-Modul importiert es (`pip install requests`); `pyvmomi` bringt es nicht mit, und ohne es scheitert **jeder** Playbook-Aufruf beim Import, bevor er ein Argument liest |
 | Collection `community.vmware` | die `vmware_guest`-Module (`ansible-galaxy collection install -r Ansible/requirements.yml`) |
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
 „Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login,
-`ansible-playbook`, `python3`, `pyvmomi`, `community.vmware`) und benennt bei
+`ansible-playbook`, `python3`, `pyvmomi`, `requests`, `community.vmware`) und benennt bei
 einem Fehler die fehlende Komponente. Bei gesetzter API-Basis-URL prüft er
 zusätzlich den Rückweg: die Portal-Erreichbarkeit vom Host aus und ob die
 Host-IP in den Machine-API IP-Freigaben steht; fehlt die Freigabe, warnt das

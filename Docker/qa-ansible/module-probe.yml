@@ -1,0 +1,104 @@
+---
+# Modulprobe der gepinnten Collection (QA-Werkzeug, wird nicht ausgeliefert).
+#
+# Ruft JEDES community.vmware-Modul, das die Playbooks unter Ansible/ benutzen,
+# mit gueltigen Argumenten und Wegwerf-Zugangsdaten gegen 127.0.0.1:443 auf. Kein
+# ESXi-Host ist beteiligt: die Verbindung wird zwangslaeufig abgelehnt, und genau
+# das ist das Bestehenskriterium.
+#
+# Was diese Probe beweist, ohne einen Host zu haben:
+#   1. das Modul existiert in der gepinnten Version ueberhaupt,
+#   2. die Argumente, die wir uebergeben, erfuellen seine argument_spec,
+#   3. jede Python-Bibliothek, die es importiert, ist installiert.
+#
+# Punkt 3 war der Anlass. Alle zehn Module importieren community.vmware's
+# vmware_rest_client, der ohne `requests` mit "Failed to import the required
+# Python library (requests)" abbricht - und `requests` stand weder in den
+# dokumentierten Host-Voraussetzungen noch in der QA-Toolchain. Auf einem korrekt
+# nach Doku aufgesetzten Ansible-Host war damit der komplette ESXi-Teil des
+# Produkts funktionslos, und sechs der sieben Inventar-Abfragen laufen unter
+# ignore_errors: die haetten "0 Datastores" gemeldet statt eines Fehlers.
+#
+# Ausgewertet wird von module-contract.sh, nicht hier: die Pruefung ist eine Liste
+# VERBOTENER Meldungen (fehlende Bibliothek, Argumentfehler, unbekanntes Modul),
+# nicht eine erwartete. Eine neue Formulierung des Verbindungsfehlers darf die
+# Probe nicht rot machen, ein neuer Argumentname schon.
+#
+# Jedes Modul, das ein Playbook benutzt, MUSS hier stehen:
+# tests/Static/AnsiblePlaybookHygieneContractTest.php laeuft beide Richtungen.
+- name: Modulprobe der gepinnten community.vmware-Version
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Nicht routbar in dem Sinne, dass dort nichts lauscht: der Aufruf kommt bis
+    # zum connect() und scheitert daran. Ein erreichbarer Host wuerde die Probe
+    # von der Frage "laedt das Modul" auf "antwortet ESXi" verschieben.
+    probe: &probe
+      hostname: 127.0.0.1
+      port: 443
+      username: virtusphere-probe
+      password: virtusphere-probe
+      validate_certs: false
+  tasks:
+    - name: vmware_about_info
+      community.vmware.vmware_about_info:
+        <<: *probe
+      ignore_errors: true
+
+    - name: vmware_datacenter_info
+      community.vmware.vmware_datacenter_info:
+        <<: *probe
+      ignore_errors: true
+
+    - name: vmware_datastore_info
+      community.vmware.vmware_datastore_info:
+        <<: *probe
+      ignore_errors: true
+
+    # esxi_hostname ist Pflicht (eines von cluster_name/esxi_hostname). Genau
+    # dieser Argumentfehler hat einmal 13 Portgruppen als 0 gemeldet, weil die
+    # Aufgabe unter ignore_errors lief; siehe .claude/rules/ansible.md.
+    - name: vmware_portgroup_info
+      community.vmware.vmware_portgroup_info:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    # datacenter ist Pflicht.
+    - name: vmware_dvs_portgroup_info
+      community.vmware.vmware_dvs_portgroup_info:
+        <<: *probe
+        datacenter: ha-datacenter
+      ignore_errors: true
+
+    - name: vmware_host_facts
+      community.vmware.vmware_host_facts:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    - name: vmware_host_auto_start
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    - name: vmware_guest_info
+      community.vmware.vmware_guest_info:
+        <<: *probe
+        name: virtusphere-probe-vm
+      ignore_errors: true
+
+    - name: vmware_guest_powerstate
+      community.vmware.vmware_guest_powerstate:
+        <<: *probe
+        name: virtusphere-probe-vm
+        state: powered-on
+      ignore_errors: true
+
+    - name: vmware_guest
+      community.vmware.vmware_guest:
+        <<: *probe
+        name: virtusphere-probe-vm
+        datacenter: ha-datacenter
+      ignore_errors: true

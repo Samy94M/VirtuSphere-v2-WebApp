@@ -15,6 +15,30 @@
 # community.vmware.vmware_about_info (capability diagnostics). It requires
 # ansible-core >= 2.19 and pyVmomi >= 8.0.3.0.1 on the host, and supports
 # vSphere/ESXi 7.0 and 8.0. See docs/DEPLOYMENT.md, "ESXi support matrix".
+#
+# `requests` is a hard requirement of every module below, not an optional extra:
+# they all import community.vmware's vmware_rest_client, which raises "Failed to
+# import the required Python library (requests)" before it looks at a single
+# argument. Without it the inventory pull, the VM creation and the power playbooks
+# all fail on a host that otherwise meets every documented prerequisite. See
+# docs/DEPLOYMENT.md, "Required on the Ubuntu host".
+#
+# Two upstream facts belong to this pin. Both were read out of the artifact this
+# file installs, not out of a release note, and the QA gate re-reads them
+# (scripts/check.ps1, gate `ansible-module-contract`) so they cannot rot here:
+#
+#   2027-11  End of life of the community.vmware 6.x line. Release 6 is
+#            maintained until then; unmaintained is release 4, not 6. For an
+#            air-gapped LAN product that is a planning date, not a warning.
+#
+#   Of the ten community.vmware modules the playbooks call, exactly one is
+#   deprecated in 6.2.0: vmware_guest_powerstate (removal in 7.0.0, successor
+#   vmware.vmware.vm_powerstate), used by startVMs-ESXi_playbook.yml and
+#   powercycleVMs-ESXi_playbook.yml. The successor ships in vmware.vmware 2.9.0,
+#   which installs alongside this pin as a dependency, so the port is available
+#   whenever the power path can be verified against a real host.
+#   Docker/qa-ansible/module-deprecations.txt is the checked-in list; a newly
+#   deprecated module fails the gate instead of surfacing on a customer host.
 collections:
   - name: community.vmware
     version: "6.2.0"

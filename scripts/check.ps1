@@ -562,6 +562,31 @@ Add-Gate -Name 'ansible-lint' -Lanes $allLanes -Kind 'container' -Body {
     Format-ToolResult $r 'ansible-lint --strict sauber' 'ansible-lint meldet Befunde'
 }
 
+Add-Gate -Name 'ansible-module-contract' -Lanes $allLanes -Kind 'container' -Body {
+    # ansible-syntax und ansible-lint lesen die Playbooks; keiner der beiden ruft
+    # ein Modul auf. Genau dort lag der Befund: jedes benutzte community.vmware-
+    # Modul importiert vmware_rest_client, der ohne die Python-Bibliothek
+    # `requests` abbricht - und die stand weder in der QA-Toolchain noch in den
+    # dokumentierten Host-Voraussetzungen. Auf einem nach Doku aufgesetzten
+    # Ansible-Host war damit der komplette ESXi-Teil funktionslos, waehrend
+    # ansible-lint --strict gruen meldete. Sechs der sieben Inventar-Abfragen
+    # laufen unter ignore_errors und haetten "0 Datastores" gemeldet.
+    #
+    # Dieses Gate ruft jedes Modul mit gueltigen Argumenten gegen 127.0.0.1:443:
+    # der Verbindungsfehler ist der Gutfall, eine fehlende Bibliothek, ein
+    # Argumentfehler oder ein verschwundenes Modul sind Befunde. Dazu haelt es die
+    # Deprecations der INSTALLIERTEN Collection gegen die eingecheckte Liste,
+    # damit eine Frist im Repo steht, ohne dass Prosa sie spiegeln muss.
+    $contract = Join-Path $repoRoot 'Docker/qa-ansible/module-contract.sh'
+    if (-not (Test-Path $contract)) { return New-InfraResult 'Docker/qa-ansible/module-contract.sh fehlt unter dem Pruef-Root (Zero-Match)' }
+    if (-not (Test-DockerImage $toolImages.ansible)) {
+        return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+    }
+    $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+        $toolImages.ansible, 'sh', '/repo/Docker/qa-ansible/module-contract.sh')
+    Format-ToolResult $r 'Jedes benutzte Modul laedt gegen die gepinnte Collection' 'Modulvertrag der gepinnten Collection verletzt'
+}
+
 Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
     # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
     # rendert die feindliche Fixture mit den Produktions-Generatoren,

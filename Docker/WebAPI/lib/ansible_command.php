@@ -267,6 +267,17 @@ function ansible_preflight_checks(bool $strict = false): array
         'ansible-playbook' => 'command -v ansible-playbook >/dev/null 2>&1 && ansible-playbook --version 2>&1',
         'python3' => 'command -v python3 >/dev/null 2>&1 && python3 --version 2>&1',
         'pyvmomi' => 'python3 -c ' . ansible_sh_quote('import pyVim, pyVmomi') . ' 2>&1',
+        // Every community.vmware module the playbooks call imports the
+        // collection's vmware_rest_client, which aborts with "Failed to import
+        // the required Python library (requests)" before it reads an argument.
+        // pyvmomi does not pull requests in, and the collection probe below is
+        // an ansible-doc call, which only reads documentation and succeeds
+        // without it: the test therefore reported a fully healthy host on which
+        // not one module could run, and six of the seven inventory queries would
+        // have answered "0 datastores" under ignore_errors. Same interpreter as
+        // the pyvmomi line on purpose - two importable libraries in two
+        // interpreters are not a working host.
+        'requests' => 'python3 -c ' . ansible_sh_quote('import requests') . ' 2>&1',
         'community.vmware' => 'ansible-doc -t module ' . $collectionModule . ' 2>&1',
     ];
 }
