@@ -831,6 +831,60 @@ $cases += @(
     } }
 )
 
+# Offline-Bundle-Vorbedingungen: --release lehnt einen dirty Worktree hart ab,
+# ein nichtleeres Ziel wird nie ueberbaut. Beide Checks stehen VOR jedem
+# Docker-Schritt, deshalb kommen die Faelle ohne Images aus; die Fixtures sind
+# eigene Mini-Git-Repos, das echte Repo wird nie beruehrt.
+function Invoke-BundleScript {
+    param([string]$FixtureRoot, [string[]]$ScriptArgs)
+    if (-not $shExe) { return $null }
+    $prevPath = $env:PATH
+    $env:PATH = (Split-Path $shExe -Parent) + [System.IO.Path]::PathSeparator + $env:PATH
+    try {
+        $scriptPosix = ((Join-Path $FixtureRoot 'scripts/build-offline-bundle.sh') -replace '\\', '/')
+        $argLine = @($ScriptArgs | ForEach-Object { "'" + ($_ -replace '\\', '/') + "'" }) -join ' '
+        return Invoke-Tool $shExe @('-c', ("sh '" + $scriptPosix + "' " + $argLine))
+    } finally {
+        $env:PATH = $prevPath
+    }
+}
+function New-BundleFixture {
+    param([string[]]$ExtraPaths = @())
+    $fx = New-Fixture (@('scripts/build-offline-bundle.sh') + $ExtraPaths)
+    foreach ($gitStep in @(
+            @('init', '-q'),
+            @('config', 'user.email', 'guard@fixture.invalid'),
+            @('config', 'user.name', 'guard'),
+            @('add', '.'),
+            @('commit', '-q', '-m', 'fixture'))) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitStep)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitStep -join ' ') + ' im Bundle-Fixture fehlgeschlagen: ' + (@($r.Output) -join ' ')) }
+    }
+    return $fx
+}
+$cases += @(
+    @{ Name = 'offline-bundle.release-dirty-abort'; Body = {
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dirty.txt' 'uncommitted'
+        Assert-Guard (Invoke-BundleScript $fx @('--release', (Join-Path $fx 'dist/out'))) @(1) '\[bundle\.dirty\]'
+    } }
+    @{ Name = 'offline-bundle.dirty-warns-without-release'; Body = {
+        # Negativrichtung: ohne --release ist dirty nur eine Warnung und der Lauf
+        # geht ueber den Check hinaus. Die Fixture laesst tool-lock.json bewusst
+        # weg, damit der Lauf deterministisch am naechsten Umgebungs-Halt endet
+        # (exit 2), bevor irgendein Docker-Schritt laufen koennte; exit 2 statt 1
+        # beweist zugleich, dass es NICHT der [bundle.dirty]-Abbruch war.
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dirty.txt' 'uncommitted'
+        Assert-Guard (Invoke-BundleScript $fx @((Join-Path $fx 'dist/out'))) @(2) 'WARNUNG: Worktree ist nicht sauber'
+    } }
+    @{ Name = 'offline-bundle.dest-not-empty-abort'; Body = {
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dist/out/altdatei.txt' 'aus einem frueheren Lauf'
+        Assert-Guard (Invoke-BundleScript $fx @((Join-Path $fx 'dist/out'))) @(2) '\[bundle\.dest-not-empty\]'
+    } }
+)
+
 # --- Ausfuehrung -----------------------------------------------------------------
 $selected = $cases
 if ($Filter) {

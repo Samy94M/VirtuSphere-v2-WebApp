@@ -71,11 +71,21 @@ tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI
 `composer install` hier keinen Packagist erreicht. Ohne diesen Schritt startet
 PHP mit „vendor/autoload.php missing".
 
-Auf dem **Ansible-Host** zusätzlich die Collections offline installieren:
+Auf dem **Ansible-Host** zuerst die Python-Voraussetzungen aus dem Wheelhouse
+des Bundles installieren (ansible-core, pyvmomi, requests; die Versionen pinnt
+`deps/requirements-ansible-host.txt` auf den QA-geprüften Stand). Das
+Wheelhouse zielt auf glibc/x86_64 mit Python 3.12, also Ubuntu 24.04;
+ansible-core in der gepinnten Version verlangt ohnehin Python 3.11 oder neuer.
+Danach die Collections, ebenfalls offline:
 
 ```bash
+python3 -m pip install --no-index --find-links deps/wheels -r deps/requirements-ansible-host.txt
 ansible-galaxy collection install collections/*.tar.gz
 ```
+
+Vor dem Wheelhouse hieß „BEFORE the network is air-gapped" in
+`Ansible/requirements.yml` faktisch „vorher im Netz installieren“; für einen
+frisch aufzusetzenden Air-Gap-Host war das ein Widerspruch in sich.
 
 ## Schritt 4: `.env` anlegen
 

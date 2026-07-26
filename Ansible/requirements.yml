@@ -1,14 +1,16 @@
 ---
 # Ansible collection pin for the VirtuSphere Ansible host (ADR-0025).
 #
-# This file is the single source of truth for the collection version. Install it
-# on the Ansible host BEFORE the network is air-gapped:
+# This file is the single source of truth for the collection version. On a
+# connected host install it directly:
 #
 #   ansible-galaxy collection install -r Ansible/requirements.yml
 #
-# Offline: fetch the tarball once on a connected machine
-#   ansible-galaxy collection download -r Ansible/requirements.yml -p ./offline
-# then install from that directory on the air-gapped host.
+# Air-gapped hosts get both the collections AND the Python prerequisites
+# (ansible-core/pyvmomi/requests as wheels, versions from the QA lock) from the
+# offline bundle (scripts/build-offline-bundle.sh, collections/ and deps/wheels;
+# steps in docs/operations/offline-install.md) - nothing needs the network
+# beforehand anymore.
 #
 # 6.2.0 is the version verified to carry every module the playbooks use,
 # including community.vmware.vmware_host_auto_start (autostart policy) and
