@@ -65,34 +65,37 @@ function legacy_audit_token_success(mysqli $connection, string $ip, string $user
     }
 }
 
-function verifyToken($token, $connection)
-{
-    if ((string) $token === '') {
-        return false;
-    }
-
-    $expired = 0;
-    $stmt = $connection->prepare('SELECT id FROM deploy_tokens WHERE token = ? AND expired = ? AND created_at > DATE_SUB(NOW(), INTERVAL 60 MINUTE) LIMIT 1');
-    $stmt->bind_param('si', $token, $expired);
-    $stmt->execute();
-
-    return $stmt->get_result()->num_rows > 0;
-}
-
 /**
- * Resolve the RBAC role of the user that owns a valid legacy token. Tokens
- * issued before the user binding (or by a since-deleted user) resolve to the
- * least-privileged role so mutating actions stay gated by default.
+ * The one predicate that decides whether a legacy token may act, and who owns it.
+ *
+ * There used to be two. verifyToken() asked about the token alone (token,
+ * expired flag, 60-minute age) while legacyTokenRole() additionally joined the
+ * owner and required it active, so the two answered different questions about
+ * the same string: a deactivated account's token passed authentication and only
+ * lost its *role*, which then fell back to VIRTUSPHERE_ROLE_USER - a role whose
+ * permission set is literally missions.write, vms.write and deploy.run. The
+ * portal refuses that account on its next click (current_user() re-reads
+ * is_active), so the gap was visible nowhere except here, and the confirmation
+ * an admin reads before deactivating promised the opposite. expandToken() made
+ * the window unbounded on top: a client that keeps polling keeps renewing.
+ *
+ * The join is strict on purpose. A token whose user_id is NULL cannot be
+ * attributed to anybody: since migration 0010 that only happens when the owner
+ * was deleted (ON DELETE SET NULL), and tokens live 60 minutes, so no legitimate
+ * client holds an unbound one. An unattributable credential with write scopes is
+ * worse than one forced re-login through api/login.php.
+ *
+ * @return array{id: int, role: string}|null null when the token may not act
  */
-function legacyTokenRole($token, $connection): string
+function legacy_token_owner($token, mysqli $connection): ?array
 {
     if ((string) $token === '') {
-        return VIRTUSPHERE_ROLE_USER;
+        return null;
     }
 
     $expired = 0;
     $stmt = $connection->prepare(
-        'SELECT u.role FROM deploy_tokens t '
+        'SELECT t.id, u.role FROM deploy_tokens t '
         . 'JOIN deploy_users u ON u.id = t.user_id '
         . 'WHERE t.token = ? AND t.expired = ? AND t.created_at > DATE_SUB(NOW(), INTERVAL 60 MINUTE) '
         . 'AND u.is_active = 1 LIMIT 1'
@@ -100,14 +103,61 @@ function legacyTokenRole($token, $connection): string
     $stmt->bind_param('si', $token, $expired);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
+    if (!is_array($row)) {
+        return null;
+    }
 
-    return role_normalize((string) ($row['role'] ?? VIRTUSPHERE_ROLE_USER));
+    return ['id' => (int) $row['id'], 'role' => role_normalize((string) $row['role'])];
+}
+
+function verifyToken($token, $connection)
+{
+    return legacy_token_owner($token, $connection) !== null;
+}
+
+/**
+ * The RBAC role of the user that owns a usable legacy token, or null when no
+ * active owner resolves.
+ *
+ * Null means refuse, not "assume the smallest role". The previous fallback
+ * documented itself as "the least-privileged role so mutating actions stay
+ * gated by default", which was empty: that role holds three write scopes. With
+ * the shared predicate above, null is only reachable when the account is
+ * deactivated between the two queries of one request, and a deny is the right
+ * answer for exactly that race.
+ */
+function legacyTokenRole($token, $connection): ?string
+{
+    $owner = legacy_token_owner($token, $connection);
+
+    return $owner === null ? null : $owner['role'];
+}
+
+/**
+ * Expires every unexpired legacy token of one user and returns how many died.
+ *
+ * The read path above already refuses a deactivated owner, so this is the
+ * second half: leaving usable-looking rows in the table means the next reader of
+ * that table (a report, a future endpoint, an operator) sees credentials that
+ * are supposed to be gone.
+ */
+function repo_legacy_expire_user_tokens(mysqli $connection, int $userId): int
+{
+    $expired = 1;
+    $stmt = $connection->prepare('UPDATE deploy_tokens SET expired = ?, updated_at = NOW() WHERE user_id = ? AND expired = 0');
+    $stmt->bind_param('ii', $expired, $userId);
+    $stmt->execute();
+
+    return $connection->affected_rows > 0 ? $connection->affected_rows : 0;
 }
 
 function expandToken($token, $connection)
 {
+    // `AND expired = 0` so this cannot resurrect a token somebody expired. Today
+    // verifyToken() gates the only call site, but a repo function that trusts
+    // its caller's ordering is a defect waiting for a second caller.
     $expired = 0;
-    $stmt = $connection->prepare('UPDATE deploy_tokens SET expired = ?, created_at = NOW(), updated_at = NOW() WHERE token = ?');
+    $stmt = $connection->prepare('UPDATE deploy_tokens SET expired = ?, created_at = NOW(), updated_at = NOW() WHERE token = ? AND expired = 0');
     $stmt->bind_param('is', $expired, $token);
     $stmt->execute();
 

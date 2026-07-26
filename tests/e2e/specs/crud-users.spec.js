@@ -115,6 +115,47 @@ test('set_active: deactivating asks (Cancel changes nothing), activating does no
   expect(Number(userRow(id).is_active), 'the account is active again').toBe(1);
 });
 
+// The confirmation promises that deactivating cuts the desktop client off too.
+// It did not: token issuance checked is_active, token verification did not, so
+// the account was refused in the portal on its next click while its legacy token
+// kept working with missions.write, vms.write and deploy.run. Only the browser
+// path proves that the handler behind the dialog really revokes, because the
+// revocation and the is_active flip share one transaction there.
+test('set_active: deactivating through the dialog revokes the account\'s legacy tokens', async ({ page }) => {
+  const name = PREFIX + 'act-token';
+  const id = seedUser(name);
+
+  const before = phpJson(`
+$db = db();
+require_once '/var/www/html/lib/repo/legacy.php';
+$token = generateToken('${name}', '${PASSWORD}', $db);
+echo 'JSON' . json_encode(['token' => $token, 'valid' => verifyToken($token, $db)]) . 'JSON';
+`);
+  expect(before.token, 'the seeded account can obtain a token').toBeTruthy();
+  expect(before.valid, 'the fresh token is valid').toBe(true);
+
+  await page.goto('users.php');
+  const dialog = page.locator('[data-confirm-dialog]');
+  await targetRow(page, name).locator('form:has(input[name="action"][value="set_active"]) button').click();
+  await expect(dialog).toBeVisible();
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'users.php');
+
+  expect(Number(userRow(id).is_active), 'the account is deactivated').toBe(0);
+
+  const after = phpJson(`
+$db = db();
+require_once '/var/www/html/lib/repo/legacy.php';
+$stmt = $db->prepare('SELECT COUNT(*) AS n FROM deploy_tokens WHERE user_id = ? AND expired = 0');
+$id = ${Number(id)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+$open = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? -1);
+echo 'JSON' . json_encode(['open' => $open, 'valid' => verifyToken('${before.token}', $db)]) . 'JSON';
+`);
+  expect(after.open, 'no unexpired token of that user survives').toBe(0);
+  expect(after.valid, 'the token the client already holds stops working').toBe(false);
+});
+
 // e2e-covers: users.php:set_role
 // e2e-covers-cancel: users.php:set_role
 test('set_role: Cancel keeps the role, Confirm changes it', async ({ page }) => {

@@ -102,6 +102,110 @@ final class AccessLegacyRbacTest extends TestCase
         $stmt->execute();
     }
 
+    public function testDeactivatingTheOwnerInvalidatesAnAlreadyIssuedToken(): void
+    {
+        // The asymmetry this pins sat inside one file: token ISSUANCE checked
+        // is_active, token VERIFICATION did not. The portal refuses the account
+        // on its next click, so nothing showed the gap; meanwhile the resolved
+        // fallback role held missions.write, vms.write and deploy.run, and
+        // expandToken renewed the 60-minute window on every poll.
+        $token = generateToken(self::PREFIX . 'user', self::PASSWORD, $this->db);
+        self::assertIsString($token);
+        self::assertTrue(verifyToken($token, $this->db), 'a fresh token of an active owner must work');
+
+        $this->setActive(self::PREFIX . 'user', 0);
+
+        self::assertFalse(verifyToken($token, $this->db), 'a deactivated owner keeps no usable token');
+        self::assertNull(legacyTokenRole($token, $this->db), 'an unresolvable owner is a deny, not a fallback role');
+
+        // Over the wire: the same 418 every invalid token has always produced,
+        // for a read, for a write and for the renewal that made the window
+        // unbounded. No new response shape on this frozen surface.
+        foreach (['getMissions', 'createMission', 'expandToken'] as $action) {
+            [$status] = $this->get('/access.php', ['token' => $token, 'action' => $action]);
+            self::assertSame(418, $status, $action . ' must be refused for a deactivated owner');
+        }
+
+        // The row is untouched: the read path refuses on its own, without needing
+        // the table to change. Revoking the row is the portal handler's half and
+        // has its own test below, so this one cannot pass by accident through it.
+        self::assertSame(1, $this->unexpiredTokenCount(self::PREFIX . 'user'), 'the read path alone must refuse');
+    }
+
+    public function testAnUnattributableTokenCannotAct(): void
+    {
+        // fk_deploy_tokens_user is ON DELETE SET NULL, so a deleted owner leaves
+        // a row that used to satisfy the old token-only predicate. A credential
+        // nobody owns must not carry write scopes.
+        $token = generateToken(self::PREFIX . 'user', self::PASSWORD, $this->db);
+        self::assertIsString($token);
+
+        $stmt = $this->db->prepare('UPDATE deploy_tokens SET user_id = NULL WHERE token = ?');
+        $stmt->bind_param('s', $token);
+        $stmt->execute();
+
+        self::assertFalse(verifyToken($token, $this->db));
+        self::assertNull(legacyTokenRole($token, $this->db));
+    }
+
+    public function testExpiredTokenCannotBeResurrectedByRenewal(): void
+    {
+        // expandToken() sets expired = 0. Without its own guard it would undo a
+        // revocation whenever a caller reached it before the verification did.
+        $token = generateToken(self::PREFIX . 'user', self::PASSWORD, $this->db);
+        self::assertIsString($token);
+
+        $userId = $this->userId(self::PREFIX . 'user');
+        self::assertGreaterThan(0, repo_legacy_expire_user_tokens($this->db, $userId));
+        self::assertSame(0, repo_legacy_expire_user_tokens($this->db, $userId), 'a second run has nothing left to expire');
+
+        self::assertFalse(expandToken($token, $this->db), 'a revoked token must not renew itself');
+        self::assertFalse(verifyToken($token, $this->db));
+    }
+
+    public function testReactivatingDoesNotBringRevokedTokensBack(): void
+    {
+        $token = generateToken(self::PREFIX . 'user', self::PASSWORD, $this->db);
+        self::assertIsString($token);
+        $userId = $this->userId(self::PREFIX . 'user');
+        repo_legacy_expire_user_tokens($this->db, $userId);
+
+        $this->setActive(self::PREFIX . 'user', 1);
+
+        self::assertFalse(verifyToken($token, $this->db), 'reactivating restores the account, not its old credentials');
+    }
+
+    private function setActive(string $name, int $active): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_users SET is_active = ? WHERE name = ?');
+        $stmt->bind_param('is', $active, $name);
+        $stmt->execute();
+    }
+
+    private function userId(string $name): int
+    {
+        $stmt = $this->db->prepare('SELECT id FROM deploy_users WHERE name = ? LIMIT 1');
+        $stmt->bind_param('s', $name);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        self::assertIsArray($row);
+
+        return (int) $row['id'];
+    }
+
+    private function unexpiredTokenCount(string $name): int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) AS n FROM deploy_tokens t JOIN deploy_users u ON u.id = t.user_id '
+            . 'WHERE u.name = ? AND t.expired = 0 AND t.created_at > DATE_SUB(NOW(), INTERVAL 60 MINUTE)'
+        );
+        $stmt->bind_param('s', $name);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+
+        return is_array($row) ? (int) $row['n'] : 0;
+    }
+
     private function osRow(string $name): ?array
     {
         $stmt = $this->db->prepare('SELECT id FROM deploy_os WHERE os_name = ? LIMIT 1');

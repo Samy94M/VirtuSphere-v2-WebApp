@@ -101,9 +101,15 @@ $legacyActionPermissions = [
 ];
 
 $requiredPermission = $legacyActionPermissions[$action] ?? null;
-if ($requiredPermission !== null && !role_has_permission(legacyTokenRole($token, $connection), $requiredPermission)) {
-    machine_api_log_warning('access', 'RBAC denied action ' . $action . ' (requires ' . $requiredPermission . ')');
-    legacy_json(['success' => false, 'message' => 'Forbidden.'], 403);
+if ($requiredPermission !== null) {
+    // null role = no active owner resolved. That is a deny, not a fallback role:
+    // the role this used to fall back to holds missions.write, vms.write and
+    // deploy.run, so "least privileged" granted exactly the scopes being gated.
+    $role = legacyTokenRole($token, $connection);
+    if ($role === null || !role_has_permission($role, $requiredPermission)) {
+        machine_api_log_warning('access', 'RBAC denied action ' . $action . ' (requires ' . $requiredPermission . ')');
+        legacy_json(['success' => false, 'message' => 'Forbidden.'], 403);
+    }
 }
 
 try {
