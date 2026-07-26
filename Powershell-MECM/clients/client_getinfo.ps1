@@ -31,6 +31,20 @@ function Save-VsValue {
     New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null
 }
 
+# --- Erfolgs-Marker eines Vorlaufs SOFORT entfernen -------------------------
+#
+# Vor jeder Abbruchmoeglichkeit, nicht erst im Schreib-try weiter unten: das lag
+# hinter dem API-Aufruf, also blieb bei einem Abbruch davor (WebAPI nicht
+# erreichbar, keine passende MAC) ein `SetupState=complete` samt Interfaces-
+# Unterbaum des VORIGEN Laufs stehen. client_staticip.ps1 liest genau diesen
+# Unterbaum und haette die Adressen der vorigen VM auf diese gesetzt, unter einer
+# gruenen Phase. Ein Marker darf nur eine Aussage ueber DIESEN Lauf sein.
+if (Test-Path $registryBase) {
+    Remove-ItemProperty -Path $registryBase -Name 'SetupState' -ErrorAction SilentlyContinue
+    $stalePath = Join-Path $registryBase 'Interfaces'
+    if (Test-Path $stalePath) { Remove-Item -Path $stalePath -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 # --- API-Adresse aufloesen (mit Retry) --------------------------------------
 $api = $null
 for ($attempt = 1; $attempt -le 3 -and -not $api; $attempt++) {
@@ -78,12 +92,9 @@ Write-VsClientLog "Treffer mit MAC $usedMac (VM $($data.vm_name))"
 Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'started' -Detail "match $usedMac"
 
 try {
-    # --- Stale-Fix: alten Zustand entfernen, dann neu schreiben -------------
-    if (Test-Path $registryBase) {
-        Remove-ItemProperty -Path $registryBase -Name 'SetupState' -ErrorAction SilentlyContinue
-        $ifPath = Join-Path $registryBase 'Interfaces'
-        if (Test-Path $ifPath) { Remove-Item -Path $ifPath -Recurse -Force -ErrorAction SilentlyContinue }
-    } else {
+    # Der Stale-Fix ist oben schon gelaufen, vor jeder Abbruchmoeglichkeit; hier
+    # bleibt nur, den Schluessel anzulegen, falls es ihn noch nicht gibt.
+    if (-not (Test-Path $registryBase)) {
         New-Item -Path $registryBase -Force | Out-Null
     }
 

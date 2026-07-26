@@ -39,7 +39,13 @@ Set-DiskStatus -Status 'Running'
 if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'disks' -PhaseEvent 'started' }
 
 try {
-    $offline = @(Get-Disk | Where-Object { $_.OperationalStatus -eq 'Offline' })
+    # -ErrorAction Stop auf JEDEM Storage-Aufruf in dieser Datei, hier eingeschlossen.
+    # Die Storage-Cmdlets melden ihre Fehler per Default nicht-terminierend, also
+    # feuerte der catch nie: das Skript lief weiter, $exitCode blieb 0, die Phase
+    # meldete "finished" und die MECM-Erkennung war erfuellt, waehrend kein
+    # einziger Datentraeger online war. Eine gruene Phase muss heissen, dass die
+    # Phase ihre Arbeit wirklich getan hat.
+    $offline = @(Get-Disk -ErrorAction Stop | Where-Object { $_.OperationalStatus -eq 'Offline' })
     if ($offline.Count -eq 0) {
         Write-VsClientLog 'Keine Offline-Datentraeger.'
         Set-DiskStatus -Status 'Success' -Extra @{ ProcessedDisks = '0' }
@@ -53,7 +59,15 @@ try {
 
     foreach ($disk in $existing) {
         try {
-            $disk | Set-Disk -IsOffline $false
+            $disk | Set-Disk -IsOffline $false -ErrorAction Stop
+            # Nachlesen statt annehmen: der Aufruf kann ohne Fehler zurueckkommen
+            # und der Datentraeger trotzdem offline bleiben (Richtlinie
+            # "Offline shared bus", Wechselmedium). Ohne diese Pruefung meldete
+            # die Phase Erfolg fuer einen Datentraeger, den niemand sieht.
+            $after = Get-Disk -Number $disk.Number -ErrorAction Stop
+            if ($after.OperationalStatus -eq 'Offline') {
+                throw ("Datentraeger ist nach Set-Disk weiterhin offline (Status {0})." -f $after.OperationalStatus)
+            }
             Write-VsClientLog "Datentraeger $($disk.Number) online (Daten erhalten)."
         } catch {
             Write-VsClientLog -Level ERROR "Datentraeger $($disk.Number) online fehlgeschlagen: $($_.Exception.Message)"
@@ -63,11 +77,17 @@ try {
 
     foreach ($disk in $raw) {
         try {
-            $disk | Set-Disk -IsOffline $false
+            $disk | Set-Disk -IsOffline $false -ErrorAction Stop
             Start-Sleep -Seconds 2
-            $disk | Initialize-Disk -PartitionStyle GPT -Confirm:$false
-            $part = $disk | New-Partition -AssignDriveLetter -UseMaximumSize
-            $part | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel ("VM_Disk_{0}" -f $disk.Number) | Out-Null
+            $disk | Initialize-Disk -PartitionStyle GPT -Confirm:$false -ErrorAction Stop
+            $part = $disk | New-Partition -AssignDriveLetter -UseMaximumSize -ErrorAction Stop
+            $part | Format-Volume -FileSystem NTFS -Confirm:$false -Force -NewFileSystemLabel ("VM_Disk_{0}" -f $disk.Number) -ErrorAction Stop | Out-Null
+            # Ein Laufwerksbuchstabe ist das, was der Benutzer der VM sieht. Fehlt
+            # er, ist die Platte nicht nutzbar, egal was die Cmdlets gemeldet haben.
+            $volume = Get-Volume -Partition $part -ErrorAction Stop
+            if (-not $part.DriveLetter -or $volume.FileSystem -ne 'NTFS') {
+                throw ("Formatierung unvollstaendig (Laufwerk '{0}', Dateisystem '{1}')." -f $part.DriveLetter, $volume.FileSystem)
+            }
             Write-VsClientLog "Neuer Datentraeger $($disk.Number) formatiert (Laufwerk $($part.DriveLetter):)."
         } catch {
             Write-VsClientLog -Level ERROR "Datentraeger $($disk.Number) formatieren fehlgeschlagen: $($_.Exception.Message)"

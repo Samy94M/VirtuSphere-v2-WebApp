@@ -71,6 +71,12 @@ if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'st
 
 $applied = 0
 $failed = 0
+# Eine Standardroute pro VM, nicht eine pro statischer Schnittstelle. Zwei
+# Default-Gateways auf einer Maschine sind kein Ausfall, aber eine Wette: Windows
+# waehlt nach Metrik, und welche Schnittstelle den Verkehr traegt, haengt dann an
+# Werten, die niemand hier gesetzt hat. Die erste statische Karte mit Gateway
+# gewinnt, die naechsten bekommen ihre Adresse ohne Route und sagen das.
+$gatewaySet = $false
 
 foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -ne 'Wireless' })) {
     $mac = ConvertTo-VsNormalizedMac $adapter.MacAddress
@@ -105,14 +111,35 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
                 Confirm        = $false
                 ErrorAction    = 'Stop'
             }
-            if (-not [string]::IsNullOrWhiteSpace($cfg.Gateway)) { $ipParams['DefaultGateway'] = $cfg.Gateway }
+            if (-not [string]::IsNullOrWhiteSpace($cfg.Gateway)) {
+                if ($gatewaySet) {
+                    Write-VsClientLog -Level WARN "Adapter '$($cfg.Name)': Gateway $($cfg.Gateway) uebersprungen, diese VM hat schon eine Standardroute."
+                } else {
+                    $ipParams['DefaultGateway'] = $cfg.Gateway
+                }
+            }
             New-NetIPAddress @ipParams | Out-Null
+            if ($ipParams.ContainsKey('DefaultGateway')) { $gatewaySet = $true }
 
             $dns = @($cfg.Dns1, $cfg.Dns2) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
             if ($dns.Count -gt 0) {
                 Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $dns -ErrorAction Stop
             }
-            Write-VsClientLog "Statische IP $($cfg.Ip)/$prefix auf '$($cfg.Name)' gesetzt."
+
+            # Nachlesen statt annehmen. New-NetIPAddress kann zurueckkommen, ohne
+            # dass die Adresse traegt (DHCP schreibt sie kurz darauf zurueck, ein
+            # Duplikat setzt sie auf "Tentative"/"Duplicate"). Ohne diese Pruefung
+            # meldete die Phase Erfolg und die VM war danach nicht erreichbar -
+            # unter gruener Phase, also niemandes Aufgabe.
+            $liveAddress = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Where-Object { $_.IPAddress -eq $cfg.Ip }
+            if (-not $liveAddress) {
+                throw "Adresse $($cfg.Ip) liegt nach dem Setzen nicht auf der Schnittstelle."
+            }
+            if ($liveAddress.AddressState -in @('Duplicate', 'Invalid')) {
+                throw "Adresse $($cfg.Ip) ist im Zustand $($liveAddress.AddressState) (Adresskonflikt im Netz?)."
+            }
+            Write-VsClientLog "Statische IP $($cfg.Ip)/$prefix auf '$($cfg.Name)' gesetzt und geprueft."
         }
         $applied++
     } catch {
@@ -121,12 +148,24 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
     }
 }
 
-$success = ($failed -eq 0)
-Set-StaticIpStatus -Success $success -Detail ("applied={0} failed={1}" -f $applied, $failed)
+# Null konfigurierte Adapter ist ein FEHLSCHLAG, kein Erfolg. Vorher galt
+# `$failed -eq 0`, und bei keiner passenden Karte war beides 0: das Skript meldete
+# Erfolg fuer null geleistete Arbeit, die MECM-Erkennung war erfuellt, und die VM
+# blieb mit DHCP oder ohne Adresse in einer gruenen Phase zurueck. Die
+# Registry-Konfiguration nennt Ziele; findet sich zu keinem davon eine Karte,
+# stimmt eine Annahme nicht (MAC-Abweichung, Karte nicht Up, falsches VLAN), und
+# das muss jemand sehen.
+$success = ($failed -eq 0 -and $applied -gt 0)
+$detail = "applied={0} failed={1} targets={2}" -f $applied, $failed, $configByMac.Count
+if ($applied -eq 0 -and $failed -eq 0) {
+    $detail += ' (no matching adapter)'
+    Write-VsClientLog -Level ERROR "Keiner der $($configByMac.Count) konfigurierten Adapter wurde gefunden: MAC-Adressen, Adapterstatus und VLAN pruefen."
+}
+Set-StaticIpStatus -Success $success -Detail $detail
 if ($reportMac) {
     # Nicht $event: das ist eine automatische PowerShell-Variable.
     $phaseEvent = if ($success) { 'finished' } else { 'failed' }
-    Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent $phaseEvent -Detail ("applied={0} failed={1}" -f $applied, $failed)
+    Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent $phaseEvent -Detail $detail
 }
 
 if ($success) { Write-VsClientLog "Fertig: $applied Adapter konfiguriert." ; exit 0 }

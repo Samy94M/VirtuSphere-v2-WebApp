@@ -201,9 +201,16 @@ foreach ($scriptFile in $dir_script) {
     }
 }
 
-# Warnung wenn der powershell-Ordner leer ist
-if((Get-ChildItem $scriptDirectory -Filter *.ps1).count -eq 0){
-    write-host "Keine Skripte im Ordner $scriptDirectory gefunden!" -ForegroundColor Red
+# Ein leerer powershell-Ordner ist ein FEHLSCHLAG, keine Warnung.
+#
+# Vorher wurde nur rot geschrieben und danach trotzdem der Detection-Wert
+# gesetzt: MECM meldete das Paket als installiert, obwohl nichts installiert
+# wurde. Genau die Lage, in die ein Paket geraet, dessen Inhalt beim Kopieren
+# fehlte oder dessen Content-Verteilung nicht durchlief - und weil die Erkennung
+# erfuellt war, versuchte MECM es nie erneut.
+if((Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction SilentlyContinue).count -eq 0){
+    write-host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
+    $Fullsuccess = $false
 }
 
 # MECM Detection Clause schreiben

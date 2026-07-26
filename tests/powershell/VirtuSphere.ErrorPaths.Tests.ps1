@@ -578,3 +578,90 @@ if ($HasRegistry) {
         }
     }
 }
+
+# Eine gruene Client-Phase muss heissen, dass die Phase ihre Arbeit wirklich
+# erledigt hat. Drei Skripte meldeten Erfolg fuer null geleistete Arbeit, und die
+# MECM-Erkennung bestaetigte es jedes Mal:
+#
+#  - Set-VMDisksOnline rief vier Storage-Cmdlets ohne -ErrorAction Stop, also
+#    feuerte der catch nie und der Exitcode blieb 0,
+#  - client_staticip wertete "null passende Adapter" als Erfolg, weil $failed 0 war,
+#  - die Paketvorlage schrieb ihren Erkennungswert auch bei leerem Skriptordner.
+#
+# In allen drei Faellen war die Erkennung erfuellt, die Phase gruen, und die VM
+# funktionierte nicht.
+Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
+    BeforeAll {
+        $script:ClientsDir = Join-Path $script:PsRoot 'clients'
+        function Get-ClientText {
+            param([string]$Name)
+            Get-Content -Path (Join-Path $script:ClientsDir $Name) -Raw
+        }
+    }
+
+    It 'Set-VMDisksOnline ruft kein Storage-Cmdlet ohne -ErrorAction Stop' {
+        # Die Storage-Cmdlets melden ihre Fehler per Default nicht-terminierend.
+        # Ohne -ErrorAction Stop laeuft das Skript nach einem Fehler weiter,
+        # $exitCode bleibt 0 und die Phase meldet "finished".
+        # Stringliterale vorher entfernen: eine Fehlermeldung, die den Cmdlet-Namen
+        # nennt ("... nach Set-Disk weiterhin offline"), ist kein Aufruf, und ein
+        # Test, der darauf anspringt, prueft seinen eigenen Suchausdruck.
+        $text = (Get-ClientText -Name 'Set-VMDisksOnline.ps1') -replace '"[^"\r\n]*"', '""' -replace "'[^'\r\n]*'", "''"
+        foreach ($cmdlet in @('Get-Disk', 'Set-Disk', 'Initialize-Disk', 'New-Partition', 'Format-Volume', 'Get-Volume')) {
+            # (?![\w-]) sonst matcht "Set-Disk" die skripteigene Hilfsfunktion
+            # Set-DiskStatus, und der Test prueft seinen eigenen Suchfehler.
+            $calls = [regex]::Matches($text, [regex]::Escape($cmdlet) + '(?![\w-])[^\r\n|]*')
+            @($calls).Count | Should -BeGreaterThan 0 -Because "$cmdlet muss vorkommen, sonst prueft dieser Test nichts"
+            foreach ($call in $calls) {
+                # -ErrorAction Stop steht im selben Aufruf ODER die Zeile ist ein
+                # bewusst tolerierter Lesezugriff mit SilentlyContinue.
+                $line = $call.Value
+                ($line -match '-ErrorAction (Stop|SilentlyContinue)') | Should -BeTrue -Because "unklassifizierter Aufruf: $line"
+            }
+        }
+    }
+
+    It 'Set-VMDisksOnline prueft nach dem Schalten nach' {
+        # Ein Aufruf kann ohne Fehler zurueckkommen und der Datentraeger trotzdem
+        # offline bleiben (Richtlinie, Wechselmedium). Der Erfolgspfad braucht
+        # deshalb eine Verifikation, keine Annahme.
+        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text | Should -Match 'weiterhin offline'
+        $text | Should -Match 'Formatierung unvollstaendig'
+    }
+
+    It 'client_staticip wertet null konfigurierte Adapter als Fehlschlag' {
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match '\$success = \(\$failed -eq 0 -and \$applied -gt 0\)'
+        $text | Should -Match 'no matching adapter'
+    }
+
+    It 'client_staticip prueft die gesetzte Adresse nach' {
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match 'Get-NetIPAddress -InterfaceIndex'
+        $text | Should -Match 'liegt nach dem Setzen nicht auf der Schnittstelle'
+    }
+
+    It 'client_staticip setzt genau eine Standardroute pro VM' {
+        # Zwei Default-Gateways sind kein Ausfall, aber eine Wette darauf, welche
+        # Schnittstelle Windows nach Metrik waehlt.
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match '\$gatewaySet'
+        $text | Should -Match 'schon eine Standardroute'
+    }
+
+    It 'client_getinfo raeumt den Erfolgs-Marker vor jeder Abbruchmoeglichkeit weg' {
+        # Der Stale-Fix muss VOR dem API-Aufruf laufen: sonst ueberlebt ein
+        # SetupState=complete des Vorlaufs einen Abbruch, und client_staticip
+        # arbeitet mit den Interfaces der vorigen VM.
+        $text = Get-ClientText -Name 'client_getinfo.ps1'
+        $text | Should -Match "(?s)Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*Resolve-VsApi"
+    }
+
+    It 'die Paketvorlage schreibt den Erkennungswert nicht bei leerem Skriptordner' {
+        # Sonst meldet MECM das Paket als installiert, obwohl nichts installiert
+        # wurde, und versucht es nie erneut.
+        $text = Get-Content -Path (Join-Path $script:PsRoot 'Package_Vorlage\install.ps1') -Raw
+        $text | Should -Match "(?s)Keine Skripte im Ordner.*\`$Fullsuccess = \`$false"
+    }
+}
