@@ -43,6 +43,7 @@ function log_category_label(string $category): string
         VIRTUSPHERE_LOG_CATEGORY_VLANS => __t('logs.category_vlans'),
         VIRTUSPHERE_LOG_CATEGORY_DEPLOY => __t('logs.category_deploy'),
         VIRTUSPHERE_LOG_CATEGORY_MECM => __t('logs.category_mecm'),
+        VIRTUSPHERE_LOG_CATEGORY_MACHINE_API => __t('logs.category_machine_api'),
         default => $category,
     };
 }

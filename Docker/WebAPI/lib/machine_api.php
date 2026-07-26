@@ -88,30 +88,110 @@ function machine_api_report_token_ok(mysqli $db, ?string $presented): bool
     return hash_equals($storedHash, hash('sha256', $presented));
 }
 
-// Writes to error_log always and to deploy_logs (category mecm) at most once
-// per throttle window per tag, so a misbehaving sync loop cannot flood the
-// portal audit log. Never throws into the wire path.
-function machine_api_audit_warning(mysqli $db, string $tag, string $message, ?string $ip = null): void
+/**
+ * Writes to error_log always, and to the portal audit log at most once per
+ * throttle window per (category, tag, scope), so a misbehaving sync loop cannot
+ * flood the log while another client's first occurrence still gets through.
+ * Never throws into the wire path.
+ *
+ * The predecessor had five defects, each one blocking before a second channel
+ * could be put on it, and all five are what this signature and
+ * machine_api_throttle_allows() answer:
+ *
+ *  - the key was the TAG alone, so one noisy caller suppressed that tag's lines
+ *    for every other IP for an hour. It is (category, tag, $scope) now, and the
+ *    scope is normally the client IP.
+ *  - the category was hardcoded to `mecm`, so a new category could not use the
+ *    helper at all. It is a parameter.
+ *  - the lookup was a LIKE on the TEXT message column of deploy_logs:
+ *    unindexable, and a tag never written before scanned the whole table before
+ *    answering "no". On a path served every ten seconds the throttle cost more
+ *    than what it throttled. It is a primary-key read on a dedicated store.
+ *  - the suppressed events left no counter, so a burst and a single
+ *    misconfiguration looked identical. The count is carried and reported with
+ *    the next line that gets through.
+ *  - two concurrent requests both passed the check and both wrote. The decision
+ *    is a locking read inside one transaction now.
+ *
+ * $scope defaults to the client IP when one is passed, because "who" is the
+ * dimension that must not be collapsed. Pass '' deliberately for a global event.
+ */
+function machine_api_audit_warning(mysqli $db, string $tag, string $message, ?string $ip = null, string $category = VIRTUSPHERE_LOG_CATEGORY_MECM, ?string $scope = null): void
 {
     machine_api_log_warning($tag, $message);
 
     try {
         require_once __DIR__ . '/repo/log.php';
-        $needle = '[' . $tag . ']%';
-        $stmt = $db->prepare('SELECT created_at FROM deploy_logs WHERE category = ? AND log_message LIKE ? ORDER BY id DESC LIMIT 1');
-        $category = VIRTUSPHERE_LOG_CATEGORY_MECM;
-        $stmt->bind_param('ss', $category, $needle);
-        $stmt->execute();
-        $last = $stmt->get_result()->fetch_assoc();
-        if (is_array($last)) {
-            $lastTs = strtotime((string) $last['created_at']);
-            if ($lastTs !== false && (time() - $lastTs) < VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS) {
-                return;
-            }
+        $verdict = machine_api_throttle_allows($db, $category, $tag, $scope ?? (string) $ip);
+        if (!$verdict['allowed']) {
+            return;
         }
 
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[' . $tag . '] ' . $message, null, $ip);
+        // The suppressed count travels with the line that breaks the silence:
+        // otherwise the operator reads one warning and cannot tell it apart from
+        // a thousand.
+        $suffix = $verdict['suppressed'] > 0
+            ? ' (' . $verdict['suppressed'] . ' further occurrence(s) suppressed in the last ' . VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS . ' s)'
+            : '';
+        audit($db, $category, '[' . $tag . '] ' . $message . $suffix, null, $ip);
     } catch (Throwable $exception) {
         error_log('[machine_api_audit_warning] audit write failed: ' . $exception->getMessage());
     }
+}
+
+/**
+ * May this (category, tag, scope) write an audit line now, and how many
+ * occurrences were swallowed since the last one that did?
+ *
+ * The read is a primary-key lookup with FOR UPDATE inside one transaction, so
+ * two concurrent requests serialise instead of both passing: the second one
+ * finds the timestamp the first just wrote. A missing row gap-locks, which is
+ * what makes the very first occurrence single-writer too.
+ *
+ * @return array{allowed: bool, suppressed: int}
+ */
+function machine_api_throttle_allows(mysqli $db, string $category, string $tag, string $scope): array
+{
+    require_once __DIR__ . '/repo/helpers.php';
+
+    return repo_transaction($db, static function () use ($db, $category, $tag, $scope): array {
+        $row = repo_fetch_one(
+            $db,
+            'SELECT UNIX_TIMESTAMP(last_written_at) AS written_at, suppressed FROM deploy_audit_throttle WHERE category = ? AND tag = ? AND scope = ? FOR UPDATE',
+            'sss',
+            [$category, $tag, $scope]
+        );
+
+        if ($row === null) {
+            repo_execute(
+                $db,
+                'INSERT INTO deploy_audit_throttle (category, tag, scope, last_written_at, suppressed) VALUES (?, ?, ?, NOW(), 0)',
+                'sss',
+                [$category, $tag, $scope]
+            );
+
+            return ['allowed' => true, 'suppressed' => 0];
+        }
+
+        $age = time() - (int) $row['written_at'];
+        if ($age < VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS) {
+            repo_execute(
+                $db,
+                'UPDATE deploy_audit_throttle SET suppressed = suppressed + 1 WHERE category = ? AND tag = ? AND scope = ?',
+                'sss',
+                [$category, $tag, $scope]
+            );
+
+            return ['allowed' => false, 'suppressed' => (int) $row['suppressed'] + 1];
+        }
+
+        repo_execute(
+            $db,
+            'UPDATE deploy_audit_throttle SET last_written_at = NOW(), suppressed = 0 WHERE category = ? AND tag = ? AND scope = ?',
+            'sss',
+            [$category, $tag, $scope]
+        );
+
+        return ['allowed' => true, 'suppressed' => (int) $row['suppressed']];
+    });
 }

@@ -169,6 +169,14 @@ const VIRTUSPHERE_LOG_CATEGORY_VMS = 'vms';
 const VIRTUSPHERE_LOG_CATEGORY_VLANS = 'vlans';
 const VIRTUSPHERE_LOG_CATEGORY_DEPLOY = 'deploy';
 const VIRTUSPHERE_LOG_CATEGORY_MECM = 'mecm';
+// Refused machine access: an IP that is not allowlisted, a rejected report token,
+// a legacy token request that was turned down. Deliberately its own category and
+// NOT `mecm` or `legacy_api`: those two are operational views and live in the
+// deploy and system tabs, while this answers a security question. Somebody
+// looking in the security tab for foreign access used to find portal sign-ins
+// and nothing else, although the machine surface is the part of the system that
+// faces the deploy VLAN.
+const VIRTUSPHERE_LOG_CATEGORY_MACHINE_API = 'machine_api';
 
 const VIRTUSPHERE_LOG_CATEGORIES = [
     VIRTUSPHERE_LOG_CATEGORY_AUTH,
@@ -183,6 +191,7 @@ const VIRTUSPHERE_LOG_CATEGORIES = [
     VIRTUSPHERE_LOG_CATEGORY_VLANS,
     VIRTUSPHERE_LOG_CATEGORY_DEPLOY,
     VIRTUSPHERE_LOG_CATEGORY_MECM,
+    VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
 ];
 
 // Log page tab grouping (portal UI only). Tabs bundle the flat category set into
@@ -206,6 +215,10 @@ const VIRTUSPHERE_LOG_TABS = [
         VIRTUSPHERE_LOG_CATEGORY_AUTH,
         VIRTUSPHERE_LOG_CATEGORY_USERS,
         VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+        // A refused machine access is a security event, so it inherits the long
+        // retention window of this tab on purpose: the misconfiguration it
+        // reports (a missing IP allowlist entry) can sit unnoticed for months.
+        VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
     ],
     // What was created, changed or deleted. VMs follow missions, their owner.
     VIRTUSPHERE_LOG_TAB_RESOURCES => [
@@ -311,6 +324,38 @@ const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE = 'ansible';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI = 'esxi';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL = 'internal-services';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS = 'deviations';
+
+// The same idea one page over: settings.php spreads its forms over tabs, and a
+// link that names the page without its panel lands on the first tab, which is
+// not the one holding the field the message just named. Nothing errors, so the
+// operator reads the message as wrong rather than the link. These are the ids
+// settings.php actually renders; settings_url() (lib/settings_page.php) is the
+// only place allowed to turn one into a URL, and
+// tests/Static/SettingsDeepLinkContractTest.php pins both directions.
+const VIRTUSPHERE_SETTINGS_TAB_DEPLOY = 'deploy';
+const VIRTUSPHERE_SETTINGS_TAB_MACHINE_API = 'machine-api';
+const VIRTUSPHERE_SETTINGS_TAB_CATALOG = 'catalog';
+const VIRTUSPHERE_SETTINGS_TAB_HTTPS = 'https';
+const VIRTUSPHERE_SETTINGS_TAB_SYSTEM = 'system';
+
+const VIRTUSPHERE_SETTINGS_TABS = [
+    VIRTUSPHERE_SETTINGS_TAB_DEPLOY,
+    VIRTUSPHERE_SETTINGS_TAB_MACHINE_API,
+    VIRTUSPHERE_SETTINGS_TAB_CATALOG,
+    VIRTUSPHERE_SETTINGS_TAB_HTTPS,
+    VIRTUSPHERE_SETTINGS_TAB_SYSTEM,
+];
+
+// Sections inside a tab that a link may target directly. core.js opens the
+// owning tab and scrolls to them, so they are valid anchors even though they
+// are not tabpanels; the dashboard's backup banner uses one.
+const VIRTUSPHERE_SETTINGS_SECTIONS = [
+    'time',
+    'session',
+    'password-policy',
+    'retention',
+    'backup',
+];
 
 const VIRTUSPHERE_INTEGRATION_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,

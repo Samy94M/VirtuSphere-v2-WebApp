@@ -362,6 +362,18 @@ CREATE TABLE IF NOT EXISTS deploy_integration_heartbeats (
     last_script_version VARCHAR(32) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Rate-limit store for machine_api_audit_warning(), not an audit trail. Keyed by
+-- (category, tag, scope) so one noisy caller cannot silence the same tag for
+-- every other client; `suppressed` keeps the count a bare timestamp loses.
+CREATE TABLE IF NOT EXISTS deploy_audit_throttle (
+    category VARCHAR(32) NOT NULL,
+    tag VARCHAR(64) NOT NULL,
+    scope VARCHAR(64) NOT NULL DEFAULT '',
+    last_written_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (category, tag, scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO deploy_accessToWebAPI (ipAddress, description)
 VALUES ('127.0.0.1', 'Lokaler Host')
 ON DUPLICATE KEY UPDATE description = VALUES(description);

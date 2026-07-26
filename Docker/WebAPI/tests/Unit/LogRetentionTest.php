@@ -52,15 +52,21 @@ final class LogRetentionTest extends TestCase
         }
     }
 
-    public function testTheLongWindowCoversExactlyAuthUsersCredentials(): void
+    public function testTheLongWindowCoversExactlyTheDecidedSecurityCategories(): void
     {
         // The security window is a compliance promise; a tab reshuffle now has to
         // change this list consciously instead of silently shortening a category.
+        //
+        // `machine_api` was added deliberately: a refused machine access is a
+        // security event, and the misconfiguration behind the commonest one (a
+        // missing IP allowlist entry) can sit unnoticed for months, which is
+        // exactly the case a quarter-long window would lose.
         $security = VIRTUSPHERE_LOG_TABS[VIRTUSPHERE_LOG_TAB_SECURITY];
         sort($security);
         $expected = [
             VIRTUSPHERE_LOG_CATEGORY_AUTH,
             VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+            VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
             VIRTUSPHERE_LOG_CATEGORY_USERS,
         ];
         sort($expected);

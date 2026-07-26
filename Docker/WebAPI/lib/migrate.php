@@ -768,6 +768,28 @@ SQL;
         migrator_add_column($db, 'deploy_integration_heartbeats', 'last_script_version', 'VARCHAR(32) NULL');
         migrator_out('0025: added MECM result-reporting columns to deploy_integration_heartbeats');
     },
+    '0026_audit_throttle' => function (mysqli $db): void {
+        // Rate-limit store for machine_api_audit_warning(), NOT an audit trail.
+        // Its predecessor asked deploy_logs "did I already write this tag?" with a
+        // LIKE on the TEXT message column: unindexable, and a tag that had never
+        // been written scanned the whole table before answering "no". On a path
+        // served every ten seconds the throttle cost more than what it throttled.
+        //
+        // The primary key is (category, tag, scope): the old key was the tag
+        // alone, so one noisy caller silenced the same tag for every other IP for
+        // an hour. `suppressed` is why the row exists at all beyond the timestamp:
+        // without a counter, an attack signal and a single misconfiguration look
+        // identical, and the whole information content of the burst is lost.
+        $db->query("CREATE TABLE IF NOT EXISTS deploy_audit_throttle (
+            category VARCHAR(32) NOT NULL,
+            tag VARCHAR(64) NOT NULL,
+            scope VARCHAR(64) NOT NULL DEFAULT '',
+            last_written_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (category, tag, scope)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        migrator_out('0026: created deploy_audit_throttle (indexed rate-limit store per category/tag/scope)');
+    },
 ];
 
 try {
