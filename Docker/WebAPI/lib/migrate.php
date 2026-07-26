@@ -834,6 +834,53 @@ SQL;
         $db->query("ALTER TABLE deploy_vms MODIFY mecm_sync_state ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready'");
         migrator_out('0028: withdrew the never-written mecm_sync_state value submitted');
     },
+    '0029_esxi_inventory_last_job' => function (mysqli $db): void {
+        // The durable fetch state used to remember only an error category and a
+        // timestamp. Once the mission-less job became terminal it disappeared
+        // from every list, so a message that explicitly referred to its log had
+        // no route there. Store only the relationship: deploy_jobs and
+        // deploy_job_logs remain the SSoT for status and output.
+        migrator_add_column($db, 'deploy_esxi_inventory_state', 'last_job_id', 'INT NULL AFTER last_error_category');
+        migrator_add_index($db, 'deploy_esxi_inventory_state', 'deploy_esxi_inventory_state_last_job', 'INDEX deploy_esxi_inventory_state_last_job (last_job_id)');
+
+        // Preserve the route for recent pre-migration results. Match the state
+        // outcome and a narrow time window instead of choosing merely the newest
+        // job for a credential: a later cancelled/reaped job did not create the
+        // stored fetch result and must not be presented as its cause.
+        $backfilled = 0;
+        $states = $db->query("SELECT credential_id, last_attempt_at, last_status FROM deploy_esxi_inventory_state WHERE last_job_id IS NULL AND last_attempt_at IS NOT NULL AND last_status IN ('ok', 'failed')");
+        $find = $db->prepare(
+            "SELECT id FROM deploy_jobs
+             WHERE mission_id IS NULL
+               AND credential_esxi_id = ?
+               AND status = ?
+               AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.mode')) = 'inventory'
+               AND updated_at BETWEEN DATE_SUB(?, INTERVAL 5 MINUTE) AND DATE_ADD(?, INTERVAL 5 MINUTE)
+             ORDER BY ABS(TIMESTAMPDIFF(SECOND, updated_at, ?)), id DESC
+             LIMIT 1"
+        );
+        $set = $db->prepare('UPDATE deploy_esxi_inventory_state SET last_job_id = ? WHERE credential_id = ? AND last_job_id IS NULL');
+        while ($state = $states->fetch_assoc()) {
+            $credentialId = (int) $state['credential_id'];
+            $jobStatus = (string) $state['last_status'] === 'ok' ? 'succeeded' : 'failed';
+            $attemptAt = (string) $state['last_attempt_at'];
+            $find->bind_param('issss', $credentialId, $jobStatus, $attemptAt, $attemptAt, $attemptAt);
+            $find->execute();
+            $job = $find->get_result()->fetch_assoc();
+            if (!is_array($job)) {
+                continue;
+            }
+            $jobId = (int) $job['id'];
+            $set->bind_param('ii', $jobId, $credentialId);
+            $set->execute();
+            $backfilled += $set->affected_rows;
+        }
+
+        if (!migrator_fk_exists($db, 'deploy_esxi_inventory_state', 'fk_deploy_esxi_inventory_state_last_job')) {
+            $db->query('ALTER TABLE deploy_esxi_inventory_state ADD CONSTRAINT fk_deploy_esxi_inventory_state_last_job FOREIGN KEY (last_job_id) REFERENCES deploy_jobs(id) ON DELETE SET NULL');
+        }
+        migrator_out('0029: linked ' . $backfilled . ' retained ESXi inventory result(s) to their job logs');
+    },
 ];
 
 try {

@@ -217,9 +217,10 @@ function repo_esxi_inventory_datastore_rows(mysqli $db, array $credentialIds): a
  *
  * @param array{api_type?:?string, product_version?:?string, license_product?:?string, license_free?:?bool, in_ha_cluster?:?bool, in_maintenance?:?bool}|null $capabilities
  */
-function repo_esxi_inventory_record_success(mysqli $db, int $credentialId, ?array $capabilities = null): void
+function repo_esxi_inventory_record_success(mysqli $db, int $credentialId, ?array $capabilities = null, ?int $jobId = null): void
 {
     $ok = 'ok';
+    $jobId = $jobId !== null && $jobId > 0 ? $jobId : null;
     $capabilities ??= [];
     $apiType = $capabilities['api_type'] ?? null;
     $productVersion = $capabilities['product_version'] ?? null;
@@ -232,16 +233,18 @@ function repo_esxi_inventory_record_success(mysqli $db, int $credentialId, ?arra
     $inMaintenance = $toFlag($capabilities['in_maintenance'] ?? null);
 
     $stmt = $db->prepare(
-        'INSERT INTO deploy_esxi_inventory_state (credential_id, last_success_at, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change, api_type, product_version, license_product, license_free, in_ha_cluster, in_maintenance)
-         VALUES (?, NOW(), NOW(), ?, NULL, 0, 0, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE last_success_at = NOW(), last_attempt_at = NOW(), last_status = ?, last_error_category = NULL, failure_streak = 0, paused_until_credential_change = 0,
+        'INSERT INTO deploy_esxi_inventory_state (credential_id, last_success_at, last_attempt_at, last_status, last_error_category, last_job_id, failure_streak, paused_until_credential_change, api_type, product_version, license_product, license_free, in_ha_cluster, in_maintenance)
+         VALUES (?, NOW(), NOW(), ?, NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE last_success_at = NOW(), last_attempt_at = NOW(), last_status = ?, last_error_category = NULL, last_job_id = ?, failure_streak = 0, paused_until_credential_change = 0,
              api_type = ?, product_version = ?, license_product = ?, license_free = ?, in_ha_cluster = ?, in_maintenance = ?'
     );
-    // i, s(status), s s s(text facts), i i i(flags), then the same for the UPDATE.
+    // INSERT: credential, status, job, three text facts and three flags;
+    // UPDATE: status, job, the same three text facts and three flags.
     $stmt->bind_param(
-        'issssiiissssiii',
+        'isisssiiisisssiii',
         $credentialId,
         $ok,
+        $jobId,
         $apiType,
         $productVersion,
         $licenseProduct,
@@ -249,6 +252,7 @@ function repo_esxi_inventory_record_success(mysqli $db, int $credentialId, ?arra
         $inHaCluster,
         $inMaintenance,
         $ok,
+        $jobId,
         $apiType,
         $productVersion,
         $licenseProduct,
@@ -263,16 +267,17 @@ function repo_esxi_inventory_record_success(mysqli $db, int $credentialId, ?arra
  * Records a failed fetch. Auth failures pause the auto-pull until the credential
  * changes (protects the ESXi account from lockout).
  */
-function repo_esxi_inventory_record_failure(mysqli $db, int $credentialId, string $category): void
+function repo_esxi_inventory_record_failure(mysqli $db, int $credentialId, string $category, ?int $jobId = null): void
 {
     $pause = $category === VIRTUSPHERE_INVENTORY_ERROR_AUTH ? 1 : 0;
     $failed = 'failed';
+    $jobId = $jobId !== null && $jobId > 0 ? $jobId : null;
     $stmt = $db->prepare(
-        'INSERT INTO deploy_esxi_inventory_state (credential_id, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change)
-         VALUES (?, NOW(), ?, ?, 1, ?)
-         ON DUPLICATE KEY UPDATE last_attempt_at = NOW(), last_status = ?, last_error_category = ?, failure_streak = failure_streak + 1, paused_until_credential_change = GREATEST(paused_until_credential_change, ?)'
+        'INSERT INTO deploy_esxi_inventory_state (credential_id, last_attempt_at, last_status, last_error_category, last_job_id, failure_streak, paused_until_credential_change)
+         VALUES (?, NOW(), ?, ?, ?, 1, ?)
+         ON DUPLICATE KEY UPDATE last_attempt_at = NOW(), last_status = ?, last_error_category = ?, last_job_id = ?, failure_streak = failure_streak + 1, paused_until_credential_change = GREATEST(paused_until_credential_change, ?)'
     );
-    $stmt->bind_param('ississi', $credentialId, $failed, $category, $pause, $failed, $category, $pause);
+    $stmt->bind_param('issiissii', $credentialId, $failed, $category, $jobId, $pause, $failed, $category, $jobId, $pause);
     $stmt->execute();
 }
 

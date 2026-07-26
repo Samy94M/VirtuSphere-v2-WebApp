@@ -137,6 +137,39 @@ final class EsxiInventoryCacheTest extends TestCase
         self::assertNotNull($state['last_success_at']);
     }
 
+    public function testFetchStatePointsToItsExactRetainedJobAndClearsWithRetention(): void
+    {
+        $failedJob = $this->makeInventoryJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED);
+        repo_esxi_inventory_record_failure(
+            $this->db,
+            $this->credentialId,
+            VIRTUSPHERE_INVENTORY_ERROR_PARSE,
+            $failedJob
+        );
+        self::assertSame($failedJob, (int) repo_esxi_inventory_state($this->db, $this->credentialId)['last_job_id']);
+
+        $successfulJob = $this->makeInventoryJob(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        repo_esxi_inventory_record_success($this->db, $this->credentialId, null, $successfulJob);
+        self::assertSame($successfulJob, (int) repo_esxi_inventory_state($this->db, $this->credentialId)['last_job_id']);
+
+        // Finished system-job retention deletes the row and its log. ON DELETE
+        // SET NULL must remove the route in the same operation, otherwise the
+        // status card would render a link that can only 404.
+        $this->db->query('DELETE FROM deploy_jobs WHERE id = ' . $successfulJob);
+        self::assertNull(repo_esxi_inventory_state($this->db, $this->credentialId)['last_job_id']);
+        $this->db->query('DELETE FROM deploy_jobs WHERE id = ' . $failedJob);
+    }
+
+    private function makeInventoryJob(string $status): int
+    {
+        $payload = json_encode(['mode' => VIRTUSPHERE_DEPLOY_MODE_INVENTORY], JSON_THROW_ON_ERROR);
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id) VALUES (NULL, ?, ?, ?)');
+        $stmt->bind_param('ssi', $status, $payload, $this->credentialId);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
     private function makeCredential(string $suffix): int
     {
         $stmt = $this->db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES (?, ?, ?, ?, ?, ?)');
@@ -155,6 +188,9 @@ final class EsxiInventoryCacheTest extends TestCase
     private function cleanup(): void
     {
         $like = self::PREFIX . '%';
+        $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?)');
+        $stmt->bind_param('s', $like);
+        $stmt->execute();
         // Inventory + state cascade from the credential; delete the credential.
         $stmt = $this->db->prepare('DELETE FROM deploy_credentials WHERE name LIKE ?');
         $stmt->bind_param('s', $like);

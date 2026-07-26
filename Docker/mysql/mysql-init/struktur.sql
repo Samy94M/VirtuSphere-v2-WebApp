@@ -167,6 +167,10 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
     last_attempt_at TIMESTAMP NULL,
     last_status VARCHAR(32) NULL,
     last_error_category VARCHAR(32) NULL,
+    -- Exact job that produced last_status/last_attempt_at. The job and its log
+    -- remain authoritative; deleting them at the retention boundary clears only
+    -- this pointer, so System status never renders a dead link.
+    last_job_id INT NULL,
     failure_streak INT NOT NULL DEFAULT 0,
     paused_until_credential_change TINYINT(1) NOT NULL DEFAULT 0,
     -- Capability facts of the last SUCCESSFUL pull (ADR-0023 amendment 3). All
@@ -179,7 +183,9 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
     license_free TINYINT(1) NULL,
     in_ha_cluster TINYINT(1) NULL,
     in_maintenance TINYINT(1) NULL,
-    CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
+    INDEX deploy_esxi_inventory_state_last_job (last_job_id),
+    CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_esxi_inventory_state_last_job FOREIGN KEY (last_job_id) REFERENCES deploy_jobs(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- On-demand Ansible preflight result (migration 0023). Unlike the ESXi inventory

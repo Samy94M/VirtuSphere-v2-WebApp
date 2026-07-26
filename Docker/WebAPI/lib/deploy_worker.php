@@ -364,7 +364,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // Parse marker (may throw -> "parse") then apply the cache atomically.
         $parsed = ansible_parse_inventory_output($fullOutput);
         $summary = repo_esxi_inventory_apply($db, $credentialId, $parsed);
-        repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities']);
+        repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities'], $jobId);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($parsed['capabilities'], true));
         // VLAN catalog is ESXi-owned (E4b): resync from the union of cached
         // portgroups after every successful pull (retire not delete).
@@ -404,7 +404,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             // onset: log only when this failure is what turned the pause on.
             $wasPaused = ($state = repo_esxi_inventory_state($db, $credentialId)) !== null
                 && (int) $state['paused_until_credential_change'] === 1;
-            repo_esxi_inventory_record_failure($db, $credentialId, $category);
+            repo_esxi_inventory_record_failure($db, $credentialId, $category, $jobId);
             if ($category === VIRTUSPHERE_INVENTORY_ERROR_AUTH && !$wasPaused) {
                 audit($db, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'esxi inventory auto-pull paused for credential id ' . $credentialId . ' after an authentication failure; save the credential to resume', null, 'cli');
             }
