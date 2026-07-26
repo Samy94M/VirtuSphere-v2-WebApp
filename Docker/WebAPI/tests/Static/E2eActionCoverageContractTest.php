@@ -29,13 +29,17 @@ final class E2eActionCoverageContractTest extends TestCase
 {
     /**
      * Actions without browser proof yet, each with the owing slice. Delete the
-     * entry in the commit that adds the covering spec. Empty since Etappe 7:
-     * every portal POST action carries a marker; a new action lands here (or
-     * gets its spec) before the build goes green again.
+     * entry in the commit that adds the covering spec. A new action lands here
+     * (or gets its spec) before the build goes green again.
      *
      * @var array<string, string>
      */
-    private const PENDING_ACTIONS = [];
+    private const PENDING_ACTIONS = [
+        'vm_edit.php:transfer_mecm' => 'MECM provenance slice (consolidated campaign plan, Etappe 8): '
+            . 'the transfer flow gains a removal preview there, and the spec that proves both dialog '
+            . 'branches is booked as one of that slice\'s guards; writing it now would pin the additive '
+            . 'semantics the slice replaces',
+    ];
 
     /**
      * Accessor instead of direct const reads: with the list empty, PHPStan

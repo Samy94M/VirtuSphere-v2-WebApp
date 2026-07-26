@@ -185,4 +185,3 @@ parameters:
 			identifier: staticMethod.alreadyNarrowedType
 			count: 1
 			path: tests/Unit/DeployModeGateTest.php
-

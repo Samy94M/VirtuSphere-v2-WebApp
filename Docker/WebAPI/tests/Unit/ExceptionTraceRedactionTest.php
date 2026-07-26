@@ -50,13 +50,13 @@ final class ExceptionTraceRedactionTest extends TestCase
 
     private function renderedTrace(): string
     {
+        // No guard after the catch: throwWithSecret() is declared `never`, so
+        // PHP itself enforces that the fixture frame cannot return.
         try {
             self::throwWithSecret('esxi-01.lan', self::SECRET, 443);
         } catch (RuntimeException $exception) {
             return $exception->getTraceAsString();
         }
-
-        self::fail('the fixture frame did not throw');
     }
 
     public function testTheSecretIsRenderedWhenArgumentsAreNotIgnored(): void
