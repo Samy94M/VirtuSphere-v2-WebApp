@@ -25,4 +25,9 @@ return [
     'vm_mecm_reset_success' => 'MECM ID wurde zurückgesetzt; die VM ist wieder für MECM eingereiht.',
     'vm_mecm_reset_template_blocked' => 'Templates können nicht für MECM eingereiht werden.',
     'vm_mecm_reset_no_mac' => 'Reset nicht möglich: Die VM hat noch keine importierte MAC-Adresse.',
+    // Ausdrückliche Aktion statt stillem Zustandswechsel: das Portal ist die
+    // Absicht vor dem Rollout, MECM die Wahrheit danach.
+    'vm_mecm_transfer_button' => 'Zuweisungen an MECM übertragen',
+    'vm_mecm_transfer_confirm' => 'Betriebssystem- und Paketzuweisungen von VM :name jetzt an MECM übertragen? Die VM wird dafür erneut in die Warteschlange des Device-Sync gestellt; ihr Installationsstand bleibt unverändert.',
+    'vm_mecm_transfer_success' => 'Die VM ist für die Übertragung eingereiht. Der Device-Sync fügt die fehlenden Collection-Mitgliedschaften beim nächsten Durchlauf hinzu; bestehende Mitgliedschaften werden nie entfernt.',
 ];

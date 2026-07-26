@@ -312,8 +312,14 @@ final class MacImportCallbackTest extends TestCase
     /** @param list<int> $vmIds */
     private function insertJob(int $missionId, array $vmIds, string $status = VIRTUSPHERE_DEPLOY_STATUS_RUNNING): int
     {
+        // heartbeat_at = NOW(): a `running` job with a NULL heartbeat counts as
+        // stale on sight, and the maintenance-worker CONTAINER of the dev stack
+        // reaps it mid-test. The callback then answers 409 "job does not accept
+        // this MAC import" for a reason that has nothing to do with the subject,
+        // which is a flake and reads as a real regression. Same shape as
+        // DeployWorkerOutcomeTest::insertJob.
         $payload = json_encode(['mode' => 'export', 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
-        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)');
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, heartbeat_at) VALUES (?, ?, ?, NOW())');
         $stmt->bind_param('iss', $missionId, $status, $payload);
         $stmt->execute();
 

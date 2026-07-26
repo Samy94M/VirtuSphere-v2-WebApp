@@ -315,10 +315,9 @@ function repo_get_mission(mysqli $db, int $missionId): ?array
 // mission would orphan its MECM collection (mission name = collection name).
 function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 {
-    $submitted = VIRTUSPHERE_MECM_SYNC_SUBMITTED;
     $registered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
 
-    return repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE mission_id = ? AND mecm_sync_state IN (?, ?) LIMIT 1', 'iss', [$missionId, $submitted, $registered]) !== null;
+    return repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE mission_id = ? AND mecm_sync_state = ? LIMIT 1', 'is', [$missionId, $registered]) !== null;
 }
 
 function repo_update_mission_checked(mysqli $db, int $missionId, array $missionData, string $expectedUpdatedAt, bool $requireLocation = false): bool

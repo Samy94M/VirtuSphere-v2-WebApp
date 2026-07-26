@@ -30,12 +30,43 @@ function virtusphere_lifecycle_meta(string $lifecycleState): array
     };
 }
 
+/**
+ * How far along the lifecycle a state is, for the one rule that has no other
+ * home: a state write must never move a VM BACKWARDS.
+ *
+ * mecm_updateid.php wrote `os_installing` unconditionally, so a VM that had
+ * already reported `os_installed` fell visibly back to 4/5 on every renewed
+ * registration - the device-sync re-reports a ResourceID whenever the VM
+ * re-enters its queue, so this was not a rare race. The operator saw a finished
+ * machine start installing again.
+ *
+ * `failed` deliberately shares the bottom rank with `initializing`: a failed VM
+ * that registers again IS moving forward, and refusing that would strand it.
+ *
+ * A new lifecycle state has to be ranked here, and the default THROWS rather
+ * than guessing: a silent fallback would rank an unknown state as either the
+ * furthest along or the furthest behind, and both answers let the guard fail
+ * open on the state it knows least about.
+ */
+function virtusphere_lifecycle_rank(string $lifecycleState): int
+{
+    return match ($lifecycleState) {
+        VIRTUSPHERE_LIFECYCLE_INITIALIZING => 0,
+        VIRTUSPHERE_LIFECYCLE_FAILED => 0,
+        VIRTUSPHERE_LIFECYCLE_READY => 1,
+        VIRTUSPHERE_LIFECYCLE_DEPLOYING => 2,
+        VIRTUSPHERE_LIFECYCLE_DEPLOYED => 3,
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLING => 4,
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLED => 5,
+        default => throw new InvalidArgumentException('Unranked lifecycle state: ' . $lifecycleState),
+    };
+}
+
 function virtusphere_mecm_sync_meta(string $mecmSyncState): array
 {
     return match ($mecmSyncState) {
         VIRTUSPHERE_MECM_SYNC_NOT_READY => ['badge' => 'neutral'],
         VIRTUSPHERE_MECM_SYNC_PENDING => ['badge' => 'warning'],
-        VIRTUSPHERE_MECM_SYNC_SUBMITTED => ['badge' => 'warning'],
         VIRTUSPHERE_MECM_SYNC_REGISTERED => ['badge' => 'success'],
         VIRTUSPHERE_MECM_SYNC_FAILED => ['badge' => 'danger'],
         default => ['badge' => 'neutral'],
@@ -50,7 +81,7 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
     if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
         return VIRTUSPHERE_STATUS_OS_INSTALLING;
     }
-    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_PENDING || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_SUBMITTED) {
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_PENDING) {
         return VIRTUSPHERE_STATUS_DEPLOYED;
     }
     if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_READY) {

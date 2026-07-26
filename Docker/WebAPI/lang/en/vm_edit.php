@@ -62,6 +62,10 @@ return [
     'no_packages' => 'No packages available.',
     'save_vm' => 'Save VM',
     'flash_saved' => 'VM saved.',
+    // MECM already knows this VM, and the device-sync only looks at VMs it does
+    // not. So the change is stored and takes effect once it is transferred;
+    // before, nothing said so.
+    'flash_mecm_transfer_pending' => 'Saved, but not in MECM yet: this VM is already registered there, so changed operating system or package assignments only reach MECM once you transfer them.',
     'err_invalid_disk_type' => 'Invalid disk type.',
     // Removing the last network interface: the form used to insert an empty
     // default one silently, overwriting the imported MAC address while reporting

@@ -62,6 +62,10 @@ return [
     'no_packages' => 'Keine Pakete verfügbar.',
     'save_vm' => 'VM speichern',
     'flash_saved' => 'VM gespeichert.',
+    // Diese VM kennt MECM schon, und der Device-Sync schaut nur auf VMs, die es
+    // nicht kennt. Die Änderung ist also gespeichert und wirkt erst nach der
+    // Übertragung; vorher hat das niemand gesagt.
+    'flash_mecm_transfer_pending' => 'Gespeichert, aber noch nicht in MECM: Diese VM ist dort bereits registriert, deshalb erreichen geänderte Betriebssystem- oder Paketzuweisungen MECM erst, wenn du sie überträgst.',
     'err_invalid_disk_type' => 'Ungültiger Datenträgertyp.',
     // Die letzte Netzwerkkarte entfernt: früher setzte das Formular still eine
     // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,

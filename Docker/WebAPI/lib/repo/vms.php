@@ -576,6 +576,55 @@ function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $user
     });
 }
 
+/**
+ * Re-queues ONE already-registered VM for the device-sync, so a package or OS
+ * change made in the portal after the registration reaches MECM.
+ *
+ * Why this is an explicit action and not a side effect of saving: the portal is
+ * the intent before the rollout, MECM is the truth after it (ADR-0020 amendment /
+ * WP-06). Ticking a package on a registered VM used to change the portal row and
+ * nothing else, and nothing said so; the operator believed the VM would get the
+ * package. Silently setting `updated = 1` on save would be the opposite mistake:
+ * it re-runs the whole assignment pass for a machine that may be mid-installation,
+ * from an edit that could have been a typo. So the save says the change has not
+ * reached MECM, and this action carries it over when the operator decides.
+ *
+ * Only the queue flag changes. The lifecycle stays exactly where it is: the VM is
+ * installed or installing, and this does not undo that. device-sync only ever
+ * ADDS collection memberships (Add-CMDeviceCollectionDirectMembershipRule, never
+ * Remove-), which is why running it again on a registered device is safe and why
+ * assignments made directly in the MECM console survive it.
+ */
+function repo_mark_vm_for_mecm_resync(mysqli $db, int $missionId, int $vmId, ?int $userId = null): void
+{
+    if ($missionId <= 0 || $vmId <= 0) {
+        throw new InvalidArgumentException('Mission and VM are required.');
+    }
+
+    repo_transaction($db, static function () use ($db, $missionId, $vmId, $userId): void {
+        $current = repo_fetch_one($db, 'SELECT lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
+        if ($current === null) {
+            throw new RuntimeException('VM not found.');
+        }
+        if ((string) $current['mecm_sync_state'] !== VIRTUSPHERE_MECM_SYNC_REGISTERED) {
+            // Before the registration the portal selection already travels with
+            // the first sync, so the action would promise work it does not do.
+            throw new RuntimeException('VM is not registered with MECM yet; its assignments travel with the next sync anyway.');
+        }
+
+        repo_execute($db, 'UPDATE deploy_vms SET updated = 1, updated_at = NOW() WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+        repo_record_vm_status_event(
+            $db,
+            $vmId,
+            (string) $current['lifecycle_state'],
+            (string) $current['mecm_sync_state'],
+            (string) $current['vm_status'],
+            'queued for MECM assignment transfer from portal',
+            $userId
+        );
+    });
+}
+
 function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int $excludeVmId = 0): array
 {
     $validator = new Validator();

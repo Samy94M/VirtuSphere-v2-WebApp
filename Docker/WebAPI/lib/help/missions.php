@@ -25,6 +25,10 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help.status_heading')); ?></h2>
             <p><?php echo h(__t('help.status_p1')); ?></p>
+            <?php // The one sentence that makes the list readable: a stage names the
+                  // last report that arrived, not the work that is done. Without it
+                  // "5/5" reads as "finished", which is what it used to promise. ?>
+            <p><?php echo h(__t('help.status_p2')); ?></p>
             <ul>
                 <li><?php echo h(__t('help.status_1')); ?></li>
                 <li><?php echo h(__t('help.status_2')); ?></li>

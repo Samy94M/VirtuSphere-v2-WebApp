@@ -35,7 +35,26 @@ try {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
 
-    repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId);
+    // Forward-only: this endpoint used to write `os_installing` unconditionally,
+    // so a VM that had already reported `os_installed` fell visibly back to 4/5
+    // every time the device-sync re-reported its ResourceID. The ResourceID is
+    // still stored in that case; only the lifecycle is not walked backwards.
+    //
+    // A false return means the VM id does not exist. The endpoint answered 200
+    // "Data updated successfully" for it, and the device-sync reads that as
+    // "done": the device left the queue and was never reported again, for a row
+    // that was deleted in the portal. 404 lets the sync keep it and say so.
+    if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId)) {
+        machine_api_audit_warning(
+            $connection,
+            'mecm_updateid',
+            'ResourceID ' . $mecmId . ' reported for unknown VM id ' . $vmId,
+            $clientIp,
+            VIRTUSPHERE_LOG_CATEGORY_MECM
+        );
+        machine_api_json(['error' => 'Unknown VM id'], 404);
+    }
+
     machine_api_json(['success' => 'Data updated successfully']);
 } catch (JsonException) {
     machine_api_json(['error' => 'Invalid JSON body'], 400);

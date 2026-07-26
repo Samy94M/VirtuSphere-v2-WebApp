@@ -25,4 +25,9 @@ return [
     'vm_mecm_reset_success' => 'MECM ID was reset; the VM is queued for MECM again.',
     'vm_mecm_reset_template_blocked' => 'Templates cannot be queued for MECM.',
     'vm_mecm_reset_no_mac' => 'Reset is not possible yet: the VM has no imported MAC address.',
+    // An explicit action rather than a silent state change: the portal is the
+    // intent before the rollout, MECM is the truth after it.
+    'vm_mecm_transfer_button' => 'Transfer assignments to MECM',
+    'vm_mecm_transfer_confirm' => 'Transfer the operating system and package assignments of VM :name to MECM now? The VM is queued for the device-sync again; its installation state stays as it is.',
+    'vm_mecm_transfer_success' => 'The VM is queued for the transfer. The device-sync adds the missing collection memberships on its next run; existing memberships are never removed.',
 ];

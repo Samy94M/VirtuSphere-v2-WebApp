@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     -- status, so it sits outside the ENUM-sync check; keep both in step by hand.
     vm_status VARCHAR(64) NOT NULL DEFAULT '2/5 Registered',
     lifecycle_state ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready',
-    mecm_sync_state ENUM('not_ready','pending','submitted','registered','failed') NOT NULL DEFAULT 'not_ready',
+    mecm_sync_state ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready',
     mecm_id VARCHAR(255),
     updated TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

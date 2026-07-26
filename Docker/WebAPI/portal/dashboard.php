@@ -17,7 +17,7 @@ $user = portal_require_user($connection);
 $missionCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) <> ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) = ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $vmCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms');
-$mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?)', 'ss', [VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_MECM_SYNC_SUBMITTED]);
+$mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ?', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
 $healthSnapshot = integration_health_snapshot($connection);
 // The MECM tile shows two separate signals and never a common worst-of: a
 // critical MECM site must not present the data flow as failed, and a failed sync

@@ -98,6 +98,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, ($vmId > 0 ? 'updated' : 'created') . ' vm id ' . $savedVmId . ' in mission id ' . $missionId . $vmNote, (int) $user['id']);
         flash_set('success', __t('vm_edit.flash_saved'));
+        // A registered VM is one MECM already holds, and the device-sync only
+        // looks at VMs it does not. So a package or OS change made here is stored
+        // and goes no further until somebody transfers it. Saying that is the
+        // whole point: the change used to be silently portal-only, and the
+        // operator believed the VM would get the package.
+        if ($vmId > 0 && !$isTemplate && (string) ($vm['mecm_sync_state'] ?? '') === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
+            $before = array_map(static fn (array $row): int => (int) ($row['id'] ?? $row['package_id'] ?? 0), (array) ($vm['packages'] ?? []));
+            $after = array_map(static fn (array $row): int => (int) $row['id'], vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []));
+            sort($before);
+            sort($after);
+            $osChanged = (string) ($vm['vm_os'] ?? '') !== $vmData['vm_os'];
+            if ($before !== $after || $osChanged) {
+                flash_set('info', __t('vm_edit.flash_mecm_transfer_pending'), '', [
+                    'url' => 'vm_edit.php?mission_id=' . $missionId . '&vm_id=' . $savedVmId,
+                    'label' => __t('portal.vm_mecm_transfer_button'),
+                ]);
+            }
+        }
         redirect_to('vms.php?mission_id=' . $missionId);
     } catch (Throwable $exception) {
         $error = portal_error_message($exception);
@@ -169,6 +187,19 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
                     <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
                     <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
                 </form>
+                <?php // Only for a VM MECM already knows: before the registration the
+                      // portal selection travels with the next sync on its own, so the
+                      // action would promise work it does not do (the repo refuses it
+                      // there too). ?>
+                <?php if ((string) ($vm['mecm_sync_state'] ?? '') === VIRTUSPHERE_MECM_SYNC_REGISTERED) { ?>
+                    <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="transfer_mecm">
+                        <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+                        <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                        <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_transfer_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_transfer_button')); ?></button>
+                    </form>
+                <?php } ?>
             <?php } ?>
         </div>
     </section>

@@ -9,6 +9,8 @@ require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 
+/** @var mysqli $connection Provided by bootstrap.php. */
+
 $user = portal_require_user($connection);
 $missionId = request_int($_GET, 'mission_id');
 $mission = repo_get_mission($connection, $missionId);
@@ -40,6 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             repo_reset_vm_mecm_id($connection, $missionId, $vmId, (int) $user['id']);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'reset mecm id for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
             flash_set('success', __t('portal.vm_mecm_reset_success'));
+        } elseif ($action === 'transfer_mecm') {
+            if ($isTemplate) {
+                throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
+            }
+            repo_mark_vm_for_mecm_resync($connection, $missionId, $vmId, (int) $user['id']);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'queued mecm assignment transfer for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
+            flash_set('success', __t('portal.vm_mecm_transfer_success'));
         } elseif ($action === 'delete') {
             repo_delete_vm_by_id($connection, $missionId, $vmId);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'deleted vm id ' . $vmId . ' from mission id ' . $missionId, (int) $user['id']);

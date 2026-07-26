@@ -102,7 +102,7 @@ try {
     }
 
     if ($action === 'getDeviceList') {
-        $result = machine_api_prepared_result($connection, 'SELECT * FROM deploy_vms WHERE updated = 1 OR mecm_sync_state IN (?, ?) ORDER BY id', 'ss', [VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_MECM_SYNC_SUBMITTED]);
+        $result = machine_api_prepared_result($connection, 'SELECT * FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ? ORDER BY id', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
         $data = [];
         while ($vm = $result->fetch_assoc()) {
             $vmId = (int) $vm['id'];

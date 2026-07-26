@@ -82,16 +82,19 @@ const VIRTUSPHERE_LIFECYCLE_STATES = [
 ];
 
 // MECM sync states. Must stay in sync with the mecm_sync_state ENUM.
+// `submitted` used to sit between pending and registered. It was read in four
+// places and written in none, so no code path could ever put a VM there. A state
+// that half exists is worse than one that does not: every reader carried it and
+// every new reader had to guess what it meant. Withdrawn in migration 0028; do
+// not reintroduce a value without the writer that reaches it.
 const VIRTUSPHERE_MECM_SYNC_NOT_READY = 'not_ready';
 const VIRTUSPHERE_MECM_SYNC_PENDING = 'pending';
-const VIRTUSPHERE_MECM_SYNC_SUBMITTED = 'submitted';
 const VIRTUSPHERE_MECM_SYNC_REGISTERED = 'registered';
 const VIRTUSPHERE_MECM_SYNC_FAILED = 'failed';
 
 const VIRTUSPHERE_MECM_SYNC_STATES = [
     VIRTUSPHERE_MECM_SYNC_NOT_READY,
     VIRTUSPHERE_MECM_SYNC_PENDING,
-    VIRTUSPHERE_MECM_SYNC_SUBMITTED,
     VIRTUSPHERE_MECM_SYNC_REGISTERED,
     VIRTUSPHERE_MECM_SYNC_FAILED,
 ];

@@ -538,6 +538,53 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
     }
 }
 
+# Beide Zuweisungswege (Portal und MECM-Konsole) duerfen nebeneinander bestehen,
+# WEIL der Device-Sync ausschliesslich hinzufuegt. Genau darauf beruht die
+# Entscheidung „das Portal ist die Absicht vor dem Rollout, MECM die Wahrheit
+# danach": eine in der Konsole gesetzte Mitgliedschaft ist vor dem Portal sicher,
+# und die Uebertragen-Aktion darf deshalb gefahrlos erneut laufen. Bisher war das
+# Zufall.
+Describe 'Kein Skript entfernt die Mitgliedschaft eines Geraets' {
+
+    It '<name> ruft kein Remove-Cmdlet auf einer Mitgliedschaft oder einem Geraet auf' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        # Geprueft wird genau das, worauf das Nebeneinander beruht: eine
+        # MITGLIEDSCHAFT wird nie entfernt und ein GERAET nie geloescht. Dass der
+        # Autoimporter die Collection einer ueberholten Paketversion abraeumt, ist
+        # seine dokumentierte Aufgabe und eine andere Frage: die Collection
+        # verschwindet mit der Version, zu der sie gehoert.
+        $text = Get-ScriptText -Name $name
+        foreach ($forbidden in @(
+            'Remove-CMDeviceCollectionDirectMembershipRule',
+            'Remove-CMDeviceCollectionMembershipRule',
+            'Remove-CMDeviceCollectionQueryMembershipRule',
+            'Remove-CMDeviceCollectionExcludeMembershipRule',
+            'Remove-CMDevice ',
+            'Remove-CMDevice$',
+            'Clear-CMDeviceCollection'
+        )) {
+            $text | Should -Not -Match $forbidden
+        }
+    }
+
+    It 'benutzt zum Zuweisen nur Add-CMDeviceCollectionDirectMembershipRule' {
+        # Zero-Match-Schutz: findet der Test das Add nicht, prueft er nichts.
+        $text = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        $text | Should -Match 'Add-CMDeviceCollectionDirectMembershipRule'
+    }
+
+    It 'der Device-Sync loescht keine Collection' {
+        # Er legt sie an (OS, Mission) und weist zu. Eine Collection zu entfernen
+        # ist nicht seine Aufgabe, und eine geloeschte Mission-Collection wuerde
+        # jede Zuweisung darin mitnehmen.
+        Get-ScriptText -Name 'mecm_new-device-sync.ps1' | Should -Not -Match 'Remove-CMDeviceCollection\b'
+    }
+}
+
 Describe 'Ursachenvokabular der Warnlaeufe' {
     It 'ValidateSet von Add-VsRunCause und $VsRunCauseVocabulary sind deckungsgleich' {
         # Zwei Spiegel derselben Liste: ohne diesen Walk kann ein neuer Code im

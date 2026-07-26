@@ -291,7 +291,13 @@ $migrations = [
         migrator_add_column($db, 'deploy_missions', 'domain', 'VARCHAR(255) NULL');
         migrator_add_column($db, 'deploy_vms', 'updated', 'TINYINT(1) NOT NULL DEFAULT 0');
         migrator_add_column($db, 'deploy_vms', 'lifecycle_state', "ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready'");
-        migrator_add_column($db, 'deploy_vms', 'mecm_sync_state', "ENUM('not_ready','pending','submitted','registered','failed') NOT NULL DEFAULT 'not_ready'");
+        // The value set is the CURRENT one, not the one this migration shipped
+        // with: 'submitted' was withdrawn in 0028. A column definition is a mirror
+        // of the PHP SSoT (database rule, check-enum-sync.sh), so it is corrected
+        // in place rather than left as history. Both paths still converge - on a
+        // fresh install this creates the final shape and 0028's MODIFY is a no-op;
+        // on an existing one this migration is long applied and 0028 does the work.
+        migrator_add_column($db, 'deploy_vms', 'mecm_sync_state', "ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready'");
         migrator_add_column($db, 'deploy_users', 'role', "ENUM('admin','user') NOT NULL DEFAULT 'user'");
         migrator_add_column($db, 'deploy_users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
         migrator_add_column($db, 'deploy_users', 'must_change_password', 'TINYINT(1) NOT NULL DEFAULT 0');
@@ -803,6 +809,30 @@ SQL;
         // what the purge now additionally requires.
         migrator_add_column($db, 'deploy_packages', 'assignments_relinked_at', 'TIMESTAMP NULL');
         migrator_out('0027: added deploy_packages.assignments_relinked_at (purge protection for relinked rows)');
+    },
+    '0028_withdraw_mecm_sync_submitted' => function (mysqli $db): void {
+        // `submitted` was read in four places and written in none. A state that
+        // half exists is worse than one that does not: every reader had to carry
+        // it, every new reader had to guess what it would mean, and the answer
+        // was "nothing ever puts a VM here". Withdrawn rather than left dangling.
+        //
+        // Data preflight before DDL (database rule): a row that still holds it -
+        // from the desktop era or a hand edit - would make the ALTER fail or
+        // silently become ''. `pending` is its honest equivalent: the portal knows
+        // the VM, MECM does not have it yet.
+        $moved = 0;
+        $pending = VIRTUSPHERE_MECM_SYNC_PENDING;
+        $stmt = $db->prepare('UPDATE deploy_vms SET mecm_sync_state = ? WHERE mecm_sync_state = ?');
+        $legacy = 'submitted';
+        $stmt->bind_param('ss', $pending, $legacy);
+        $stmt->execute();
+        $moved = $stmt->affected_rows;
+        if ($moved > 0) {
+            migrator_out('0028: moved ' . $moved . " VM(s) from the withdrawn 'submitted' state to 'pending'");
+        }
+
+        $db->query("ALTER TABLE deploy_vms MODIFY mecm_sync_state ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready'");
+        migrator_out('0028: withdrew the never-written mecm_sync_state value submitted');
     },
 ];
 

@@ -81,6 +81,44 @@ final class MachineApiWireTest extends TestCase
     }
 
     /**
+     * A ResourceID reported for a VM id that does not exist is a failure, and the
+     * wire now says so.
+     *
+     * It answered 200 "Data updated successfully" for it. The device-sync reads
+     * that as done and never reports the device again, for a row somebody deleted
+     * in the portal: the machine sat in MECM with nothing in VirtuSphere pointing
+     * at it, and no log line anywhere named the mismatch. This is a deliberate
+     * wire-behaviour change, and the PowerShell side already treats a non-2xx as
+     * a failure it counts and reports (resource_update_failed).
+     */
+    public function testAResourceIdForAnUnknownVmIsRejectedInsteadOfConfirmed(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+            'deviceName' => 'phpunit-does-not-exist',
+            'deviceResourceID' => '16777999',
+            'deviceid' => 999000111,
+        ]);
+
+        self::assertSame(404, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame(['error' => 'Unknown VM id'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /** The two input rejections keep their frozen 400 envelope. */
+    public function testMissingResourceIdOrVmIdKeepsTheInvalidDataEnvelope(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach ([['deviceResourceID' => '', 'deviceid' => 1], ['deviceResourceID' => '4711', 'deviceid' => 0]] as $payload) {
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', $payload);
+            self::assertSame(400, $status, $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    /**
      * @return array{0:int,1:string,2:string}
      */
     private function post(string $path, array $payload): array
