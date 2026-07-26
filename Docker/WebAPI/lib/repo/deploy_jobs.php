@@ -484,6 +484,44 @@ function repo_deploy_active_job_exists(mysqli $db, int $missionId): bool
     ) !== null;
 }
 
+/**
+ * Locks one mission row for a change that must not race a deploy, and returns
+ * it (null when it is gone, which is the caller's decision to interpret).
+ *
+ * The lock order matters and is fixed: mission row first, deploy_jobs second,
+ * exactly as both enqueue paths take it. A destructive path that checked the
+ * jobs first would deadlock against an enqueue instead of queueing behind it.
+ * Only meaningful inside repo_transaction(): FOR UPDATE outside a transaction
+ * releases immediately and proves nothing.
+ *
+ * @return array<string, mixed>|null
+ */
+function repo_deploy_lock_mission(mysqli $db, int $missionId): ?array
+{
+    return repo_fetch_one($db, 'SELECT id, mission_name FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$missionId]);
+}
+
+/**
+ * Refuses a destructive change while a job of this mission is queued or
+ * running. The guard repo_delete_credential() and the bulk VM delete already
+ * had, and the two paths that could delete the very state a running deploy is
+ * working on did not: deleting a mission cascaded its jobs, their logs and its
+ * VM rows out from under the worker, and the single-VM delete of the same page
+ * as the bulk delete simply lacked its sibling's check.
+ *
+ * Hard refusal on purpose (no implicit cancel): cancelling somebody else's
+ * running deploy is a separate decision with its own confirmation, and the two
+ * sibling guards answer the same situation the same way.
+ *
+ * Call after repo_deploy_lock_mission() and inside the same transaction.
+ */
+function repo_deploy_assert_mission_idle(mysqli $db, int $missionId): void
+{
+    if (repo_deploy_active_job_exists($db, $missionId)) {
+        throw new RuntimeException('Mission has an active deploy job.');
+    }
+}
+
 function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $esxiCredentialId, int $ansibleCredentialId, array $payloadData, ?string $scheduledAtUtc = null): int
 {
     if ($missionId <= 0 || $userId <= 0 || $esxiCredentialId <= 0 || $ansibleCredentialId <= 0) {

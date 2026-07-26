@@ -63,6 +63,10 @@ return [
     'save_vm' => 'Save VM',
     'flash_saved' => 'VM saved.',
     'err_invalid_disk_type' => 'Invalid disk type.',
+    // Removing the last network interface: the form used to insert an empty
+    // default one silently, overwriting the imported MAC address while reporting
+    // success.
+    'err_interfaces_required' => 'A VM needs at least one network interface. The stored interfaces stay unchanged until one is entered.',
     'err_conflict' => 'This VM was changed by someone else in the meantime. Please reload the page and re-enter your change; otherwise it would overwrite the changes made since.',
     'label_ip' => 'IP',
     'label_subnet' => 'Subnet',

@@ -53,6 +53,11 @@ return [
     // whether a mission or a template was being saved.
     'err_mission_name_taken' => 'This name is already taken.',
     'err_entry_exists' => 'This entry already exists.',
+    // Deleting a mission or one of its VMs while a job of that mission is queued
+    // or running. One sentence for both on purpose: it is the same reason, and
+    // the refusal is hard (no implicit cancel), so nobody's running deploy is
+    // ended as a side effect.
+    'err_mission_active_job' => 'A deploy job for this mission is queued or running. Cancel it in the deploy list first; while it is open, nothing here can be deleted.',
     'err_db_generic' => 'The database could not save the action. Please check your input.',
     'err_action_failed' => 'The action could not be completed.',
 ];

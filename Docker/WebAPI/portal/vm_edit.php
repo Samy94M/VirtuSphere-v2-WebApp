@@ -180,7 +180,12 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
         // Errors for the fields below render inline next to their input; anything
         // else (interface/disk rows) has no inline anchor and is listed here.
         $inlineVmFields = ['vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'vm_ram', 'vm_cpu', 'vm_guest_id'];
-        $extraErrors = array_diff_key($fieldErrors, array_flip($inlineVmFields));
+        // A single-issue failure passes the same sentence as the field error and
+        // as the exception message; listing it under itself reads as two faults.
+        $extraErrors = array_filter(
+            array_diff_key($fieldErrors, array_flip($inlineVmFields)),
+            static fn (string $message): bool => $message !== $error
+        );
         ?>
         <div class="alert alert-error">
             <?php echo h($error); ?>

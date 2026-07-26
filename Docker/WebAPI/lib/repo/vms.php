@@ -9,6 +9,9 @@ require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/../mac.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/status_events.php';
+// The VM delete paths refuse to run while a deploy of the mission is in flight;
+// that predicate and the mission lock it needs live in the job repo.
+require_once __DIR__ . '/deploy_jobs.php';
 
 const REPO_VM_COLUMNS = [
     'vm_name',
@@ -454,30 +457,35 @@ function repo_vm_name_exists(mysqli $db, int $missionId, string $vmName, int $ex
  */
 function repo_bulk_delete_vms(mysqli $db, int $missionId, array $vmIds): array
 {
-    $result = ['deleted' => 0, 'skipped' => []];
-    $missionHasActiveJob = (int) repo_scalar(
-        $db,
-        "SELECT COUNT(*) FROM deploy_jobs WHERE mission_id = ? AND status IN ('queued', 'running') AND cancelled_at IS NULL",
-        'i',
-        [$missionId]
-    ) > 0;
+    // One transaction for the whole batch, so the mission lock is taken once and
+    // held: no job can be queued between two VMs of the same batch, and the
+    // active-job verdict below is therefore true for every VM in it, not only
+    // for the first. The per-VM guard inside repo_delete_vm_by_id then finds the
+    // lock already held and answers from the same reading.
+    return repo_transaction($db, static function () use ($db, $missionId, $vmIds): array {
+        $result = ['deleted' => 0, 'skipped' => []];
+        if (repo_deploy_lock_mission($db, $missionId) === null) {
+            return $result;
+        }
+        $missionHasActiveJob = repo_deploy_active_job_exists($db, $missionId);
 
-    foreach ($vmIds as $vmId) {
-        $vmId = (int) $vmId;
-        $name = (string) (repo_scalar($db, 'SELECT vm_name FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$vmId, $missionId]) ?? '');
-        if ($name === '') {
-            continue; // not in this mission; silently ignore
+        foreach ($vmIds as $vmId) {
+            $vmId = (int) $vmId;
+            $name = (string) (repo_scalar($db, 'SELECT vm_name FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$vmId, $missionId]) ?? '');
+            if ($name === '') {
+                continue; // not in this mission; silently ignore
+            }
+            if ($missionHasActiveJob) {
+                $result['skipped'][] = ['vm_name' => $name, 'reason' => 'active_job'];
+                continue;
+            }
+            if (repo_delete_vm_by_id($db, $missionId, $vmId)) {
+                $result['deleted']++;
+            }
         }
-        if ($missionHasActiveJob) {
-            $result['skipped'][] = ['vm_name' => $name, 'reason' => 'active_job'];
-            continue;
-        }
-        if (repo_delete_vm_by_id($db, $missionId, $vmId)) {
-            $result['deleted']++;
-        }
-    }
 
-    return $result;
+        return $result;
+    });
 }
 
 /**
@@ -508,13 +516,29 @@ function repo_bulk_reset_mecm_ids(mysqli $db, int $missionId, array $vmIds, ?int
     return $result;
 }
 
+/**
+ * Deletes one VM row of a mission, never the VM on the hypervisor.
+ *
+ * The active-job guard lives HERE and not only in the bulk caller, because the
+ * single-row path of vms.php is the same click one row over and had no guard at
+ * all: it removed a VM the running worker was about to receive MACs for, and
+ * the MAC upload then reported an unknown VM while the deploy looked healthy.
+ * Both callers are now behind one predicate.
+ */
 function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
 {
     if ($missionId <= 0 || $vmId <= 0) {
         return false;
     }
 
-    return repo_execute($db, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+    return repo_transaction($db, static function () use ($db, $missionId, $vmId): bool {
+        if (repo_deploy_lock_mission($db, $missionId) === null) {
+            return false;
+        }
+        repo_deploy_assert_mission_idle($db, $missionId);
+
+        return repo_execute($db, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+    });
 }
 
 function repo_vm_has_imported_mac(mysqli $db, int $vmId): bool

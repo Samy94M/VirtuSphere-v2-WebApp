@@ -26,10 +26,6 @@ require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/worker_heartbeat.php';
 
-final class DeployWorkerCancelled extends RuntimeException
-{
-}
-
 function deploy_worker_options(array $argv): array
 {
     $options = [
@@ -149,7 +145,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing deploy artifacts.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
         $priorLifecycles = deploy_worker_mark_vms_deploying($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' started', $vmIds);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         $esxiCredential = deploy_worker_credential($db, (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         $ansibleCredential = deploy_worker_credential($db, (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
@@ -170,7 +166,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
         if ($preflightExitCode !== 0) {
             $failedComponent = ansible_preflight_failed_component($preflightOutput);
             throw new RuntimeException(
@@ -183,7 +179,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $localDir = (string) $artifacts['local_dir'];
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy files prepared: ' . implode(', ', (array) $artifacts['files']));
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         // Autostart preflight (ADR-0025). Runs only when this job would write the
         // policy, and may drop the autostart step from a full pipeline without
@@ -199,7 +195,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             deploy_worker_heartbeat_tick($db, $jobId, $workerId);
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
         });
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         $command = ansible_remote_command((string) $artifacts['remote_dir'], $payload, $autostartEnabled);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible playbook sequence: ' . deploy_job_payload_summary((string) $job['payload_json']));
@@ -225,7 +221,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             throw new RuntimeException($transportError->getMessage() . ansible_step_failure_suffix($currentStep), 0, $transportError);
         }
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         if ($exitCode !== 0) {
             throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . ansible_step_failure_suffix($currentStep) . '.');
@@ -233,7 +229,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
         deploy_worker_conclude_sequence($db, $job, $workerId, $vmIds, $priorLifecycles);
     } catch (DeployWorkerCancelled $cancelled) {
-        deploy_worker_handle_cancelled($db, $job, $vmIds);
+        // The reason travels: "cancelled" and "the mission was deleted under me"
+        // look identical in the log otherwise, and the second one is the finding.
+        deploy_worker_handle_cancelled($db, $job, $vmIds, $cancelled->getMessage());
     } catch (Throwable $exception) {
         deploy_worker_handle_failure($db, $job, $workerId, $vmIds, $exception->getMessage());
     } finally {
@@ -304,7 +302,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     try {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing ESXi inventory fetch.');
         deploy_worker_heartbeat_tick($db, $jobId, $workerId, 0);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         $esxiCredential = deploy_worker_credential($db, $credentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         $ansibleCredential = deploy_worker_credential($db, (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
@@ -321,7 +319,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
         if ($preflightExit !== 0) {
             $failCategory = VIRTUSPHERE_INVENTORY_ERROR_SSH;
             $failedComponent = ansible_preflight_failed_component($preflightOutput);
@@ -337,7 +335,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             deploy_worker_heartbeat_tick($db, $jobId, $workerId);
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
         });
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty(deploy_worker_payload($job)['verbose']));
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running ESXi inventory playbook.');
@@ -347,7 +345,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk);
         }, 0, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer);
-        deploy_worker_assert_not_cancelled($db, $jobId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         if ($exitCode !== 0) {
             $failCategory = ansible_categorize_inventory_error($fullOutput, $exitCode);
@@ -385,7 +383,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     } catch (DeployWorkerCancelled $cancelled) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Inventory job cancelled.');
+        // Tolerant of a vanished row for the same reason as the deploy path: one
+        // of the ways we land here is that the job no longer exists.
+        deploy_worker_log_if_job_exists($db, $jobId, 'Inventory job stopped. Reason: ' . $cancelled->getMessage());
     } catch (Throwable $exception) {
         $category = $failCategory ?? VIRTUSPHERE_INVENTORY_ERROR_PARSE;
         try {
@@ -416,26 +416,6 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
 function deploy_worker_credential(mysqli $db, int $credentialId, string $type): array
 {
     return repo_deploy_assert_credential_type($db, $credentialId, $type);
-}
-
-/**
- * Cancellation is honoured at step boundaries only, never mid-exec (AP6, by
- * design). A cancel flips the job to `cancelled`; this check runs between the
- * preflight, the SFTP upload and each playbook, so the sequence stops before
- * the next step. It deliberately does NOT interrupt a running ansible-playbook:
- * killing a create/powercycle mid-run would leave the ESXi side in an undefined
- * state (a half-cloned VM, a power operation of unknown outcome) that no later
- * step could reason about. The bounded SSH transport (idle/total timeout) is
- * what caps an individual step; cancel is cooperative at the seams. The
- * convergence sweep (L4) cleans up VMs left `deploying` if the worker dies
- * before its own cancelled-catch runs.
- */
-function deploy_worker_assert_not_cancelled(mysqli $db, int $jobId): void
-{
-    $job = repo_deploy_job($db, $jobId);
-    if ($job !== null && (string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
-        throw new DeployWorkerCancelled('Deploy job was cancelled.');
-    }
 }
 
 function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, int $intervalSeconds = VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS): void

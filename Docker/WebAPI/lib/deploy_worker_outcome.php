@@ -19,6 +19,56 @@ require_once __DIR__ . '/repo/status_events.php';
  * against a real database without an SSH transport.
  */
 
+final class DeployWorkerCancelled extends RuntimeException
+{
+}
+
+/**
+ * Stops the worker as soon as the job in front of it is no longer its own to
+ * finish. There are four states and only one was checked:
+ *
+ *  - the operator cancelled it (the original check),
+ *  - the job row is GONE. `$job !== null` let exactly this case through: the
+ *    worker carried on against a deleted mission and then failed on a foreign
+ *    key while writing its next log line, which the error categorizer reports as
+ *    a remote problem, so the operator reads "the host answered unexpectedly"
+ *    for a row somebody deleted in the portal,
+ *  - it is no longer `running`: the heartbeat reaper concluded it and already
+ *    published a verdict plus marked its VMs, which writing on would overwrite,
+ *  - it is `running` under ANOTHER worker's lock (adopted after that reap), so
+ *    two workers would drive the same playbook sequence over the same VMs.
+ *
+ * All four raise DeployWorkerCancelled, because the outcome is the same: this
+ * worker stops without publishing a result of its own.
+ *
+ * Cancellation itself is honoured at step boundaries only, never mid-exec (AP6,
+ * by design): this check runs between the preflight, the SFTP upload and each
+ * playbook, so the sequence stops before the NEXT step. Killing a
+ * create/powercycle mid-run would leave the ESXi side in a state no later step
+ * could reason about (a half-cloned VM, a power operation of unknown outcome).
+ * The bounded SSH transport caps an individual step; cancel is cooperative at
+ * the seams, and the convergence sweep (L4) cleans up VMs left `deploying` if
+ * the worker dies before its own catch runs.
+ */
+function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId): void
+{
+    $job = repo_deploy_job($db, $jobId);
+    if ($job === null) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' no longer exists.');
+    }
+
+    $status = (string) $job['status'];
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
+        throw new DeployWorkerCancelled('Deploy job was cancelled.');
+    }
+    if ($status !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
+        throw new DeployWorkerCancelled('Deploy job is no longer running (status ' . $status . '); another party concluded it.');
+    }
+    if ((string) ($job['locked_by'] ?? '') !== $workerId) {
+        throw new DeployWorkerCancelled('Deploy job is locked by ' . ((string) ($job['locked_by'] ?? '') ?: 'nobody') . ', not by this worker.');
+    }
+}
+
 function deploy_worker_payload(array $job): array
 {
     $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
@@ -121,16 +171,45 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
  * the import endpoint already finished stay deployed/pending, and stored
  * MACs are never touched. The job status itself stays `cancelled`.
  *
+ * Also the landing place for the two other ways a job stops being this worker's
+ * (deploy_worker_assert_job_is_ours): the row is gone, or somebody else
+ * concluded it. Both are why the job log is written only while the row still
+ * exists: deploy_logs references it, so a log line about a deleted job fails on
+ * a foreign key and turns a clean stop into an unexplained crash. The VM
+ * convergence still runs in that case, from the mission id of the job the worker
+ * holds in memory, because those VMs are the ones actually left in `deploying`.
+ *
  * @param int[] $vmIds
  */
-function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds): void
+function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds, string $reason = 'Deploy job was cancelled.'): void
 {
     $jobId = (int) $job['id'];
-    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Worker stopped processing because the job was cancelled.');
+    deploy_worker_log_if_job_exists($db, $jobId, 'Worker stopped processing. Reason: ' . $reason);
+
     $swept = deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' cancelled while deploying', $vmIds, [], true);
     if ($swept > 0) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Marked ' . $swept . ' still-deploying VM(s) of this job as failed; already imported MACs are kept.');
+        deploy_worker_log_if_job_exists($db, $jobId, 'Marked ' . $swept . ' still-deploying VM(s) of this job as failed; already imported MACs are kept.');
     }
+}
+
+/**
+ * A job log line on a stop path, where "the row is already gone" is one of the
+ * reasons we got here. deploy_logs references deploy_jobs, so writing about a
+ * deleted job fails on a foreign key and turns a clean stop into a crash the
+ * operator reads as an ESXi problem. Returns false when the line went to
+ * error_log instead, which is the only place left that can still hold it.
+ */
+function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): bool
+{
+    if (repo_deploy_job($db, $jobId) === null) {
+        error_log('[deploy-worker] job ' . $jobId . ' is gone; ' . $line);
+
+        return false;
+    }
+
+    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
+
+    return true;
 }
 
 /**

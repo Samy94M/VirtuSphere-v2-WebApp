@@ -47,7 +47,14 @@ final class DeployConvergenceContractTest extends TestCase
         // The claim-time marking must feed the restore, or a green create/start
         // job leaves `deploying` VMs for the sweep to falsely fail.
         self::assertStringContainsString('$priorLifecycles = deploy_worker_mark_vms_deploying(', $worker);
-        self::assertStringContainsString('deploy_worker_handle_cancelled($db, $job, $vmIds)', $worker);
+        // The stop reason travels with it: "cancelled", "the row is gone" and
+        // "somebody else concluded it" are the same stop but not the same finding,
+        // and the log line is the only place that difference can survive.
+        self::assertStringContainsString('deploy_worker_handle_cancelled($db, $job, $vmIds, $cancelled->getMessage())', $worker);
+        // The ownership check itself lives in the requireable module too, or the
+        // four states it distinguishes would again be unreachable for a test.
+        self::assertStringContainsString('function deploy_worker_assert_job_is_ours', $this->source('lib/deploy_worker_outcome.php'));
+        self::assertStringNotContainsString('function deploy_worker_assert_job_is_ours', $worker);
         self::assertStringContainsString('deploy_worker_handle_failure($db, $job, $workerId, $vmIds, $exception->getMessage())', $worker);
         self::assertStringNotContainsString('VIRTUSPHERE_DEPLOY_STATUS_PARTIAL', $worker);
     }

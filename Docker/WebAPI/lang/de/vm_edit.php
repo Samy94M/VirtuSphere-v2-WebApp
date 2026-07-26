@@ -63,6 +63,10 @@ return [
     'save_vm' => 'VM speichern',
     'flash_saved' => 'VM gespeichert.',
     'err_invalid_disk_type' => 'Ungültiger Datenträgertyp.',
+    // Die letzte Netzwerkkarte entfernt: früher setzte das Formular still eine
+    // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,
+    // während es Erfolg meldete.
+    'err_interfaces_required' => 'Eine VM braucht mindestens eine Netzwerkkarte. Die gespeicherten Netzwerkkarten bleiben unverändert, bis eine eingetragen ist.',
     'err_conflict' => 'Diese VM wurde inzwischen von jemand anderem geändert. Bitte die Seite neu laden und die Änderung erneut eingeben; sonst würden die zwischenzeitlichen Änderungen überschrieben.',
     'label_ip' => 'IP',
     'label_subnet' => 'Subnetz',

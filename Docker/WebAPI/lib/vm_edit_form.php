@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/inventory_field.php';
+// vm_parse_interfaces() rejects an empty interface list with a field error.
+require_once __DIR__ . '/validate.php';
 
 /**
  * VM editor form helpers: the default interface/disk rows, the POST parsers that
@@ -41,6 +43,19 @@ function vm_default_disks(): array
     ]];
 }
 
+/**
+ * The interface rows of a submitted VM form.
+ *
+ * Removing the LAST row is rejected instead of falling back to a default NIC.
+ * repo_save_vm rewrites deploy_interfaces from what this returns, so the empty
+ * default replaced the real row: a MAC that Ansible had exported and MECM was
+ * waiting for was silently gone, together with the VLAN, the IP and the mode,
+ * and the save reported success. There is no honest default for "the operator
+ * removed every interface", so the form says so and keeps the stored rows.
+ *
+ * vm_default_interfaces() stays the RENDER default (a new VM, the sticky
+ * re-render): offering a prefilled row is not the same as writing one.
+ */
 function vm_parse_interfaces(array $rows, array $mission): array
 {
     $interfaces = [];
@@ -68,7 +83,14 @@ function vm_parse_interfaces(array $rows, array $mission): array
         ];
     }
 
-    return $interfaces !== [] ? $interfaces : vm_default_interfaces($mission);
+    if ($interfaces === []) {
+        throw new ValidationException(
+            ['interfaces' => __t('vm_edit.err_interfaces_required')],
+            __t('vm_edit.err_interfaces_required')
+        );
+    }
+
+    return $interfaces;
 }
 
 function vm_parse_disks(array $rows): array

@@ -53,6 +53,11 @@ return [
     // es um eine Mission oder eine Vorlage ging.
     'err_mission_name_taken' => 'Dieser Name ist bereits vergeben.',
     'err_entry_exists' => 'Dieser Eintrag existiert bereits.',
+    // Eine Mission oder eine ihrer VMs löschen, während ein Auftrag dieser
+    // Mission läuft oder wartet. Bewusst für beide Fälle ein Satz: es ist
+    // derselbe Grund, und die Ablehnung ist hart (kein stiller Abbruch des
+    // Auftrags), damit niemandes laufender Deploy nebenbei beendet wird.
+    'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Brich ihn zuerst in der Bereitstellungsliste ab; solange er offen ist, lässt sich daran nichts löschen.',
     'err_db_generic' => 'Die Datenbank konnte die Aktion nicht speichern. Bitte prüfe die Eingaben.',
     'err_action_failed' => 'Die Aktion konnte nicht abgeschlossen werden.',
 ];

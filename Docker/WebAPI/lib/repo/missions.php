@@ -9,6 +9,9 @@ require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/status_events.php';
 require_once __DIR__ . '/vms.php';
+// deleteMission() cascades a mission's jobs and logs away, so it needs the same
+// "not while a deploy runs" guard the job repo owns.
+require_once __DIR__ . '/deploy_jobs.php';
 
 /**
  * The mission's ESXi autostart defaults (ADR-0025), as one list. A mission column
@@ -205,6 +208,19 @@ function getMissions($connection)
     return repo_fetch_all($stmt->get_result());
 }
 
+/**
+ * Deletes a mission and everything the schema cascades with it: its VM rows,
+ * its deploy jobs and their logs.
+ *
+ * That cascade is why this refuses to run while a job of the mission is queued
+ * or running. Without the guard the delete pulled the job row, its log rows and
+ * the VM rows out from under a worker that was mid-playbook: the worker then
+ * failed on a foreign key while writing its next log line, the VMs it had
+ * already created on ESXi were left with nothing pointing at them, and the
+ * operator's only trace of the run was gone with the rows. The two sibling
+ * guards (repo_delete_credential, the bulk VM delete) already answered this
+ * situation, and they answer it the same way: refuse, do not cancel.
+ */
 function deleteMission($id, $connection)
 {
     $missionId = repo_id($id);
@@ -212,14 +228,21 @@ function deleteMission($id, $connection)
         throw new InvalidArgumentException('Mission id is required.');
     }
 
-    $stmt = $connection->prepare('DELETE FROM deploy_missions WHERE id = ?');
-    $stmt->bind_param('i', $missionId);
-    $stmt->execute();
-    if ($stmt->affected_rows === 0) {
-        throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
-    }
+    return repo_transaction($connection, static function () use ($connection, $missionId): bool {
+        if (repo_deploy_lock_mission($connection, $missionId) === null) {
+            throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
+        }
+        repo_deploy_assert_mission_idle($connection, $missionId);
 
-    return true;
+        $stmt = $connection->prepare('DELETE FROM deploy_missions WHERE id = ?');
+        $stmt->bind_param('i', $missionId);
+        $stmt->execute();
+        if ($stmt->affected_rows === 0) {
+            throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
+        }
+
+        return true;
+    });
 }
 
 function createMission($missionName, $connection)

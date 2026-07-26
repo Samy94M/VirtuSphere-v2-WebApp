@@ -57,6 +57,10 @@ function portal_error_message(Throwable $exception): string
         // credentials.php renders Delete for every credential, including one an
         // active job holds, so this guard is one click away.
         'Credential is used by an active deploy job.' => 'credentials.err_in_use',
+        // The same class of guard on the two paths that would delete the state a
+        // running deploy works on: missions.php renders Delete for every mission
+        // and vms.php for every row, both regardless of a running job.
+        'Mission has an active deploy job.' => 'layout.err_mission_active_job',
         // Two operators editing the same VM: the optimistic-locking guard in
         // repo_save_vm rejects the second save. Reachable by construction, so it
         // must speak the operator's language, not raw English.
