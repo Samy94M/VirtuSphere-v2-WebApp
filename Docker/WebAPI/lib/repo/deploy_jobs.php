@@ -883,7 +883,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
     $message = 'Reaped stale deploy job after missing heartbeat for ' . $staleAfterSeconds . ' seconds.';
 
     return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $failed, $message): array {
-        $stmt = $db->prepare('SELECT id, mission_id, payload_json, locked_by FROM deploy_jobs WHERE status = ? AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');
+        $stmt = $db->prepare('SELECT id, mission_id, payload_json, credential_esxi_id, locked_by FROM deploy_jobs WHERE status = ? AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');
         $stmt->bind_param('si', $running, $staleAfterSeconds);
         $stmt->execute();
         $jobs = repo_fetch_all($stmt->get_result());
@@ -895,6 +895,22 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
                 repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+                $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
+                if (($job['mission_id'] ?? null) === null
+                    && (int) ($job['credential_esxi_id'] ?? 0) > 0
+                    && is_array($payload)
+                    && (string) ($payload['mode'] ?? '') === VIRTUSPHERE_DEPLOY_MODE_INVENTORY) {
+                    // A reaped inventory pull is a real failed attempt. Without
+                    // this state transition the active-job link vanished while
+                    // the ESXi card kept its previous (possibly green) result,
+                    // and no page listed the now-terminal system job.
+                    repo_esxi_inventory_record_failure(
+                        $db,
+                        (int) $job['credential_esxi_id'],
+                        VIRTUSPHERE_INVENTORY_ERROR_WORKER,
+                        $jobId
+                    );
+                }
             }
         }
 

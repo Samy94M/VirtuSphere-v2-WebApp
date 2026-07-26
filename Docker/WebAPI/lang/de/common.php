@@ -48,7 +48,8 @@ return [
     'conn_authz' => 'Die Anmeldung hat funktioniert, aber dem Konto fehlen die nötigen Rechte.',
     'conn_http' => 'Der Host hat mit HTTP :status geantwortet.',
     'conn_ssh' => 'Die SSH-Verbindung zu ":host" ist fehlgeschlagen.',
-    'conn_parse' => 'Der Abruf ist mit einem unbekannten Fehler gescheitert. Die Ursache steht im Jobprotokoll.',
+    'conn_worker' => 'Der Inventarabruf wurde beendet, weil der Deploy-Worker kein Lebenszeichen mehr gesendet hat.',
+    'conn_parse' => 'Der Abruf ist mit einem unbekannten Fehler gescheitert.',
     'conn_config' => 'Konfigurationsproblem vor dem Verbindungsaufbau: Zugangsdaten, Toolchain oder Playbooks sind unvollständig. Der Host wurde dabei nicht kontaktiert.',
     'conn_unknown' => 'Die Verbindung ist fehlgeschlagen.',
 ];

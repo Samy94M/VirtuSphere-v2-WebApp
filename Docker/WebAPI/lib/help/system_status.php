@@ -105,7 +105,10 @@ declare(strict_types=1);
                 'client_days' => VIRTUSPHERE_CLIENT_EVENT_RETENTION_DAYS,
                 'package_days' => VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS,
             ])); ?></p>
-            <p><?php echo h(__t('help_system_status.logs_p4', ['days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS])); ?></p>
+            <p><?php echo h(__t('help_system_status.logs_p4', [
+                'log_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
+                'system_days' => VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS,
+            ])); ?></p>
         </section>
 
         <section class="panel">

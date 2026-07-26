@@ -16,7 +16,7 @@ Das Portal liest in regelmäßigen Abständen read-only aus den registrierten ES
 ## Setup-Reihenfolge
 
 1. Unter Zugangsdaten ein ESXi-Konto anlegen (Read-only-Rechte genügen für das Inventar, siehe unten). Bei genau einem Ansible-Zugang wird er automatisch verwendet; bei mehreren unter Einstellungen → Kataloge und Inventar einen auswählen.
-2. Ersten Abruf abwarten (Sofort-Pull nach dem Anlegen oder manueller Abruf). Der Systemstatus zeigt Versuch, Erfolg und einen gegebenenfalls offenen Job.
+2. Ersten Abruf abwarten (Sofort-Pull nach dem Anlegen oder manueller Abruf). Der Systemstatus zeigt Versuch und Ergebnis; offene Aufträge sowie der letzte beendete Abruf führen direkt in ihr Jobprotokoll.
 3. Erst danach greift der ESXi-owned VLAN-Katalog (Rollout-Vorbedingung): Portgruppen erscheinen als Auswahl, `vlans.php` wird read-only.
 
 ## Benötigte ESXi-Rechte
@@ -42,6 +42,7 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 | `authz` | Rechte reichen nicht | ESXi-Rolle des Kontos erweitern (Profil oben) |
 | `http` | Host antwortet mit unerwartetem Status | Statuscode ansehen; erscheint bei ESXi-Abrufen nicht mehr |
 | `ssh` | Ansible-Host nicht erreichbar/Preflight | Ansible-Zugangsdatum und Host prüfen (wie bei Deploy-Jobs) |
+| `worker` | Deploy-Worker verlor während des Abrufs sein Lebenszeichen | Deploy-Worker im Systemstatus prüfen und neu starten; das Jobprotokoll nennt die Reaper-Ursache |
 | `parse` | Ausgabe unerwartet/Marker fehlt | Job-Log ansehen; Playbook/Modulversion gegen den Host prüfen |
 | `config` | Zugangsdatum unvollständig oder Typ nicht unterstützt | Host, Benutzername und Typ im Zugangsdatum prüfen |
 
@@ -114,7 +115,8 @@ Das Portal spricht ESXi **nie** direkt an. „Inventarabruf starten" auf der Sei
 Konsequenzen für den Betrieb:
 
 - **Die Zertifikatsvariante ist egal.** Selbstsigniert ab Werk, von der VMCA des vCenters oder von der Domänen-CA: die Prüfung ist im Playbook bewusst aus. Eine strikte TLS-Prüfung ist eine spätere Härtungsentscheidung (WP7) und gehört in eine ADR, nicht still in einen Stream-Kontext.
-- **Die Meldung und der Befund haben getrennte Aufgaben.** Der Flash unterscheidet eingereiht, bereits offen oder fehlende/uneindeutige Ansible-Auswahl. Der dauerhafte Befund steht im Systemstatus; bei eingereiht/laufend ist die Aktion deaktiviert und das Job-Log direkt verlinkt.
+- **Die Meldung und der Befund haben getrennte Aufgaben.** Der Flash unterscheidet eingereiht, bereits offen oder fehlende/uneindeutige Ansible-Auswahl. Der dauerhafte Befund steht im Systemstatus; eingereihte und laufende Aufträge sowie der letzte beendete Abruf sind dort direkt verlinkt. Auch ein erfolgreicher Abruf behält den Link, damit Teilabfragen und Nullwerte prüfbar bleiben.
+- **Das Jobprotokoll bleibt die technische Wahrheit.** `deploy_esxi_inventory_state.last_job_id` merkt sich nur, welcher Auftrag den dauerhaften Befund erzeugt hat; Status und Ausgabe bleiben in `deploy_jobs` und `deploy_job_logs`. Der Fremdschlüssel verwendet `ON DELETE SET NULL`: löscht die Aufbewahrung den 30 Tage alten Systemauftrag, zeigt ein alter Fehler einen verständlichen Hinweis statt eines toten Links. Ein neuer Abruf erzeugt wieder einen exakten Verweis.
 - **Ein Ansible-Zugangsdatum wird weiterhin sofort geprüft** (SSH-Anmeldung plus Preflight), denn dieser Weg läuft aus dem Portal heraus. Einen Scheduler hat er nicht, deshalb altert sein Ergebnis: Ein bestandener Preflight wechselt nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` (aktuell 7) Tagen auf „Unbestätigt", denn ein Grün von vor Wochen beweist nichts über heute. Ein Fehlschlag altert nie; ein bekannter Defekt darf nicht ins Graue verschwinden. Indirekt wird der Host trotzdem laufend benutzt, weil jeder ESXi-Abruf über ihn läuft, aber dieses Ergebnis landet auf der ESXi-Zeile, nicht auf dem Ansible-Badge.
 
 Historisch prüfte der Test `{host}:{port}/rest/appliance/system/version` mit PHPs strikter Zertifikatsprüfung. Beides war falsch: der Pfad gehört zur Management-API der vCenter Server Appliance und fehlt auf einem einzelnen ESXi (HTTP 404 trotz korrekter Zugangsdaten), und die Prüfung lehnte das ab Werk selbstsignierte Host-Zertifikat ab, das der Betrieb akzeptiert. Der Test meldete also rot bei völlig gesunden Zugangsdaten. Dieser Weg ist entfernt (ADR-0023, drittes Amendment).

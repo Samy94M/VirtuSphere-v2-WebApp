@@ -74,6 +74,22 @@ final class DeployJobReaperTest extends TestCase
         self::assertNull($job['heartbeat_at']);
     }
 
+    public function testReapedInventoryJobBecomesAWorkerFailureWithItsExactLogPointer(): void
+    {
+        $this->skipWhenForeignRunningJobsExist();
+        $credentialId = $this->insertEsxiCredential($this->prefix . '_esxi');
+        $jobId = $this->insertRunningInventoryJob($credentialId, 'worker-gone', 700);
+
+        repo_reap_stale_deploy_jobs($this->db, 600);
+
+        $state = repo_esxi_inventory_state($this->db, $credentialId);
+        self::assertIsArray($state);
+        self::assertSame('failed', $state['last_status']);
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_WORKER, $state['last_error_category']);
+        self::assertSame($jobId, (int) $state['last_job_id']);
+        self::assertSame(1, $this->systemLogCount($jobId, 'Reaped stale deploy job%'));
+    }
+
     private function insertMission(string $name): int
     {
         $status = 'template';
@@ -102,12 +118,42 @@ final class DeployJobReaperTest extends TestCase
         return $jobId;
     }
 
+    private function insertEsxiCredential(string $name): int
+    {
+        $type = VIRTUSPHERE_CREDENTIAL_TYPE_ESXI;
+        $host = 'esxi.example.test';
+        $port = 443;
+        $username = 'svc';
+        $secret = 'fixture';
+        $stmt = $this->db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $username, $secret);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function insertRunningInventoryJob(int $credentialId, string $workerId, int $heartbeatAgeSeconds): int
+    {
+        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+        $payload = json_encode(['mode' => VIRTUSPHERE_DEPLOY_MODE_INVENTORY], JSON_THROW_ON_ERROR);
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, locked_at, locked_by, heartbeat_at, payload_json, credential_esxi_id) VALUES (NULL, ?, NOW(), ?, NOW(), ?, ?)');
+        $stmt->bind_param('sssi', $running, $workerId, $payload, $credentialId);
+        $stmt->execute();
+        $jobId = (int) $this->db->insert_id;
+
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET heartbeat_at = DATE_SUB(NOW(), INTERVAL ? SECOND) WHERE id = ?');
+        $stmt->bind_param('ii', $heartbeatAgeSeconds, $jobId);
+        $stmt->execute();
+
+        return $jobId;
+    }
+
     private function skipWhenForeignRunningJobsExist(): void
     {
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
         $like = 'phpunit_phase_c_%';
-        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_jobs j INNER JOIN deploy_missions m ON m.id = j.mission_id WHERE j.status = ? AND m.mission_name NOT LIKE ?');
-        $stmt->bind_param('ss', $running, $like);
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_jobs j LEFT JOIN deploy_missions m ON m.id = j.mission_id LEFT JOIN deploy_credentials c ON c.id = j.credential_esxi_id WHERE j.status = ? AND (m.mission_name IS NULL OR m.mission_name NOT LIKE ?) AND (c.name IS NULL OR c.name NOT LIKE ?)');
+        $stmt->bind_param('sss', $running, $like, $like);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         if ((int) ($row['c'] ?? 0) > 0) {
@@ -118,6 +164,12 @@ final class DeployJobReaperTest extends TestCase
     private function deleteTestMissions(): void
     {
         $like = 'phpunit_phase_c_%';
+        $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?)');
+        $stmt->bind_param('s', $like);
+        $stmt->execute();
+        $stmt = $this->db->prepare('DELETE FROM deploy_credentials WHERE name LIKE ?');
+        $stmt->bind_param('s', $like);
+        $stmt->execute();
         $stmt = $this->db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
         $stmt->bind_param('s', $like);
         $stmt->execute();

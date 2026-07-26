@@ -36,6 +36,7 @@ const VIRTUSPHERE_CONNECTION_MESSAGE_KEYS = [
     VIRTUSPHERE_INVENTORY_ERROR_AUTHZ => 'common.conn_authz',
     VIRTUSPHERE_INVENTORY_ERROR_HTTP => 'common.conn_http',
     VIRTUSPHERE_INVENTORY_ERROR_SSH => 'common.conn_ssh',
+    VIRTUSPHERE_INVENTORY_ERROR_WORKER => 'common.conn_worker',
     VIRTUSPHERE_INVENTORY_ERROR_PARSE => 'common.conn_parse',
     VIRTUSPHERE_INVENTORY_ERROR_CONFIG => 'common.conn_config',
 ];
