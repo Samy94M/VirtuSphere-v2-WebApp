@@ -2,7 +2,21 @@
 # scripts/backup.sh — VirtuSphere Vollbackup (DB + Konfiguration).
 #
 # Schreibt pro Lauf drei Dateien nach Docker/backups/ (gitignored):
-#   1. db-<ts>.sql.gz        — komplette MySQL (alle DBs, Routines, Events, Trigger)
+#   1. db-<ts>.sql.gz        — die Anwendungsdatenbank (MYSQL_DATABASE aus der
+#                              Container-Umgebung; Routines, Events, Trigger).
+#                              Bewusst NICHT --all-databases: der fruehere
+#                              Volldump nahm die mysql-Grant-Tabellen mit, und
+#                              deren Import ueberschreibt auf dem Restore-Host
+#                              die Grants des frisch angelegten App-Users -
+#                              nach einer Passwortrotation kann die App dann
+#                              nicht mehr verbinden, waehrend der Drill als
+#                              root grün blieb. Der App-User selbst entsteht
+#                              auf dem Zielhost aus der .env (MYSQL_USER/
+#                              MYSQL_PASSWORD im Compose), nicht aus dem Dump.
+#                              Alte --all-databases-Archive bleiben einspielbar;
+#                              restore_test.sh erkennt sie und fuehrt den in
+#                              docs/operations/backup.md dokumentierten
+#                              Grant-Reparaturschritt aus.
 #   2. config-<ts>.tar.gz    — .env, docker-compose.yml, docker-compose.override.yml
 #                              (falls vorhanden; host-spezifisch und nicht in Git,
 #                              aber ohne sie startet der Produktionsstack nicht),
@@ -198,7 +212,7 @@ if ! docker exec "$CONTAINER" true >/dev/null 2>&1; then
 fi
 
 db_file="$BACKUP_DIR/db-$ts.sql.gz"
-docker exec "$CONTAINER" sh -c 'exec mysqldump --all-databases --routines --events --triggers --single-transaction -uroot -p"$MYSQL_ROOT_PASSWORD"' \
+docker exec "$CONTAINER" sh -c 'exec mysqldump --databases "$MYSQL_DATABASE" --routines --events --triggers --single-transaction -uroot -p"$MYSQL_ROOT_PASSWORD"' \
   | gzip > "$db_file"
 
 # Plausibilitaet: ein leerer/abgebrochener Dump darf nicht als Erfolg zaehlen.

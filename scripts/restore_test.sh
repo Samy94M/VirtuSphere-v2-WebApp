@@ -128,12 +128,24 @@ env_value() {
 }
 DB_NAME="$(env_value DB_NAME)"
 APP_KEY="$(env_value APP_KEY)"
+APP_DB_USER="$(env_value DB_USER)"
+APP_DB_PASS="$(env_value DB_PASS)"
 [ -n "$DB_NAME" ] || fail "DB_NAME fehlt im gesicherten .env."
 [ -n "$APP_KEY" ] || fail "APP_KEY fehlt im gesicherten .env; Credentials waeren nach diesem Restore unlesbar."
+[ -n "$APP_DB_USER" ] || fail "DB_USER fehlt im gesicherten .env; die App haette nach diesem Restore keinen DB-Zugang."
+[ -n "$APP_DB_PASS" ] || fail "DB_PASS fehlt im gesicherten .env; die App haette nach diesem Restore keinen DB-Zugang."
 
 # --- 4. Wegwerf-MySQL + Import ---------------------------------------------------
+# Der Wegwerf-Container entsteht wie der Produktionsstack: der mysql-Entrypoint
+# legt den App-User aus der archivierten .env an (MYSQL_USER/MYSQL_PASSWORD/
+# MYSQL_DATABASE, wie docker-compose.yml sie setzt). Genau diese Grants muss der
+# Import ueberleben, denn die App verbindet nie als root.
 docker network create "$NET" >/dev/null
-docker run -d --name "$MYSQL_NAME" --network "$NET" -e MYSQL_ROOT_PASSWORD="$PW" "$MYSQL_IMAGE" >/dev/null
+docker run -d --name "$MYSQL_NAME" --network "$NET" \
+  -e MYSQL_ROOT_PASSWORD="$PW" \
+  -e MYSQL_DATABASE="$DB_NAME" \
+  -e MYSQL_USER="$APP_DB_USER" -e MYSQL_PASSWORD="$APP_DB_PASS" \
+  "$MYSQL_IMAGE" >/dev/null
 
 echo "Warte auf MySQL im Wegwerf-Container ..."
 # Bewusst SELECT 1 statt mysqladmin ping: waehrend der Image-Initialisierung
@@ -149,7 +161,54 @@ done
 echo "Spiele Dump ein ..."
 gunzip -c "$dump" | docker exec -i "$MYSQL_NAME" mysql -uroot -p"$PW"
 
-drill_sql() { docker exec "$MYSQL_NAME" mysql -uroot -p"$PW" -N -e "$1" 2>/dev/null; }
+ROOT_PW="$PW"
+drill_sql() { docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "$1" 2>/dev/null; }
+
+# --- 4a. Der App-User muss nach dem Import arbeiten koennen ---------------------
+#
+# Der Drill lief frueher ausschliesslich als root und konnte gruen sein, obwohl
+# die App nach dem Restore keinen DB-Zugriff hatte: ein --all-databases-Dump
+# traegt die mysql-Grant-Tabellen mit, deren Import ersetzt die Grants des vom
+# Entrypoint frisch angelegten App-Users, und nach einer Passwortrotation passt
+# der importierte Alt-Stand nicht mehr zur .env. FLUSH PRIVILEGES zuerst, weil
+# der Server importierte Grant-Tabellen erst dann liest - genau wie nach dem
+# Neustart, der im Ernstfall auf den Import folgt.
+docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "FLUSH PRIVILEGES" 2>/dev/null || true
+
+# Ein Alt-Archiv ersetzt nach dem FLUSH auch das ROOT-Passwort des Zielservers
+# durch den archivierten Stand (empirisch: der Drill brach hier still ab). Der
+# Ernstfall-Operator kennt es aus der archivierten .env; der Drill genauso.
+if ! drill_sql "SELECT 1" >/dev/null; then
+  ARCHIVED_ROOT_PW="$(env_value MYSQL_ROOT_PASSWORD)"
+  if [ -n "$ARCHIVED_ROOT_PW" ] \
+    && docker exec "$MYSQL_NAME" mysql -uroot -p"$ARCHIVED_ROOT_PW" -N -e "SELECT 1" >/dev/null 2>&1; then
+    ROOT_PW="$ARCHIVED_ROOT_PW"
+    echo "Hinweis: der Grant-Import hat auch das Root-Passwort des Wegwerf-Servers ersetzt; weiter mit dem archivierten MYSQL_ROOT_PASSWORD (Alt-Archiv-Effekt, siehe backup.md)."
+  else
+    fail "root ist nach dem Grant-Import weder mit dem Wegwerf- noch mit dem archivierten Passwort nutzbar."
+  fi
+fi
+app_can_work() {
+  docker exec "$MYSQL_NAME" mysql -u"$APP_DB_USER" -p"$APP_DB_PASS" -N \
+    -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME'" >/dev/null 2>&1
+}
+if zgrep -m1 -q '^-- Current Database: .mysql.$' "$dump" 2>/dev/null \
+  || gunzip -c "$dump" | grep -m1 -q '^-- Current Database: .mysql.$'; then
+  echo "Alt-Archiv erkannt (--all-databases mit mysql-Grant-Tabellen)."
+  if app_can_work; then
+    echo "OK: App-User hat den Grant-Import ueberlebt (Passwortstand konsistent)."
+  else
+    # Der in docs/operations/backup.md dokumentierte Reparaturschritt fuer
+    # Alt-Archive: App-User aus der archivierten .env neu setzen. Im Ernstfall
+    # macht das der Operator; der Drill beweist, dass der Schritt genuegt.
+    echo "App-User nach Grant-Import nicht arbeitsfaehig; stelle Grants aus der archivierten .env wieder her (backup.md, Alt-Archiv-Schritt) ..."
+    drill_sql "CREATE USER IF NOT EXISTS '$APP_DB_USER'@'%' IDENTIFIED BY '$APP_DB_PASS'; ALTER USER '$APP_DB_USER'@'%' IDENTIFIED BY '$APP_DB_PASS'; GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$APP_DB_USER'@'%'; FLUSH PRIVILEGES;" \
+      || fail "Grant-Reparatur fuer das Alt-Archiv schlug fehl."
+  fi
+fi
+app_can_work \
+  || fail "Der App-User $APP_DB_USER kann nach dem Restore nicht arbeiten; die App haette keinen DB-Zugriff, waehrend ein root-Drill gruen bliebe."
+echo "OK: App-User $APP_DB_USER kann nach dem Restore arbeiten."
 
 # --- 5. Tabellenzahl Dump vs. Restore ------------------------------------------
 dump_tables=$(gunzip -c "$dump" | awk -v db="$DB_NAME" '
@@ -166,13 +225,16 @@ echo "Tabellen OK: $restored_tables Tabellen in $DB_NAME wiederhergestellt."
 # run_php <app-key> <php-script> [args...] — Projekt-PHP im Drill-Netz mit den
 # Restore-Verbindungsdaten; der Schluessel ist Parameter, damit die Krypto-Probe
 # denselben Weg einmal mit dem gesicherten und einmal mit einem falschen
-# APP_KEY gehen kann.
+# APP_KEY gehen kann. Verbunden wird als App-User aus der archivierten .env,
+# nie als root: genau so verbindet der Stack, und genau diese Faehigkeit hat
+# der Drill frueher nie bewiesen. MYSQL_ROOT_PASSWORD ist nur gesetzt, weil
+# EnvBoot seine Anwesenheit verlangt.
 run_php() {
   _key="$1"; shift
   docker run --rm --network "$NET" \
     -v "$REPO_MOUNT:/repo" \
     -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
-    -e DB_USER=root -e DB_PASS="$PW" -e MYSQL_ROOT_PASSWORD="$PW" \
+    -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
     -e APP_KEY="$_key" "$PHP_IMAGE" php "$@"
 }
 
@@ -183,7 +245,7 @@ run_php "$APP_KEY" /repo/Docker/WebAPI/lib/migrate.php --check | grep -q 'pendin
 
 echo "Pruefe Schema-Konvergenz gegen struktur.sql ..."
 drill_sql "DROP DATABASE IF EXISTS vs_drill_fresh; CREATE DATABASE vs_drill_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null
-docker exec -i "$MYSQL_NAME" mysql -uroot -p"$PW" vs_drill_fresh < Docker/mysql/mysql-init/struktur.sql 2>/dev/null \
+docker exec -i "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" vs_drill_fresh < Docker/mysql/mysql-init/struktur.sql 2>/dev/null \
   || fail "struktur.sql laedt nicht in eine frische Datenbank."
 # Fingerprint ueber information_schema statt mysqldump: eine ueber Migrationen
 # gewachsene Datenbank hat eine andere physische Spaltenreihenfolge (ADD COLUMN
@@ -192,7 +254,7 @@ docker exec -i "$MYSQL_NAME" mysql -uroot -p"$PW" vs_drill_fresh < Docker/mysql/
 # ENUM-Definition), NULL/Default/Extra/Collation, Indizes, FKs samt Regeln und
 # Tabellenoptionen — sortiert, damit das Layout keine Rolle spielt.
 schema_fingerprint() {
-  docker exec -i "$MYSQL_NAME" mysql -uroot -p"$PW" -N 2>/dev/null <<SQL
+  docker exec -i "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N 2>/dev/null <<SQL
 SELECT CONCAT_WS('|', 'col', table_name, column_name, column_type, is_nullable,
                  IFNULL(column_default, '<null>'), extra, IFNULL(collation_name, ''))
   FROM information_schema.columns WHERE table_schema = '$1'
@@ -230,7 +292,7 @@ echo "Starte Smoke-Server (php -S) gegen den Restore ..."
 docker run -d --name "$SMOKE_NAME" --network "$NET" \
   -v "$REPO_MOUNT:/repo" -w /repo/Docker/WebAPI \
   -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
-  -e DB_USER=root -e DB_PASS="$PW" -e MYSQL_ROOT_PASSWORD="$PW" \
+  -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
   -e APP_KEY="$APP_KEY" \
   "$PHP_IMAGE" php -S 0.0.0.0:$SMOKE_PORT -t /repo/Docker/WebAPI >/dev/null
 

@@ -69,12 +69,12 @@ Ein Backup ist erst dann ein Backup, wenn der Restore bewiesen ist:
 sh scripts/restore_test.sh
 ```
 
-Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem Stack-Image `mysql:8.4`, Projekt-PHP-Image) und prüft die ganze Kette:
+Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem Stack-Image `mysql:8.4`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
 1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
-3. Import des jüngsten Dumps, Tabellenzahl Dump gegen Restore
-4. Migrationen bis `pending=0`, danach Schema-Fingerprint gegen das frische `struktur.sql`
+3. Import des jüngsten Dumps, danach `FLUSH PRIVILEGES` (wie der Neustart im Ernstfall) und die Arbeitsprobe des App-Users; ein Alt-Archiv (`--all-databases`) wird erkannt und durchläuft den unten dokumentierten Grant-Reparaturschritt
+4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach Schema-Fingerprint gegen das frische `struktur.sql`
 5. Invarianten und Rowcounts (Benutzer, Migrationstracking, keine verwaisten Interfaces/VMs/Jobs)
 6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
 7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung eines ungültigen Tokens
@@ -93,6 +93,16 @@ Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind st
    ```sh
    gunzip -c Docker/backups/db-<ts>.sql.gz | docker exec -i virtusphere-v2-webapp-mysql-1 mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
    ```
+4a. **Nur bei einem Alt-Archiv** (Dump aus der Zeit vor dem Formatwechsel, erkennbar an `-- Current Database: mysql` im Dump; neue Dumps enthalten nur die Anwendungsdatenbank): der Import hat die mysql-Grant-Tabellen mitgebracht und ersetzt damit die Konten des Zielservers durch den archivierten Stand. Zwei Folgen, beide mit dem archivierten `.env` behebbar. Erstens kann nach dem nächsten `FLUSH PRIVILEGES`/Neustart das **Root-Passwort** das aus der archivierten `.env` sein statt des aktuellen. Zweitens passt der **App-User** nach einer Passwortrotation nicht mehr zur aktuellen `.env`; dann die Grants aus der wirksamen `.env` neu setzen:
+   ```sh
+   docker exec -i virtusphere-v2-webapp-mysql-1 mysql -uroot -p"<wirksames Root-Passwort>" <<'SQL'
+   CREATE USER IF NOT EXISTS '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASS>';
+   ALTER USER '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASS>';
+   GRANT ALL PRIVILEGES ON `<DB_NAME>`.* TO '<DB_USER>'@'%';
+   FLUSH PRIVILEGES;
+   SQL
+   ```
+   `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
 5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen und erst dann `docker compose up -d`. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die Rechte läuft er, kann aber nicht protokollieren (siehe `go-live.md`, Schritt 1a).
 6. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
@@ -102,7 +112,7 @@ Für wechselndes Adminpersonal: der DB-Dump erfasst automatisch jede neue Tabell
 
 | Bereich | Quelle im Restore |
 |---|---|
-| Missionen, VMs, Interfaces, Disks, Pakete, Deploy-Jobs (inkl. `scheduled_at`/`group_id`), ESXi-Inventar-Cache, VLAN-Katalog, VM-Hotplug-Flags, alle `deploy_settings` (Zeitzone, Intervalle) | DB-Dump (`--all-databases`) |
+| Missionen, VMs, Interfaces, Disks, Pakete, Deploy-Jobs (inkl. `scheduled_at`/`group_id`), ESXi-Inventar-Cache, VLAN-Katalog, VM-Hotplug-Flags, alle `deploy_settings` (Zeitzone, Intervalle) | DB-Dump (nur die Anwendungsdatenbank; die DB-Konten entstehen aus der `.env` des Zielhosts, nie aus dem Dump) |
 | `.env`, `docker-compose.yml` (inkl. Status-Mount), nginx-Konfiguration/SSL | Config-Tar |
 | `docker-compose.override.yml` (host-spezifisch, nicht in Git; Produktionshost startet ohne sie nicht) | Config-Tar, falls auf dem Host vorhanden |
 | Rechte der Log-Verzeichnisse (`0777`) | **kein Archiv**; nach dem Restore per `chmod` setzen, siehe `go-live.md` Schritt 1a |
