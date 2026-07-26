@@ -272,14 +272,15 @@ function drill_smoke(string $base): void
     }
     drill_note('health.php reachable, db=ok (status=' . (string) $decoded['status'] . ')');
 
-    // Machine API: an invalid token gets the deterministic legacy 418. That
-    // one response proves routing, PHP and the token check against the
-    // restored database without needing a real token.
-    $api = drill_http('GET', $base . '/access.php?token=' . urlencode('restore-drill-invalid-token'));
-    if ($api['status'] !== 418) {
-        drill_fail('machine API answered HTTP ' . $api['status'] . ' for an invalid token instead of the legacy 418');
+    // Machine API: the drill container's IP is never on the restored allowlist,
+    // so the frozen machine-API 403 ("Ihre IP: ...") is deterministic. That one
+    // response proves routing, PHP and the allowlist check against the restored
+    // database without needing a valid caller.
+    $api = drill_http('GET', $base . '/mecm-api.php?action=getDeviceList');
+    if ($api['status'] !== 403 || !str_contains($api['body'], 'Ihre IP')) {
+        drill_fail('machine API answered HTTP ' . $api['status'] . ' for an unlisted IP instead of the frozen 403 allowlist rejection');
     }
-    drill_note('machine API rejects an invalid token with the legacy wire shape');
+    drill_note('machine API rejects an unlisted IP with the frozen wire shape');
 
     // Portal login with the drill admin the shell script seeded.
     $user = (string) getenv('DRILL_ADMIN_USER');
