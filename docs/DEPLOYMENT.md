@@ -70,14 +70,14 @@ The `deploy-worker`, `maintenance-worker`, `php`, `webserver` and `mysql` servic
 
 In `--loop` mode the worker tolerates a MySQL outage instead of exiting: it retries the initial connection with backoff (up to 30s between attempts) and, if the database drops mid-loop, reconnects through `db(true)` and continues claiming jobs. This closes the earlier failure where a slow MySQL start or a MySQL restart left the worker container dead and deploy jobs stuck in `queued` with no portal-visible error. The `--once` mode used by tooling still fails fast (three connection attempts, then a non-zero exit).
 
-Long-running worker phases send heartbeats at least every `VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS` (30s) through phase boundaries and streamed Ansible output. At the beginning of each loop the worker reaps running jobs whose heartbeat is older than `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` (600s): the job is marked `failed`, its lock is cleared, a SYSTEM log line is written, and affected mission VMs are reset through the existing deploy-worker VM status path. Terminal updates are guarded by `id`, `locked_by` and `running` status so a worker that lost ownership cannot overwrite a cancelled or reaped job.
+Long-running worker phases send heartbeats at least every `VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS` (30s) through phase boundaries and streamed Ansible output. At the beginning of each loop the worker reaps running jobs whose heartbeat is older than `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` (600s): the job is marked `failed`, its lock is cleared, a SYSTEM log line is written, and affected mission VMs are reset through the existing deploy-worker VM status path. A reaped ESXi inventory job additionally records the durable `worker` failure and its exact job id, so the System-status card cannot retain an older green result while the terminal system job disappears from the active queue. Terminal updates are guarded by `id`, `locked_by` and `running` status so a worker that lost ownership cannot overwrite a cancelled or reaped job.
 
 ### Deploy job retention
 
 The maintenance worker prunes on its hourly retention pass:
 
 - **`deploy_job_logs`** of jobs that have been terminal for more than `VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS` (30). The window is measured on the **job**, not on the log row, so a job that streams for an hour never loses its opening lines and a live tail cannot race the purge. Queued and running jobs are untouchable by construction. The job row survives with its status and `last_error`; `deploy_log.php` says the output was pruned instead of showing an unexplained empty table.
-- **Finished mission-less system jobs** (the ESXi inventory pulls) after `VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS` (30), rows and all; their logs cascade. No page lists them once terminal, and their one durable result lives in `deploy_esxi_inventory_state`. Mission jobs are kept, because the deploy page shows their history.
+- **Finished mission-less system jobs** (the ESXi inventory pulls) after `VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS` (30), rows and all; their logs cascade. No shared list shows them once terminal, but until retention their System-status card links the exact latest completed job through `deploy_esxi_inventory_state.last_job_id`. That field is only a relationship: `deploy_jobs` and `deploy_job_logs` remain authoritative. Its `ON DELETE SET NULL` foreign key removes the link with the retained job, so an old failure renders a retention explanation instead of a dead URL. Mission jobs are kept, because the deploy page shows their history.
 
 ## Runtime logs and error references
 
@@ -89,6 +89,8 @@ VirtuSphere writes runtime logs into host-mounted directories so troubleshooting
 - nginx access/error logs: `Docker/logs/nginx/access.log` and `Docker/logs/nginx/error.log` map to `/var/log/nginx` in the webserver container.
 
 The global handler in `Docker/WebAPI/lib/errors.php` is installed before EnvBoot completes. Web errors render a full internal error page with a short reference ID, while CLI errors print the same reference to STDERR and exit non-zero. The handler also appends the full context and stack trace to `error.log`; when the database boot path is healthy it records an `error [ref] ...` row in `deploy_logs` for the portal log view.
+
+The trace carries **no argument values**: `zend.exception_ignore_args = 1` in `Docker/php/conf.d/zz-virtusphere.ini`. File, line and function of every frame stay, the values do not. That is not cosmetic. The decrypted ESXi password is a positional argument of `ansible_prepare_job_artifacts()`, of its inventory twin and of `ssh_execute_command()`, and those frames throw on routine conditions (mission not found, mission is a template, no VMs), so with PHP's default setting a plaintext credential would land in this file, in worker STDERR and, under `VIRTUSPHERE_DEBUG`, in the browser. Pasting a trace into a ticket is therefore safe; if you need an argument value, add a deliberate log line rather than turning the setting off.
 
 For a reported error page, use this order:
 
