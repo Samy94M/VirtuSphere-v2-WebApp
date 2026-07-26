@@ -20,6 +20,10 @@
 #   9. Aktive Doku und PowerShell verwenden nur die MECM-Terminologie.
 #  10. "`VIRTUSPHERE_X` ... aktuell N"-Nennungen == numerischer Wert der
 #      Konstante in lib/constants.php bzw. lib/deploy_constants.php.
+#  11. Ein von aktiver Doku behaupteter Dateipfad braucht einen Erzeuger
+#      ausserhalb von docs/ (die Erstpasswort-Datei, die nichts je schrieb).
+#  12. Jeder .env.example-Schluessel, den compose ohne Vorgabewert interpoliert,
+#      kommt im Go-Live-Runbook namentlich vor (APP_BIND_IP fehlte dort).
 #
 # Bewusst NICHT geprueft (datierte Dokumente, die einen Stand beschreiben
 # sollen): docs/audits/, docs/CHANGELOG.md, docs/adr/. Nicht maschinell
@@ -31,6 +35,11 @@
 # VIRTUSPHERE_CHECK_ROOT uebersteuert das Repo-Root; die [doc-semantics.*]-IDs
 # sind der stabile Diagnose-Vertrag.
 set -eu
+# Das echte Repo, unabhaengig von VIRTUSPHERE_CHECK_ROOT. Regel 11 braucht es:
+# sie vergleicht, was die (in einer Fixture ggf. mutierte) Doku behauptet, gegen
+# das, was der Baum wirklich enthaelt. Eine Doku-Fixture enthaelt keinen Code, und
+# gegen sie waere jeder Pfad scheinbar verwaist.
+real_root=$(cd "$(dirname "$0")/.." && pwd)
 cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}"
 
 quiet=0
@@ -159,6 +168,73 @@ for f in $active_docs; do
     fi
   done | grep -q MISMATCH && fail const-mirror "$f nennt einen anderen Konstantenwert als der Code; an der Nennung fixen, nicht am SSoT."
 done
+
+# --- 11. Ein von aktiver Doku behaupteter Dateipfad braucht einen Erzeuger ------
+#
+# Das Go-Live-Runbook schickte den neuen Admin zu einer Erstpasswort-Datei unter
+# Docker/WebAPI/logs/. Eine Suche ueber den ganzen Baum fand diesen Dateinamen
+# ausschliesslich in der Doku: nichts im Repository schreibt die Datei je, eine
+# frische Datenbank enthaelt keinen Benutzer, und das Portal legt keinen an. Der
+# Admin am ersten Tag konnte sich nicht anmelden.
+#
+# Geprueft wird die Form, die eine Behauptung ueberhaupt nachpruefbar macht: ein
+# Pfad mit Dateiendung in Backticks. Nennt ihn die Doku, muss ihn irgendetwas
+# ausserhalb von docs/ erzeugen oder lesen (Code, Skript, Compose, Migration).
+# Ein Pfad, der nur in Dokumentation existiert, IST der Befund.
+doc_path_scope=''
+for f in $active_docs; do
+  [ -f "$f" ] && doc_path_scope="$doc_path_scope $f"
+done
+# Zeilen mit Entfernungs-Marker fallen vorher heraus (dieselbe Ausnahme wie bei
+# Regel 8): "Phase D entfernt `portal/vorgaben.txt`" ist eine Loeschungsnotiz,
+# keine Anweisung, und ein Erzeuger waere dort genau falsch.
+# shellcheck disable=SC2086
+path_pattern='`[A-Za-z0-9_./-]+/[A-Za-z0-9_-]+\.(txt|json|log|pem|pfx|sql|key|crt)`'
+claimed_paths=$(grep -hE "$path_pattern" $doc_path_scope 2>/dev/null \
+  | grep -viE 'entfern|removes|removed|geloescht|gel.scht|retired|stillgelegt|nicht mehr' \
+  | grep -oE "$path_pattern" \
+  | tr -d '`' | LC_ALL=C sort -u || true)
+for path in $claimed_paths; do
+  base=$(basename "$path")
+  # Erzeuger/Leser: irgendeine Nennung ausserhalb von docs/. Auf dem Basisnamen,
+  # weil Code den Pfad selten als ganzen String traegt (er baut ihn aus einem
+  # Verzeichnis plus Dateinamen zusammen).
+  # --exclude=*.log: eine Logzeile, die den Namen zufaellig enthaelt, ist kein
+  # Erzeuger. Laufzeitlogs liegen im Arbeitsbaum (gitignored) und wuerden die
+  # Regel abhaengig davon machen, was der Stack heute geschrieben hat.
+  if ! grep -rqI --exclude-dir=docs --exclude-dir=.git --exclude-dir=vendor \
+       --exclude-dir=node_modules --exclude-dir=dist --exclude='*.log' \
+       -- "$base" "$real_root" 2>/dev/null; then
+    fail phantom-path "aktive Doku nennt '$path', aber nichts ausserhalb von docs/ erzeugt oder liest '$base'; ein Pfad, der nur in der Doku existiert, schickt den Leser ins Leere."
+  fi
+done
+
+# --- 12. Jeder .env.example-Schluessel, den compose braucht, steht im Runbook ---
+#
+# `APP_BIND_IP` fehlte im .env-Schritt des Runbooks, und sein Vorlagenwert
+# 127.0.0.1 macht das Portal im LAN unerreichbar, waehrend der Stack vollstaendig
+# gesund ist und jede dokumentierte Probe hostlokal laeuft. EnvBoot prueft diesen
+# Wert als einzigen nicht, weil jeder Wert technisch gueltig ist.
+#
+# Geprueft wird genau die Klasse, die den Start kaputt machen kann: ein Schluessel,
+# den docker-compose.yml als ${NAME} OHNE Vorgabewert interpoliert. Fehlt er im
+# Go-Live-Runbook, kann niemand ihn setzen, ohne die Compose-Datei zu lesen.
+env_example='.env.example'
+compose_file='docker-compose.yml'
+runbook='docs/operations/go-live.md'
+if [ -f "$env_example" ] && [ -f "$compose_file" ] && [ -f "$runbook" ]; then
+  # ${NAME} ja, ${NAME:-default} und ${NAME-default} nein: mit Vorgabewert
+  # startet der Stack auch ohne den Schluessel.
+  interpolated=$(grep -ohE '\$\{[A-Z][A-Z0-9_]*\}' "$compose_file" | tr -d '${}' | LC_ALL=C sort -u)
+  for key in $interpolated; do
+    grep -qE "^#? *$key=" "$env_example" || continue
+    if ! grep -q "$key" "$runbook"; then
+      fail env-key-unnamed "$key wird von $compose_file ohne Vorgabewert interpoliert und steht in $env_example, kommt aber in $runbook nicht vor; wer das Runbook abarbeitet, kann ihn nicht setzen."
+    fi
+  done
+else
+  fail no-ssot "$env_example, $compose_file oder $runbook fehlt; ohne alle drei ist die .env-Abdeckung nicht pruefbar."
+fi
 
 # --- 9. Terminologie: SCCM ist ausgemustert, aktiver Text sagt MECM -------------
 term_scope="$active_docs"

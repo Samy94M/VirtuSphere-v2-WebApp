@@ -88,8 +88,41 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 1. Repo auf den Ubuntu-Host holen (Branch `main`). Der Host erreicht GitHub
    nicht; der Code kommt per Bundle über den internen Gitea, siehe „Code auf den
    Host bringen und Releases nachziehen" am Ende dieses Dokuments.
-2. `.env` anlegen (Vorlage: `.env.example`). Starke Werte für `APP_KEY`,
-   `DB_PASS`, `MYSQL_ROOT_PASSWORD` setzen; `WEB_HTTP_PORT=8021` bestätigen.
+2. `.env` anlegen, und zwar als **Kopie von `.env.example`**, nicht von Hand
+   getippt. Jeden Schlüssel der Vorlage stehen lassen: `docker compose` bricht
+   beim Parsen ab, wenn einer fehlt, den es ohne Vorgabewert einsetzt.
+
+   | Schlüssel | Was zu tun ist |
+   |---|---|
+   | `APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD` | starke, eigene Werte; EnvBoot bricht bei schwachen hart ab |
+   | `APP_BIND_IP` | siehe unten, der am leichtesten übersehene Wert |
+   | `WEB_HTTP_PORT` | `8021` bestätigen (die Portadresse des Portals) |
+   | `WEB_HTTPS_PORT`, `PMA_PORT` | stehen lassen; ohne sie startet der Stack nicht, auch wenn HTTPS noch aus ist und phpMyAdmin nicht läuft |
+   | `DB_NAME`, `DB_USER`, `DB_HOST`, `DB_PORT` | unverändert übernehmen; MySQL legt die Datenbank daraus an |
+   | `APP_PUBLIC_BASE_URL`, `SSL_SUBJECT` | auf den echten Hostnamen oder die IP setzen, siehe unten |
+
+   **`APP_BIND_IP` ist der Schritt, der am leichtesten übersehen wird.** Der
+   Vorlagenwert ist `127.0.0.1`, und damit bindet der Webserver ausschließlich an
+   das Loopback-Interface: der Stack ist vollständig gesund, jede hostlokale
+   Probe (`curl http://127.0.0.1:8021/portal/health.php`) antwortet, und aus dem
+   LAN ist das Portal trotzdem nicht erreichbar. EnvBoot prüft diesen Wert als
+   einzigen nicht, weil jeder Wert technisch gültig ist. Für den produktiven
+   Betrieb also die LAN-Adresse des Hosts eintragen (oder `0.0.0.0` für alle
+   Interfaces) und in Schritt 4 von einem **anderen** Rechner aus prüfen.
+
+   `APP_PUBLIC_BASE_URL` und `SSL_SUBJECT` tragen in der Vorlage den
+   Beispielhostnamen `virtusphere.lan`. Dieser Name ist nicht dekorativ: der
+   Ansible-Host baut daraus seine Rückrufadresse für die MAC-Meldung. Er muss im
+   DNS des Deploy-Netzes auflösbar sein, sonst läuft der Deploy sauber durch und
+   die MAC-Adressen kommen nie an. Wenn kein DNS-Eintrag existiert, hier die IP
+   eintragen.
+
+   Das erste Admin-Konto entsteht in Schritt 4.1, **nach** den Migrationen. Wer
+   `SEED_ADMIN_USER` und `SEED_ADMIN_PASSWORD` schon hier in die `.env` schreibt,
+   bekommt es von `Docker/scripts/setup.sh` gleich mit angelegt; auf einem
+   Produktionshost ist der Weg in Schritt 4.1 der bessere, weil das Passwort dann
+   nicht in einer Datei liegen bleibt.
+
 3. Stack starten und **alle fünf** Container prüfen, besonders den in E1b neu
    hinzugekommenen `maintenance-worker`:
 
@@ -113,8 +146,9 @@ oder die SSH-Sitzung friert ein.
    `Docker/logs/nginx` müssen für den Container-User schreibbar sein. Gehören sie
    dem SSH-User, crash-loopen Worker und nginx (`Log directory is not writable`,
    `error.log Permission denied`). Vor dem Start `chmod 0777` auf beide.
-   Docker Desktop umgeht das über seine VM, ein Linux-Host nicht. Folge:
-   `initial-admin-password.txt` liegt dann uid-33-owned, mit `sudo cat` lesen.
+   Docker Desktop umgeht das über seine VM, ein Linux-Host nicht. Dieselbe
+   uid-33-Eigentümerschaft gilt für alles, was der PHP-Container dort anlegt: zum
+   Lesen einer solchen Datei vom SSH-User aus braucht es `sudo cat`.
 2. **Docker-Default-Subnetz.** `docker compose up` legt ein Netz aus
    `172.17.0.0/16` an. Liegt die IP, über die du per SSH verbunden bist, in
    diesem Bereich, routet der Host die Antwortpakete in die Docker-Bridge und die
@@ -187,15 +221,42 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 
 ## Schritt 4: Admin & Portal-Grundfunktion
 
-1. **Admin-Konto klären.** Es existiert bereits ein Konto `admin`; das
-   Erstpasswort liegt in `Docker/WebAPI/logs/initial-admin-password.txt`.
-   Entweder dieses Passwort nutzen oder bewusst zurücksetzen (mit
-   `must_change_password=1`). Nach erfolgreichem Login die Datei
-   `initial-admin-password.txt` **löschen**.
-2. **Portal-Smoke-Test** (rein WebApp, noch ohne MECM): Login → Dashboard →
+1. **Erstes Admin-Konto anlegen.** Eine frische Datenbank enthält **keinen**
+   Benutzer, und das Portal legt von sich aus keinen an: ohne diesen Schritt gibt
+   es niemanden, der sich anmelden kann. Es gibt genau zwei Wege, und bei beiden
+   setzt du das Passwort selbst.
+
+   ```bash
+   docker exec -it virtusphere-v2-webapp-php-1 \
+     php /var/www/html/lib/seed.php admin '<starkes Passwort>' admin@example.lan
+   ```
+
+   Der zweite Weg: `SEED_ADMIN_USER` und `SEED_ADMIN_PASSWORD` in der `.env`
+   setzen (in `.env.example` als Kommentar vorbereitet), dann legt
+   `Docker/scripts/setup.sh` das Konto beim Hochfahren mit an; ohne beide Werte
+   überspringt es den Schritt mit einer Meldung. Auf einem Produktionshost ist der
+   `docker exec`-Weg der bessere, weil das Passwort danach nicht in einer Datei
+   liegen bleibt.
+
+   Beide Wege legen **genau ein** Konto an, Rolle `admin`, mit
+   `must_change_password=1`: die erste Anmeldung erzwingt ein neues Passwort, das
+   gesetzte gilt also nur für diesen einen Login. Existiert schon ein Benutzer,
+   meldet `seed.php` „users already exist" und ändert nichts, der Aufruf ist also
+   gefahrlos wiederholbar und kann kein bestehendes Passwort überschreiben.
+2. **Portal im Browser öffnen:** `http://<APP_BIND_IP oder Hostname>:<WEB_HTTP_PORT>/`,
+   mit den Vorlagenwerten also `http://virtusphere.lan:8021/`. Die Wurzel leitet
+   auf die Anmeldung um. **Von einem anderen Rechner aus prüfen**, nicht per
+   `curl` auf dem Host: eine hostlokale Probe beantwortet nicht die Frage, ob
+   `APP_BIND_IP` aus dem LAN erreichbar ist (Schritt 1.2). Bleibt die Verbindung
+   aus, während `docker compose ps` alles gesund zeigt und `curl` auf dem Host
+   antwortet, ist genau dieser Wert die Ursache.
+3. **Portal-Smoke-Test** (rein WebApp, noch ohne MECM): Login → Dashboard →
    Mission anlegen → VM anlegen → Paket verknüpfen → Log-Seite öffnen. Damit
-   sind Sessions, CSRF, RBAC und i18n einmal produktiv bestätigt.
-3. **IP-Freigaben füllen** (Einstellungen → IP-Freigaben). Die Maschinen-
+   sind Sessions, CSRF, RBAC und i18n einmal produktiv bestätigt. Die
+   **Portal-Hilfe** (Fragezeichen in der Kopfzeile) erklärt jede Seite mit den
+   echten Konstanten des laufenden Systems; sie ist die einzige Erklärung im
+   Projekt, die nicht veralten kann.
+4. **IP-Freigaben füllen** (Einstellungen → IP-Freigaben). Die Maschinen-
    Schnittstelle ist per Allowlist gesperrt und antwortet jeder nicht
    freigegebenen IP mit **403**, ohne dass im Portal etwas kaputt aussieht.
    Eine frische Datenbank kennt nur `127.0.0.1`, eine migrierte Bestands-DB
@@ -211,7 +272,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Ausweis gelten. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
    („Verbindung und Umgebung prüfen" beim Ansible-Zugang): fehlt er, endet die Prüfung als Warnung mit der
    IP, die hier einzutragen ist.
-4. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft
+5. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft
    später über den Admin-Config-Flow (ADR-0012, Runbook
    `docs/operations/https.md`).
 

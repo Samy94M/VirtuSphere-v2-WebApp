@@ -9,11 +9,12 @@ Wichtige Einstiegsdateien:
 - `GROK.md` als SSoT für verbotene Patterns und Integrationsverträge.
 - `docs/adr/README.md` für die ADR-Entscheidungsübersicht.
 - `docs/DEPLOYMENT.md` für persistente Logs und Troubleshooting.
-- `docs/INSTALLATION-ANLEITUNG.md` für das Setup.
+- `docs/INSTALLATION-ANLEITUNG.md` für das Setup auf einem Host **mit** Netzzugang (`setup.sh` baut die Images). Der luftspaltgetrennte Produktionshost geht stattdessen über `docs/operations/offline-install.md`.
 - `docs/QA.md` für PHPUnit-, Hook-, Lang-Audit- und Git-Hygiene-Befehle.
 - `docs/CHANGELOG.md` für die Migrationshistorie.
 - `docs/operations/` für den laufenden Betrieb, ein Dokument je Frage:
   - `go-live.md`: erste produktive Inbetriebnahme auf dem Ubuntu-Host, ohne Docker-Vorwissen.
+  - `offline-install.md`: Installation auf einem Host ohne Internetzugang (Bundle prüfen, Images laden statt bauen); ab den Migrationen führt `go-live.md` weiter.
   - `esxi-inventory.md`: read-only Inventarabruf, ESXi-geführter VLAN-Katalog, Fehlerbilder und was eine 0 auf einer ESXi-Karte bedeutet.
   - `mecm-integration.md`: Zusammenspiel von Portal, MECM-Server und PXE-Clients.
   - `https.md`: HTTPS im Portal einschalten (Zertifikat, Listener, HSTS).

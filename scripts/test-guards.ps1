@@ -226,7 +226,10 @@ $docSemFixtureFiles = @(
     # SSoT der const-mirror-Regel: ohne sie meldet jede "aktuell N"-Nennung im
     # Doku-Scope "nicht auffindbar", und jeder andere Fall waere aus dem
     # falschen Grund rot statt aus seiner eigenen Mutation.
-    'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/deploy_constants.php'
+    'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/deploy_constants.php',
+    # SSoT der env-key-Regel: ohne .env.example meldet sie no-ssot, und jeder
+    # andere Fall waere aus dem falschen Grund rot.
+    '.env.example'
 )
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
 $enumList = "'queued','running','succeeded','failed','cancelled','partial'"
@@ -310,6 +313,37 @@ $cases = @(
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/phpstan.neon.dist' 'level: 5' 'tier: 5'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.no-ssot\]'
+    } }
+    @{ Name = 'doc-semantics.phantom-path'; Body = {
+        # Der Originalbefund: das Runbook schickte den Admin zu einer
+        # Erstpasswort-Datei, die nichts im Repository je schreibt. Der
+        # Erzeuger-Scan laeuft gegen den echten Baum (nicht die Fixture), sonst
+        # waere in einer Doku-Fixture jeder Pfad scheinbar verwaist.
+        #
+        # Der Dateiname wird zusammengesetzt und steht nirgends als Literal: aus
+        # demselben Grund. Ein Literal in dieser Datei liegt ausserhalb von docs/
+        # und waere fuer den Scan selbst ein Erzeuger, womit die Fixture die
+        # Regel aushebeln wuerde, die sie beweisen soll.
+        $phantom = 'initial-admin' + '-password' + '.txt'
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Erstpasswort liegt in ``Docker/WebAPI/logs/$phantom``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phantom-path\]'
+    } }
+    @{ Name = 'doc-semantics.phantom-path-removal-note'; Body = {
+        # Gegenrichtung: eine Loeschungsnotiz ("entfernt X") darf NICHT rot
+        # werden, sonst waere jede historische Aussage in aktiver Doku ein Befund
+        # und die Regel wuerde abgeschaltet.
+        $gone = 'keiner-liest' + '-das' + '.txt'
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Phase X entfernt ``portal/$gone``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'doc-semantics.env-key-unnamed'; Body = {
+        # APP_BIND_IP fehlte im .env-Schritt, und sein Vorlagenwert macht das
+        # Portal im LAN unerreichbar, waehrend der Stack gesund ist.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' 'APP_BIND_IP' 'APP_IRGENDWAS'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.env-key-unnamed\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {

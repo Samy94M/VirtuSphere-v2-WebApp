@@ -176,9 +176,15 @@ Alle Schritte laufen ohne Internetzugang.
 4. PHP-Abhaengigkeiten: `tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI`
 5. Ansible-Collections auf dem Ansible-Host:
    `ansible-galaxy collection install collections/*.tar.gz` (offline).
-6. Weiter mit `virtusphere/docs/INSTALLATION-ANLEITUNG.md` (.env anlegen,
-   `docker compose up -d --wait`, Migrationen). phpMyAdmin ist optional:
+6. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
+   Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
+   mit `virtusphere/docs/operations/go-live.md`. phpMyAdmin ist optional:
    `docker compose --profile tools up -d phpmyadmin`.
+
+NICHT `Docker/scripts/setup.sh` benutzen: es ruft `docker compose build` auf, und
+die Basis-Images sind digest-gepinnt und liegen nicht im Bundle. Auf einem Host
+ohne Netz kann dieser Aufruf nicht durchlaufen. Schritt 2 laedt fertige Images,
+gebaut wird hier nichts.
 
 `sbom/` und `reports/` dokumentieren den Auslieferungszustand (SPDX-SBOM und
 CVE-Bericht je Image); `provenance.json` traegt Commit und Buildkontext.
