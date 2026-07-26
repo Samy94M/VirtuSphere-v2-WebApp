@@ -108,7 +108,7 @@ return [
     'deploy_mode_full' => 'Full pipeline: complete run. Create VMs, power-cycle, export MACs, start. When the mission enabled autostart, the autostart policy is written last.',
     'deploy_mode_autostart' => 'Apply ESXi autostart policy: writes the mission autostart policy to the host, without creating or starting VMs.',
     'deploy_mode_create' => 'Create VMs: creates the VMs on ESXi without starting them. Re-running it is not a reliable way to apply changes: when it meets an existing VM of the same name it may partially align its hardware with the portal values, but that is not guaranteed. Changed portal values only take effect reliably when a VM is created anew.',
-    'deploy_mode_powercycle' => 'Power-Cycle + Export MACs: briefly restarts VMs to read out MAC addresses.',
+    'deploy_mode_powercycle' => 'Power-Cycle + Export MACs: briefly powers VMs on and off again so ESXi assigns MAC addresses, then reads them out. It only touches a VM whose PXE network interface has no MAC in the portal yet and that was powered off when the run started; running or suspended VMs keep their state, and only what this run itself started is powered off again.',
     'deploy_mode_export' => 'Export MACs: reads MAC addresses from VMs that are already running.',
     'deploy_mode_start' => 'Start VMs: starts VMs that already exist.',
     'deploy_verbose_heading' => 'Ansible -vvv',

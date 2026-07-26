@@ -76,6 +76,18 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
                 $consumedVmRoots[] = explode('.', $path)[0];
             }
 
+            // Filter chains consume keys by name, not via item.<key>: the
+            // power-cycle target selection reads needs_mac through
+            // selectattr('needs_mac', ...). Counted only for the reverse
+            // direction; names that are no VM key (instance, item) are simply
+            // never asked about there.
+            preg_match_all("/(?:selectattr|rejectattr)\\('(\\w+)'|map\\(attribute='(\\w+)/", $source, $attrMatches);
+            foreach (array_merge($attrMatches[1], $attrMatches[2]) as $attribute) {
+                if ($attribute !== '') {
+                    $consumedVmRoots[] = $attribute;
+                }
+            }
+
             preg_match_all('/\bmission_configuration\.((?:\w+\.)*\w+)/', $source, $matches);
             foreach (array_unique($matches[1]) as $path) {
                 self::assertContains(

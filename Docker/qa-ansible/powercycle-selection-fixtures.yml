@@ -1,0 +1,82 @@
+---
+# Beweis der Powercycle-Auswahl ohne ESXi-Host (QA-Werkzeug, wird nicht
+# ausgeliefert; Gate ansible-powercycle-selection).
+#
+# Die zwei set_fact-Ketten sind ZEICHENGLEICH mit
+# Ansible/powercycleVMs-ESXi_playbook.yml;
+# tests/Static/PowercyclePlaybookContractTest.php pinnt beide Dateien
+# aufeinander, sonst bewiese dieses Playbook eine andere Auswahl als die, die
+# ein echter Host zu sehen bekommt. Hier laufen die Ketten gegen Fixtures:
+# needs_mac bejaht/verneint/fehlt mal initial an/aus/suspendiert, dazu die
+# leere Eingabe und eine Modulantwort ohne hw_power_status. Der Vertrag:
+#   - Ziel ist nur, wer needs_mac ausdruecklich bejaht,
+#   - geschaltet wird nur, wer davon initial poweredOff war,
+#   - eine kaputte Antwortform ergibt nie einen Treffer, und die
+#     Wachhund-Kette des Produktions-Playbooks erkennt sie als Fehler.
+- name: Powercycle-Auswahl gegen Fixtures beweisen
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vm_configurations:
+      - { vm_name: aus-und-ohne-mac, needs_mac: true }
+      - { vm_name: hat-schon-mac, needs_mac: false }
+      - { vm_name: ohne-aussage }
+      - { vm_name: laeuft-ohne-mac, needs_mac: true }
+      - { vm_name: suspendiert-ohne-mac, needs_mac: true }
+    powercycle_initial:
+      results:
+        - { item: { vm_name: aus-und-ohne-mac }, instance: { hw_power_status: poweredOff } }
+        - { item: { vm_name: laeuft-ohne-mac }, instance: { hw_power_status: poweredOn } }
+        - { item: { vm_name: suspendiert-ohne-mac }, instance: { hw_power_status: suspended } }
+    # Zwei kaputte Formen, weil sie verschieden scheitern: ein Item ganz ohne
+    # instance und ein instance ohne hw_power_status. Ein dotted-Filter wirft
+    # auf beiden (ansible-core behandelt fehlende Attribute hart, hier
+    # empirisch bewiesen); deshalb prueft der Wachhund im Produktions-Playbook
+    # VOR der Auswahl mit map+default, das nie wirft, und die Auswahl-Kette
+    # sieht nur noch geprueften Stoff.
+    broken_initial:
+      results:
+        - { item: { vm_name: ohne-instance } }
+        - { item: { vm_name: ohne-power-state }, instance: { hw_name: nur-ein-anderes-feld } }
+    empty_configurations: []
+
+  tasks:
+    - name: Ziele bestimmen (nur VMs, deren PXE-NIC laut Portal keine MAC hat)
+      ansible.builtin.set_fact:
+        powercycle_targets: "{{ vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
+
+    - name: Nur initial ausgeschaltete Ziele werden geschaltet
+      ansible.builtin.set_fact:
+        powercycle_to_start: >-
+          {{ powercycle_initial.results | default([])
+             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff')
+             | map(attribute='item') | list }}
+
+    - name: Auswahl entspricht dem Vertrag
+      ansible.builtin.assert:
+        that:
+          - powercycle_targets | map(attribute='vm_name') | list == ['aus-und-ohne-mac', 'laeuft-ohne-mac', 'suspendiert-ohne-mac']
+          - powercycle_to_start | map(attribute='vm_name') | list == ['aus-und-ohne-mac']
+        fail_msg: >-
+          Die Powercycle-Auswahl weicht vom Vertrag ab: Ziel ist nur, wer
+          needs_mac bejaht, geschaltet wird nur, wer initial poweredOff war.
+
+    - name: Leere Eingaben bleiben leer
+      ansible.builtin.assert:
+        that:
+          - empty_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list == []
+          - "[] | selectattr('instance.hw_power_status', 'equalto', 'poweredOff') | map(attribute='item') | list == []"
+        fail_msg: >-
+          Eine leere Eingabe muss zu einer leeren Auswahl fuehren, nie zu
+          einem Zugriff.
+
+    - name: Wachhund erkennt beide kaputten Antwortformen und ist wurf-frei
+      ansible.builtin.assert:
+        that:
+          - broken_initial.results | default([]) | map(attribute='instance.hw_power_status', default='') | select('equalto', '') | list | length == 2
+          - powercycle_initial.results | default([]) | map(attribute='instance.hw_power_status', default='') | select('equalto', '') | list | length == 0
+        fail_msg: >-
+          Die Wachhund-Kette des Produktions-Playbooks erkennt eine Antwort
+          ohne instance bzw. ohne hw_power_status nicht mehr; eine geaenderte
+          Modulantwort saehe dann wie "nichts zu tun" aus, und die Auswahl
+          darunter wuerde auf ihr werfen.

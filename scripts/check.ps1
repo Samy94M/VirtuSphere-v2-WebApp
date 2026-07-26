@@ -587,6 +587,26 @@ Add-Gate -Name 'ansible-module-contract' -Lanes $allLanes -Kind 'container' -Bod
     Format-ToolResult $r 'Jedes benutzte Modul laedt gegen die gepinnte Collection' 'Modulvertrag der gepinnten Collection verletzt'
 }
 
+Add-Gate -Name 'ansible-powercycle-selection' -Lanes $allLanes -Kind 'container' -Body {
+    # Wen der Power-Cycle schalten darf, ist reine Jinja-Filterei und damit ohne
+    # ESXi-Host beweisbar: das Fixture-Playbook rechnet die ZEICHENGLEICHEN
+    # Ketten des Produktions-Playbooks (PowercyclePlaybookContractTest pinnt
+    # beide aufeinander) gegen an/aus/suspendiert, fehlendes needs_mac, leere
+    # Eingaben und zwei kaputte Modulantwort-Formen und assertet die
+    # dokumentierte Auswahl. Der erste Lauf fand einen echten Fehlschluss: ein
+    # dotted selectattr WIRFT auf einer Antwort ohne das Attribut, statt sie zu
+    # filtern - deshalb prueft der Wachhund im Playbook mit map+default VOR der
+    # Auswahl.
+    $fixture = Join-Path $repoRoot 'Docker/qa-ansible/powercycle-selection-fixtures.yml'
+    if (-not (Test-Path $fixture)) { return New-InfraResult 'powercycle-selection-fixtures.yml fehlt unter dem Pruef-Root (Zero-Match)' }
+    if (-not (Test-DockerImage $toolImages.ansible)) {
+        return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+    }
+    $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+        $toolImages.ansible, 'ansible-playbook', '/repo/Docker/qa-ansible/powercycle-selection-fixtures.yml')
+    Format-ToolResult $r 'Powercycle-Auswahl gegen Fixtures bewiesen (an/aus/suspendiert/kaputt/leer)' 'Powercycle-Auswahl weicht vom Vertrag ab'
+}
+
 Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
     # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
     # rendert die feindliche Fixture mit den Produktions-Generatoren,
