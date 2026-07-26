@@ -43,13 +43,22 @@ for f in images/*.tar.gz; do gunzip -c "$f" | docker load; done
 docker images
 ```
 
-`docker load` bringt die Images mit genau den Tags mit, die `docker-compose.yml`
-erwartet, deshalb muss anschließend nichts gebaut und nichts gezogen werden.
+Danach prüfen: `docker images` muss **jedes** geladene Image mit Namen **und** Tag
+zeigen. Ein namenloses Image (`<none>:<none>`) ist hier kein normaler Nebeneffekt,
+sondern ein Befund - das Bundle bricht seinen Build bereits ab, wenn ein Archiv
+keinen Tag trägt.
 
-Das Laden kann pro Image ein zusätzliches namenloses Image (`<none>:<none>`)
-hinterlassen, wenn eine Zwischenschicht keinen Tag trägt. Das ist normal und
-kostet nur Plattenplatz; `docker image prune` räumt es auf, **nachdem** der Stack
-läuft (vorher nicht: es entfernt auch, was noch nicht referenziert ist).
+**Kein `docker image prune`.** Die eben geladenen Images sind noch von keinem
+Container referenziert; `prune` würde genau sie entfernen, und auf diesem Host
+gibt es keinen Weg, sie zurückzuholen.
+
+Warum das ein eigener Absatz ist: `docker load` stellt **keinen RepoDigest**
+wieder her, und ein `docker save`-Archiv enthält gar keinen. Eine digest-gepinnte
+Referenz wie `mysql:8.4@sha256:…` ist auf diesem Host deshalb *nicht auflösbar* -
+Compose würde ziehen wollen und ohne Netz scheitern. Genau dafür liegt
+`.env.offline-images` im Bundle; Schritt 4 hängt sie an die `.env`. Die Integrität
+der Images hängt hier an der Prüfsumme aus Schritt 1, nicht am Registry-Digest,
+den dieser Host ohnehin nie prüfen könnte.
 
 ## Schritt 3: Quellcode und Abhängigkeiten entpacken
 
@@ -70,7 +79,17 @@ ansible-galaxy collection install collections/*.tar.gz
 
 ## Schritt 4: `.env` anlegen
 
-Vorlage ist `virtusphere/.env.example`. Zwingend selbst setzen:
+Vorlage ist `virtusphere/.env.example`. **Zuerst** die zwei Zeilen aus
+`.env.offline-images` (aus dem Bundle, nicht aus dem Quellbaum) anhängen:
+
+```bash
+cp virtusphere/.env.example virtusphere/.env
+cat .env.offline-images >> virtusphere/.env
+```
+
+Sie setzen `MYSQL_IMAGE` und `PMA_IMAGE` auf die Tags, die Schritt 2 geladen hat.
+Ohne sie greift der Digest-Pin aus `docker-compose.yml`, den dieser Host nicht
+auflösen kann (siehe Schritt 2). Dann zwingend selbst setzen:
 
 | Schlüssel | Warum |
 |---|---|

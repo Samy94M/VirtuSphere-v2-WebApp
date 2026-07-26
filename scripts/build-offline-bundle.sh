@@ -3,7 +3,10 @@
 # vollstaendig offline verifizier- und installierbares Artefakt:
 #
 #   images/         docker save der Runtime-Images (per Image-ID dedupliziert)
-#   images.txt      Ref -> Image-ID -> RepoDigest je gespeichertem Image
+#   images.txt      Ref -> Tag -> Image-ID -> RepoDigest je gespeichertem Image
+#   .env.offline-images  MYSQL_IMAGE/PMA_IMAGE auf die geladenen Tags (docker load
+#                   stellt keinen RepoDigest her, also ist der Digest-Pin auf dem
+#                   Zielhost nicht aufloesbar)
 #   deps/           vendor.tar.gz (composer install --no-dev, im PHP-Image)
 #   collections/    ansible-galaxy collection download (Air-Gap-Ansible-Host)
 #   sbom/           SPDX-SBOM je Image (trivy, Digest-Pin aus tool-lock.json)
@@ -90,9 +93,71 @@ docker compose --project-directory "$ROOT" --profile "*" config --images | LC_AL
     digest=$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$ref")
     safe=$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')
     echo "    $ref"
-    docker save "$ref" | gzip > "$OUT/images/$safe.tar.gz"
-    printf '%s\t%s\t%s\t%s\n' "$ref" "$id" "${digest:-lokal-gebaut}" "images/$safe.tar.gz" >> "$OUT/images.txt"
+
+    # `docker save name:tag@sha256:...` schreibt "RepoTags": null ins Manifest,
+    # weil eine Referenz mit Digest keinen Tag traegt. Nach `docker load` ist das
+    # Image dann namenlos (<none>:<none>) - der gemeldete "dangling image". Und
+    # schlimmer: `docker load` stellt NIE einen RepoDigest wieder her, ein
+    # save-Archiv enthaelt gar keinen. Ein digest-gepinntes `image:` ist auf dem
+    # Zielhost damit ueberhaupt nicht aufloesbar ("No such image"), also versucht
+    # compose zu ziehen - auf einem luftspaltgetrennten Host das Ende.
+    #
+    # Gespeichert wird deshalb der TAG. Die Integritaet der Kette haengt nicht
+    # mehr am Registry-Digest (den der Zielhost nie pruefen koennte), sondern an
+    # der Pruefsumme des Bundles - plus dieser Zusicherung hier: das lokale Image
+    # muss den gepinnten Digest wirklich tragen, sonst waere der ausgelieferte Tag
+    # nicht beweisbar derselbe Inhalt.
+    tag="${ref%@*}"
+    want="${ref#*@}"
+    # Eine Referenz ohne Tag (die lokal gebauten Images heissen bei
+    # `compose config --images` nur "virtusphere-v2-webapp-php") normalisiert
+    # Docker auf :latest, und genau das steht dann in RepoTags. Ohne diese
+    # Normalisierung sucht die Zusicherung unten einen Tag, den es so nie gibt.
+    case "$tag" in
+        */*:*|*:*) : ;;
+        *) tag="$tag:latest" ;;
+    esac
+    if [ "$want" != "$ref" ]; then
+        if ! docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" \
+            | grep -qx "${tag%%:*}@$want"; then
+            echo "offline-bundle: [bundle.digest-mismatch] $ref traegt den gepinnten Digest lokal nicht; erst 'docker compose pull' laufen lassen." >&2
+            exit 2
+        fi
+    fi
+    docker save "$tag" | gzip > "$OUT/images/$safe.tar.gz"
+
+    # Das Archiv muss sich selbst beweisen: verify.sh hasht nur Dateien, und ein
+    # leeres RepoTags faellt erst auf dem Zielhost auf, wo niemand mehr etwas
+    # reparieren kann.
+    if ! gunzip -c "$OUT/images/$safe.tar.gz" | tar -xOf - manifest.json 2>/dev/null | grep -q "\"$tag\""; then
+        echo "offline-bundle: [bundle.image-tag] $OUT/images/$safe.tar.gz traegt den Tag $tag nicht; ein docker load daraus ergaebe ein namenloses Image." >&2
+        exit 1
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$tag" "$id" "${digest:-lokal-gebaut}" "images/$safe.tar.gz" >> "$OUT/images.txt"
 done
+
+# --- 1b) Referenzen, die der Zielhost wirklich aufloesen kann ------------------
+#
+# docker load stellt keinen RepoDigest wieder her, also ist die digest-gepinnte
+# Referenz aus docker-compose.yml auf dem Zielhost nicht aufloesbar. Compose
+# referenziert die beiden Registry-Images deshalb ueber ${MYSQL_IMAGE:-<pin>} bzw.
+# ${PMA_IMAGE:-<pin>}; diese Datei setzt die Variablen auf die reinen Tags, die
+# Schritt 2 der Installation geladen hat. Auf einem vernetzten Host existiert sie
+# nicht, und der Digest gilt.
+echo "==> .env.offline-images schreiben"
+{
+    echo "# Vom Offline-Bundle erzeugt. An .env anhaengen, BEVOR der Stack startet."
+    echo "# Grund: docker load stellt keinen RepoDigest wieder her, also kann der Host"
+    echo "# die digest-gepinnte Referenz nicht aufloesen und wuerde ziehen wollen."
+    while IFS="$(printf '\t')" read -r _ref tag _id _digest _file; do
+        case "$tag" in
+            mysql:*)      echo "MYSQL_IMAGE=$tag" ;;
+            phpmyadmin:*) echo "PMA_IMAGE=$tag" ;;
+        esac
+    done < "$OUT/images.txt"
+} > "$OUT/.env.offline-images"
+grep -q '^MYSQL_IMAGE=' "$OUT/.env.offline-images" \
+    || { echo "offline-bundle: [bundle.image-indirection] kein MYSQL_IMAGE in .env.offline-images; der Zielhost koennte das Image nicht aufloesen." >&2; exit 1; }
 
 # --- 2) PHP-Abhaengigkeiten: vendor.tar.gz ohne Dev-Pakete --------------------
 echo "==> composer vendor (--no-dev) bauen"
@@ -115,7 +180,7 @@ dkr run --rm \
 # --- 4) SBOM + CVE-Bericht je gespeichertem Image ------------------------------
 echo "==> SBOM und CVE-Scan (trivy)"
 CVE_FAILED=0
-while IFS="$(printf '\t')" read -r ref _id _digest _file; do
+while IFS="$(printf '\t')" read -r ref _tag _id _digest _file; do
     safe=$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')
     dkr run --rm \
         -v //var/run/docker.sock:/var/run/docker.sock \
@@ -172,11 +237,17 @@ Alle Schritte laufen ohne Internetzugang.
 
 1. Verifikation: `sh verify.sh` (prueft jede Datei gegen SHA256SUMS).
 2. Images laden: `for f in images/*.tar.gz; do gunzip -c "$f" | docker load; done`
+   Danach muss `docker images` jedes Image MIT Namen und Tag zeigen. Kein
+   `docker image prune`: es wuerde die eben geladenen Images entfernen.
 3. Quellcode entpacken: `mkdir virtusphere && tar xzf source.tar.gz -C virtusphere`
 4. PHP-Abhaengigkeiten: `tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI`
 5. Ansible-Collections auf dem Ansible-Host:
    `ansible-galaxy collection install collections/*.tar.gz` (offline).
-6. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
+6. Beim Anlegen der `.env` im naechsten Schritt den Inhalt von
+   `.env.offline-images` anhaengen. Ohne diese zwei Zeilen versucht Compose die
+   digest-gepinnten Referenzen aufzuloesen, die ein `docker load` nicht
+   wiederherstellt, und will ziehen - auf diesem Host das Ende.
+7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. phpMyAdmin ist optional:
    `docker compose --profile tools up -d phpmyadmin`.

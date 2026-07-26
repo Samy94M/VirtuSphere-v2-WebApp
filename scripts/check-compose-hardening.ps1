@@ -282,6 +282,26 @@ if ($findings.Count -eq 0) {
     }
 }
 
+# --- Der Digest muss auch im STANDARD der Indirektion stehen -------------------
+#
+# Beide Registry-Images werden ueber ${VAR:-tag@sha256:...} referenziert, weil
+# `docker load` keinen RepoDigest wiederherstellt und eine digest-gepinnte
+# Referenz auf einem luftspaltgetrennten Host deshalb nicht aufloesbar ist. Die
+# Pruefung oben liest die AUFGELOESTE Referenz und wuerde einen ungepinnten
+# Standard nicht sehen, solange eine Variable gesetzt ist. Deshalb zusaetzlich im
+# Klartext: der Standard selbst ist der Pin.
+$composeText = [System.IO.File]::ReadAllText($composeFile)
+foreach ($indirect in @('MYSQL_IMAGE', 'PMA_IMAGE')) {
+    $match = [regex]::Match($composeText, ('image:\s*\$\{' + $indirect + ':-([^\}]+)\}'))
+    if (-not $match.Success) {
+        Add-Finding 'image-indirection' ("$indirect wird in docker-compose.yml nicht als image: `${${indirect}:-<pin>} referenziert; ohne die Indirektion kann ein Offline-Host das Image nicht aufloesen, mit einer ungepinnten Indirektion ist der Digest weg.")
+        continue
+    }
+    if ($match.Groups[1].Value -notmatch $imageRefPattern) {
+        Add-Finding 'image-indirection' ('{0}: der Standard "{1}" ist nicht als tag@sha256-Digest gepinnt' -f $indirect, $match.Groups[1].Value)
+    }
+}
+
 # --- First-Party-Dockerfiles: FROM/COPY --from per Digest ----------------------
 $dockerfiles = @('Docker/php/Dockerfile', 'Docker/nginx/Dockerfile', 'Docker/qa-ansible/Dockerfile')
 $digestRe = '@sha256:[0-9a-f]{64}'

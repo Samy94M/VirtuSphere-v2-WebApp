@@ -793,13 +793,26 @@ $cases += @(
         Edit-Fixture $fx 'docker-compose.yml' '      - tools' '      - werkzeuge'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
     } }
+    @{ Name = 'compose-hardening.image-indirection-drift'; Body = {
+        # Die Gegenrichtung: ohne die Indirektion kann ein luftspaltgetrennter Host
+        # das Image nicht aufloesen, weil docker load keinen RepoDigest
+        # wiederherstellt. Ein umbenannter Variablenname faellt auf, obwohl die
+        # AUFGELOESTE Referenz weiter den Digest traegt - genau die Luecke, die die
+        # Klartextpruefung schliesst.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'image: ${MYSQL_IMAGE:-' 'image: ${MYSQL_IMAGE_TYPO:-'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.image-indirection\]' -InfraOnExit2
+    } }
     @{ Name = 'compose-hardening.image-digest-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture
-        # Anker digest-unabhaengig, sonst bricht jeder Digest-Bump den Guard:
-        # der Digest-Rest wird zum YAML-Inline-Kommentar, das Image verliert
-        # seinen Pin.
-        Edit-Fixture $fx 'docker-compose.yml' 'image: mysql:8.4@sha256:' 'image: mysql:8.4 # sha256:'
+        # Anker digest-unabhaengig, sonst bricht jeder Digest-Bump den Guard.
+        # Die Klammer wird GESCHLOSSEN und der Digest-Rest zum echten
+        # YAML-Kommentar: innerhalb von ${...} ist ein # kein Kommentar, und ein
+        # Standard mit Leerzeichen macht `docker compose config` unparsebar - der
+        # Fall waere dann infra statt Befund.
+        Edit-Fixture $fx 'docker-compose.yml' 'image: ${MYSQL_IMAGE:-mysql:8.4@' 'image: ${MYSQL_IMAGE:-mysql:8.4} # @'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.image-digest\]' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.dockerfile-digest-drift'; Body = {

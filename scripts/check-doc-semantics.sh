@@ -108,7 +108,13 @@ else
 fi
 
 # --- 6. MySQL-Version gegen docker-compose.yml ----------------------------------
-mysql_ssot=$(sed -n 's/.*image:[[:space:]]*mysql:\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' docker-compose.yml 2>/dev/null | head -n 1)
+# Die Referenz laeuft ueber eine Indirektion (${MYSQL_IMAGE:-mysql:8.4@sha256:...}),
+# weil docker load keinen RepoDigest wiederherstellt und ein digest-gepinntes
+# image: auf einem luftspaltgetrennten Host nicht aufloesbar ist. Die Version steht
+# im STANDARD der Indirektion, also matcht das Muster `mysql:` an beliebiger Stelle
+# der image-Zeile statt direkt dahinter. Diese Regel hat den Umbau gefangen, was
+# genau ihr Zweck ist: der Zero-Match-Zweig unten ist kein leerer Gutfall.
+mysql_ssot=$(sed -n 's/.*image:.*mysql:\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' docker-compose.yml 2>/dev/null | head -n 1)
 if [ -z "$mysql_ssot" ]; then
   fail no-ssot "MySQL-Version nicht aus docker-compose.yml lesbar; ohne SSoT kann keine Versionsnennung geprueft werden."
 else
