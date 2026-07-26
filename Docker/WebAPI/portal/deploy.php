@@ -53,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'verbose' => $_POST['verbose'] ?? false,
                 'vm_ids' => is_array($_POST['vm_ids'] ?? null) ? $_POST['vm_ids'] : [],
                 'powercycle_wait' => $_POST['powercycle_wait'] ?? VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT,
+                'start_wait' => $_POST['start_wait'] ?? VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT,
             ];
             $schedule = deploy_parse_schedule($_POST);
             $confirmed = ($_POST['confirmed'] ?? '') === '1';
@@ -368,20 +369,30 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
             <label><?php echo h(__t('deploy.label_mode')); ?>
                 <select name="mode" required
                         data-stagger-modes="<?php echo h(implode(',', VIRTUSPHERE_DEPLOY_STAGGER_MODES)); ?>"
-                        data-powercycle-modes="<?php echo h(implode(',', ansible_modes_using_powercycle())); ?>">
+                        data-powercycle-modes="<?php echo h(implode(',', ansible_modes_using_powercycle())); ?>"
+                        data-start-wait-modes="<?php echo h(implode(',', ansible_modes_using_start())); ?>">
                     <?php foreach (virtusphere_deploy_mode_labels() as $modeValue => $modeLabel) { ?>
                         <option value="<?php echo h($modeValue); ?>" <?php echo $selectedMode === (string) $modeValue ? 'selected' : ''; ?>><?php echo h($modeLabel); ?></option>
                     <?php } ?>
                 </select>
                 <small class="hint" data-stagger-lock hidden><?php echo h(__t('deploy.stagger_lock_hint')); ?></small>
             </label>
-            <?php // Wait time and verbosity are one two-field group: both start with a
-                  // caption so the checkbox lines up with the number input, and the long
-                  // verbose hint runs under both. ?>
+            <?php // Wait times and verbosity are one field group: each starts with a
+                  // caption so the checkbox lines up with the number inputs, and the long
+                  // verbose hint runs under all of them. ?>
             <div class="field-group">
                 <label><?php echo h(__t('deploy.label_powercycle_wait')); ?>
                     <input type="number" name="powercycle_wait" value="<?php echo h(deploy_form_value('powercycle_wait', (string) VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MAX); ?>" data-powercycle-input>
                     <small class="hint" data-powercycle-lock hidden><span class="hint-subject"><?php echo h(__t('deploy.label_powercycle_wait')); ?>:</span> <?php echo h(__t('deploy.powercycle_lock_hint')); ?></small>
+                </label>
+                <?php // The pause before the VMs are powered on. Visible because the
+                      // right value depends on the MECM cadence of the environment;
+                      // the bounds come from the constants the playbook is fed from,
+                      // so the field cannot offer a pause the SSH layer would kill. ?>
+                <label><?php echo h(__t('deploy.label_start_wait')); ?>
+                    <input type="number" name="start_wait" value="<?php echo h(deploy_form_value('start_wait', (string) VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_START_WAIT_SECONDS_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_START_WAIT_SECONDS_MAX); ?>" data-start-wait-input>
+                    <small class="hint"><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_hint', ['max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX])); ?></small>
+                    <small class="hint" data-start-wait-lock hidden><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_lock_hint')); ?></small>
                 </label>
                 <div class="field-stack">
                     <span class="field-label"><?php echo h(__t('deploy.verbose_heading')); ?></span>

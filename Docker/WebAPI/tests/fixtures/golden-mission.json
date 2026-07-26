@@ -48,6 +48,7 @@
         }
     ],
     "power_cycle_wait": 7,
+    "start_wait": 123,
     "host_datacenter": "",
     "esxi_host_name": "esxi-güld.lan",
     "esxi_credential": {
@@ -67,7 +68,6 @@
             "esxi_username": "rö\"ot",
             "esxi_password": "p@ss\"wö\\rd:on\u0001\nx",
             "ansible_username": "ansible",
-            "WaitingTime": "60",
             "apiUrl": "http://10.10.10.10:8021"
         },
         "serverlist": {
@@ -116,6 +116,8 @@
                 }
             ],
             "PowerCycleWaitSeconds": 7,
+            "StartWaitSeconds": 123,
+            "CreateSettleSeconds": 60,
             "mission_configuration": {
                 "mission_name": "Bühne: \"Gold\" #7",
                 "mission_id": 42,

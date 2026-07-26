@@ -13,7 +13,6 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'disk_type' => 'thick',
     'interface_mode' => 'dhcp',
     'interface_type' => 'vmxnet3',
-    'waiting_time' => 60,
     // CPU/RAM hot-add, enabled by default; only applied when a VM is created
     // (Paket F). Existing ESXi VMs are never reconfigured.
     'cpu_hotplug' => true,
@@ -92,6 +91,37 @@ const VIRTUSPHERE_VM_AUTOSTART_DEFAULTS = [
 const VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT = 5;
 const VIRTUSPHERE_POWERCYCLE_WAIT_MIN = 1;
 const VIRTUSPHERE_POWERCYCLE_WAIT_MAX = 300;
+
+// Seconds the start step waits before it powers the VMs on, so the MECM side is
+// ready for the PXE boot that follows. How long that takes depends on the MECM
+// cadence of the environment, which is why this is a form field and not only a
+// default.
+//
+// It is emitted in SECONDS and the playbook pauses in seconds. Its predecessor
+// was a bare 60 written into accounts.yml as `WaitingTime` and read by
+// `pause: minutes:`, i.e. 3600 seconds of silence, while the SSH layer aborts a
+// command after VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS of it: mode `start` could
+// never power a VM on, and `full` died in its last step with every VM off. The
+// desktop client shipped 5 here, so the unit was always minutes, and 300 s is
+// that field-proven value.
+//
+// The durable rule is the invariant, not the number: no configured playbook
+// pause may reach the idle budget of the layer above it. MAX therefore keeps a
+// margin below VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS (deploy_constants.php,
+// which requires this file, so the bound cannot be written as an expression of
+// it); tests/Static/AnsiblePauseBudgetContractTest.php walks every pause
+// directive in Ansible/*.yml against the emitting constant and that budget.
+const VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT = 300;
+const VIRTUSPHERE_START_WAIT_SECONDS_MIN = 1;
+const VIRTUSPHERE_START_WAIT_SECONDS_MAX = 1500;
+
+// Seconds the create step waits for ESXi to register the VMs it just created,
+// before the next playbook addresses them by name. Not operator-tunable: it is a
+// property of the hypervisor, not of the MECM environment, so there is no form
+// field and the value is fixed. It lives here rather than as a literal in the
+// playbook so it is inside the same pause budget as the two configurable waits:
+// a pause nobody owns is a pause nothing checks.
+const VIRTUSPHERE_CREATE_SETTLE_SECONDS = 60;
 
 function virtusphere_guest_os_ids(): array
 {

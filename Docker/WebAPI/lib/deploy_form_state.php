@@ -44,6 +44,7 @@ const VIRTUSPHERE_DEPLOY_QUEUE_FIELDS = [
     'credential_ansible_id',
     'mode',
     'powercycle_wait',
+    'start_wait',
     'start_mode',
     'scheduled_at',
     'stagger_minutes',

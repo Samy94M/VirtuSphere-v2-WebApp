@@ -241,23 +241,28 @@
             staggerInput.addEventListener('input', syncStagger);
             syncStagger();
         }
-        // Mode -> wait time, one direction only. Unlike staggering the wait time
+        // Mode -> wait time, one direction only. Unlike staggering a wait time
         // carries no intent that could lock a mode, so there is no reverse lock and
-        // the value is left untouched: the server ignores it in a non-powercycle
-        // mode anyway (warn-only, matches the JS-less path).
-        var powercycleModeSelect = document.querySelector('[data-powercycle-modes]');
-        var powercycleInput = document.querySelector('[data-powercycle-input]');
-        var powercycleLock = document.querySelector('[data-powercycle-lock]');
-        if (powercycleModeSelect && powercycleInput) {
-            var powercycleAllowed = (powercycleModeSelect.getAttribute('data-powercycle-modes') || '').split(',');
-            var syncPowercycle = function () {
-                var modeOk = powercycleAllowed.indexOf(powercycleModeSelect.value) !== -1;
-                powercycleInput.disabled = !modeOk;
-                if (powercycleLock) { powercycleLock.hidden = modeOk; }
+        // the value is left untouched: the server ignores it in a mode that does not
+        // run the matching playbook anyway (warn-only, matches the JS-less path).
+        // Both wait fields work this way, so the rule lives here once; the mode list
+        // is derived server-side from the real playbook sequence.
+        var lockWaitByMode = function (modesAttribute, inputSelector, lockSelector) {
+            var select = document.querySelector('[' + modesAttribute + ']');
+            var input = document.querySelector(inputSelector);
+            var lock = document.querySelector(lockSelector);
+            if (!select || !input) { return; }
+            var allowed = (select.getAttribute(modesAttribute) || '').split(',');
+            var sync = function () {
+                var modeOk = allowed.indexOf(select.value) !== -1;
+                input.disabled = !modeOk;
+                if (lock) { lock.hidden = modeOk; }
             };
-            powercycleModeSelect.addEventListener('change', syncPowercycle);
-            syncPowercycle();
-        }
+            select.addEventListener('change', sync);
+            sync();
+        };
+        lockWaitByMode('data-powercycle-modes', '[data-powercycle-input]', '[data-powercycle-lock]');
+        lockWaitByMode('data-start-wait-modes', '[data-start-wait-input]', '[data-start-wait-lock]');
     }
 
     // ESXi inventory datastore usage bar: width + colour (kept out of inline styles

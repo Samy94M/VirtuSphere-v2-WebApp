@@ -81,6 +81,26 @@ function deploy_job_normalize_wait(mixed $value): int
     return $wait;
 }
 
+/**
+ * The start step's pause, in seconds. Same shape as the power-cycle wait, and
+ * clamped here as well as in ansible_job_payload(): the stored payload is what
+ * a retry re-runs, so an out-of-range number must never survive the enqueue.
+ * The upper bound keeps the playbook's pause below the worker's SSH idle budget
+ * (see VIRTUSPHERE_START_WAIT_SECONDS_MAX).
+ */
+function deploy_job_normalize_start_wait(mixed $value): int
+{
+    $wait = (int) ($value ?? VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT);
+    if ($wait < VIRTUSPHERE_START_WAIT_SECONDS_MIN) {
+        return VIRTUSPHERE_START_WAIT_SECONDS_MIN;
+    }
+    if ($wait > VIRTUSPHERE_START_WAIT_SECONDS_MAX) {
+        return VIRTUSPHERE_START_WAIT_SECONDS_MAX;
+    }
+
+    return $wait;
+}
+
 function deploy_job_payload(array $data): array
 {
     return [
@@ -88,6 +108,7 @@ function deploy_job_payload(array $data): array
         'verbose' => deploy_job_bool($data['verbose'] ?? false),
         'vm_ids' => deploy_job_normalize_vm_ids($data['vm_ids'] ?? []),
         'powercycle_wait' => deploy_job_normalize_wait($data['powercycle_wait'] ?? null),
+        'start_wait' => deploy_job_normalize_start_wait($data['start_wait'] ?? null),
     ];
 }
 

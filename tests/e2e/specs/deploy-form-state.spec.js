@@ -21,6 +21,10 @@ const MARK = 'e2edform';
 const FILLED = {
   mode: 'powercycle', // staggerable AND power-cycling: neither lock disables a field
   powercycle_wait: '42',
+  // Deliberately the one field the chosen mode DOES disable: powercycle runs no
+  // start playbook. A disabled-but-filled control is exactly what FormData drops
+  // and form.elements keeps, so this value travelling is the proof of that rule.
+  start_wait: '99',
   stagger_minutes: '7',
 };
 
@@ -83,6 +87,8 @@ async function fillQueueForm(page, ids, scheduledAt) {
   // Mode first: it is what enables the wait time and the staggering.
   await form.locator('select[name="mode"]').selectOption(FILLED.mode);
   await form.locator('input[name="powercycle_wait"]').fill(FILLED.powercycle_wait);
+  // force: the mode above disables this input; filling it anyway is the point.
+  await form.locator('input[name="start_wait"]').fill(FILLED.start_wait, { force: true });
   await form.locator('input[name="verbose"]').check();
   // The datetime field is hidden until the radio unhides it.
   await form.locator('input[name="start_mode"][value="scheduled"]').check();
@@ -96,6 +102,7 @@ async function expectQueueFormIntact(page, ids, scheduledAt, because) {
   await expect(form.locator('select[name="credential_ansible_id"]'), because).toHaveValue(String(ids.ansible));
   await expect(form.locator('select[name="mode"]'), because).toHaveValue(FILLED.mode);
   await expect(form.locator('input[name="powercycle_wait"]'), because).toHaveValue(FILLED.powercycle_wait);
+  await expect(form.locator('input[name="start_wait"]'), because).toHaveValue(FILLED.start_wait);
   await expect(form.locator('input[name="verbose"]'), because).toBeChecked();
   await expect(form.locator('input[name="start_mode"][value="scheduled"]'), because).toBeChecked();
   await expect(form.locator('input[name="scheduled_at"]'), because).toHaveValue(scheduledAt);

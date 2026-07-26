@@ -37,6 +37,8 @@
       when: vm_configurations | length > 0
       register: vm_creation_results
 
+    # Wert aus VIRTUSPHERE_CREATE_SETTLE_SECONDS, nicht als Literal: jede Pause
+    # im Baum muss gegen das SSH-Idle-Budget prüfbar sein.
     - name: Warten, bis ESXi die neuen VMs registriert hat
       ansible.builtin.pause:
-        seconds: 60
+        seconds: "{{ CreateSettleSeconds | default(60) | int }}"

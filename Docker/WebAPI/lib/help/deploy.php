@@ -20,6 +20,18 @@ declare(strict_types=1);
             <p><?php echo h(__t('help.deploy_verbose_p1')); ?></p>
             <h3><?php echo h(__t('help.deploy_powercycle_wait_heading')); ?></h3>
             <p><?php echo h(__t('help.deploy_powercycle_wait_p1')); ?></p>
+            <h3><?php echo h(__t('help.deploy_start_wait_heading')); ?></h3>
+            <p><?php echo h(__t('help.deploy_start_wait_p1', [
+                'default' => VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT,
+            ])); ?></p>
+            <?php // All three numbers come from the constants the deploy actually
+                  // runs on, including the SSH idle budget the upper bound derives
+                  // from: the explanation of WHY there is a ceiling is only true as
+                  // long as it names the ceiling that exists. ?>
+            <p><?php echo h(__t('help.deploy_start_wait_p2', [
+                'max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX,
+                'idle' => VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
+            ])); ?></p>
         </section>
 
         <section class="panel">

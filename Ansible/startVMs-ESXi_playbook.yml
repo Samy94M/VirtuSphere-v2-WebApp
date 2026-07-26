@@ -7,9 +7,12 @@
     - ./accounts.yml
 
   tasks:
+    # Sekunden, nie Minuten: der Wert kommt aus VIRTUSPHERE_START_WAIT_SECONDS_*
+    # und muss unter dem SSH-Idle-Budget des Workers bleiben. Als `minutes:`
+    # gelesen wurde daraus die Stille, die jeden full-/start-Deploy getötet hat.
     - name: Warten vor dem Starten der VMs
       ansible.builtin.pause:
-        minutes: "{{ WaitingTime }}"
+        seconds: "{{ StartWaitSeconds | default(300) | int }}"
 
     - name: Vorhandene VMs starten
       community.vmware.vmware_guest_powerstate:

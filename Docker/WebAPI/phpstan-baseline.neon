@@ -1,12 +1,6 @@
 parameters:
 	ignoreErrors:
 		-
-			message: '#^Offset ''mode'' does not exist on array\{vm_ids\: array\<int\>, powercycle_wait\: int\}\.$#'
-			identifier: offsetAccess.notFound
-			count: 1
-			path: lib/ansible.php
-
-		-
 			message: '#^Offset ''domain'' on array\{lifetime\: int\<0, max\>, path\: non\-falsy\-string, domain\: string, secure\: bool, httponly\: bool, samesite\: ''Lax''\|''lax''\|''None''\|''none''\|''Strict''\|''strict''\} on left side of \?\? always exists and is not nullable\.$#'
 			identifier: nullCoalesce.offset
 			count: 1
@@ -204,8 +198,3 @@ parameters:
 			count: 1
 			path: tests/Unit/DeployModeGateTest.php
 
-		-
-			message: '#^Offset ''mode'' does not exist on array\{vm_ids\: array\<int\>, powercycle_wait\: int\}\.$#'
-			identifier: offsetAccess.notFound
-			count: 3
-			path: tests/Unit/DeployModeGateTest.php

@@ -59,7 +59,8 @@ try {
         $fixture['vms'],
         (int) ($fixture['power_cycle_wait'] ?? VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT),
         (string) ($fixture['host_datacenter'] ?? ''),
-        (string) ($fixture['esxi_host_name'] ?? '')
+        (string) ($fixture['esxi_host_name'] ?? ''),
+        (int) ($fixture['start_wait'] ?? VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT)
     );
     $accounts = ansible_accounts_yml(
         $fixture['esxi_credential'],

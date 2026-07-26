@@ -15,7 +15,7 @@ require_once __DIR__ . '/deploy_constants.php';
 /**
  * Decode a deploy job payload with safe defaults for the fields this module needs.
  *
- * @return array{vm_ids: int[], powercycle_wait: int}
+ * @return array{mode: string, vm_ids: int[], powercycle_wait: int, start_wait: int}
  */
 function ansible_job_payload(array $job): array
 {
@@ -30,8 +30,15 @@ function ansible_job_payload(array $job): array
         }
     }
 
+    // Clamped at BOTH ends, both waits: an out-of-range value from an older
+    // payload (or a crafted one) must reach the playbook as something the layer
+    // above it can still survive, and a pause longer than the SSH idle budget is
+    // exactly how a deploy dies with its VMs off.
     $wait = (int) ($payload['powercycle_wait'] ?? VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT);
     $wait = max(VIRTUSPHERE_POWERCYCLE_WAIT_MIN, min(VIRTUSPHERE_POWERCYCLE_WAIT_MAX, $wait));
+
+    $startWait = (int) ($payload['start_wait'] ?? VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT);
+    $startWait = max(VIRTUSPHERE_START_WAIT_SECONDS_MIN, min(VIRTUSPHERE_START_WAIT_SECONDS_MAX, $startWait));
 
     // The mode decides which gates apply (a location-less mode needs no
     // datastore) and which playbooks run. An unreadable payload falls back to
@@ -41,7 +48,12 @@ function ansible_job_payload(array $job): array
         $mode = VIRTUSPHERE_DEPLOY_MODE_FULL;
     }
 
-    return ['mode' => $mode, 'vm_ids' => array_map('intval', array_keys($vmIds)), 'powercycle_wait' => $wait];
+    return [
+        'mode' => $mode,
+        'vm_ids' => array_map('intval', array_keys($vmIds)),
+        'powercycle_wait' => $wait,
+        'start_wait' => $startWait,
+    ];
 }
 
 /**
@@ -104,6 +116,22 @@ function ansible_modes_using_powercycle(): array
     return array_values(array_filter(
         virtusphere_user_deploy_modes(),
         static fn (string $mode): bool => in_array(VIRTUSPHERE_PLAYBOOKS['powercycle'], ansible_playbooks_for_mode($mode), true)
+    ));
+}
+
+/**
+ * The modes whose sequence runs the start playbook, i.e. the only modes that
+ * read StartWaitSeconds. Derived the same way as the power-cycle list, so the
+ * form's lock follows the sequence instead of a second hand-kept copy of it.
+ * Today: 'full' and 'start'.
+ *
+ * @return string[]
+ */
+function ansible_modes_using_start(): array
+{
+    return array_values(array_filter(
+        virtusphere_user_deploy_modes(),
+        static fn (string $mode): bool => in_array(VIRTUSPHERE_PLAYBOOKS['start'], ansible_playbooks_for_mode($mode), true)
     ));
 }
 

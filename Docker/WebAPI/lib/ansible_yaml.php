@@ -39,8 +39,13 @@ function ansible_accounts_yml(array $esxiCredential, string $esxiSecret, array $
         // accounts.yml; no current ESXi playbook reads them (the MAC export patches
         // its own api_base_url into upload_mac_list.py). Retire with the desktop API
         // at E3 rather than dropping them now and diverging the two formats.
+        //
+        // `WaitingTime` used to sit here and is deliberately gone: it was a
+        // per-deploy value in a file that holds credentials and static parity
+        // keys, and the start playbook read it as MINUTES. It now travels as
+        // StartWaitSeconds in serverlist.yml, next to PowerCycleWaitSeconds,
+        // which is where a per-job number belongs.
         'ansible_username: ' . ansible_yaml_string((string) ($ansibleCredential['username'] ?? '')),
-        'WaitingTime: ' . ansible_yaml_string((string) VIRTUSPHERE_VM_DEFAULTS['waiting_time']),
         'apiUrl: ' . ansible_yaml_string($apiBaseUrl),
         '',
     ]);
@@ -103,7 +108,7 @@ function ansible_effective_datastore(array $mission, array $vm): string
     return $override !== '' ? $override : trim((string) ($mission['hypervisor_datastorage'] ?? ''));
 }
 
-function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = ''): string
+function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = '', int $startWait = VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT): string
 {
     // Mission-wide values: they feed the mission_configuration block below and
     // act as the fallback for every VM without an own override. The datacenter
@@ -158,7 +163,12 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
         $out .= '      stop_delay: ' . $vmAutostart['stop_delay'] . "\n";
     }
 
+    // Both waits are emitted in seconds and both playbooks pause in seconds, so
+    // the number in the artifact is the number of seconds the deploy stands
+    // still. Nothing converts a unit on the way.
     $out .= "\nPowerCycleWaitSeconds: " . $powerCycleWait . "\n";
+    $out .= 'StartWaitSeconds: ' . $startWait . "\n";
+    $out .= 'CreateSettleSeconds: ' . VIRTUSPHERE_CREATE_SETTLE_SECONDS . "\n";
 
     $missionAutostart = ansible_mission_autostart($mission);
     $out .= "\nmission_configuration:\n";

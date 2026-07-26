@@ -7,7 +7,9 @@ YAML-1.1 semantics Ansible applies when it reads the files on the control
 node. Then deep-compares both documents against the fixture's ``expected``
 block. This is the semantic proof the substring pins in PHPUnit cannot give:
 a Norway token stays a string, a control byte survives as the same byte, an
-int stays an int, WaitingTime stays the string the desktop client expects.
+int stays an int, and both pause budgets (PowerCycleWaitSeconds,
+StartWaitSeconds) arrive as ints in seconds rather than as strings a Jinja
+`| int` would have to rescue.
 
 Deliberately NOT named test_*.py: the python-client-tests gate discovers
 unittest files in this directory with the stdlib-only python image, which has
