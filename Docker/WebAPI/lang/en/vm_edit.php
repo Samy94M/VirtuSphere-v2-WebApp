@@ -89,7 +89,7 @@ return [
     'hotplug_heading' => 'Hot-add (CPU/RAM)',
     'cpu_hotplug' => 'CPU hot-add',
     'ram_hotplug' => 'RAM hot-add',
-    'hotplug_hint' => 'Allows adding CPU/RAM while the VM is running. Applied only when the VM is created; the guest operating system must support hot-add. Existing VMs are not reconfigured.',
+    'hotplug_hint' => 'Allows adding CPU/RAM while the VM is running. Applied only when the VM is created; the guest operating system must support hot-add. For existing VMs, re-running the create step is not a reliable way to change the setting.',
     'autostart_heading' => 'Autostart',
     'autostart_enabled' => 'Start this VM when the host boots',
     'autostart_hint' => 'Leave a delay blank and the mission default applies, so a later change there follows automatically. A 0 means "no wait" and is not the same as blank. The order of the VMs follows from their start delays.',

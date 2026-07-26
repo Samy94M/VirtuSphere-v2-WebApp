@@ -174,7 +174,7 @@ return [
     'retention_client_events' => 'Client phase reports',
     'tab_https' => 'HTTPS',
     'https_title' => 'HTTPS status',
-    'https_hint' => 'HTTPS only covers the browser sessions in the portal. The machine surface (MECM, PowerShell, Ansible) keeps using HTTP until the E3 decision and is never redirected.',
+    'https_hint' => 'HTTPS covers the browser sessions in the portal; the machine surface (MECM, PowerShell, Ansible) is never redirected. Its scripts only follow once they are explicitly switched to HTTPS; the steps are in the operations handbook (docs/operations/https.md, section "Umstellen").',
     'https_quarantined' => 'HTTPS is switched on, but the web server rejected the generated configuration and set it aside: nothing is being served over HTTPS right now. The portal therefore stays reachable over HTTP and the redirect is suspended. Upload the certificate again or switch HTTPS off; the reason is in the log of the web server container.',
     'https_state_on' => 'Active',
     'https_state_off' => 'Off',

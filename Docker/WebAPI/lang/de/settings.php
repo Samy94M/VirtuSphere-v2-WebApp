@@ -174,7 +174,7 @@ return [
     'retention_client_events' => 'Client-Phasen-Meldungen',
     'tab_https' => 'HTTPS',
     'https_title' => 'HTTPS-Status',
-    'https_hint' => 'HTTPS gilt nur für die Browser-Sitzungen im Portal. Die Maschinen-Schnittstelle (MECM, PowerShell, Ansible) läuft bis zur E3-Entscheidung weiter über HTTP und wird nie umgeleitet.',
+    'https_hint' => 'HTTPS gilt hier für die Browser-Sitzungen im Portal; die Maschinen-Schnittstelle (MECM, PowerShell, Ansible) wird nie umgeleitet. Deren Skripte wechseln erst mit, wenn sie ausdrücklich auf HTTPS umgestellt werden; die Schritte stehen im Betriebshandbuch (docs/operations/https.md, Abschnitt „Umstellen").',
     'https_quarantined' => 'HTTPS ist eingeschaltet, aber der Webserver hat die erzeugte Konfiguration abgelehnt und beiseitegelegt: aktuell wird kein HTTPS ausgeliefert. Das Portal bleibt deshalb über HTTP erreichbar, die Umleitung ist ausgesetzt. Zertifikat erneut hochladen oder HTTPS abschalten; den Grund nennt das Protokoll des Webserver-Containers.',
     'https_state_on' => 'Aktiv',
     'https_state_off' => 'Aus',

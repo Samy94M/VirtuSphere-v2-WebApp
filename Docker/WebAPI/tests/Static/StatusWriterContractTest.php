@@ -39,6 +39,42 @@ final class StatusWriterContractTest extends TestCase
         VIRTUSPHERE_STATUS_OS_INSTALLED => ['mecm-api.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLED],
     ];
 
+    /**
+     * Every stage number a catalog sentence teaches, pinned as `module.key` =>
+     * sorted unique stages. The writer map above is the truth these claims are
+     * checked against by a human once, here; this table then keeps the catalogs
+     * honest mechanically. Derivations that made sentences wrong before:
+     *
+     *  - the ResourceID feedback (mecm_updateid.php) writes 4/5, not 3/5,
+     *  - a dead MECM strands a VM at 3/5 (Ansible still delivers the MAC),
+     *    never at 2/5,
+     *  - "the VM works on its own" and "stuck in the Windows installation"
+     *    start at 4/5; at 3/5 the client phases are empty by design.
+     *
+     * A key that newly mentions a stage fails here until it is classified; a
+     * classified key that stops mentioning stages fails too (dead pin). Both
+     * locales must teach the same numbers, or one of them lies alone.
+     */
+    private const STAGE_CLAIMS = [
+        'help.status_1' => [1, 2],
+        'help.status_2' => [2],
+        'help.status_3' => [3],
+        'help.status_4' => [4],
+        'help.status_5' => [5],
+        'help.status_stuck_1' => [2],
+        'help.status_stuck_2' => [3],
+        'help.status_stuck_3' => [4, 5],
+        'help.stack_a6_p3' => [4],
+        'help.stack_a7_p3' => [5],
+        'help.stack_a11_li1' => [3],
+        'help.settings_api_p1' => [2],
+        'help_system_status.firstaid_step3' => [4, 5],
+        'help_system_status.system_status_source_1' => [3],
+        'help_system_status.clientphases_p1' => [4],
+    ];
+
+    private const LOCALES = ['de', 'en'];
+
     private function source(string $file): string
     {
         $path = dirname(__DIR__, 2) . '/' . $file;
@@ -148,6 +184,86 @@ final class StatusWriterContractTest extends TestCase
             virtusphere_lifecycle_rank(VIRTUSPHERE_LIFECYCLE_FAILED),
             'a failed VM must be able to move forward again, or a retry strands it'
         );
+    }
+
+    /**
+     * The stage numbers a catalog string teaches, as sorted unique ints.
+     * Word-boundary guarded so a plain fraction elsewhere cannot match.
+     *
+     * @return list<int>
+     */
+    private static function claimedStages(string $text): array
+    {
+        preg_match_all('#(?<![\d.,])([1-5])/5(?!\d)#', $text, $matches);
+        $stages = array_values(array_unique(array_map('intval', $matches[1])));
+        sort($stages);
+
+        return $stages;
+    }
+
+    /**
+     * @return array<string, array<string, string>> locale => "module.key" => text
+     */
+    private function catalogStrings(): array
+    {
+        $byLocale = [];
+        foreach (self::LOCALES as $locale) {
+            // Glob, never a filename list: a catalog split must not silently
+            // take its keys out of this contract (i18n rule, health-matrix
+            // lesson). The stage vocabulary may spread to any catalog.
+            $paths = glob(dirname(__DIR__, 2) . '/lang/' . $locale . '/*.php') ?: [];
+            self::assertNotSame([], $paths, 'locale ' . $locale . ' has no catalogs; this scan would then prove nothing');
+            foreach ($paths as $path) {
+                $module = basename($path, '.php');
+                $strings = require $path;
+                self::assertIsArray($strings);
+                foreach ($strings as $key => $text) {
+                    if (is_string($text)) {
+                        $byLocale[$locale][$module . '.' . $key] = $text;
+                    }
+                }
+            }
+        }
+
+        return $byLocale;
+    }
+
+    /**
+     * Every stage number in every catalog matches its classified claim, in both
+     * locales; unclassified stage mentions and dead pins fail the build.
+     */
+    public function testCatalogStageMentionsMatchTheClassifiedClaims(): void
+    {
+        $byLocale = $this->catalogStrings();
+
+        foreach (self::LOCALES as $locale) {
+            $seen = [];
+            foreach ($byLocale[$locale] as $qualifiedKey => $text) {
+                $stages = self::claimedStages($text);
+                if ($stages === []) {
+                    continue;
+                }
+                $seen[$qualifiedKey] = $stages;
+                self::assertArrayHasKey(
+                    $qualifiedKey,
+                    self::STAGE_CLAIMS,
+                    sprintf('[%s] %s mentions stage(s) %s but is not classified in STAGE_CLAIMS; decide which stages the sentence must teach (writer map above is the truth).', $locale, $qualifiedKey, implode(',', $stages))
+                );
+                self::assertSame(
+                    self::STAGE_CLAIMS[$qualifiedKey],
+                    $stages,
+                    sprintf('[%s] %s teaches stage(s) %s but the writers put this sentence at %s.', $locale, $qualifiedKey, implode(',', $stages), implode(',', self::STAGE_CLAIMS[$qualifiedKey]))
+                );
+            }
+
+            foreach (self::STAGE_CLAIMS as $qualifiedKey => $stages) {
+                self::assertArrayHasKey(
+                    $qualifiedKey,
+                    $seen,
+                    sprintf('[%s] %s is classified with stage(s) %s but the catalog no longer mentions any stage; drop the dead pin or restore the sentence.', $locale, $qualifiedKey, implode(',', $stages))
+                );
+            }
+        }
     }
 
     /** @return array<string, string> */

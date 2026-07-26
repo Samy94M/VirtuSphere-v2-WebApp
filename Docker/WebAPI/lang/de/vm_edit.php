@@ -89,7 +89,7 @@ return [
     'hotplug_heading' => 'Hot-Add (CPU/RAM)',
     'cpu_hotplug' => 'CPU-Hot-Add',
     'ram_hotplug' => 'RAM-Hot-Add',
-    'hotplug_hint' => 'Erlaubt das Hinzufügen von CPU/RAM im laufenden Betrieb. Wirkt nur bei der Erzeugung der VM; das Gast-Betriebssystem muss Hot-Add unterstützen. Bestehende VMs werden nicht umkonfiguriert.',
+    'hotplug_hint' => 'Erlaubt das Hinzufügen von CPU/RAM im laufenden Betrieb. Wirkt nur bei der Erzeugung der VM; das Gast-Betriebssystem muss Hot-Add unterstützen. Für bestehende VMs ist ein erneuter Create-Lauf kein verlässlicher Weg, die Einstellung zu ändern.',
     'autostart_heading' => 'Autostart',
     'autostart_enabled' => 'Diese VM beim Hochfahren des Hosts starten',
     'autostart_hint' => 'Bleiben die Verzögerungen leer, gelten die Standardwerte der Mission; eine spätere Änderung dort wirkt dann automatisch mit. Eine 0 bedeutet „ohne Wartezeit" und ist nicht dasselbe wie leer. Die Reihenfolge der VMs ergibt sich aus den Startverzögerungen.',
