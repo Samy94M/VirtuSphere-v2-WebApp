@@ -739,6 +739,26 @@ $cases += @(
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         Assert-Guard (Invoke-ComposeHardeningGuard) @(0) -InfraOnExit2
     } }
+    @{ Name = 'compose-hardening.env-leak-drift'; Body = {
+        # Der Originalbefund: env_file gab dem LAN-zugewandten nginx-Container
+        # APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl das Image keinen dieser
+        # Werte liest. Wiederhergestellt heisst das: die Regel muss es sehen.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - ./Docker/logs/nginx:/var/log/nginx' "      - ./Docker/logs/nginx:/var/log/nginx`n    env_file:`n      - .env"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-port-collision-drift'; Body = {
+        # Gegenrichtung derselben Regel: der Container BRAUCHT PMA_PORT, weil das
+        # Image es als MySQL-Serverport liest. Faellt es weg, protokolliert
+        # phpMyAdmin je Anfrage "Undefined array key PMA_PORT" und faellt still auf
+        # 3306 zurueck - genau die Sorte stiller Vorgabe, die spaeter jemand
+        # umkonfiguriert und nicht mehr findet.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      PMA_PORT: ${DB_PORT}' '      # PMA_PORT entfernt'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
     @{ Name = 'compose-hardening.read-only-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture

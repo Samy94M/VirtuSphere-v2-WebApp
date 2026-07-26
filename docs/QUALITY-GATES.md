@@ -13,7 +13,7 @@ Ausführungsformen: **nativ** (Host-Tools), **containerisiert** (läuft über Do
 | Gate | Beweist | Form | Rot heißt meist |
 |---|---|---|---|
 | `compose-config` | Compose-Dateien valide und interpolierbar | containerisiert | Syntax-/Env-Fehler in `docker-compose.yml`/`.env` |
-| `compose-hardening` | Bestehende Container-Härtung als Vertrag: `read_only`+tmpfs, `cap_drop: ALL` + dokumentierte `cap_add`, `no-new-privileges`, Limits, Healthchecks, `service_healthy`-Ordnung, phpMyAdmin nur im `tools`-Profil auf Loopback, Tag+Digest-Pins, kein Docker-Socket | containerisiert | Eine Lockerung der Härtung; Fix am Compose, nie am Check |
+| `compose-hardening` | Bestehende Container-Härtung als Vertrag: `read_only`+tmpfs, `cap_drop: ALL` + dokumentierte `cap_add`, `no-new-privileges`, Limits, Healthchecks, `service_healthy`-Ordnung, phpMyAdmin nur im `tools`-Profil auf Loopback, Tag+Digest-Pins, kein Docker-Socket, **und der Umgebungssatz je Container** (nginx bekommt nichts, phpMyAdmin genau `PMA_HOST`/`PMA_PORT`, MySQL seine vier `MYSQL_*`) | containerisiert | Eine Lockerung der Härtung; Fix am Compose, nie am Check. Der Umgebungsbefund nennt nur Schlüsselnamen, nie Werte |
 | `php-lint` | Jede First-Party-PHP-Datei parst | containerisiert | Syntaxfehler; Datei in der Fehlzeile |
 | `phpunit-unit` | Unit- + Static-Suiten, `--fail-on-skipped` | containerisiert | Regression oder verletzter Contract-Test; ein Skip ist hier ein Defekt (ADR-0015-Amendment) |
 | `phpstan` | Statische Analyse auf dem Level aus `phpstan.neon.dist`, Baseline nur als Ratchet | containerisiert | Neuer Befund: an der Quelle fixen, nie re-baselinen |

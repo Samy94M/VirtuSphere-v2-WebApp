@@ -115,6 +115,27 @@ $dependsHealthy = @{
 $digestPinnedImages = @('mysql', 'phpmyadmin')
 $imageRefPattern = '^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$'
 
+# Welche Umgebungsschluessel ein Service sehen DARF, nach Aufloesung durch
+# `docker compose config`. `$null` heisst "nicht gepinnt", nicht "beliebig".
+#
+# Anlass: `env_file: .env` gab dem LAN-zugewandten nginx-Container und dem
+# phpMyAdmin-Container APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl keines der
+# beiden Images einen dieser Werte anfasst. Beim phpMyAdmin kam ein zweiter Schaden
+# dazu: das Image liest PMA_PORT als Port des MySQL-SERVERS, waehrend das Projekt
+# unter demselben Namen den Host-Veroeffentlichungsport fuehrt - der Container
+# versuchte also mysql:8023, wo nichts lauscht, und die Datenbankverbindung war
+# kaputt, waehrend die Oberflaeche erreichbar blieb.
+#
+# php und die beiden Worker sind bewusst NICHT gepinnt: sie sind die DB- und
+# Krypto-Seite, ihr Schluesselsatz zu enumerieren wuerde neue Interpolationen
+# einfuehren, die Regel 12 von check-doc-semantics.sh dann namentlich im Runbook
+# verlangt. Das ist eine eigene Aenderung, nicht diese.
+$expectedEnvKeys = @{
+    'webserver'  = @()
+    'phpmyadmin' = @('PMA_HOST', 'PMA_PORT')
+    'mysql'      = @('MYSQL_DATABASE', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD', 'MYSQL_USER')
+}
+
 $servicesNode = Get-Prop $config 'services'
 if ($null -eq $servicesNode) {
     Add-Finding 'services' 'compose config enthaelt keinen services-Block'
@@ -144,6 +165,27 @@ if ($findings.Count -eq 0) {
         $expectedSorted = @($expected | Sort-Object)
         if ((($actualSorted -join ',')) -ne (($expectedSorted -join ','))) {
             Add-Finding 'cap-add' ('{0}: cap_add ist [{1}], dokumentiert ist [{2}]' -f $name, ($actualSorted -join ', '), ($expectedSorted -join ', '))
+        }
+
+        # Umgebungsschluessel exakt das dokumentierte Set. Gemeldet werden nur
+        # NAMEN, nie Werte: dieses Skript darf kein Geheimnis in einen CI-Log
+        # schreiben (siehe Kopf).
+        if ($null -ne $expectedEnvKeys[$name]) {
+            $envNode = Get-Prop $svc 'environment'
+            $envKeys = @()
+            if ($null -ne $envNode) {
+                $envKeys = @($envNode.PSObject.Properties.Name | ForEach-Object { "$_" })
+            }
+            $envActual = @($envKeys | Sort-Object)
+            $envExpected = @(@($expectedEnvKeys[$name]) | Sort-Object)
+            if (($envActual -join ',') -ne ($envExpected -join ',')) {
+                $extra = @($envActual | Where-Object { $envExpected -notcontains $_ })
+                $missing = @($envExpected | Where-Object { $envActual -notcontains $_ })
+                $detail = @()
+                if ($extra.Count -gt 0) { $detail += ('zusaetzlich: ' + ($extra -join ', ')) }
+                if ($missing.Count -gt 0) { $detail += ('fehlt: ' + ($missing -join ', ')) }
+                Add-Finding 'env-scope' ('{0}: Umgebung weicht vom dokumentierten Satz ab ({1}). Ein Container, der ein Geheimnis nie liest, soll es auch nicht sehen.' -f $name, ($detail -join '; '))
+            }
         }
 
         # no-new-privileges.

@@ -19,8 +19,9 @@
 
 services:
   webserver:
-    env_file:
-      - Docker/qa/qa.env
+    # Kein env_file, wie im Hauptcompose: das nginx-Image liest keinen dieser
+    # Werte, und die Ports kommen aus der Host-seitigen Interpolation von qa.env
+    # (--env-file), nicht aus der Container-Umgebung.
     volumes:
       - qa-ssl:/etc/nginx/ssl
       - qa-conf:/etc/nginx/virtusphere-conf.d

@@ -13,10 +13,16 @@ services:
       - ./Docker/nginx/ssl:/etc/nginx/ssl
       - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
       - ./Docker/logs/nginx:/var/log/nginx
-    env_file:
-      - .env
-    environment:
-      SSL_SUBJECT: ${SSL_SUBJECT}
+    # Bewusst KEIN env_file und keine environment-Sektion. Der Container las mit
+    # `env_file: .env` APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl das Image
+    # keinen dieser Werte anfasst: init.sh liest keine Umgebung, default.conf ist
+    # statisch, und der envsubst-Entrypoint des Basisimages laeuft nicht. Die
+    # veroeffentlichten Ports kommen aus der Host-seitigen Interpolation, nicht aus
+    # der Container-Umgebung. Ein LAN-zugewandter Prozess mit dem
+    # Datenbank-Rootpasswort im `env` ist Reichweite ohne Gegenwert.
+    # SSL_SUBJECT stand hier und wurde von nichts gelesen; es ist auch aus
+    # .env.example und dem Runbook entfernt.
+    # Gepinnt durch scripts/check-compose-hardening.ps1 ([compose.env-scope]).
     depends_on:
       php:
         # Real PHP readiness (AP8): nginx only starts once FPM answers its
@@ -213,12 +219,23 @@ services:
     profiles:
       - tools
     ports:
+      # PMA_PORT ist hier der HOST-Veroeffentlichungsport. Im Container heisst
+      # dieselbe Variable etwas anderes: das phpMyAdmin-Image liest PMA_PORT als
+      # Port des MySQL-SERVERS. Mit `env_file: .env` bekam der Container also
+      # PMA_PORT=8023 und versuchte mysql:8023 - dort lauscht nichts, und die
+      # Verbindung war schlicht kaputt, waehrend die Oberflaeche erreichbar war.
       - "127.0.0.1:${PMA_PORT}:80"
-    env_file:
-      - .env
+    # Kein env_file: das Image liest weder APP_KEY noch DB_PASS noch
+    # MYSQL_ROOT_PASSWORD (die Anmeldung passiert im Browser), und ein Werkzeug,
+    # das nur mit dem tools-Profil startet, braucht die Geheimnisse des ganzen
+    # Projekts nicht in seiner Umgebung.
     environment:
       PMA_HOST: mysql
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      # Der Server-Port, explizit, damit die Namenskollision oben nicht
+      # wiederkommt. Nicht weglassen: mit gesetztem PMA_HOST und fehlendem
+      # PMA_PORT protokolliert das Image je Anfrage "Undefined array key
+      # PMA_PORT", bevor es auf 3306 zurueckfaellt.
+      PMA_PORT: ${DB_PORT}
     depends_on:
       mysql:
         condition: service_healthy

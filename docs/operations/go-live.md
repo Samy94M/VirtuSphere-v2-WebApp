@@ -98,9 +98,9 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
    | `APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD` | starke, eigene Werte; EnvBoot bricht bei schwachen hart ab |
    | `APP_BIND_IP` | siehe unten, der am leichtesten übersehene Wert |
    | `WEB_HTTP_PORT` | `8021` bestätigen (die Portadresse des Portals) |
-   | `WEB_HTTPS_PORT`, `PMA_PORT` | stehen lassen; ohne sie startet der Stack nicht, auch wenn HTTPS noch aus ist und phpMyAdmin nicht läuft |
+   | `WEB_HTTPS_PORT`, `PMA_PORT` | stehen lassen; ohne sie startet der Stack nicht, auch wenn HTTPS noch aus ist und phpMyAdmin nicht läuft. `PMA_PORT` ist der Port, auf dem phpMyAdmin **auf dem Host** erreichbar ist, nicht der Datenbankport |
    | `DB_NAME`, `DB_USER`, `DB_HOST`, `DB_PORT` | unverändert übernehmen; MySQL legt die Datenbank daraus an |
-   | `APP_PUBLIC_BASE_URL`, `SSL_SUBJECT` | auf den echten Hostnamen oder die IP setzen, siehe unten |
+   | `APP_PUBLIC_BASE_URL` | auf den echten Hostnamen oder die IP setzen, siehe unten |
 
    **`APP_BIND_IP` ist der Schritt, der am leichtesten übersehen wird.** Der
    Vorlagenwert ist `127.0.0.1`, und damit bindet der Webserver ausschließlich an
@@ -111,7 +111,7 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
    Betrieb also die LAN-Adresse des Hosts eintragen (oder `0.0.0.0` für alle
    Interfaces) und in Schritt 4 von einem **anderen** Rechner aus prüfen.
 
-   `APP_PUBLIC_BASE_URL` und `SSL_SUBJECT` tragen in der Vorlage den
+   `APP_PUBLIC_BASE_URL` trägt in der Vorlage den
    Beispielhostnamen `virtusphere.lan`. Dieser Name ist nicht dekorativ: der
    Ansible-Host baut daraus seine Rückrufadresse für die MAC-Meldung. Er muss im
    DNS des Deploy-Netzes auflösbar sein, sonst läuft der Deploy sauber durch und
