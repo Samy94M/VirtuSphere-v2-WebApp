@@ -13,8 +13,50 @@
 #
 # vmware_guest_powerstate: benutzt von startVMs-ESXi_playbook.yml und
 # powercycleVMs-ESXi_playbook.yml. Der Nachfolger liegt in vmware.vmware 2.9.0,
-# die als Abhaengigkeit des Pins mitinstalliert wird. Portiert wird, sobald der
-# Power-Pfad gegen einen echten Host geprueft werden kann (ADR-0023/ADR-0025
-# verlangen das fuer ESXi-Feldpfade), nicht blind: die Probe beweist, dass ein
-# Modul laedt, nicht dass es dasselbe tut.
+# die als Abhaengigkeit des Pins mitinstalliert wird (community.vmware 6.x
+# verlangt vmware.vmware >= 2.5.0 und benutzt deren Code).
+#
+# Entschieden am 2026-07-26: erfasst, NICHT portiert. Die Fakten dazu, damit die
+# Entscheidung beim naechsten Mal nicht neu recherchiert werden muss:
+#
+#  - Kein Zeitdruck. Deprecated in community.vmware 5.7.0, Entfernung erst in
+#    7.0.0; neueste Version ist 6.2.1, ein 7.0.0 existiert nicht, und die
+#    6.x-Linie ist laut Maintenance-Tabelle bis November 2027 maintained.
+#  - Es gibt KEINEN Migrationsleitfaden. Weder Collection hat eine
+#    Porting-Tabelle; das einzige Signal ist die warning_text-Zeile in
+#    meta/runtime.yml.
+#  - Der tragende Grund gegen einen blinden Port: ansible-collections/
+#    vmware.vmware Issue #224 (offen seit 2025-08) meldet, dass das neue Modul
+#    hart scheitert, wenn eine VM eine offene vSphere-Frage hat und
+#    question_answers nicht gesetzt ist - und zwar VOR der changed=false-
+#    Abkuerzung. powercycleVMs laeuft gegen frisch erzeugte VMs, also genau die,
+#    die msg.uuid.altered ausloesen. Eine korrekt eingeschaltete VM wuerde dann
+#    fehlschlagen. Ohne ESXi-Host ist das nicht pruefbar: die Modulprobe beweist,
+#    dass ein Modul laedt, nicht was es tut.
+#
+# Was ein Port ausserdem mitbringen muesste (gepruefte Argumentspezifikation,
+# nicht geraten - jeder Punkt wurde im QA-Image gegen die installierte Collection
+# gefahren):
+#  - Alle zehn Parameter, die die beiden Playbooks uebergeben, akzeptiert das
+#    neue Modul unveraendert. Aber: datacenter ist dort required, und folder wird
+#    TRAGEND. Im Altmodul werden datacenter/folder nur bei Namensdubletten
+#    konsultiert; im neuen wird ein nicht leeres folder immer gegen datacenter
+#    aufgeloest. Unser `folder: "/"` loest zu <datacenter>/vm auf, was fuer einen
+#    Standalone-Host richtig ist (ha-datacenter/vm), aber ein falsches
+#    item.datacenter_name wird damit zum harten Fehler statt ignoriert.
+#  - state_change_timeout heisst timeout, Default 0 -> 3600, und gilt jetzt fuer
+#    JEDEN Zustand. 3600 s liegt UEBER dem SSH-Idle-Budget von 1800 s: ein
+#    haengender Power-Task wuerde vom Transport gekillt, statt einen sauberen
+#    Fehler pro VM zu melden. Ein Port muss timeout explizit unter das Budget
+#    setzen.
+#  - `present` (der alte Default) existiert nicht mehr; beide Playbooks uebergeben
+#    state explizit, sind also nicht betroffen.
+#  - powered-on/powered-off sind semantisch identisch (gleiche pyVmomi-Verben,
+#    gleiches force-Gate). shutdown-guest hat seine Bedeutung geaendert, wird von
+#    diesen beiden Playbooks aber nicht benutzt.
+#  - Der Port wuerde einen latenten Fehler BEHEBEN: mit `folder: "/"` scheitert
+#    das Altmodul hart an doppelten VM-Namen, weil "/" in seinem
+#    Disambiguierungszweig ausdruecklich abgelehnt wird.
+#  - Standalone-ESXi ist voll unterstuetzt; nur scheduled_at verlangt vCenter.
+#    Keine zusaetzliche Python-Bibliothek ueber pyvmomi + requests hinaus.
 vmware_guest_powerstate 7.0.0 vmware.vmware.vm_powerstate

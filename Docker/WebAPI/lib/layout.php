@@ -62,6 +62,13 @@ function portal_error_message(Throwable $exception): string
         // running deploy works on: missions.php renders Delete for every mission
         // and vms.php for every row, both regardless of a running job.
         'Mission has an active deploy job.' => 'layout.err_mission_active_job',
+        // The retry button in the deploy list re-runs the enqueue gate, and that
+        // path has no form and therefore no sticky field error to carry the
+        // sentence. Both wordings are listed because the enqueue gate and the
+        // worker gate phrase the same condition differently; a map keyed on the
+        // exact string needs both, or one of them renders raw English.
+        'Mission datacenter is required: the selected ESXi credential does not report exactly one datacenter.' => 'layout.err_datacenter_unresolved',
+        'Mission datacenter is required: the ESXi credential of this job does not report exactly one datacenter.' => 'layout.err_datacenter_unresolved',
         // Two operators editing the same VM: the optimistic-locking guard in
         // repo_save_vm rejects the second save. Reachable by construction, so it
         // must speak the operator's language, not raw English.

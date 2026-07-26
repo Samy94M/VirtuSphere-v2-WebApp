@@ -58,6 +58,11 @@ return [
     // the refusal is hard (no implicit cancel), so nobody's running deploy is
     // ended as a side effect.
     'err_mission_active_job' => 'A deploy job for this mission is queued or running. Cancel it in the deploy list first; while it is open, nothing here can be deleted.',
+    // The retry button in the job list re-runs the same enqueue gate, but it has
+    // no form and therefore no field message. Without this entry the portal
+    // renders the raw English exception there. The sentence names both causes,
+    // because the retry path does not know which of the two applies.
+    'err_datacenter_unresolved' => 'The datacenter cannot be determined: the mission has none and the selected ESXi credential does not report exactly one (no inventory yet, or several). Set the datacenter on the mission, or refresh the inventory under System status.',
     'err_db_generic' => 'The database could not save the action. Please check your input.',
     'err_action_failed' => 'The action could not be completed.',
 ];

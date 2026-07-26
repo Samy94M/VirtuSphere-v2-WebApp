@@ -11,7 +11,7 @@ Hard constraints: the portal must stay LAN-only, server-rendered and read-only t
 
 ## Decision
 
-**Read-only inventory as system deploy jobs.** A new mission-less deploy mode `inventory` runs a read-only playbook (`inventoryESXi_playbook.yml`, only community.vmware `*_info`/`*_facts` modules) through the existing deploy worker on a separate branch, so the deploy path is untouched. The maintenance worker enqueues a pull per ESXi credential on an interval (`esxi_inventory_interval_hours`, default 6, 0 = off); saving a credential triggers an immediate pull; a manual refresh button exists on the system status page. Results land in `deploy_esxi_inventory` (per credential+kind) and a `deploy_esxi_inventory_state` row tracks the fetch health. The cache is **source-of-truth-is-ESXi, cache-is-mirror**: it only feeds display and warnings, never a block.
+**Read-only inventory as system deploy jobs.** A new mission-less deploy mode `inventory` runs a read-only playbook (`inventoryESXi_playbook.yml`, only community.vmware `*_info`/`*_facts` modules) through the existing deploy worker on a separate branch, so the deploy path is untouched. The maintenance worker enqueues a pull per ESXi credential on an interval (`esxi_inventory_interval_hours`, default 6, 0 = off); saving a credential triggers an immediate pull; a manual refresh button exists on the system status page. Results land in `deploy_esxi_inventory` (per credential+kind) and a `deploy_esxi_inventory_state` row tracks the fetch health. The cache is **source-of-truth-is-ESXi, cache-is-mirror**: no *judgement* about a value is ever taken from it, and it never blocks on an assumption. The one thing it does gate is a **missing required value** it is the default source for, namely the mission datacenter (see the location chain below and Amendment 4, which draws the line).
 
 **Never destructive.** Writes are per-(credential,kind) atomic replaces with an **empty-result guard** (a successful fetch returning 0 items keeps the existing rows) and case-insensitive de-duplication. Atomicity is the repo function's own responsibility (`repo_transaction()`), not the caller's: a committed empty middle between the DELETE and the INSERTs would read to the VLAN sync as proof that the host lost its portgroups. Failed fetches are classified into `VIRTUSPHERE_INVENTORY_ERROR_*` and never count as an absence proof. An **auth failure pauses** the auto-pull until the credential is changed (lockout protection); there is no auto-retry on auth errors. A credential deletion cascades only its cache rows; mission/VM fields are name-strings and are never touched.
 
@@ -172,3 +172,41 @@ argument spec read for months as "this host has no portgroups".
   previously showed none at all. A never-pulled credential is named at the field
   with a link to its System-status card, so the free-text dead end this ADR
   accepted knowingly is explained where it is met.
+
+## Amendment (2026-07-26): completed inventory jobs remain diagnosable
+
+- **The fetch state points to the exact job that produced it.**
+  `deploy_esxi_inventory_state.last_job_id` is a relationship, not a copied
+  status or log: `deploy_jobs` and `deploy_job_logs` remain authoritative. The
+  worker writes it together with success or failure, and migration 0029 only
+  backfills a retained job whose credential, outcome, inventory mode and narrow
+  completion window all match the existing state.
+- **The System-status card owns navigation for mission-less jobs.** Queued and
+  running pulls keep their active link; the latest completed pull is linked as
+  well, including success, because a green aggregate does not prove that every
+  optional query returned data. The shared `deploy_job_log_url()` builder owns
+  the viewer route, and the log viewer returns mission-less jobs to their exact
+  credential card rather than to an empty mission queue.
+- **Retention removes the relation atomically.** The foreign key uses
+  `ON DELETE SET NULL`, so purging a system job cannot leave a dead link. A
+  retained old failure without a job shows a retention explanation and asks for
+  a new pull; it never promises an unavailable log.
+- **A reaped pull is a fetch failure.** When a running inventory job loses its
+  heartbeat, the reaper records the `worker` error category and that job id in
+  the same durable state. Otherwise the active link would disappear while the
+  card could keep an older green result.
+
+## Amendment 4 (2026-07-26): "never a block" and the four refusals, reconciled
+
+The Decision above opened with "never a block" and, twelve lines later, mandated two refusals derived from the same table. Read literally, the two contradict each other, and a reader could take either as the rule. The refusals are correct; the sentence was too absolute. The distinction it was missing:
+
+**A cache-derived judgement needs a fresh fact, or it does not happen.** Refusing a job because of something the cache *claims about the host* is a decision made on possibly stale data, so it requires a successful, fresh pull. `esxi_autostart_preflight()` implements exactly that: `$fresh && $facts['license_free']` blocks, `$fresh && $facts['in_ha_cluster']` skips, and a stale or absent fact returns `ok` with a log line saying ESXi remains the authority. This is the rule "never a block" was written for, and it holds.
+
+**A missing required value is a different question.** The mission datacenter is mandatory for the generated `serverlist.yml`; the cache is only the place the portal looks to fill it in when the mission leaves it empty. Refusing to queue a job for which no datacenter resolves is not a judgement about the host, it is a required field with no value. Three gates do it (portal, enqueue, worker) because the cache can change between queueing and the run.
+
+Two things follow, and both are decided here rather than left to reading:
+
+- **A value the cache does not know is never a refusal.** A mission datacenter that is stored but absent from the cached list renders a warning, never a block, and a mission that carries a datacenter does not consult the cache at all. There is therefore no "the cache contradicts the mission" refusal anywhere, and none should be added: the cache is a mirror, and a mirror that has not been polished lately is not evidence.
+- **Letting the deploy run instead would be worse, not more consistent.** Checked against the pinned collection and Broadcom's own documentation: a standalone ESXi host has exactly one datacenter, it is always `ha-datacenter`, and `vmware_guest` hardcodes that name as its parameter default, so on this product's target topology the derivation succeeds as soon as one pull has worked. Dropping the gate would move the error from a sentence in the form to a `No datacenter named  was found` after a job was queued, dispatched and logged in, with `--check` validating nothing on the way. And "let the API reject it" is demonstrably unreliable on the very task this project runs: a wrong *datastore* is never null-checked on that code path, the raw string reaches `CreateVM_Task`, and the operator gets an unhandled pyVmomi exception instead of a message. The successor collection `vmware.vmware` validates every named object explicitly with an opt-in `fail_on_missing`, which is the same shape as this pre-check, one layer down.
+
+`docs/operations/esxi-inventory.md` said a refusal "always" requires a fresh successful pull. That is true of the capability refusal and precisely false of the datacenter one; it now says which is which.
