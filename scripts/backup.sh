@@ -3,7 +3,10 @@
 #
 # Schreibt pro Lauf drei Dateien nach Docker/backups/ (gitignored):
 #   1. db-<ts>.sql.gz        — komplette MySQL (alle DBs, Routines, Events, Trigger)
-#   2. config-<ts>.tar.gz    — .env, docker-compose.yml, nginx-Konfiguration/SSL
+#   2. config-<ts>.tar.gz    — .env, docker-compose.yml, docker-compose.override.yml
+#                              (falls vorhanden; host-spezifisch und nicht in Git,
+#                              aber ohne sie startet der Produktionsstack nicht),
+#                              nginx-Konfiguration/SSL
 #   3. manifest-<ts>.sha256  — SHA-256-Hashes beider Archive; der Restore-Drill
 #                              (scripts/restore_test.sh) verifiziert sie vor dem
 #                              Einspielen, ein Backup ohne Manifest ist fuer den
@@ -210,6 +213,13 @@ db_bytes=$size
 config_file="$BACKUP_DIR/config-$ts.tar.gz"
 config_items="docker-compose.yml"
 [ -f .env ] && config_items="$config_items .env"
+# docker-compose.override.yml ist host-spezifisch und NICHT in Git. Genau deshalb
+# muss es hier mit: der Produktionshost braucht es zum Starten (Subnetz-Pin, damit
+# der Docker-Bridge das SSH nicht abschneidet, geleerte Proxy-Umgebung je Service),
+# und ein Restore ohne diese Datei bringt den Stack nicht hoch, obwohl beide
+# Archive intakt sind. Bedingt, damit ein Dev-Host ohne Override weiter ein
+# gueltiges Archiv erzeugt.
+[ -f docker-compose.override.yml ] && config_items="$config_items docker-compose.override.yml"
 [ -d Docker/nginx/conf.d ] && config_items="$config_items Docker/nginx/conf.d"
 [ -d Docker/nginx/ssl ] && config_items="$config_items Docker/nginx/ssl"
 # shellcheck disable=SC2086

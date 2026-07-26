@@ -63,3 +63,9 @@ Docker/WebAPI/.infection-cache/
 # Python bytecode from local test runs
 __pycache__/
 *.pyc
+
+# Host-spezifische Compose-Ergaenzung (Subnetz-Pin, Proxy-Umgebung, Log-Rechte).
+# Nicht versioniert, weil sie pro Host anders aussieht - dafuer liegt sie im
+# Config-Archiv von scripts/backup.sh, denn der Produktionsstack startet ohne sie
+# nicht (ADR-0017, Nachtrag 3).
+docker-compose.override.yml

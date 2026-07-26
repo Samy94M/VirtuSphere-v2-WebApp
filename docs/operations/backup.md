@@ -3,9 +3,11 @@
 VirtuSphere schreibt pro Lauf zwei Dateien nach `Docker/backups/` (gitignored):
 
 1. `db-<ts>.sql.gz`: kompletter MySQL-Dump (alle Datenbanken, Routines, Events, Trigger, `--single-transaction`).
-2. `config-<ts>.tar.gz`: `.env`, `docker-compose.yml`, nginx-Konfiguration und (falls vorhanden) SSL-Material.
+2. `config-<ts>.tar.gz`: `.env`, `docker-compose.yml`, `docker-compose.override.yml` (falls vorhanden), nginx-Konfiguration und (falls vorhanden) SSL-Material.
 
-Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt) und Laufzeit-Logs.
+Die Override-Datei ist host-spezifisch und nicht in Git, und genau deshalb liegt sie im Archiv: der Produktionshost braucht sie zum Starten (Subnetz-Pin, damit die Docker-Bridge das SSH nicht abschneidet, geleerte Proxy-Umgebung je Service). Ein Restore ohne sie bringt den Stack nicht hoch, obwohl beide Archive intakt sind.
+
+Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte der Log-Verzeichnisse**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen, sonst kann der Fehlerhandler nicht schreiben (Begruendung in `docs/operations/go-live.md`, Schritt 1a).
 
 ## Backup ausführen
 
@@ -91,17 +93,19 @@ Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind st
    ```sh
    gunzip -c Docker/backups/db-<ts>.sql.gz | docker exec -i virtusphere-v2-webapp-mysql-1 mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
    ```
-5. Konfiguration bei Bedarf aus `config-<ts>.tar.gz` zurückspielen, dann `docker compose up -d`.
+5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen und erst dann `docker compose up -d`. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die Rechte läuft er, kann aber nicht protokollieren (siehe `go-live.md`, Schritt 1a).
 6. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
 ## Was deckt das Backup ab, was kommt aus Git
 
-Für wechselndes Adminpersonal: der DB-Dump erfasst automatisch jede neue Tabelle und Spalte, der Config-Tar die Betriebskonfiguration; alles andere ist versionierter Code aus Git.
+Für wechselndes Adminpersonal: der DB-Dump erfasst automatisch jede neue Tabelle und Spalte, der Config-Tar die Betriebskonfiguration einschließlich der host-spezifischen Override-Datei. Alles andere ist versionierter Code aus Git **mit einer Ausnahme**: die Rechte der Log-Verzeichnisse sind Hostzustand und stehen in keinem Archiv.
 
 | Bereich | Quelle im Restore |
 |---|---|
 | Missionen, VMs, Interfaces, Disks, Pakete, Deploy-Jobs (inkl. `scheduled_at`/`group_id`), ESXi-Inventar-Cache, VLAN-Katalog, VM-Hotplug-Flags, alle `deploy_settings` (Zeitzone, Intervalle) | DB-Dump (`--all-databases`) |
 | `.env`, `docker-compose.yml` (inkl. Status-Mount), nginx-Konfiguration/SSL | Config-Tar |
+| `docker-compose.override.yml` (host-spezifisch, nicht in Git; Produktionshost startet ohne sie nicht) | Config-Tar, falls auf dem Host vorhanden |
+| Rechte der Log-Verzeichnisse (`0777`) | **kein Archiv**; nach dem Restore per `chmod` setzen, siehe `go-live.md` Schritt 1a |
 | Playbooks, PHP-Code, CSS, Hilfe-Texte, Migrationen | Git |
 | ESXi-Inventar-Cache | selbstheilend, der nächste Pull baut ihn neu |
 | `backup-status.jsonl` | Metadaten, nicht gesichert |

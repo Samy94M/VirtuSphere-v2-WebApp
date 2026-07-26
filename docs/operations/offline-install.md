@@ -94,9 +94,12 @@ chmod 0777 virtusphere/Docker/WebAPI/logs virtusphere/Docker/logs/nginx
 ```
 
 Auf einem echten Linux-Host außerdem eine lokale `docker-compose.override.yml`
-für das Netz-Subnetz und die Proxy-Variablen. Diese Datei ist gitignored, liegt
-also **nicht** im Bundle und **nicht** im Backup: sie gehört in die
-Host-Dokumentation, sonst startet der Stack nach einem Neuaufbau nicht.
+für das Netz-Subnetz und die Proxy-Variablen (Begründung und Inhalt in
+`docs/operations/go-live.md`, Schritt 1a). Diese Datei ist gitignored und liegt
+deshalb **nicht** im Bundle: sie beschreibt diesen einen Host, nicht das Produkt.
+Sobald sie einmal existiert, nimmt `scripts/backup.sh` sie ins Config-Archiv auf,
+und der Restore-Drill prüft, dass der archivierte Compose-Satz auflösbar ist. Beim
+**ersten** Aufbau eines Hosts gibt es sie noch nicht, also hier von Hand anlegen.
 
 ## Schritt 6: Stack starten und Migrationen
 

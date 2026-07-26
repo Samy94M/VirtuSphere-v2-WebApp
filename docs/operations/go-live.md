@@ -141,7 +141,11 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 Auf Docker Desktop (Entwicklung) treten diese drei nicht auf, auf einem nackten
 Linux-Host schon. Der Fix lebt in einer lokalen `docker-compose.override.yml`
 (gitignored, nicht im Repo) plus einem `chmod`; ohne ihn startet der Stack nicht
-oder die SSH-Sitzung friert ein.
+oder die SSH-Sitzung friert ein. Die Override-Datei ist ab ihrem ersten Bestehen
+Teil des Config-Archivs von `scripts/backup.sh`, denn ein Restore ohne sie bringt
+genau diesen Host nicht hoch. Der `chmod` ist es **nicht**: Verzeichnisrechte sind
+Hostzustand, den kein Archiv trägt, und deshalb steht er in
+`docs/operations/backup.md` als Restore-Schritt.
 
 1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` (PHP als uid 33) und
    `Docker/logs/nginx` müssen für den Container-User schreibbar sein. Gehören sie

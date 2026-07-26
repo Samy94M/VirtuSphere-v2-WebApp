@@ -93,6 +93,36 @@ fi
 
 # --- 3. .env aus dem Config-Archiv lesen ---------------------------------------
 tar -xzf "$config" -C "$WORKDIR" .env 2>/dev/null || fail "Config-Archiv enthaelt kein .env."
+
+# --- 3a. Der archivierte Compose-Satz muss fuer sich stehen ---------------------
+#
+# Der Drill prueft Hashes, Rechte und die Datenbank; dass die archivierte
+# Konfiguration einen Stack HOCHBRINGT, hat er nie geprueft. Genau daran ist der
+# Befund vorbeigelaufen: docker-compose.override.yml fehlte im Archiv, beide
+# Archive waren intakt, und ein Restore auf dem Produktionshost haette nicht
+# starten koennen (das Subnetz-Pin dort verhindert, dass die Docker-Bridge das SSH
+# abschneidet). `config --quiet` ist die billigste Frage, die das beantwortet: es
+# loest Interpolation und Struktur auf, ohne etwas zu starten.
+tar -xzf "$config" -C "$WORKDIR" docker-compose.yml 2>/dev/null \
+  || fail "Config-Archiv enthaelt kein docker-compose.yml."
+# Der Docker-CLI ist unter Git-Bash ein Windows-Programm und liest /tmp/... als
+# C:\tmp\..., waehrend MSYS_NO_PATHCONV=1 die Uebersetzung abschaltet. $WORKDIR ist
+# die erste Stelle, die einen mktemp-Pfad an docker uebergibt, also braucht sie die
+# Host-Form - dieselbe Idiom wie $REPO_MOUNT oben. Ohne das meldet der Drill
+# "couldn't find env file" und damit einen Befund, den es nicht gibt.
+workdir_host="$(cd "$WORKDIR" && pwd -W 2>/dev/null || echo "$WORKDIR")"
+compose_args="-f $workdir_host/docker-compose.yml"
+override_present="nein"
+if tar -tzf "$config" | grep -qx 'docker-compose.override.yml'; then
+  tar -xzf "$config" -C "$WORKDIR" docker-compose.override.yml 2>/dev/null \
+    || fail "Config-Archiv listet docker-compose.override.yml, entpacken schlug fehl."
+  compose_args="$compose_args -f $workdir_host/docker-compose.override.yml"
+  override_present="ja"
+fi
+# shellcheck disable=SC2086
+docker compose $compose_args --env-file "$workdir_host/.env" config --quiet \
+  || fail "Der archivierte Compose-Satz laesst sich nicht aufloesen; ein Restore daraus wuerde nicht starten."
+echo "OK: archivierter Compose-Satz aufloesbar (Override im Archiv: $override_present)"
 env_value() {
   grep -E "^$1=" "$WORKDIR/.env" | head -n 1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
 }
