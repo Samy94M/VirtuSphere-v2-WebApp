@@ -204,6 +204,15 @@ echo 'SEEDED';
     // Internal services are ours and keep their instruction: a never-started
     // container really can be started.
     await expect(page.locator('#internal-services')).toHaveCount(1);
+    // BOTH internal workers have a row. The deploy worker had none at all, so a
+    // stopped one left this page fully green above a queue that had stopped
+    // moving; a browser is the only place that absence is visible.
+    await expect(
+      page.locator('#internal-services article.status-row').filter({ hasText: /Wartungsdienst|Maintenance service/ }),
+    ).toHaveCount(1);
+    await expect(
+      page.locator('#internal-services article.status-row').filter({ hasText: /Bereitstellungsdienst|Deploy service/ }),
+    ).toHaveCount(1);
   } finally {
     restoreHeartbeats(snapshot);
   }

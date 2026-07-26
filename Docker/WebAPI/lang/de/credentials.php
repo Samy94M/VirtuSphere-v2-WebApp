@@ -7,7 +7,9 @@ return [
     'create_heading' => 'Zugangsdaten anlegen',
     'scope_hint' => 'Hier werden ausschließlich verschlüsselte Ansible- und ESXi-Konten gespeichert.',
     'mecm_scope_hint' => 'MECM verwendet keine Zugangsdaten aus dieser Liste, sondern IP-Freigaben und optional den Report-Token.',
-    'mecm_scope_link' => 'MECM-Einstellungen öffnen',
+    // Der Link führt in die Machine-API-Einstellungen des Portals, nicht auf den
+    // MECM-Server: das Label nennt deshalb das Ziel, nicht das fremde System.
+    'mecm_scope_link' => 'Machine-API-Einstellungen im Portal öffnen',
     'ansible_scope_hint' => 'Ein Ansible-Eintrag hier ist der SSH-Zugang zum Ausführungs-Host. Die API-Basis-URL ist eine separate Rückadresse, kein alternativer Zugang; beim Deploy werden beide gemeinsam verwendet.',
     'ansible_scope_link' => 'Deploy-Einstellungen ansehen',
     'stored_heading' => 'Gespeicherte Zugangsdaten',
@@ -46,6 +48,8 @@ return [
     'test_esxi_invalid_ansible' => 'Der gewählte Ansible-Zugang ist nicht mehr gültig. Bitte die Auswahl in den Einstellungen korrigieren.',
     'test_esxi_failed' => 'Der Inventar-Abruf konnte nicht eingereiht werden.',
     'test_esxi_action' => 'Ergebnis oder Konfiguration öffnen',
+    'test_action_allowlist' => 'IP-Freigaben öffnen',
+    'test_action_api_base_url' => 'Deploy-Einstellungen öffnen',
     'test_hint' => 'Ansible-Tests und ESXi-Inventarabrufe zeigen Ergebnis und Zeitpunkt dauerhaft im Systemstatus:',
     'test_hint_link' => 'Systemstatus',
     'status_never' => 'noch nie',
@@ -58,5 +62,8 @@ return [
     'cadence_esxi_off' => 'kein automatischer Abruf (Intervall 0)',
     'cadence_esxi_paused' => 'pausiert, kein automatischer Abruf',
     'cadence_esxi_no_ansible' => 'kein automatischer Abruf, kein Ansible-Zugang gewählt',
+    // Der Abruf ist ein Bereitstellungsauftrag: ohne laufenden Deploy-Dienst wird
+    // er eingereiht und nie ausgeführt.
+    'cadence_esxi_no_worker' => 'kein automatischer Abruf, der Bereitstellungsdienst läuft nicht',
     'cadence_manual' => 'nur auf Klick, :days Tage gültig',
 ];

@@ -58,6 +58,11 @@ function maintenance_worker_main(array $argv): int
             }
             fwrite(STDERR, '[maintenance-worker] Database error, reconnecting: ' . $exception->getMessage() . "\n");
             $db = maintenance_worker_connect_db($options);
+            // Sleep before retrying: `continue` skipped it, so a PERMANENT SQL
+            // error turned this loop into a hot spin that reconnected and failed
+            // thousands of times a second while the portal said nothing. Same
+            // defect as in the deploy worker's loop.
+            sleep((int) $options['sleep']);
             continue;
         }
         if ($options['once']) {

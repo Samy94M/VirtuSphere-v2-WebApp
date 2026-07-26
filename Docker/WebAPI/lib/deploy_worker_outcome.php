@@ -24,6 +24,69 @@ final class DeployWorkerCancelled extends RuntimeException
 }
 
 /**
+ * The deploy worker's own System status row: it reports that it is alive, and how
+ * deep its queue is.
+ *
+ * It had no traffic light at all. Its only liveness signal was a tmpfs file for
+ * the container healthcheck, which the PHP container cannot read, so a stopped or
+ * crash-looping worker left the page fully green above a queue that had stopped
+ * moving. The operator saw "everything ok" and a job sitting at `queued` forever,
+ * with nothing anywhere connecting the two.
+ *
+ * The queue depth and the age of the oldest waiting job are the two numbers that
+ * make the row actionable: a live worker with a growing queue and a dead worker
+ * with a growing queue look identical without them.
+ *
+ * Throttled to the reported interval, because the loop wakes every few seconds
+ * and the staleness thresholds are multiples of what is reported here.
+ */
+function deploy_worker_report_alive(mysqli $db, bool $ok = true, ?string $failureDetail = null): void
+{
+    static $lastReportedAt = 0;
+
+    $now = time();
+    if ($ok && $lastReportedAt !== 0 && ($now - $lastReportedAt) < VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS) {
+        return;
+    }
+    $lastReportedAt = $now;
+
+    try {
+        $detail = $failureDetail ?? deploy_worker_queue_detail($db);
+        repo_record_worker_result($db, VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER, VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS, $ok, $detail);
+    } catch (Throwable $exception) {
+        // The report is never allowed to break the worker: a job in flight matters
+        // more than its own status row.
+        fwrite(STDERR, '[deploy-worker] status report failed: ' . $exception->getMessage() . "\n");
+    }
+}
+
+/**
+ * "queue: N waiting, oldest 12 min" - the sentence the row needs to be worth
+ * reading. Without the age, a queue of one that has been waiting since yesterday
+ * looks like a queue of one that arrived a second ago.
+ */
+function deploy_worker_queue_detail(mysqli $db): string
+{
+    $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $row = repo_fetch_one(
+        $db,
+        'SELECT COUNT(*) AS waiting, TIMESTAMPDIFF(MINUTE, MIN(created_at), NOW()) AS oldest_minutes FROM deploy_jobs WHERE status = ? AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP())',
+        's',
+        [$queued]
+    ) ?? [];
+    $active = (int) repo_scalar($db, 'SELECT COUNT(*) FROM deploy_jobs WHERE status = ?', 's', [$running]);
+
+    $waiting = (int) ($row['waiting'] ?? 0);
+    $detail = 'queue: ' . $waiting . ' waiting, ' . $active . ' running';
+    if ($waiting > 0) {
+        $detail .= ', oldest ' . (int) ($row['oldest_minutes'] ?? 0) . ' min';
+    }
+
+    return $detail;
+}
+
+/**
  * Stops the worker as soon as the job in front of it is no longer its own to
  * finish. There are four states and only one was checked:
  *

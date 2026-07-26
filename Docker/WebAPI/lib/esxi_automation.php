@@ -21,16 +21,25 @@ require_once __DIR__ . '/deploy_constants.php';
  * @param bool $ansibleHostSelected esxi_inventory_ansible_resolution() resolved
  *        a host. Without one the pull has nothing to run over and is not even
  *        attempted, so no timestamp moves either.
+ * @param bool $deployWorkerAlive The deploy worker reported in within its
+ *        staleness window. The pull is a deploy JOB: the maintenance worker only
+ *        enqueues it, the deploy worker runs it. Without a worker the job sits
+ *        `queued` forever while the cadence line promises a cycle - the same
+ *        defect the cadence line exists to prevent, one component over. Defaults
+ *        to true so a caller that genuinely cannot know does not invent a blocker.
  * @return string|null One of VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS, or null when
  *         nothing stops the credential from being enqueued on its cycle.
  */
-function esxi_inventory_automation_blocker(int $intervalHours, ?array $esxiState, bool $ansibleHostSelected): ?string
+function esxi_inventory_automation_blocker(int $intervalHours, ?array $esxiState, bool $ansibleHostSelected, bool $deployWorkerAlive = true): ?string
 {
     if ($intervalHours <= 0) {
         return VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF;
     }
     if (!$ansibleHostSelected) {
         return VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST;
+    }
+    if (!$deployWorkerAlive) {
+        return VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER;
     }
     if ($esxiState !== null && (int) ($esxiState['paused_until_credential_change'] ?? 0) === 1) {
         return VIRTUSPHERE_ESXI_AUTOMATION_PAUSED;

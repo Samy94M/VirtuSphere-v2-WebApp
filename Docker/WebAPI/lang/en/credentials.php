@@ -7,7 +7,9 @@ return [
     'create_heading' => 'Create credential',
     'scope_hint' => 'Only encrypted Ansible and ESXi accounts are stored here.',
     'mecm_scope_hint' => 'MECM does not use credentials from this list; it uses IP allowlisting and optionally the report token.',
-    'mecm_scope_link' => 'Open MECM settings',
+    // The link opens the portal's machine API settings, not anything on the MECM
+    // server: the label names the destination, not the foreign system.
+    'mecm_scope_link' => 'Open machine API settings in the portal',
     'ansible_scope_hint' => 'An Ansible entry here is the SSH credential for the execution host. The API base URL is a separate callback address, not an alternative credential; a deploy uses both together.',
     'ansible_scope_link' => 'View deploy settings',
     'stored_heading' => 'Stored credentials',
@@ -46,6 +48,8 @@ return [
     'test_esxi_invalid_ansible' => 'The selected Ansible credential is no longer valid. Correct the selection under Settings.',
     'test_esxi_failed' => 'The inventory pull could not be queued.',
     'test_esxi_action' => 'Open result or configuration',
+    'test_action_allowlist' => 'Open IP allowlist',
+    'test_action_api_base_url' => 'Open deploy settings',
     'test_hint' => 'Ansible tests and ESXi inventory pulls keep their result and timestamp in System status:',
     'test_hint_link' => 'System status',
     'status_never' => 'never',
@@ -58,5 +62,8 @@ return [
     'cadence_esxi_off' => 'no automatic pull (interval 0)',
     'cadence_esxi_paused' => 'paused, no automatic pull',
     'cadence_esxi_no_ansible' => 'no automatic pull, no Ansible credential selected',
+    // The pull is a deploy job: without a running deploy service it is queued and
+    // never executed.
+    'cadence_esxi_no_worker' => 'no automatic pull, the deploy service is not running',
     'cadence_manual' => 'on click only, valid for :days days',
 ];

@@ -10,6 +10,43 @@ declare(strict_types=1);
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/helpers.php';
 
+/**
+ * Records an internal worker's own result. Same row as the MECM sources, but the
+ * status is the RUN's outcome instead of a fixed `ok`.
+ *
+ * The maintenance worker wrote its heartbeat at the START of a pass, with a
+ * hardcoded 'loop ok'. So a pass that threw on every single cycle kept the row
+ * fresh and green: the one component whose job is to notice that other things are
+ * stuck reported health it had not established. The heartbeat belongs at the END
+ * of the pass, and it belongs to the outcome.
+ *
+ * $ok false writes VIRTUSPHERE_HEARTBEAT_STATUS_FAIL, which the traffic light
+ * treats as red immediately, ahead of any staleness rule.
+ */
+function repo_record_worker_result(mysqli $db, string $source, int $intervalSeconds, bool $ok, ?string $detail = null): void
+{
+    $stmt = $db->prepare('INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count, last_event)
+        VALUES (?, ?, NOW(), ?, ?, ?, ?, 1, ?)
+        ON DUPLICATE KEY UPDATE
+            last_seen_at = IF(VALUES(last_status) = ?, NOW(), last_seen_at),
+            last_checked_at = NOW(),
+            last_status = VALUES(last_status),
+            last_detail = VALUES(last_detail),
+            last_ip = VALUES(last_ip),
+            interval_seconds = VALUES(interval_seconds),
+            beat_count = beat_count + 1,
+            last_event = VALUES(last_event)');
+    // last_seen_at means "last SUCCESSFUL contact" for every other source, so a
+    // failing pass must not refresh it; last_checked_at carries the attempt.
+    $status = $ok ? VIRTUSPHERE_HEARTBEAT_STATUS_OK : VIRTUSPHERE_HEARTBEAT_STATUS_FAIL;
+    $seenAt = $ok ? date('Y-m-d H:i:s') : null;
+    $ip = 'cli';
+    $event = VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
+    $okStatus = VIRTUSPHERE_HEARTBEAT_STATUS_OK;
+    $stmt->bind_param('sssssiss', $source, $seenAt, $status, $detail, $ip, $intervalSeconds, $event, $okStatus);
+    $stmt->execute();
+}
+
 function repo_touch_integration_heartbeat(mysqli $db, string $source, string $ip, int $intervalSeconds, ?string $detail = null): void
 {
     // last_event is reset to 'heartbeat' so a sync task that once reported V2

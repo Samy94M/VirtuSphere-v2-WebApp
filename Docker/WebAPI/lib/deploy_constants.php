@@ -196,10 +196,18 @@ const VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES = [
 // interval or the missing Ansible host has already stopped.
 const VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF = 'interval_off';
 const VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST = 'no_ansible_host';
+// A dead deploy worker stops the cycle as thoroughly as a switched-off interval:
+// the pull is a deploy JOB, so the maintenance worker enqueues it and the deploy
+// worker executes it. With no deploy worker the job is queued and nothing runs
+// it, while the cadence line promised a cycle. Ranked ahead of the per-credential
+// pause and behind the two global settings, in fix order: un-pausing one
+// credential cannot start a cycle that has no executor.
+const VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER = 'no_deploy_worker';
 const VIRTUSPHERE_ESXI_AUTOMATION_PAUSED = 'paused';
 const VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS = [
     VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF,
     VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST,
+    VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER,
     VIRTUSPHERE_ESXI_AUTOMATION_PAUSED,
 ];
 

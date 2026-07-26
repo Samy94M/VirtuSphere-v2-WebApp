@@ -57,6 +57,7 @@ function deploy_worker_main(array $argv): int
     do {
         worker_heartbeat_touch();
         try {
+            deploy_worker_report_alive($db);
             $claimed = deploy_worker_run_once($db, $workerId, $options);
         } catch (mysqli_sql_exception $exception) {
             if ($options['once']) {
@@ -64,6 +65,14 @@ function deploy_worker_main(array $argv): int
             }
             fwrite(STDERR, '[deploy-worker] Database error, reconnecting: ' . $exception->getMessage() . "\n");
             $db = deploy_worker_connect_db($options);
+            // Sleep before retrying. `continue` used to skip it, so a PERMANENT
+            // SQL error (a dropped grant, a full disk, a schema mismatch) turned
+            // the loop into a hot spin: it reconnected and failed thousands of
+            // times a second, filling the log and pinning a core, and nothing in
+            // the portal said anything at all. The reconnect helper waits on its
+            // own attempts, but a successful reconnect followed by a failing query
+            // never reached it.
+            sleep((int) $options['sleep']);
             continue;
         }
         if ($options['once']) {

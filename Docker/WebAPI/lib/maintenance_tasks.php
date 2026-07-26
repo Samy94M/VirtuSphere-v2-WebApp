@@ -34,55 +34,116 @@ function maintenance_worker_due(array &$state, string $job, int $intervalSeconds
     return true;
 }
 
+/**
+ * One maintenance pass.
+ *
+ * The self-heartbeat used to be the FIRST thing in here, with a hardcoded
+ * 'loop ok'. A pass that threw on every cycle therefore kept its own row fresh
+ * and green: the one component whose job is to notice that other things are stuck
+ * reported health it had not established, and the operator had no way to see that
+ * the retention purges, the job reaper and the VM convergence sweep had all
+ * stopped running. It is at the END now (see the finally below) and it carries
+ * what actually happened.
+ *
+ * A failing individual job does not abort the pass - the others are independent
+ * and must still run - but it does make the pass's verdict a failure.
+ */
 function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = false): void
 {
-    if (maintenance_worker_due($state, 'self-heartbeat', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, $force)) {
-        repo_touch_integration_heartbeat($db, VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE, 'cli', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, 'loop ok');
-    }
+    $failures = [];
+    $heartbeatDue = maintenance_worker_due($state, 'self-heartbeat', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, $force);
 
-    if (maintenance_worker_due($state, 'retention', VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS, $force)) {
-        $purged = repo_purge_client_events($db);
-        // Portal audit log, pruned per category (ADR-0026): security categories
-        // keep a year, everything else a quarter.
-        $purgedLogs = removeLog($db);
-        // The login-attempt table is a 15-minute lockout counter, not an archive;
-        // every attempt is also on the auth audit channel. Left unpruned it grew
-        // without bound (it had no purge before). Its own short window (ADR-0026),
-        // deliberately shorter than the audit windows.
-        $purgedAttempts = repo_purge_login_attempts($db);
-        $purgedPackages = repo_purge_retired_packages($db);
-        $purgedOs = repo_purge_retired_os($db);
-        // Streamed playbook output of FINISHED jobs, and the finished inventory
-        // jobs themselves. Both grew without bound: the interval pull writes one
-        // job per credential every few hours, each with its own output. The
-        // system-job delete cascades the log rows it owns.
-        $purgedJobLogs = repo_purge_deploy_job_logs($db);
-        $purgedSystemJobs = repo_purge_finished_system_jobs($db);
-        if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs > 0) {
-            fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . " finished system jobs\n");
+    try {
+        maintenance_worker_run_jobs($db, $state, $force, $failures);
+    } finally {
+        if ($heartbeatDue) {
+            repo_record_worker_result(
+                $db,
+                VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
+                VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS,
+                $failures === [],
+                $failures === [] ? 'loop ok' : 'failed jobs: ' . implode(', ', $failures)
+            );
         }
+    }
+}
+
+/**
+ * The pass's individual jobs. Each one records its own failure and lets the rest
+ * continue: they are independent, and a broken retention purge must not stop the
+ * job reaper.
+ *
+ * @param list<string> $failures
+ */
+function maintenance_worker_run_jobs(mysqli $db, array &$state, bool $force, array &$failures): void
+{
+    if (maintenance_worker_due($state, 'retention', VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS, $force)) {
+        maintenance_worker_job('retention', $failures, static function () use ($db): void {
+            $purged = repo_purge_client_events($db);
+            // Portal audit log, pruned per category (ADR-0026): security categories
+            // keep a year, everything else a quarter.
+            $purgedLogs = removeLog($db);
+            // The login-attempt table is a 15-minute lockout counter, not an archive;
+            // every attempt is also on the auth audit channel. Left unpruned it grew
+            // without bound (it had no purge before). Its own short window (ADR-0026),
+            // deliberately shorter than the audit windows.
+            $purgedAttempts = repo_purge_login_attempts($db);
+            $purgedPackages = repo_purge_retired_packages($db);
+            $purgedOs = repo_purge_retired_os($db);
+            // Streamed playbook output of FINISHED jobs, and the finished inventory
+            // jobs themselves. Both grew without bound: the interval pull writes one
+            // job per credential every few hours, each with its own output. The
+            // system-job delete cascades the log rows it owns.
+            $purgedJobLogs = repo_purge_deploy_job_logs($db);
+            $purgedSystemJobs = repo_purge_finished_system_jobs($db);
+            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs > 0) {
+                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . " finished system jobs\n");
+            }
+        });
     }
 
     if (maintenance_worker_due($state, 'deploy-job-reap', VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS, $force)) {
-        maintenance_worker_reap_deploy_jobs($db);
+        maintenance_worker_job('deploy-job-reap', $failures, static function () use ($db): void {
+            maintenance_worker_reap_deploy_jobs($db);
+        });
     }
 
     if (maintenance_worker_due($state, 'deploy-vm-sweep', VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS, $force)) {
-        maintenance_worker_sweep_deploying_vms($db);
+        maintenance_worker_job('deploy-vm-sweep', $failures, static function () use ($db): void {
+            maintenance_worker_sweep_deploying_vms($db);
+        });
     }
 
     if (maintenance_worker_due($state, 'esxi-inventory', VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS, $force)) {
-        try {
+        maintenance_worker_job('esxi-inventory', $failures, static function () use ($db): void {
             $enqueued = esxi_inventory_enqueue_due($db);
             if ($enqueued > 0) {
                 fwrite(STDOUT, '[maintenance-worker] enqueued ' . $enqueued . " ESXi inventory job(s)\n");
             }
-        } catch (Throwable $exception) {
-            fwrite(STDERR, '[maintenance-worker] ESXi inventory scheduling failed: ' . $exception->getMessage() . "\n");
-        }
+        });
     }
 
-    maintenance_worker_audit_transitions($db, $state);
+    maintenance_worker_job('audit-transitions', $failures, static function () use ($db, &$state): void {
+        maintenance_worker_audit_transitions($db, $state);
+    });
+}
+
+/**
+ * Runs one maintenance job and records its name if it throws, without stopping
+ * the pass. The jobs are independent, so a broken retention purge must not keep
+ * the deploy-job reaper from running; but the pass's verdict is a failure, and
+ * that is what reaches the System status row.
+ *
+ * @param list<string> $failures
+ */
+function maintenance_worker_job(string $name, array &$failures, callable $work): void
+{
+    try {
+        $work();
+    } catch (Throwable $exception) {
+        $failures[] = $name;
+        fwrite(STDERR, '[maintenance-worker] job ' . $name . ' failed: ' . $exception->getMessage() . "\n");
+    }
 }
 
 // Second reaper (AP6): the deploy worker reaps only at its own loop start, so
@@ -92,13 +153,10 @@ function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = fa
 // (heartbeat check plus MAC-aware VM convergence) on its own interval.
 function maintenance_worker_reap_deploy_jobs(mysqli $db): void
 {
-    try {
-        $reaped = deploy_worker_reap_stale_jobs($db);
-    } catch (Throwable $exception) {
-        fwrite(STDERR, '[maintenance-worker] deploy job reaping failed: ' . $exception->getMessage() . "\n");
-
-        return;
-    }
+    // Deliberately no local catch any more: maintenance_worker_job() reports the
+    // failure AND makes it the pass's verdict. Swallowing it here logged to stderr
+    // and left the System status row green, which is the defect one level up.
+    $reaped = deploy_worker_reap_stale_jobs($db);
     if ($reaped > 0) {
         fwrite(STDOUT, '[maintenance-worker] reaped ' . $reaped . " stale deploy job(s)\n");
     }
@@ -112,13 +170,9 @@ function maintenance_worker_reap_deploy_jobs(mysqli $db): void
 // the repo sweep records.
 function maintenance_worker_sweep_deploying_vms(mysqli $db): void
 {
-    try {
-        $swept = repo_sweep_orphaned_deploying_vms($db);
-    } catch (Throwable $exception) {
-        fwrite(STDERR, '[maintenance-worker] deploy VM convergence sweep failed: ' . $exception->getMessage() . "\n");
-
-        return;
-    }
+    // Same reasoning as the reaper: the pass's wrapper owns the failure, so it
+    // reaches the traffic light instead of only stderr.
+    $swept = repo_sweep_orphaned_deploying_vms($db);
     if ($swept === []) {
         return;
     }

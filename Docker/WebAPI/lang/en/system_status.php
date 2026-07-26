@@ -26,10 +26,14 @@ return [
     'source_autoimporter' => 'MECM package import (autoimporter)',
     'source_mecm_site_health' => 'MECM site health',
     'source_maintenance_worker' => 'Maintenance service (portal)',
+    'source_deploy_worker' => 'Deploy service (portal)',
     'action_device_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Devices Sync" must be running (restart if needed).',
     'action_packages_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Packages Sync" must be running (restart if needed).',
     'action_autoimporter' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Package Import" must be running (restart if needed).',
     'action_maintenance_worker' => 'Internal maintenance service is not running: check "docker compose ps" on the portal host and restart the maintenance-worker service.',
+    // Without this service every job stays "waiting", including the ESXi
+    // inventory pull, which runs as a job.
+    'action_deploy_worker' => 'Deploy service is not running: while it stands still every job stays waiting and the ESXi inventory is not pulled either. Check "docker compose ps" on the portal host and restart the deploy-worker service.',
     'open_logs' => 'Open MECM log entries',
     'legend_heading' => 'Legend',
     'legend_intro' => 'Every traffic light on this page uses the same colours with the same meaning; only the wording per area differs.',
@@ -52,6 +56,7 @@ return [
     'inv_refresh_failed' => ':count failed.',
     'inv_never' => 'no successful fetch yet',
     'inv_paused' => 'paused until credentials change',
+    'inv_open_credentials' => 'Open credentials',
     'inv_th_datacenters' => 'Datacenters',
     'inv_th_networks' => 'Portgroups',
     'inv_th_datastores' => 'Datastores',

@@ -286,6 +286,13 @@ const VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC = 'packages-sync';
 const VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER = 'autoimporter';
 const VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH = 'mecm-site-health';
 const VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE = 'maintenance-worker';
+// The deploy worker had no traffic light at all. Its only liveness signal was a
+// tmpfs file for the container healthcheck, which the PHP container cannot read,
+// so a stopped or crash-looping worker left the System status page fully green
+// above a deploy queue that had stopped moving: the operator saw "everything ok"
+// and a job sitting at `queued` forever. It writes into the same table as the
+// MECM tasks now, directly (never over the wire), like the maintenance worker.
+const VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER = 'deploy-worker';
 
 // Legacy heartbeat wire sources: the three sync tasks whose older versions may
 // still call action=heartbeat. Result reports (action=reportRun) additionally
@@ -317,6 +324,7 @@ const VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES = [
 ];
 const VIRTUSPHERE_INTEGRATION_INTERNAL_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
+    VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER,
 ];
 
 // Stable fragment targets used by settings, credentials, dashboard, help and
@@ -366,6 +374,7 @@ const VIRTUSPHERE_INTEGRATION_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
     VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH,
     VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
+    VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER,
 ];
 
 const VIRTUSPHERE_HEARTBEAT_STATUS_OK = 'ok';
@@ -515,6 +524,12 @@ const VIRTUSPHERE_DEPLOY_WORKER_SLEEP_SECONDS = 5;
 const VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS = 15;
 const VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS = 60;
 const VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS = 3600;
+// The deploy worker's heartbeat cadence for the System status row. Deliberately
+// not its sleep interval: it sleeps every few seconds and would write hundreds
+// of rows an hour, while the staleness thresholds are multiples of the reported
+// interval and would go red for a worker that is merely busy inside one long
+// playbook. This is the same order as the MECM tasks, so the row reads the same.
+const VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS = 60;
 
 // Container liveness heartbeat (AP8): both loop workers touch this file on
 // every loop iteration, on every DB-reconnect attempt and on every transport

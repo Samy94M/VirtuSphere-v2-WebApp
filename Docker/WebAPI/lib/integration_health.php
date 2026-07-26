@@ -107,6 +107,46 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
             'state' => $esxiWorst,
             'interval_hours' => $intervalHours,
             'ansible_selected' => esxi_inventory_ansible_resolution($db)['credential_id'] !== null,
+            // The fourth input of esxi_inventory_automation_blocker(). The pull is
+            // a deploy JOB, so a dead deploy worker stops the cycle as thoroughly
+            // as a switched-off interval, and the cadence line must say so instead
+            // of promising a cycle nobody drives.
+            'deploy_worker_alive' => integration_deploy_worker_alive($bySource),
         ],
     ];
+}
+
+/**
+ * Whether the deploy worker's own status row is currently healthy.
+ *
+ * Reads the state the page already derived rather than re-deriving staleness:
+ * the row and the cadence line have to agree, and two derivations of "stale" is
+ * exactly how they would drift apart. A missing row (a stack that never ran the
+ * worker) counts as not alive, because nothing has ever proven otherwise.
+ *
+ * @param array<string, array{source:string,row:array|null,state:string}> $bySource
+ */
+function integration_deploy_worker_alive(array $bySource): bool
+{
+    $entry = $bySource[VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER] ?? null;
+    if ($entry === null || ($entry['row'] ?? null) === null) {
+        return false;
+    }
+
+    return in_array((string) $entry['state'], ['ok', 'legacy'], true);
+}
+
+/**
+ * The same answer for a page that needs only this one fact and not a whole
+ * snapshot (the Credentials list). Reuses repo_integration_status_rows(), so the
+ * staleness derivation stays single-sourced.
+ */
+function integration_deploy_worker_alive_now(mysqli $db, ?int $now = null): bool
+{
+    $bySource = [];
+    foreach (repo_integration_status_rows($db, $now ?? time()) as $row) {
+        $bySource[(string) $row['source']] = $row;
+    }
+
+    return integration_deploy_worker_alive($bySource);
 }

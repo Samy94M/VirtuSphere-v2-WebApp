@@ -26,10 +26,14 @@ return [
     'source_autoimporter' => 'MECM Paket-Import (Autoimporter)',
     'source_mecm_site_health' => 'MECM Site-Health',
     'source_maintenance_worker' => 'Wartungsdienst (Portal)',
+    'source_deploy_worker' => 'Bereitstellungsdienst (Portal)',
     'action_device_sync' => 'Auf dem MECM-Server die Aufgabenplanung prüfen: Task „VirtuSphere MECM Devices Sync" muss laufen (ggf. neu starten).',
     'action_packages_sync' => 'Auf dem MECM-Server die Aufgabenplanung prüfen: Task „VirtuSphere MECM Packages Sync" muss laufen (ggf. neu starten).',
     'action_autoimporter' => 'Auf dem MECM-Server die Aufgabenplanung prüfen: Task „VirtuSphere MECM Package Import" muss laufen (ggf. neu starten).',
     'action_maintenance_worker' => 'Interner Wartungsdienst läuft nicht: auf dem Portal-Server „docker compose ps" prüfen und den Dienst maintenance-worker neu starten.',
+    // Ohne diesen Dienst bleibt jeder Auftrag auf „Wartend" stehen, auch der
+    // ESXi-Inventarabruf, der als Auftrag läuft.
+    'action_deploy_worker' => 'Bereitstellungsdienst läuft nicht: solange er stillsteht, bleibt jeder Auftrag wartend und auch das ESXi-Inventar wird nicht abgerufen. Auf dem Portal-Server „docker compose ps" prüfen und den Dienst deploy-worker neu starten.',
     'open_logs' => 'MECM-Logeinträge öffnen',
     'legend_heading' => 'Legende',
     'legend_intro' => 'Alle Ampeln auf dieser Seite nutzen dieselben Farben mit derselben Bedeutung; nur die Worte je Bereich unterscheiden sich.',
@@ -52,6 +56,7 @@ return [
     'inv_refresh_failed' => ':count fehlgeschlagen.',
     'inv_never' => 'noch kein erfolgreicher Abruf',
     'inv_paused' => 'pausiert bis Zugangsdaten geändert',
+    'inv_open_credentials' => 'Zugangsdaten öffnen',
     'inv_th_datacenters' => 'Datacenter',
     'inv_th_networks' => 'Portgruppen',
     'inv_th_datastores' => 'Datastores',

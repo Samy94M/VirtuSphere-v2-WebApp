@@ -14,6 +14,9 @@ require_once __DIR__ . '/../lib/credentials_status.php';
 require_once __DIR__ . '/../lib/credentials_test_message.php';
 require_once __DIR__ . '/../lib/ssh.php';
 require_once __DIR__ . '/../lib/system_status.php';
+// The cadence line needs to know whether the deploy worker is alive; that answer
+// lives with the other health derivations so both pages read one of them.
+require_once __DIR__ . '/../lib/integration_health.php';
 
 /**
  * Testing an ESXi credential means pulling its inventory over the Ansible host:
@@ -146,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 [$flashType, $flashMessage, $enqueue] = credentials_test_esxi($connection, $id, (int) $user['id']);
                 audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested ESXi inventory pull for credential id ' . $id . ' (' . ($enqueue['reason'] ?? 'queued') . ')' . (isset($enqueue['job_id']) ? '; job id ' . $enqueue['job_id'] : ''), (int) $user['id']);
                 $actionUrl = in_array(($enqueue['reason'] ?? ''), ['ambiguous_ansible_credential', 'invalid_ansible_credential', 'no_ansible_credential'], true)
-                    ? 'settings.php#panel-catalog'
+                    ? settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)
                     : system_status_url('credential-' . $id, ['inventory' => $id]);
                 flash_set($flashType, $flashMessage, '', [
                     'url' => $actionUrl,
@@ -171,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // the system-status detail then says what broke instead of a dash.
                 // The allowlist verdict rides the same slot: it is the check that
                 // raised the warning, not a broken component.
-                $isAllowlistWarning = $result['ok'] && $result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST;
+                $isAllowlistWarning = credentials_test_is_allowlist_warning($result);
                 $failedComponent = ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP || $isAllowlistWarning)
                     ? $result['code']
                     : (string) ($result['context']['component'] ?? '');
@@ -203,7 +206,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($result['ok']) {
                     $flashType = $isAllowlistWarning ? 'warning' : 'success';
                 }
-                flash_set($flashType, credentials_test_message($result), $detail);
+                // Same shape as the ESXi branch above: a result whose fix lives on
+                // another page carries the way there.
+                flash_set($flashType, credentials_test_message($result), $detail, credentials_test_action($result));
             }
         }
     } catch (ValidationException $exception) {
@@ -225,6 +230,10 @@ $inventoryIntervalHours = esxi_inventory_interval_hours($connection);
 // Global, so it is resolved once: without a usable Ansible host the scheduler
 // has nothing to run the pull over and enqueues nothing for any credential.
 $ansibleHostSelected = esxi_inventory_ansible_resolution($connection)['credential_id'] !== null;
+// The cadence line on this page and the one on System status must name the same
+// blocker, so both read the same fourth input: without a live deploy worker the
+// inventory pull is enqueued and never executed.
+$deployWorkerAlive = integration_deploy_worker_alive_now($connection);
 // One clock for the whole table, like the System status snapshot: both badges
 // are age-derived, so two rows recorded at the same instant must not land on
 // opposite sides of a threshold because their time() calls differed by a second.
@@ -237,8 +246,8 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
     <section class="panel">
         <h2><?php echo h(__t('credentials.create_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('credentials.scope_hint')); ?></p>
-        <p class="muted"><?php echo h(__t('credentials.mecm_scope_hint')); ?> <a href="settings.php#panel-machine-api"><?php echo h(__t('credentials.mecm_scope_link')); ?></a></p>
-        <p class="muted"><?php echo h(__t('credentials.ansible_scope_hint')); ?> <a href="settings.php#panel-deploy"><?php echo h(__t('credentials.ansible_scope_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.mecm_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('credentials.mecm_scope_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.ansible_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY)); ?>"><?php echo h(__t('credentials.ansible_scope_link')); ?></a></p>
         <form class="form-grid" method="post" action="credentials.php" autocomplete="off">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">

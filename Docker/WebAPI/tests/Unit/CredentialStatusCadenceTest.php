@@ -80,6 +80,41 @@ final class CredentialStatusCadenceTest extends TestCase
         );
     }
 
+    public function testADeadDeployWorkerStopsTheCycleForEveryCredential(): void
+    {
+        // The pull is a deploy JOB: the maintenance worker enqueues it, the deploy
+        // worker runs it. With no worker the job sits `queued` forever, so a line
+        // promising a cycle would be exactly the defect this line exists against.
+        self::assertSame(
+            __t('credentials.cadence_esxi_no_worker'),
+            credential_cadence_esxi(self::HOURS, $this->esxiState(), true, false)
+        );
+    }
+
+    public function testADeadWorkerDoesNotOutrankAGlobalSetting(): void
+    {
+        // Fix order: restarting the worker cannot start a cycle whose interval is
+        // off or whose Ansible host is missing, so those two are named first.
+        self::assertSame(
+            __t('credentials.cadence_esxi_off'),
+            credential_cadence_esxi(0, $this->esxiState(), true, false)
+        );
+        self::assertSame(
+            __t('credentials.cadence_esxi_no_ansible'),
+            credential_cadence_esxi(self::HOURS, $this->esxiState(), false, false)
+        );
+    }
+
+    public function testADeadWorkerOutranksAPerCredentialPause(): void
+    {
+        // The other direction: un-pausing one credential does nothing while there
+        // is no executor at all, so the worker is the one to fix first.
+        self::assertSame(
+            __t('credentials.cadence_esxi_no_worker'),
+            credential_cadence_esxi(self::HOURS, $this->esxiState(['paused_until_credential_change' => 1]), true, false)
+        );
+    }
+
     public function testEveryBlockerTheSchedulerKnowsHasASentence(): void
     {
         // The SSoT is VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS, which the scheduler
@@ -90,6 +125,7 @@ final class CredentialStatusCadenceTest extends TestCase
         $reached = [
             credential_cadence_esxi(0, $this->esxiState(), true),
             credential_cadence_esxi(self::HOURS, $this->esxiState(), false),
+            credential_cadence_esxi(self::HOURS, $this->esxiState(), true, false),
             credential_cadence_esxi(self::HOURS, $this->esxiState(['paused_until_credential_change' => 1]), true),
         ];
         self::assertCount(

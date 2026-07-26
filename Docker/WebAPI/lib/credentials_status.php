@@ -40,14 +40,17 @@ require_once __DIR__ . '/esxi_automation.php';
  * @param array<string, mixed>|null $esxiState Inventory state row, or null when
  *        the credential was never pulled (which is not the same as paused).
  * @param bool $ansibleHostSelected Result of esxi_inventory_ansible_resolution().
+ * @param bool $deployWorkerAlive The deploy worker's status row is not stale. The
+ *        pull is a deploy job, so without a worker it is enqueued and never runs.
  */
-function credential_cadence_esxi(int $intervalHours, ?array $esxiState, bool $ansibleHostSelected): string
+function credential_cadence_esxi(int $intervalHours, ?array $esxiState, bool $ansibleHostSelected, bool $deployWorkerAlive = true): string
 {
-    $blocker = esxi_inventory_automation_blocker($intervalHours, $esxiState, $ansibleHostSelected);
+    $blocker = esxi_inventory_automation_blocker($intervalHours, $esxiState, $ansibleHostSelected, $deployWorkerAlive);
     if ($blocker !== null) {
         return match ($blocker) {
             VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF => __t('credentials.cadence_esxi_off'),
             VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST => __t('credentials.cadence_esxi_no_ansible'),
+            VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER => __t('credentials.cadence_esxi_no_worker'),
             VIRTUSPHERE_ESXI_AUTOMATION_PAUSED => __t('credentials.cadence_esxi_paused'),
             default => throw new LogicException('Unknown ESXi inventory automation blocker: ' . $blocker),
         };

@@ -10,6 +10,7 @@ require_once __DIR__ . '/backup_status.php';
 require_once __DIR__ . '/portal_sort.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/layout_modals.php';
+require_once __DIR__ . '/settings_page.php';
 
 // A double submit must not stack the same alert twice, and a queue that is
 // never rendered (redirect chains) must not grow without bound.
@@ -382,7 +383,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
                             echo '<div class="alert ' . h(backup_status_alert_class($backupState)) . '">'
                                 . '<strong>' . h(__t('dashboard.backup_banner_title')) . '</strong> '
                                 . h($backupMessage)
-                                . ' <a href="settings.php#panel-backup">' . h(__t('dashboard.backup_banner_link')) . '</a>'
+                                . ' <a href="' . h(settings_url('backup')) . '">' . h(__t('dashboard.backup_banner_link')) . '</a>'
                                 . '</div>';
                         }
                     }
@@ -608,6 +609,7 @@ function integration_source_label(string $source): string
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.source_autoimporter'),
         VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH => __t('system_status.source_mecm_site_health'),
         VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.source_maintenance_worker'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => __t('system_status.source_deploy_worker'),
         default => $source,
     };
 }
@@ -619,6 +621,7 @@ function integration_action_hint(string $source): string
         VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.action_packages_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.action_autoimporter'),
         VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.action_maintenance_worker'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => __t('system_status.action_deploy_worker'),
         default => '',
     };
 }
