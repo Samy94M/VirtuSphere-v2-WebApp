@@ -5,10 +5,11 @@
     Erstinstallation der VirtuSphere-MECM-Integration auf dem MECM-Server.
 
 .DESCRIPTION
-    Schreibt die Konfiguration in die Registry, legt Verzeichnisse an, kopiert
-    die Sync-Skripte nach %ProgramFiles%\VirtuSphere\mecm, registriert die vier
-    geplanten Aufgaben (SYSTEM, hoechste Rechte, beim Systemstart, ohne
-    Laufzeitlimit) und verifiziert die Erstinstallation.
+    Schreibt die Konfiguration in die Registry, legt Verzeichnisse an, beendet
+    laufende Aufgaben, kopiert die Sync-Skripte nach
+    %ProgramFiles%\VirtuSphere\mecm, registriert die vier geplanten Aufgaben
+    (SYSTEM, hoechste Rechte, ohne Profil, beim Systemstart UND stuendlich,
+    ohne Laufzeitlimit) und verifiziert die Erstinstallation.
 
     Idempotent: erneutes Ausfuehren aktualisiert Konfiguration und Skripte; die
     vier Intervalle behalten dabei ihren eingestellten Wert, wenn der jeweilige
@@ -359,6 +360,46 @@ try {
     Remove-Item -Path $localProbe -Force -ErrorAction SilentlyContinue
 }
 
+# Die Aufgabenliste steht VOR dem Kopieren, weil die laufenden Instanzen erst
+# beendet werden muessen (siehe unten) und beides denselben Namen braucht.
+$tasks = @(
+    @{ Name = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
+    @{ Name = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
+    @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
+    @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
+)
+
+# --- Laufende Aufgaben VOR dem Kopieren beenden -----------------------------
+#
+# Die Skripte sind Endlosschleifen und dot-sourcen VirtuSphere-Common.ps1 nur
+# einmal beim Start. Ein Re-Run, der die Dateien unter einer laufenden Instanz
+# austauscht, laesst diese Instanz mit dem ALTEN Common weiterlaufen, waehrend
+# die neue Registry-Konfiguration schon da ist: eine Aufgabe, die eine gerade
+# eingefuehrte Wire-Aenderung nicht kennt, meldet weiter im alten Format, und
+# die Systemstatus-Seite zeigt einen frisch installierten Stand, der nicht
+# laeuft. Ausserdem haelt eine laufende Instanz die .ps1 nicht offen, aber die
+# Logdatei: Copy-Item scheitert nicht, das Ergebnis ist nur unbestimmt.
+# Stoppen ist hier immer richtig, weil unten jede Aufgabe neu gestartet wird.
+Write-Step 'Beende laufende Aufgaben'
+foreach ($task in $tasks) {
+    $existing = Get-ScheduledTask -TaskName $task.Name -ErrorAction SilentlyContinue
+    if (-not $existing) { continue }
+    if ($existing.State -eq 'Running') {
+        try {
+            Stop-ScheduledTask -TaskName $task.Name -ErrorAction Stop
+            Write-Ok ("Aufgabe beendet: {0}" -f $task.Name)
+        } catch {
+            # Kein Abbruch: der Neustart unten setzt die Aufgabe ohnehin neu auf.
+            # Die Warnung sagt aber, dass die alte Instanz kurz weiterlaufen kann.
+            Write-Warn ("Aufgabe '{0}' liess sich nicht beenden: {1}" -f $task.Name, $_.Exception.Message)
+        }
+    }
+}
+# Der Scheduler meldet 'Ready' bevor der powershell.exe-Prozess weg ist. Ohne
+# diese kurze Wartezeit kopieren wir in genau das Fenster hinein, das wir
+# gerade geschlossen haben.
+Start-Sleep -Seconds 2
+
 $sourceDir = Join-Path $PSScriptRoot 'mecm'
 Copy-Item -Path (Join-Path $sourceDir '*.ps1') -Destination $installDir -Force
 Write-Ok "Skripte nach $installDir kopiert"
@@ -377,18 +418,26 @@ if (Test-Path (Join-Path $templateSource 'install.ps1')) {
 
 # --- Geplante Aufgaben ------------------------------------------------------
 Write-Step 'Registriere geplante Aufgaben'
-$tasks = @(
-    @{ Name = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
-    @{ Name = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
-    @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
-    @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
-)
 # Auch der Task-Principal verwendet die sprachunabhaengige SYSTEM-SID.
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 foreach ($task in $tasks) {
     $scriptFile = Join-Path $installDir $task.Script
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-ExecutionPolicy Bypass -NonInteractive -File "{0}"' -f $scriptFile)
-    $trigger = New-ScheduledTaskTrigger -AtStartup
+    # -NoProfile: die Aufgaben laufen als SYSTEM, und ein Profilskript unter
+    # SYSTEM (AllUsersAllHosts) ist Fremdcode im Sync-Prozess. Es kann eine
+    # Kodierung, eine PSModulePath oder ein $ErrorActionPreference setzen, das
+    # die Skripte nicht erwarten, und es kostet bei jedem Start Zeit. Ein
+    # unbeaufsichtigter Dienst laedt kein Profil.
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -NonInteractive -File "{0}"' -f $scriptFile)
+    # Zwei Trigger, nicht einer. -AtStartup allein hiess: nach den drei
+    # Neustartversuchen (-RestartCount 3) ist die Aufgabe bis zum naechsten
+    # Reboot tot, und ein MECM-Server bootet selten. Der Ausfall sieht dann
+    # aus wie eine stille Integration, nicht wie ein Fehler. Der zweite
+    # Trigger holt sie stuendlich zurueck; -MultipleInstances IgnoreNew
+    # sorgt dafuer, dass er nichts tut, solange die Aufgabe laeuft.
+    $triggers = @(
+        (New-ScheduledTaskTrigger -AtStartup)
+        (New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1))
+    )
     # -MultipleInstances IgnoreNew ist der Doppelstart-Schutz (AP5): die
     # Skripte sind Endlosschleifen, eine zweite Instanz wuerde denselben Sync
     # parallel fahren (doppelte Imports, konkurrierende Registry-Writes).
@@ -397,7 +446,7 @@ foreach ($task in $tasks) {
     $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     # Endlosschleifen: kein Laufzeitlimit (Standard 72h wuerde sie killen).
     $set.ExecutionTimeLimit = 'PT0S'
-    $definition = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $set -Description 'VirtuSphere MECM Integration'
+    $definition = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $set -Description 'VirtuSphere MECM Integration'
     Register-ScheduledTask -TaskName $task.Name -InputObject $definition -Force | Out-Null
     Start-ScheduledTask -TaskName $task.Name
     Write-Ok ("Aufgabe registriert und gestartet: {0}" -f $task.Name)

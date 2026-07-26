@@ -97,6 +97,9 @@ while ($true) {
     $scanWarnings = 0   # offene Punkte -> Stamp nicht merken, naechster Lauf wiederholt
     $unchanged = 0
     $sleepSeconds = $intervalSeconds
+    # Ursachen dieses Laufs mit Paket- und Ordnernamen; ohne sie zeigte die Karte
+    # "offene Punkte: 3" ohne ein einziges Paket zu nennen.
+    $causes = New-VsRunCauseList
 
     try {
         if (-not $siteCode) {
@@ -131,10 +134,15 @@ while ($true) {
             # Unveraendert: ein gelungener No-op-Lauf.
             $unchanged = 1
         } elseif (-not (Test-Path $basePath)) {
+            # Stamp NICHT merken. Er wurde gemerkt, also war der naechste Lauf
+            # "unveraendert" und meldete ok: ein fehlender Paketpfad war damit ab
+            # dem zweiten Durchlauf unsichtbar, obwohl nichts behoben war und
+            # nichts mehr importiert wurde. Ein Zustand, den niemand geheilt hat,
+            # muss weiter gemeldet werden.
             Write-VsLog -Level WARN -Message ("Paket-Pfad nicht gefunden: {0}" -f $basePath)
-            $lastFilesStamp = $stamp
             $outcome = 'warning'
             $category = 'source_missing'
+            Add-VsRunCause -Causes $causes -Cause 'package_source_missing' -Target $basePath
         } else {
             Write-VsLog -Message ("Aenderung erkannt - Scan #{0}." -f $loop)
 
@@ -143,7 +151,15 @@ while ($true) {
 
             foreach ($dir in @(Get-ChildItem -Path $basePath -Directory)) {
                 $cfg = Read-VsPackageConfig -Folder $dir.FullName
-                if (-not $cfg) { continue }
+                if (-not $cfg) {
+                    # Ein unlesbares oder unvollstaendiges config.json loggte WARN
+                    # und erhoehte keinen Zaehler: der Lauf blieb ok, der Stamp
+                    # wurde gemerkt, und der Ordner wurde nie wieder gescannt. Ein
+                    # Paket, das so nie entsteht, ist kein gelungener Lauf.
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_config_invalid' -Target $dir.Name
+                    continue
+                }
                 $folders++
 
             $appName = [string]$cfg.ProjectName
@@ -181,26 +197,36 @@ while ($true) {
                     } catch {
                         Write-VsLog -Level WARN -Context $old -Message ("Alt-Version nicht vollstaendig entfernt - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
                         $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $old
                     }
                 }
             }
 
             # --- Application anlegen (falls neu) ---------------------------
             $isNew = -not (Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue)
+            # --- Self-Healing der install.ps1 (bei JEDEM Scan) -----------------
+            #
+            # Nicht mehr nur bei $isNew: die Vorlage gewinnt laut Vertrag, aber der
+            # $isNew-Zweig gab ihr genau einen Versuch. Ein Fehlschlag dort war
+            # endgueltig, weil die Application danach existierte. Wiederholt wird,
+            # solange der Inhalt abweicht, und ein Fehlschlag ist ein offener Punkt.
+            $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
+            $templateScript = Join-Path $templatePath 'install.ps1'
+            $packageScript = Join-Path $pkgFolder 'install.ps1'
+            if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
+                try {
+                    Copy-Item $templateScript -Destination $packageScript -Force -ErrorAction Stop
+                    Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen.'
+                } catch {
+                    Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_template_failed' -Target $fullName
+                }
+            }
+
             if ($isNew) {
                 Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
                 New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null
-
-                # Self-Healing: Standard-install.ps1 aus der Vorlage ueberschreibt
-                # bewusst die paketeigene Datei.
-                $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
-                if ((Test-Path (Join-Path $templatePath 'install.ps1')) -and (Test-Path (Join-Path $pkgFolder 'install.ps1'))) {
-                    try {
-                        Copy-Item (Join-Path $templatePath 'install.ps1') -Destination (Join-Path $pkgFolder 'install.ps1') -Force -ErrorAction Stop
-                    } catch {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert (Paket nutzt eigene Datei): {0}" -f $_.Exception.Message)
-                    }
-                }
 
                 $registryDetection = "SOFTWARE\VirtuSphere\Packages\{0}-{1}" -f $appName, $version
                 $dtParams = @{
@@ -246,19 +272,40 @@ while ($true) {
             # Laeuft auch fuer bestehende Apps und heilt damit fruehere
             # Teilfehler (App vorhanden, aber Collection/Deployment fehlt).
             if ("$($cfg.generateOwnDeviceColletion)" -eq 'true') {
-                if (-not (Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue)) {
+                $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
+                if (-not $collection) {
                     New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -ErrorAction SilentlyContinue | Out-Null
                     Start-Sleep -Seconds 2
-                    Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue | Move-CMObject -FolderPath $collectionOrgFolder -ErrorAction SilentlyContinue | Out-Null
+                    $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
+                }
+                # Das Verschieben wird WIEDERHOLT, nicht nur beim Anlegen versucht.
+                # Es lief unter SilentlyContinue genau einmal; scheiterte es, lag
+                # die Collection dauerhaft im Wurzelordner. Der Paket-Sync liest
+                # aber genau VirtuSphere_Applications als Katalogquelle, also fehlte
+                # das Paket dauerhaft im Portal, obwohl in MECM alles da war.
+                if ($collection -and -not (Test-VsInOrgFolder -Collection $collection -FolderPath $collectionOrgFolder)) {
+                    try {
+                        $collection | Move-CMObject -FolderPath $collectionOrgFolder -ErrorAction Stop | Out-Null
+                    } catch {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Collection nicht in '{0}' verschoben - Wiederholung im naechsten Durchlauf: {1}" -f $collectionOrgFolder, $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection $fullName
+                    }
                 }
 
-                if ($isNew) {
+                # Nicht mehr nur bei $isNew. Eine Application, deren erste
+                # Verteilung fehlschlug, wurde nie wieder verteilt: sie schlaegt
+                # dann auf JEDEM Client fehl, waehrend die Karte gruen ist. Das
+                # Verteilen wird wiederholt, solange der Content nicht auf der
+                # DP-Gruppe liegt, und ein Fehlschlag ist ein offener Punkt.
+                if (-not (Test-VsContentDistributed -ApplicationName $fullName)) {
                     try {
                         Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
+                        Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
                     } catch {
-                        # Kein Retry (erneutes Verteilen bereits verteilter Inhalte
-                        # wirft selbst Fehler) - Verteilung dann manuell anstossen.
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - manuell verteilen (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
                     }
                 }
 
@@ -268,6 +315,7 @@ while ($true) {
                     } catch {
                         Write-VsLog -Level WARN -Context $fullName -Message ("Deployment fehlgeschlagen - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
                         $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName
                     }
                 }
             }
@@ -292,6 +340,7 @@ while ($true) {
                 Write-VsLog -Level WARN -Message ("Scan #{0} mit {1} offenen Punkten - Wiederholung im naechsten Intervall." -f $loop, $scanWarnings)
                 $outcome = 'warning'
                 $category = 'partial_failure'
+                $detail = Format-VsRunDetail -Causes $causes
             } else {
                 $lastFilesStamp = $stamp
             }

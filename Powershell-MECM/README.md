@@ -57,9 +57,17 @@ Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 | VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | aus `config.json`-Ordnern MECM-Applications erzeugen | 60 s |
 | VirtuSphere MECM Site Health | `mecm_site-health.ps1` | offiziellen MECM-Site-Zustand aus `SMS_SummarizerSiteStatus` melden | 300 s |
 
-Alle vier laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, Start beim Systemstart
-(`AtStartup`), Doppelstart-Schutz `MultipleInstances IgnoreNew`, **ohne
+Alle vier laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, ohne Profil
+(`-NoProfile`), Doppelstart-Schutz `MultipleInstances IgnoreNew`, **ohne
 Laufzeitlimit** (`PT0S`, Endlosschleifen) und mit Auto-Neustart bei Absturz.
+
+Jede Aufgabe hat **zwei** Trigger: `AtStartup` und eine stündliche
+Wiederholung. Mit dem Systemstart allein war eine Aufgabe nach ihren drei
+Neustartversuchen bis zum nächsten Reboot tot, und ein MECM-Server bootet
+selten: der Ausfall sah aus wie eine stille Integration. `IgnoreNew` sorgt
+dafür, dass der stündliche Trigger nichts tut, solange die Aufgabe läuft. Der
+Installer beendet laufende Aufgaben, bevor er die Skripte ersetzt, und startet
+sie danach neu.
 
 Die Intervalle sind Registry-owned (Installerparameter, Spalte oben = Standard)
 und je Aufgabe auf 5/10/30/60 s bis 3600 s begrenzt; die Spanne steht in

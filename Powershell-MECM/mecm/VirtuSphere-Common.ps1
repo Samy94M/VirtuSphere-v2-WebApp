@@ -494,11 +494,109 @@ $script:VsRunCauseVocabulary = @(
     'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
     'package_config_invalid',    # config.json unlesbar oder Pflichtfeld fehlt
     'package_content_failed',    # Content-Verteilung fehlgeschlagen
-    'package_source_missing'     # files-Pfad des Paketordners fehlt
+    'package_source_missing',    # files-Pfad des Paketordners fehlt
+    'package_deploy_failed',     # New-CMApplicationDeployment fehlgeschlagen
+    'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
+    'package_template_failed'    # Vorlagen-install.ps1 nicht ueberschrieben
 )
 
 function New-VsRunCauseList {
     return New-Object System.Collections.Generic.List[string]
+}
+
+# Ist der Content dieser Application schon verteilt?
+#
+# Die Frage entscheidet, ob der Autoimporter das Verteilen wiederholen darf. Er
+# tat es nur bei $isNew, also wurde eine Application, deren erste Verteilung
+# fehlschlug, nie wieder verteilt: sie schlaegt dann auf JEDEM Client fehl,
+# waehrend die Statuskarte gruen ist. Blind zu wiederholen geht nicht, weil
+# Start-CMContentDistribution fuer bereits verteilten Content selbst wirft.
+#
+# $true bei jeder Unsicherheit (Cmdlet fehlt, Abfrage wirft): dann wird NICHT
+# verteilt und der naechste Lauf fragt erneut. Ein falsches "noch nicht verteilt"
+# wuerde jeden Durchlauf einen Fehler erzeugen, den niemand beheben kann.
+#
+# Die Frage ist bewusst "ist der Content ueberhaupt verteilt", nicht "liegt er auf
+# genau dieser DP-Gruppe": Get-CMDistributionStatus liefert die Summe ueber alle
+# Verteilungspunkte, und die Gruppe steht darin nicht. Fuer die Installation, die
+# genau eine DP-Gruppe anlegt, ist beides dasselbe. Wer VirtuSphere-Content
+# spaeter zusaetzlich per Hand auf eine zweite Gruppe verteilt, unterdrueckt damit
+# die Wiederholung fuer die erste - das waere eine Abfrage ueber die
+# Gruppenmitglieder, die ohne MECM-Testumgebung nicht pruefbar ist, und ein
+# ungepruefter Blindflug ist hier schlechter als eine benannte Grenze.
+function Test-VsContentDistributed {
+    param(
+        [Parameter(Mandatory)][string]$ApplicationName
+    )
+    try {
+        $status = @(Get-CMDistributionStatus -Name $ApplicationName -ErrorAction Stop)
+    } catch {
+        Write-Debug $_
+        return $true
+    }
+    if (@($status).Count -eq 0) { return $false }
+
+    # Targeted > 0 heisst: die Verteilung ist mindestens angestossen. Ob sie
+    # fertig ist, entscheidet MECM selbst und ist hier nicht die Frage.
+    foreach ($entry in $status) {
+        if ([int]($entry.Targeted) -gt 0) { return $true }
+    }
+    return $false
+}
+
+# Liegt diese Collection schon im VirtuSphere-Ordner?
+#
+# Auch hier gilt Unsicherheit als "ja": ein wiederholtes Move-CMObject auf ein
+# Objekt, das schon dort liegt, ist harmlos, aber eine Fehlmeldung pro Durchlauf
+# ist es nicht. Der ObjectPath einer Collection traegt den Ordnerpfad OHNE
+# Site-Drive-Praefix, Move-CMObject erwartet ihn MIT - deshalb wird nur der
+# Ordnername verglichen.
+function Test-VsInOrgFolder {
+    param(
+        [Parameter(Mandatory)]$Collection,
+        [Parameter(Mandatory)][string]$FolderPath
+    )
+    try {
+        $current = [string]$Collection.ObjectPath
+    } catch {
+        Write-Debug $_
+        return $true
+    }
+    if ([string]::IsNullOrWhiteSpace($current)) { return $false }
+
+    $leaf = ($FolderPath -split '\\')[-1]
+    return ($current -like ('*' + $leaf))
+}
+
+# Traegt der Paketordner schon das Vorlagen-install.ps1?
+#
+# Das Self-Healing lief nur im $isNew-Zweig: schlug das Kopieren dort fehl (Datei
+# gesperrt, Share kurz weg), existierte die Application danach, der naechste
+# Durchlauf war also nicht mehr "neu", und die paketeigene install.ps1 blieb fuer
+# immer stehen - unter einer gruenen Karte, obwohl die Vorlage laut Vertrag
+# gewinnt. Verglichen wird der Inhalt, nicht das Datum: Copy-Item -Force setzt
+# die Zeitstempel, ein Hash-Vergleich beantwortet dagegen genau die Frage, ob
+# noch kopiert werden muss.
+#
+# Anders als bei den beiden Helfern oben gilt Unsicherheit hier als "nein":
+# ein erneutes Kopieren ist idempotent, und ein unlesbarer Hash ist selbst ein
+# offener Punkt, der gemeldet werden soll.
+function Test-VsTemplateScriptCurrent {
+    param(
+        [Parameter(Mandatory)][string]$TemplateFile,
+        [Parameter(Mandatory)][string]$PackageFile
+    )
+    if (-not (Test-Path $TemplateFile)) { return $true }   # keine Vorlage, nichts zu tun
+    if (-not (Test-Path $PackageFile)) { return $true }    # Paket bringt keine install.ps1 mit
+
+    try {
+        $template = (Get-FileHash -Path $TemplateFile -Algorithm SHA256 -ErrorAction Stop).Hash
+        $package = (Get-FileHash -Path $PackageFile -Algorithm SHA256 -ErrorAction Stop).Hash
+    } catch {
+        Write-Debug $_
+        return $false
+    }
+    return ($template -eq $package)
 }
 
 # Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
@@ -511,7 +609,8 @@ function Add-VsRunCause {
         [ValidateSet('mission_missing', 'mac_missing', 'mac_conflict', 'device_import_failed',
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',
             'collection_folder_failed', 'resource_id_pending', 'resource_update_failed',
-            'package_config_invalid', 'package_content_failed', 'package_source_missing')]
+            'package_config_invalid', 'package_content_failed', 'package_source_missing',
+            'package_deploy_failed', 'package_cleanup_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',
         [string]$Collection = ''

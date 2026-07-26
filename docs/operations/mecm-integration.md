@@ -541,7 +541,8 @@ MAC-Normalisierung, Site-Code- und SMS-Provider-Ermittlung, Site-Health-Abbildun
 Installation und Registrierung der geplanten Aufgaben erledigt
 `Powershell-MECM/install-VirtuSphere-MECM.ps1` (idempotent, siehe
 `Powershell-MECM/README.md`). Die vier registrierten Aufgaben laufen alle als
-`NT AUTHORITY\SYSTEM`, mit höchsten Rechten, `AtStartup`,
+`NT AUTHORITY\SYSTEM`, mit höchsten Rechten, ohne Profil (`-NoProfile`), mit
+zwei Triggern (`AtStartup` **und** stündliche Wiederholung),
 `MultipleInstances IgnoreNew` und ohne Laufzeitlimit (`ExecutionTimeLimit=PT0S`):
 
 | Aufgabe | Skript | Meldet an `reportRun` |
@@ -558,6 +559,17 @@ Wichtige Härtungen gegenüber den Altskripten:
 - **Kein Laufzeitlimit** für die Aufgaben (`ExecutionTimeLimit=PT0S`) plus
   Auto-Neustart – das Standard-72h-Limit hätte die Endlosschleifen sonst
   regelmäßig beendet.
+- **Zwei Trigger statt einem.** Mit `AtStartup` allein war eine Aufgabe nach
+  ihren drei Neustartversuchen bis zum nächsten Reboot tot, und ein MECM-Server
+  bootet selten: der Ausfall sah aus wie eine stille Integration. Der stündliche
+  Trigger holt sie zurück; `IgnoreNew` sorgt dafür, dass er nichts tut, solange
+  die Aufgabe läuft.
+- **`-NoProfile`.** Die Aufgaben laufen als SYSTEM, und ein Profilskript unter
+  SYSTEM ist Fremdcode im Sync-Prozess (Kodierung, `PSModulePath`,
+  `$ErrorActionPreference`).
+- **Der Installer beendet laufende Aufgaben, bevor er die Skripte ersetzt.**
+  Sonst lief die alte Instanz mit dem beim Start dot-gesourcten Common weiter,
+  während die neue Registry-Konfiguration schon da war.
 - **Sende-Guard im Paket-Sync:** Fehlt der Applications-Ordner oder liefert
   WMI nichts, wird **nichts** gesendet (ein leerer Payload würde serverseitig
   den Katalog zurückziehen). Zusätzlich Change-Detection per Payload-Hash.
@@ -682,20 +694,25 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 
 **Autoimporter**
 
+Ein offener Punkt hält den mtime-Stamp zurück: der nächste Durchlauf scannt
+denselben Baum erneut, und der Lauf meldet `warning` mit `partial_failure` samt
+Ursachencodes im Detail (`package_content_failed target=…`), statt `ok`. Nur ein
+Durchlauf ohne offene Punkte merkt den Stamp.
+
 | Fall | Verhalten | Log |
 |---|---|---|
 | `config.json` fehlt im Ordner | Ordner ignoriert | still |
-| `config.json` ungültig / ohne ProjectName+version | übersprungen | WARN |
+| `config.json` ungültig / ohne ProjectName+version | übersprungen, **offener Punkt** (`package_config_invalid`) | WARN |
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
 | files-Baum unverändert (mtime-Stamp) | kein Scan | still |
-| files-Pfad fehlt | Scan übersprungen | WARN |
-| Alt-Version nicht vollständig entfernbar | Retry im nächsten Durchlauf (Stamp wird nicht gemerkt) | WARN |
+| files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
+| Alt-Version nicht vollständig entfernbar | Retry im nächsten Durchlauf (`package_cleanup_failed`) | WARN |
 | Alt-Version ohne eigene Collection | wird über die Application gefunden und bereinigt | Log je Entfernung |
-| Vorlagen-install.ps1 nicht kopierbar | Paket nutzt eigene Datei | WARN |
-| Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry im nächsten Durchlauf | WARN |
-| Content-Verteilung scheitert | kein Auto-Retry (Doppel-Verteilung wirft selbst Fehler); manuell anstoßen | WARN mit DP-Gruppe |
-| `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry | WARN |
-| Application existiert bereits | Anlage übersprungen, Collection/Deployment werden trotzdem geprüft | still (Konsole) |
+| Vorlagen-install.ps1 nicht kopierbar | Retry im nächsten Durchlauf (`package_template_failed`) | WARN |
+| Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
+| Content-Verteilung scheitert | Retry im nächsten Durchlauf, solange nichts verteilt ist (`package_content_failed`) | WARN mit DP-Gruppe |
+| `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry, kein offener Punkt | WARN |
+| Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
 
 ## Troubleshooting
 
