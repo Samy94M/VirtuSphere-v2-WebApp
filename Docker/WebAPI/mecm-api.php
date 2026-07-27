@@ -11,6 +11,7 @@ virtusphere_error_response_mode('json');
 require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/status_events.php';
+require_once __DIR__ . '/lib/repo/mecm_provenance.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -118,6 +119,11 @@ try {
 
             $vm['mission'] = $mission;
             $vm['packages'] = machine_vm_packages($connection, $vmId);
+            // Additive wire (ADR-0034): the owned membership rules ride along,
+            // so the device-sync can compute its reconciliation plan without a
+            // second endpoint. Empty for a device VirtuSphere never reported a
+            // rule for; a remove is only ever planned against entries here.
+            $vm['owned_collections'] = repo_mecm_rules_for_vm($connection, $vmId);
             $vm['vm_status'] = virtusphere_legacy_status_from_states((string) $vm['lifecycle_state'], (string) $vm['mecm_sync_state']);
             $vm['updated'] = 1;
             $data[] = $vm;

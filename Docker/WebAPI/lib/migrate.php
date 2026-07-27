@@ -932,6 +932,31 @@ SQL;
         migrator_add_index($db, 'deploy_vm_status_events', 'deploy_vm_status_events_created', 'INDEX deploy_vm_status_events_created (created_at)');
         migrator_out('0032: indexed the status-event history for its retention');
     },
+    '0033_mecm_membership_provenance' => function (mysqli $db): void {
+        // ADR-0034 (decisions 1-3): which MECM membership rules are
+        // VirtuSphere's OWN. Reconciliation (removing an obsolete own rule on
+        // an OS switch) is only safe with this record; a remove without
+        // provenance proof could take out a rule an administrator created by
+        // hand. Rows die with their VM (CASCADE) - deleting a VM in the portal
+        // is purely local and leaves the MECM rules standing (decision 1), so
+        // the provenance of a deleted VM has no reader and no claim.
+        // collection_type and origin are PHP-validated vocabularies
+        // (VIRTUSPHERE_MECM_RULE_*), deliberately not ENUM columns: no new
+        // order-exact mirror (ADR-0016 scope unchanged).
+        $db->query("CREATE TABLE IF NOT EXISTS deploy_vm_mecm_rules (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            vm_id INT NOT NULL,
+            collection_id VARCHAR(16) NOT NULL,
+            collection_name VARCHAR(255) NOT NULL,
+            collection_type VARCHAR(16) NOT NULL,
+            origin VARCHAR(32) NOT NULL DEFAULT 'created',
+            actor VARCHAR(191) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY deploy_vm_mecm_rules_unique (vm_id, collection_id),
+            CONSTRAINT fk_deploy_vm_mecm_rules_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        migrator_out('0033: MECM membership rules carry their provenance');
+    },
 ];
 
 try {

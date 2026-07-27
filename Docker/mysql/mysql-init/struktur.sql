@@ -354,6 +354,26 @@ CREATE TABLE IF NOT EXISTS deploy_vm_status_events (
     CONSTRAINT fk_deploy_vm_status_events_user FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- MECM membership provenance (migration 0033, ADR-0034): which direct
+-- membership rules are VirtuSphere's OWN (origin created, or explicitly
+-- adopted through the portal). Reconciliation may remove only owned rules;
+-- manual MECM rules stay untouched. Rows die with their VM (decision 1: a VM
+-- delete is purely local, the MECM rules stand). collection_type and origin
+-- are PHP-validated vocabularies (VIRTUSPHERE_MECM_RULE_*), deliberately no
+-- ENUM mirror.
+CREATE TABLE IF NOT EXISTS deploy_vm_mecm_rules (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    collection_id VARCHAR(16) NOT NULL,
+    collection_name VARCHAR(255) NOT NULL,
+    collection_type VARCHAR(16) NOT NULL,
+    origin VARCHAR(32) NOT NULL DEFAULT 'created',
+    actor VARCHAR(191) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_vm_mecm_rules_unique (vm_id, collection_id),
+    CONSTRAINT fk_deploy_vm_mecm_rules_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS deploy_client_events (
     id INT AUTO_INCREMENT PRIMARY KEY,
     vm_id INT NOT NULL,
