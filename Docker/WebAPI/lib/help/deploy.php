@@ -43,6 +43,12 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
+            <h2><?php echo h(__t('help.deploy_cancel_heading')); ?></h2>
+            <p><?php echo h(__t('help.deploy_cancel_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_cancel_p2')); ?></p>
+        </section>
+
+        <section class="panel">
             <h2><?php echo h(__t('help.deploy_storage_heading')); ?></h2>
             <p><?php echo h(__t('help.deploy_storage_p1', [
                 // The default disk size with its unit, from the constant the

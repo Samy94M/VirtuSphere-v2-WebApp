@@ -253,6 +253,67 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(0, $this->statusEventCount($vmId, 'ansible mac import'));
     }
 
+    /**
+     * ADR-0033: the callback window follows the machine, not the wish. A
+     * cancel of a running job now parks it in `cancelling` while the playbook
+     * finishes its current step - and that step's own MAC upload is exactly
+     * the callback arriving here. Bouncing it with 409 threw away addresses a
+     * sequence had really assigned (B4).
+     */
+    public function testCallbackIsAcceptedWhileTheJobIsCancelling(): void
+    {
+        $missionId = $this->insertMission('cancelling');
+        $vmId = $this->insertVm($missionId, 'CANCELLING');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId], VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('CANCELLING'),
+                'hw_eth0' => ['macaddress' => $this->mac('cancelling'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('success', $response['outcome']);
+        self::assertSame($this->mac('cancelling'), $this->interfaceMac($vmId, 'WDS'));
+        self::assertNotNull($this->rawJobResult($jobId), 'the durable result belongs to the sequence that produced it');
+        self::assertSame(['deployed', 'pending', 1], $this->vmState($vmId), 'an imported VM is really deployed, cancel or not');
+    }
+
+    /**
+     * Only the CONFIRMED end state refuses, and the refusal is findable: the
+     * old 409 left its trace in error_log only, so an operator staring at the
+     * job log saw MACs vanish without a sentence anywhere in the portal.
+     */
+    public function testACancelledJobReturns409AndLeavesAJobLogTrace(): void
+    {
+        $missionId = $this->insertMission('cancelled');
+        $vmId = $this->insertVm($missionId, 'CANCELLED');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId], VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
+
+        [$status] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('CANCELLED'),
+                'hw_eth0' => ['macaddress' => $this->mac('cancelled'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(409, $status);
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'));
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_job_logs WHERE job_id = ? AND line LIKE ?');
+        $needle = '%MAC callback%';
+        $stmt->bind_param('is', $jobId, $needle);
+        $stmt->execute();
+        self::assertGreaterThan(0, (int) $stmt->get_result()->fetch_assoc()['c'], 'the rejection must be readable in the job log the operator actually opens');
+    }
+
     public function testLegacyRequestWithoutJobKeepsSubmittedVmScope(): void
     {
         $missionId = $this->insertMission('legacy');

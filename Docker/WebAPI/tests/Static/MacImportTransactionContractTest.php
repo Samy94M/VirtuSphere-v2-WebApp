@@ -14,10 +14,18 @@ final class MacImportTransactionContractTest extends TestCase
 
         self::assertNotFalse($jobGate);
         self::assertNotFalse($begin);
-        self::assertLessThan($begin, $jobGate, 'job/mission/running validation must happen before BEGIN');
-        self::assertStringContainsString('status = ? LIMIT 1 FOR UPDATE', $source);
+        self::assertLessThan($begin, $jobGate, 'job/mission/status validation must happen before BEGIN');
+        // ADR-0033: the callback window is running OR cancelling (the sequence
+        // that produced the MACs still owns the job); only confirmed end
+        // states refuse, and the recheck behind BEGIN uses the same window.
+        self::assertStringContainsString('VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)', $source);
+        self::assertStringContainsString('status IN (?, ?) LIMIT 1 FOR UPDATE', $source);
         self::assertStringContainsString('MacImportConflictException', $source);
         self::assertStringContainsString("], 409)", $source);
+        // The rejection leaves a job-log line and a throttled portal audit row
+        // (raw prepared statement, after rollback, never able to 500).
+        self::assertStringContainsString('Rejected a MAC callback:', $source);
+        self::assertStringContainsString('machine_api_audit_warning(', $source);
     }
 
     public function testPlanningFinishesBeforeAnyPhaseTwoWrite(): void

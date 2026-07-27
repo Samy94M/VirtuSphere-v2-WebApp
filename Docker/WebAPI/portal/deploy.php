@@ -104,9 +104,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // page that owns the job, including a failed cancel attempt.
                 $redirectBase = deploy_job_origin_url($job);
             }
-            repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'cancelled deploy job id ' . $jobId, (int) $user['id']);
-            flash_set('success', __t('deploy.flash_cancelled'));
+            $cancelOutcome = repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
+            // The answer follows the machine (ADR-0033): a queued job IS
+            // cancelled, a running one has its cancel REQUESTED and the worker
+            // still finishes the current step. One flash for each, because
+            // "abgebrochen" for a playbook that is still executing is a lie.
+            if ($cancelOutcome === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested cancel of deploy job id ' . $jobId, (int) $user['id']);
+                flash_set('success', __t('deploy.flash_cancel_requested'));
+            } else {
+                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'cancelled deploy job id ' . $jobId, (int) $user['id']);
+                flash_set('success', __t('deploy.flash_cancelled'));
+            }
             redirect_to($redirectBase);
         } elseif ($action === 'cancel_group') {
             $groupId = request_string($_POST, 'group_id');
@@ -547,7 +556,10 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
                     <td><?php echo h(portal_format_timestamp($job['updated_at'] ?? '')); ?></td>
                     <td class="actions">
                         <a class="button button-secondary" href="<?php echo h(deploy_job_log_url((int) $job['id'])); ?>"><?php echo h(__t('deploy.log')); ?></a>
-                        <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, true)) { ?>
+                        <?php // Cancellable, not active: a cancelling job already has its
+                              // wish recorded, and offering the button again would promise
+                              // an action that changes nothing (ADR-0033). ?>
+                        <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true)) { ?>
                             <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="action" value="cancel">

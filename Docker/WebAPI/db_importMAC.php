@@ -73,14 +73,18 @@ try {
 
     // The authoritative 409 gate is deliberately before begin_transaction().
     // A terminal, unknown or mission-foreign callback cannot write any row.
+    // The window follows the machine, not the wish (ADR-0033): a `cancelling`
+    // job's playbook is still finishing its current step, and that step's own
+    // MAC upload is exactly this request - bouncing it threw away addresses
+    // the sequence had really assigned. Only the confirmed end states refuse.
     $job = null;
     $jobScopeIds = null;
     if ($jobId !== null) {
         $job = mac_import_job($connection, $jobId);
         if (!is_array($job)
             || (int) ($job['mission_id'] ?? 0) !== $missionId
-            || (string) ($job['status'] ?? '') !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
-            throw new MacImportConflictException('Deploy job is not running for this mission.');
+            || !in_array((string) ($job['status'] ?? ''), [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)) {
+            throw new MacImportConflictException('Deploy job does not accept MAC imports for this mission.');
         }
         $jobScopeIds = mac_import_job_scope_ids($job);
     }
@@ -92,10 +96,12 @@ try {
 
     if ($jobId !== null) {
         // Close the race between the pre-transaction 409 gate and this lock. A
-        // worker that already made the job terminal still produces no writes.
+        // worker that already made the job terminal still produces no writes;
+        // running and cancelling both accept (same window as the gate above).
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? AND mission_id = ? AND status = ? LIMIT 1 FOR UPDATE');
-        $stmt->bind_param('iis', $jobId, $missionId, $running);
+        $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? AND mission_id = ? AND status IN (?, ?) LIMIT 1 FOR UPDATE');
+        $stmt->bind_param('iiss', $jobId, $missionId, $running, $cancelling);
         $stmt->execute();
         if (!$stmt->get_result()->fetch_assoc()) {
             throw new MacImportConflictException('Deploy job became terminal before the callback was locked.');
@@ -140,8 +146,9 @@ try {
         // This is intentionally a raw prepared statement, never a repo helper.
         $resultJson = json_encode($resultContract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $connection->prepare('UPDATE deploy_jobs SET result_json = ?, updated_at = NOW() WHERE id = ? AND mission_id = ? AND status = ?');
-        $stmt->bind_param('siis', $resultJson, $jobId, $missionId, $running);
+        $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        $stmt = $connection->prepare('UPDATE deploy_jobs SET result_json = ?, updated_at = NOW() WHERE id = ? AND mission_id = ? AND status IN (?, ?)');
+        $stmt->bind_param('siiss', $resultJson, $jobId, $missionId, $running, $cancelling);
         $stmt->execute();
     }
 
@@ -187,6 +194,35 @@ try {
         $connection->rollback();
     }
     machine_api_log_warning('db_importMAC', 'Rejected callback conflict: ' . $exception->getMessage());
+    // The rejection must be findable where the operator looks (ADR-0033): one
+    // line in the job log the caller named, one throttled portal audit row.
+    // Raw prepared statement on purpose (this file's transaction rule) and
+    // after the rollback, so the trace survives independently of the request.
+    // Only for an EXISTING job row - the FK would refuse anything else, and a
+    // rejected callback must never be able to crash into a 500.
+    if (isset($jobId, $job) && $jobId !== null && is_array($job)) {
+        try {
+            $stream = 'system';
+            $line = 'Rejected a MAC callback: ' . $exception->getMessage()
+                . ' (job status ' . (string) ($job['status'] ?? '?') . ', caller ' . $clientIp . ')';
+            $stmt = $connection->prepare(
+                'INSERT INTO deploy_job_logs (job_id, seq, stream, line)
+                 SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ? FROM deploy_job_logs WHERE job_id = ?'
+            );
+            $stmt->bind_param('issi', $jobId, $stream, $line, $jobId);
+            $stmt->execute();
+        } catch (Throwable $traceError) {
+            error_log('[db_importMAC] conflict trace failed: ' . $traceError->getMessage());
+        }
+        machine_api_audit_warning(
+            $connection,
+            'db_importMAC',
+            'MAC callback rejected for job id ' . $jobId . ': ' . $exception->getMessage(),
+            $clientIp,
+            VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
+            'job-' . $jobId
+        );
+    }
     machine_api_json(['error' => 'Deploy job does not accept this MAC import', 'job_id' => $jobId ?? null], 409);
 } catch (Throwable $exception) {
     if ($transactionStarted) {

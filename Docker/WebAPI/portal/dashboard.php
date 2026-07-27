@@ -31,7 +31,16 @@ $hypervisorWorst = $healthSnapshot['esxi']['state'];
 // reach the deploy page, and only when at least one is in flight: a permanent
 // "0" here would be the same noise the hypervisor tile above avoids.
 $activeDeploys = can('deploy.run', $user)
-    ? (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_jobs WHERE mission_id IS NOT NULL AND status IN (?, ?) AND cancelled_at IS NULL', 'ss', [VIRTUSPHERE_DEPLOY_STATUS_QUEUED, VIRTUSPHERE_DEPLOY_STATUS_RUNNING])
+    ? (int) repo_scalar(
+        $connection,
+        // The active SSoT (ADR-0033): a cancelling job still occupies its
+        // mission, so the tile counts it like the guards do.
+        'SELECT COUNT(*) FROM deploy_jobs WHERE mission_id IS NOT NULL AND status IN ('
+            . implode(', ', array_fill(0, count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES), '?'))
+            . ') AND cancelled_at IS NULL',
+        str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)),
+        VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES
+    )
     : 0;
 
 $stmt = $connection->prepare('SELECT m.*, (SELECT COUNT(*) FROM deploy_vms v WHERE v.mission_id = m.id) AS vm_count FROM deploy_missions m WHERE LEFT(m.mission_name, 1) <> ? ORDER BY m.updated_at DESC LIMIT 8');

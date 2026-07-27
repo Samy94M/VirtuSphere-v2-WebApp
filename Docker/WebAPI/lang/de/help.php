@@ -99,7 +99,7 @@ return [
     'vm_delete_p2' => 'Wird Schritt 3 vergessen, passiert erst einmal nichts Schlimmes. Aber sobald eine neue VM mit demselben Namen und einer anderen MAC angelegt wird, meldet der Device-Sync einen MAC-Konflikt im Protokoll und übernimmt die neue VM nicht automatisch.',
 
     'deploy_heading' => 'Bereitstellungsmodi',
-    'deploy_requirements_p1' => 'Einreihen lässt sich eine Mission erst, wenn sie mindestens eine VM und einen gesetzten Datastore hat; nur der Modus „Apply ESXi autostart policy" kommt ohne Datastore aus. Pro Mission läuft höchstens ein Auftrag zugleich, ein weiterer ist erst nach Abschluss oder Abbruch möglich.',
+    'deploy_requirements_p1' => 'Einreihen lässt sich eine Mission erst, wenn sie mindestens eine VM und einen gesetzten Datastore hat; nur der Modus „Apply ESXi autostart policy" kommt ohne Datastore aus. Pro Mission läuft höchstens ein Auftrag zugleich, ein weiterer ist erst nach Abschluss oder bestätigtem Abbruch möglich.',
     // Zweiter Absatz, weil die erste Hälfte der Antwort an der Mission hängt und
     // die zweite am Portal: der graue Knopf hat vier weitere mögliche Gründe, die
     // auf drei anderen Seiten liegen.
@@ -324,6 +324,9 @@ return [
     'deploy_schedule_p1' => 'Ein Auftrag startet sofort oder zu einem Termin. Zeiten gelten in der Portal-Zeitzone; intern wird in UTC geplant. Ein geplanter Auftrag wird erst zum Termin vom Worker übernommen; ist der Worker offline, wird er danach in Reihenfolge nachgeholt.',
     'deploy_schedule_p2' => 'Staffelung erzeugt je VM einen eigenen Auftrag, die im Abstand von N Minuten nacheinander starten (nur Modi Full, Power-Cycle, Start). In der Jobliste tragen sie ein Staffel-Kennzeichen und den geplanten Zeitpunkt.',
     'deploy_schedule_p3' => 'Ist ein Termin oder eine Staffelung gesetzt, erscheint vor dem Einreihen eine Vorschau der berechneten Startzeiten. "Gruppe abbrechen" stoppt alle noch wartenden Jobs einer Staffel; ein bereits laufender Job läuft zu Ende.',
+    'deploy_cancel_heading' => 'Auftrag abbrechen',
+    'deploy_cancel_p1' => 'Ein wartender Auftrag ist mit dem Abbruch sofort beendet. Bei einem laufenden Auftrag ist der Abbruch zunächst nur angefordert (Status "cancelling"): der Worker beendet den gerade laufenden Playbook-Schritt, denn ein harter Stopp mitten in einer VM-Erstellung würde auf dem ESXi-Host einen Zustand hinterlassen, mit dem kein späterer Schritt umgehen kann. An der nächsten Schrittgrenze bestätigt der Worker den Abbruch, erst dann steht "cancelled".',
+    'deploy_cancel_p2' => 'Solange die Bestätigung aussteht, bleibt der Auftrag aktiv: die Mission lässt sich nicht löschen, ein neuer Auftrag lässt sich nicht einreihen, und eine in diesem Schritt noch gemeldete MAC-Rückmeldung wird angenommen; bereits eingetragene VMs bleiben bereitgestellt. Stirbt der Worker vor der Bestätigung, stellt die Aufsicht den Abbruch nach kurzer Zeit selbst fest und schließt ihn ab.',
 
     'deploy_storage_heading' => 'Speicherbedarf beim Einreihen',
     'deploy_storage_p1' => 'Sobald eine Mission gewählt ist, zeigt das Formular, wie viel Plattenplatz der Auftrag je Ziel-Datastore belegt. Gezählt werden die provisionierten Größen aller Festplatten der angehakten VMs, zehn Maschinen mit der Standardgröße von je :size also als deren Zehnfaches. VMs mit einem eigenen Datastore bekommen eine eigene Zeile. Eine VM ohne eigene Festplatten wird mit der Standard-Festplatte (:size, thick) angelegt und mit dieser Größe auch im Speicherbedarf gezählt.',

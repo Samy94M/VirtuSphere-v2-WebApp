@@ -102,9 +102,10 @@ final class DeployConvergenceContractTest extends TestCase
 
         $repo = $this->source('lib/repo/deploy_jobs.php');
         self::assertStringContainsString('function repo_sweep_orphaned_deploying_vms', $repo);
-        // Only deploying orphans: an active (queued/running) job protects its
-        // mission's VMs, and the sweep must not block on concurrent row locks.
-        self::assertStringContainsString('NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (?, ?))', $repo);
+        // Only deploying orphans: an ACTIVE job (the SSoT set, cancelling
+        // included since ADR-0033) protects its mission's VMs, and the sweep
+        // must not block on concurrent row locks.
+        self::assertStringContainsString("NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (' . \$placeholders . '))", $repo);
         self::assertMatchesRegularExpression('/lifecycle_state = \?\s+AND NOT EXISTS/s', $repo);
         self::assertMatchesRegularExpression('/repo_sweep_orphaned_deploying_vms.*?FOR UPDATE SKIP LOCKED/s', $repo);
         self::assertStringContainsString('WHERE id = ? AND lifecycle_state = ?', $repo);
@@ -141,6 +142,42 @@ final class DeployConvergenceContractTest extends TestCase
         $command = $this->source('lib/ansible_command.php');
         self::assertStringContainsString('function ansible_step_marker_line', $command);
         self::assertStringContainsString('function ansible_step_marker_parse', $command);
+    }
+
+    /**
+     * The active predicate is ONE constant (ADR-0033). A hand-written
+     * queued/running literal is exactly how five sites silently disagreed
+     * about what "active" means when cancelling arrived: a job in that state
+     * was invisible to the guards that exist to protect its mission. Only the
+     * migration history may carry the historical literal.
+     */
+    public function testNoHandWrittenActiveStatusListSurvivesOutsideTheMigrationHistory(): void
+    {
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $files = array_merge(
+            glob($root . '/lib/*.php') ?: [],
+            glob($root . '/lib/repo/*.php') ?: [],
+            glob($root . '/portal/*.php') ?: [],
+            glob($root . '/*.php') ?: []
+        );
+        self::assertNotEmpty($files, 'zero-match: the scan must see the codebase');
+
+        $offenders = [];
+        foreach ($files as $file) {
+            if (str_ends_with($file, '/lib/migrate.php')) {
+                continue;
+            }
+            $source = (string) file_get_contents($file);
+            if (preg_match("/IN\s*\(\s*'queued'\s*,\s*'running'\s*\)/i", $source) === 1
+                || preg_match('/VIRTUSPHERE_DEPLOY_STATUS_QUEUED\s*,\s*VIRTUSPHERE_DEPLOY_STATUS_RUNNING\s*\]/', $source) === 1) {
+                $offenders[] = substr($file, strlen($root) + 1);
+            }
+        }
+
+        // deploy_constants.php itself declares the cancellable set
+        // (queued/running), which is a DIFFERENT question than active.
+        $offenders = array_values(array_diff($offenders, ['lib/deploy_constants.php']));
+        self::assertSame([], $offenders, 'active-status lists must come from VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES');
     }
 
     private function source(string $relativePath): string

@@ -542,6 +542,10 @@ function deploy_job_status_badge_class(string $status): string
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => 'success',
         VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'danger',
         VIRTUSPHERE_DEPLOY_STATUS_RUNNING => 'info',
+        // Explicitly warning, not info: the wish is recorded but the sequence
+        // may still be executing its current step (ADR-0033), which is exactly
+        // the "look here" shade between a healthy run and a terminal state.
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING => 'warning',
         // Same variant as the default, pinned on purpose: partial is a terminal
         // per-VM verdict, not a transient state that merely lacks a mapping.
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'warning',

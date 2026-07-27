@@ -426,17 +426,20 @@ function repo_esxi_inventory_counts(mysqli $db): array
  */
 function repo_esxi_inventory_pending_jobs(mysqli $db): array
 {
+    // The active SSoT (queued/running/cancelling, ADR-0033): a cancelling pull
+    // still owns its credential and its link, and the enqueue dedupe reads
+    // this same predicate through repo_create_system_job.
+    $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+    $placeholders = implode(', ', array_fill(0, count($active), '?'));
     $stmt = $db->prepare(
         'SELECT id, credential_esxi_id, status, correlation_id, created_at, locked_at
          FROM deploy_jobs
          WHERE mission_id IS NULL
-           AND status IN (?, ?)
+           AND status IN (' . $placeholders . ')
            AND cancelled_at IS NULL
          ORDER BY id DESC'
     );
-    $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
-    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-    $stmt->bind_param('ss', $queued, $running);
+    $stmt->bind_param(str_repeat('s', count($active)), ...$active);
     $stmt->execute();
 
     $jobs = [];

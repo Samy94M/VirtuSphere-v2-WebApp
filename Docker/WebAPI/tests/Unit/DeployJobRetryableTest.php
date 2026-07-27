@@ -27,6 +27,9 @@ final class DeployJobRetryableTest extends TestCase
         $expected = [
             VIRTUSPHERE_DEPLOY_STATUS_QUEUED => false,
             VIRTUSPHERE_DEPLOY_STATUS_RUNNING => false,
+            // Active, not terminal (ADR-0033): the wish is recorded but the
+            // sequence may still run; a retry of it would be a second job.
+            VIRTUSPHERE_DEPLOY_STATUS_CANCELLING => false,
             VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => false,
             VIRTUSPHERE_DEPLOY_STATUS_FAILED => true,
             VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => true,

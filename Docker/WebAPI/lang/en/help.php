@@ -99,7 +99,7 @@ return [
     'vm_delete_p2' => 'If step 3 is forgotten, nothing bad happens at first. But as soon as a new VM with the same name and a different MAC is created, the device sync reports a MAC conflict in the log and does not pick up the new VM automatically.',
 
     'deploy_heading' => 'Deploy modes',
-    'deploy_requirements_p1' => 'A mission can only be queued once it has at least one VM and a datastore set; only the "Apply ESXi autostart policy" mode works without a datastore. Only one job runs per mission at a time; another is possible only after it finishes or is cancelled.',
+    'deploy_requirements_p1' => 'A mission can only be queued once it has at least one VM and a datastore set; only the "Apply ESXi autostart policy" mode works without a datastore. Only one job runs per mission at a time; another is possible only after it finishes or its cancellation is confirmed.',
     // A second paragraph because the first half of the answer belongs to the
     // mission and the second to the portal: the greyed-out button has four more
     // possible causes, living on three other pages.
@@ -323,6 +323,9 @@ return [
     'deploy_schedule_p1' => 'A job starts immediately or at a set time. Times are in the portal timezone; internally scheduling is in UTC. A scheduled job is only claimed by the worker at its time; if the worker is offline it is caught up afterwards in order.',
     'deploy_schedule_p2' => 'Staggering creates one job per VM that start one after another every N minutes (full, power-cycle and start modes only). In the job list they carry a batch marker and their scheduled time.',
     'deploy_schedule_p3' => 'When a time or a stagger is set, a preview of the computed start times appears before queuing. "Cancel group" stops all still-waiting jobs of a batch; a job that is already running finishes.',
+    'deploy_cancel_heading' => 'Cancelling a job',
+    'deploy_cancel_p1' => 'A waiting job ends immediately when cancelled. For a running job the cancel is first only requested (status "cancelling"): the worker finishes the playbook step that is currently executing, because a hard stop in the middle of a VM creation would leave the ESXi host in a state no later step can reason about. At the next step boundary the worker confirms the cancellation; only then the job reads "cancelled".',
+    'deploy_cancel_p2' => 'While the confirmation is pending the job stays active: the mission cannot be deleted, no new job can be queued, and a MAC report still arriving from that step is accepted; VMs already imported stay deployed. If the worker dies before confirming, the supervision detects the cancellation shortly after and concludes it itself.',
 
     'deploy_storage_heading' => 'Storage requirements when queuing',
     'deploy_storage_p1' => 'As soon as a mission is selected, the form shows how much disk space the job will use per target datastore. It counts the provisioned sizes of all disks of the checked VMs, so ten machines at the default size of :size each add up to ten times that. VMs with their own datastore get their own row. A VM without its own disks is created with the default disk (:size, thick) and counted at that size in the storage estimate.',

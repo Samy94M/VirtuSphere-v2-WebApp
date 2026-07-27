@@ -32,3 +32,4 @@
 - [ADR-0030: Partial-Ergebnismodell und result_json-Vertrag](ADR-0030-partial-deploy-results-and-result-json.md)
 - [ADR-0031: Kanonischer Prüf-Runner, Lanes und Exitcode-Kontrakt](ADR-0031-canonical-check-runner-lanes-and-exit-codes.md)
 - [ADR-0032: Durchgängige Korrelations-ID über alle sieben Ausführungsschichten](ADR-0032-correlation-id.md)
+- [ADR-0033: Cancellation is a confirmed state machine](ADR-0033-cancellation-state-machine.md)

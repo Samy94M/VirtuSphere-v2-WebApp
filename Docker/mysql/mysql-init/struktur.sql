@@ -281,7 +281,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- NULL for system jobs (e.g. ESXi inventory) that run without a mission (ADR-0023).
     mission_id INT NULL,
     user_id INT NULL,
-    status ENUM('queued','running','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
+    -- cancelling (migration 0031, ADR-0033): a running job whose cancel was
+    -- requested; it keeps lock/heartbeat until the worker confirms at a step
+    -- boundary or the reaper converges a dead worker to cancelled.
+    status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
     locked_at TIMESTAMP NULL,
     locked_by VARCHAR(191) NULL,
     heartbeat_at TIMESTAMP NULL,
@@ -291,7 +294,13 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     result_json JSON NULL,
     credential_esxi_id INT NULL,
     credential_ansible_id INT NULL,
+    -- cancelled_at names the CONFIRMED end state only; the wish carries its
+    -- own timestamp and actor below (migration 0031). cancel_requested_by is
+    -- the historical user id, deliberately without FK: a deleted account must
+    -- not erase who asked, and the job log names the user anyway.
     cancelled_at TIMESTAMP NULL,
+    cancel_requested_at TIMESTAMP NULL,
+    cancel_requested_by INT NULL,
     -- Scheduling (ADR-0022): scheduled_at is a UTC run-not-before time;
     -- group_id ties a staggered batch of per-VM jobs together.
     scheduled_at DATETIME NULL,

@@ -176,6 +176,7 @@ function migrator_preflight_deploy_job_statuses(mysqli $db): void
     $allowed = [
         VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
         VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
         VIRTUSPHERE_DEPLOY_STATUS_FAILED,
         VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
@@ -336,7 +337,10 @@ $migrations = [
             id INT AUTO_INCREMENT PRIMARY KEY,
             mission_id INT NULL,
             user_id INT NULL,
-            status ENUM('queued','running','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
+            -- Value set is the CURRENT one (same rule as lifecycle_state above):
+            -- 'cancelling' arrived in 0031; a fresh install creates the final
+            -- shape here and 0031's MODIFY is a no-op.
+            status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
             locked_at TIMESTAMP NULL,
             locked_by VARCHAR(191) NULL,
             heartbeat_at TIMESTAMP NULL,
@@ -641,13 +645,16 @@ $migrations = [
         migrator_out('0018: re-normalized ' . $updated . ' interface MAC(s) that drifted after 0008');
     },
     '0019_deploy_partial_results' => function (mysqli $db): void {
-        // The status values are an order-exact mirror of deploy_constants.php.
-        // Preflight rejects unsupported stored values before this DDL, so MySQL
-        // can never coerce an unknown status while changing the ENUM.
+        // The status values are an order-exact mirror of deploy_constants.php
+        // (CURRENT set, not the one this migration shipped with - same in-place
+        // mirror rule as 0001; 'cancelling' arrived in 0031, whose MODIFY is a
+        // no-op on the fresh path). Preflight rejects unsupported stored values
+        // before this DDL, so MySQL can never coerce an unknown status while
+        // changing the ENUM.
         if (migrator_table_exists($db, 'deploy_jobs') && migrator_column_exists($db, 'deploy_jobs', 'status')) {
             $sql = <<<'SQL'
 ALTER TABLE deploy_jobs
-MODIFY COLUMN status ENUM('queued','running','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'
+MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'
 SQL;
             $db->query($sql);
         }
@@ -893,6 +900,30 @@ SQL;
         // order-exact mirror is created (ADR-0016 scope stays the same).
         migrator_add_column($db, 'deploy_esxi_inventory_state', 'kind_freshness_json', 'JSON NULL AFTER in_maintenance');
         migrator_out('0030: added per-kind inventory freshness');
+    },
+    '0031_deploy_job_cancelling' => function (mysqli $db): void {
+        // B4/ADR-0033 (decision 4): cancelling a RUNNING job used to jump
+        // straight to `cancelled` and null lock + heartbeat, while the worker
+        // only honours a stop at step boundaries. For the length of the current
+        // playbook the portal showed a terminal job whose sequence was still
+        // creating VMs: delete/enqueue guards opened, the sequence's own MAC
+        // callback bounced with 409, and a worker that died after the cancel
+        // was invisible to the reaper. The new value models the wait for the
+        // worker's confirmation; the wish gets its own timestamp and actor
+        // (cancelled_at stays the CONFIRMED end state).
+        //
+        // ENUM order mirrors the VIRTUSPHERE_DEPLOY_STATUS_* declaration order
+        // (ADR-0016); no data preflight beyond the shared status preflight is
+        // needed because no existing row can carry the new value yet, and
+        // MODIFY with a superset never truncates.
+        $db->query("ALTER TABLE deploy_jobs
+            MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'");
+        // cancel_requested_by is the historical user id, deliberately without
+        // FK: a deleted account must not erase who asked, and the job log
+        // names the user anyway.
+        migrator_add_column($db, 'deploy_jobs', 'cancel_requested_at', 'TIMESTAMP NULL AFTER cancelled_at');
+        migrator_add_column($db, 'deploy_jobs', 'cancel_requested_by', 'INT NULL AFTER cancel_requested_at');
+        migrator_out('0031: deploy jobs know the confirmed-cancellation state machine');
     },
 ];
 

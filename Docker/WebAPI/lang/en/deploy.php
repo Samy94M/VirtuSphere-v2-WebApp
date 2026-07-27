@@ -43,6 +43,7 @@ return [
     'confirm_retry_partial' => 'Queue the export for mission :name again? Only the MAC export of the original VM selection is repeated.',
     'flash_queued' => 'Deploy job queued.',
     'flash_cancelled' => 'Deploy job cancelled.',
+    'flash_cancel_requested' => 'Cancel requested. The worker finishes the current step and confirms the cancellation at the next step boundary.',
     'flash_retried' => 'Deploy job queued again.',
     // VM selection and power-cycle
     'label_vms' => 'VMs (empty = whole mission)',

@@ -218,6 +218,18 @@ function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $worker
     if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
         throw new DeployWorkerCancelled('Deploy job was cancelled.');
     }
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+        // The stop IS the confirmation (ADR-0033): this check runs exactly at
+        // the step boundaries where a cancel is honoured, so the worker that
+        // owns the lock concludes the state machine here via the ownership
+        // CAS. Under a foreign lock this worker only stops; the owner (or the
+        // reaper, if the owner died) delivers the confirmation.
+        if ((string) ($job['locked_by'] ?? '') === $workerId && repo_confirm_deploy_job_cancelled($db, $jobId, $workerId)) {
+            throw new DeployWorkerCancelled('Cancel requested by operator; confirmed at this step boundary.');
+        }
+
+        throw new DeployWorkerCancelled('Deploy job is cancelling; another party owns its conclusion.');
+    }
     if ($status !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
         throw new DeployWorkerCancelled('Deploy job is no longer running (status ' . $status . '); another party concluded it.');
     }
@@ -251,12 +263,16 @@ function deploy_worker_reap_stale_jobs(mysqli $db): int
         $jobId = (int) $job['id'];
         // A reaped job may already carry a committed MAC import: those VMs are
         // really deployed and keep their state; only the rest converges to
-        // failed/failed.
+        // failed/failed. The note names what actually happened: a converged
+        // cancellation is the operator's wish, not a stale-heartbeat failure.
         $result = deploy_worker_job_mac_result($db, $jobId);
+        $note = ($job['reaped_to'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED
+            ? 'deploy job ' . $jobId . ' cancelled; the worker died before confirming'
+            : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
         deploy_worker_mark_vms_failed(
             $db,
             (int) $job['mission_id'],
-            'deploy job ' . $jobId . ' reaped after stale heartbeat',
+            $note,
             $vmIds,
             $result !== null ? $result['successful_vm_ids'] : []
         );

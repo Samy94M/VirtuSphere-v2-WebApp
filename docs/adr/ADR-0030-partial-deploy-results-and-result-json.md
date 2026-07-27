@@ -126,3 +126,12 @@ Spalte `result_json` bleibt bestehen und stört Altcode nicht.
 - Out of scope: i18n der Status-ENUMs (bewusst dagegen entschieden, E2), eine
   durchgängige Korrelations-ID (eigener ADR im Arbeitspaket AP7b) und jede
   Änderung an den fünf Legacy-Statusstrings.
+
+## Amendment (2026-07-27): result_json und der Abbruch-Automat (ADR-0033)
+
+Ein MAC-Rückruf wird auch im Zustand `cancelling` angenommen (die Sequenz, die
+die Adressen erzeugt hat, besitzt den Job noch), und sein `result_json`
+überlebt die Bestätigung des Abbruchs: das durable Ergebnis gehört zur
+Sequenz, nicht zum Endstatus. Für den Retry ändert sich nichts - `cancelled`
+behält das schlichte Wieder-Einreihen (eine Cancellation macht keine
+Outcome-Aussage), `cancelling` ist aktiv und wird nie zum Retry angeboten.

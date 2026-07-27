@@ -476,11 +476,17 @@ function repo_purge_finished_system_jobs(mysqli $db, int $retentionDays = VIRTUS
  */
 function repo_deploy_active_job_exists(mysqli $db, int $missionId): bool
 {
+    // The active set is the SSoT constant (queued/running/cancelling): a
+    // cancelling job's playbook may still be executing, so it protects its
+    // mission exactly like a running one until the worker confirms (ADR-0033).
+    $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+    $placeholders = implode(', ', array_fill(0, count($active), '?'));
+
     return repo_fetch_one(
         $db,
-        'SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (?, ?) AND cancelled_at IS NULL LIMIT 1 FOR UPDATE',
-        'iss',
-        [$missionId, VIRTUSPHERE_DEPLOY_STATUS_QUEUED, VIRTUSPHERE_DEPLOY_STATUS_RUNNING]
+        'SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL LIMIT 1 FOR UPDATE',
+        'i' . str_repeat('s', count($active)),
+        array_merge([$missionId], $active)
     ) !== null;
 }
 
@@ -771,11 +777,15 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
     }
 
     return repo_transaction($db, static function () use ($db, $mode, $esxiCredentialId, $ansibleCredentialId, $userId): ?int {
+        // Same active SSoT as the mission guard: a cancelling pull still owns
+        // its credential until the worker confirms (ADR-0033).
+        $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+        $placeholders = implode(', ', array_fill(0, count($active), '?'));
         $existing = repo_fetch_one(
             $db,
-            "SELECT id FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ? AND status IN ('queued', 'running') AND cancelled_at IS NULL LIMIT 1 FOR UPDATE",
-            'i',
-            [$esxiCredentialId]
+            'SELECT id FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL LIMIT 1 FOR UPDATE',
+            'i' . str_repeat('s', count($active)),
+            array_merge([$esxiCredentialId], $active)
         );
         if ($existing !== null) {
             return null;
@@ -797,13 +807,33 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
     });
 }
 
-function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): bool
+/**
+ * The two cancel transitions (ADR-0033, decision 4). Returns the status the
+ * job holds afterwards, so the caller can phrase its answer honestly:
+ *
+ *  - queued  -> cancelled: nothing started, the wish IS the end state.
+ *  - running -> cancelling: the worker still owns the sequence, so lock,
+ *    heartbeat and every protective effect of an active job stay until it
+ *    confirms at a step boundary (repo_confirm_deploy_job_cancelled) or the
+ *    reaper converges a dead worker. cancelled_at stays NULL: it names the
+ *    CONFIRMED end state only; the wish carries its own timestamp and actor.
+ *  - cancelling -> cancelling: idempotent. The first wish keeps its timestamp
+ *    and actor (the button is hidden for cancelling jobs, but a stale page's
+ *    POST must not error or overwrite who asked first).
+ *
+ * The old behaviour - running straight to cancelled with nulled lock and
+ * heartbeat - showed a terminal job whose playbook was still creating VMs for
+ * the length of its current step: delete/enqueue guards opened, the
+ * sequence's own MAC callback bounced with 409, and a worker that died after
+ * the cancel was invisible to the reaper (B4).
+ */
+function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): string
 {
     if ($jobId <= 0 || $userId <= 0) {
         throw new InvalidArgumentException('Job and user are required.');
     }
 
-    return repo_transaction($db, static function () use ($db, $jobId, $userId): bool {
+    return repo_transaction($db, static function () use ($db, $jobId, $userId): string {
         $stmt = $db->prepare('SELECT id, status FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $jobId);
         $stmt->execute();
@@ -811,15 +841,58 @@ function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): bool
         if (!$job) {
             throw new RuntimeException('Deploy job not found.');
         }
-        if (!in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, true)) {
-            throw new RuntimeException('Only queued or running deploy jobs can be cancelled.');
+        $current = (string) $job['status'];
+        if ($current === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            return VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        }
+        if (!in_array($current, VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true)) {
+            throw new RuntimeException('Only active deploy jobs can be cancelled.');
         }
 
-        $message = 'Cancelled by user id ' . $userId;
-        $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('ssi', $status, $message, $jobId);
+        if ($current === VIRTUSPHERE_DEPLOY_STATUS_QUEUED) {
+            $message = 'Cancelled by user id ' . $userId;
+            $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), cancel_requested_at = NOW(), cancel_requested_by = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ?');
+            $stmt->bind_param('sisi', $status, $userId, $message, $jobId);
+            $stmt->execute();
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+
+            return $status;
+        }
+
+        $message = 'Cancel requested by user id ' . $userId . '; the worker stops at the next step boundary.';
+        $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancel_requested_at = NOW(), cancel_requested_by = ?, last_error = ?, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sisi', $status, $userId, $message, $jobId);
         $stmt->execute();
+        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+
+        return $status;
+    });
+}
+
+/**
+ * The worker's confirmation of a requested cancel, as an ownership CAS: only
+ * the worker that holds the lock may conclude its own job, exactly like the
+ * finish path. True when this call performed the transition.
+ */
+function repo_confirm_deploy_job_cancelled(mysqli $db, int $jobId, string $workerId): bool
+{
+    $workerId = trim($workerId);
+    if ($jobId <= 0 || $workerId === '') {
+        throw new InvalidArgumentException('Job and worker are required.');
+    }
+
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId): bool {
+        $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+        $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        $message = 'Cancelled after operator request; confirmed by the worker at a step boundary.';
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt->bind_param('ssiss', $cancelled, $message, $jobId, $workerId, $cancelling);
+        $stmt->execute();
+        if ($stmt->affected_rows !== 1) {
+            return false;
+        }
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
 
         return true;
@@ -868,9 +941,13 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
 
 function repo_touch_deploy_job_heartbeat(mysqli $db, int $jobId, string $workerId): bool
 {
+    // running AND cancelling: a cancelling job's current step is still
+    // executing under this worker, and without the beat the reaper would fail
+    // a perfectly alive worker mid-confirmation (ADR-0033).
     $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-    $stmt = $db->prepare('UPDATE deploy_jobs SET heartbeat_at = NOW(), updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
-    $stmt->bind_param('iss', $jobId, $workerId, $running);
+    $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+    $stmt = $db->prepare('UPDATE deploy_jobs SET heartbeat_at = NOW(), updated_at = NOW() WHERE id = ? AND locked_by = ? AND status IN (?, ?)');
+    $stmt->bind_param('isss', $jobId, $workerId, $running, $cancelling);
 
     return $stmt->execute() && $stmt->affected_rows === 1;
 }
@@ -879,31 +956,50 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
 {
     $staleAfterSeconds = max(60, $staleAfterSeconds);
     $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
     $failed = VIRTUSPHERE_DEPLOY_STATUS_FAILED;
-    $message = 'Reaped stale deploy job after missing heartbeat for ' . $staleAfterSeconds . ' seconds.';
+    $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+    $failedMessage = 'Reaped stale deploy job after missing heartbeat for ' . $staleAfterSeconds . ' seconds.';
+    $cancelledMessage = 'Cancellation converged by the reaper: the worker died before confirming (no heartbeat for ' . $staleAfterSeconds . ' seconds).';
 
-    return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $failed, $message): array {
-        $stmt = $db->prepare('SELECT id, mission_id, payload_json, credential_esxi_id, locked_by FROM deploy_jobs WHERE status = ? AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');
-        $stmt->bind_param('si', $running, $staleAfterSeconds);
+    return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $cancelled, $failedMessage, $cancelledMessage): array {
+        $stmt = $db->prepare('SELECT id, mission_id, status, payload_json, credential_esxi_id, locked_by FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');
+        $stmt->bind_param('ssi', $running, $cancelling, $staleAfterSeconds);
         $stmt->execute();
         $jobs = repo_fetch_all($stmt->get_result());
 
-        foreach ($jobs as $job) {
+        foreach ($jobs as &$job) {
             $jobId = (int) $job['id'];
-            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
-            $stmt->bind_param('ssis', $failed, $message, $jobId, $running);
+            // A stale cancelling job converges to what the operator asked for,
+            // never to failed: the wish was recorded, only the confirmation is
+            // missing, and a dead worker cannot deliver it (ADR-0033). The
+            // reaped-from status travels with the row so the caller's VM
+            // convergence can phrase its note truthfully.
+            $wasCancelling = (string) $job['status'] === $cancelling;
+            $job['reaped_to'] = $wasCancelling ? $cancelled : $failed;
+            $message = $wasCancelling ? $cancelledMessage : $failedMessage;
+            if ($wasCancelling) {
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt->bind_param('ssis', $cancelled, $message, $jobId, $cancelling);
+            } else {
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt->bind_param('ssis', $failed, $message, $jobId, $running);
+            }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
                 repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
                 $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
-                if (($job['mission_id'] ?? null) === null
+                if (!$wasCancelling
+                    && ($job['mission_id'] ?? null) === null
                     && (int) ($job['credential_esxi_id'] ?? 0) > 0
                     && is_array($payload)
                     && (string) ($payload['mode'] ?? '') === VIRTUSPHERE_DEPLOY_MODE_INVENTORY) {
                     // A reaped inventory pull is a real failed attempt. Without
                     // this state transition the active-job link vanished while
                     // the ESXi card kept its previous (possibly green) result,
-                    // and no page listed the now-terminal system job.
+                    // and no page listed the now-terminal system job. A
+                    // CANCELLING pull is exempt on purpose: the operator asked
+                    // for the stop, which is not a fetch failure.
                     repo_esxi_inventory_record_failure(
                         $db,
                         (int) $job['credential_esxi_id'],
@@ -913,6 +1009,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 }
             }
         }
+        unset($job);
 
         return $jobs;
     });
@@ -945,16 +1042,18 @@ function repo_sweep_orphaned_deploying_vms(mysqli $db): array
     $note = 'convergence sweep: stuck in deploying without an active deploy job';
 
     return repo_transaction($db, static function () use ($db, $deploying, $failedLifecycle, $failedMecm, $note): array {
-        $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
-        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+        // The active SSoT again: a cancelling job's VMs belong to that job's
+        // own convergence (worker confirm or reaper), never to this sweep.
+        $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+        $placeholders = implode(', ', array_fill(0, count($active), '?'));
         $stmt = $db->prepare(
             'SELECT v.id, v.mission_id, v.vm_name, v.vm_status FROM deploy_vms v
              WHERE v.lifecycle_state = ?
-               AND NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (?, ?))
+               AND NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (' . $placeholders . '))
              ORDER BY v.id
              FOR UPDATE SKIP LOCKED'
         );
-        $stmt->bind_param('sss', $deploying, $queued, $running);
+        $stmt->bind_param('s' . str_repeat('s', count($active)), $deploying, ...$active);
         $stmt->execute();
         $vms = repo_fetch_all($stmt->get_result());
 

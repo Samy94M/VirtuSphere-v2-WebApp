@@ -4,14 +4,32 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/defaults.php';
 
+// Declaration order is the ENUM mirror order (ADR-0016, check-enum-sync):
+// cancelling sits between running and the terminal states, exactly where the
+// machine passes through it. A running job whose cancel was requested keeps
+// lock, heartbeat and every protective effect until the worker confirms at a
+// step boundary or the reaper converges a dead worker (ADR-0033, decision 4).
 const VIRTUSPHERE_DEPLOY_STATUS_QUEUED = 'queued';
 const VIRTUSPHERE_DEPLOY_STATUS_RUNNING = 'running';
+const VIRTUSPHERE_DEPLOY_STATUS_CANCELLING = 'cancelling';
 const VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED = 'succeeded';
 const VIRTUSPHERE_DEPLOY_STATUS_FAILED = 'failed';
 const VIRTUSPHERE_DEPLOY_STATUS_CANCELLED = 'cancelled';
 const VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial';
 
+// Active = the job still owns its mission (delete/enqueue blocks, the
+// one-job-per-mission and one-pull-per-credential guards). Cancelling belongs
+// here: the playbook may still be executing its current step.
 const VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+    VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+    VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
+];
+
+// What the cancel button (and a cancel POST) may act on. Deliberately NOT the
+// active set: a cancelling job is active but already has its wish recorded; a
+// second cancel is idempotent in the repo and pointless in the UI.
+const VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
     VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
 ];

@@ -75,7 +75,9 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
                 <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $job['mission_id']); ?>"><?php echo h(__t('common.mission')); ?></a>
             <?php } ?>
             <a class="button button-secondary" href="<?php echo h(deploy_job_log_url((int) $job['id'])); ?>"><?php echo h(__t('common.refresh')); ?></a>
-            <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, true)) { ?>
+            <?php // Cancellable, not active: a cancelling job's wish is recorded
+                  // and the button would promise a no-op (ADR-0033). ?>
+            <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true)) { ?>
                 <form class="inline-form" method="post" action="deploy.php<?php echo (int) $job['mission_id'] > 0 ? '?mission_id=' . h((string) $job['mission_id']) : ''; ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="cancel">

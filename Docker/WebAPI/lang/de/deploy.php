@@ -43,6 +43,7 @@ return [
     'confirm_retry_partial' => 'Export für Mission :name erneut einreihen? Nur der MAC-Export der ursprünglichen VM-Auswahl wird wiederholt.',
     'flash_queued' => 'Bereitstellungsauftrag eingereiht.',
     'flash_cancelled' => 'Bereitstellungsauftrag abgebrochen.',
+    'flash_cancel_requested' => 'Abbruch angefordert. Der Worker beendet noch den laufenden Schritt und bestätigt den Abbruch an der nächsten Schrittgrenze.',
     'flash_retried' => 'Bereitstellungsauftrag erneut eingereiht.',
     // VM-Auswahl und Power-Cycle
     'label_vms' => 'VMs (leer = ganze Mission)',
