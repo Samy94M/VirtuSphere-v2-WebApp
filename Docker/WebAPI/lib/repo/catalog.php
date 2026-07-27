@@ -165,23 +165,57 @@ function repo_os_for_picker(mysqli $db, string $currentOsName): array
     return $oses;
 }
 
+/**
+ * The one rule for "which of several versions is the successor": the highest
+ * package_version by version_compare(), never the newest row id. B12: this
+ * pick and the relink in mecm_packages.php answered the question differently,
+ * and a re-imported OLDER build (highest id, lower version) became the
+ * recommended upgrade - the operator was told to update onto a downgrade.
+ * packages_pick_successor() applies its own eligibility filters first and then
+ * picks through this same helper.
+ *
+ * @param array<int, array<string, mixed>> $candidates rows carrying package_version
+ * @return array<string, mixed>|null
+ */
+function catalog_pick_highest_version(array $candidates): ?array
+{
+    $best = null;
+    foreach ($candidates as $candidate) {
+        if ($best === null || version_compare((string) $candidate['package_version'], (string) $best['package_version'], '>')) {
+            $best = $candidate;
+        }
+    }
+
+    return $best;
+}
+
 // Update-available hints: linked retired packages whose basename has an
 // active (unlinked) successor - covers cases the automatic relink skipped.
+// Per retired package the successor is picked by catalog_pick_highest_version,
+// the same rule as the automatic relink (B12).
 function repo_vm_package_upgrade_hints(mysqli $db, int $vmId): array
 {
-    $stmt = $db->prepare("SELECT old.package_name AS old_name, new.package_name AS new_name
+    $stmt = $db->prepare("SELECT old.package_name AS old_name, new.package_name AS new_name, new.package_version
         FROM deploy_vm_packages link
         INNER JOIN deploy_packages old ON old.id = link.package_id AND old.package_status = ?
         INNER JOIN deploy_packages new ON new.package_basename = old.package_basename AND new.package_status <> ? AND new.id <> old.id
         WHERE link.vm_id = ?
-        ORDER BY old.package_name, new.id DESC");
+        ORDER BY old.package_name");
     $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
     $stmt->bind_param('ssi', $retired, $retired, $vmId);
     $stmt->execute();
 
-    $hints = [];
+    $candidates = [];
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $hints[(string) $row['old_name']] ??= (string) $row['new_name'];
+        $candidates[(string) $row['old_name']][] = $row;
+    }
+
+    $hints = [];
+    foreach ($candidates as $oldName => $rows) {
+        $best = catalog_pick_highest_version($rows);
+        if ($best !== null) {
+            $hints[$oldName] = (string) $best['new_name'];
+        }
     }
 
     return $hints;

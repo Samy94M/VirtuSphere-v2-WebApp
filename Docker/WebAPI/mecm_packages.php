@@ -197,7 +197,7 @@ function packages_pick_successor(mysqli $db, string $basename, string $retiredVe
     $stmt->bind_param('ssi', $basename, $retired, $retiredId);
     $stmt->execute();
 
-    $best = null;
+    $eligible = [];
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $candidate) {
         if (!isset($newPackageIds[(int) $candidate['id']])) {
             continue;
@@ -205,12 +205,12 @@ function packages_pick_successor(mysqli $db, string $basename, string $retiredVe
         if (version_compare((string) $candidate['package_version'], $retiredVersion, '<=')) {
             continue;
         }
-        if ($best === null || version_compare((string) $candidate['package_version'], (string) $best['package_version'], '>')) {
-            $best = $candidate;
-        }
+        $eligible[] = $candidate;
     }
 
-    return $best;
+    // The best-of pick is the shared rule (B12): the same helper feeds the
+    // portal's update hint, so relink and hint can never disagree again.
+    return catalog_pick_highest_version($eligible);
 }
 
 $clientIp = machine_api_client_ip();
