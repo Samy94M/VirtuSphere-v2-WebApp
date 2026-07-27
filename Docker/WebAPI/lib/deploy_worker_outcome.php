@@ -7,6 +7,7 @@ require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/mac_import.php';
+require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/status_events.php';
 require_once __DIR__ . '/worker_heartbeat.php';
@@ -22,6 +23,64 @@ require_once __DIR__ . '/worker_heartbeat.php';
 
 final class DeployWorkerCancelled extends RuntimeException
 {
+}
+
+// Where the inventory job was when it threw (B6). Not a wire vocabulary: these
+// exist so a thrown failure is classified by the phase that raised it first and
+// by text evidence second, instead of every throw falling back to `parse` and
+// blaming the host's answer.
+const VIRTUSPHERE_DEPLOY_PHASE_CONFIG = 'config';
+const VIRTUSPHERE_DEPLOY_PHASE_SSH = 'ssh';
+const VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT = 'transport';
+const VIRTUSPHERE_DEPLOY_PHASE_MARKER = 'marker';
+const VIRTUSPHERE_DEPLOY_PHASE_DB = 'db';
+
+/**
+ * Classifies a thrown inventory-job failure into a VIRTUSPHERE_INVENTORY_ERROR_*
+ * category: phase first, text second.
+ *
+ * Only ssh/transport consult the message, because only there can wording
+ * distinguish anything (DNS vs. refused vs. auth); their fallback is `ssh`,
+ * never `parse`. Config failures never reached the network; marker failures are
+ * the one true "the host answered unexpectedly"; db failures are ours. An
+ * unknown phase is a coding error in the worker and reads as `worker`.
+ */
+function deploy_worker_classify_inventory_failure(string $phase, string $message): string
+{
+    switch ($phase) {
+        case VIRTUSPHERE_DEPLOY_PHASE_CONFIG:
+            return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+        case VIRTUSPHERE_DEPLOY_PHASE_SSH:
+        case VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT:
+            $category = connection_error_category($message);
+
+            return $category === VIRTUSPHERE_INVENTORY_ERROR_PARSE ? VIRTUSPHERE_INVENTORY_ERROR_SSH : $category;
+        case VIRTUSPHERE_DEPLOY_PHASE_MARKER:
+            return VIRTUSPHERE_INVENTORY_ERROR_PARSE;
+        case VIRTUSPHERE_DEPLOY_PHASE_DB:
+        default:
+            return VIRTUSPHERE_INVENTORY_ERROR_WORKER;
+    }
+}
+
+/**
+ * Strips credential secrets (and their URL-encoded form) out of a failure
+ * message before it reaches the job log. Same minimum length as
+ * connection_error_detail(): replacing a 1-3 character secret would shred the
+ * message. Deliberately no truncation or whitespace collapse here; the job log
+ * is the operator's evidence and the full playbook output sits above it anyway.
+ *
+ * @param array<int, mixed> $secrets
+ */
+function deploy_worker_redact_secrets(string $message, array $secrets): string
+{
+    foreach ($secrets as $secret) {
+        if (is_string($secret) && strlen($secret) >= VIRTUSPHERE_CONNECTION_REDACT_MIN) {
+            $message = str_replace([$secret, rawurlencode($secret)], '***', $message);
+        }
+    }
+
+    return $message;
 }
 
 /**

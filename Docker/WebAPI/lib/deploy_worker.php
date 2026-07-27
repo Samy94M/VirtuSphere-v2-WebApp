@@ -140,6 +140,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
     $jobId = (int) $job['id'];
     $localDir = null;
+    $esxiSecret = null;
+    $ansibleSecret = null;
 
     $vmIds = deploy_worker_payload($job)['vm_ids'] ?? [];
 
@@ -247,7 +249,10 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // look identical in the log otherwise, and the second one is the finding.
         deploy_worker_handle_cancelled($db, $job, $vmIds, $cancelled->getMessage());
     } catch (Throwable $exception) {
-        deploy_worker_handle_failure($db, $job, $workerId, $vmIds, $exception->getMessage());
+        // Same redaction as the inventory path: a transport error can echo the
+        // command line it ran, and accounts.yml values have no business in a
+        // job error an operator copies into a ticket.
+        deploy_worker_handle_failure($db, $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]));
     } finally {
         repo_touch_deploy_job_heartbeat($db, $jobId, $workerId);
         if (!empty($options['cleanup'])) {
@@ -308,6 +313,12 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     $localDir = null;
     $failCategory = null;
     $fullOutput = '';
+    // Phase tracking (B6): a thrown failure is classified by WHERE it happened
+    // first and by text evidence second (deploy_worker_classify_inventory_failure),
+    // instead of every throw reading as "the host answered unexpectedly".
+    $phase = VIRTUSPHERE_DEPLOY_PHASE_CONFIG;
+    $esxiSecret = null;
+    $ansibleSecret = null;
 
     $heartbeatOnSilence = static function () use ($db, $jobId, $workerId): void {
         deploy_worker_heartbeat_tick($db, $jobId, $workerId);
@@ -324,6 +335,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $ansibleSecret = repo_credential_secret($db, (int) $ansibleCredential['id']);
         $apiBaseUrl = ansible_resolve_api_base_url($db);
 
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_SSH;
         $preflightBuffer = '';
         // Same accumulation as the deploy path: the last stage marker names the
         // broken component in the job error instead of a bare exit code.
@@ -347,8 +359,10 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             );
         }
 
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_CONFIG;
         $artifacts = ansible_prepare_inventory_artifacts($db, $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
         $localDir = (string) $artifacts['local_dir'];
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT;
         ssh_sftp_upload_directory($ansibleCredential, $ansibleSecret, $localDir, (string) $artifacts['remote_dir'], static function (string $line) use ($db, $jobId, $workerId): void {
             deploy_worker_heartbeat_tick($db, $jobId, $workerId);
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
@@ -371,7 +385,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
 
         // Parse marker (may throw -> "parse") then apply the cache atomically.
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_MARKER;
         $parsed = ansible_parse_inventory_output($fullOutput);
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_DB;
         $summary = repo_esxi_inventory_apply($db, $credentialId, $parsed);
         repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities'], $jobId);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($parsed['capabilities'], true));
@@ -405,7 +421,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // of the ways we land here is that the job no longer exists.
         deploy_worker_log_if_job_exists($db, $jobId, 'Inventory job stopped. Reason: ' . $cancelled->getMessage());
     } catch (Throwable $exception) {
-        $category = $failCategory ?? VIRTUSPHERE_INVENTORY_ERROR_PARSE;
+        $category = $failCategory ?? deploy_worker_classify_inventory_failure($phase, $exception->getMessage());
         try {
             // An auth failure pauses all future auto-pulls of this credential to
             // stop the ESXi account from locking out (ADR-0023). That pause blocks
@@ -420,7 +436,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         } catch (Throwable $stateError) {
             error_log('[inventory] state update failed: ' . $stateError->getMessage());
         }
-        $message = '[' . $category . '] ' . $exception->getMessage();
+        $message = '[' . $category . '] ' . deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_STDERR, $message);
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
     } finally {

@@ -194,6 +194,13 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('ansible_preflight_command($preflightApiBaseUrl)', $worker);
         self::assertStringNotContainsString('ansible_preflight_command()', $worker);
 
+        // Thrown inventory failures are classified by phase, never by the old
+        // parse-fallback, and failure messages leave through the secret
+        // redactor (B6; DeployWorkerFailureClassificationTest proves the map).
+        self::assertStringContainsString('deploy_worker_classify_inventory_failure($phase', $worker);
+        self::assertStringNotContainsString('?? VIRTUSPHERE_INVENTORY_ERROR_PARSE', $worker);
+        self::assertStringContainsString('deploy_worker_redact_secrets($exception->getMessage()', $worker);
+
         // The tick lives in the requireable outcome module (the entrypoint runs
         // its loop on require), and it must keep carrying the integration report:
         // that is what keeps the System status row green through one long remote
