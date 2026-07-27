@@ -46,7 +46,7 @@ The `data-confirm` attribute is the SSoT for portal confirmations (ADR-0013). It
 - CSP and security headers are centralized in `lib/headers.php`.
 - CSP and CSRF rules stay unchanged for localized portal pages. Inline scripts/styles still require a nonce, and POST writes still require CSRF.
 - Compose keeps phpMyAdmin loopback-only and does not mount the Docker socket into PHP.
-- HTTPS is admin-configured in the portal (ADR-0027): cert upload plus three toggles. PHP writes config/certs only to a shared volume; nginx reloads itself behind an `nginx -t` gate. The HTTP->HTTPS redirect lives in `lib/bootstrap.php`, so the machine API and `health.php` are exempt by construction; the machine API stays HTTP until E3, its HTTPS migration is candidate 5 in ADR-0019.
+- HTTPS is admin-configured in the portal (ADR-0027): cert upload plus three toggles. PHP writes config/certs only to a shared volume; nginx reloads itself behind an `nginx -t` gate. The HTTP->HTTPS redirect lives in `lib/bootstrap.php`, so the machine API and `health.php` are exempt by construction; the machine API stays HTTP for now; its HTTPS migration is candidate 5 in ADR-0019 and needs its own decision (ADR-0019 amendment 1).
 
 ## 4. ADR Index
 
