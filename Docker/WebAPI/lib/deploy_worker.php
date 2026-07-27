@@ -427,25 +427,6 @@ function deploy_worker_credential(mysqli $db, int $credentialId, string $type): 
     return repo_deploy_assert_credential_type($db, $credentialId, $type);
 }
 
-function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, int $intervalSeconds = VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS): void
-{
-    static $lastHeartbeat = [];
-
-    // Ticks fire on every read slice of the bounded transport (AP6), also the
-    // silent ones, so touching here keeps the container healthcheck green
-    // through playbook runs far longer than the loop cadence (AP8).
-    worker_heartbeat_touch();
-
-    $key = $jobId . ':' . $workerId;
-    $now = time();
-    if ($intervalSeconds > 0 && isset($lastHeartbeat[$key]) && ($now - $lastHeartbeat[$key]) < $intervalSeconds) {
-        return;
-    }
-
-    if (repo_touch_deploy_job_heartbeat($db, $jobId, $workerId)) {
-        $lastHeartbeat[$key] = $now;
-    }
-}
 
 function deploy_worker_log_stream_chunk(mysqli $db, int $jobId, string $workerId, string $stream, string &$buffer, string $chunk, ?callable $onLine = null): void
 {

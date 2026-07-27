@@ -9,6 +9,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/status_events.php';
+require_once __DIR__ . '/worker_heartbeat.php';
 
 /**
  * The deploy worker's job-outcome state machine: everything that turns a
@@ -84,6 +85,40 @@ function deploy_worker_queue_detail(mysqli $db): string
     }
 
     return $detail;
+}
+
+/**
+ * The transport-driven heartbeat: fires on every read slice of the bounded SSH
+ * transport (AP6), including the silent ones, and carries all three liveness
+ * signals of a busy worker. Lives here rather than in the CLI entrypoint so the
+ * integration tests can drive it against a real database (the entrypoint runs
+ * its main loop on require).
+ */
+function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, int $intervalSeconds = VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS): void
+{
+    static $lastHeartbeat = [];
+
+    // Ticks fire on every read slice of the bounded transport (AP6), also the
+    // silent ones, so touching here keeps the container healthcheck green
+    // through playbook runs far longer than the loop cadence (AP8).
+    worker_heartbeat_touch();
+
+    // The System status row rides along, throttled to its own cadence inside
+    // deploy_worker_report_alive(). Without this, a healthy job inside one
+    // remote step longer than the danger window turned the row red: the report
+    // ran only at the top of the main loop, which does not spin while a
+    // playbook runs.
+    deploy_worker_report_alive($db);
+
+    $key = $jobId . ':' . $workerId;
+    $now = time();
+    if ($intervalSeconds > 0 && isset($lastHeartbeat[$key]) && ($now - $lastHeartbeat[$key]) < $intervalSeconds) {
+        return;
+    }
+
+    if (repo_touch_deploy_job_heartbeat($db, $jobId, $workerId)) {
+        $lastHeartbeat[$key] = $now;
+    }
 }
 
 /**

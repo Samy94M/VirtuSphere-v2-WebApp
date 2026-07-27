@@ -540,9 +540,11 @@ const VIRTUSPHERE_LOG_ROTATE_MAX_BYTES = 10485760; // 10 MiB per file
 const VIRTUSPHERE_LOG_ROTATE_GENERATIONS = 5;      // error.log.1 .. .5
 // The deploy worker's heartbeat cadence for the System status row. Deliberately
 // not its sleep interval: it sleeps every few seconds and would write hundreds
-// of rows an hour, while the staleness thresholds are multiples of the reported
-// interval and would go red for a worker that is merely busy inside one long
-// playbook. This is the same order as the MECM tasks, so the row reads the same.
+// of rows an hour. The report runs at the top of the main loop AND inside
+// deploy_worker_heartbeat_tick(), which the bounded SSH transport fires on every
+// read slice - so a worker busy inside one long playbook keeps reporting at this
+// cadence instead of going red. Same order as the MECM tasks, so the row reads
+// the same.
 const VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS = 60;
 
 // Container liveness heartbeat (AP8): both loop workers touch this file on

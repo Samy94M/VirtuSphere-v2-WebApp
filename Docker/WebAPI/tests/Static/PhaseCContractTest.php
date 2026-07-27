@@ -180,8 +180,20 @@ final class PhaseCContractTest extends TestCase
 
         $worker = $this->source('lib/deploy_worker.php');
         self::assertStringContainsString('deploy_worker_reap_stale_jobs($db);', $worker);
-        self::assertStringContainsString('function deploy_worker_heartbeat_tick', $worker);
+        self::assertStringContainsString('deploy_worker_heartbeat_tick(', $worker);
         self::assertStringContainsString('deploy_worker_log_stream_chunk', $worker);
+
+        // The tick lives in the requireable outcome module (the entrypoint runs
+        // its loop on require), and it must keep carrying the integration report:
+        // that is what keeps the System status row green through one long remote
+        // step (WorkerTrafficLightTest proves the behaviour; this pins the wiring).
+        $outcome = $this->source('lib/deploy_worker_outcome.php');
+        self::assertStringContainsString('function deploy_worker_heartbeat_tick', $outcome);
+        self::assertMatchesRegularExpression(
+            '/function deploy_worker_heartbeat_tick.*?deploy_worker_report_alive\(\$db\);/s',
+            $outcome,
+            'the transport tick must report the integration source, or a long playbook turns the ampel red'
+        );
 
         self::assertGreaterThan(
             VIRTUSPHERE_POWERCYCLE_WAIT_MAX,

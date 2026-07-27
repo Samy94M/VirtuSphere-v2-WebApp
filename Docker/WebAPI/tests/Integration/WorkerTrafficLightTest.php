@@ -98,6 +98,43 @@ final class WorkerTrafficLightTest extends TestCase
     }
 
     /**
+     * A worker that is busy inside one long remote step is not a dead worker.
+     *
+     * deploy_worker_report_alive() used to run only at the top of the main loop,
+     * while the transport's silence ticks refreshed the container healthcheck and
+     * the job heartbeat but never the integration source. A healthy job inside a
+     * playbook longer than the danger window (a long vmware_guest clone) turned
+     * the System status row red, the exact opposite of what the row is for. The
+     * tick now carries the throttled integration report too, so the three
+     * liveness signals cannot disagree.
+     */
+    public function testAHeartbeatTickDuringALongRemoteStepKeepsTheAmpelFresh(): void
+    {
+        repo_record_worker_result($this->db, VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER, VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS, true, 'queue: 0 waiting, 1 running');
+
+        // Simulate a remote step that has been silent (toward the DB row) for
+        // longer than the danger window: the loop-start report lies in the past.
+        $stale = VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS * (VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER + 1) + VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS;
+        repo_execute(
+            $this->db,
+            'UPDATE deploy_integration_heartbeats SET last_seen_at = DATE_SUB(NOW(), INTERVAL ? SECOND), last_checked_at = DATE_SUB(NOW(), INTERVAL ? SECOND) WHERE source = ?',
+            'iis',
+            [$stale, $stale, VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER]
+        );
+        self::assertFalse(integration_deploy_worker_alive_now($this->db), 'precondition: the aged row must read as dead');
+
+        // What the bounded SSH transport calls on a silent read slice. The job id
+        // does not need to exist: the job-row heartbeat failing to match must not
+        // stop the worker's own liveness report.
+        deploy_worker_heartbeat_tick($this->db, 999999999, 'test-worker:1');
+
+        self::assertTrue(integration_deploy_worker_alive_now($this->db), 'a busy worker must stay green through a long remote step');
+        $row = $this->row(VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER);
+        self::assertSame(VIRTUSPHERE_HEARTBEAT_STATUS_OK, (string) $row['last_status']);
+        self::assertStringContainsString('queue:', (string) $row['last_detail'], 'the tick reports through the same route, queue depth included');
+    }
+
+    /**
      * The ESXi cadence line follows the same fact: the inventory pull is a deploy
      * job, so without a worker the cycle it promises does not run.
      */
