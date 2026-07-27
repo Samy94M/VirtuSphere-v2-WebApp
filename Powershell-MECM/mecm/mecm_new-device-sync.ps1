@@ -257,36 +257,112 @@ while ($true) {
                     continue
                 }
 
-                # Collection-Zuweisungen (OS, Pakete, Mission) ueber den Cache
-                $targets = New-Object System.Collections.Generic.List[string]
-                if ($deviceOS) { $targets.Add($deviceOS) }
-                foreach ($pkg in @($device.packages)) { if ($pkg.package_name) { $targets.Add([string]$pkg.package_name) } }
-                $targets.Add($missionName)
+                # Reconciliation (ADR-0034): desired/owned/present -> Plan.
+                # desired kommt aus dem Payload (OS, Pakete, Mission), owned aus
+                # der mitgelieferten Provenienz (owned_collections), present aus
+                # GEZIELTEN Proben: die desired-Namen ueber den Collection-Cache
+                # und jede owned-ID. Fremde Regeln betreten den Plan nie und
+                # bleiben dadurch unantastbar; ein Vollabzug aller
+                # Mitgliedschaften waere teuer und wuerde nichts schuetzen.
+                $desired = New-Object System.Collections.Generic.List[object]
+                if ($deviceOS) { $desired.Add(@{ name = [string]$deviceOS; type = 'os' }) }
+                foreach ($pkg in @($device.packages)) { if ($pkg.package_name) { $desired.Add(@{ name = [string]$pkg.package_name; type = 'package' }) } }
+                $desired.Add(@{ name = [string]$missionName; type = 'mission' })
+
+                $ownedRules = @()
+                foreach ($ownedRule in @($device.owned_collections)) {
+                    if ($ownedRule.collection_id) {
+                        $ownedRules += @{
+                            collection_id   = [string]$ownedRule.collection_id
+                            collection_name = [string]$ownedRule.collection_name
+                            type            = [string]$ownedRule.collection_type
+                        }
+                    }
+                }
 
                 # Zaehlt die Zuweisungen, die NICHT gesessen haben. Der Zaehler
                 # entscheidet danach, ob die ResourceID gemeldet werden darf.
                 $targetsSkipped = 0
 
-                foreach ($target in $targets) {
-                    if (-not $collectionCache.ContainsKey($target)) {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target)
+                $present = @()
+                foreach ($target in $desired) {
+                    if (-not $collectionCache.ContainsKey($target.name)) {
+                        Write-VsLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target.name)
                         $dataWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $target
+                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $target.name
                         $targetsSkipped++
                         continue
                     }
-                    $collectionId = $collectionCache[$target]
+                    $collectionId = [string]$collectionCache[$target.name]
                     $member = Get-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction SilentlyContinue
-                    if (-not $member) {
-                        try {
-                            Add-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction Stop | Out-Null
-                            $collectionsToUpdate[$target] = $true
-                        } catch {
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target, $_.Exception.Message)
-                            $itemFailures++
-                            Add-VsRunCause -Causes $causes -Cause 'collection_assign_failed' -Target $deviceName -Collection $target
-                            $targetsSkipped++
-                        }
+                    if ($member) { $present += @{ collection_id = $collectionId; collection_name = [string]$target.name } }
+                }
+                foreach ($ownedRule in $ownedRules) {
+                    if (@($present | Where-Object { $_.collection_id -eq $ownedRule.collection_id }).Count -gt 0) { continue }
+                    $member = Get-CMDeviceCollectionDirectMembershipRule -CollectionId $ownedRule.collection_id -ResourceId $resourceId -ErrorAction SilentlyContinue
+                    if ($member) { $present += @{ collection_id = [string]$ownedRule.collection_id; collection_name = [string]$ownedRule.collection_name } }
+                }
+
+                $plan = Get-VsMembershipPlan -Desired $desired -Owned $ownedRules -Present $present
+                $membershipReport = New-Object System.Collections.Generic.List[object]
+
+                foreach ($target in @($plan.add)) {
+                    # Ein desired-Ziel ohne Collection wurde oben schon als
+                    # collection_missing gezaehlt; der Plan kennt es trotzdem
+                    # als add, weil es nicht present ist.
+                    if (-not $collectionCache.ContainsKey($target.name)) { continue }
+                    $collectionId = [string]$collectionCache[$target.name]
+                    try {
+                        Add-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction Stop | Out-Null
+                        $collectionsToUpdate[$target.name] = $true
+                        $membershipReport.Add(@{ collection_id = $collectionId; collection_name = [string]$target.name; type = [string]$target.type; change = 'added' })
+                    } catch {
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target.name, $_.Exception.Message)
+                        $itemFailures++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_assign_failed' -Target $deviceName -Collection $target.name
+                        $targetsSkipped++
+                    }
+                }
+
+                # Entfernen NUR aus $plan.remove: owned UND present UND nicht
+                # mehr desired (Entscheidung 2). Ein Fehlschlag laesst das
+                # Device in der Warteschlange, der naechste Lauf konvergiert.
+                foreach ($rule in @($plan.remove)) {
+                    try {
+                        Remove-CMDeviceCollectionDirectMembershipRule -CollectionId $rule.collection_id -ResourceId $resourceId -Force -ErrorAction Stop
+                        $collectionsToUpdate[$rule.collection_name] = $true
+                        $membershipReport.Add(@{ collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
+                        Write-VsLog -Context $deviceName -Message ("Eigene, nicht mehr zugewiesene Regel entfernt: '{0}' ({1})." -f $rule.collection_name, $rule.collection_id)
+                    } catch {
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Entfernen der eigenen Regel '{0}' fehlgeschlagen: {1}" -f $rule.collection_name, $_.Exception.Message)
+                        $itemFailures++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_remove_failed' -Target $deviceName -Collection $rule.collection_name
+                        $targetsSkipped++
+                    }
+                }
+
+                # Verfallene Provenienz (Regel in MECM von Hand entfernt): nur
+                # zurueckmelden, nie zurueckkaempfen - MECM bleibt die Wahrheit.
+                foreach ($rule in @($plan.stale_owned)) {
+                    $membershipReport.Add(@{ collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
+                    Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt - Provenienz wird zurueckgezogen." -f $rule.collection_name)
+                }
+
+                # Angewandte Aenderungen zurueckmelden, BEVOR die ResourceID das
+                # Device aus der Warteschlange nimmt. Ein Fehlschlag ist eine
+                # Warnung: die Provenienz konvergiert im naechsten Lauf (der
+                # Report ist idempotent), verloren geht hoechstens eine
+                # ueberzaehlige eigene Zeile, nie eine entfernte Hand-Regel.
+                if ($membershipReport.Count -gt 0) {
+                    try {
+                        Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body @{
+                            deviceid    = $device.id
+                            memberships = @($membershipReport)
+                        } | Out-Null
+                    } catch {
+                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung fehlgeschlagen: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+                        $dataWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'membership_report_failed' -Target $deviceName
                     }
                 }
 

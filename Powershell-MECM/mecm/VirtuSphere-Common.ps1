@@ -494,6 +494,8 @@ $script:VsRunCauseVocabulary = @(
     'collection_assign_failed',  # Add-CMDeviceCollectionDirectMembershipRule fehlgeschlagen
     'collection_update_failed',  # Invoke-CMCollectionUpdate fehlgeschlagen
     'collection_folder_failed',  # Ordner/Verschieben fehlgeschlagen
+    'collection_remove_failed',  # Remove der EIGENEN Regel fehlgeschlagen (ADR-0034)
+    'membership_report_failed',  # Provenienz-Meldung ans Portal fehlgeschlagen (ADR-0034)
     'resource_id_pending',       # MECM hat noch keine ResourceID vergeben
     'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
     'package_config_invalid',    # config.json unlesbar oder Pflichtfeld fehlt
@@ -606,13 +608,68 @@ function Test-VsTemplateScriptCurrent {
 # Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
 # Strings, damit ein Tippfehler beim Aufruf sofort auffaellt; die Liste oben ist
 # die SSoT und wird von der Pester-Suite in beide Richtungen dagegen gehalten.
+# ---------------------------------------------------------------------------
+# MECM-Mitgliedschafts-Reconciliation (ADR-0034)
+# ---------------------------------------------------------------------------
+# Pure Planfunktion: desired (Portalwunsch, {name,type}), owned (Provenienz,
+# {collection_id,collection_name}), present (aktuelle Direct-Rules) -> Buckets.
+# Die IDENTISCHE Abbildung existiert auf der PHP-Seite (lib/mecm_plan.php);
+# beide laufen die gemeinsamen Vektoren in
+# Docker/WebAPI/tests/fixtures/mecm-plan-vectors.json, damit Portal-Vorschau
+# und Sync-Apply nie auseinanderlaufen. Die eine Sicherheitsregel: `remove`
+# enthaelt nur Regeln, die owned UND present UND nicht mehr desired sind - eine
+# Hand-Regel hat keine Provenienz und ist konstruktionsbedingt unantastbar
+# (preserve_manual/foreign werden nie angefasst, adoptiert wird nur im Portal).
+function Get-VsMembershipPlan {
+    param(
+        [array]$Desired = @(),
+        [array]$Owned = @(),
+        [array]$Present = @()
+    )
+
+    $ownedById = @{}
+    foreach ($rule in @($Owned)) { if ($null -ne $rule) { $ownedById[[string]$rule.collection_id] = $rule } }
+    $desiredByName = @{}
+    foreach ($target in @($Desired)) { if ($null -ne $target) { $desiredByName[[string]$target.name] = $target } }
+
+    $plan = @{ add = @(); preserve = @(); preserve_manual = @(); remove = @(); stale_owned = @(); foreign = @() }
+    $presentNames = @{}
+    $presentIds = @{}
+    foreach ($rule in @($Present)) {
+        if ($null -eq $rule) { continue }
+        $id = [string]$rule.collection_id
+        $name = [string]$rule.collection_name
+        $presentIds[$id] = $true
+        $presentNames[$name] = $true
+        if ($desiredByName.ContainsKey($name)) {
+            if ($ownedById.ContainsKey($id)) { $plan.preserve += , $rule } else { $plan.preserve_manual += , $rule }
+        } elseif ($ownedById.ContainsKey($id)) {
+            $plan.remove += , $rule
+        } else {
+            $plan.foreign += , $rule
+        }
+    }
+    foreach ($target in @($Desired)) {
+        if ($null -ne $target -and -not $presentNames.ContainsKey([string]$target.name)) { $plan.add += , $target }
+    }
+    # Owned, aber nicht mehr vorhanden: jemand hat unsere Regel direkt in MECM
+    # entfernt. Die Provenienz ist verfallen und wird zurueckgemeldet, nie
+    # zurueckgekaempft - MECM bleibt die Wahrheit (Entscheidung 1).
+    foreach ($id in @($ownedById.Keys)) {
+        if (-not $presentIds.ContainsKey([string]$id)) { $plan.stale_owned += , $ownedById[$id] }
+    }
+
+    return $plan
+}
+
 function Add-VsRunCause {
     param(
         [Parameter(Mandatory)]$Causes,
         [Parameter(Mandatory)]
         [ValidateSet('mission_missing', 'mac_missing', 'mac_conflict', 'device_import_failed',
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',
-            'collection_folder_failed', 'resource_id_pending', 'resource_update_failed',
+            'collection_folder_failed', 'collection_remove_failed', 'membership_report_failed',
+            'resource_id_pending', 'resource_update_failed',
             'package_config_invalid', 'package_content_failed', 'package_source_missing',
             'package_deploy_failed', 'package_cleanup_failed', 'package_template_failed')]
         [string]$Cause,

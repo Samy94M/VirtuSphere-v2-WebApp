@@ -10,6 +10,15 @@
 # unter pwsh auf Linux (CI). Registry-Faelle sind in einen $HasRegistry-Block
 # gekapselt und laufen nur auf Windows (der PS-5.1-CI-Job deckt sie ab).
 
+# Auf Dateiebene, weil -ForEach schon in der Discovery-Phase gebraucht wird
+# (gleiches Muster wie die MAC-Vektoren in VirtuSphere.Common.Tests.ps1). Die
+# Vektoren sind DIESELBE Datei, die MecmPlanVectorsTest auf der PHP-Seite
+# laeuft: Portal-Vorschau und Device-Sync-Apply koennen nicht auseinanderlaufen.
+$PlanRepoRootDiscovery = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$PlanVectorFileDiscovery = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $PlanRepoRootDiscovery 'Docker') 'WebAPI') 'tests') 'fixtures') 'mecm-plan-vectors.json'
+$PlanVectorCases = (Get-Content -Path $PlanVectorFileDiscovery -Raw | ConvertFrom-Json).vectors |
+    ForEach-Object { @{ name = $_.name; why = $_.why; desired = @($_.desired); owned = @($_.owned); present = @($_.present); expected = $_.expected } }
+
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $psRoot = Join-Path $script:RepoRoot 'Powershell-MECM'
@@ -153,6 +162,22 @@ Describe 'Get-VsApiHeaders (Token-Handhabung)' {
         }
         $ids[0] | Should -Match '^[0-9a-f]{16}$'
         $ids[1] | Should -Be $ids[0]
+    }
+}
+
+Describe 'Get-VsMembershipPlan (gemeinsame Vektoren mit PHP, ADR-0034)' {
+
+    It 'vector <name>' -ForEach $PlanVectorCases {
+        $plan = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($desired, $owned, $present) -Body {
+            param($d, $o, $p) Get-VsMembershipPlan -Desired $d -Owned $o -Present $p
+        }
+
+        ((@($plan.add) | ForEach-Object { [string]$_.name } | Sort-Object) -join '|') |
+            Should -Be ((@($expected.add) | Sort-Object) -join '|') -Because $why
+        foreach ($bucket in @('preserve', 'preserve_manual', 'remove', 'stale_owned', 'foreign')) {
+            ((@($plan.$bucket) | ForEach-Object { [string]$_.collection_id } | Sort-Object) -join '|') |
+                Should -Be ((@($expected.$bucket) | Sort-Object) -join '|') -Because ($bucket + ': ' + $why)
+        }
     }
 }
 

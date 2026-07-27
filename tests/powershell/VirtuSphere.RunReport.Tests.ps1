@@ -538,28 +538,49 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
     }
 }
 
-# Beide Zuweisungswege (Portal und MECM-Konsole) duerfen nebeneinander bestehen,
-# WEIL der Device-Sync ausschliesslich hinzufuegt. Genau darauf beruht die
-# Entscheidung „das Portal ist die Absicht vor dem Rollout, MECM die Wahrheit
-# danach": eine in der Konsole gesetzte Mitgliedschaft ist vor dem Portal sicher,
-# und die Uebertragen-Aktion darf deshalb gefahrlos erneut laufen. Bisher war das
-# Zufall.
-Describe 'Kein Skript entfernt die Mitgliedschaft eines Geraets' {
+# Beide Zuweisungswege (Portal und MECM-Konsole) bestehen nebeneinander, WEIL
+# ein Entfernen den Provenienz-Beweis braucht (ADR-0034): der Device-Sync darf
+# eine Direct-Rule ausschliesslich aus dem Plan-Bucket `remove` nehmen, und der
+# enthaelt nur Regeln, die owned UND vorhanden UND nicht mehr gewuenscht sind.
+# Eine in der Konsole gesetzte Mitgliedschaft hat keine Provenienzzeile und ist
+# damit konstruktionsbedingt unantastbar; adoptiert wird nie im Sync, sondern
+# nur ausdruecklich im Portal. Der alte Vertrag ("es gibt gar kein Remove") ist
+# hier bewusst neu geschnitten worden.
+Describe 'Mitgliedschaften entfernt nur der Device-Sync, und nur mit Provenienz-Beweis' {
 
     It '<name> ruft kein Remove-Cmdlet auf einer Mitgliedschaft oder einem Geraet auf' -ForEach @(
-        @{ name = 'mecm_new-device-sync.ps1' }
         @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
         @{ name = 'mecm_autoimporter.ps1' }
         @{ name = 'mecm_site-health.ps1' }
     ) {
-        # Geprueft wird genau das, worauf das Nebeneinander beruht: eine
-        # MITGLIEDSCHAFT wird nie entfernt und ein GERAET nie geloescht. Dass der
-        # Autoimporter die Collection einer ueberholten Paketversion abraeumt, ist
-        # seine dokumentierte Aufgabe und eine andere Frage: die Collection
-        # verschwindet mit der Version, zu der sie gehoert.
+        # Dass der Autoimporter die Collection einer ueberholten Paketversion
+        # abraeumt, ist seine dokumentierte Aufgabe und eine andere Frage: die
+        # Collection verschwindet mit der Version, zu der sie gehoert.
         $text = Get-ScriptText -Name $name
         foreach ($forbidden in @(
             'Remove-CMDeviceCollectionDirectMembershipRule',
+            'Remove-CMDeviceCollectionMembershipRule',
+            'Remove-CMDeviceCollectionQueryMembershipRule',
+            'Remove-CMDeviceCollectionExcludeMembershipRule',
+            'Remove-CMDevice ',
+            'Remove-CMDevice$',
+            'Clear-CMDeviceCollection'
+        )) {
+            $text | Should -Not -Match $forbidden
+        }
+    }
+
+    It 'der Device-Sync entfernt Direct-Rules genau einmal, und nur aus $plan.remove' {
+        $text = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        # Zero-Match-Schutz: das Remove MUSS existieren (der Sync reconciliert
+        # seit ADR-0034), sonst prueft der Positivpfad nichts.
+        $text | Should -Match 'Remove-CMDeviceCollectionDirectMembershipRule'
+        ([regex]::Matches($text, 'Remove-CMDeviceCollectionDirectMembershipRule')).Count | Should -Be 1
+        # Die eine Aufrufstelle konsumiert den Plan-Bucket: die Schleife ueber
+        # $plan.remove ist der Provenienz-Beweis, den die Vektoren pinnen.
+        $text | Should -Match '(?s)foreach \(\$rule in @\(\$plan\.remove\)\).{0,600}Remove-CMDeviceCollectionDirectMembershipRule'
+        # Die uebrigen Formen bleiben auch im Device-Sync verboten.
+        foreach ($forbidden in @(
             'Remove-CMDeviceCollectionMembershipRule',
             'Remove-CMDeviceCollectionQueryMembershipRule',
             'Remove-CMDeviceCollectionExcludeMembershipRule',
