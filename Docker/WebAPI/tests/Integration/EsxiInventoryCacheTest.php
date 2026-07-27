@@ -82,6 +82,116 @@ final class EsxiInventoryCacheTest extends TestCase
         self::assertCount(2, $grouped['network']);
     }
 
+    /**
+     * B15: an empty list used to be three different things at once, and the
+     * cache treated all three as "keep the old rows". With the per-query report
+     * the pull can now SAY which one happened, and the cache follows: a kind
+     * whose every query answered decides authoritatively, so an answered-empty
+     * kind is cleared (the host genuinely has none, and keeping the old rows
+     * would show portgroups the host lost). failed/skipped still keep rows.
+     */
+    public function testAnsweredEmptyClearsTheKindWhileFailedEmptyKeepsIt(): void
+    {
+        repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'network', repo_esxi_inventory_name_items(['VLAN10', 'VLAN20']));
+        repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'datastore', [['name' => 'ds-old']]);
+
+        $summary = repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'datacenters' => ['DC1'],
+            'datastores' => [],
+            'networks' => [],
+            'hosts' => [],
+            'queries' => [
+                'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'datastores' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'not authorized'],
+                'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_SKIPPED, 'message' => ''],
+            ],
+        ]);
+
+        // Both network queries answered and the union is empty: authoritative.
+        self::assertFalse($summary['network']['kept_empty']);
+        self::assertTrue($summary['network']['cleared']);
+        self::assertSame(2, $summary['network']['removed']);
+        // The datastore query was rejected: the empty list proves nothing and
+        // the frozen rows stay, exactly as before the report existed.
+        self::assertTrue($summary['datastore']['kept_empty']);
+        self::assertFalse($summary['datastore']['cleared']);
+
+        $grouped = repo_esxi_inventory_for_credential($this->db, $this->credentialId);
+        self::assertArrayNotHasKey('network', $grouped);
+        self::assertCount(1, $grouped['datastore']);
+    }
+
+    public function testKindFreshnessIsStampedOnlyForAnsweredKinds(): void
+    {
+        repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'datacenters' => ['DC1'],
+            'datastores' => [],
+            'networks' => ['VLAN10'],
+            'hosts' => [],
+            'queries' => [
+                'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'datastores' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'x'],
+                'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_SKIPPED, 'message' => ''],
+                'hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+            ],
+        ]);
+
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertNotNull($state, 'the freshness stamp must create the state row when none exists yet');
+        $map = json_decode((string) ($state['kind_freshness_json'] ?? ''), true);
+        self::assertIsArray($map);
+        // datacenters and hosts answered: stamped, including the EMPTY host
+        // kind (that is the whole point: "we know it is empty as of T" is not
+        // representable by row timestamps). The rejected datastore query and
+        // the half-skipped network union stamp nothing.
+        self::assertArrayHasKey(VIRTUSPHERE_INVENTORY_KIND_DATACENTER, $map);
+        self::assertArrayHasKey(VIRTUSPHERE_INVENTORY_KIND_HOST, $map);
+        self::assertArrayNotHasKey(VIRTUSPHERE_INVENTORY_KIND_DATASTORE, $map);
+        self::assertArrayNotHasKey(VIRTUSPHERE_INVENTORY_KIND_NETWORK, $map);
+
+        // A later pull with the datastore query healthy fills the gap and
+        // keeps the earlier stamps.
+        repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'datacenters' => [],
+            'datastores' => [['name' => 'ds1']],
+            'networks' => [],
+            'hosts' => [],
+            'queries' => [
+                'datastores' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+                'datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'x'],
+                'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'x'],
+                'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'x'],
+                'hosts' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_REJECTED, 'message' => 'x'],
+            ],
+        ]);
+        $map = json_decode((string) repo_esxi_inventory_state($this->db, $this->credentialId)['kind_freshness_json'], true);
+        self::assertArrayHasKey(VIRTUSPHERE_INVENTORY_KIND_DATASTORE, $map);
+        self::assertArrayHasKey(VIRTUSPHERE_INVENTORY_KIND_DATACENTER, $map, 'an earlier stamp survives a later rejected query');
+    }
+
+    public function testAPullWithoutTheQueryReportKeepsTheOldGuardSemantics(): void
+    {
+        // Output from a playbook that predates the per-query report: nothing is
+        // authoritative, nothing is stamped, the empty-guard works as always.
+        repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'network', repo_esxi_inventory_name_items(['VLAN10']));
+
+        $summary = repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'datacenters' => [],
+            'datastores' => [],
+            'networks' => [],
+            'hosts' => [],
+        ]);
+
+        self::assertTrue($summary['network']['kept_empty']);
+        self::assertFalse($summary['network']['cleared']);
+        self::assertCount(1, repo_esxi_inventory_for_credential($this->db, $this->credentialId)['network']);
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertTrue($state === null || $state['kind_freshness_json'] === null);
+    }
+
     public function testCaseInsensitiveDedupe(): void
     {
         $result = repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'network', repo_esxi_inventory_name_items(['Prod', 'prod', 'PROD', 'Test']));

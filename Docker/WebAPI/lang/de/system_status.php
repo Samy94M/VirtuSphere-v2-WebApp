@@ -198,6 +198,7 @@ return [
     'inv_open_card' => 'ESXi-Status ansehen',
     'inv_configure_credentials' => 'ESXi-Zugang anlegen',
     'inv_kind_empty' => 'Für diese Inventarart liegen keine Einträge vor.',
+    'inv_kind_as_of' => 'Stand: :time',
     'inv_last_attempt' => 'Letzter Versuch',
     'inv_last_success' => 'Letzter Erfolg',
     'inv_job_queued' => 'eingereiht',

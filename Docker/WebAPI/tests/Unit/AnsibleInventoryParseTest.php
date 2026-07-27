@@ -240,6 +240,66 @@ final class AnsibleInventoryParseTest extends TestCase
         self::assertSame([], ansible_parse_inventory_queries(null));
     }
 
+    public function testNormalizationCountsRawAgainstKeptEntries(): void
+    {
+        // ansible_inventory.php used to drop unusable raw entries silently: a
+        // module output whose shape stopped matching looked exactly like a host
+        // with fewer portgroups, and nothing anywhere said so (B15). The parser
+        // now reports raw vs. kept per kind. A case-duplicate is NOT a loss
+        // (the dedupe is intentional); only unusable shapes count.
+        $out = $this->markerOutput([
+            'datacenters' => ['DC1', '   '],
+            'datastores' => [['name' => 'ds1'], ['capacity' => 5], 'not-a-dict'],
+            'networks_standard' => [['portgroup' => 'VLAN10'], 42, ['no_name_field' => true], ['portgroup' => 'vlan10']],
+            'networks_dvs' => [],
+            'hosts' => [],
+        ]);
+
+        $parsed = ansible_parse_inventory_output($out);
+        $normalization = $parsed['normalization'];
+
+        self::assertSame(['raw' => 2, 'kept' => 1], $normalization['datacenters']);
+        self::assertSame(['raw' => 3, 'kept' => 1], $normalization['datastores']);
+        // 4 raw: one good, one unusable int, one nameless dict, one
+        // case-duplicate. The duplicate collapses in the dedupe but still
+        // counts as kept here (it WAS parseable), so kept is 2, not 1.
+        self::assertSame(['raw' => 4, 'kept' => 2], $normalization['networks']);
+    }
+
+    public function testNormalizationLogLineNamesTheDrops(): void
+    {
+        $line = ansible_inventory_normalization_log_line([
+            'datacenters' => ['raw' => 2, 'kept' => 1],
+            'datastores' => ['raw' => 3, 'kept' => 1],
+            'networks' => ['raw' => 4, 'kept' => 4],
+        ]);
+
+        self::assertStringContainsString('datacenters 1 of 2', $line);
+        self::assertStringContainsString('datastores 2 of 3', $line);
+        self::assertStringNotContainsString('networks', $line);
+    }
+
+    public function testNormalizationLogLineSpeaksInTheGoodCaseToo(): void
+    {
+        // Same rule as the query and datastore-health lines: a line that only
+        // ever appears when something is wrong does not teach the reader that
+        // the check exists, and silence becomes ambiguous.
+        $line = ansible_inventory_normalization_log_line([
+            'datacenters' => ['raw' => 1, 'kept' => 1],
+            'networks' => ['raw' => 13, 'kept' => 13],
+        ]);
+
+        self::assertStringContainsString('all 14 raw entries usable', $line);
+    }
+
+    public function testNormalizationLogLineIsNullForAPullWithoutRawEntries(): void
+    {
+        self::assertNull(ansible_inventory_normalization_log_line([
+            'datacenters' => ['raw' => 0, 'kept' => 0],
+            'networks' => ['raw' => 0, 'kept' => 0],
+        ]));
+    }
+
     public function testMissingMarkerThrows(): void
     {
         $this->expectException(RuntimeException::class);

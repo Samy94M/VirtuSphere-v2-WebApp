@@ -55,8 +55,15 @@ function repo_esxi_inventory_dedupe(array $items): array
 }
 
 /**
- * Replaces the cached rows of one (credential, kind). Empty input keeps the
- * existing rows (empty-guard) and reports it.
+ * Replaces the cached rows of one (credential, kind).
+ *
+ * Empty input is two different facts, and $authoritativeEmpty says which one
+ * this is (B15): false keeps the existing rows (empty-guard, a transient blank
+ * or a rejected query must not wipe the cache), true DELETES them, because the
+ * kind's every query answered and the host genuinely reports none; keeping the
+ * old rows would show portgroups the host lost. The caller derives the flag
+ * from the per-query report (repo_esxi_inventory_answered_kinds); a pull
+ * without the report is never authoritative.
  *
  * The DELETE and the INSERTs are one unit: an interrupted rewrite must never
  * commit the empty middle state, because repo_esxi_vlan_sync() reads this table
@@ -65,9 +72,9 @@ function repo_esxi_inventory_dedupe(array $items): array
  * opening a second one.
  *
  * @param array<int, array<string, mixed>> $items name + optional capacity_bytes/free_bytes/meta_json
- * @return array{written:int, removed:int, kept_empty:bool}
+ * @return array{written:int, removed:int, kept_empty:bool, cleared:bool}
  */
-function repo_esxi_inventory_replace_kind(mysqli $db, int $credentialId, string $kind, array $items): array
+function repo_esxi_inventory_replace_kind(mysqli $db, int $credentialId, string $kind, array $items, bool $authoritativeEmpty = false): array
 {
     if (!in_array($kind, VIRTUSPHERE_INVENTORY_KINDS, true)) {
         throw new InvalidArgumentException('Unknown inventory kind: ' . $kind);
@@ -75,7 +82,16 @@ function repo_esxi_inventory_replace_kind(mysqli $db, int $credentialId, string 
 
     $deduped = repo_esxi_inventory_dedupe($items);
     if ($deduped === []) {
-        return ['written' => 0, 'removed' => 0, 'kept_empty' => true];
+        if (!$authoritativeEmpty) {
+            return ['written' => 0, 'removed' => 0, 'kept_empty' => true, 'cleared' => false];
+        }
+
+        return repo_transaction($db, static function () use ($db, $credentialId, $kind): array {
+            $before = (int) repo_scalar($db, 'SELECT COUNT(*) FROM deploy_esxi_inventory WHERE credential_id = ? AND kind = ?', 'is', [$credentialId, $kind]);
+            repo_execute($db, 'DELETE FROM deploy_esxi_inventory WHERE credential_id = ? AND kind = ?', 'is', [$credentialId, $kind]);
+
+            return ['written' => 0, 'removed' => $before, 'kept_empty' => false, 'cleared' => true];
+        });
     }
 
     return repo_transaction($db, static function () use ($db, $credentialId, $kind, $deduped): array {
@@ -97,30 +113,107 @@ function repo_esxi_inventory_replace_kind(mysqli $db, int $credentialId, string 
             $written++;
         }
 
-        return ['written' => $written, 'removed' => $before, 'kept_empty' => false];
+        return ['written' => $written, 'removed' => $before, 'kept_empty' => false, 'cleared' => false];
     });
 }
 
 /**
- * Applies a full parsed inventory for one credential in a single transaction.
- * Each kind is replaced independently with its own empty-guard.
+ * The kinds whose EVERY query answered in this pull, derived from the
+ * per-query report. Only these may decide authoritatively about emptiness and
+ * only these get a freshness stamp. The network kind is a union of two
+ * queries, so both must have answered: with one of them failed or skipped the
+ * union is incomplete and proves nothing. A pull without the report (old
+ * playbook) answers nothing.
  *
- * @param array{datacenters?:array, datastores?:array, networks?:array, hosts?:array} $parsed
- * @return array<string, array{written:int, removed:int, kept_empty:bool}>
+ * @param array<string, array{state?:string}> $queries
+ * @return array<int, string>
+ */
+function repo_esxi_inventory_answered_kinds(array $queries): array
+{
+    if ($queries === []) {
+        return [];
+    }
+
+    $map = [
+        VIRTUSPHERE_INVENTORY_KIND_DATACENTER => ['datacenters'],
+        VIRTUSPHERE_INVENTORY_KIND_DATASTORE => ['datastores'],
+        VIRTUSPHERE_INVENTORY_KIND_NETWORK => ['networks_standard', 'networks_dvs'],
+        VIRTUSPHERE_INVENTORY_KIND_HOST => ['hosts'],
+    ];
+
+    $answered = [];
+    foreach ($map as $kind => $queryNames) {
+        foreach ($queryNames as $queryName) {
+            if ((string) ($queries[$queryName]['state'] ?? '') !== VIRTUSPHERE_INVENTORY_QUERY_ANSWERED) {
+                continue 2;
+            }
+        }
+        $answered[] = $kind;
+    }
+
+    return $answered;
+}
+
+/**
+ * Applies a full parsed inventory for one credential in a single transaction.
+ * Each kind is replaced independently; the per-query report decides which
+ * kinds may treat an empty result as authoritative (B15), and every answered
+ * kind gets its freshness stamped, including the empty ones.
+ *
+ * @param array{datacenters?:array, datastores?:array, networks?:array, hosts?:array, queries?:array} $parsed
+ * @return array<string, array{written:int, removed:int, kept_empty:bool, cleared:bool}>
  */
 function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed): array
 {
-    return repo_transaction($db, static function () use ($db, $credentialId, $parsed): array {
+    $answeredKinds = repo_esxi_inventory_answered_kinds((array) ($parsed['queries'] ?? []));
+
+    return repo_transaction($db, static function () use ($db, $credentialId, $parsed, $answeredKinds): array {
+        $authoritative = static fn (string $kind): bool => in_array($kind, $answeredKinds, true);
+
         $summary = [];
-        $summary['datacenter'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATACENTER, repo_esxi_inventory_name_items($parsed['datacenters'] ?? []));
-        $summary['datastore'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATASTORE, (array) ($parsed['datastores'] ?? []));
+        $summary['datacenter'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATACENTER, repo_esxi_inventory_name_items($parsed['datacenters'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_DATACENTER));
+        $summary['datastore'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATASTORE, (array) ($parsed['datastores'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_DATASTORE));
         // Networks may arrive as plain names (legacy) or as items with a
         // vlan_id meta; both are accepted.
-        $summary['network'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_NETWORK, repo_esxi_inventory_mixed_items((array) ($parsed['networks'] ?? [])));
-        $summary['host'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_HOST, (array) ($parsed['hosts'] ?? []));
+        $summary['network'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_NETWORK, repo_esxi_inventory_mixed_items((array) ($parsed['networks'] ?? [])), $authoritative(VIRTUSPHERE_INVENTORY_KIND_NETWORK));
+        $summary['host'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_HOST, (array) ($parsed['hosts'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_HOST));
+
+        repo_esxi_inventory_touch_kind_freshness($db, $credentialId, $answeredKinds);
 
         return $summary;
     });
+}
+
+/**
+ * Stamps "answered as of now" for the given kinds on the credential's state
+ * row, creating the row when the first pull gets here before
+ * repo_esxi_inventory_record_success() does. Merge, not overwrite: a kind
+ * whose query failed this time keeps its older stamp, which is exactly the
+ * age the frozen rows have.
+ *
+ * @param array<int, string> $kinds
+ */
+function repo_esxi_inventory_touch_kind_freshness(mysqli $db, int $credentialId, array $kinds): void
+{
+    $kinds = array_values(array_intersect($kinds, VIRTUSPHERE_INVENTORY_KINDS));
+    if ($kinds === []) {
+        return;
+    }
+
+    // Database clock, like every other timestamp on this row (NOW() writes).
+    $now = (string) repo_scalar($db, 'SELECT NOW()');
+    $row = repo_fetch_one($db, 'SELECT kind_freshness_json FROM deploy_esxi_inventory_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
+    $decoded = $row !== null ? json_decode((string) ($row['kind_freshness_json'] ?? ''), true) : null;
+    $map = is_array($decoded) ? $decoded : [];
+    foreach ($kinds as $kind) {
+        $map[$kind] = $now;
+    }
+
+    $json = json_encode($map, JSON_THROW_ON_ERROR);
+    // Row-alias syntax (VALUES() in ODKU is deprecated on MySQL 8.4).
+    $stmt = $db->prepare('INSERT INTO deploy_esxi_inventory_state (credential_id, kind_freshness_json) VALUES (?, ?) AS new ON DUPLICATE KEY UPDATE kind_freshness_json = new.kind_freshness_json');
+    $stmt->bind_param('is', $credentialId, $json);
+    $stmt->execute();
 }
 
 /**

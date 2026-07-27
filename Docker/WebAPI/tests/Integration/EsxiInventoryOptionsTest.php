@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_storage.php';
 require_once dirname(__DIR__, 2) . '/lib/esxi_inventory.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';

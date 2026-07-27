@@ -113,7 +113,7 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
  * Parses the base64-JSON marker the inventory playbook prints into the cache
  * shape. Throws when the marker is missing/corrupt (worker records "parse").
  *
- * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>, capabilities:array<string,mixed>, queries:array<string,array{state:string,message:string}>}
+ * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>, capabilities:array<string,mixed>, queries:array<string,array{state:string,message:string}>, normalization:array<string,array{raw:int,kept:int}>}
  */
 function ansible_parse_inventory_output(string $stdout): array
 {
@@ -129,10 +129,16 @@ function ansible_parse_inventory_output(string $stdout): array
         throw new RuntimeException('Inventory payload is not valid JSON.');
     }
 
-    $datacenters = array_values(array_filter(array_map(static fn ($v): string => trim((string) $v), (array) ($data['datacenters'] ?? [])), static fn (string $v): bool => $v !== ''));
+    // Raw-vs-kept bookkeeping (B15): an entry whose shape stopped matching used
+    // to vanish silently, which looks exactly like a host that has less. The
+    // dedupe below is NOT a loss (a case-duplicate WAS parseable), so `kept`
+    // counts parseable entries before de-duplication.
+    $rawDatacenters = (array) ($data['datacenters'] ?? []);
+    $datacenters = array_values(array_filter(array_map(static fn ($v): string => trim((string) $v), $rawDatacenters), static fn (string $v): bool => $v !== ''));
 
+    $rawDatastores = (array) ($data['datastores'] ?? []);
     $datastores = [];
-    foreach ((array) ($data['datastores'] ?? []) as $ds) {
+    foreach ($rawDatastores as $ds) {
         if (!is_array($ds)) {
             continue;
         }
@@ -153,12 +159,16 @@ function ansible_parse_inventory_output(string $stdout): array
     // Raw portgroup objects (or legacy plain names) from both module kinds,
     // de-duplicated case-insensitively; the first item's meta wins.
     $networks = [];
+    $rawNetworks = 0;
+    $keptNetworks = 0;
     foreach (['standard' => (array) ($data['networks_standard'] ?? []), 'dvs' => (array) ($data['networks_dvs'] ?? [])] as $source => $entries) {
         foreach ($entries as $raw) {
+            $rawNetworks++;
             $item = ansible_inventory_network_item($raw, $source);
             if ($item === null) {
                 continue;
             }
+            $keptNetworks++;
             $key = esxi_inventory_name_key($item['name']);
             if (!isset($networks[$key])) {
                 $networks[$key] = $item;
@@ -174,7 +184,44 @@ function ansible_parse_inventory_output(string $stdout): array
         'hosts' => ansible_parse_inventory_hosts($data['hosts'] ?? [], $data['fetched_epoch'] ?? null),
         'capabilities' => ansible_parse_inventory_capabilities($data['about'] ?? [], $data['host_runtime'] ?? []),
         'queries' => ansible_parse_inventory_queries($data['queries'] ?? []),
+        'normalization' => [
+            'datacenters' => ['raw' => count($rawDatacenters), 'kept' => count($datacenters)],
+            'datastores' => ['raw' => count($rawDatastores), 'kept' => count($datastores)],
+            'networks' => ['raw' => $rawNetworks, 'kept' => $keptNetworks],
+        ],
     ];
+}
+
+/**
+ * The job-log line for the raw-vs-kept balance of one pull, in the shape of the
+ * query and datastore-health lines above and for the same reason: it speaks in
+ * the good case too, because a line that only ever appears when something is
+ * wrong does not teach the reader that the check exists. Null for a pull that
+ * carried no raw entries at all (the counts line already says so).
+ *
+ * @param array<string, array{raw:int, kept:int}> $normalization
+ */
+function ansible_inventory_normalization_log_line(array $normalization): ?string
+{
+    $totalRaw = 0;
+    $parts = [];
+    foreach ($normalization as $kind => $counts) {
+        $raw = (int) ($counts['raw'] ?? 0);
+        $kept = (int) ($counts['kept'] ?? 0);
+        $totalRaw += $raw;
+        if ($raw > $kept) {
+            $parts[] = sprintf('%s %d of %d unusable', (string) $kind, $raw - $kept, $raw);
+        }
+    }
+
+    if ($totalRaw === 0) {
+        return null;
+    }
+    if ($parts === []) {
+        return sprintf('Inventory normalization: all %d raw entries usable.', $totalRaw);
+    }
+
+    return 'Inventory normalization: ' . implode('; ', $parts) . ' - the raw module output sits in the playbook log above.';
 }
 
 /**
@@ -449,14 +496,42 @@ function ansible_capability_string(array $source, array $keys): ?string
     return null;
 }
 
+/**
+ * Resolves a capability key against both shapes the module family emits: the
+ * flat dotted key and the official NESTED dict of vmware_host_facts with
+ * schema=vsphere ({"runtime": {"inMaintenanceMode": ...}}). The parser only
+ * knew the flat form, so a host answering in the official shape read as "not
+ * known" on every runtime fact (B15). Presence and value are separate answers,
+ * because "gathered as null/empty" and "not gathered" are different facts
+ * (tri-state contract).
+ *
+ * @return array{0: bool, 1: mixed} [found, value]
+ */
+function ansible_capability_resolve(array $source, string $key): array
+{
+    if (array_key_exists($key, $source)) {
+        return [true, $source[$key]];
+    }
+
+    $node = $source;
+    foreach (explode('.', $key) as $part) {
+        if (!is_array($node) || !array_key_exists($part, $node)) {
+            return [false, null];
+        }
+        $node = $node[$part];
+    }
+
+    return [true, $node];
+}
+
 /** Tri-state bool: null when the key is absent, so "unknown" survives. */
 function ansible_capability_bool(array $source, array $keys): ?bool
 {
     foreach ($keys as $key) {
-        if (!array_key_exists($key, $source)) {
+        [$found, $value] = ansible_capability_resolve($source, $key);
+        if (!$found) {
             continue;
         }
-        $value = $source[$key];
         if (is_bool($value)) {
             return $value;
         }
@@ -478,10 +553,10 @@ function ansible_capability_bool(array $source, array $keys): ?bool
 function ansible_capability_ha_state(array $runtime): ?bool
 {
     foreach (['runtime.dasHostState', 'dasHostState'] as $key) {
-        if (!array_key_exists($key, $runtime)) {
+        [$found, $value] = ansible_capability_resolve($runtime, $key);
+        if (!$found) {
             continue;
         }
-        $value = $runtime[$key];
         if ($value === null || $value === '' || $value === []) {
             return false;
         }

@@ -88,7 +88,7 @@ Die erste Form heißt: alle Zahlen sind belastbar, eine 0 ist dann eine echte 0.
 
 | Wort | Bedeutung | Was zu tun ist |
 |---|---|---|
-| `answered` | Die Abfrage lief und hat geantwortet, auch wenn die Antwort leer war | Nichts. Eine 0 bedeutet hier wirklich „gibt es nicht" |
+| `answered` | Die Abfrage lief und hat geantwortet, auch wenn die Antwort leer war | Nichts. Eine 0 bedeutet hier wirklich „gibt es nicht"; der Cache übernimmt sie dann auch (siehe unten) |
 | `rejected` | Die Abfrage wurde abgelehnt, oft bevor sie ESXi überhaupt erreicht hat | Die Meldung in Klammern lesen; sie stammt wörtlich vom Ansible-Modul und steht ausführlich weiter oben im selben Job-Log |
 | `skipped` | Das Playbook hatte nichts zu fragen, etwa Distributed-Portgruppen ohne bekanntes Datacenter | In der Regel nichts. Erwartet man hier Daten, zuerst die Abfrage darüber prüfen, von der sie abhängt |
 
@@ -106,7 +106,13 @@ Eine Zeile ohne `Inventory queries:` stammt aus einem Abruf, der älter ist als 
 
 Für das Inventar ist ein Zugangsdatum **auf den ESXi-Host selbst** der geprüfte und empfohlene Weg; ein vCenter-Zugangsdatum liefert Datacenter und Datastores, aber weder Standard-Portgruppen noch Host-Daten.
 
-Verloren geht dabei nie etwas: ein leeres Teilergebnis lässt den vorhandenen Stand dieser Art unangetastet (Empty-Guard), und der VLAN-Katalog zieht Portgruppen erst zurück, wenn ein Abruf sie nachweislich nicht mehr meldet.
+Ein leeres Teilergebnis ist seit dem per-Query-Bericht zwei verschiedene Dinge, und der Cache behandelt sie verschieden:
+
+- Haben **alle** Abfragen einer Art geantwortet (bei Portgruppen: beide) und die Antwort ist leer, dann ist die 0 belastbar: der Cache **löscht** die Art für dieses Zugangsdatum. Das Job-Log sagt es wörtlich (`network: cleared (host reports none, 2 removed)`); alte Zeilen stehen zu lassen hieße, Portgruppen anzuzeigen, die der Host verloren hat.
+- Wurde eine Abfrage abgelehnt oder übersprungen, beweist die leere Liste nichts: die vorhandenen Zeilen bleiben eingefroren stehen (`kept (empty result, not authoritative)`), ihre Frische wird **nicht** erneuert. In den Inventardetails trägt jede Art dafür ihren eigenen Stand („Stand: …"); eine eingefrorene Art zeigt dort ein älteres Datum als der letzte Erfolg der Karte, und genau das ist die Wahrheit.
+- Ein Abruf ohne den per-Query-Bericht (älteres Playbook) entscheidet nie autoritativ: leer heißt dort weiterhin „Bestand behalten".
+
+Zusätzlich bilanziert jede erfolgreiche Abholung ihre Normalisierung (`Inventory normalization: …`): wie viele rohe Modul-Einträge ankamen und wie viele davon verwertbar waren. Ein Eintrag, dessen Form nicht mehr passt, sah vorher exakt aus wie ein Host, der weniger hat. Der VLAN-Katalog zieht Portgruppen unverändert erst zurück, wenn ein Abruf sie nachweislich nicht mehr meldet (Retire, nie Delete).
 
 ## „Inventarabruf starten" bei ESXi ist ein echter Auftrag
 
@@ -146,6 +152,8 @@ Dabei gleich drei Anzeigen mitprüfen, die dieselben Facts lesen und bisher nur 
 - **Uhrabweichung** ebendort. Sie erscheint nur, wenn die Facts eine Host-Zeit liefern (`ansible_host_date_time_epoch`) **und** die Abweichung `VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS` erreicht. Bleibt sie auf einem Host mit bekannt verstellter Uhr aus, fehlt der Fact, nicht die Abweichung.
 
 Auch hier gilt durchgehend: fehlender Fact heißt keine Anzeige, nie eine erfundene Zahl.
+
+**Bewusste Grenze: `connectionState` wird nicht abgefragt.** Diese vCenter-Eigenschaft beschreibt, ob ein Host aus Sicht seines vCenters verbunden ist (`connected`/`disconnected`/`notResponding`). Auf dem unterstützten Deploy-Weg, direkt gegen den Standalone-Host, ist sie ohne Aussage: erreicht der Abruf den Host, ist er verbunden, erreicht er ihn nicht, meldet die Fehlerkategorie das präziser. Auf dem read-only vCenter-Inventarweg hieße das: ein im vCenter als getrennt geführter Host fällt hier nur dadurch auf, dass seine Abfragen leer oder abgelehnt ausfallen, nicht durch einen eigenen Hinweis. Wer diesen Zustand überwachen will, tut das im vCenter selbst.
 
 ## Autostart auf dem ESXi-Host
 

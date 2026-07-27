@@ -183,6 +183,12 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
     license_free TINYINT(1) NULL,
     in_ha_cluster TINYINT(1) NULL,
     in_maintenance TINYINT(1) NULL,
+    -- Per-kind answered-at stamps (migration 0030): {"datastore": "...", ...},
+    -- written for kinds whose every inventory query ANSWERED in a pull. Covers
+    -- the two states row timestamps cannot: a kind known empty as of T, and a
+    -- kind whose frozen rows outlived its failing query. Keys are validated in
+    -- PHP against VIRTUSPHERE_INVENTORY_KINDS (deliberately no second ENUM).
+    kind_freshness_json JSON NULL,
     INDEX deploy_esxi_inventory_state_last_job (last_job_id),
     CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_esxi_inventory_state_last_job FOREIGN KEY (last_job_id) REFERENCES deploy_jobs(id) ON DELETE SET NULL

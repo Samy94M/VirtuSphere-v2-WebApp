@@ -398,7 +398,15 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
 
         $parts = [];
         foreach ($summary as $kind => $info) {
-            $parts[] = $kind . ': ' . ($info['kept_empty'] ? 'kept (empty result)' : ($info['written'] . ' items'));
+            if (!empty($info['cleared'])) {
+                // Every query of the kind answered and the union is empty: the
+                // host genuinely reports none, so the mirror says so too (B15).
+                $parts[] = $kind . ': cleared (host reports none, ' . $info['removed'] . ' removed)';
+            } elseif ($info['kept_empty']) {
+                $parts[] = $kind . ': kept (empty result, not authoritative)';
+            } else {
+                $parts[] = $kind . ': ' . $info['written'] . ' items';
+            }
         }
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Inventory updated for credential ' . $credentialId . ' - ' . implode(', ', $parts));
         // Directly after the counts, because that is where a 0 is read and
@@ -414,6 +422,12 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $healthLine = ansible_inventory_datastore_health_log_line($parsed['datastores']);
         if ($healthLine !== null) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $healthLine);
+        }
+        // Raw-vs-kept balance (B15): an entry whose shape stopped matching used
+        // to vanish silently, indistinguishable from a host that has less.
+        $normalizationLine = ansible_inventory_normalization_log_line($parsed['normalization'] ?? []);
+        if ($normalizationLine !== null) {
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $normalizationLine);
         }
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     } catch (DeployWorkerCancelled $cancelled) {

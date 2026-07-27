@@ -210,3 +210,33 @@ Two things follow, and both are decided here rather than left to reading:
 - **Letting the deploy run instead would be worse, not more consistent.** Checked against the pinned collection and Broadcom's own documentation: a standalone ESXi host has exactly one datacenter, it is always `ha-datacenter`, and `vmware_guest` hardcodes that name as its parameter default, so on this product's target topology the derivation succeeds as soon as one pull has worked. Dropping the gate would move the error from a sentence in the form to a `No datacenter named  was found` after a job was queued, dispatched and logged in, with `--check` validating nothing on the way. And "let the API reject it" is demonstrably unreliable on the very task this project runs: a wrong *datastore* is never null-checked on that code path, the raw string reaches `CreateVM_Task`, and the operator gets an unhandled pyVmomi exception instead of a message. The successor collection `vmware.vmware` validates every named object explicitly with an opt-in `fail_on_missing`, which is the same shape as this pre-check, one layer down.
 
 `docs/operations/esxi-inventory.md` said a refusal "always" requires a fresh successful pull. That is true of the capability refusal and precisely false of the datacenter one; it now says which is which.
+
+## Amendment 5 (2026-07-27): the per-query report decides what an empty result means
+
+The Decision's empty-result guard treated every empty fetch result as "keep the
+existing rows". That rule predates the per-query report (Amendment, 2026-07-24):
+once a pull says which of its queries answered, an unconditional guard preserves
+rows the host verifiably lost, and the mirror shows portgroups that do not exist.
+
+- **Answered-empty is authoritative.** A kind whose every query answered (for
+  portgroups: both sources) with an empty union is cleared for that credential.
+  The job log states it (`cleared (host reports none, N removed)`).
+- **Failed or skipped keeps rows, frozen.** The empty list proves nothing; the
+  existing rows stay and their freshness is NOT renewed. A pull without the
+  report (an older playbook) is never authoritative.
+- **Freshness is persisted per kind** (`kind_freshness_json`, migration 0030):
+  answered kinds get a stamp, including empty ones, because "known empty as of
+  T" is not representable by row timestamps. The inventory detail groups render
+  it, so a frozen kind visibly ages next to the card's last success.
+- **Normalization is balanced out loud.** The parser reports raw vs. kept per
+  kind and the worker logs it (`Inventory normalization: ...`), because an entry
+  whose shape stopped matching used to be indistinguishable from a host that
+  has less.
+- **Bounded scope: `connectionState` stays unqueried.** On the supported direct
+  standalone connection the pull itself proves connectivity, and failure
+  categories say more; the vCenter-side host state is monitored in vCenter. The
+  runbook documents this as a limit.
+
+The VLAN catalog's retire logic is unchanged: it already required fresh positive
+evidence and never deletes. `EsxiInventoryCacheTest` pins the three empty-result
+paths and the freshness stamps.

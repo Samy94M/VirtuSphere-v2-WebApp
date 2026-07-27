@@ -881,6 +881,19 @@ SQL;
         }
         migrator_out('0029: linked ' . $backfilled . ' retained ESXi inventory result(s) to their job logs');
     },
+    '0030_esxi_inventory_kind_freshness' => function (mysqli $db): void {
+        // B15: freshness existed only per credential (last_success_at) and per
+        // ROW (fetched_at), so two states were unrepresentable: "this kind is
+        // known empty as of T" (no rows to carry a timestamp) and "this kind's
+        // rows are frozen because its query failed while the rest refreshed".
+        // The map stores per-kind answered-at stamps written by
+        // repo_esxi_inventory_apply() for kinds whose every query answered.
+        // JSON instead of a second ENUM-mirrored table: the kinds live in
+        // VIRTUSPHERE_INVENTORY_KINDS and are validated in PHP, so no new
+        // order-exact mirror is created (ADR-0016 scope stays the same).
+        migrator_add_column($db, 'deploy_esxi_inventory_state', 'kind_freshness_json', 'JSON NULL AFTER in_maintenance');
+        migrator_out('0030: added per-kind inventory freshness');
+    },
 ];
 
 try {

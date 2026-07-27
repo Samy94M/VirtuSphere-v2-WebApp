@@ -150,8 +150,40 @@ function system_status_datastore_health_badge(array $row): string
     return $html;
 }
 
-/** @param array<string,array<int,array<string,mixed>>> $detail */
-function system_status_render_inventory_detail(array $detail): void
+/**
+ * The per-kind "Stand" line of one detail group, or '' when no timestamp is
+ * known. The stamp map (migration 0030) wins because it also covers a kind
+ * that is KNOWN empty; the rows' own fetched_at is the fallback for caches
+ * from before the map existed. This line is what makes a frozen kind readable:
+ * after a pull whose datastore query failed, the datastore group shows an
+ * older Stand than the card's last success, which is exactly the truth.
+ *
+ * @param array<string, string> $kindFreshness
+ * @param array<int, array<string, mixed>> $rows
+ */
+function system_status_kind_freshness_line(array $kindFreshness, string $kind, array $rows): string
+{
+    $stamp = (string) ($kindFreshness[$kind] ?? '');
+    if ($stamp === '') {
+        foreach ($rows as $row) {
+            $fetched = (string) ($row['fetched_at'] ?? '');
+            if ($fetched !== '' && ($stamp === '' || $fetched > $stamp)) {
+                $stamp = $fetched;
+            }
+        }
+    }
+    if ($stamp === '') {
+        return '';
+    }
+
+    return __t('system_status.inv_kind_as_of', ['time' => portal_format_timestamp($stamp)]);
+}
+
+/**
+ * @param array<string,array<int,array<string,mixed>>> $detail
+ * @param array<string, string> $kindFreshness per-kind answered-at stamps of the credential's state row
+ */
+function system_status_render_inventory_detail(array $detail, array $kindFreshness = []): void
 {
     foreach ([
         VIRTUSPHERE_INVENTORY_KIND_HOST => __t('system_status.inv_th_hosts'),
@@ -160,8 +192,9 @@ function system_status_render_inventory_detail(array $detail): void
         VIRTUSPHERE_INVENTORY_KIND_NETWORK => __t('system_status.inv_th_networks'),
     ] as $kind => $label) {
         $rows = $detail[$kind] ?? [];
+        $freshnessLine = system_status_kind_freshness_line($kindFreshness, $kind, $rows);
         ?>
-        <div class="inventory-detail-group"><h4><?php echo h($label); ?> (<?php echo h((string) count($rows)); ?>)</h4>
+        <div class="inventory-detail-group"><h4><?php echo h($label); ?> (<?php echo h((string) count($rows)); ?>)<?php if ($freshnessLine !== '') { ?> <small class="muted"><?php echo h($freshnessLine); ?></small><?php } ?></h4>
         <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { $isDatastore = $kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE; $size = $isDatastore ? system_status_datastore_size($row) : ''; ?><li><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php if ($size !== '') { ?> <small><?php echo h($size); ?></small><?php } ?><?php if ($isDatastore) { echo system_status_datastore_health_badge($row); } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
         </div>
         <?php
@@ -243,7 +276,9 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                     <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?></a><?php } ?>
                     <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?></button></form><?php } ?>
                 </div>
-                <?php if ($isSelected) { ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail); ?></div><?php } ?>
+                <?php if ($isSelected) {
+                    $kindFreshnessDecoded = $state !== null ? json_decode((string) ($state['kind_freshness_json'] ?? ''), true) : null;
+                    ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail, is_array($kindFreshnessDecoded) ? $kindFreshnessDecoded : []); ?></div><?php } ?>
             </article>
         <?php } ?>
         </div><?php } ?>

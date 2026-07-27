@@ -63,6 +63,35 @@ final class EsxiCapabilitiesTest extends TestCase
         self::assertNull(ansible_parse_inventory_capabilities([], [])['in_ha_cluster']);
     }
 
+    public function testTheOfficialNestedVsphereSchemaShapeIsResolved(): void
+    {
+        // vmware_host_facts with schema=vsphere returns the requested
+        // properties as a NESTED dict ({"runtime": {"inMaintenanceMode": ...}}),
+        // not as flat dotted keys. The parser only knew the flat form, so on a
+        // host emitting the official shape both facts silently stayed null and
+        // the portal said "not known" about a host that had answered (B15).
+        $runtime = [
+            'runtime' => [
+                'inMaintenanceMode' => true,
+                'dasHostState' => ['state' => 'master'],
+            ],
+        ];
+        $facts = ansible_parse_inventory_capabilities([], $runtime);
+
+        self::assertTrue($facts['in_maintenance']);
+        self::assertTrue($facts['in_ha_cluster']);
+    }
+
+    public function testNestedGatheredButEmptyDasHostStateReadsAsNotInHa(): void
+    {
+        // Present-but-empty in the nested form is the same fact as in the flat
+        // form: the property was gathered and the host is not in an HA cluster.
+        self::assertFalse(ansible_parse_inventory_capabilities([], ['runtime' => ['dasHostState' => null]])['in_ha_cluster']);
+        self::assertFalse(ansible_parse_inventory_capabilities([], ['runtime' => ['inMaintenanceMode' => false]])['in_maintenance']);
+        // And an absent property stays unknown, nested or not.
+        self::assertNull(ansible_parse_inventory_capabilities([], ['runtime' => []])['in_ha_cluster']);
+    }
+
     public function testProductVersionDoesNotRepeatAVersionTheNameAlreadyCarries(): void
     {
         $facts = ansible_parse_inventory_capabilities(['productFullName' => 'VMware ESXi 8.0.3 build-1', 'version' => '8.0.3'], []);

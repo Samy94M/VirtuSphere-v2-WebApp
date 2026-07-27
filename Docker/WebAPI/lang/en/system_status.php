@@ -198,6 +198,7 @@ return [
     'inv_open_card' => 'View ESXi status',
     'inv_configure_credentials' => 'Add ESXi credential',
     'inv_kind_empty' => 'No entries exist for this inventory kind.',
+    'inv_kind_as_of' => 'As of: :time',
     'inv_last_attempt' => 'Last attempt',
     'inv_last_success' => 'Last success',
     'inv_job_queued' => 'queued',
