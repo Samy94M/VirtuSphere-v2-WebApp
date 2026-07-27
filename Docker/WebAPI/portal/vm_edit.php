@@ -12,6 +12,7 @@ require_once __DIR__ . '/../lib/repo/client_events.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/vm_edit_form.php';
+require_once __DIR__ . '/../lib/mecm_plan.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
 
@@ -194,13 +195,35 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
                       // action would promise work it does not do (the repo refuses it
                       // there too). ?>
                 <?php if ((string) ($vm['mecm_sync_state'] ?? '') === VIRTUSPHERE_MECM_SYNC_REGISTERED) { ?>
-                    <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
-                        <?php echo csrf_field(); ?>
-                        <input type="hidden" name="action" value="transfer_mecm">
-                        <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-                        <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
-                        <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_transfer_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_transfer_button')); ?></button>
-                    </form>
+                    <?php
+                    // Transfer preview (ADR-0034): what the next device-sync run
+                    // does to OUR rules, from the same loader the POST handler
+                    // re-checks. Removals need saying out loud - the transfer
+                    // used to be purely additive, and an operator who deselects
+                    // a package must see the removal before confirming it.
+                    $transferState = mecm_transfer_state($connection, $missionId, $vmId);
+                    $transferAdds = array_column($transferState['plan']['add'], 'name');
+                    $transferRemoves = array_column($transferState['plan']['remove'], 'collection_name');
+                    ?>
+                    <div class="stack">
+                        <?php if ($transferAdds !== []) { ?>
+                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_add', ['names' => implode(', ', $transferAdds)])); ?></p>
+                        <?php } ?>
+                        <?php if ($transferRemoves !== []) { ?>
+                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_remove', ['names' => implode(', ', $transferRemoves)])); ?></p>
+                        <?php } ?>
+                        <?php if ($transferAdds === [] && $transferRemoves === []) { ?>
+                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_none')); ?></p>
+                        <?php } ?>
+                        <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                            <?php echo csrf_field(); ?>
+                            <input type="hidden" name="action" value="transfer_mecm">
+                            <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+                            <input type="hidden" name="assignment_revision" value="<?php echo h($transferState['revision']); ?>">
+                            <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                            <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_transfer_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_transfer_button')); ?></button>
+                        </form>
+                    </div>
                 <?php } ?>
             <?php } ?>
         </div>

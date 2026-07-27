@@ -37,7 +37,7 @@ echo 'JSON' . json_encode(['missionId' => $id, 'vmIds' => $vmIds]) . 'JSON';
 function vmRow(id) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT vm_name, mecm_id, mecm_sync_state, lifecycle_state FROM deploy_vms WHERE id = ? LIMIT 1');
+$stmt = $db->prepare('SELECT vm_name, mecm_id, mecm_sync_state, lifecycle_state, updated FROM deploy_vms WHERE id = ? LIMIT 1');
 $id = ${Number(id)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
@@ -118,6 +118,48 @@ test('vm_edit MECM reset: Cancel keeps the ID, Confirm clears it and returns to 
     dialog.locator('[data-confirm-accept]').click(),
   ]);
   expect(vmRow(vmId).mecm_id, 'Confirm cleared the MECM ID').toBeNull();
+});
+
+// e2e-covers: vm_edit.php:transfer_mecm
+// e2e-covers-cancel: vm_edit.php:transfer_mecm
+test('vm_edit MECM transfer: the preview names the removal, Cancel changes nothing, Confirm queues', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'transfer', 1);
+  const vmId = seed.vmIds[0];
+  // updated starts at 0 so the confirm's effect is observable, and one OWNED
+  // rule no longer covered by the assignments makes the removal preview real
+  // (ADR-0034: the transfer stopped being purely additive there).
+  runPhp(`
+$db = db();
+$vmId = ${Number(vmId)};
+$stmt = $db->prepare('UPDATE deploy_vms SET updated = 0 WHERE id = ?');
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+$stmt = $db->prepare("INSERT INTO deploy_vm_mecm_rules (vm_id, collection_id, collection_name, collection_type, origin) VALUES (?, 'E2E00099', 'E2E-Obsolete-Pkg', 'package', 'created')");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  // The preview names the own rule the next sync run will remove.
+  await expect(page.getByText('E2E-Obsolete-Pkg'), 'the removal preview names the obsolete own rule').toBeVisible();
+
+  const dialog = page.locator('[data-confirm-dialog]');
+  const transfer = page.locator('form:has(input[name="action"][value="transfer_mecm"]) button');
+
+  await transfer.click();
+  await expect(dialog, 'the transfer asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).updated, 'Cancel queued nothing').toBe(0);
+
+  await transfer.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`)),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  expect(vmRow(vmId).updated, 'Confirm queued the VM for the device-sync').toBe(1);
 });
 
 // e2e-covers: vms.php:delete

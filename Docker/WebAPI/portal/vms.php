@@ -7,6 +7,7 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/mecm_plan.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -45,6 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'transfer_mecm') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
+            }
+            // Revision gate (ADR-0034): the preview the operator confirmed must
+            // still describe the stored assignments. hash_equals against the
+            // freshly computed revision; a page rendered before an assignment
+            // change (or before the preview existed) is rejected, never applied.
+            $transferState = mecm_transfer_state($connection, $missionId, $vmId);
+            if (!hash_equals($transferState['revision'], request_string($_POST, 'assignment_revision'))) {
+                throw new RuntimeException(__t('portal.vm_mecm_transfer_stale'));
             }
             repo_mark_vm_for_mecm_resync($connection, $missionId, $vmId, (int) $user['id']);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'queued mecm assignment transfer for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);

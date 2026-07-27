@@ -34,12 +34,7 @@ final class E2eActionCoverageContractTest extends TestCase
      *
      * @var array<string, string>
      */
-    private const PENDING_ACTIONS = [
-        'vm_edit.php:transfer_mecm' => 'MECM provenance slice (consolidated campaign plan, Etappe 8): '
-            . 'the transfer flow gains a removal preview there, and the spec that proves both dialog '
-            . 'branches is booked as one of that slice\'s guards; writing it now would pin the additive '
-            . 'semantics the slice replaces',
-    ];
+    private const PENDING_ACTIONS = [];
 
     /**
      * Accessor instead of direct const reads: with the list empty, PHPStan

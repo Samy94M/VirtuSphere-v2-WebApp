@@ -1,0 +1,126 @@
+{
+  "comment": "Shared vectors for the MECM membership reconciliation plan (ADR-0034). PHP (lib/mecm_plan.php, MecmPlanVectorsTest) and PowerShell (Get-VsMembershipPlan, VirtuSphere.RunReport.Tests.ps1) both run every vector, so the two implementations cannot drift. desired entries are {name, type}; owned and present entries are {collection_id, collection_name}. expected.add lists names (the collection may not exist yet), every other bucket lists collection ids, each sorted ascending.",
+  "vectors": [
+    {
+      "name": "fresh-device",
+      "why": "Nothing exists yet: everything desired is an add, nothing is removable because nothing is owned.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"},
+        {"name": "ProjectX-1.2.0", "type": "package"},
+        {"name": "Mission Alpha", "type": "mission"}
+      ],
+      "owned": [],
+      "present": [],
+      "expected": {"add": ["Mission Alpha", "ProjectX-1.2.0", "Win11-24H2"], "preserve": [], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "steady-state",
+      "why": "Everything desired exists and is owned: nothing to do, and the plan says so explicitly.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"},
+        {"name": "Mission Alpha", "type": "mission"}
+      ],
+      "owned": [
+        {"collection_id": "VS000010", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000011", "collection_name": "Mission Alpha"}
+      ],
+      "present": [
+        {"collection_id": "VS000010", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000011", "collection_name": "Mission Alpha"}
+      ],
+      "expected": {"add": [], "preserve": ["VS000010", "VS000011"], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "os-switch",
+      "why": "OS A to B (decision 2): the OWN rule in A is removed, B is added. This is the case the whole provenance exists for.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"}
+      ],
+      "owned": [
+        {"collection_id": "VS000020", "collection_name": "Win10-22H2"}
+      ],
+      "present": [
+        {"collection_id": "VS000020", "collection_name": "Win10-22H2"}
+      ],
+      "expected": {"add": ["Win11-24H2"], "preserve": [], "preserve_manual": [], "remove": ["VS000020"], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "package-deselected",
+      "why": "A deselected package is reconciled away, but only because it is owned.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"}
+      ],
+      "owned": [
+        {"collection_id": "VS000030", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000031", "collection_name": "ProjectX-1.2.0"}
+      ],
+      "present": [
+        {"collection_id": "VS000030", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000031", "collection_name": "ProjectX-1.2.0"}
+      ],
+      "expected": {"add": [], "preserve": ["VS000030"], "preserve_manual": [], "remove": ["VS000031"], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "manual-rule-covers-desired",
+      "why": "An administrator already added the device to the desired collection by hand: the plan neither adds a duplicate nor adopts the rule (nothing is adopted silently). It is preserved as manual and stays untouchable.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"}
+      ],
+      "owned": [],
+      "present": [
+        {"collection_id": "VS000040", "collection_name": "Win11-24H2"}
+      ],
+      "expected": {"add": [], "preserve": [], "preserve_manual": ["VS000040"], "remove": [], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "foreign-rule-untouched",
+      "why": "A manual rule for something VirtuSphere never wanted is listed as foreign for transparency and never planned against (decision 2: manual rules stay).",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"}
+      ],
+      "owned": [
+        {"collection_id": "VS000050", "collection_name": "Win11-24H2"}
+      ],
+      "present": [
+        {"collection_id": "VS000050", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000051", "collection_name": "Handmade-Ops-Group"}
+      ],
+      "expected": {"add": [], "preserve": ["VS000050"], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": ["VS000051"]}
+    },
+    {
+      "name": "stale-owned-rule",
+      "why": "Somebody removed the own rule directly in MECM: the provenance is stale and is withdrawn (reported as removed), never re-fought. The desired name is re-added like any missing target.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"}
+      ],
+      "owned": [
+        {"collection_id": "VS000060", "collection_name": "Win11-24H2"}
+      ],
+      "present": [],
+      "expected": {"add": ["Win11-24H2"], "preserve": [], "preserve_manual": [], "remove": [], "stale_owned": ["VS000060"], "foreign": []}
+    },
+    {
+      "name": "mixed-everything",
+      "why": "All buckets at once, so an implementation cannot pass by special-casing single-bucket vectors.",
+      "desired": [
+        {"name": "Win11-24H2", "type": "os"},
+        {"name": "ProjectX-1.3.0", "type": "package"},
+        {"name": "Mission Alpha", "type": "mission"}
+      ],
+      "owned": [
+        {"collection_id": "VS000070", "collection_name": "Win10-22H2"},
+        {"collection_id": "VS000071", "collection_name": "Mission Alpha"},
+        {"collection_id": "VS000072", "collection_name": "ProjectX-1.2.0"},
+        {"collection_id": "VS000073", "collection_name": "Gone-In-Mecm"}
+      ],
+      "present": [
+        {"collection_id": "VS000070", "collection_name": "Win10-22H2"},
+        {"collection_id": "VS000071", "collection_name": "Mission Alpha"},
+        {"collection_id": "VS000072", "collection_name": "ProjectX-1.2.0"},
+        {"collection_id": "VS000074", "collection_name": "Win11-24H2"},
+        {"collection_id": "VS000075", "collection_name": "Handmade-Ops-Group"}
+      ],
+      "expected": {"add": ["ProjectX-1.3.0"], "preserve": ["VS000071"], "preserve_manual": ["VS000074"], "remove": ["VS000070", "VS000072"], "stale_owned": ["VS000073"], "foreign": ["VS000075"]}
+    }
+  ]
+}
