@@ -282,8 +282,9 @@ zusätzlich an der VM im Portal.
 > daher zusätzlich `mission_creator`. Die Ergänzung ist additiv; PowerShell-Clients
 > lesen benannte Eigenschaften und ignorieren unbekannte. Es ist ein reines
 > Anzeigefeld: keine Skript-Logik darf darauf verzweigen. Zeilen aus der Zeit vor
-> der Migration liefern `null`, ebenso Missionen, die über die Legacy-Token-API
-> angelegt wurden (dort gibt es keinen Benutzerkontext, nur eine Token-Rolle).
+> der Migration liefern `null`, ebenso Missionen, die seinerzeit über die
+> inzwischen entfernte Token-API (ADR-0035) angelegt wurden: dort gab es keinen
+> Benutzerkontext, nur eine Token-Rolle.
 
 ## VM außer Betrieb nehmen
 

@@ -81,6 +81,22 @@ final class MachineApiWireTest extends TestCase
     }
 
     /**
+     * Negative contract of the E3 retirement (ADR-0035): the legacy desktop
+     * token API is gone as a path, not merely disabled. 404 is the claim; any
+     * 2xx/4xx envelope here would mean a resurrected endpoint. The check runs
+     * allowlisted on purpose, so a 403 cannot mask a still-deployed file.
+     */
+    public function testRetiredLegacyTokenApiPathsAnswer404(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach (['/access.php?action=getMissions', '/api/login.php'] as $path) {
+            [$status] = $this->get($path);
+            self::assertSame(404, $status, $path . ' must not exist anymore (ADR-0035)');
+        }
+    }
+
+    /**
      * A ResourceID reported for a VM id that does not exist is a failure, and the
      * wire now says so.
      *

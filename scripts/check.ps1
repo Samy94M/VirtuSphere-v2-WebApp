@@ -853,18 +853,6 @@ Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {
     Format-ToolResult $r 'alle Guards positiv/negativ/zero-match bewiesen' 'Guard-Harness meldet unbewiesene Guards'
 }
 
-Add-Gate -Name 'legacy-csharp-build' -Lanes $intRel -Kind 'windows-only' -Network $true -Body {
-    if (-not $isWindowsHost) { return New-NaResult 'windows-only: Legacy-C#-Build braucht MSBuild/NuGet auf Windows' }
-    if (-not (Test-Command 'msbuild')) { return New-InfraResult 'MSBuild nicht im PATH (Developer Command Prompt / Build Tools noetig)' }
-    # SignManifests aus: das ClickOnce-Signing des historischen Projekts haengt
-    # am persoenlichen Zertifikat der urspruenglichen Entwicklermaschine und
-    # existiert in keinem Runner-Store (CI-Erstlauf 2026-07-16: MSB3482). Das
-    # Gate beweist reproduzierbares Kompilieren; Publishing/Signing des
-    # eingefrorenen Desktop-Clients ist keine Lane-Aufgabe (E3-Freeze).
-    $r = Invoke-Tool 'msbuild' @((Join-Path $repoRoot 'VirtuSphere.sln'), '/t:Build', '/p:Configuration=Release', '/p:SignManifests=false', '/v:m', '/nologo')
-    Format-ToolResult $r 'Legacy-Client baut reproduzierbar (ohne ClickOnce-Signing)' 'MSBuild rot'
-}
-
 # --- Release-Lane -------------------------------------------------------------
 
 # Volle Browser-Matrix (ADR-0028-Revision): dieselbe Suite wie e2e-portal auf

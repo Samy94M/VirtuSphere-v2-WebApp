@@ -357,7 +357,7 @@ return [
     'creator_capture' => 'Saving a mission as a template: the template belongs to the person who saved it. The captured VMs keep their original creator.',
     'creator_clone' => 'Cloning a template into a mission: the new mission and its VMs belong to the person who cloned it, not to the author of the template.',
     'creator_import' => 'Importing a mission from a file: the mission belongs to the importing person. The VMs keep the creator recorded in the file.',
-    'creator_unknown' => 'A field showing "Unknown" has no creator on record. This applies to missions and VMs that predate this feature, and to anything created through the old desktop interface, where only a token signs in and no user is known. No name is guessed in that case.',
+    'creator_unknown' => 'A field showing "Unknown" has no creator on record. This applies to missions and VMs that predate this feature, and to anything created back then through the since-removed desktop interface, where only a token signed in and no user was known. No name is guessed in that case.',
 
     'location_heading' => 'Datacenter and datastore',
     'location_p1' => 'Both fields are selection lists fed from the ESXi inventory. For the datastore, the name carries the free space of the last pull, provided the pull reported one; "maintenance" there means the datastore is in maintenance mode and no free space is stated for it. The mission value is the default and is inherited by every VM of the mission when it is deployed. In the VM editor the empty option reads "Inherit from mission" and names the inherited value in brackets, provided the mission has one. A value chosen there applies to that one VM only.',

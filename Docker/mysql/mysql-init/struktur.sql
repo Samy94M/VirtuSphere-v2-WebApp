@@ -206,15 +206,7 @@ CREATE TABLE IF NOT EXISTS deploy_ansible_preflight_state (
     CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS deploy_tokens (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    token VARCHAR(255) NOT NULL,
-    expired BOOLEAN NOT NULL,
-    user_id INT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_deploy_tokens_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- deploy_tokens fiel mit dem Desktop-Client (ADR-0035, Migration 0034).
 
 CREATE TABLE IF NOT EXISTS deploy_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,

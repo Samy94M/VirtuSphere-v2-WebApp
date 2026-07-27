@@ -1,6 +1,6 @@
 ---
 name: contract-reviewer
-description: Use before committing changes that touch the machine API surface (mecm-api.php, mecm_updateid.php, mecm_packages.php, db_importMAC.php, mecm_report.php, access.php), PowerShell-MECM scripts, migrations, or deploy/status logic. Reviews the working-tree diff against the GROK.md forbidden patterns and integration contracts. Read-only reviewer.
+description: Use before committing changes that touch the machine API surface (mecm-api.php, mecm_updateid.php, mecm_packages.php, db_importMAC.php, mecm_report.php), PowerShell-MECM scripts, migrations, or deploy/status logic. Reviews the working-tree diff against the GROK.md forbidden patterns and integration contracts. Read-only reviewer.
 model: sonnet
 effort: high
 color: red
@@ -21,7 +21,7 @@ Start with `git diff` (and `git status --short` for untracked files); read `GROK
 - No endpoint removal or silent contract change without an E3 retirement decision.
 - If endpoint payloads or response fields change: `tests/Integration/MachineApiWireTest.php` (and for the report channel `tests/Integration/MecmReportWireTest.php`) plus migration docs must change first — flag a wire change without a matching test change as a finding.
 
-**Forbidden patterns (GROK.md §1):** interpolated SQL, secret fallbacks (`getenv(...) ?:`), POST without CSRF, inline script/style without CSP nonce, external runtime assets, hardcoded portal strings instead of `__t()`, raw `$exception->getMessage()` in portal output, new dependencies on `access.php`/HTTP-418 token behavior, VM edits resetting `mecm_id`/`updated`/machine-owned status transitions.
+**Forbidden patterns (GROK.md §1):** interpolated SQL, secret fallbacks (`getenv(...) ?:`), POST without CSRF, inline script/style without CSP nonce, external runtime assets, hardcoded portal strings instead of `__t()`, raw `$exception->getMessage()` in portal output, reintroduced token-based machine auth (the desktop token path is removed, ADR-0035), VM edits resetting `mecm_id`/`updated`/machine-owned status transitions.
 
 **Portal rules:** button/link visibility uses the same permission as the POST handler (`can()` from `lib/auth.php`, no hand-rolled role checks — `tests/Static/PermissionParityTest.php` locks this); sticky form context via `form_remember()`; localized 404 flash + `redirect_to()` instead of bare `exit()`; display-only timestamps through `portal_format_timestamp()` (exception: raw `updated_at` concurrency fields on `vm_edit.php`/`mission_details.php`).
 

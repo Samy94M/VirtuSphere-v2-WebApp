@@ -495,8 +495,10 @@ $migrations = [
         }
     },
     '0010_legacy_token_user' => function (mysqli $db): void {
-        // Bind each legacy API token to the issuing user so access.php can gate
-        // mutating actions by the same RBAC permission the portal enforces.
+        // Bound each legacy API token to its issuing user so the (since
+        // retired, ADR-0035) token endpoint could gate mutating actions by the
+        // same RBAC permission the portal enforces. No-op since 0034's drop;
+        // migrator_add_column guards on the table's existence.
         migrator_add_column($db, 'deploy_tokens', 'user_id', 'INT NULL');
     },
     '0011_deploy_job_scheduling' => function (mysqli $db): void {
@@ -707,7 +709,10 @@ SQL;
         // (AP6). Preflight per database.md: orphaned user_id values would block
         // the DDL; NULL them first, which is exactly what ON DELETE SET NULL
         // would have done had the FK existed when the user was removed.
-        if (migrator_fk_exists($db, 'deploy_tokens', 'fk_deploy_tokens_user')) {
+        // Since 0034 dropped the table, a fresh schema never creates it; this
+        // step then has nothing to converge and must not ALTER a ghost.
+        if (!migrator_table_exists($db, 'deploy_tokens')
+            || migrator_fk_exists($db, 'deploy_tokens', 'fk_deploy_tokens_user')) {
             return;
         }
 
@@ -956,6 +961,31 @@ SQL;
             CONSTRAINT fk_deploy_vm_mecm_rules_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         migrator_out('0033: MECM membership rules carry their provenance');
+    },
+    '0034_drop_legacy_token_schema' => function (mysqli $db): void {
+        // ADR-0035 (E3 accepted): the desktop client and its token API are
+        // retired, so the token store goes with them. Preflight per
+        // database.md: the destruction is counted and named before the DDL,
+        // because a dropped table reports nothing afterwards. The usage
+        // evidence deliberately lives in deploy_logs (category legacy_api),
+        // which this migration does not touch - the rollout checkpoint stays
+        // provable after the drop.
+        if (!migrator_table_exists($db, 'deploy_tokens')) {
+            migrator_out('0034: deploy_tokens already absent');
+
+            return;
+        }
+
+        $total = 0;
+        $active = 0;
+        if ($result = $db->query('SELECT COUNT(*) AS total, COALESCE(SUM(expired = 0), 0) AS active FROM deploy_tokens')) {
+            $row = $result->fetch_assoc();
+            $total = (int) ($row['total'] ?? 0);
+            $active = (int) ($row['active'] ?? 0);
+        }
+
+        $db->query('DROP TABLE deploy_tokens');
+        migrator_out('0034: dropped deploy_tokens (' . $total . ' row(s), ' . $active . ' non-expired)');
     },
 ];
 

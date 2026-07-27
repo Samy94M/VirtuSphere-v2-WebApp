@@ -245,18 +245,10 @@ function deleteMission($id, $connection)
     });
 }
 
-function createMission($missionName, $connection)
-{
-    // Legacy machine-API contract: returns bool so the desktop client keeps
-    // receiving `true` on success. The portal uses repo_create_mission() when it
-    // needs the new id and location fields.
-    return repo_create_mission($connection, ['mission_name' => $missionName]) > 0;
-}
-
 /**
  * $creatorUserId stamps deploy_missions.mission_creator from the session. It is
- * never read from $missionData, so a request body can not forge it; callers
- * without a user (legacy machine API) leave the column empty.
+ * never read from $missionData, so a request body can not forge it; a caller
+ * without a user leaves the column empty rather than guessing an author.
  */
 function repo_create_mission(mysqli $db, array $missionData, bool $requireLocation = false, ?int $creatorUserId = null): int
 {
@@ -266,44 +258,6 @@ function repo_create_mission(mysqli $db, array $missionData, bool $requireLocati
     $values['mission_creator'] = repo_creator_name($db, $creatorUserId);
 
     return repo_insert_from_values($db, 'deploy_missions', $values);
-}
-
-function updateMission($mysqli, $missionId, $missionData)
-{
-    $id = repo_id($missionId);
-    if ($id === 0 || empty($missionData)) {
-        return false;
-    }
-
-    $values = repo_allowed_columns($missionData, REPO_MISSION_EDITABLE_COLUMNS);
-
-    if ($values === []) {
-        return false;
-    }
-
-    $values = repo_validate_mission_values($mysqli, $values, $id, false);
-    if ($values === []) {
-        return false;
-    }
-
-    $sets = [];
-    foreach (array_keys($values) as $column) {
-        $sets[] = "`{$column}` = ?";
-    }
-    $sets[] = 'updated_at = NOW()';
-
-    $params = array_values($values);
-    $types = implode('', array_map('repo_bind_type', $params)) . 'i';
-    $params[] = $id;
-    $sql = 'UPDATE deploy_missions SET ' . implode(', ', $sets) . ' WHERE id = ?';
-    $stmt = $mysqli->prepare($sql);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    if ($stmt->affected_rows === 0 && repo_get_mission($mysqli, $id) === null) {
-        throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
-    }
-
-    return true;
 }
 
 function repo_get_mission(mysqli $db, int $missionId): ?array

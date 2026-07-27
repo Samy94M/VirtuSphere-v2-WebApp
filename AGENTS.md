@@ -9,7 +9,7 @@
 - Machine API surface: `mecm-api.php`, `mecm_updateid.php`, `mecm_packages.php`, `db_importMAC.php`, `mecm_report.php`. Harden these, but do not remove or silently change their wire contract. `mecm_report.php` (ADR-0018) is display-only telemetry and must never write VM lifecycle state.
 - Worker containers: `lib/deploy_worker.php` (`deploy-worker`) runs Ansible deploy jobs; `lib/maintenance_worker.php` (`maintenance-worker`) runs retention purges, the deploy-job reaper/convergence sweep and integration transition audits (no outbound MECM probe; the TCP-445 probe was removed, ADR-0018). Both are `--loop` CLIs that survive MySQL restarts.
 - PowerShell integration lives in `Powershell-MECM/` (`mecm/` server scripts, `clients/` client phase scripts, installer). All environment specifics come from the Windows registry, not the code; server scripts report run results and MECM site health, client scripts report install phases, to `mecm_report.php`.
-- Legacy desktop token API: `access.php`, `api/login.php`, `deploy_tokens`, `generateToken`, `verifyToken`, `expandToken`. Do not build new flows on it. Physical retirement waits until E3 acceptance.
+- The former desktop token API is removed (ADR-0035); its paths answer 404 by contract. Do not reintroduce token-based machine auth; machine access is the IP allowlist plus the optional report-channel token.
 - `scripts/`: local tooling. `check.ps1` is the executable SSoT of all quality gates (lanes Fast/Integration/Release, ADR-0031); `test-guards.ps1` proves every guard positive/negative/zero-match. Individual checks: `lint-csp-patterns.sh` (pattern scan; `--file`, `--worktree`, `--range`), `lang-audit.php` (DE/EN + placeholder parity), `check-enum-sync.sh`, `check-php-version-sync.sh`, `check-doc-hygiene.sh`, `check-doc-semantics.sh`, `check-bounds-sync.php` (ADR-0016). All honor `VIRTUSPHERE_CHECK_ROOT` and emit stable `[check.case]` diagnostic IDs. Backup/restore is `backup.sh` + `restore_test.sh` (ADR-0017, runbook `docs/operations/backup.md`).
 - `.claude/hooks/`: `session-start.sh` runs the drift checks quietly; PostToolUse runs `lint-csp-patterns.sh`, `php-lint.sh` (blocking `php -l`) and `lang-parity.sh` (blocking DE/EN audit on `lang/` edits).
 
@@ -37,16 +37,14 @@ Forbidden patterns live only in `GROK.md` section 1 and are not restated here; t
 - Escape HTML with `htmlspecialchars`; emit JSON with `json_encode`. Do not mix the two.
 - New or changed portal-visible text goes through `__t()` and keeps DE/EN catalog parity. Run `php scripts/lang-audit.php --ci` or the documented container equivalent for portal text, validation or error-message changes.
 - Keep machine API contracts intact: exact 5 legacy status strings, `updated` MECM flag, `mecm_id` preservation, MAC import by `(mission_id, vm_name)` after the deploy migration.
-- Do not localize or rename machine API fields, MECM/Ansible status strings or legacy token responses for portal UI language work.
+- Do not localize or rename machine API fields or MECM/Ansible status strings for portal UI language work.
 - Keep the app air-gap friendly: no CDN, cloud service, telemetry or runtime package download dependency.
 - RBAC uses `can($permission)` from `lib/auth.php`. Do not hand-roll role checks in pages.
 
 ## Endpoint Map
 
-- `access.php?action=...`: legacy token API for the desktop client, no new dependencies.
-- `api/login.php`: legacy token login, no new dependencies.
 - `mecm-api.php`: MECM read surface, keeps `getDeviceList`, `getMissionName`, `getDeviceInfos&mac=...`.
 - `mecm_updateid.php`: accepts `deviceResourceID` and `deviceid`.
 - `mecm_packages.php`: package/task sequence sync.
-- `db_importMAC.php`: Ansible MAC import; target payload becomes `{ "mission_id": 123, "results": [...] }`.
+- `db_importMAC.php`: Ansible MAC import; payload `{ "mission_id": 123, "job_id": 45, "results": [...] }`, `job_id` required (ADR-0035).
 - `mecm_report.php`: report channel (ADR-0018), POST-only; `action=reportPhase` (client phase events by MAC), `action=heartbeat` (legacy sync-loop heartbeats) and `action=reportRun` (additive: per-run `started`/`completed` results from the three sync tasks plus `completed`-only `mecm-site-health` from `SMS_SummarizerSiteStatus`, 0=ok/1=warning/2=critical/else unknown). Display-only: `last_event` drives the badge, arrival order is truth (sequential client, dedup only on an identical completed `run_id`), provider faults are grey and red is reserved for MECM-confirmed status 2; migration 0025 adds columns additively with no backfill. Optional `X-VirtuSphere-Token` header (heartbeat/reportRun), checked only when a token hash is configured.

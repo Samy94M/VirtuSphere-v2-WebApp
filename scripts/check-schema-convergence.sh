@@ -49,10 +49,19 @@ echo "convergence: building $B from struktur.sql + migrate.php"
 myql -e "DROP DATABASE IF EXISTS $B; CREATE DATABASE $B CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 myql "$B" < "$STRUKTUR"
 
-echo "convergence: exercising migrations 0019/0020/0021 from the previous schema"
+echo "convergence: exercising migrations 0019/0020/0021/0034 from the previous schema"
+# deploy_tokens existiert im frischen Schema nicht mehr (ADR-0035); der
+# Alt-Zustand wird als pre-0010-Form nachgebaut (ohne user_id, ohne FK), damit
+# 0021 seine Reparatur und 0034 den gezaehlten Drop wirklich durchlaufen.
 myql "$B" -e "
-  ALTER TABLE deploy_tokens DROP FOREIGN KEY fk_deploy_tokens_user;
-  ALTER TABLE deploy_tokens DROP INDEX fk_deploy_tokens_user;
+  CREATE TABLE deploy_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(255) NOT NULL,
+    expired BOOLEAN NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  INSERT INTO deploy_tokens (token, expired) VALUES ('vs_conv_token', 0);
   ALTER TABLE deploy_jobs
     MODIFY COLUMN status ENUM('queued','running','succeeded','failed','cancelled') NOT NULL DEFAULT 'queued',
     DROP COLUMN result_json;
@@ -77,6 +86,12 @@ migration_output="$(docker exec -e DB_NAME="$B" -e DB_USER=root -e DB_PASS="$MYS
   php /var/www/html/lib/migrate.php)"
 printf '%s\n' "$migration_output" | grep -Fq '0020: skipped VM "vm-empty" in mission "vs_conv_empty" because wds_vlan is empty' \
   || { echo "BLOCK: [schema-convergence.migration-report] migration 0020 did not name the empty-WDS VM in its report" >&2; exit 1; }
+# 0021 muss die Alt-Form wirklich repariert haben (Report statt Schema-Assert:
+# 0034 raeumt die Tabelle danach weg), und 0034 muss die Zerstoerung beziffern.
+printf '%s\n' "$migration_output" | grep -Fq '0021: added fk_deploy_tokens_user' \
+  || { echo "BLOCK: [schema-convergence.migration-report] migration 0021 did not repair the pre-0010 token shape" >&2; exit 1; }
+printf '%s\n' "$migration_output" | grep -Fq '0034: dropped deploy_tokens (1 row(s), 1 non-expired)' \
+  || { echo "BLOCK: [schema-convergence.migration-report] migration 0034 did not count what it destroyed" >&2; exit 1; }
 
 assert_sql() {
   actual="$(myql -N -B "$B" -e "$1")"
@@ -91,7 +106,7 @@ assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON 
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-empty'" "0" "migration 0020 guessed an interface for an empty WDS VLAN"
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-template'" "0" "migration 0020 materialized an interface for a non-deployable template"
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-existing' AND i.vlan = 'KEEP' AND i.type = 'e1000e'" "1" "migration 0020 changed an existing interface"
-assert_sql "SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = '$B' AND constraint_name = 'fk_deploy_tokens_user'" "1" "migration 0021 did not restore fk_deploy_tokens_user on a pre-0010 shaped schema"
+assert_sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$B' AND table_name = 'deploy_tokens'" "0" "migration 0034 did not drop deploy_tokens (ADR-0035)"
 
 # Re-run the data migration itself, not just the tracking guard, to prove that
 # its NOT EXISTS write cannot duplicate a previously materialized interface.

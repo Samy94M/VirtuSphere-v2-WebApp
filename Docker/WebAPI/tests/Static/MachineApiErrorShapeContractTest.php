@@ -25,8 +25,6 @@ final class MachineApiErrorShapeContractTest extends TestCase
         'mecm_packages.php',
         'db_importMAC.php',
         'mecm_report.php',
-        'access.php',
-        'api/login.php',
     ];
 
     /** @return array<string, array{0: string}> */

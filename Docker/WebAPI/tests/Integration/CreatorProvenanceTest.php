@@ -65,11 +65,11 @@ final class CreatorProvenanceTest extends TestCase
 
     public function testMissionCreateWithoutUserLeavesCreatorEmpty(): void
     {
-        // The legacy token API (access.php -> createMission()) resolves only the
-        // token's role, so there is no author to record. Empty beats a guess.
-        self::assertTrue(createMission(self::PREFIX . 'legacy', $this->db));
+        // A caller without a session user (e.g. a machine-side import) has no
+        // author to record. Empty beats a guess.
+        $missionId = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'nouser']);
 
-        $missionId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_missions WHERE mission_name = ?', 's', [self::PREFIX . 'legacy']);
+        self::assertGreaterThan(0, $missionId);
         self::assertSame('', $this->missionCreator($missionId));
     }
 

@@ -314,29 +314,28 @@ final class MacImportCallbackTest extends TestCase
         self::assertGreaterThan(0, (int) $stmt->get_result()->fetch_assoc()['c'], 'the rejection must be readable in the job log the operator actually opens');
     }
 
-    public function testLegacyRequestWithoutJobKeepsSubmittedVmScope(): void
+    public function testRequestWithoutJobIdIsRejectedWithoutAnyWrite(): void
     {
-        $missionId = $this->insertMission('legacy');
+        // ADR-0035: the job_id-less callback fell with the desktop client. A
+        // MAC import without a job scope answers 400 and must not touch a row,
+        // because an unscoped write is exactly the surface the retirement
+        // removed.
+        $missionId = $this->insertMission('nojob');
         $submittedVm = $this->insertVm($missionId, 'SUBMITTED');
-        $untouchedVm = $this->insertVm($missionId, 'UNTOUCHED');
         $this->insertInterface($submittedVm, 'WDS');
-        $this->insertInterface($untouchedVm, 'WDS');
 
         [$status, $body] = $this->post([
             'mission_id' => $missionId,
             'results' => [['instance' => [
                 'hw_name' => strtolower($this->vmName('SUBMITTED')),
-                'hw_eth0' => ['macaddress' => $this->mac('legacy'), 'summary' => 'WDS'],
+                'hw_eth0' => ['macaddress' => $this->mac('nojob'), 'summary' => 'WDS'],
             ]]],
         ]);
 
-        self::assertSame(200, $status, $body);
+        self::assertSame(400, $status, $body);
         $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame('success', $response['outcome']);
-        self::assertNull($response['job_id']);
-        self::assertSame(1, $response['counts']['expected_vms']);
-        self::assertSame(['deployed', 'pending', 1], $this->vmState($submittedVm));
-        self::assertSame(['ready', 'not_ready', 0], $this->vmState($untouchedVm));
+        self::assertSame('job_id is required for MAC import payload', $response['error']);
+        self::assertSame(['ready', 'not_ready', 0], $this->vmState($submittedVm));
     }
 
     private function insertMission(string $suffix): int
@@ -476,11 +475,12 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame('feedface00000020', $decoded['correlation_id'] ?? null, 'a valid id is echoed');
         self::assertSame('success', $decoded['outcome'] ?? null);
 
-        // Invalid id: ignored, never a 4xx, outcome unchanged (idempotent
-        // repeat of the same import while the job would be running; here the
-        // job is terminal after the worker path, so use a fresh legacy call).
+        // Invalid id: ignored, never a 4xx, outcome unchanged. The callback
+        // does not terminate the job, so the idempotent repeat rides the same
+        // still-running job scope.
         [$status2, $body2] = $this->post([
             'mission_id' => $missionId,
+            'job_id' => $jobId,
             'correlation_id' => 'NOT-AN-ID',
             'results' => $results,
         ]);
@@ -488,9 +488,10 @@ final class MacImportCallbackTest extends TestCase
         $decoded2 = json_decode($body2, true);
         self::assertNull($decoded2['correlation_id'] ?? null, 'an invalid id is not echoed');
 
-        // Absent field: the legacy contract is untouched.
+        // Absent field: the contract stays optional-diagnostic.
         [$status3, $body3] = $this->post([
             'mission_id' => $missionId,
+            'job_id' => $jobId,
             'results' => $results,
         ]);
         self::assertSame(200, $status3);

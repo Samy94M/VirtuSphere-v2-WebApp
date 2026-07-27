@@ -20,7 +20,7 @@ return [
     'aria_role_select' => 'Role of :name',
     'btn_reset' => 'Reset',
     'confirm_reset_password' => 'Reset the password of :name? The previous password stops working.',
-    'confirm_deactivate' => 'Deactivate the user :name? Login is refused immediately, running sessions end on the next request, and the desktop client\'s tokens are revoked. Reactivating does not restore them: the client has to sign in again.',
+    'confirm_deactivate' => 'Deactivate the user :name? Login is refused immediately, running sessions end on the next request.',
     'confirm_role' => 'Change the role of :name? The new permissions apply immediately.',
     'confirm_role_self' => 'Change your own role? Taking away your administrator rights locks you out of user management immediately. Only another administrator can undo it.',
     'btn_unlock' => 'Clear Lock',

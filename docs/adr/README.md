@@ -34,3 +34,4 @@
 - [ADR-0032: Durchgängige Korrelations-ID über alle sieben Ausführungsschichten](ADR-0032-correlation-id.md)
 - [ADR-0033: Cancellation is a confirmed state machine](ADR-0033-cancellation-state-machine.md)
 - [ADR-0034: MECM-Provenienz und sichere Reconciliation](ADR-0034-mecm-provenance-and-reconciliation.md)
+- [ADR-0035: E3 accepted: the desktop client and its token API are removed](ADR-0035-e3-desktop-client-retirement.md)

@@ -6,7 +6,6 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/password_policy.php';
 require_once __DIR__ . '/../lib/repo/helpers.php';
-require_once __DIR__ . '/../lib/repo/legacy.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/validate.php';
 
@@ -81,23 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($active === 0 && user_is_last_active_admin($connection, $targetId)) {
                 throw new RuntimeException(__t('users.err_last_admin'));
             }
-            // Deactivating also kills the account's legacy API tokens. Without
-            // that, the desktop token outlived the account: the portal refuses
-            // the user on the next click, the token kept working, and the
-            // confirmation the admin just read promised the opposite. One
-            // transaction, because a flag flipped without the tokens gone is the
-            // state this defect consisted of.
-            $revoked = 0;
-            repo_transaction($connection, function () use ($connection, $active, $targetId, &$revoked): void {
-                $stmt = $connection->prepare('UPDATE deploy_users SET is_active = ?, updated_at = NOW() WHERE id = ?');
-                $stmt->bind_param('ii', $active, $targetId);
-                $stmt->execute();
-                if ($active === 0) {
-                    $revoked = repo_legacy_expire_user_tokens($connection, $targetId);
-                }
-            });
-            $note = $revoked > 0 ? ' (legacy tokens revoked: ' . $revoked . ')' : '';
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_USERS, 'changed active state for user id ' . $targetId . $note, (int) $user['id']);
+            $stmt = $connection->prepare('UPDATE deploy_users SET is_active = ?, updated_at = NOW() WHERE id = ?');
+            $stmt->bind_param('ii', $active, $targetId);
+            $stmt->execute();
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_USERS, 'changed active state for user id ' . $targetId, (int) $user['id']);
             flash_set('success', __t('users.flash_status'));
         } elseif ($action === 'set_role') {
             $targetId = request_int($_POST, 'user_id');

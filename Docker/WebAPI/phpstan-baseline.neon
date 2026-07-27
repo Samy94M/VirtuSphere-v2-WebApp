@@ -135,14 +135,8 @@ parameters:
 		-
 			message: '#^Variable \$connection might not be defined\.$#'
 			identifier: variable.undefined
-			count: 16
+			count: 18
 			path: portal/vm_edit.php
-
-		-
-			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
-			identifier: nullCoalesce.variable
-			count: 2
-			path: tests/Integration/AccessLegacyRbacTest.php
 
 		-
 			message: '#^Unreachable statement \- code above always terminates\.$#'
@@ -161,6 +155,12 @@ parameters:
 			identifier: nullCoalesce.variable
 			count: 1
 			path: tests/Integration/MachineApiWireTest.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: tests/Integration/MecmProvenanceWireTest.php
 
 		-
 			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'

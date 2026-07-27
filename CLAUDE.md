@@ -1,6 +1,6 @@
 # VirtuSphere Agent Entry
 
-VirtuSphere is migrating from a C# WinForms desktop client to a LAN-only, server-rendered PHP web application. The existing MECM and Ansible machine integrations stay available during the migration; the desktop token API remains legacy-only until the E3 deploy milestone is accepted.
+VirtuSphere is a LAN-only, server-rendered PHP web application with MECM and Ansible machine integrations. The former desktop client and its token API are removed (E3 accepted, ADR-0035); the machine API surface (`mecm-*`, `db_importMAC.php`) stays wire-compatible.
 
 Read these files before non-trivial changes:
 - `AGENTS.md` for tool-agnostic implementation rules.

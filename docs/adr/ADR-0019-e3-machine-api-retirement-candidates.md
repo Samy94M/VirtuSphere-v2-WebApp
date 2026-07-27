@@ -60,3 +60,18 @@ changed before an explicit E3 retirement decision:
   with a `tests/Integration/MachineApiWireTest.php` update and a migration-doc
   note per `.claude/rules/powershell.md`.
 - Until then these are known, documented gaps rather than latent surprises.
+
+## Amendment 1 (2026-07-27): candidate 4 resolved by ADR-0035
+
+E3 is accepted for the desktop client (campaign decision 8). The retirement
+itself is ADR-0035: `access.php`, `api/login.php`, `lib/repo/legacy.php`, the
+`deploy_tokens` schema and the desktop C# sources are removed, with the 404
+negative contract in `MachineApiWireTest`. That removes the whole
+`updateMission` bypass, so **candidate 4 is done**.
+
+**Candidates 1-3 and 5 stay open** and are explicitly not covered by decision
+8: `getMissionName` retirement, `getDeviceInfos` payload trimming and
+side-effect freedom, and the machine-API HTTPS move each remain their own
+future decision with their own wire-test-first cut. Candidate 5's motivation
+shifts slightly: with `access.php` gone, the report token is the remaining
+cleartext concern.

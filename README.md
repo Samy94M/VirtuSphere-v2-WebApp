@@ -2,7 +2,7 @@
 
 ## Web-App-Migration
 
-VirtuSphere wird von der C# WinForms-Desktop-App zu einer LAN-internen, server-gerenderten PHP-Web-App migriert. Die technische Basis: Docker Compose mit `.env`, PHP 8.4, MySQL 8.4, nginx HTTP-first, zentrale PHP-Helfer unter `Docker/WebAPI/lib/`, Healthcheck `Docker/WebAPI/portal/health.php`, Migrationsrunner `Docker/WebAPI/lib/migrate.php`, Composer/phpseclib sowie ADR-/Agenten-Doku.
+VirtuSphere ist eine LAN-interne, server-gerenderte PHP-Web-App; die frühere Desktop-App ist entfernt (ADR-0035). Die technische Basis: Docker Compose mit `.env`, PHP 8.4, MySQL 8.4, nginx HTTP-first, zentrale PHP-Helfer unter `Docker/WebAPI/lib/`, Healthcheck `Docker/WebAPI/portal/health.php`, Migrationsrunner `Docker/WebAPI/lib/migrate.php`, Composer/phpseclib sowie ADR-/Agenten-Doku.
 
 Wichtige Einstiegsdateien:
 - `AGENTS.md` für Entwicklungsregeln und Endpunktkarte.
@@ -34,23 +34,9 @@ Das Portal ist server-gerendert (PHP, kein JS-Build, kein CDN) und zweisprachig:
 
 ## Status und offene Punkte
 
-- Der Desktop-Client und die Legacy-Token-API sind noch nicht physisch entfernt; das E3-Retirement steht aus. Die Maschinen-API (`mecm-*`, `db_importMAC.php`) bleibt während der Migration wire-kompatibel.
-- Offen: rein visuelles Frontend-Design-Handoff, E3-Legacy-Token-Retirement und ein frischer Clean-Checkout-Setup-Probelauf als Release-Nachweis.
+- Der frühere Desktop-Client und seine Token-API sind physisch entfernt (E3 angenommen, ADR-0035); die entfernten Pfade antworten per Wire-Contract mit 404. Die Maschinen-API (`mecm-*`, `db_importMAC.php`) bleibt wire-kompatibel.
+- Offen: rein visuelles Frontend-Design-Handoff und ein frischer Clean-Checkout-Setup-Probelauf als Release-Nachweis.
 - Abgeschlossene Arbeitsstände werden ausschließlich in `docs/CHANGELOG.md` geführt, nicht hier.
-
-## Legacy-Desktop-Client (WinForms)
-
-Dieser Abschnitt beschreibt den bestehenden Desktop-Client, der bis zum E3-Meilenstein parallel weiterläuft.
-
-VirtuSphere bietet Infrastrukturadministratoren eine grafische Schnittstelle zum Anlegen virtueller Server im Microsoft Endpoint Configuration Manager (MECM) mit PXE-Boot für Windows-Installationen. Es automatisiert Nachinstallationsprozesse wie Domain-Controller-Rolle, Domänenbeitritt und die Installation individueller Softwarepakete. Serverinfrastrukturvorlagen können erstellt, kopiert und je ESXi-Ziel angepasst werden. Der Client generiert Ansible-Playbooks und kopiert sie per SSH auf einen Ubuntu-Server, von dem aus die VMs auf dem hinterlegten ESXi-Server erstellt werden; die Windows-Installation erfolgt anschließend per PXE-Boot über MECM.
-
-Hauptmerkmale:
-- VM-Management: Erstellen, Bearbeiten und Löschen virtueller Maschinen.
-- Automatisierung: Ansible-Playbooks für das Deployment.
-- SSH-Schlüsselmanagement und sichere Kommunikation mit Hypervisoren.
-- Intuitives GUI für VMs und Missionskonfigurationen.
-
-Technologie-Stack des Clients: .NET Framework (Windows Forms), Ansible, Docker (WebAPI/Datenbank), MySQL und PHP.
 
 ## Lizenz
 

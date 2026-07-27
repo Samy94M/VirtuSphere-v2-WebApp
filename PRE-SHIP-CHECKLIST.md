@@ -27,4 +27,4 @@ Vor jedem Release-/Meilenstein-Abschluss durchgehen. Diese Datei bleibt eine **l
 ## Meilenstein-gebundene Punkte (offen bis zur jeweiligen Etappe)
 
 - [ ] Clean-Checkout-Releaseprobe auf frischem Host (Ubuntu) als Release-Nachweis.
-- [ ] E3-Legacy-Retirement umgesetzt: Desktop-Client, `access.php`, Token-Schema physisch entfernt (Entscheidung ist angenommen, Beschlussdatum in ADR-0019; Wire-Tests und ADR vor dem Löschen).
+- [ ] **Rollout-Checkpunkt vor dem ersten Prod-Deploy mit Migration 0034 (E3-Retirement, ADR-0035):** letzte echte Legacy-API-Nutzung aus der Prod-DB belegen (`SELECT MAX(created_at), COUNT(*) FROM deploy_logs WHERE category='legacy_api';` plus letzte Zeilen im Detail) und das Ergebnis im Rollout-Protokoll festhalten. Die Migration löscht nur `deploy_tokens`; die Beweiszeilen in `deploy_logs` bleiben auch danach abfragbar (ADR-0035).

@@ -31,7 +31,7 @@ final class RequestInputContractTest extends TestCase
     private const SCANNED_DIRS = ['portal', 'lib'];
     private const SCANNED_ROOT_FILES = [
         'mecm-api.php', 'mecm_report.php', 'mecm_updateid.php', 'db_importMAC.php',
-        'access.php', 'mecm_packages.php',
+        'mecm_packages.php',
     ];
 
     public function testNoRawScalarCastOnRequestInput(): void

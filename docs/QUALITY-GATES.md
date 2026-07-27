@@ -50,7 +50,6 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 | `health-contract` | `health.php` 200/`ok` mit vergröberter PHP-Version, `/tests/` 403 | containerisiert | Exposure-Regression |
 | `e2e-portal` | Playwright Chromium gegen den QA-Stack: der E6-Abdeckungsvertrag (unten) | nativ, Netz für Toolbezug | Browser-beweisbare Regression; Report im Artefakt |
 | `guard-harness` | Jeder Guard positiv, negativ (Mutation wird erkannt) und im Zero-Match-Fall bewiesen (`scripts/test-guards.ps1`) | nativ | Ein Guard schützt nicht mehr, was er behauptet |
-| `legacy-csharp-build` | Desktop-Client baut reproduzierbar (bis zur E3-Entscheidung) | windows-only | Build-Bruch durch Repo-Änderung; off-Windows `not_applicable` |
 
 ## Release-Lane (vor jeder Auslieferung)
 

@@ -10,10 +10,11 @@ require_once __DIR__ . '/helpers.php';
  * Canonicalizes a free-text catalog status to one of the two stored values.
  * 'aktiv'/'active' (any case) become VIRTUSPHERE_CATALOG_STATUS_DEFAULT,
  * 'retired' becomes VIRTUSPHERE_CATALOG_STATUS_RETIRED. Anything else passes
- * through unchanged: the legacy token API (access.php createOS/updateOS) may
- * store arbitrary status text, and narrowing that is a wire change reserved for
- * E3. Deliberately not Validator::enum(), which lowercases and would fight the
- * capitalized canonical values and their case-sensitive SQL comparisons.
+ * through unchanged: rows written before the retired token API fell (ADR-0035)
+ * may hold arbitrary status text, and rewriting stored data is a migration
+ * decision, not a validator side effect. Deliberately not Validator::enum(),
+ * which lowercases and would fight the capitalized canonical values and their
+ * case-sensitive SQL comparisons.
  */
 function catalog_normalize_status(string $status): string
 {

@@ -20,7 +20,7 @@ return [
     'aria_role_select' => 'Rolle von :name',
     'btn_reset' => 'Zurücksetzen',
     'confirm_reset_password' => 'Passwort von :name zurücksetzen? Das bisherige Passwort gilt danach nicht mehr.',
-    'confirm_deactivate' => 'Benutzer :name deaktivieren? Die Anmeldung wird sofort verweigert, laufende Sitzungen enden beim nächsten Aufruf, und die Token des Desktop-Clients werden zurückgezogen. Ein erneutes Aktivieren stellt sie nicht wieder her: der Client muss sich neu anmelden.',
+    'confirm_deactivate' => 'Benutzer :name deaktivieren? Die Anmeldung wird sofort verweigert, laufende Sitzungen enden beim nächsten Aufruf.',
     'confirm_role' => 'Rolle von :name ändern? Die neuen Rechte gelten sofort.',
     'confirm_role_self' => 'Deine eigene Rolle ändern? Nimmst du dir die Administratorrechte, verlierst du sofort den Zugang zur Benutzerverwaltung. Nur ein anderer Administrator kann das rückgängig machen.',
     'btn_unlock' => 'Sperre aufheben',

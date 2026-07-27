@@ -34,7 +34,7 @@ Der Backend/Ops-Stand vom 2026-07-05 ist fuer lokale Tests nutzbar:
 
 Der Portal-UX-Slice ergaenzt dazu Sticky-Formulare mit Fehlern pro Feld (OS, VLANs, Packages, Credentials, Benutzer, Missionen, Settings und VM-Editor), Suche und IP-Filter im Log-Viewer sowie die Benutzeridentitaet in der Topbar als kompakter Konto-Link. Bewusst offen bleibt nur noch das rein visuelle Portal-Design (Settings-Optik, weitere Formularanordnung und Navigationsfeinschliff), das der Frontend-Kollege auf Basis der bestehenden Portal-Struktur weiterfuehren kann.
 
-Abschlusspruefung: Der Backend/Ops-Plan und das Findings-/SSoT-Update sind umgesetzt; HTTPS-Konfiguration und das visuelle Portal-Design sind inzwischen ebenfalls fertig, und der Stack lief in einer Erstinbetriebnahme auf dem Produktionshost. Offen bleiben das E3-Retirement der Legacy-Token-API (Entscheidung angenommen 2026-07-26, Rueckbau folgt) und die Clean-Checkout-Releaseprobe als formaler Release-Nachweis. Die lokalen Setup-Aequivalente wurden ueber Docker Build/Start, `migrate.php --check`, Migration und Healthcheck verifiziert.
+Abschlusspruefung: Der Backend/Ops-Plan und das Findings-/SSoT-Update sind umgesetzt; HTTPS-Konfiguration und das visuelle Portal-Design sind inzwischen ebenfalls fertig, und der Stack lief in einer Erstinbetriebnahme auf dem Produktionshost. Das E3-Retirement der frueheren Token-API ist umgesetzt (ADR-0035); offen bleibt die Clean-Checkout-Releaseprobe als formaler Release-Nachweis. Die lokalen Setup-Aequivalente wurden ueber Docker Build/Start, `migrate.php --check`, Migration und Healthcheck verifiziert.
 
 ## Voraussetzungen
 

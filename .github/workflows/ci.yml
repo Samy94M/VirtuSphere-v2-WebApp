@@ -4,8 +4,7 @@ name: CI
 # scripts/check.ps1 aus statt einer zweiten, driftfaehigen Schrittliste.
 # Fast-Lane auf jedem PR und Push; Integration-Lane (QA-Wegwerf-Stack,
 # --fail-on-skipped, Playwright-Chromium; ADR-0015-Ergaenzung und
-# ADR-0028-Revision) auf Merge nach main, nightly und manuell; der
-# windows-only Legacy-C#-Build laeuft als eigener Windows-Job derselben Lane.
+# ADR-0028-Revision) auf Merge nach main, nightly und manuell.
 # Tool-Versionen kommen aus scripts/tool-lock.json (Images per Digest,
 # PowerShell-Module exakt); Actions sind auf volle Commit-SHAs gepinnt.
 
@@ -218,39 +217,4 @@ jobs:
         with:
           name: qa-windows-powershell-51
           path: qa-ps51.json
-          retention-days: 14
-
-  # Windows-only-Gate derselben Lane (Plan v2 L8): der Legacy-C#-Client baut
-  # nur mit MSBuild/NuGet auf Windows. Die HintPaths des historischen Projekts
-  # zeigen auf ..\packages (eine Ebene ueber dem Checkout), also restauriert
-  # NuGet gezielt dorthin.
-  legacy-csharp-build:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: MSBuild in den PATH (vswhere statt ungepinnter Action)
-        shell: pwsh
-        run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-          if (-not $msbuild) { throw 'MSBuild nicht gefunden' }
-          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $msbuild -Parent)
-
-      - name: NuGet restore (packages.config, Ziel ..\packages laut HintPaths)
-        run: nuget restore VirtuSphere.sln -PackagesDirectory ..\packages
-
-      - name: Legacy-C#-Build (kanonischer Runner, ein Gate)
-        shell: pwsh
-        run: ./scripts/check.ps1 -Lane Integration -Gate legacy-csharp-build -Json qa-csharp.json
-
-      - name: QA-Artefakt hochladen
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: qa-legacy-csharp
-          path: qa-csharp.json
           retention-days: 14

@@ -52,6 +52,16 @@ try {
     if (array_key_exists('job_id', $payload) && $jobId === null) {
         machine_api_json(['error' => 'job_id must be a positive integer'], 400);
     }
+    if ($jobId === null) {
+        // ADR-0035: the job_id-less callback fell with the desktop client. An
+        // unscoped import could rewrite rows no running deploy owns, which is
+        // exactly the surface the E3 retirement removed.
+        machine_api_log_warning('db_importMAC', 'Rejected MAC import without job_id from ' . $clientIp . '.');
+        machine_api_json([
+            'error' => 'job_id is required for MAC import payload',
+            'legacy_payload' => $legacyPayload,
+        ], 400);
+    }
     if ($results === []) {
         machine_api_json(['error' => 'No result entries received'], 400);
     }
@@ -77,38 +87,32 @@ try {
     // job's playbook is still finishing its current step, and that step's own
     // MAC upload is exactly this request - bouncing it threw away addresses
     // the sequence had really assigned. Only the confirmed end states refuse.
-    $job = null;
-    $jobScopeIds = null;
-    if ($jobId !== null) {
-        $job = mac_import_job($connection, $jobId);
-        if (!is_array($job)
-            || (int) ($job['mission_id'] ?? 0) !== $missionId
-            || !in_array((string) ($job['status'] ?? ''), [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)) {
-            throw new MacImportConflictException('Deploy job does not accept MAC imports for this mission.');
-        }
-        $jobScopeIds = mac_import_job_scope_ids($job);
+    $job = mac_import_job($connection, $jobId);
+    if (!is_array($job)
+        || (int) ($job['mission_id'] ?? 0) !== $missionId
+        || !in_array((string) ($job['status'] ?? ''), [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)) {
+        throw new MacImportConflictException('Deploy job does not accept MAC imports for this mission.');
     }
+    $jobScopeIds = mac_import_job_scope_ids($job);
 
     // Sole outer request transaction: no repo_transaction()-wrapped function is
     // called until commit. Planning locks and validates every row before phase 2.
     $connection->begin_transaction();
     $transactionStarted = true;
 
-    if ($jobId !== null) {
-        // Close the race between the pre-transaction 409 gate and this lock. A
-        // worker that already made the job terminal still produces no writes;
-        // running and cancelling both accept (same window as the gate above).
-        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
-        $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? AND mission_id = ? AND status IN (?, ?) LIMIT 1 FOR UPDATE');
-        $stmt->bind_param('iiss', $jobId, $missionId, $running, $cancelling);
-        $stmt->execute();
-        if (!$stmt->get_result()->fetch_assoc()) {
-            throw new MacImportConflictException('Deploy job became terminal before the callback was locked.');
-        }
+    // Close the race between the pre-transaction 409 gate and this lock. A
+    // worker that already made the job terminal still produces no writes;
+    // running and cancelling both accept (same window as the gate above).
+    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+    $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? AND mission_id = ? AND status IN (?, ?) LIMIT 1 FOR UPDATE');
+    $stmt->bind_param('iiss', $jobId, $missionId, $running, $cancelling);
+    $stmt->execute();
+    if (!$stmt->get_result()->fetch_assoc()) {
+        throw new MacImportConflictException('Deploy job became terminal before the callback was locked.');
     }
 
-    $plan = mac_import_build_plan($connection, $missionId, $results, $jobId !== null, $jobScopeIds);
+    $plan = mac_import_build_plan($connection, $missionId, $results, true, $jobScopeIds);
     $resultContract = mac_import_result_contract($plan);
 
     $updateInterface = $connection->prepare('UPDATE deploy_interfaces SET mac = ? WHERE id = ? AND vm_id = ?');
@@ -141,16 +145,12 @@ try {
         }
     }
 
-    if ($jobId !== null) {
-        // result_json is part of the same raw transaction as NIC and VM state.
-        // This is intentionally a raw prepared statement, never a repo helper.
-        $resultJson = json_encode($resultContract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
-        $stmt = $connection->prepare('UPDATE deploy_jobs SET result_json = ?, updated_at = NOW() WHERE id = ? AND mission_id = ? AND status IN (?, ?)');
-        $stmt->bind_param('siiss', $resultJson, $jobId, $missionId, $running, $cancelling);
-        $stmt->execute();
-    }
+    // result_json is part of the same raw transaction as NIC and VM state.
+    // This is intentionally a raw prepared statement, never a repo helper.
+    $resultJson = json_encode($resultContract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $stmt = $connection->prepare('UPDATE deploy_jobs SET result_json = ?, updated_at = NOW() WHERE id = ? AND mission_id = ? AND status IN (?, ?)');
+    $stmt->bind_param('siiss', $resultJson, $jobId, $missionId, $running, $cancelling);
+    $stmt->execute();
 
     $connection->commit();
     $transactionStarted = false;
@@ -158,9 +158,9 @@ try {
     $diagnostics = mac_import_legacy_diagnostics($plan['errors']);
     if ($plan['outcome'] !== 'success') {
         machine_api_log_warning('db_importMAC', sprintf(
-            'MAC import mission_id=%d job_id=%s outcome=%s successful_vms=%d failed_vms=%d errors=%d.',
+            'MAC import mission_id=%d job_id=%d outcome=%s successful_vms=%d failed_vms=%d errors=%d.',
             $missionId,
-            $jobId === null ? 'legacy' : (string) $jobId,
+            $jobId,
             $plan['outcome'],
             $plan['counts']['successful_vms'],
             $plan['counts']['failed_vms'],
@@ -200,7 +200,7 @@ try {
     // after the rollback, so the trace survives independently of the request.
     // Only for an EXISTING job row - the FK would refuse anything else, and a
     // rejected callback must never be able to crash into a 500.
-    if (isset($jobId, $job) && $jobId !== null && is_array($job)) {
+    if (isset($jobId, $job) && is_array($job)) {
         try {
             $stream = 'system';
             $line = 'Rejected a MAC callback: ' . $exception->getMessage()
