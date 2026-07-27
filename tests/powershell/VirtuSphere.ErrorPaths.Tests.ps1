@@ -123,6 +123,28 @@ Describe 'Get-VsApiHeaders (Token-Handhabung)' {
         $headers['X-VirtuSphere-Correlation'] | Should -Match '^[0-9a-f]{16}$'
     }
 
+    It 'traegt die Korrelations-ID schon in der ersten Logzeile, vor jedem API-Aufruf (B11)' {
+        # Die Datei deklarierte die ID doppelt: beim Laden 8 Zeichen, spaeter
+        # $null. Jede Logzeile vor dem ersten Header-Bau trug deshalb einen
+        # leeren ID-Feldwert, und genau die fruehen Zeilen (Config gelesen,
+        # Site-Code erkannt) sind die, die man beim Debuggen zuerst sucht.
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $root = Join-Path ([System.IO.Path]::GetTempPath()) ('vs-corr-' + [guid]::NewGuid().ToString('N'))
+            Initialize-VsLog -Component 'PesterCorr' -LogRoot $root
+            Write-VsLog -Message 'erste Zeile' | Out-Null
+            $file = Get-ChildItem -Path $root -Filter '*_PesterCorr.log' | Select-Object -First 1
+            $line = Get-Content -Path $file.FullName | Select-Object -First 1
+            $headerId = (Get-VsApiHeaders -Config ([pscustomobject]@{ ReportToken = '' }))['X-VirtuSphere-Correlation']
+            Remove-Item -Recurse -Force $root
+            , @($line, $headerId)
+        }
+        $logId = ($result[0] -split '\|')[-1].Trim()
+        $logId | Should -Match '^[0-9a-f]{16}$'
+        # Und es ist DIESELBE ID, die der API-Header traegt: eine Spur pro
+        # Prozesslauf, nicht eine fuers Log und eine fuer die Wire.
+        $result[1] | Should -Be $logId
+    }
+
     It 'mintet die Korrelations-ID einmal pro Lauf und haelt sie dann konstant (ADR-0032)' {
         $ids = Invoke-InFileScope -Path $script:MecmCommon -Body {
             $a = (Get-VsApiHeaders -Config ([pscustomobject]@{ ReportToken = 'tok' }))['X-VirtuSphere-Correlation']

@@ -89,7 +89,13 @@ $script:VsLogRoot = if ($env:ProgramFiles) {
 } else {
     Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs'
 }
-$script:VsCorrelationId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+# Korrelations-ID pro Prozesslauf (ADR-0032): 16 Hex aus einer GUID, EINMAL
+# beim Laden gemintet, damit schon die erste Logzeile sie traegt (B11: eine
+# spaetere $null-Re-Deklaration liess jede Zeile vor dem ersten API-Aufruf
+# ID-los). Bewusst KEIN Registry-Wert: ein Neustart des Skripts ist eine neue
+# Spur. Rein diagnostisch, kein Secret und kein Token; die Redaction laesst
+# sie deshalb sichtbar.
+$script:VsCorrelationId = ([guid]::NewGuid().ToString('N')).Substring(0, 16).ToLowerInvariant()
 
 function Initialize-VsLog {
     param(
@@ -152,11 +158,9 @@ function Invoke-VsLogRetention {
 # ---------------------------------------------------------------------------
 # WebAPI-Aufrufe (inkl. optionalem Token-Header)
 # ---------------------------------------------------------------------------
-# Korrelations-ID pro Prozesslauf (ADR-0032): 16 Hex aus einer GUID, beim
-# ersten Header-Bau gemintet und dann konstant. Bewusst KEIN Registry-Wert:
-# ein Neustart des Skripts ist eine neue Spur. Rein diagnostisch, kein Secret
-# und kein Token; die Redaction laesst sie deshalb sichtbar.
-$script:VsCorrelationId = $null
+# Accessor fuer die beim Laden geminteten Korrelations-ID (Deklaration beim
+# Logging-Block oben). Der Guard bleibt als Gurt: sollte die Variable je
+# geleert werden, ist eine frische ID besser als ein leerer Header.
 function Get-VsCorrelationId {
     if (-not $script:VsCorrelationId) {
         $script:VsCorrelationId = ([guid]::NewGuid().ToString('N')).Substring(0, 16).ToLowerInvariant()
