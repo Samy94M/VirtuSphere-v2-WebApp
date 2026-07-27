@@ -181,6 +181,48 @@ Describe 'Get-VsMembershipPlan (gemeinsame Vektoren mit PHP, ADR-0034)' {
     }
 }
 
+Describe 'Get-VsContentDistributionState (B7: mehrwertig statt Ja/Nein)' {
+
+    It '<name>' -ForEach @(
+        @{ name = 'keine Statuszeile -> not_started'; entries = @(); expected = 'not_started' }
+        @{ name = 'Targeted 0 -> not_started'; entries = @(@{ Targeted = 0; NumberInstalled = 0; NumberErrors = 0 }); expected = 'not_started' }
+        @{ name = 'Fehler auf einem DP -> failed, egal wie viel installiert ist'; entries = @(@{ Targeted = 2; NumberInstalled = 2; NumberErrors = 1 }); expected = 'failed' }
+        @{ name = 'angestossen, unfertig -> in_progress'; entries = @(@{ Targeted = 3; NumberInstalled = 1; NumberErrors = 0 }); expected = 'in_progress' }
+        @{ name = 'vollstaendige Zielverteilung -> succeeded'; entries = @(@{ Targeted = 2; NumberInstalled = 2; NumberErrors = 0 }); expected = 'succeeded' }
+        @{ name = 'mehrere Eintraege werden aggregiert'; entries = @(@{ Targeted = 1; NumberInstalled = 1; NumberErrors = 0 }, @{ Targeted = 1; NumberInstalled = 0; NumberErrors = 0 }); expected = 'in_progress' }
+    ) {
+        # Die alte boolesche Frage las Targeted > 0 als erledigt und NumberErrors
+        # las niemand: eine ueberall gescheiterte Verteilung galt als fertig.
+        $state = Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $entries) -Body {
+            param($e)
+            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) $e }
+            Get-VsContentDistributionState -ApplicationName 'App'
+        }
+        $state | Should -Be $expected
+    }
+
+    It 'eine werfende Abfrage ist unknown, nie ein erfundener Zustand' {
+        $state = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) throw 'kein Site-Drive' }
+            Get-VsContentDistributionState -ApplicationName 'App'
+        }
+        $state | Should -Be 'unknown'
+    }
+
+    It 'mit ApplicationId fragt sie per -Id ab, nicht per -Name' {
+        # -Name trifft bei Namensgleichheit das falsche Objekt (B7); wo der
+        # Aufrufer das Application-Objekt hat, gewinnt die CI_ID.
+        $probe = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $captured = @{}
+            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) $captured.Name = $Name; $captured.Id = $Id; @() }
+            Get-VsContentDistributionState -ApplicationName 'App' -ApplicationId 4711 | Out-Null
+            $captured
+        }
+        $probe.Id | Should -Be 4711
+        $probe.Name | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Token-Redaction (statischer Vertrag ueber alle Quellen)' {
 
     It 'keine Log-/Ausgabezeile referenziert den ReportToken-Wert' {

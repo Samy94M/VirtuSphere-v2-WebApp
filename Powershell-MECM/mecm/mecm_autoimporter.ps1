@@ -73,12 +73,25 @@ $loop = 0
 # kann kein Test aufrufen, ohne sie zu starten. Dort deckt Pester beide ab.
 
 # Fingerabdruck des files-Baums fuer Change-Detection.
+#
+# Zusaetzlich zur config.json-Menge geht das Vorlagen-install.ps1 in den Stamp
+# ein (B7): die Vorlage gewinnt laut Vertrag ueber die paketeigene Datei, aber
+# eine GEAENDERTE Vorlage loeste keinen Scan aus - der Abgleich lief erst, wenn
+# zufaellig eine config.json angefasst wurde. Ein fehlendes Vorlagen-Skript ist
+# ein eigener Zustandswert und kein Fehler: es gibt schlicht nichts abzugleichen.
 function Get-VsFilesStamp {
-    param([string]$Path)
+    param([string]$Path, [string]$TemplateScript = '')
     if (-not (Test-Path $Path)) { return 'missing' }
     $items = Get-ChildItem -Path $Path -Recurse -File -Filter 'config.json' -ErrorAction SilentlyContinue
     if (-not $items) { return 'empty' }
-    ($items | Sort-Object FullName | ForEach-Object { '{0}:{1}' -f $_.FullName, $_.LastWriteTimeUtc.Ticks }) -join '|'
+    $parts = @($items | Sort-Object FullName | ForEach-Object { '{0}:{1}' -f $_.FullName, $_.LastWriteTimeUtc.Ticks })
+    if ($TemplateScript -and (Test-Path $TemplateScript)) {
+        $template = Get-Item -Path $TemplateScript -ErrorAction SilentlyContinue
+        if ($template) { $parts += ('template:{0}:{1}' -f $template.FullName, $template.LastWriteTimeUtc.Ticks) }
+    } elseif ($TemplateScript) {
+        $parts += 'template:absent'
+    }
+    $parts -join '|'
 }
 
 while ($true) {
@@ -128,8 +141,10 @@ while ($true) {
             }
         }
 
-        # Change-Detection: nur bei geaendertem files-Baum voll scannen.
-        $stamp = Get-VsFilesStamp -Path $basePath
+        # Change-Detection: nur bei geaendertem files-Baum voll scannen. Das
+        # Vorlagen-Skript zaehlt mit (B7): eine neue Vorlage muss den Abgleich
+        # in jeden Paketordner ausloesen, nicht erst die naechste config.json.
+        $stamp = Get-VsFilesStamp -Path $basePath -TemplateScript (Join-Path $templatePath 'install.ps1')
         if ($stamp -eq $lastFilesStamp) {
             # Unveraendert: ein gelungener No-op-Lauf.
             $unchanged = 1
@@ -223,7 +238,10 @@ while ($true) {
             }
 
             # --- Application anlegen (falls neu) ---------------------------
-            $isNew = -not (Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue)
+            # Das Objekt wird behalten: der Verteilstatus unten adressiert per
+            # CI_ID statt -Name, wo es eines gibt (B7).
+            $app = Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue
+            $isNew = -not $app
             if ($isNew) {
                 Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
                 New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null
@@ -293,19 +311,52 @@ while ($true) {
                     }
                 }
 
-                # Nicht mehr nur bei $isNew. Eine Application, deren erste
-                # Verteilung fehlschlug, wurde nie wieder verteilt: sie schlaegt
-                # dann auf JEDEM Client fehl, waehrend die Karte gruen ist. Das
-                # Verteilen wird wiederholt, solange der Content nicht auf der
-                # DP-Gruppe liegt, und ein Fehlschlag ist ein offener Punkt.
-                if (-not (Test-VsContentDistributed -ApplicationName $fullName)) {
-                    try {
-                        Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
-                        Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
-                    } catch {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                # Mehrwertiger Verteilzustand (B7): nur `succeeded` heisst
+                # "nichts zu tun". Die alte Ja/Nein-Frage las Targeted > 0 als
+                # fertig und niemand las NumberErrors: eine auf jedem DP
+                # gescheiterte Verteilung galt als erledigt, der Stamp wurde
+                # gemerkt, die Karte blieb gruen. Jetzt haelt jeder Zustand
+                # ausser succeeded den Stamp zurueck, der naechste Lauf prueft
+                # erneut. Per CI_ID adressiert, wenn das Objekt da ist ($isNew
+                # hat es geladen); nur eine in diesem Lauf frisch angelegte
+                # Application faellt auf den Namen zurueck.
+                $distState = Get-VsContentDistributionState -ApplicationName $fullName -ApplicationId $(if ($app) { $app.CI_ID } else { $null })
+                switch ($distState) {
+                    'succeeded' { }
+                    'not_started' {
+                        try {
+                            Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
+                            Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
+                            # Frisch angestossen ist noch nicht angekommen: der
+                            # Stamp wartet, bis ein Lauf `succeeded` sieht.
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                        } catch {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                        }
+                    }
+                    'in_progress' {
+                        Write-VsLog -Context $fullName -Message 'Content-Verteilung laeuft noch - der Stamp wartet auf die vollstaendige Zielverteilung.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                    }
+                    'failed' {
+                        # Benannte Grenze: eine fehlgeschlagene Verteilung wird
+                        # nicht blind neu angestossen (Start-CMContentDistribution
+                        # wirft fuer bereits verteilten Content, und eine
+                        # Redistribution je DP ist ohne MECM-Testumgebung nicht
+                        # pruefbar). Der Punkt bleibt offen und sichtbar, bis der
+                        # Operator in der Konsole neu verteilt.
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Content-Verteilung meldet Fehler auf mindestens einem Verteilungspunkt - in der MECM-Konsole neu verteilen; der Punkt bleibt offen.'
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                    }
+                    'unknown' {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Verteilstatus nicht abfragbar - es wird nicht verteilt, der naechste Lauf fragt erneut.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
                     }
                 }
 
@@ -326,9 +377,14 @@ while ($true) {
                     try {
                         New-CMApplicationDeployment -Name $fullName -CollectionName ([string]$cfg.DeployTo) -DeployAction Install -DeployPurpose Available -UserNotification DisplaySoftwareCenterOnly -ErrorAction Stop | Out-Null
                     } catch {
-                        # Bewusst ohne Retry-Zaehler: fehlende Ziel-Collection ist
-                        # ein Konfigurationsfehler, Dauer-Retry wuerde nur spammen.
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Ziel-Collection '{0}' nicht gefunden." -f $cfg.DeployTo)
+                        # Zaehlt jetzt (B7): ohne Zaehler wurde der Stamp gemerkt
+                        # und der Fehlschlag war ab dem zweiten Lauf unsichtbar -
+                        # eine spaeter angelegte DeployTo-Collection bekam ihr
+                        # Deployment nie. Die Meldung nennt die echte Ursache
+                        # statt der Vermutung "nicht gefunden".
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Zusatz-Deployment auf '{0}' fehlgeschlagen - Wiederholung im naechsten Durchlauf: {1}" -f $cfg.DeployTo, $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName -Collection ([string]$cfg.DeployTo)
                     }
                 }
             }

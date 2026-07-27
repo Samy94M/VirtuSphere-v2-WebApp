@@ -499,7 +499,9 @@ $script:VsRunCauseVocabulary = @(
     'resource_id_pending',       # MECM hat noch keine ResourceID vergeben
     'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
     'package_config_invalid',    # config.json unlesbar oder Pflichtfeld fehlt
-    'package_content_failed',    # Content-Verteilung fehlgeschlagen
+    'package_content_failed',    # Content-Verteilung fehlgeschlagen oder auf DPs mit Fehlern
+    'package_content_in_progress', # Verteilung laeuft noch; Stamp wartet (B7)
+    'package_content_unknown',   # Verteilstatus nicht abfragbar; Stamp wartet (B7)
     'package_source_missing',    # files-Pfad des Paketordners fehlt
     'package_deploy_failed',     # New-CMApplicationDeployment fehlgeschlagen
     'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
@@ -510,44 +512,55 @@ function New-VsRunCauseList {
     return New-Object System.Collections.Generic.List[string]
 }
 
-# Ist der Content dieser Application schon verteilt?
+# Verteilzustand des Application-Contents (B7, ADR-0034):
+# not_started | in_progress | succeeded | failed | unknown.
 #
-# Die Frage entscheidet, ob der Autoimporter das Verteilen wiederholen darf. Er
-# tat es nur bei $isNew, also wurde eine Application, deren erste Verteilung
-# fehlschlug, nie wieder verteilt: sie schlaegt dann auf JEDEM Client fehl,
-# waehrend die Statuskarte gruen ist. Blind zu wiederholen geht nicht, weil
-# Start-CMContentDistribution fuer bereits verteilten Content selbst wirft.
+# Die boolesche Vorgaengerfrage ("ist ueberhaupt verteilt?") las Targeted > 0
+# als erledigt, und NumberErrors las niemand: eine Verteilung, die auf jedem DP
+# scheiterte, galt als fertig, der Autoimporter merkte den Stamp, die Karte
+# blieb gruen, und jede Client-Installation schlug fehl. Mehrwertig entscheidet
+# der Aufrufer selbst; nur `succeeded` heisst "nichts zu tun UND der Stamp darf
+# gemerkt werden".
 #
-# $true bei jeder Unsicherheit (Cmdlet fehlt, Abfrage wirft): dann wird NICHT
-# verteilt und der naechste Lauf fragt erneut. Ein falsches "noch nicht verteilt"
-# wuerde jeden Durchlauf einen Fehler erzeugen, den niemand beheben kann.
+# Adressierung per CI_ID (-Id), wenn der Aufrufer das Application-Objekt hat:
+# -Name trifft bei Namensgleichheit das falsche Objekt. `unknown` bei jeder
+# Unsicherheit; der Aufrufer verteilt dann nicht (Start-CMContentDistribution
+# wirft fuer bereits verteilten Content selbst) und merkt keinen Stamp, der
+# naechste Lauf fragt erneut.
 #
-# Die Frage ist bewusst "ist der Content ueberhaupt verteilt", nicht "liegt er auf
-# genau dieser DP-Gruppe": Get-CMDistributionStatus liefert die Summe ueber alle
-# Verteilungspunkte, und die Gruppe steht darin nicht. Fuer die Installation, die
-# genau eine DP-Gruppe anlegt, ist beides dasselbe. Wer VirtuSphere-Content
-# spaeter zusaetzlich per Hand auf eine zweite Gruppe verteilt, unterdrueckt damit
-# die Wiederholung fuer die erste - das waere eine Abfrage ueber die
-# Gruppenmitglieder, die ohne MECM-Testumgebung nicht pruefbar ist, und ein
-# ungepruefter Blindflug ist hier schlechter als eine benannte Grenze.
-function Test-VsContentDistributed {
+# Bewusst weiterhin die Summe ueber alle Verteilungspunkte, nicht "liegt er auf
+# genau dieser DP-Gruppe": Get-CMDistributionStatus kennt die Gruppe nicht, und
+# fuer die Installation, die genau eine DP-Gruppe anlegt, ist beides dasselbe
+# (benannte Grenze, unveraendert).
+function Get-VsContentDistributionState {
     param(
-        [Parameter(Mandatory)][string]$ApplicationName
+        [Parameter(Mandatory)][string]$ApplicationName,
+        $ApplicationId = $null
     )
     try {
-        $status = @(Get-CMDistributionStatus -Name $ApplicationName -ErrorAction Stop)
+        if ($ApplicationId) {
+            $status = @(Get-CMDistributionStatus -Id $ApplicationId -ErrorAction Stop)
+        } else {
+            $status = @(Get-CMDistributionStatus -Name $ApplicationName -ErrorAction Stop)
+        }
     } catch {
         Write-Debug $_
-        return $true
+        return 'unknown'
     }
-    if (@($status).Count -eq 0) { return $false }
+    if (@($status).Count -eq 0) { return 'not_started' }
 
-    # Targeted > 0 heisst: die Verteilung ist mindestens angestossen. Ob sie
-    # fertig ist, entscheidet MECM selbst und ist hier nicht die Frage.
+    $targeted = 0
+    $installed = 0
+    $distErrors = 0
     foreach ($entry in $status) {
-        if ([int]($entry.Targeted) -gt 0) { return $true }
+        $targeted += [int]$entry.Targeted
+        $installed += [int]$entry.NumberInstalled
+        $distErrors += [int]$entry.NumberErrors
     }
-    return $false
+    if ($distErrors -gt 0) { return 'failed' }
+    if ($targeted -le 0) { return 'not_started' }
+    if ($installed -ge $targeted) { return 'succeeded' }
+    return 'in_progress'
 }
 
 # Liegt diese Collection schon im VirtuSphere-Ordner?
@@ -670,7 +683,8 @@ function Add-VsRunCause {
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',
             'collection_folder_failed', 'collection_remove_failed', 'membership_report_failed',
             'resource_id_pending', 'resource_update_failed',
-            'package_config_invalid', 'package_content_failed', 'package_source_missing',
+            'package_config_invalid', 'package_content_failed', 'package_content_in_progress',
+            'package_content_unknown', 'package_source_missing',
             'package_deploy_failed', 'package_cleanup_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',

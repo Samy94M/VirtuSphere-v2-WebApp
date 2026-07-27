@@ -135,11 +135,28 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         # Beide liefen nur beim ersten Anlegen. Schlug es dort fehl, existierte
         # die Application danach, der naechste Durchlauf war nicht mehr "neu",
         # und die Verteilung wurde nie wiederholt: das Paket schlaegt auf jedem
-        # Client fehl, waehrend die Karte gruen ist.
+        # Client fehl, waehrend die Karte gruen ist. Seit B7 ist die Frage
+        # mehrwertig (Get-VsContentDistributionState), und nur `succeeded`
+        # laesst den Stamp zu.
         $source = Get-Content -Path $script:Importer -Raw
-        $source | Should -Match 'Test-VsContentDistributed'
+        $source | Should -Match 'Get-VsContentDistributionState'
+        $source | Should -Not -Match 'Test-VsContentDistributed'
         $source | Should -Match 'Test-VsInOrgFolder'
         $source | Should -Match 'Test-VsTemplateScriptCurrent'
+    }
+
+    It 'jeder Verteilzustand ausser succeeded haelt den Stamp zurueck' {
+        # B7: Targeted > 0 galt als fertig, NumberErrors las niemand. Jetzt
+        # zaehlt jeder Nicht-succeeded-Zweig einen offenen Punkt, und der Stamp
+        # (der nur bei $scanWarnings -eq 0 gemerkt wird) wartet auf die
+        # vollstaendige Zielverteilung.
+        $source = Get-Content -Path $script:Importer -Raw
+        foreach ($needle in @('package_content_in_progress', 'package_content_unknown', 'package_content_failed')) {
+            $source | Should -Match $needle
+        }
+        # Der Stamp umfasst das Vorlagen-Skript: eine neue Vorlage loest den
+        # Scan aus, nicht erst die naechste config.json.
+        $source | Should -Match 'Get-VsFilesStamp -Path \$basePath -TemplateScript'
     }
 
     It 'das Vorlagen-Skript wird ausserhalb des $isNew-Zweigs abgeglichen' {
