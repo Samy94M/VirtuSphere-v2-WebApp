@@ -55,7 +55,9 @@ final class DeployConvergenceContractTest extends TestCase
         // four states it distinguishes would again be unreachable for a test.
         self::assertStringContainsString('function deploy_worker_assert_job_is_ours', $this->source('lib/deploy_worker_outcome.php'));
         self::assertStringNotContainsString('function deploy_worker_assert_job_is_ours', $worker);
-        self::assertStringContainsString('deploy_worker_handle_failure($db, $job, $workerId, $vmIds, $exception->getMessage())', $worker);
+        // Since B6 the message leaves through the secret redactor first; the
+        // handler call itself stays in the entrypoint's catch.
+        self::assertStringContainsString('deploy_worker_handle_failure($db, $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]))', $worker);
         self::assertStringNotContainsString('VIRTUSPHERE_DEPLOY_STATUS_PARTIAL', $worker);
     }
 

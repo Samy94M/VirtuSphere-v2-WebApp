@@ -206,8 +206,8 @@ function ansible_inventory_normalization_log_line(array $normalization): ?string
     $totalRaw = 0;
     $parts = [];
     foreach ($normalization as $kind => $counts) {
-        $raw = (int) ($counts['raw'] ?? 0);
-        $kept = (int) ($counts['kept'] ?? 0);
+        $raw = $counts['raw'];
+        $kept = $counts['kept'];
         $totalRaw += $raw;
         if ($raw > $kept) {
             $parts[] = sprintf('%s %d of %d unusable', (string) $kind, $raw - $kept, $raw);

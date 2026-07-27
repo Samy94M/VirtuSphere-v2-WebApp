@@ -425,7 +425,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
         // Raw-vs-kept balance (B15): an entry whose shape stopped matching used
         // to vanish silently, indistinguishable from a host that has less.
-        $normalizationLine = ansible_inventory_normalization_log_line($parsed['normalization'] ?? []);
+        $normalizationLine = ansible_inventory_normalization_log_line($parsed['normalization']);
         if ($normalizationLine !== null) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $normalizationLine);
         }
