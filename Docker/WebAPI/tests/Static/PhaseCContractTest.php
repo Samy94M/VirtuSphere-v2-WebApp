@@ -183,6 +183,17 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('deploy_worker_heartbeat_tick(', $worker);
         self::assertStringContainsString('deploy_worker_log_stream_chunk', $worker);
 
+        // The deploy preflight probes the real MAC return route (portal +
+        // allowlist) exactly for the modes whose sequence uploads MACs: a full
+        // deploy on a host that cannot reach the portal must fail its preflight
+        // instead of stranding VMs at stage 2/5, while a create-only job must
+        // not be failed for a route it never uses. The inventory path stays
+        // probe-less on purpose (no callback). B6: both call sites used to pass
+        // nothing at all.
+        self::assertStringContainsString('ansible_mode_expects_mac_result(', $worker);
+        self::assertStringContainsString('ansible_preflight_command($preflightApiBaseUrl)', $worker);
+        self::assertStringNotContainsString('ansible_preflight_command()', $worker);
+
         // The tick lives in the requireable outcome module (the entrypoint runs
         // its loop on require), and it must keep carrying the integration report:
         // that is what keeps the System status row green through one long remote

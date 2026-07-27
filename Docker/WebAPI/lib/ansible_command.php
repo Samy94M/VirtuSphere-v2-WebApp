@@ -303,13 +303,29 @@ function ansible_preflight_checks(bool $strict = false): array
  * exactly the E3-frozen one, so the probe changes no contract. It prints a
  * verdict line and always exits 0: health.php passing while this says denied
  * is a warning (deploys would lose their MAC upload), not a broken credential.
+ *
+ * Both probes open the URL exactly like the MAC upload does: on https with a
+ * pinned certificate they compare the served certificate's SHA-256 instead of
+ * the chain (VS_PF_PIN, same semantics as upload_mac_list.py). A bare urlopen()
+ * used to fail the preflight against a self-signed portal whose callback would
+ * have worked. $certSha256 = null resolves the pin from the installed portal
+ * certificate; pass '' to force plain verification (tests).
  */
-function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false): string
+function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false, ?string $certSha256 = null): string
 {
     $checks = ansible_preflight_checks($strict);
 
     $apiBaseUrl = trim($apiBaseUrl);
     if ($apiBaseUrl !== '') {
+        if ($certSha256 === null) {
+            // Same SSoT as the upload patcher: empty for http and for a
+            // certificate a PKI already covers (then the default chain check is
+            // the stronger answer).
+            require_once __DIR__ . '/ansible_yaml.php';
+            $certSha256 = ansible_portal_cert_fingerprint($apiBaseUrl);
+        }
+        $pinEnv = ' VS_PF_PIN=' . ansible_sh_quote($certSha256);
+
         // An HTTP status of any kind proves the route: only a transport error
         // means the host cannot reach the portal. urlopen() raises HTTPError on
         // 4xx/5xx, so the bare call failed this component for a portal that was
@@ -318,17 +334,17 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
         // Test-VsApiAnswered on the client side and as health.php's own 200 for
         // `degraded`: three layers, one predicate.
         $healthUrl = rtrim($apiBaseUrl, '/') . '/portal/health.php';
-        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL] = 'VS_PF_URL=' . ansible_sh_quote($healthUrl)
+        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL] = 'VS_PF_URL=' . ansible_sh_quote($healthUrl) . $pinEnv
             . ' python3 -c ' . ansible_sh_quote(
-                'import os, urllib.request, urllib.error' . "\n"
+                ansible_probe_opener_source() . "\n"
                 . 'try:' . "\n"
-                . '    urllib.request.urlopen(os.environ["VS_PF_URL"], timeout=5)' . "\n"
+                . '    vs_urlopen(os.environ["VS_PF_URL"], timeout=5)' . "\n"
                 . 'except urllib.error.HTTPError as error:' . "\n"
                 . '    print("portal answered HTTP %d" % error.code)' . "\n"
             ) . ' 2>&1';
 
         $macUploadUrl = rtrim($apiBaseUrl, '/') . '/db_importMAC.php';
-        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST] = 'VS_PF_MAC_URL=' . ansible_sh_quote($macUploadUrl)
+        $checks[VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST] = 'VS_PF_MAC_URL=' . ansible_sh_quote($macUploadUrl) . $pinEnv
             . ' python3 -c ' . ansible_sh_quote(ansible_allowlist_probe_source()) . ' 2>&1';
     }
 
@@ -342,6 +358,55 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
 }
 
 /**
+ * The shared opener building block of the two portal-side probes. Defines
+ * vs_urlopen with the exact pin semantics of upload_mac_list.py's
+ * build_https_opener(): with a 64-hex fingerprint in VS_PF_PIN the chain and
+ * hostname checks are replaced by an exact SHA-256 comparison of the served
+ * certificate; without one, plain urlopen applies (default verifying context
+ * on https, nothing on http). One source, because the probes exist to predict
+ * whether the UPLOAD will work: a probe that verifies differently answers a
+ * different question, and a bare urlopen() failed the preflight against a
+ * self-signed portal whose pinned callback would have succeeded.
+ */
+function ansible_probe_opener_source(): string
+{
+    return <<<'PY'
+import hashlib, os, ssl, urllib.request, urllib.error
+
+def vs_build_opener():
+    pin = "".join(c for c in os.environ.get("VS_PF_PIN", "").lower() if c in "0123456789abcdef")
+    if len(pin) != 64:
+        return urllib.request.urlopen
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    class PinnedHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(self._pinned_connection, req)
+
+        def _pinned_connection(self, host, **kwargs):
+            import http.client
+            connection = http.client.HTTPSConnection(host, context=context, **kwargs)
+            original_connect = connection.connect
+
+            def connect_and_verify():
+                original_connect()
+                der = connection.sock.getpeercert(binary_form=True)
+                if hashlib.sha256(der).hexdigest() != pin:
+                    connection.close()
+                    raise ssl.SSLError("portal certificate does not match the pinned fingerprint")
+
+            connection.connect = connect_and_verify
+            return connection
+
+    return urllib.request.build_opener(PinnedHandler()).open
+
+vs_urlopen = vs_build_opener()
+PY;
+}
+
+/**
  * Python source of the allowlist probe. Only the 403 counts as denied: any
  * other HTTP answer (the expected 405, but also e.g. a redirect target's
  * status) means the IP gate was passed, and a transport error right after the
@@ -352,9 +417,9 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
 function ansible_allowlist_probe_source(): string
 {
     $source = <<<'PY'
-import os, re, urllib.request, urllib.error
+import re
 try:
-    urllib.request.urlopen(os.environ["VS_PF_MAC_URL"], timeout=5)
+    vs_urlopen(os.environ["VS_PF_MAC_URL"], timeout=5)
     print("{marker} ok")
 except urllib.error.HTTPError as error:
     if error.code == 403:
@@ -371,7 +436,7 @@ except Exception:
     print("{marker} unknown")
 PY;
 
-    return str_replace('{marker}', VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER, $source);
+    return ansible_probe_opener_source() . "\n" . str_replace('{marker}', VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER, $source);
 }
 
 /**

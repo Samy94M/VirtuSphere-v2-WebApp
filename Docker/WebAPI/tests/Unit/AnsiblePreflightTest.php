@@ -102,6 +102,35 @@ final class AnsiblePreflightTest extends TestCase
         self::assertStringContainsString('403', $withUrl);
     }
 
+    public function testHttpsProbesCarryTheUploadsPinLogic(): void
+    {
+        // The MAC upload pins the portal certificate by SHA-256 when the portal
+        // runs on a self-signed certificate (upload_mac_list.py). The probes
+        // must accept exactly the portals the upload accepts: a bare urlopen()
+        // failed the preflight against a self-signed portal whose callback
+        // would have worked, so the deploy died in its own precheck.
+        $pin = str_repeat('ab', 32);
+        $command = ansible_preflight_command('https://portal.lan', false, $pin);
+
+        // The fingerprint travels in the environment like the URLs do, and both
+        // probes route through the shared pinned opener.
+        self::assertStringContainsString("VS_PF_PIN='" . $pin . "'", $command);
+        self::assertSame(2, substr_count($command, 'VS_PF_PIN='), 'portal and allowlist probe both need the pin');
+        self::assertSame(2, substr_count($command, 'getpeercert'), 'both probes verify the served certificate');
+        self::assertStringContainsString('hashlib.sha256', $command);
+        self::assertStringContainsString('vs_urlopen', $command);
+    }
+
+    public function testAnHttpPortalKeepsAnEmptyPinAndTheProbesStillRun(): void
+    {
+        // http has nothing to pin: the pin env is empty and the opener falls
+        // back to plain urlopen, exactly like the upload's default_opener().
+        $command = ansible_preflight_command('http://portal.lan:8021', false, '');
+        self::assertStringContainsString("VS_PF_PIN=''", $command);
+        self::assertStringContainsString('portal/health.php', $command);
+        self::assertStringContainsString('db_importMAC.php', $command);
+    }
+
     public function testAllowlistVerdictReadsOkDeniedAndUnknown(): void
     {
         $chain = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " portal\n" . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " allowlist\n";

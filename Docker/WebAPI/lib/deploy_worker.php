@@ -170,7 +170,12 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // consumes): on failure the last stage marker in here names the broken
         // component for the job's error message.
         $preflightOutput = '';
-        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
+        // The portal/allowlist probes gate exactly the modes whose sequence
+        // uploads MACs: those jobs strand at stage 2/5 when the host cannot
+        // reach the portal, while a create-only job must not be failed for a
+        // route it never uses (B6; same derivation as the missing-result rule).
+        $preflightApiBaseUrl = ansible_mode_expects_mac_result((string) $payload['mode']) ? $apiBaseUrl : '';
+        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
             $preflightOutput .= $chunk;
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
@@ -323,7 +328,11 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // Same accumulation as the deploy path: the last stage marker names the
         // broken component in the job error instead of a bare exit code.
         $preflightOutput = '';
-        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command(), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
+        // Deliberately probe-less: the inventory pull has no MAC callback, so a
+        // portal unreachable from the Ansible host must not fail it (B6 fixed
+        // the deploy path; this path never needed the route).
+        $preflightApiBaseUrl = '';
+        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($db, $jobId, $workerId, &$preflightBuffer, &$preflightOutput): void {
             $preflightOutput .= $chunk;
             deploy_worker_log_stream_chunk($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
