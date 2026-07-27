@@ -33,3 +33,4 @@
 - [ADR-0031: Kanonischer Prüf-Runner, Lanes und Exitcode-Kontrakt](ADR-0031-canonical-check-runner-lanes-and-exit-codes.md)
 - [ADR-0032: Durchgängige Korrelations-ID über alle sieben Ausführungsschichten](ADR-0032-correlation-id.md)
 - [ADR-0033: Cancellation is a confirmed state machine](ADR-0033-cancellation-state-machine.md)
+- [ADR-0034: MECM-Provenienz und sichere Reconciliation](ADR-0034-mecm-provenance-and-reconciliation.md)

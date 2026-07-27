@@ -70,6 +70,7 @@ return [
     'mission_p1' => 'Eine Mission ist eine Gruppe zusammengehöriger VMs, die gemeinsam bereitgestellt werden. Wichtig zu wissen: Der Missionsname wird 1:1 als Gerätesammlung (Device Collection) in MECM angelegt, im Ordner „VirtuSphere_Missions". Was hier im Portal steht, taucht also später genauso in der MECM-Konsole auf.',
     'mission_p2' => 'Vorlagen erkennt man am Namen, der mit „_" beginnt. Sie sind reine Bauplan-Missionen: Sie werden nie an MECM übertragen und dürfen als einzige VM-Namen doppelt verwenden. Aus einer Vorlage lässt sich jederzeit eine echte Mission klonen, mit frischen VM-IDs und leeren MAC-Adressen.',
     'mission_p3' => 'Die Übergabe an MECM passiert automatisch: Sobald eine VM eine MAC-Adresse hat (nach der Bereitstellung über ESXi), importiert sie das Sync-Skript auf dem MECM-Server als Gerät und ordnet sie ihrer Missions-Collection zu. Niemand muss VMs von Hand in MECM anlegen.',
+    'mission_p4' => 'In die andere Richtung gilt das nicht: Das Löschen einer VM oder Mission im Portal ist rein lokal. Das Gerät und seine Collection-Mitgliedschaften bleiben in MECM bestehen und werden dort von Hand entfernt, wenn sie weg sollen. Der Sync gleicht nur die eigenen, im Portal noch zugewiesenen Regeln ab; von Hand in MECM angelegte Regeln fasst er nie an.',
 
     'naming_heading' => 'Namensregeln & Datenqualität',
     'naming_p0' => 'Alles, was im Portal angelegt wird, muss später in Windows und MECM 1:1 funktionieren. Daraus ergeben sich diese Regeln:',

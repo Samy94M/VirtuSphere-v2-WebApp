@@ -70,6 +70,7 @@ return [
     'mission_p1' => 'A mission is a group of VMs that belong together and are deployed as one unit. Important to know: the mission name is created 1:1 as a device collection in MECM, inside the "VirtuSphere_Missions" folder. Whatever is entered here in the portal shows up under exactly that name in the MECM console later.',
     'mission_p2' => 'Templates are recognisable by a name starting with "_". They are pure blueprint missions: they are never transferred to MECM and are the only place where VM names may repeat. A template can be cloned into a real mission at any time, with fresh VM IDs and empty MAC addresses.',
     'mission_p3' => 'The handover to MECM happens automatically: as soon as a VM has a MAC address (after deployment via ESXi), the sync script on the MECM server imports it as a device and assigns it to its mission collection. Nobody has to create VMs in MECM by hand.',
+    'mission_p4' => 'The other direction does not apply: deleting a VM or mission in the portal is purely local. The device and its collection memberships remain in MECM and are removed there by hand when they should go. The sync only reconciles its own rules that are still assigned in the portal; rules created by hand in MECM are never touched.',
 
     'naming_heading' => 'Naming rules & data quality',
     'naming_p0' => 'Everything created in the portal has to work 1:1 in Windows and MECM later. That leads to these rules:',
