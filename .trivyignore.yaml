@@ -13,15 +13,17 @@
 # Eine Ausnahme ohne Ablaufdatum ist keine Ausnahme, sondern ein Ignorieren;
 # solche Eintraege sind in Reviews abzulehnen.
 #
-# Stand 2026-07-17 (Owner aller Eintraege: Samy):
-# - mysql:8.4 (aktuellster Oracle-Build c592c15): gosu ist mit Go 1.24.6
-#   gebaut (15 stdlib-CVEs), mysqlsh buendelt aeltere Python-Pakete. Beheben
-#   kann das nur ein neuer Oracle-Image-Build; gosu laeuft nur beim
-#   Containerstart als Privilege-Dropper, mysqlsh ist kein Netzdienst.
-# - phpmyadmin:5.2.3 (aktuellster Library-Build b68f318): buendelt twig 3.11
-#   und symfony/cache 5.4 im eigenen vendor; behebt nur ein neues
-#   phpMyAdmin-Release. Das Tool liegt im tools-Profil, loopback-only,
-#   und laeuft nicht im Runtime-Stack.
+# Stand 2026-07-27 (Owner aller Eintraege: Samy):
+# - mysql:8.4 (aktuellster Oracle-Build 8dbcf53): gosu ist weiterhin mit
+#   alter Go-stdlib gebaut (15 CVEs), mysqlsh buendelt trotz aktualisierter
+#   Paketversionen dieselben 4 offenen Advisories. Beheben kann das nur ein
+#   neuer Oracle-Image-Build; gosu laeuft nur beim Containerstart als
+#   Privilege-Dropper, mysqlsh ist kein Netzdienst.
+# - phpmyadmin:5.2.3 (aktuellster Library-Build b68f318, identisch mit
+#   latest/5.2): buendelt twig 3.11 und symfony/cache 5.4 im eigenen vendor;
+#   behebt nur ein neues phpMyAdmin-Release, upstream existiert keins.
+#   Das Tool liegt im tools-Profil, loopback-only, und laeuft nicht im
+#   Runtime-Stack.
 vulnerabilities:
   # --- mysql:8.4 / usr/local/bin/gosu (Go stdlib 1.24.6) ---
   - id: CVE-2025-68121
@@ -97,6 +99,22 @@ vulnerabilities:
     expired_at: 2026-09-30
   - id: CVE-2026-49981
     statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
+    expired_at: 2026-09-30
+  # Neu 2026-07-27: vier weitere twig-CVEs (Fix erst in twig 3.27.0);
+  # phpMyAdmin liefert kein Release damit, latest/5.2/5.2.3 sind derselbe
+  # Build wie unser Pin. Gleiche Risikolage wie oben: tools-Profil,
+  # loopback-only, kein Runtime-Stack.
+  - id: CVE-2026-48805
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; tools-Profil, loopback-only; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-48806
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-48807
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-48808
+    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
     expired_at: 2026-09-30
   - id: CVE-2026-45073
     statement: "symfony/cache 5.4 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
