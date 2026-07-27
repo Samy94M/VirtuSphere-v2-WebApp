@@ -679,6 +679,10 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Auto-Approve scheitert / ResourceID fehlt noch | Retry im nächsten Scan | DEBUG + WARN |
 | Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |
 | Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
+| Eigene Regel nicht mehr zugewiesen (Provenienz, ADR-0034) | wird entfernt und an `reportMembership` gemeldet; Hand-Regeln in MECM sind ohne Provenienzzeile unantastbar | INFO |
+| Entfernen der eigenen Regel scheitert | VM bleibt in der Warteschlange; nächster Lauf konvergiert | ERROR |
+| Eigene Regel wurde in MECM von Hand entfernt | Provenienz wird zurückgezogen (`removed` gemeldet), nie zurückgekämpft | WARN |
+| Provenienz-Meldung (`reportMembership`) scheitert | Warnung; Report ist idempotent, nächster Lauf konvergiert | WARN |
 | Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
 | Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
 | ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |
