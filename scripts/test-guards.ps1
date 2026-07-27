@@ -235,7 +235,10 @@ $docSemFixtureFiles = @(
     'Ansible/createVMs-ESXi_playbook.yml'
 )
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
-$enumList = "'queued','running','succeeded','failed','cancelled','partial'"
+# Muss dem AKTUELLEN Spiegel folgen (ADR-0016): 'cancelling' kam mit
+# Migration 0031, und ein Anker auf einem Literal, das es nicht mehr gibt,
+# faerbt beide Mutationsfaelle infra statt proven.
+$enumList = "'queued','running','cancelling','succeeded','failed','cancelled','partial'"
 
 $cases = @(
     @{ Name = 'enum-sync.green'; Body = {
@@ -243,12 +246,12 @@ $cases = @(
     } }
     @{ Name = 'enum-sync.missing-value'; Body = {
         $fx = New-Fixture $enumFixtureFiles
-        Edit-Fixture $fx 'Docker/mysql/mysql-init/struktur.sql' $enumList "'queued','running','succeeded','failed','cancelled'"
+        Edit-Fixture $fx 'Docker/mysql/mysql-init/struktur.sql' $enumList "'queued','running','cancelling','succeeded','failed','cancelled'"
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
     } }
     @{ Name = 'enum-sync.reordered'; Body = {
         $fx = New-Fixture $enumFixtureFiles
-        Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' $enumList "'running','queued','succeeded','failed','cancelled','partial'"
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' $enumList "'running','queued','cancelling','succeeded','failed','cancelled','partial'"
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
     } }
     @{ Name = 'enum-sync.zero-match'; Body = {
