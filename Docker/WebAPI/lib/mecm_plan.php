@@ -36,7 +36,7 @@ function mecm_membership_plan(array $desired, array $owned, array $present): arr
 
     $desiredByName = [];
     foreach ($desired as $target) {
-        $desiredByName[(string) ($target['name'] ?? '')] = $target;
+        $desiredByName[$target['name']] = $target;
     }
 
     $plan = [
@@ -97,7 +97,7 @@ function mecm_membership_plan(array $desired, array $owned, array $present): arr
 function mecm_transfer_revision(array $desired, array $owned): string
 {
     $desiredKeys = array_map(
-        static fn (array $t): string => (string) ($t['type'] ?? '') . ':' . (string) ($t['name'] ?? ''),
+        static fn (array $t): string => $t['type'] . ':' . $t['name'],
         $desired
     );
     $ownedKeys = array_map(
