@@ -925,6 +925,13 @@ SQL;
         migrator_add_column($db, 'deploy_jobs', 'cancel_requested_by', 'INT NULL AFTER cancel_requested_at');
         migrator_out('0031: deploy jobs know the confirmed-cancellation state machine');
     },
+    '0032_status_event_retention_index' => function (mysqli $db): void {
+        // B11 rest (Etappe 8): the transition history gains its reader (VM
+        // editor) and its retention. The purge scans by age; without this
+        // index it full-scans a table that gets a row per state transition.
+        migrator_add_index($db, 'deploy_vm_status_events', 'deploy_vm_status_events_created', 'INDEX deploy_vm_status_events_created (created_at)');
+        migrator_out('0032: indexed the status-event history for its retention');
+    },
 ];
 
 try {

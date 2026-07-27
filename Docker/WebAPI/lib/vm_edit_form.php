@@ -309,3 +309,46 @@ function vm_edit_render_status_panel(array $vm, array $clientPhaseSummary, array
         </section>
     <?php
 }
+
+/**
+ * The VM's transition history (B11 rest): every state write records a row and
+ * until Etappe 8 no page ever read one back, so the trail existed only for the
+ * database. Read-only, collapsed by default, hidden entirely without events (a
+ * fresh VM has nothing to explain). The caller owns the visibility guard like
+ * the panel above.
+ *
+ * @param array<int, array<string, mixed>> $events newest first (repo_vm_status_events)
+ */
+function render_vm_status_history(array $events): void
+{
+    if ($events === []) {
+        return;
+    }
+    ?>
+        <section class="panel">
+            <details>
+                <summary><?php echo h(__t('vm_edit.status_history_heading')); ?></summary>
+                <p class="muted"><?php echo h(__t('vm_edit.status_history_hint', [
+                    'limit' => VIRTUSPHERE_STATUS_EVENT_HISTORY_LIMIT,
+                    'days' => VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS,
+                ])); ?></p>
+                <div class="table-wrap" tabindex="0">
+                    <table>
+                        <thead><tr><th><?php echo h(__t('vm_edit.th_time')); ?></th><th><?php echo h(__t('vm_edit.diagnostics_lifecycle')); ?></th><th><?php echo h(__t('vm_edit.diagnostics_mecm')); ?></th><th><?php echo h(__t('vm_edit.th_detail')); ?></th><th><?php echo h(__t('vm_edit.status_history_actor')); ?></th></tr></thead>
+                        <tbody>
+                        <?php foreach ($events as $event) { ?>
+                            <tr>
+                                <td class="nowrap"><?php echo h(portal_format_timestamp((string) $event['created_at'])); ?></td>
+                                <td><?php echo lifecycle_badge((string) $event['lifecycle_state']); ?></td>
+                                <td><?php echo mecm_sync_badge((string) $event['mecm_sync_state']); ?></td>
+                                <td><?php echo h((string) ($event['note'] ?? '') !== '' ? (string) $event['note'] : '—'); ?></td>
+                                <td><?php echo h((string) ($event['actor_name'] ?? '') !== '' ? (string) $event['actor_name'] : '—'); ?></td>
+                            </tr>
+                        <?php } ?>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        </section>
+    <?php
+}

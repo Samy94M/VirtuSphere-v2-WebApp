@@ -97,8 +97,12 @@ function maintenance_worker_run_jobs(mysqli $db, array &$state, bool $force, arr
             // system-job delete cascades the log rows it owns.
             $purgedJobLogs = repo_purge_deploy_job_logs($db);
             $purgedSystemJobs = repo_purge_finished_system_jobs($db);
-            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs > 0) {
-                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . " finished system jobs\n");
+            // The VM transition history (B11 rest): it gained its reader in the
+            // VM editor and, with it, this retention - before Etappe 8 the
+            // table only ever shrank through a VM delete.
+            $purgedStatusEvents = repo_purge_vm_status_events($db);
+            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs + $purgedStatusEvents > 0) {
+                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . ' finished system jobs, ' . $purgedStatusEvents . " status events\n");
             }
         });
     }

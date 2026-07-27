@@ -347,6 +347,9 @@ CREATE TABLE IF NOT EXISTS deploy_vm_status_events (
     note TEXT NULL,
     created_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Retention scans by age (migration 0032); without the index the hourly
+    -- purge full-scans a table that gets a row per state transition.
+    INDEX deploy_vm_status_events_created (created_at),
     CONSTRAINT fk_deploy_vm_status_events_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_vm_status_events_user FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

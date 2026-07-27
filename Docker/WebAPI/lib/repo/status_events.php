@@ -84,6 +84,46 @@ function repo_set_vm_state_forward(mysqli $db, int $vmId, string $lifecycleState
     return repo_set_vm_state($db, $vmId, $lifecycleState, $mecmSyncState, $legacyStatus, $updated, $note, $mecmId);
 }
 
+/**
+ * The transition history of one VM, newest first, with the actor resolved to a
+ * name (B11 rest: nine writers, and until Etappe 8 not a single reader). The
+ * LEFT JOIN keeps system-written events (created_by NULL) and events whose
+ * user was deleted; both render without an actor rather than vanishing.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function repo_vm_status_events(mysqli $db, int $vmId, int $limit = VIRTUSPHERE_STATUS_EVENT_HISTORY_LIMIT): array
+{
+    require_once __DIR__ . '/helpers.php';
+    $limit = max(1, min(200, $limit));
+    $stmt = $db->prepare(
+        'SELECT e.lifecycle_state, e.mecm_sync_state, e.legacy_status, e.note, e.created_at, u.name AS actor_name
+         FROM deploy_vm_status_events e
+         LEFT JOIN deploy_users u ON u.id = e.created_by
+         WHERE e.vm_id = ?
+         ORDER BY e.id DESC
+         LIMIT ?'
+    );
+    $stmt->bind_param('ii', $vmId, $limit);
+    $stmt->execute();
+
+    return repo_fetch_all($stmt->get_result());
+}
+
+/**
+ * Retention for the history (maintenance worker). Age-based only: the newest
+ * rows of a long-idle VM age out too, because the panel's question is "what
+ * happened recently" and the audit log keeps the durable trail.
+ */
+function repo_purge_vm_status_events(mysqli $db, int $retentionDays = VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS): int
+{
+    $stmt = $db->prepare('DELETE FROM deploy_vm_status_events WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+    $stmt->bind_param('i', $retentionDays);
+    $stmt->execute();
+
+    return $stmt->affected_rows;
+}
+
 function repo_set_vm_state(mysqli $db, int $vmId, string $lifecycleState, string $mecmSyncState, string $legacyStatus, ?int $updated, ?string $note = null, ?string $mecmId = null): bool
 {
     virtusphere_assert_lifecycle_state($lifecycleState);

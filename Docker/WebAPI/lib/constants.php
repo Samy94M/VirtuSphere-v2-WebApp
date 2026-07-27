@@ -276,6 +276,16 @@ const VIRTUSPHERE_CLIENT_EVENT_RETENTION_DAYS = 30;
 // A "started" event without a follow-up is shown as "unconfirmed" after this.
 const VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS = 900;
 
+// VM status-event history (B11 rest, Etappe 8): the transition trail the VM
+// editor renders. Same window as the portal audit log's default category
+// (ADR-0026): the history is forensic context, not an archive; a VM delete
+// still cascades its rows away regardless of age.
+const VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS = 90;
+// How many transitions the VM editor's history panel shows. A VM that has
+// been re-deployed for months carries hundreds of rows; the panel answers
+// "what happened recently", the retention bounds the rest.
+const VIRTUSPHERE_STATUS_EVENT_HISTORY_LIMIT = 20;
+
 // Integration result-reporting sources (deploy_integration_heartbeats.source).
 // The three MECM sync tasks and the MECM site-health reporter post results
 // through mecm_report.php?action=reportRun. The legacy action=heartbeat still

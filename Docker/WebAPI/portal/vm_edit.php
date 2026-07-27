@@ -139,6 +139,8 @@ $oses = repo_os_for_picker($connection, (string) ($vm['vm_os'] ?? ''));
 $vlans = repo_active_vlans($connection);
 $packages = repo_packages_for_picker($connection, $selectedPackages);
 $packageUpgradeHints = $vmId > 0 ? repo_vm_package_upgrade_hints($connection, $vmId) : [];
+// The transition history (B11 rest): nine writers had no reader until Etappe 8.
+$statusEvents = $vmId > 0 ? repo_vm_status_events($connection, $vmId) : [];
 // Location overrides: empty means "inherit from the mission" (ansible_effective_*).
 // The mission value is only shown, never prefilled: a prefill would be saved back
 // as a real override and pin the VM to a value that later goes stale. A <select>
@@ -433,5 +435,7 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
 
         <?php if ($canWrite) { ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
     </form>
+
+    <?php render_vm_status_history($statusEvents); ?>
 </div>
 <?php layout_footer(); ?>
