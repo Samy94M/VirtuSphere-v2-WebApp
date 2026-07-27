@@ -37,6 +37,7 @@ OUTCOME_EXIT_CODES = {
 
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_ERROR_BODY_BYTES = 4096
 
 
 def positive_int(value):
@@ -147,6 +148,34 @@ def short_reason(error, limit=200):
     return text[:limit]
 
 
+def portal_error_reason(error):
+    """
+    The portal's own `error` field from a failed HTTP response, flattened to
+    one short line; None for anything else.
+
+    Bounded and shape-checked on purpose: a raw response can be an nginx page
+    or a proxy error, and that text must never reach the job log (pinned by
+    test_http_4xx_is_not_retried_and_never_logs_the_body). Only the sentence
+    the portal wrote FOR the operator is surfaced - {"error": "..."} is the
+    machine API's frozen error shape.
+    """
+    try:
+        raw = error.read(MAX_ERROR_BODY_BYTES + 1)
+    except Exception:
+        return None
+    if not raw or len(raw) > MAX_ERROR_BODY_BYTES:
+        return None
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    reason = data.get('error') if isinstance(data, dict) else None
+    if not isinstance(reason, str) or not reason.strip():
+        return None
+
+    return short_reason(reason)
+
+
 def normalized_fingerprint(value):
     """Hex fingerprint without separators, lowercase. Empty for anything unusable."""
     text = ''.join(c for c in str(value).lower() if c in '0123456789abcdef')
@@ -231,12 +260,13 @@ def send_request(request, opener=urlopen):
         except HTTPError as error:
             if 500 <= error.code < 600 and attempt == 0:
                 continue
-            # The body stays unlogged on purpose (pinned by
-            # test_http_4xx_is_not_retried_and_never_logs_the_body): a raw
-            # response can be an nginx page or a proxy error, and this text lands
-            # in the job log. Surfacing the portal's own {"error":...} field is a
-            # separate, deliberate change (WP-12), not a side effect of TLS work.
-            print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
+            # The portal's own error field is surfaced (WP-12); everything else
+            # about the body stays unlogged (see portal_error_reason).
+            reason = portal_error_reason(error)
+            if reason:
+                print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}. Portal-Antwort: {reason}')
+            else:
+                print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
             return EXIT_HTTP_ERROR, None
         except (URLError, socket.timeout, TimeoutError) as error:
             if is_timeout_error(error) and attempt == 0:

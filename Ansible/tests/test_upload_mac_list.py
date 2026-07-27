@@ -191,6 +191,60 @@ class UploadMacListTest(unittest.TestCase):
         self.assertIn('HTTP-Fehler 409', output)
         self.assertNotIn('private-server-detail', output)
 
+    def test_http_4xx_surfaces_the_portals_own_error_field(self):
+        # The deliberate WP-12 half of the body rule: the portal's own JSON
+        # error field IS meant for the operator, and the job log is where they
+        # look. "HTTP-Fehler 409." alone forced a portal-log search for a
+        # sentence the response already carried.
+        error = HTTPError(
+            'http://api.invalid',
+            409,
+            'Conflict',
+            None,
+            io.BytesIO(json.dumps({'error': 'Deploy job does not accept this MAC import'}).encode('utf-8')),
+        )
+        exit_code, output, opener = self.run_upload([error])
+
+        self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
+        self.assertEqual(1, len(opener.requests))
+        self.assertIn('HTTP-Fehler 409', output)
+        self.assertIn('Deploy job does not accept this MAC import', output)
+
+    def test_the_surfaced_error_field_is_flattened_and_truncated(self):
+        # The field is server text that crosses into a single job-log line:
+        # newlines collapse and a runaway sentence is cut, exactly like the
+        # transport reasons handled by short_reason().
+        noisy = 'zeile1\nzeile2\t' + 'x' * 500
+        error = HTTPError(
+            'http://api.invalid', 422, 'Unprocessable', None,
+            io.BytesIO(json.dumps({'error': noisy}).encode('utf-8')),
+        )
+        _, output, _ = self.run_upload([error])
+
+        self.assertIn('zeile1 zeile2', output)
+        self.assertNotIn('\nzeile2', output)
+        self.assertNotIn('x' * 201, output)
+
+    def test_an_oversized_or_non_string_error_body_stays_unlogged(self):
+        # The read is bounded: a body past the limit is not portal JSON we
+        # trust, and a non-string error field is not a sentence. Both fall
+        # back to the bare status line.
+        oversized = HTTPError(
+            'http://api.invalid', 409, 'Conflict', None,
+            io.BytesIO(b'{"error": "' + b'y' * (UPLOAD.MAX_ERROR_BODY_BYTES + 10) + b'"}'),
+        )
+        structured = HTTPError(
+            'http://api.invalid', 409, 'Conflict', None,
+            io.BytesIO(json.dumps({'error': {'nested': 'detail'}}).encode('utf-8')),
+        )
+        for error in (oversized, structured):
+            with self.subTest(error=error):
+                exit_code, output, _ = self.run_upload([error])
+                self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
+                self.assertNotIn('Portal-Antwort', output)
+                self.assertNotIn('nested', output)
+                self.assertNotIn('yyyy', output)
+
     def test_http_5xx_is_retried_once(self):
         error = HTTPError(
             'http://api.invalid',
