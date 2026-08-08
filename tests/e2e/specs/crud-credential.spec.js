@@ -40,6 +40,16 @@ echo 'JSON' . json_encode(['secret' => repo_credential_secret(db(), $id)]) . 'JS
 `, ['lib/repo/credentials.php']).secret;
 }
 
+function credentialTrust(id) {
+  return phpJson(`
+$row = repo_credential(db(), ${Number(id)});
+echo 'JSON' . json_encode([
+  'mode' => $row['esxi_trust_mode'] ?? null,
+  'tested' => $row['esxi_strict_tested_at'] ?? null,
+]) . 'JSON';
+`, ['lib/repo/credentials.php']);
+}
+
 function idByName(name) {
   const data = phpJson(`
 $db = db();
@@ -244,6 +254,50 @@ echo 'JSON' . json_encode(['jobs' => $jobs, 'audit' => $audit]) . 'JSON';
       runPhp(`repo_set_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '${String(selectionBefore.row?.setting_value || '')}'); echo 'RESTORED';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
     }
   }
+});
+
+// e2e-covers: credentials.php:activate_strict
+// e2e-covers-cancel: credentials.php:activate_strict
+// e2e-covers: credentials.php:use_legacy
+// e2e-covers-cancel: credentials.php:use_legacy
+test('ESXi trust: legacy is visible and strict activation is a separate confirmed action', async ({ page }) => {
+  const name = PREFIX + 'trust-staged';
+  const id = seedCredential(name, 'https://esxi-trust.invalid', 443, 'esxi');
+  runPhp(`
+$db = db();
+$pem = file_get_contents('/var/www/html/tests/fixtures/https/valid.crt.txt');
+$stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'legacy_insecure', esxi_cert_kind = 'ca_bundle', esxi_certificate_pem = ?, esxi_strict_tested_at = NOW() WHERE id = ?");
+$id = ${Number(id)};
+$stmt->bind_param('si', $pem, $id);
+$stmt->execute();
+echo 'SEEDED';
+`);
+
+  await page.goto('credentials.php');
+  let row = page.locator('tr', { hasText: name }).first();
+  await expect(row).toContainText(/Legacy/);
+  await expect(row.locator('form:has(button[value="activate_strict"])')).toBeVisible();
+  const dialog = page.locator('[data-confirm-dialog]');
+
+  await row.locator('button[value="activate_strict"]').click();
+  await expect(dialog).toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  expect(credentialTrust(id).mode).toBe('legacy_insecure');
+
+  await row.locator('button[value="activate_strict"]').click();
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
+  expect(credentialTrust(id).mode).toBe('strict');
+  row = page.locator('tr', { hasText: name }).first();
+  await expect(row).toContainText(/Strikt|Strict/);
+
+  await row.locator('button[value="use_legacy"]').click();
+  await expect(dialog).toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  expect(credentialTrust(id).mode).toBe('strict');
+  await row.locator('button[value="use_legacy"]').click();
+  await expect(dialog).toBeVisible();
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
+  expect(credentialTrust(id).mode).toBe('legacy_insecure');
 });
 
 // e2e-covers: credentials.php:delete

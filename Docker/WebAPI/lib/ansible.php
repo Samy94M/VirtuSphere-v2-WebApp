@@ -79,6 +79,7 @@ function ansible_prepare_job_artifacts(
         $workDir . DIRECTORY_SEPARATOR . 'accounts.yml',
         ansible_accounts_yml($esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl)
     );
+    $trustFile = ansible_write_esxi_trust_artifact($workDir, $esxiCredential);
     ansible_write_file(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
         ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'], (string) $payload['mode'])
@@ -88,7 +89,11 @@ function ansible_prepare_job_artifacts(
     return [
         'local_dir' => $workDir,
         'remote_dir' => ansible_remote_dir($jobId, $missionName),
-        'files' => array_values(array_unique(array_merge(ansible_required_files(), ['accounts.yml', 'serverlist.yml']))),
+        'files' => array_values(array_unique(array_merge(
+            ansible_required_files(),
+            ['accounts.yml', 'serverlist.yml'],
+            $trustFile === null ? [] : [$trustFile]
+        ))),
         // The full pipeline appends the autostart playbook only for a mission
         // that asked for it; the caller needs the mission row to know that, and
         // the mission is loaded here.

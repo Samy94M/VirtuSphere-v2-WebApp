@@ -98,6 +98,26 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
     $host = credential_validate_host($validator, $type, $data['host'] ?? '');
     $port = $validator->optionalIntRange('port', $data['port'] ?? null, validator_label('port', 'Port'), 1, 65535);
     $username = $validator->requireString('username', $data['username'] ?? '', validator_label('username', 'Username'), 191);
+    $esxiCertKind = null;
+    $esxiCertificatePem = null;
+    if ($type === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        $rawCertificate = trim((string) ($data['esxi_certificate_pem'] ?? ''));
+        if ($rawCertificate !== '') {
+            $esxiCertKind = $validator->enum(
+                'esxi_cert_kind',
+                $data['esxi_cert_kind'] ?? '',
+                validator_label('esxi_cert_kind', 'ESXi certificate type'),
+                VIRTUSPHERE_ESXI_CERT_KINDS
+            );
+            if (in_array($esxiCertKind, VIRTUSPHERE_ESXI_CERT_KINDS, true)) {
+                try {
+                    $esxiCertificatePem = credential_esxi_certificate_normalize($esxiCertKind, $rawCertificate);
+                } catch (InvalidArgumentException $exception) {
+                    $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_invalid', 'The ESXi certificate is not a valid PEM certificate or bundle.'));
+                }
+            }
+        }
+    }
 
     if ($secretRequired && trim((string) ($secret ?? '')) === '') {
         $validator->add('secret', validator_text('validate.secret_required', 'Secret is required.'));
@@ -116,12 +136,14 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
         'host' => $host,
         'port' => $port,
         'username' => $username,
+        'esxi_cert_kind' => $esxiCertKind,
+        'esxi_certificate_pem' => $esxiCertificatePem,
     ];
 }
 
 function repo_credentials(mysqli $db): array
 {
-    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
     $stmt->execute();
 
     return repo_fetch_all($stmt->get_result());
@@ -130,7 +152,7 @@ function repo_credentials(mysqli $db): array
 function repo_credentials_by_type(mysqli $db, string $type): array
 {
     $type = credential_normalize_type($type);
-    $stmt = $db->prepare('SELECT id, type, name, host, port, username, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
+    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
     $stmt->bind_param('s', $type);
     $stmt->execute();
 
@@ -140,9 +162,9 @@ function repo_credentials_by_type(mysqli $db, string $type): array
 function repo_credential(mysqli $db, int $id, bool $includeSecret = false): ?array
 {
     if ($includeSecret) {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     } else {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     }
     $stmt->bind_param('i', $id);
     $stmt->execute();
@@ -164,10 +186,12 @@ function repo_credential_secret(mysqli $db, int $id): string
 function repo_create_credential(mysqli $db, array $data, string $secret, int $createdBy): int
 {
     $values = credential_validate_payload($db, $data, $secret, true);
+    credential_assert_strict_esxi_https($values, VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW);
     $ciphertext = crypto_encrypt_secret($secret);
+    $trustMode = VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW;
 
-    $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    $stmt->bind_param('sssissi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $createdBy);
+    $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->bind_param('sssisssssi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustMode, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $createdBy);
     $stmt->execute();
 
     return (int) $db->insert_id;
@@ -179,22 +203,102 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
         throw new InvalidArgumentException('Credential id is required.');
     }
 
+    $current = repo_credential($db, $id, true);
+    if ($current === null) {
+        throw new RuntimeException('Credential not found.');
+    }
     $values = credential_validate_payload($db, $data, $secret, false, $id);
+    $effectiveTrustMode = $values['type'] === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI
+        ? credential_esxi_trust_mode($current)
+        : VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+    credential_assert_strict_esxi_https($values, $effectiveTrustMode);
+    $secretChanges = $secret !== null && trim($secret) !== '';
+    $resetStrictTest = $secretChanges
+        || (string) ($current['type'] ?? '') !== $values['type']
+        || trim((string) ($current['host'] ?? '')) !== trim((string) $values['host'])
+        || (string) ($current['port'] ?? '') !== (string) ($values['port'] ?? '')
+        || trim((string) ($current['username'] ?? '')) !== trim((string) $values['username'])
+        || (string) ($current['esxi_cert_kind'] ?? '') !== (string) ($values['esxi_cert_kind'] ?? '')
+        || trim((string) ($current['esxi_certificate_pem'] ?? '')) !== trim((string) ($values['esxi_certificate_pem'] ?? ''));
+    $resetStrictTestInt = $resetStrictTest ? 1 : 0;
 
     // A blank or whitespace-only secret means "keep the stored secret". Real
     // secrets are encrypted verbatim (no trim), so surrounding spaces survive.
-    if ($secret !== null && trim($secret) !== '') {
+    if ($secretChanges) {
         $ciphertext = crypto_encrypt_secret($secret);
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssissi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $id);
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssissssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     } else {
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssisi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $id);
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     }
 
     $stmt->execute();
     if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
         throw new RuntimeException('Credential not found.');
+    }
+
+    return true;
+}
+
+function credential_assert_strict_esxi_https(array $values, string $trustMode): void
+{
+    if (($values['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI || $trustMode !== VIRTUSPHERE_ESXI_TRUST_STRICT) {
+        return;
+    }
+    $endpoint = credential_esxi_normalize((string) ($values['host'] ?? ''), $values['port'] ?? null);
+    if ($endpoint !== null && $endpoint['scheme'] === 'https') {
+        return;
+    }
+
+    $message = validator_text('validate.esxi_strict_https', 'Strict ESXi certificate verification requires an HTTPS host URL.');
+    throw new ValidationException(['host' => $message], $message);
+}
+
+function repo_record_esxi_strict_test_success(mysqli $db, int $id): bool
+{
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_strict_tested_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    return $stmt->affected_rows === 1;
+}
+
+function repo_activate_esxi_strict_trust(mysqli $db, int $id): bool
+{
+    $credential = repo_credential($db, $id);
+    if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        throw new RuntimeException('ESXi credential not found.');
+    }
+    $endpoint = credential_esxi_normalize((string) ($credential['host'] ?? ''), $credential['port'] ?? null);
+    if ($endpoint === null || $endpoint['scheme'] !== 'https') {
+        throw new RuntimeException('Strict ESXi certificate verification requires HTTPS.');
+    }
+    credential_esxi_certificate_normalize(
+        (string) ($credential['esxi_cert_kind'] ?? ''),
+        (string) ($credential['esxi_certificate_pem'] ?? '')
+    );
+    if (empty($credential['esxi_strict_tested_at'])) {
+        throw new RuntimeException('Strict ESXi certificate verification must pass a connection test before activation.');
+    }
+
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'strict', updated_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    return $stmt->affected_rows === 1 || credential_esxi_trust_mode(repo_credential($db, $id) ?? []) === VIRTUSPHERE_ESXI_TRUST_STRICT;
+}
+
+function repo_activate_esxi_legacy_trust(mysqli $db, int $id): bool
+{
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'legacy_insecure', esxi_strict_tested_at = NULL, updated_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    if ($stmt->affected_rows === 0) {
+        $credential = repo_credential($db, $id);
+        if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+            throw new RuntimeException('ESXi credential not found.');
+        }
     }
 
     return true;

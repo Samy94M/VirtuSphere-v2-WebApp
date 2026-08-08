@@ -97,6 +97,8 @@ return [
     'deploy_schedule_horizon' => 'The last staggered start is beyond the :days-day scheduling horizon.',
     'deploy_stagger_mode' => 'Staggering is only available for the full, power-cycle and start modes.',
     'deploy_stagger_range' => 'The stagger interval must be between :min and :max minutes.',
+    'esxi_certificate_invalid' => 'The ESXi certificate is not a valid PEM certificate or CA bundle.',
+    'esxi_strict_https' => 'Strict ESXi certificate verification requires an HTTPS host URL.',
     // Bytes, not characters: the hashing algorithm truncates after :max bytes and
     // an umlaut takes two of them. The text says bytes on purpose.
     'password_max_bytes' => 'The password must be at most :max bytes long. Umlauts and emoji count more than once.',

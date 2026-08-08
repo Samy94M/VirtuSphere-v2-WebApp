@@ -21,6 +21,9 @@
   vars_files:
     - ./serverlist.yml
     - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   vars:
     # The module's `esxi_hostname` names the host OBJECT as the hypervisor knows
@@ -38,7 +41,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         name: "{{ item.vm_name }}"
       delegate_to: localhost
       loop: "{{ vm_configurations }}"
@@ -74,7 +77,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         esxi_hostname: "{{ vs_esxi_host }}"
         system_defaults:
           enabled: true
@@ -96,7 +99,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         esxi_hostname: "{{ vs_esxi_host }}"
         name: "{{ item.vm_name }}"
         power_info:

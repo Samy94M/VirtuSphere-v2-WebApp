@@ -103,7 +103,7 @@ function esxi_inventory_clear_ansible_selection_if_matches(mysqli $db, int $cred
  *
  * @return array{enqueued:bool, reason?:string, job_id?:int, message?:string}
  */
-function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId, ?int $userId = null): array
+function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId, ?int $userId = null, bool $strictTrustProbe = false): array
 {
     $resolution = esxi_inventory_ansible_resolution($db);
     $ansibleId = $resolution['credential_id'];
@@ -118,7 +118,7 @@ function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId
     }
 
     try {
-        $jobId = repo_create_system_job($db, VIRTUSPHERE_DEPLOY_MODE_INVENTORY, $esxiCredentialId, $ansibleId, $userId);
+        $jobId = repo_create_system_job($db, VIRTUSPHERE_DEPLOY_MODE_INVENTORY, $esxiCredentialId, $ansibleId, $userId, $strictTrustProbe);
     } catch (Throwable $exception) {
         return ['enqueued' => false, 'reason' => 'error', 'message' => $exception->getMessage()];
     }

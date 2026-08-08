@@ -30,11 +30,18 @@ require_once __DIR__ . '/../lib/integration_health.php';
  */
 function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): array
 {
+    $credential = repo_credential($db, $credentialId);
+    if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        throw new RuntimeException(__t('credentials.err_not_found'));
+    }
+    $strictProbe = credential_esxi_trust_mode($credential) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE
+        && trim((string) ($credential['esxi_certificate_pem'] ?? '')) !== '';
     repo_esxi_inventory_clear_pause($db, $credentialId);
-    $result = esxi_inventory_enqueue_for_credential($db, $credentialId, $userId);
+    $result = esxi_inventory_enqueue_for_credential($db, $credentialId, $userId, $strictProbe);
+    $result['strict_trust_probe'] = $strictProbe;
 
     if (!empty($result['enqueued'])) {
-        return ['success', __t('credentials.test_esxi_queued'), $result];
+        return ['success', __t($strictProbe ? 'credentials.test_esxi_strict_queued' : 'credentials.test_esxi_queued'), $result];
     }
     if (($result['reason'] ?? '') === 'no_ansible_credential') {
         return ['warning', __t('credentials.test_esxi_no_ansible'), $result];
@@ -85,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         $action = request_string($_POST, 'action');
-        if (!in_array($action, ['create', 'update', 'delete', 'test'], true)) {
+        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy'], true)) {
             http_response_code(400);
             echo h(__t('common.unknown_action'));
             exit;
@@ -97,6 +104,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'host' => $_POST['host'] ?? '',
             'port' => $_POST['port'] ?? null,
             'username' => $_POST['username'] ?? '',
+            'esxi_cert_kind' => $_POST['esxi_cert_kind'] ?? '',
+            'esxi_certificate_pem' => $_POST['esxi_certificate_pem'] ?? '',
         ];
         $secret = request_string($_POST, 'secret');
 
@@ -110,7 +119,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // rotation is reported as "secret: changed", not with its value.
             $before = repo_credential($connection, $id, true) ?? [];
             repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null);
-            $credentialDiff = audit_change_summary($before, $payload, []);
+            // Certificate material is public, not a secret, but a PEM block is
+            // still bulk configuration data that must not flood the audit log.
+            $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
             if ($secret !== '') {
                 $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'secret: changed']));
             }
@@ -131,6 +142,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'updated credential id ' . $id . audit_change_note($credentialDiff), (int) $user['id']);
             flash_set('success', __t('credentials.flash_updated'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
+        } elseif ($action === 'activate_strict') {
+            repo_activate_esxi_strict_trust($connection, $id);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'activated strict ESXi certificate verification for credential id ' . $id, (int) $user['id']);
+            flash_set('success', __t('credentials.flash_strict_activated'));
+        } elseif ($action === 'use_legacy') {
+            repo_activate_esxi_legacy_trust($connection, $id);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'activated legacy insecure ESXi certificate mode for credential id ' . $id, (int) $user['id']);
+            flash_set('warning', __t('credentials.flash_legacy_activated'));
         } elseif ($action === 'delete') {
             $before = repo_credential($connection, $id) ?? [];
             repo_delete_credential($connection, $id);
@@ -248,6 +267,9 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
         <p class="muted"><?php echo h(__t('credentials.scope_hint')); ?></p>
         <p class="muted"><?php echo h(__t('credentials.mecm_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('credentials.mecm_scope_link')); ?></a></p>
         <p class="muted"><?php echo h(__t('credentials.ansible_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY)); ?>"><?php echo h(__t('credentials.ansible_scope_link')); ?></a></p>
+        <p class="muted"><?php echo h(__t('credentials.trust_why')); ?></p>
+        <p class="muted"><?php echo h(__t('credentials.trust_what')); ?></p>
+        <p class="muted"><?php echo h(__t('credentials.trust_how')); ?></p>
         <form class="form-grid" method="post" action="credentials.php" autocomplete="off">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">
@@ -265,6 +287,15 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
             <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old('create', 'port')); ?>"<?php echo form_input_class('create', 'port'); ?> placeholder="<?php echo h(__t('credentials.port_placeholder')); ?>"><?php echo form_error_html('create', 'port'); ?></label>
             <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old('create', 'username')); ?>"<?php echo form_input_class('create', 'username'); ?> required autocomplete="off"><?php echo form_error_html('create', 'username'); ?></label>
             <label><?php echo h(__t('credentials.label_secret')); ?><input name="secret" type="password" required autocomplete="new-password"><?php echo form_error_html('create', 'secret'); ?></label>
+            <label><?php echo h(__t('credentials.label_cert_kind')); ?>
+                <select name="esxi_cert_kind">
+                    <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_CA_BUNDLE); ?>"><?php echo h(__t('credentials.cert_kind_ca')); ?></option>
+                    <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_SERVER); ?>"><?php echo h(__t('credentials.cert_kind_server')); ?></option>
+                </select>
+                <?php echo form_error_html('create', 'esxi_cert_kind'); ?>
+            </label>
+            <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old('create', 'esxi_certificate_pem')); ?></textarea><?php echo form_error_html('create', 'esxi_certificate_pem'); ?></label>
+            <p class="muted"><?php echo h(__t('credentials.new_strict_hint')); ?></p>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
         </form>
     </section>
@@ -286,6 +317,9 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                 $editorOpen = form_has_state($rowKey);
                 $isEsxi = (string) ($row['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI;
                 $isAnsible = (string) ($row['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE;
+                $strictProbeReady = $isEsxi
+                    && credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE
+                    && trim((string) ($row['esxi_certificate_pem'] ?? '')) !== '';
             ?>
                 <tr>
                     <td><?php echo h(credential_type_label((string) ($row['type'] ?? ''))); ?></td>
@@ -301,6 +335,11 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <a href="<?php echo h(system_status_url('credential-' . $rowId, ['inventory' => $rowId])); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
                             <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>
                             <small class="status-cadence"><?php echo h(credential_cadence_esxi($inventoryIntervalHours, $esxiState, $ansibleHostSelected)); ?></small>
+                            <?php if (credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_STRICT) { ?>
+                                <small class="status-cadence"><?php echo portal_badge('info', __t('credentials.trust_strict')); ?></small>
+                            <?php } else { ?>
+                                <small class="status-cadence"><?php echo portal_badge('warning', __t('credentials.trust_legacy')); ?></small>
+                            <?php } ?>
                         <?php } elseif ($isAnsible) {
                             $pfState = $ansiblePreflightStates[$rowId] ?? null;
                             $pfTitle = $pfState !== null && !empty($pfState['last_checked_at'])
@@ -324,8 +363,21 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                                   // disables the button on submit, which would drop a button-borne
                                   // name/value from the POST. ?>
                             <input type="hidden" name="action" value="test">
-                            <button class="button button-secondary" type="submit" data-busy-label="<?php echo h($isEsxi ? __t('credentials.btn_inventory_busy') : __t('credentials.btn_testing')); ?>"><?php echo h($isEsxi ? __t('credentials.btn_inventory') : __t('credentials.btn_test_ansible')); ?></button>
+                            <button class="button button-secondary" type="submit" data-busy-label="<?php echo h($isEsxi ? __t('credentials.btn_inventory_busy') : __t('credentials.btn_testing')); ?>"><?php echo h($strictProbeReady ? __t('credentials.btn_test_strict') : ($isEsxi ? __t('credentials.btn_inventory') : __t('credentials.btn_test_ansible'))); ?></button>
                         </form>
+                        <?php if ($isEsxi && credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE && !empty($row['esxi_strict_tested_at'])) { ?>
+                            <form class="inline-form" method="post" action="credentials.php">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
+                                <button class="button" type="submit" name="action" value="activate_strict" data-confirm="<?php echo h(__t('credentials.confirm_activate_strict', ['name' => (string) ($row['name'] ?? '')])); ?>"><?php echo h(__t('credentials.btn_activate_strict')); ?></button>
+                            </form>
+                        <?php } elseif ($isEsxi && credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_STRICT) { ?>
+                            <form class="inline-form" method="post" action="credentials.php">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
+                                <button class="button button-secondary" type="submit" name="action" value="use_legacy" data-confirm="<?php echo h(__t('credentials.confirm_use_legacy', ['name' => (string) ($row['name'] ?? '')])); ?>"><?php echo h(__t('credentials.btn_use_legacy')); ?></button>
+                            </form>
+                        <?php } ?>
                         <form class="inline-form" method="post" action="credentials.php">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
@@ -352,6 +404,18 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old($rowKey, 'port', (string) ($row['port'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'port'); ?>><?php echo form_error_html($rowKey, 'port'); ?></label>
                             <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old($rowKey, 'username', (string) ($row['username'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'username'); ?> required autocomplete="off"><?php echo form_error_html($rowKey, 'username'); ?></label>
                             <label><?php echo h(__t('credentials.label_new_secret')); ?><input name="secret" type="password" placeholder="<?php echo h(__t('credentials.secret_keep_placeholder')); ?>"<?php echo form_input_class($rowKey, 'secret'); ?> autocomplete="new-password"><?php echo form_error_html($rowKey, 'secret'); ?></label>
+                            <?php if ($isEsxi) { ?>
+                                <?php $certKind = form_old($rowKey, 'esxi_cert_kind', (string) ($row['esxi_cert_kind'] ?? VIRTUSPHERE_ESXI_CERT_CA_BUNDLE)); ?>
+                                <label><?php echo h(__t('credentials.label_cert_kind')); ?>
+                                    <select name="esxi_cert_kind">
+                                        <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_CA_BUNDLE); ?>" <?php echo $certKind === VIRTUSPHERE_ESXI_CERT_CA_BUNDLE ? 'selected' : ''; ?>><?php echo h(__t('credentials.cert_kind_ca')); ?></option>
+                                        <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_SERVER); ?>" <?php echo $certKind === VIRTUSPHERE_ESXI_CERT_SERVER ? 'selected' : ''; ?>><?php echo h(__t('credentials.cert_kind_server')); ?></option>
+                                    </select>
+                                    <?php echo form_error_html($rowKey, 'esxi_cert_kind'); ?>
+                                </label>
+                                <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old($rowKey, 'esxi_certificate_pem', (string) ($row['esxi_certificate_pem'] ?? ''))); ?></textarea><?php echo form_error_html($rowKey, 'esxi_certificate_pem'); ?></label>
+                                <p class="muted"><?php echo h(__t(credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE ? 'credentials.legacy_upgrade_hint' : 'credentials.strict_active_hint')); ?></p>
+                            <?php } ?>
                             <div class="actions">
                                 <button class="button" type="submit"><?php echo h(__t('common.save')); ?></button>
                             </div>

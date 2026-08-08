@@ -1081,7 +1081,14 @@ try {
 
     Write-Host ('==> VirtuSphere check.ps1 - Lane {0}, Root {1}' -f $Lane, $repoRoot) -ForegroundColor Cyan
 
+    $gateNumber = 0
+    $gateTotal = $selected.Count
     foreach ($g in $selected) {
+        $gateNumber++
+        # Emit before the body starts so long-running container/E2E gates have
+        # an immediately visible position in the lane instead of looking
+        # stalled until their captured tool output is available.
+        Write-Host ('[{0}/{1}] RUN  {2}' -f $gateNumber, $gateTotal, $g.Name) -ForegroundColor Cyan
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $outcome = $null
 
@@ -1122,7 +1129,7 @@ try {
             'not_applicable' { $color = 'DarkGray' }
             'skip' { $color = 'DarkGray' }
         }
-        Write-Host ('[{0}] {1} ({2}s) {3}' -f $outcome.class, $g.Name, $entry.durationSeconds, $outcome.detail) -ForegroundColor $color
+        Write-Host ('[{0}/{1}] {2} {3} ({4}s) {5}' -f $gateNumber, $gateTotal, $outcome.class, $g.Name, $entry.durationSeconds, $outcome.detail) -ForegroundColor $color
         if ($outcome.class -eq 'fail' -or $outcome.class -eq 'infrastructure_error') {
             foreach ($line in ($gateOutput | Select-Object -Last 25)) { Write-Host ('    ' + $line) }
             if ($FailFast) { break }

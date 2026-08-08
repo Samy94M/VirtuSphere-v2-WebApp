@@ -12,6 +12,9 @@
   gather_facts: false
   vars_files:
     - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   tasks:
     # Connection canary: NO ignore_errors, so a connection/auth/authz failure
@@ -22,7 +25,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       register: vs_datacenters
 
     - name: Gather datastores
@@ -31,7 +34,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       register: vs_datastores
       ignore_errors: true
 
@@ -51,7 +54,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         esxi_hostname: "{{ esxi_hostname }}"
       register: vs_portgroups
       ignore_errors: true
@@ -73,7 +76,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         datacenter: "{{ vs_datacenters.datacenter_info | map(attribute='name') | first }}"
         show_vlan_info: true
       register: vs_dvs_portgroups
@@ -86,7 +89,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       register: vs_hosts
       ignore_errors: true
 
@@ -99,7 +102,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       register: vs_vms
       ignore_errors: true
 
@@ -115,7 +118,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       register: vs_about
       ignore_errors: true
 
@@ -125,7 +128,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         schema: vsphere
         properties:
           - runtime.inMaintenanceMode

@@ -31,6 +31,7 @@ const VIRTUSPHERE_CONNECTION_REDACT_MIN = 4;
 const VIRTUSPHERE_CONNECTION_MESSAGE_KEYS = [
     VIRTUSPHERE_INVENTORY_ERROR_DNS => 'common.conn_dns',
     VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE => 'common.conn_unreachable',
+    VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE => 'common.conn_certificate',
     VIRTUSPHERE_INVENTORY_ERROR_TLS => 'common.conn_tls',
     VIRTUSPHERE_INVENTORY_ERROR_AUTH => 'common.conn_auth',
     VIRTUSPHERE_INVENTORY_ERROR_AUTHZ => 'common.conn_authz',
@@ -81,12 +82,14 @@ function connection_error_category(string $text): string
             'name resolution',
             'nodename nor servname',
         ],
-        VIRTUSPHERE_INVENTORY_ERROR_TLS => [
-            'ssl operation failed',
+        VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE => [
             'certificate verify failed',
             'unable to get local issuer',
             'self-signed certificate',
             'self signed certificate',
+        ],
+        VIRTUSPHERE_INVENTORY_ERROR_TLS => [
+            'ssl operation failed',
             'ssl routines',
             'ssl handshake',
             'tls handshake',

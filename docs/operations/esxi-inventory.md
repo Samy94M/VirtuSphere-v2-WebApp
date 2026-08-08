@@ -15,9 +15,11 @@ Das Portal liest in regelmäßigen Abständen read-only aus den registrierten ES
 
 ## Setup-Reihenfolge
 
-1. Unter Zugangsdaten ein ESXi-Konto anlegen (Read-only-Rechte genügen für das Inventar, siehe unten). Bei genau einem Ansible-Zugang wird er automatisch verwendet; bei mehreren unter Einstellungen → Kataloge und Inventar einen auswählen.
-2. Ersten Abruf abwarten (Sofort-Pull nach dem Anlegen oder manueller Abruf). Der Systemstatus zeigt Versuch und Ergebnis; offene Aufträge sowie der letzte beendete Abruf führen direkt in ihr Jobprotokoll.
-3. Erst danach greift der ESXi-owned VLAN-Katalog (Rollout-Vorbedingung): Portgruppen erscheinen als Auswahl, `vlans.php` wird read-only.
+1. Unter Zugangsdaten ein ESXi-Konto anlegen (Read-only-Rechte genügen für das Inventar, siehe unten) und den Host per `https://` eintragen. Neue Einträge starten im strikten Trust-Modus.
+2. Zertifikat im ESXi Host Client oder Browser als PEM exportieren. Ein CA-Bundle ist bei einer internen PKI die robuste Wahl; ein einzelnes Serverzertifikat bindet genau dieses Zertifikat und muss nach dessen Erneuerung ersetzt werden.
+3. Zertifikat speichern und den Inventarabruf starten. Ein migriertes Legacy-Zugangsdatum führt dabei zunächst einen strikten Test aus; erst ein Erfolg schaltet die getrennte Aktivierungsaktion frei. Bei genau einem Ansible-Zugang wird er automatisch verwendet; bei mehreren unter Einstellungen → Kataloge und Inventar einen auswählen.
+4. Ersten Abruf abwarten. Der Systemstatus zeigt Versuch und Ergebnis; offene Aufträge sowie der letzte beendete Abruf führen direkt in ihr Jobprotokoll.
+5. Erst danach greift der ESXi-owned VLAN-Katalog (Rollout-Vorbedingung): Portgruppen erscheinen als Auswahl, `vlans.php` wird read-only.
 
 ## Benötigte ESXi-Rechte
 
@@ -37,7 +39,8 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 |---|---|---|
 | `dns` | Hostname nicht auflösbar | Hostnamen im Zugangsdatum prüfen; DNS/Suchdomäne des Portal-Containers prüfen |
 | `unreachable` | Host aus/nicht erreichbar, Timeout | Netzwerk/Host prüfen; Auto-Retry beim nächsten Intervall; alter Cache bleibt |
-| `tls` | Zertifikat wurde abgelehnt | Betrifft nur den SSH-Weg zum Ansible-Host; der ESXi-Abruf prüft keine Zertifikate |
+| `certificate` | ESXi-Zertifikat konnte nicht verifiziert werden oder fehlt im strikten Modus | Hostnamen, Gültigkeit und gespeichertes CA-Bundle bzw. Serverzertifikat prüfen; danach strikten Test wiederholen |
+| `tls` | TLS-Handshake außerhalb der Zertifikatsprüfung gescheitert | HTTPS-Port, TLS-Version und Gegenstelle prüfen |
 | `auth` | Falscher Benutzer/Passwort | Zugangsdatum korrigieren; **Auto-Abruf pausiert** bis zur Änderung (Kontosperren-Schutz), kein Auto-Retry |
 | `authz` | Rechte reichen nicht | ESXi-Rolle des Kontos erweitern (Profil oben) |
 | `http` | Host antwortet mit unerwartetem Status | Statuscode ansehen; erscheint bei ESXi-Abrufen nicht mehr |
@@ -117,11 +120,13 @@ Zusätzlich bilanziert jede erfolgreiche Abholung ihre Normalisierung (`Inventor
 
 ## „Inventarabruf starten" bei ESXi ist ein echter Auftrag
 
-Das Portal spricht ESXi **nie** direkt an. „Inventarabruf starten" auf der Seite Zugangsdaten hebt bei einem ESXi-Zugangsdatum die Auth-Pause auf und reiht denselben read-only Abruf ein, den auch das Speichern auslöst: über den Ansible-Host, per pyVmomi/SOAP gegen `/sdk`, mit `validate_certs: false`. Damit läuft genau der Weg, den ein Deploy nimmt.
+Das Portal spricht ESXi **nie** direkt an. „Inventarabruf starten" auf der Seite Zugangsdaten hebt bei einem ESXi-Zugangsdatum die Auth-Pause auf und reiht denselben read-only Abruf ein, den auch das Speichern auslöst: über den Ansible-Host, per pyVmomi/SOAP gegen `/sdk`. `validate_certs` und der Trust-Pfad werden ausschließlich aus dem gespeicherten Modus erzeugt. Damit läuft genau der Weg, den ein Deploy nimmt.
 
 Konsequenzen für den Betrieb:
 
-- **Die Zertifikatsvariante ist egal.** Selbstsigniert ab Werk, von der VMCA des vCenters oder von der Domänen-CA: die Prüfung ist im Playbook bewusst aus. Eine strikte TLS-Prüfung ist eine spätere Härtungsentscheidung (WP7) und gehört in eine ADR, nicht still in einen Stream-Kontext.
+- **`strict` (Standard für neue Zugänge):** `validate_certs: true`; `SSL_CERT_FILE` und `REQUESTS_CA_BUNDLE` zeigen auf das pro Auftrag hochgeladene `esxi-trust.pem`. Ohne gespeichertes Zertifikat stoppt die Konfiguration ausdrücklich mit `certificate`, bevor YAML-Parsing oder eine Hostantwort als Ursache erscheinen kann.
+- **`legacy_insecure` (nur Übergang und ausdrücklich sichtbar):** `validate_certs: false`. HTTPS verschlüsselt zwar, beweist aber nicht die Identität des Hosts; ein Angreifer im LAN könnte sich als ESXi ausgeben und das ESXi-Konto abgreifen. Bestandszugänge werden bei Migration so markiert, damit kein bestehender Ablauf überraschend blockiert.
+- **Gestufte Umstellung:** Zertifikat speichern → strikten Inventarlauf erfolgreich abschließen → getrennt „Strikten Modus aktivieren“. Host, Benutzer, Secret oder Zertifikat zu ändern verwirft den Testnachweis. Der Rückweg zu Legacy ist eine bestätigte, protokollierte Aktion.
 - **Die Meldung und der Befund haben getrennte Aufgaben.** Der Flash unterscheidet eingereiht, bereits offen oder fehlende/uneindeutige Ansible-Auswahl. Der dauerhafte Befund steht im Systemstatus; eingereihte und laufende Aufträge sowie der letzte beendete Abruf sind dort direkt verlinkt. Auch ein erfolgreicher Abruf behält den Link, damit Teilabfragen und Nullwerte prüfbar bleiben.
 - **Das Jobprotokoll bleibt die technische Wahrheit.** `deploy_esxi_inventory_state.last_job_id` merkt sich nur, welcher Auftrag den dauerhaften Befund erzeugt hat; Status und Ausgabe bleiben in `deploy_jobs` und `deploy_job_logs`. Der Fremdschlüssel verwendet `ON DELETE SET NULL`: löscht die Aufbewahrung den 30 Tage alten Systemauftrag, zeigt ein alter Fehler einen verständlichen Hinweis statt eines toten Links. Ein neuer Abruf erzeugt wieder einen exakten Verweis.
 - **Ein Ansible-Zugangsdatum wird weiterhin sofort geprüft** (SSH-Anmeldung plus Preflight), denn dieser Weg läuft aus dem Portal heraus. Einen Scheduler hat er nicht, deshalb altert sein Ergebnis: Ein bestandener Preflight wechselt nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` (aktuell 7) Tagen auf „Unbestätigt", denn ein Grün von vor Wochen beweist nichts über heute. Ein Fehlschlag altert nie; ein bekannter Defekt darf nicht ins Graue verschwinden. Indirekt wird der Host trotzdem laufend benutzt, weil jeder ESXi-Abruf über ihn läuft, aber dieses Ergebnis landet auf der ESXi-Zeile, nicht auf dem Ansible-Badge.

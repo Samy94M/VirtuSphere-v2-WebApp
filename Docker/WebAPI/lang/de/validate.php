@@ -97,6 +97,8 @@ return [
     'deploy_schedule_horizon' => 'Der letzte Startzeitpunkt liegt jenseits des :days-Tage-Planungshorizonts.',
     'deploy_stagger_mode' => 'Staffelung ist nur in den Modi Full, Power-Cycle und Start möglich.',
     'deploy_stagger_range' => 'Der Staffelabstand muss zwischen :min und :max Minuten liegen.',
+    'esxi_certificate_invalid' => 'Das ESXi-Zertifikat ist kein gültiges PEM-Zertifikat bzw. CA-Bundle.',
+    'esxi_strict_https' => 'Die strikte ESXi-Zertifikatsprüfung erfordert eine HTTPS-Host-URL.',
     // Bytes, nicht Zeichen: das Hash-Verfahren schneidet nach :max Bytes ab, und
     // ein Umlaut belegt zwei davon. Der Text sagt deshalb bewusst Bytes.
     'password_max_bytes' => 'Das Passwort darf höchstens :max Bytes lang sein. Umlaute und Emojis zählen mehrfach.',

@@ -921,10 +921,14 @@ New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
 $proven = 0
 $unproven = 0
 $infra = 0
+$caseNumber = 0
+$caseTotal = $selected.Count
 
 try {
     Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count) -ForegroundColor Cyan
     foreach ($case in $selected) {
+        $caseNumber = $caseNumber + 1
+        Write-Host ('[{0}/{1}] RUN  {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Cyan
         $verdict = $null
         try {
             $verdict = & $case.Body
@@ -934,15 +938,15 @@ try {
         switch ($verdict.Status) {
             'proven' {
                 $proven = $proven + 1
-                Write-Host ('[proven]   ' + $case.Name) -ForegroundColor Green
+                Write-Host ('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Green
             }
             'infra' {
                 $infra = $infra + 1
-                Write-Host ('[infra]    ' + $case.Name + ' - ' + $verdict.Detail) -ForegroundColor Yellow
+                Write-Host ('[{0}/{1}] infra    {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Yellow
             }
             default {
                 $unproven = $unproven + 1
-                Write-Host ('[unproven] ' + $case.Name + ' - ' + $verdict.Detail) -ForegroundColor Red
+                Write-Host ('[{0}/{1}] unproven {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Red
             }
         }
     }

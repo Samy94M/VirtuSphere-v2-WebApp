@@ -38,11 +38,16 @@ function ansible_prepare_inventory_artifacts(mysqli $db, array $job, array $esxi
         $workDir . DIRECTORY_SEPARATOR . 'accounts.yml',
         ansible_accounts_yml($esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl)
     );
+    $trustFile = ansible_write_esxi_trust_artifact($workDir, $esxiCredential);
 
     return [
         'local_dir' => $workDir,
         'remote_dir' => ansible_remote_dir($jobId, $label),
-        'files' => array_values(array_unique(array_merge(ansible_required_files(), ['accounts.yml']))),
+        'files' => array_values(array_unique(array_merge(
+            ansible_required_files(),
+            ['accounts.yml'],
+            $trustFile === null ? [] : [$trustFile]
+        ))),
     ];
 }
 
@@ -53,6 +58,7 @@ function ansible_inventory_remote_command(string $remoteDir, bool $verbose = fal
     $commands = [
         'cd ' . ansible_sh_quote($remoteDir),
         'chmod 600 accounts.yml',
+        'if [ -f ' . VIRTUSPHERE_ESXI_TRUST_FILE . ' ]; then chmod 600 ' . VIRTUSPHERE_ESXI_TRUST_FILE . '; fi',
         'ansible-playbook ' . ansible_sh_quote($playbook) . ($verbose ? ' -vvv' : '') . ' 2>&1',
     ];
     $cleanup = 'rm -rf -- ' . ansible_sh_quote($remoteDir);
@@ -686,6 +692,13 @@ function ansible_categorize_inventory_error(string $output, int $exitCode): stri
         || str_contains($lower, "couldn't resolve module/action")
     ) {
         return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    }
+    if (str_contains($lower, 'certificate verify failed')
+        || str_contains($lower, 'unable to get local issuer')
+        || str_contains($lower, 'self-signed certificate')
+        || str_contains($lower, 'self signed certificate')
+    ) {
+        return VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE;
     }
     if (str_contains($lower, 'permission') || str_contains($lower, 'not authorized') || str_contains($lower, 'privilege') || str_contains($lower, 'restricted')) {
         return VIRTUSPHERE_INVENTORY_ERROR_AUTHZ;

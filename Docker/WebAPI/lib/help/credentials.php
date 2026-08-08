@@ -13,6 +13,15 @@ declare(strict_types=1);
             </ul>
         </section>
         <section class="panel">
+            <h2><?php echo h(__t('help.credentials_trust_heading')); ?></h2>
+            <h3><?php echo h(__t('help.credentials_trust_why_heading')); ?></h3>
+            <p><?php echo h(__t('help.credentials_trust_why')); ?></p>
+            <h3><?php echo h(__t('help.credentials_trust_what_heading')); ?></h3>
+            <p><?php echo h(__t('help.credentials_trust_what')); ?></p>
+            <h3><?php echo h(__t('help.credentials_trust_how_heading')); ?></h3>
+            <p><?php echo h(__t('help.credentials_trust_how')); ?></p>
+        </section>
+        <section class="panel">
             <h2><?php echo h(__t('help.credentials_tests_heading')); ?></h2>
             <p><?php echo h(__t('help.credentials_tests_p1', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
             <p><?php echo h(__t('help.credentials_tests_p2')); ?></p>

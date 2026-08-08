@@ -29,12 +29,15 @@ function ansible_accounts_yml(array $esxiCredential, string $esxiSecret, array $
     }
     $esxiHostname = $esxi['hostname'];
     $esxiPort = $esxi['port'];
+    $strictTrust = credential_esxi_trust_mode($esxiCredential) === VIRTUSPHERE_ESXI_TRUST_STRICT;
 
     return implode("\n", [
         'esxi_hostname: ' . ansible_yaml_string($esxiHostname),
         'esxi_port: ' . $esxiPort,
         'esxi_username: ' . ansible_yaml_string((string) ($esxiCredential['username'] ?? '')),
         'esxi_password: ' . ansible_yaml_string($esxiSecret),
+        'esxi_validate_certs: ' . ($strictTrust ? 'true' : 'false'),
+        'esxi_ca_bundle_path: ' . ansible_yaml_string($strictTrust ? './' . VIRTUSPHERE_ESXI_TRUST_FILE : ''),
         // ansible_username and apiUrl are kept for parity with the desktop client's
         // accounts.yml; no current ESXi playbook reads them (the MAC export patches
         // its own api_base_url into upload_mac_list.py). Retire with the desktop API
@@ -49,6 +52,24 @@ function ansible_accounts_yml(array $esxiCredential, string $esxiSecret, array $
         'apiUrl: ' . ansible_yaml_string($apiBaseUrl),
         '',
     ]);
+}
+
+/**
+ * Writes the optional private trust artifact and returns its upload name.
+ * Strict mode without a usable certificate fails here with a certificate
+ * error, before YAML parsing or a network request can obscure the cause.
+ */
+function ansible_write_esxi_trust_artifact(string $workDir, array $esxiCredential): ?string
+{
+    if (credential_esxi_trust_mode($esxiCredential) !== VIRTUSPHERE_ESXI_TRUST_STRICT) {
+        return null;
+    }
+
+    $kind = trim((string) ($esxiCredential['esxi_cert_kind'] ?? ''));
+    $pem = credential_esxi_certificate_normalize($kind, (string) ($esxiCredential['esxi_certificate_pem'] ?? ''));
+    ansible_write_file($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ESXI_TRUST_FILE, $pem);
+
+    return VIRTUSPHERE_ESXI_TRUST_FILE;
 }
 
 /**

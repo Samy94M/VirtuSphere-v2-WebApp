@@ -110,6 +110,10 @@ function deploy_job_payload(array $data): array
         'vm_ids' => deploy_job_normalize_vm_ids($data['vm_ids'] ?? []),
         'powercycle_wait' => deploy_job_normalize_wait($data['powercycle_wait'] ?? null),
         'start_wait' => deploy_job_normalize_start_wait($data['start_wait'] ?? null),
+        // System-inventory only: a legacy credential can prove its stored
+        // certificate under strict validation before the operator activates
+        // that mode. Harmless false on mission jobs and old payloads.
+        'strict_trust_probe' => deploy_job_bool($data['strict_trust_probe'] ?? false),
     ];
 }
 
@@ -771,7 +775,7 @@ function repo_cancel_deploy_group(mysqli $db, string $groupId, int $userId): int
  * returns null if a queued/running system job already exists for the same ESXi
  * credential, so a manual refresh + the interval automation cannot pile up.
  */
-function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId, int $ansibleCredentialId, ?int $userId = null): ?int
+function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId, int $ansibleCredentialId, ?int $userId = null, bool $strictTrustProbe = false): ?int
 {
     if ($esxiCredentialId <= 0 || $ansibleCredentialId <= 0) {
         throw new InvalidArgumentException('ESXi and Ansible credentials are required.');
@@ -784,7 +788,7 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
         throw new InvalidArgumentException('System jobs must use a system mode, not ' . $mode . '.');
     }
 
-    return repo_transaction($db, static function () use ($db, $mode, $esxiCredentialId, $ansibleCredentialId, $userId): ?int {
+    return repo_transaction($db, static function () use ($db, $mode, $esxiCredentialId, $ansibleCredentialId, $userId, $strictTrustProbe): ?int {
         // Same active SSoT as the mission guard: a cancelling pull still owns
         // its credential until the worker confirms (ADR-0033).
         $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
@@ -802,7 +806,7 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
         repo_deploy_assert_credential_type($db, $esxiCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         repo_deploy_assert_credential_type($db, $ansibleCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
 
-        $payloadJson = json_encode(['mode' => $mode], JSON_THROW_ON_ERROR);
+        $payloadJson = json_encode(['mode' => $mode, 'strict_trust_probe' => $strictTrustProbe], JSON_THROW_ON_ERROR);
         $userParam = $userId !== null && $userId > 0 ? $userId : null;
         $correlationId = virtusphere_correlation_id();
         $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, correlation_id) VALUES (NULL, ?, ?, ?, ?, ?)');
@@ -1155,7 +1159,7 @@ function repo_deploy_assert_mission_ready(mysqli $db, array $mission, int $esxiC
 function repo_deploy_assert_credential_type(mysqli $db, int $credentialId, string $type): array
 {
     $label = credential_type_label($type);
-    $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext FROM deploy_credentials WHERE id = ? LIMIT 1');
+    $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     $stmt->bind_param('i', $credentialId);
     $stmt->execute();
     $credential = $stmt->get_result()->fetch_assoc();

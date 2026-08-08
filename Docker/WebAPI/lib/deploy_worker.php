@@ -330,6 +330,14 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
         $esxiCredential = deploy_worker_credential($db, $credentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
+        $inventoryPayload = deploy_worker_payload($job);
+        $strictTrustProbe = !empty($inventoryPayload['strict_trust_probe']);
+        if ($strictTrustProbe) {
+            // Test the candidate trust material without changing the durable
+            // mode. Only a successful run records the evidence that enables
+            // the separate activation action.
+            $esxiCredential['esxi_trust_mode'] = VIRTUSPHERE_ESXI_TRUST_STRICT;
+        }
         $ansibleCredential = deploy_worker_credential($db, (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         $esxiSecret = repo_credential_secret($db, (int) $esxiCredential['id']);
         $ansibleSecret = repo_credential_secret($db, (int) $ansibleCredential['id']);
@@ -369,7 +377,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         });
         deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
 
-        $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty(deploy_worker_payload($job)['verbose']));
+        $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty($inventoryPayload['verbose']));
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running ESXi inventory playbook.');
         $buffer = '';
         $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($db, $jobId, $workerId, &$buffer, &$fullOutput): void {
@@ -390,6 +398,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $phase = VIRTUSPHERE_DEPLOY_PHASE_DB;
         $summary = repo_esxi_inventory_apply($db, $credentialId, $parsed);
         repo_esxi_inventory_record_success($db, $credentialId, $parsed['capabilities'], $jobId);
+        if (credential_esxi_trust_mode($esxiCredential) === VIRTUSPHERE_ESXI_TRUST_STRICT) {
+            repo_record_esxi_strict_test_success($db, $credentialId);
+        }
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($parsed['capabilities'], true));
         // VLAN catalog is ESXi-owned (E4b): resync from the union of cached
         // portgroups after every successful pull (retire not delete).

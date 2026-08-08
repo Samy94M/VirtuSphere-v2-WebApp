@@ -24,7 +24,9 @@ final class PortalConfirmNamingContractTest extends TestCase
 {
     /** Confirms that act on one identifiable object: the question must name it. */
     private const ROW_ACTIONS = [
+        'credentials.confirm_activate_strict',
         'credentials.confirm_delete',
+        'credentials.confirm_use_legacy',
         'deploy.confirm_cancel',
         'deploy.confirm_retry',
         'deploy.confirm_retry_partial',

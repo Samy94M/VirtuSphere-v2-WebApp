@@ -58,6 +58,9 @@ function portal_error_message(Throwable $exception): string
         // credentials.php renders Delete for every credential, including one an
         // active job holds, so this guard is one click away.
         'Credential is used by an active deploy job.' => 'credentials.err_in_use',
+        'Strict ESXi certificate verification requires HTTPS.' => 'credentials.err_strict_requires_https',
+        'Strict ESXi certificate verification must pass a connection test before activation.' => 'credentials.err_strict_test_required',
+        'ESXi certificate is required.' => 'credentials.err_certificate_required',
         // The same class of guard on the two paths that would delete the state a
         // running deploy works on: missions.php renders Delete for every mission
         // and vms.php for every row, both regardless of a running job.

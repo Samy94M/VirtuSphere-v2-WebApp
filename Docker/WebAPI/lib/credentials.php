@@ -21,6 +21,26 @@ const VIRTUSPHERE_CREDENTIAL_LABELS = [
 
 const VIRTUSPHERE_ESXI_SCHEMES = ['http', 'https'];
 
+// ESXi transport trust (Etappe 9b). A newly created credential must verify the
+// peer; a row without the column can only be an upgraded legacy row and keeps
+// the historical behaviour until an operator explicitly activates strict mode.
+const VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE = 'legacy_insecure';
+const VIRTUSPHERE_ESXI_TRUST_STRICT = 'strict';
+const VIRTUSPHERE_ESXI_TRUST_MODES = [
+    VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+    VIRTUSPHERE_ESXI_TRUST_STRICT,
+];
+const VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW = VIRTUSPHERE_ESXI_TRUST_STRICT;
+
+const VIRTUSPHERE_ESXI_CERT_CA_BUNDLE = 'ca_bundle';
+const VIRTUSPHERE_ESXI_CERT_SERVER = 'server_certificate';
+const VIRTUSPHERE_ESXI_CERT_KINDS = [
+    VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+    VIRTUSPHERE_ESXI_CERT_SERVER,
+];
+const VIRTUSPHERE_ESXI_CERT_MAX_BYTES = 262144;
+const VIRTUSPHERE_ESXI_TRUST_FILE = 'esxi-trust.pem';
+
 const VIRTUSPHERE_CREDENTIAL_PORT_SSH = 22;
 const VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTP = 80;
 const VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTPS = 443;
@@ -51,6 +71,62 @@ function credential_esxi_default_port(string $scheme): int
     return strtolower($scheme) === 'http'
         ? VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTP
         : VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTPS;
+}
+
+function credential_esxi_trust_mode(array $credential): string
+{
+    $mode = trim((string) ($credential['esxi_trust_mode'] ?? ''));
+
+    return in_array($mode, VIRTUSPHERE_ESXI_TRUST_MODES, true)
+        ? $mode
+        : VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+}
+
+/**
+ * Validates and canonicalizes a CA bundle or one pinned server certificate.
+ * Only PEM certificate blocks plus whitespace are accepted: private keys,
+ * prose accidentally pasted from a browser and trailing garbage never reach
+ * the Ansible runner. A server pin is deliberately exactly one certificate;
+ * a CA bundle may contain a chain.
+ */
+function credential_esxi_certificate_normalize(string $kind, string $pem): string
+{
+    if (!in_array($kind, VIRTUSPHERE_ESXI_CERT_KINDS, true)) {
+        throw new InvalidArgumentException('Unknown ESXi certificate kind.');
+    }
+
+    $pem = trim($pem);
+    if ($pem === '') {
+        throw new InvalidArgumentException('ESXi certificate is required.');
+    }
+    if (strlen($pem) > VIRTUSPHERE_ESXI_CERT_MAX_BYTES) {
+        throw new InvalidArgumentException('ESXi certificate bundle is too large.');
+    }
+
+    $pattern = '/-----BEGIN CERTIFICATE-----\s+.+?\s+-----END CERTIFICATE-----/s';
+    $matched = preg_match_all($pattern, $pem, $matches);
+    if ($matched === false || $matched === 0) {
+        throw new InvalidArgumentException('ESXi certificate must be PEM encoded.');
+    }
+
+    $outside = preg_replace($pattern, '', $pem);
+    if ($outside === null || trim($outside) !== '') {
+        throw new InvalidArgumentException('ESXi certificate input contains non-certificate data.');
+    }
+    if ($kind === VIRTUSPHERE_ESXI_CERT_SERVER && $matched !== 1) {
+        throw new InvalidArgumentException('A pinned ESXi server certificate must contain exactly one certificate.');
+    }
+
+    $normalized = [];
+    foreach ($matches[0] as $block) {
+        $certificate = openssl_x509_read($block);
+        if ($certificate === false || !openssl_x509_export($certificate, $exported, true)) {
+            throw new InvalidArgumentException('ESXi certificate is invalid.');
+        }
+        $normalized[] = trim($exported);
+    }
+
+    return implode("\n", $normalized) . "\n";
 }
 
 /**

@@ -31,7 +31,8 @@ final class ConnectionErrorTest extends TestCase
     {
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, connection_error_category('Connection refused'));
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, connection_error_category('stream_socket_client(): connection timed out'));
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_TLS, connection_error_category('SSL operation failed: certificate verify failed'));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE, connection_error_category('SSL operation failed: certificate verify failed'));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_TLS, connection_error_category('SSL handshake failed: wrong version number'));
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTH, connection_error_category('Authentication failed for user root'));
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTHZ, connection_error_category('The session is not authorized to perform this operation'));
     }

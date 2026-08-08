@@ -21,6 +21,9 @@
   vars_files:
     - ./serverlist.yml
     - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   tasks:
     # Beide Auswahl-Ketten sind zeichengleich in
@@ -38,7 +41,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         datacenter: "{{ item.datacenter_name }}"
         name: "{{ item.vm_name }}"
       delegate_to: localhost
@@ -99,7 +102,7 @@
             port: "{{ esxi_port | int }}"
             username: "{{ esxi_username }}"
             password: "{{ esxi_password }}"
-            validate_certs: false
+            validate_certs: "{{ esxi_validate_certs | bool }}"
             name: "{{ item.vm_name }}"
             folder: "/"
             datacenter: "{{ item.datacenter_name }}"
@@ -121,7 +124,7 @@
             port: "{{ esxi_port | int }}"
             username: "{{ esxi_username }}"
             password: "{{ esxi_password }}"
-            validate_certs: false
+            validate_certs: "{{ esxi_validate_certs | bool }}"
             name: "{{ item.vm_name }}"
             folder: "/"
             datacenter: "{{ item.datacenter_name }}"

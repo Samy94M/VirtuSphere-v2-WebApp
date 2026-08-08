@@ -5,6 +5,9 @@
   vars_files:
     - ./serverlist.yml
     - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   tasks:
     - name: Live-Inventar fuer die VM-Identitaetspruefung lesen
@@ -13,7 +16,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
       delegate_to: localhost
       register: vs_vm_identity_inventory
 
@@ -61,7 +64,7 @@
         port: "{{ esxi_port | int }}"
         username: "{{ esxi_username }}"
         password: "{{ esxi_password }}"
-        validate_certs: false
+        validate_certs: "{{ esxi_validate_certs | bool }}"
         name: "{{ item.vm_name }}"
         state: present
         folder: "/"

@@ -326,6 +326,10 @@ $migrations = [
             port INT NULL,
             username VARCHAR(191) NOT NULL,
             secret_ciphertext TEXT NOT NULL,
+            esxi_trust_mode ENUM('legacy_insecure','strict') NOT NULL DEFAULT 'strict',
+            esxi_cert_kind ENUM('ca_bundle','server_certificate') NULL,
+            esxi_certificate_pem MEDIUMTEXT NULL,
+            esxi_strict_tested_at TIMESTAMP NULL,
             created_by INT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1001,6 +1005,24 @@ SQL;
         // The collision gate needs the host's VM names and MOIDs in the same
         // credential-scoped cache as the other read-only inventory kinds.
         $db->query("ALTER TABLE deploy_esxi_inventory MODIFY kind ENUM('datacenter','datastore','network','host','vm') NOT NULL");
+    },
+    '0037_esxi_certificate_trust' => function (mysqli $db): void {
+        // Decision 2A: fresh credentials verify the ESXi peer. Existing rows
+        // retain the historical unverified transport visibly as legacy until
+        // an operator has stored a certificate, tested it and explicitly
+        // activates strict mode. Detect the pre-migration shape before adding
+        // the final-schema columns: on a fresh database 0002 already created
+        // them, so no row is incorrectly reclassified as legacy.
+        $hadTrustMode = migrator_column_exists($db, 'deploy_credentials', 'esxi_trust_mode');
+        migrator_add_column($db, 'deploy_credentials', 'esxi_trust_mode', "ENUM('legacy_insecure','strict') NOT NULL DEFAULT 'strict' AFTER secret_ciphertext");
+        migrator_add_column($db, 'deploy_credentials', 'esxi_cert_kind', "ENUM('ca_bundle','server_certificate') NULL AFTER esxi_trust_mode");
+        migrator_add_column($db, 'deploy_credentials', 'esxi_certificate_pem', 'MEDIUMTEXT NULL AFTER esxi_cert_kind');
+        migrator_add_column($db, 'deploy_credentials', 'esxi_strict_tested_at', 'TIMESTAMP NULL AFTER esxi_certificate_pem');
+
+        if (!$hadTrustMode) {
+            $db->query("UPDATE deploy_credentials SET esxi_trust_mode = 'legacy_insecure' WHERE type = 'esxi'");
+        }
+        migrator_out('0037: ESXi credentials carry explicit certificate trust mode');
     },
 ];
 

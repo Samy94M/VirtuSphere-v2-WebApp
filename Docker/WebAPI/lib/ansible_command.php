@@ -203,6 +203,7 @@ function ansible_remote_command(string $remoteDir, array $payload, bool $autosta
     $commands = [
         'cd ' . ansible_sh_quote($remoteDir),
         'chmod 600 accounts.yml',
+        'if [ -f ' . VIRTUSPHERE_ESXI_TRUST_FILE . ' ]; then chmod 600 ' . VIRTUSPHERE_ESXI_TRUST_FILE . '; fi',
         // ADR-0032: opaque diagnostic id for the whole remote sequence; remote
         // tooling passes it through, nothing parses it.
         'export VS_CORRELATION_ID=' . ansible_sh_quote(virtusphere_correlation_id()),

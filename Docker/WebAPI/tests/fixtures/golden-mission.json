@@ -69,6 +69,8 @@
             "esxi_port": 8443,
             "esxi_username": "rö\"ot",
             "esxi_password": "p@ss\"wö\\rd:on\u0001\nx",
+            "esxi_validate_certs": false,
+            "esxi_ca_bundle_path": "",
             "ansible_username": "ansible",
             "apiUrl": "http://10.10.10.10:8021"
         },

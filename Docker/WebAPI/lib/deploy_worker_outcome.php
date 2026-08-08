@@ -49,7 +49,9 @@ function deploy_worker_classify_inventory_failure(string $phase, string $message
 {
     switch ($phase) {
         case VIRTUSPHERE_DEPLOY_PHASE_CONFIG:
-            return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+            return str_contains(strtolower($message), 'certificate')
+                ? VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE
+                : VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
         case VIRTUSPHERE_DEPLOY_PHASE_SSH:
         case VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT:
             $category = connection_error_category($message);

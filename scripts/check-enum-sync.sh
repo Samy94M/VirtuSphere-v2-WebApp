@@ -46,7 +46,11 @@ php_values() { # $1=file $2=const-prefix
 
 # Erste ENUM(...)-Definition der Spalte in der Datei, als Komma-Liste.
 enum_values() { # $1=file $2=column
-  grep -F "$2" "$1" | grep "ENUM(" | head -n 1 \
+  # Match the complete SQL identifier. A substring search for `kind ENUM`
+  # also matched `esxi_cert_kind ENUM` and compared the certificate vocabulary
+  # against the inventory kinds. The non-identifier boundary keeps legitimate
+  # indentation/backticks while rejecting suffix matches.
+  grep -E "(^|[^[:alnum:]_])$2([^[:alnum:]_]|$).*ENUM[(]" "$1" | head -n 1 \
     | sed -n "s/.*ENUM(\([^)]*\)).*/\1/p" | tr -d "' "
 }
 
@@ -77,8 +81,8 @@ check_pair "Lifecycle-States"  "$LIB/constants.php"        "VIRTUSPHERE_LIFECYCL
 check_pair "MECM-Sync-States"  "$LIB/constants.php"        "VIRTUSPHERE_MECM_SYNC_"       "mecm_sync_state"
 check_pair "User-Rollen"       "$LIB/permissions.php"      "VIRTUSPHERE_ROLE_"            "role"
 check_pair "Deploy-Job-Status" "$LIB/deploy_constants.php" "VIRTUSPHERE_DEPLOY_STATUS_"   "status"
-check_pair "Credential-Typen"  "$LIB/credentials.php"      "VIRTUSPHERE_CREDENTIAL_TYPE_" "type ENUM"
-check_pair "Inventory-Kinds"   "$LIB/deploy_constants.php" "VIRTUSPHERE_INVENTORY_KIND_"  "kind ENUM"
+check_pair "Credential-Typen"  "$LIB/credentials.php"      "VIRTUSPHERE_CREDENTIAL_TYPE_" "type"
+check_pair "Inventory-Kinds"   "$LIB/deploy_constants.php" "VIRTUSPHERE_INVENTORY_KIND_"  "kind"
 check_pair "Autostart-Stop"    "$LIB/deploy_constants.php" "VIRTUSPHERE_AUTOSTART_STOP_ACTION_" "autostart_stop_action"
 
 if [ "$errors" -gt 0 ]; then
