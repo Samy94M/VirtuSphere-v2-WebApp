@@ -110,6 +110,12 @@ return [
     'storage_hint' => 'Provisionierte Festplattengrößen der ausgewählten VMs je Ziel-Datastore, verglichen mit dem freien Speicher aus dem letzten Inventar-Abruf. Thin-Festplatten belegen anfangs weniger. Die Anzeige ist eine Momentaufnahme und blockiert den Deploy nicht.',
     // Der Verweis auf den Systemstatus steht als Link daneben, nicht mehr als
     // Klammerzusatz im Satz: sonst nennt die Meldung die Seite zweimal.
+    'identity_conflict_flash' => 'Deploy blockiert: Auf dem gewählten ESXi-Zugang existiert bereits eine fremde oder noch nicht übernommene VM mit diesem Namen: :names.',
+    'identity_conflict' => 'Deploy blockiert: Auf dem gewählten ESXi-Zugang existiert bereits eine VM namens „:name", deren Instance-UUID nicht zur Portal-VM gehört. Prüfen Sie die VM und übernehmen Sie sie nur ausdrücklich. Dabei werden keine Hardware-Einstellungen geändert.',
+    'identity_adopt_button' => 'Vorhandene VM übernehmen',
+    'identity_adopt_confirm' => 'Die vorhandene VM „:name" ausdrücklich übernehmen? MOID und Instance-UUID werden an die Portal-VM gebunden. Die VM-Hardware auf ESXi wird nicht geändert.',
+    'identity_adopted' => 'Die vorhandene VM „:name" wurde ausdrücklich übernommen. MOID und Instance-UUID sind jetzt gespeichert.',
+    'identity_refresh_link' => 'ESXi-Inventar aktualisieren',
     'inventory_deviation_warn' => 'Hinweis: Datacenter, Datastore oder VLAN dieser Mission kommt nicht im aktuellen ESXi-Inventar vor. Der Deploy wird nicht blockiert; bitte die Werte prüfen.',
     'inventory_deviation_link' => 'Inventar im Systemstatus ansehen',
     'host_missing_warn' => 'Hinweis: Nicht im Inventar des gewählten Hosts ":host", aber auf anderen Hosts vorhanden: :values. Der Deploy wird nicht blockiert; bitte die Host-Wahl prüfen.',

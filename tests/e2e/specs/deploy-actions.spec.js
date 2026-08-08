@@ -1,4 +1,4 @@
-// TESTPLAN 3.5 / E6: the five deploy actions. Every seeded job is *scheduled*
+// TESTPLAN 3.5 / E6: the deploy actions. Every seeded job is *scheduled*
 // (scheduled_at in the future), because the claim query skips those (ADR-0022):
 // the real worker of the stack can never grab a fixture mid-test, which makes
 // cancel/cancel_group deterministic. Only the retry test creates a job the
@@ -153,6 +153,58 @@ echo 'JSON' . json_encode(['logLines' => $logLines, 'auditRows' => $auditRows]) 
 `);
   expect(trace.logLines, 'the queue line carries the same trace').toBeGreaterThan(0);
   expect(trace.auditRows, 'the audit row carries the same trace').toBeGreaterThan(0);
+});
+
+// e2e-covers: deploy.php:adopt_vm
+// e2e-covers-cancel: deploy.php:adopt_vm
+test('adopt_vm: Cancel keeps the VM foreign, Confirm stores identity only', async ({ page }) => {
+  const seed = seedBase();
+  const fixture = phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT id, vm_name, vm_cpu, vm_ram, vm_guest_id FROM deploy_vms WHERE mission_id = ? ORDER BY id LIMIT 1');
+$mid = ${Number(seed.missionId)};
+$stmt->bind_param('i', $mid);
+$stmt->execute();
+$vm = $stmt->get_result()->fetch_assoc();
+repo_esxi_inventory_replace_kind($db, ${Number(seed.esxi)}, VIRTUSPHERE_INVENTORY_KIND_VM, [[
+    'name' => $vm['vm_name'],
+    'meta_json' => ['moid' => 'vm-e2e-44', 'instance_uuid' => 'e2e-instance-uuid-44', 'power_state' => 'poweredOff'],
+]], true);
+echo 'JSON' . json_encode($vm) . 'JSON';
+`, ['lib/repo/esxi_inventory.php']);
+
+  const identity = () => phpJson(`
+$db = db();
+$id = ${Number(fixture.id)};
+$stmt = $db->prepare('SELECT vm_moid, vm_instance_uuid, vm_cpu, vm_ram, vm_guest_id FROM deploy_vms WHERE id = ?');
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}&credential_esxi_id=${seed.esxi}`);
+  const adopt = page.locator('form:has(input[name="action"][value="adopt_vm"]) button');
+  const dialog = page.locator('[data-confirm-dialog]');
+  await expect(adopt, 'a foreign namesake exposes the explicit adoption action').toBeVisible();
+
+  await adopt.click();
+  await expect(dialog, 'adoption asks before replacing identity').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(identity().vm_instance_uuid, 'dismissing adoption stores no identity').toBeNull();
+
+  await adopt.click();
+  await Promise.all([
+    page.waitForURL(new RegExp(`deploy\\.php\\?mission_id=${seed.missionId}`)),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const after = identity();
+  expect(after.vm_moid).toBe('vm-e2e-44');
+  expect(after.vm_instance_uuid).toBe('e2e-instance-uuid-44');
+  expect(after.vm_cpu).toBe(fixture.vm_cpu);
+  expect(after.vm_ram).toBe(fixture.vm_ram);
+  expect(after.vm_guest_id).toBe(fixture.vm_guest_id);
+  expect(missionJobs(seed.missionId), 'adoption does not enqueue or mutate ESXi').toHaveLength(0);
 });
 
 // e2e-covers: deploy.php:cancel

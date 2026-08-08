@@ -110,6 +110,12 @@ return [
     'storage_hint' => 'Provisioned disk sizes of the selected VMs per target datastore, compared against the free space of the last inventory pull. Thin disks use less at first. This is a snapshot and never blocks the deploy.',
     // The pointer to System status is the link beside the sentence now, not a
     // parenthesis inside it: otherwise the message names the page twice.
+    'identity_conflict_flash' => 'Deploy blocked: the selected ESXi credential already reports a foreign or not-yet-adopted VM with this name: :names.',
+    'identity_conflict' => 'Deploy blocked: the selected ESXi credential already reports a VM named “:name” whose instance UUID does not belong to the portal VM. Verify the VM and adopt it only through the explicit action. No hardware settings are changed.',
+    'identity_adopt_button' => 'Adopt existing VM',
+    'identity_adopt_confirm' => 'Explicitly adopt the existing VM “:name”? Its MOID and instance UUID will be bound to the portal VM. ESXi hardware will not be changed.',
+    'identity_adopted' => 'The existing VM “:name” was explicitly adopted. Its MOID and instance UUID are now stored.',
+    'identity_refresh_link' => 'Refresh ESXi inventory',
     'inventory_deviation_warn' => 'Note: the datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values.',
     'inventory_deviation_link' => 'View the inventory under System status',
     'host_missing_warn' => 'Note: not in the inventory of the selected host ":host" but present on other hosts: :values. The deploy is not blocked; please check the host choice.',

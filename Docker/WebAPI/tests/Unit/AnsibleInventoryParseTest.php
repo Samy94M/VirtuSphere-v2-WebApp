@@ -125,8 +125,8 @@ final class AnsibleInventoryParseTest extends TestCase
      * Etappe 9 (decision 6): the pull learns which VMs the host actually holds,
      * because the name-collision gate cannot ask "is there already a VM called
      * X here" without it. `vmware_vm_info` reports `guest_name` and `moid`; it
-     * does NOT report the instance UUID (only the product `uuid`), so the MOID
-     * is the handle this cache compares against.
+     * reports the product `uuid` and the durable `instance_uuid`; both the
+     * instance UUID and MOID must survive into the credential-scoped cache.
      */
     public function testParsesVirtualMachinesWithTheirHypervisorHandle(): void
     {
@@ -137,7 +137,7 @@ final class AnsibleInventoryParseTest extends TestCase
             'networks_dvs' => [],
             'hosts' => [],
             'vms' => [
-                ['guest_name' => 'WS-001', 'moid' => 'vm-24', 'uuid' => '4207072c-edd8-3bd5-64dc-903fd3a0db04', 'power_state' => 'poweredOff', 'folder' => '/ha-datacenter/vm'],
+                ['guest_name' => 'WS-001', 'moid' => 'vm-24', 'uuid' => '4207072c-edd8-3bd5-64dc-903fd3a0db04', 'instance_uuid' => '503c89f1-5734-4d4d-a930-4d92b97a7289', 'power_state' => 'poweredOff', 'folder' => '/ha-datacenter/vm'],
                 // Nameless entry: unusable for a name comparison, dropped, and
                 // counted as a normalization loss rather than vanishing.
                 ['guest_name' => '', 'moid' => 'vm-25'],
@@ -151,6 +151,7 @@ final class AnsibleInventoryParseTest extends TestCase
         $parsed = ansible_parse_inventory_output($out);
         self::assertSame(['WS-001', 'WS-002'], array_column($parsed['vms'], 'name'));
         self::assertSame('vm-24', $parsed['vms'][0]['meta_json']['moid']);
+        self::assertSame('503c89f1-5734-4d4d-a930-4d92b97a7289', $parsed['vms'][0]['meta_json']['instance_uuid']);
         self::assertSame('poweredOff', $parsed['vms'][0]['meta_json']['power_state']);
         self::assertSame('vm-30', $parsed['vms'][1]['meta_json']['moid']);
         self::assertSame(['raw' => 4, 'kept' => 3], $parsed['normalization']['vms']);

@@ -150,8 +150,8 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
     /**
      * Decision 6: the deployment collision gate can only distinguish an owned
      * VM from a foreign namesake when the read-only inventory supplies the
-     * host's VM names and MOIDs. The instance UUID comes from the focused
-     * guest-info/export path; vmware_vm_info does not expose it.
+     * host's VM names, MOIDs and instance UUIDs. The product UUID is a separate
+     * field and must never substitute for the durable instance identity.
      */
     public function testInventoryQueriesVirtualMachinesForTheCollisionGate(): void
     {

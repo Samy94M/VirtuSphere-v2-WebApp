@@ -66,7 +66,7 @@ Wer prüft und wer anzeigt, entscheidet dabei nicht getrennt: `esxi_inventory_au
 
 ## Grüner Abruf, trotzdem eine 0
 
-Ein Abruf ist kein einzelner Vorgang, sondern mehrere getrennte Abfragen: Datacenter, Datastores, Standard-Portgruppen, Distributed-Portgruppen, Host-Daten und VM-Namen samt MOID für den Kollisionsschutz. Nur die erste ist der Verbindungstest; bleibt eine der übrigen ohne Ergebnis, läuft der Abruf trotzdem sauber zu Ende. Die Karte zeigt für sichtbare Inventararten dann eine 0 und die Ampel bleibt grün, denn die Ampel beantwortet ausschließlich, ob der Abruf gelaufen ist. Eine 0 neben gefüllten Zahlen ist also kein Widerspruch, sondern der Hinweis, genau eine Abfrage nachzusehen.
+Ein Abruf ist kein einzelner Vorgang, sondern mehrere getrennte Abfragen: Datacenter, Datastores, Standard-Portgruppen, Distributed-Portgruppen, Host-Daten und VM-Namen samt MOID und Instance-UUID für den Kollisionsschutz. Nur die erste ist der Verbindungstest; bleibt eine der übrigen ohne Ergebnis, läuft der Abruf trotzdem sauber zu Ende. Die Karte zeigt für sichtbare Inventararten dann eine 0 und die Ampel bleibt grün, denn die Ampel beantwortet ausschließlich, ob der Abruf gelaufen ist. Eine 0 neben gefüllten Zahlen ist also kein Widerspruch, sondern der Hinweis, genau eine Abfrage nachzusehen.
 
 Woher die einzelnen Zahlen kommen und was eine 0 dort bedeutet:
 
@@ -100,7 +100,7 @@ Die Namen in der Zeile sind die Abfragen, nicht die Kartenzahlen. Welche es gibt
 | `datastores` | die Zahl „Datastores" samt Kapazität und freiem Speicher |
 | `networks_standard`, `networks_dvs` | gemeinsam die Zahl „Portgruppen" und den VLAN-Katalog |
 | `hosts` | die Zahl „Hosts" samt RAM, Kernen und Uhrabweichung |
-| `vms` | den nicht als Kartenzahl angezeigten Namens-/MOID-Spiegel für Kollisionsprüfung und ausdrückliche Adoption |
+| `vms` | den nicht als Kartenzahl angezeigten Namens-/MOID-/Instance-UUID-Spiegel für Kollisionsprüfung und ausdrückliche Adoption |
 | `about`, `host_runtime` | die Hinweise zum Host (Produkt, Lizenz, HA-Cluster, Wartungsmodus), keine Kartenzahl |
 
 Eine Zeile ohne `Inventory queries:` stammt aus einem Abruf, der älter ist als dieser Bericht; sie behauptet bewusst nichts über Vollständigkeit.

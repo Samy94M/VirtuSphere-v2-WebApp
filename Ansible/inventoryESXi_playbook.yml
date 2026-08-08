@@ -90,10 +90,9 @@
       register: vs_hosts
       ignore_errors: true
 
-    # The deployment collision gate needs every occupied VM name and its MOID.
-    # vmware_vm_info is the read-only fleet query for that shape. Its `uuid` is
-    # the product UUID, not the instance UUID; the focused guest-info/export
-    # path remains the source of the durable instance identity.
+    # The deployment collision gate needs every occupied VM name, its MOID and
+    # durable instance UUID. The pinned vmware_vm_info exposes both `uuid`
+    # (product UUID) and `instance_uuid`; PHP deliberately keeps only the latter.
     - name: Gather virtual machines for collision detection
       community.vmware.vmware_vm_info:
         hostname: "{{ esxi_hostname }}"

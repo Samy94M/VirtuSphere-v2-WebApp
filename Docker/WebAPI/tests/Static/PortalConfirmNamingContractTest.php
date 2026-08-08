@@ -30,6 +30,7 @@ final class PortalConfirmNamingContractTest extends TestCase
         'deploy.confirm_retry_partial',
         'deploy.confirm_retry_partial_many',
         'deploy.confirm_retry_partial_one',
+        'deploy.identity_adopt_confirm',
         'missions.confirm_delete',
         'missions.confirm_delete_empty',
         'missions.confirm_delete_scheduled',

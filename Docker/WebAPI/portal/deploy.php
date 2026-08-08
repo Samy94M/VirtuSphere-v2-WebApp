@@ -95,6 +95,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('success', __t('deploy.flash_queued'));
                 redirect_to(deploy_job_log_url($jobId));
             }
+        } elseif ($action === 'adopt_vm') {
+            if (!can('vms.write', $user)) {
+                portal_forbid($connection, $user, 'vms.write');
+            }
+            $missionIdPost = request_int($_POST, 'mission_id');
+            $esxiId = request_int($_POST, 'credential_esxi_id');
+            $vmId = request_int($_POST, 'vm_id');
+            $adopted = repo_adopt_vm_identity($connection, $missionIdPost, $vmId, $esxiId);
+            audit(
+                $connection,
+                VIRTUSPHERE_LOG_CATEGORY_VMS,
+                'adopted ESXi identity for vm id ' . $vmId . ' from credential id ' . $esxiId
+                    . ' (moid ' . $adopted['vm_moid'] . ', instance uuid ' . $adopted['vm_instance_uuid'] . ')',
+                (int) $user['id']
+            );
+            flash_set('success', __t('deploy.identity_adopted', ['name' => $adopted['vm_name']]));
+            redirect_to('deploy.php?mission_id=' . $missionIdPost . '&credential_esxi_id=' . $esxiId);
         } elseif ($action === 'cancel') {
             $jobId = request_int($_POST, 'job_id');
             $job = repo_deploy_job($connection, $jobId);
@@ -132,6 +149,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             redirect_to($redirectBase);
         }
+    } catch (VmIdentityConflictException $exception) {
+        form_remember('schedule', $_POST, []);
+        flash_set('error', __t('deploy.identity_conflict_flash', [
+            'names' => implode(', ', array_column($exception->conflicts(), 'vm_name')),
+        ]));
+        redirect_to($redirectBase);
     } catch (ValidationException $exception) {
         form_remember('schedule', $_POST, $exception->errors());
         flash_set('error', portal_error_message($exception));
@@ -177,7 +200,6 @@ $deployNotices = deploy_prerequisite_notices(
 // A selected mission with no VMs has nothing to enqueue; the vms_empty hint below
 // explains the disabled button. The repo gate is the JS-less backstop.
 $selectedMissionEmpty = $selectedMission !== null && $missionVms === [];
-$canQueue = $deployNotices === [] && !$selectedMissionEmpty;
 
 // Warn (never block) when the selected mission references datacenter/datastore/
 // VLAN values that are not in the ESXi inventory (E4.4).
@@ -256,6 +278,17 @@ $storageIsland = deploy_storage_island($connection, $storageRows, $esxiCredentia
 // it on the first change; this is the starting state, and the only state a
 // browser without JavaScript ever sees.
 $selectedEsxiId = deploy_form_value('credential_esxi_id');
+$identityConflicts = [];
+if ($selectedMission !== null && (int) $selectedEsxiId > 0) {
+    $selectedVmIds = deploy_form_vm_selection();
+    $identityConflicts = repo_vm_identity_conflicts(
+        $connection,
+        $selectedMissionId,
+        (int) $selectedEsxiId,
+        $selectedVmIds === null ? [] : array_keys($selectedVmIds)
+    );
+}
+$canQueue = $deployNotices === [] && !$selectedMissionEmpty && $identityConflicts === [];
 $initialHostWarning = $hostWarnings[$selectedEsxiId] ?? '';
 $initialCapabilityWarning = $capabilityWarnings[$selectedEsxiId] ?? '';
 $initialCapacity = $selectedEsxiId !== '' ? deploy_datastore_capacity($connection, (int) $selectedEsxiId) : [];
@@ -340,6 +373,24 @@ layout_header(__t('deploy.title'), $user, 'deploy', 'deploy');
             <?php // The sentence ends by naming the page that holds the details, so it
                   // carries the way there rather than leaving the operator to find it. ?>
             <div class="alert alert-warning"><?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>
+        <?php } ?>
+        <?php foreach ($identityConflicts as $conflict) { ?>
+            <?php $identityComplete = (string) $conflict['inventory_moid'] !== '' && (string) $conflict['inventory_instance_uuid'] !== ''; ?>
+            <div class="alert alert-warning">
+                <p><?php echo h(__t('deploy.identity_conflict', ['name' => (string) $conflict['vm_name']])); ?></p>
+                <?php if ($identityComplete && can('vms.write', $user)) { ?>
+                    <form class="inline-form" method="post" action="deploy.php?mission_id=<?php echo h((string) $selectedMissionId); ?>">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="adopt_vm">
+                        <input type="hidden" name="mission_id" value="<?php echo h((string) $selectedMissionId); ?>">
+                        <input type="hidden" name="credential_esxi_id" value="<?php echo h($selectedEsxiId); ?>">
+                        <input type="hidden" name="vm_id" value="<?php echo h((string) $conflict['vm_id']); ?>">
+                        <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('deploy.identity_adopt_confirm', ['name' => (string) $conflict['vm_name']])); ?>"><?php echo h(__t('deploy.identity_adopt_button')); ?></button>
+                    </form>
+                <?php } elseif (!$identityComplete) { ?>
+                    <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.identity_refresh_link')); ?></a>
+                <?php } ?>
+            </div>
         <?php } ?>
         <form class="form-grid" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
             <?php echo csrf_field(); ?>

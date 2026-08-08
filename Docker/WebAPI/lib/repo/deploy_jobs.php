@@ -9,6 +9,7 @@ require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../mac_import.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/vm_identity.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/status_events.php';
 
@@ -559,6 +560,7 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
 
         repo_deploy_assert_credential_type($db, $esxiCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         repo_deploy_assert_credential_type($db, $ansibleCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
+        repo_deploy_assert_no_vm_identity_conflicts($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
 
         if (repo_deploy_active_job_exists($db, $missionId)) {
             throw new RuntimeException('This mission already has an active deploy job.');
@@ -688,6 +690,12 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
         if ($vms === []) {
             throw new RuntimeException('Mission has no VMs to deploy.');
         }
+        repo_deploy_assert_no_vm_identity_conflicts(
+            $db,
+            $missionId,
+            $esxiCredentialId,
+            array_map(static fn (array $vm): int => (int) $vm['id'], $vms)
+        );
 
         // Horizon guard for the LAST staggered slot (base + (n-1)*stagger).
         $baseEpoch = $baseUtc !== null ? strtotime($baseUtc . ' UTC') : time();

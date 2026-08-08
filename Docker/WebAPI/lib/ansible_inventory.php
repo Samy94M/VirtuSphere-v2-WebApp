@@ -112,15 +112,15 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
 /**
  * One VM the host holds, as `vmware_vm_info` reports it (decision 6). The name
  * is what the collision gate compares, the MOID is the handle it matches an
- * adopted VM against; the module does NOT report the instance UUID, only the
- * product `uuid`, so the MOID is all this cache can offer.
+ * adopted VM against. The pinned module reports both the product `uuid` and
+ * durable `instance_uuid`; only the latter decides whether a namesake is ours.
  *
  * A VM without a MOID is kept with a null handle rather than dropped: the name
  * still occupies the host, and a gate that cannot see it would wave through
  * exactly the collision it exists to catch. Only a nameless entry is a loss,
  * because a name comparison has nothing to work with.
  *
- * @return array{name:string, meta_json:array{moid:?string, power_state:?string}}|null
+ * @return array{name:string, meta_json:array{moid:?string, instance_uuid:?string, power_state:?string}}|null
  */
 function ansible_inventory_vm_item(mixed $raw): ?array
 {
@@ -134,12 +134,14 @@ function ansible_inventory_vm_item(mixed $raw): ?array
     }
 
     $moid = trim((string) ($raw['moid'] ?? ''));
+    $instanceUuid = trim((string) ($raw['instance_uuid'] ?? ''));
     $powerState = trim((string) ($raw['power_state'] ?? ''));
 
     return [
         'name' => $name,
         'meta_json' => [
             'moid' => $moid === '' ? null : $moid,
+            'instance_uuid' => $instanceUuid === '' ? null : $instanceUuid,
             'power_state' => $powerState === '' ? null : $powerState,
         ],
     ];
