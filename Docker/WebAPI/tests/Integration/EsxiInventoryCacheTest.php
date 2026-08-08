@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/credentials.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory.php';
 
 /**
@@ -58,10 +59,14 @@ final class EsxiInventoryCacheTest extends TestCase
             'hosts' => [
                 ['name' => 'esxi-01', 'meta_json' => ['ram_mb' => 262144, 'cpu_cores' => 40]],
             ],
+            'vms' => [
+                ['name' => 'WS-001', 'meta_json' => ['moid' => 'vm-24', 'power_state' => 'poweredOff']],
+            ],
         ]);
 
         self::assertSame(1, $summary['datacenter']['written']);
         self::assertSame(2, $summary['network']['written']);
+        self::assertSame(1, $summary['vm']['written']);
 
         $grouped = repo_esxi_inventory_for_credential($this->db, $this->credentialId);
         self::assertCount(2, $grouped['network']);
@@ -69,6 +74,32 @@ final class EsxiInventoryCacheTest extends TestCase
         self::assertSame('ds-fast', (string) $datastore['name']);
         self::assertSame(500_000_000_000, (int) $datastore['free_bytes']);
         self::assertStringContainsString('cpu_cores', (string) $grouped['host'][0]['meta_json']);
+        self::assertStringContainsString('vm-24', (string) $grouped['vm'][0]['meta_json']);
+    }
+
+    public function testAnsweredEmptyVmQueryClearsNamesakesAndStampsFreshness(): void
+    {
+        repo_esxi_inventory_replace_kind($this->db, $this->credentialId, VIRTUSPHERE_INVENTORY_KIND_VM, [
+            ['name' => 'WS-OLD', 'meta_json' => ['moid' => 'vm-1']],
+        ]);
+
+        $summary = repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'datacenters' => [],
+            'datastores' => [],
+            'networks' => [],
+            'hosts' => [],
+            'vms' => [],
+            'queries' => [
+                'vms' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED, 'message' => ''],
+            ],
+        ]);
+
+        self::assertTrue($summary['vm']['cleared']);
+        self::assertSame(1, $summary['vm']['removed']);
+        self::assertArrayNotHasKey('vm', repo_esxi_inventory_for_credential($this->db, $this->credentialId));
+
+        $map = json_decode((string) repo_esxi_inventory_state($this->db, $this->credentialId)['kind_freshness_json'], true);
+        self::assertArrayHasKey(VIRTUSPHERE_INVENTORY_KIND_VM, $map);
     }
 
     public function testEmptyResultKeepsExistingRows(): void

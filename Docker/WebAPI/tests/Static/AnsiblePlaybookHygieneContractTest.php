@@ -37,7 +37,7 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
      */
     private const IGNORE_ERRORS_ALLOWLIST = [
         'exportVMs-Informations-ESXi_playbook.yml' => 1,
-        'inventoryESXi_playbook.yml' => 6,
+        'inventoryESXi_playbook.yml' => 7,
     ];
 
     public function testIgnoreErrorsOnlyWhereClassifiedAndAlwaysRegistered(): void
@@ -145,6 +145,22 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
                 sprintf('Task result %s is not reported in the queries block, so its empty result would be indistinguishable from an answer.', $name)
             );
         }
+    }
+
+    /**
+     * Decision 6: the deployment collision gate can only distinguish an owned
+     * VM from a foreign namesake when the read-only inventory supplies the
+     * host's VM names and MOIDs. The instance UUID comes from the focused
+     * guest-info/export path; vmware_vm_info does not expose it.
+     */
+    public function testInventoryQueriesVirtualMachinesForTheCollisionGate(): void
+    {
+        $source = $this->playbooks()['inventoryESXi_playbook.yml'] ?? '';
+        self::assertNotSame('', $source);
+        self::assertStringContainsString('community.vmware.vmware_vm_info:', $source);
+        self::assertMatchesRegularExpression('/^\s*register:\s*vs_vms\s*$/m', $source);
+        self::assertStringContainsString('vs_vms.virtual_machines', $source);
+        self::assertMatchesRegularExpression("/^\s*'vms':\s*\{/m", $source);
     }
 
     public function testEveryCommandTaskIsClassified(): void

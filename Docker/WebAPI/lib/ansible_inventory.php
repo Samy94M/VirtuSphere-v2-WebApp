@@ -110,10 +110,46 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
 }
 
 /**
+ * One VM the host holds, as `vmware_vm_info` reports it (decision 6). The name
+ * is what the collision gate compares, the MOID is the handle it matches an
+ * adopted VM against; the module does NOT report the instance UUID, only the
+ * product `uuid`, so the MOID is all this cache can offer.
+ *
+ * A VM without a MOID is kept with a null handle rather than dropped: the name
+ * still occupies the host, and a gate that cannot see it would wave through
+ * exactly the collision it exists to catch. Only a nameless entry is a loss,
+ * because a name comparison has nothing to work with.
+ *
+ * @return array{name:string, meta_json:array{moid:?string, power_state:?string}}|null
+ */
+function ansible_inventory_vm_item(mixed $raw): ?array
+{
+    if (!is_array($raw)) {
+        return null;
+    }
+
+    $name = trim((string) ($raw['guest_name'] ?? $raw['name'] ?? ''));
+    if ($name === '') {
+        return null;
+    }
+
+    $moid = trim((string) ($raw['moid'] ?? ''));
+    $powerState = trim((string) ($raw['power_state'] ?? ''));
+
+    return [
+        'name' => $name,
+        'meta_json' => [
+            'moid' => $moid === '' ? null : $moid,
+            'power_state' => $powerState === '' ? null : $powerState,
+        ],
+    ];
+}
+
+/**
  * Parses the base64-JSON marker the inventory playbook prints into the cache
  * shape. Throws when the marker is missing/corrupt (worker records "parse").
  *
- * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>, capabilities:array<string,mixed>, queries:array<string,array{state:string,message:string}>, normalization:array<string,array{raw:int,kept:int}>}
+ * @return array{datacenters:array<int,string>, datastores:array<int,array<string,mixed>>, networks:array<int,array<string,mixed>>, vms:array<int,array<string,mixed>>, hosts:array<int,array<string,mixed>>, capabilities:array<string,mixed>, queries:array<string,array{state:string,message:string}>, normalization:array<string,array{raw:int,kept:int}>}
  */
 function ansible_parse_inventory_output(string $stdout): array
 {
@@ -177,10 +213,30 @@ function ansible_parse_inventory_output(string $stdout): array
     }
     $networks = array_values($networks);
 
+    // Same case-insensitive dedupe as the networks above, and for a harder
+    // reason: (credential_id, kind, name) is unique, so two case variants of
+    // one name would make the write fail instead of the cache disagree.
+    $rawVms = (array) ($data['vms'] ?? []);
+    $vms = [];
+    $keptVms = 0;
+    foreach ($rawVms as $raw) {
+        $item = ansible_inventory_vm_item($raw);
+        if ($item === null) {
+            continue;
+        }
+        $keptVms++;
+        $key = esxi_inventory_name_key($item['name']);
+        if (!isset($vms[$key])) {
+            $vms[$key] = $item;
+        }
+    }
+    $vms = array_values($vms);
+
     return [
         'datacenters' => $datacenters,
         'datastores' => $datastores,
         'networks' => $networks,
+        'vms' => $vms,
         'hosts' => ansible_parse_inventory_hosts($data['hosts'] ?? [], $data['fetched_epoch'] ?? null),
         'capabilities' => ansible_parse_inventory_capabilities($data['about'] ?? [], $data['host_runtime'] ?? []),
         'queries' => ansible_parse_inventory_queries($data['queries'] ?? []),
@@ -188,6 +244,7 @@ function ansible_parse_inventory_output(string $stdout): array
             'datacenters' => ['raw' => count($rawDatacenters), 'kept' => count($datacenters)],
             'datastores' => ['raw' => count($rawDatastores), 'kept' => count($datastores)],
             'networks' => ['raw' => $rawNetworks, 'kept' => $keptNetworks],
+            'vms' => ['raw' => count($rawVms), 'kept' => $keptVms],
         ],
     ];
 }

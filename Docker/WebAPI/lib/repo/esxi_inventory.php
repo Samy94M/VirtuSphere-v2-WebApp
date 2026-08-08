@@ -139,6 +139,7 @@ function repo_esxi_inventory_answered_kinds(array $queries): array
         VIRTUSPHERE_INVENTORY_KIND_DATASTORE => ['datastores'],
         VIRTUSPHERE_INVENTORY_KIND_NETWORK => ['networks_standard', 'networks_dvs'],
         VIRTUSPHERE_INVENTORY_KIND_HOST => ['hosts'],
+        VIRTUSPHERE_INVENTORY_KIND_VM => ['vms'],
     ];
 
     $answered = [];
@@ -160,7 +161,7 @@ function repo_esxi_inventory_answered_kinds(array $queries): array
  * kinds may treat an empty result as authoritative (B15), and every answered
  * kind gets its freshness stamped, including the empty ones.
  *
- * @param array{datacenters?:array, datastores?:array, networks?:array, hosts?:array, queries?:array} $parsed
+ * @param array{datacenters?:array, datastores?:array, networks?:array, hosts?:array, vms?:array, queries?:array} $parsed
  * @return array<string, array{written:int, removed:int, kept_empty:bool, cleared:bool}>
  */
 function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed): array
@@ -177,6 +178,7 @@ function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed)
         // vlan_id meta; both are accepted.
         $summary['network'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_NETWORK, repo_esxi_inventory_mixed_items((array) ($parsed['networks'] ?? [])), $authoritative(VIRTUSPHERE_INVENTORY_KIND_NETWORK));
         $summary['host'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_HOST, (array) ($parsed['hosts'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_HOST));
+        $summary['vm'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_VM, (array) ($parsed['vms'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_VM));
 
         repo_esxi_inventory_touch_kind_freshness($db, $credentialId, $answeredKinds);
 

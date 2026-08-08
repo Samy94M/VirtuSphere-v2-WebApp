@@ -528,7 +528,7 @@ $migrations = [
         $db->query("CREATE TABLE IF NOT EXISTS deploy_esxi_inventory (
             id INT AUTO_INCREMENT PRIMARY KEY,
             credential_id INT NOT NULL,
-            kind ENUM('datacenter','datastore','network','host') NOT NULL,
+            kind ENUM('datacenter','datastore','network','host','vm') NOT NULL,
             name VARCHAR(191) NOT NULL,
             capacity_bytes BIGINT NULL,
             free_bytes BIGINT NULL,
@@ -996,6 +996,11 @@ SQL;
         // in on their next export callback or through the explicit adoption.
         migrator_add_column($db, 'deploy_vms', 'vm_moid', 'VARCHAR(64) NULL');
         migrator_add_column($db, 'deploy_vms', 'vm_instance_uuid', 'VARCHAR(64) NULL');
+    },
+    '0036_inventory_vm_kind' => function (mysqli $db): void {
+        // The collision gate needs the host's VM names and MOIDs in the same
+        // credential-scoped cache as the other read-only inventory kinds.
+        $db->query("ALTER TABLE deploy_esxi_inventory MODIFY kind ENUM('datacenter','datastore','network','host','vm') NOT NULL");
     },
 ];
 

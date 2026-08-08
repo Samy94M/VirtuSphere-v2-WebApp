@@ -90,6 +90,20 @@
       register: vs_hosts
       ignore_errors: true
 
+    # The deployment collision gate needs every occupied VM name and its MOID.
+    # vmware_vm_info is the read-only fleet query for that shape. Its `uuid` is
+    # the product UUID, not the instance UUID; the focused guest-info/export
+    # path remains the source of the durable instance identity.
+    - name: Gather virtual machines for collision detection
+      community.vmware.vmware_vm_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+      register: vs_vms
+      ignore_errors: true
+
     # Capability facts (ADR-0023 amendment 3). Read-only, like everything else
     # here. about_info answers what the endpoint IS (standalone host or vCenter,
     # product, licence); the vsphere schema answers what it is DOING (maintenance
@@ -139,6 +153,10 @@
                | map(attribute='value') | flatten | list }}
           hosts: >-
             {{ vs_hosts.ansible_facts | default({}) }}
+          # Raw pass-through: PHP keeps name/MOID/power state and counts any
+          # entry it cannot normalize, just like the network inventory.
+          vms: >-
+            {{ vs_vms.virtual_machines | default([]) }}
           # Raw pass-through, for the same reason as the portgroups above: the
           # field extraction lives in ansible_parse_inventory_capabilities().
           about: >-
@@ -175,6 +193,9 @@
               'hosts': {'failed': vs_hosts.failed | default(false),
                         'skipped': vs_hosts.skipped | default(false),
                         'msg': vs_hosts.msg | default('')},
+              'vms': {'failed': vs_vms.failed | default(false),
+                      'skipped': vs_vms.skipped | default(false),
+                      'msg': vs_vms.msg | default('')},
               'about': {'failed': vs_about.failed | default(false),
                         'skipped': vs_about.skipped | default(false),
                         'msg': vs_about.msg | default('')},

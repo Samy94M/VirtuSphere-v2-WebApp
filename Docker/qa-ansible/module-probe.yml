@@ -11,12 +11,12 @@
 #   2. die Argumente, die wir uebergeben, erfuellen seine argument_spec,
 #   3. jede Python-Bibliothek, die es importiert, ist installiert.
 #
-# Punkt 3 war der Anlass. Alle zehn Module importieren community.vmware's
+# Punkt 3 war der Anlass. Alle elf Module importieren community.vmware's
 # vmware_rest_client, der ohne `requests` mit "Failed to import the required
 # Python library (requests)" abbricht - und `requests` stand weder in den
 # dokumentierten Host-Voraussetzungen noch in der QA-Toolchain. Auf einem korrekt
 # nach Doku aufgesetzten Ansible-Host war damit der komplette ESXi-Teil des
-# Produkts funktionslos, und sechs der sieben Inventar-Abfragen laufen unter
+# Produkts funktionslos, und sieben der acht Inventar-Abfragen laufen unter
 # ignore_errors: die haetten "0 Datastores" gemeldet statt eines Fehlers.
 #
 # Ausgewertet wird von module-contract.sh, nicht hier: die Pruefung ist eine Liste
@@ -87,6 +87,11 @@
       community.vmware.vmware_guest_info:
         <<: *probe
         name: virtusphere-probe-vm
+      ignore_errors: true
+
+    - name: vmware_vm_info
+      community.vmware.vmware_vm_info:
+        <<: *probe
       ignore_errors: true
 
     - name: vmware_guest_powerstate

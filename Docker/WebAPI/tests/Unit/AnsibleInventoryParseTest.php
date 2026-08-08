@@ -122,6 +122,62 @@ final class AnsibleInventoryParseTest extends TestCase
     }
 
     /**
+     * Etappe 9 (decision 6): the pull learns which VMs the host actually holds,
+     * because the name-collision gate cannot ask "is there already a VM called
+     * X here" without it. `vmware_vm_info` reports `guest_name` and `moid`; it
+     * does NOT report the instance UUID (only the product `uuid`), so the MOID
+     * is the handle this cache compares against.
+     */
+    public function testParsesVirtualMachinesWithTheirHypervisorHandle(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => [],
+            'datastores' => [],
+            'networks_standard' => [],
+            'networks_dvs' => [],
+            'hosts' => [],
+            'vms' => [
+                ['guest_name' => 'WS-001', 'moid' => 'vm-24', 'uuid' => '4207072c-edd8-3bd5-64dc-903fd3a0db04', 'power_state' => 'poweredOff', 'folder' => '/ha-datacenter/vm'],
+                // Nameless entry: unusable for a name comparison, dropped, and
+                // counted as a normalization loss rather than vanishing.
+                ['guest_name' => '', 'moid' => 'vm-25'],
+                // Case duplicate: one row per name, the first wins, exactly as
+                // the network dedupe does. Two rows would break the unique key.
+                ['guest_name' => 'ws-001', 'moid' => 'vm-99'],
+                ['guest_name' => 'WS-002', 'moid' => 'vm-30', 'power_state' => 'poweredOn'],
+            ],
+        ]);
+
+        $parsed = ansible_parse_inventory_output($out);
+        self::assertSame(['WS-001', 'WS-002'], array_column($parsed['vms'], 'name'));
+        self::assertSame('vm-24', $parsed['vms'][0]['meta_json']['moid']);
+        self::assertSame('poweredOff', $parsed['vms'][0]['meta_json']['power_state']);
+        self::assertSame('vm-30', $parsed['vms'][1]['meta_json']['moid']);
+        self::assertSame(['raw' => 4, 'kept' => 3], $parsed['normalization']['vms']);
+    }
+
+    /**
+     * A VM without a MOID is still a name that occupies the host. The gate must
+     * see it (and, having nothing to match against, treat it as foreign), so it
+     * is kept with a null handle instead of dropped.
+     */
+    public function testAVirtualMachineWithoutAMoidIsKeptWithoutAHandle(): void
+    {
+        $out = $this->markerOutput([
+            'datacenters' => [],
+            'datastores' => [],
+            'networks_standard' => [],
+            'networks_dvs' => [],
+            'hosts' => [],
+            'vms' => [['guest_name' => 'WS-003']],
+        ]);
+
+        $parsed = ansible_parse_inventory_output($out);
+        self::assertSame('WS-003', $parsed['vms'][0]['name']);
+        self::assertNull($parsed['vms'][0]['meta_json']['moid']);
+    }
+
+    /**
      * The per-query report exists so an empty list stops being ambiguous. A
      * rejected query (the module refused the call) and a skipped one (the
      * playbook had nothing to ask about) both produce the same empty list as a

@@ -66,7 +66,7 @@ Wer prüft und wer anzeigt, entscheidet dabei nicht getrennt: `esxi_inventory_au
 
 ## Grüner Abruf, trotzdem eine 0
 
-Ein Abruf ist kein einzelner Vorgang, sondern mehrere getrennte Abfragen: Datacenter, Datastores, Standard-Portgruppen, Distributed-Portgruppen, Host-Daten. Nur die erste ist der Verbindungstest; bleibt eine der übrigen ohne Ergebnis, läuft der Abruf trotzdem sauber zu Ende. Die Karte zeigt für diese Art dann eine 0 und die Ampel bleibt grün, denn die Ampel beantwortet ausschließlich, ob der Abruf gelaufen ist. Eine 0 neben gefüllten Zahlen ist also kein Widerspruch, sondern der Hinweis, genau eine Abfrage nachzusehen.
+Ein Abruf ist kein einzelner Vorgang, sondern mehrere getrennte Abfragen: Datacenter, Datastores, Standard-Portgruppen, Distributed-Portgruppen, Host-Daten und VM-Namen samt MOID für den Kollisionsschutz. Nur die erste ist der Verbindungstest; bleibt eine der übrigen ohne Ergebnis, läuft der Abruf trotzdem sauber zu Ende. Die Karte zeigt für sichtbare Inventararten dann eine 0 und die Ampel bleibt grün, denn die Ampel beantwortet ausschließlich, ob der Abruf gelaufen ist. Eine 0 neben gefüllten Zahlen ist also kein Widerspruch, sondern der Hinweis, genau eine Abfrage nachzusehen.
 
 Woher die einzelnen Zahlen kommen und was eine 0 dort bedeutet:
 
@@ -80,8 +80,8 @@ Woher die einzelnen Zahlen kommen und was eine 0 dort bedeutet:
 Nachsehen muss man dafür nichts raten: **jeder Abruf protokolliert selbst, welche seiner Abfragen geantwortet hat.** Im Job-Log (Systemstatus, Auftrag der jeweiligen Karte) steht direkt unter den Zahlen eine Zeile `Inventory queries:`. Sie hat genau zwei Formen:
 
 ```
-Inventory queries: all 7 answered.
-Inventory queries: 6 of 7 answered, 1 without an answer - networks_standard rejected (one of the following is required: cluster_name, esxi_hostname)
+Inventory queries: all 8 answered.
+Inventory queries: 7 of 8 answered, 1 without an answer - networks_standard rejected (one of the following is required: cluster_name, esxi_hostname)
 ```
 
 Die erste Form heißt: alle Zahlen sind belastbar, eine 0 ist dann eine echte 0. Die zweite nennt jede stumme Abfrage beim Namen und in zwei Worten den Grund. Scheitern mehrere Abfragen an derselben Ursache, was bei einem falschen Zugangsdatum oder einer unpassenden Modulversion der Normalfall ist, stehen sie gemeinsam vor einer Meldung (`datastores, hosts rejected (...)`), statt dieselbe Meldung mehrfach zu wiederholen:
@@ -100,6 +100,7 @@ Die Namen in der Zeile sind die Abfragen, nicht die Kartenzahlen. Welche es gibt
 | `datastores` | die Zahl „Datastores" samt Kapazität und freiem Speicher |
 | `networks_standard`, `networks_dvs` | gemeinsam die Zahl „Portgruppen" und den VLAN-Katalog |
 | `hosts` | die Zahl „Hosts" samt RAM, Kernen und Uhrabweichung |
+| `vms` | den nicht als Kartenzahl angezeigten Namens-/MOID-Spiegel für Kollisionsprüfung und ausdrückliche Adoption |
 | `about`, `host_runtime` | die Hinweise zum Host (Produkt, Lizenz, HA-Cluster, Wartungsmodus), keine Kartenzahl |
 
 Eine Zeile ohne `Inventory queries:` stammt aus einem Abruf, der älter ist als dieser Bericht; sie behauptet bewusst nichts über Vollständigkeit.

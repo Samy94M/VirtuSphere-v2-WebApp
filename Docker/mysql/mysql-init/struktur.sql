@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS deploy_vlan (
 CREATE TABLE IF NOT EXISTS deploy_esxi_inventory (
     id INT AUTO_INCREMENT PRIMARY KEY,
     credential_id INT NOT NULL,
-    kind ENUM('datacenter','datastore','network','host') NOT NULL,
+    kind ENUM('datacenter','datastore','network','host','vm') NOT NULL,
     name VARCHAR(191) NOT NULL,
     capacity_bytes BIGINT NULL,
     free_bytes BIGINT NULL,
