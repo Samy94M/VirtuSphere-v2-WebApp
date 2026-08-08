@@ -15,6 +15,8 @@
     "vms": [
         {
             "vm_name": "vm-ü01ß",
+            "vm_moid": "vm-42",
+            "vm_instance_uuid": "50112233-4455-6677-8899-aabbccddeeff",
             "vm_ram": "8192",
             "vm_cpu": "4",
             "cpu_hotplug": 0,
@@ -74,6 +76,8 @@
             "vm_configurations": [
                 {
                     "vm_name": "vm-ü01ß",
+                    "vm_moid": "vm-42",
+                    "vm_instance_uuid": "50112233-4455-6677-8899-aabbccddeeff",
                     "memory": 8192,
                     "vcpus": 4,
                     "hotadd_cpu": false,
@@ -96,6 +100,8 @@
                 },
                 {
                     "vm_name": "on",
+                    "vm_moid": "",
+                    "vm_instance_uuid": "",
                     "memory": 4096,
                     "vcpus": 2,
                     "hotadd_cpu": true,
@@ -118,6 +124,7 @@
             "PowerCycleWaitSeconds": 7,
             "StartWaitSeconds": 123,
             "CreateSettleSeconds": 60,
+            "identity_unbound_allowed": true,
             "mission_configuration": {
                 "mission_name": "Bühne: \"Gold\" #7",
                 "mission_id": 42,

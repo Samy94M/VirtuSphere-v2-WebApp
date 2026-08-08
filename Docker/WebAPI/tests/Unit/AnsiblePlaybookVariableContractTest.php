@@ -22,11 +22,11 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
      * with the desktop client's serverlist format and as operator
      * documentation inside the artifact; retire with the desktop API at E3.
      */
-    private const VM_KEYS_WITHOUT_CONSUMER = ['packages', 'os'];
+    private const VM_KEYS_WITHOUT_CONSUMER = ['packages', 'os', 'vm_moid'];
 
     /** Jinja filters/keywords and Ansible builtins that never name our data. */
     private const NON_DATA_TOKENS = [
-        'default', 'int', 'bool', 'length', 'list', 'map', 'attribute',
+        'default', 'int', 'bool', 'length', 'list', 'map', 'attribute', 'lower',
         'first', 'selectattr', 'rejectattr', 'combine', 'dict2items', 'flatten',
         'to_json', 'to_nice_json', 'b64encode', 'trim', 'lookup',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',

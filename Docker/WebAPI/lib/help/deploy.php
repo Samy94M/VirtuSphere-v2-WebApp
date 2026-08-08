@@ -33,6 +33,9 @@ declare(strict_types=1);
                 'max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX,
                 'idle' => VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
             ])); ?></p>
+            <h3><?php echo h(__t('help.deploy_identity_heading')); ?></h3>
+            <p><?php echo h(__t('help.deploy_identity_p1')); ?></p>
+            <p><?php echo h(__t('help.deploy_identity_p2')); ?></p>
         </section>
 
         <section class="panel">

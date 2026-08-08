@@ -30,6 +30,40 @@
     vs_esxi_host: "{{ mission_configuration.autostart.esxi_host | default('', true) or esxi_hostname }}"
 
   tasks:
+    # This check intentionally comes before the host-wide defaults write. A
+    # namesake must not make a job mutate even level 1 of the host policy.
+    - name: Ziel-VMs fuer die Identitaetspruefung lesen
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+        name: "{{ item.vm_name }}"
+      delegate_to: localhost
+      loop: "{{ vm_configurations }}"
+      register: autostart_identity_results
+
+    - name: Name und Instance-UUID vor der Autostart-Aenderung validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (identity_unbound_allowed | default(false) | bool)
+            or
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before autostart update for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}.
+      loop: "{{ autostart_identity_results.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
     # Level 1. Only ever enables the host's autostart manager, never disables it:
     # one host can carry VMs of several missions, and switching the manager off
     # would silently stop their autostart too. Turning a mission off is done by

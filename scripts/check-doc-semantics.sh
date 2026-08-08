@@ -324,6 +324,30 @@ else
   fail no-ssot "$create_playbook oder $matrix_doc fehlt; die Hardware-Version ist nicht gegen die Support-Matrix pruefbar."
 fi
 
+# --- 16. vCenter bleibt Inventarquelle, nie Deploy-Ziel ------------------------
+#
+# Produktiv ist nur direktes Standalone-ESXi freigegeben. Ein vCenter liefert
+# bewusst nur das partielle Read-only-Inventar (erstes Datacenter, VM-Suche im
+# Root-Folder). Diese Supportgrenze darf weder zu "deploy yes" aufgeweicht noch
+# durch das Entfernen der Matrixzeile still aus dem Handbuch verschwinden.
+matrix_doc='docs/DEPLOYMENT.md'
+if [ ! -f "$matrix_doc" ]; then
+  fail no-ssot "$matrix_doc fehlt; die vCenter-Supportgrenze ist nicht pruefbar."
+else
+  vcenter_rows=$(grep -iE '^\|[^|]*vcenter[^|]*\|' "$matrix_doc" || true)
+  if [ -z "$vcenter_rows" ]; then
+    fail vcenter-deploy-boundary "$matrix_doc hat keine vCenter-Zeile in der Support-Matrix; deploy nein und die Read-only-Grenzen muessen ausdruecklich bleiben."
+  else
+    vcenter_contract_ok=1
+    case "$vcenter_rows" in *'deploy **no**, partial read-only inventory'*) ;; *) vcenter_contract_ok=0 ;; esac
+    case "$vcenter_rows" in *'first datacenter only'*) ;; *) vcenter_contract_ok=0 ;; esac
+    case "$vcenter_rows" in *'folder `/`'*) ;; *) vcenter_contract_ok=0 ;; esac
+    if [ "$vcenter_contract_ok" -ne 1 ]; then
+      fail vcenter-deploy-boundary "$matrix_doc muss vCenter als deploy **no**, partielles Read-only-Inventar mit first-datacenter- und folder-/-Grenze ausweisen."
+    fi
+  fi
+fi
+
 # --- 9. Terminologie: SCCM ist ausgemustert, aktiver Text sagt MECM -------------
 term_scope="$active_docs"
 for p in Powershell-MECM tests/powershell PSScriptAnalyzerSettings.psd1 \

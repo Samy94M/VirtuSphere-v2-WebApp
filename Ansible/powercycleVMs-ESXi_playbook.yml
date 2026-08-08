@@ -45,6 +45,26 @@
       loop: "{{ powercycle_targets }}"
       register: powercycle_initial
 
+    - name: Name und Instance-UUID vor dem Power-Cycle validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (identity_unbound_allowed | default(false) | bool)
+            or
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before power-cycle for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}.
+      loop: "{{ powercycle_initial.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
     # Eine Antwort ohne Power-State darf nicht wie "nichts zu tun" aussehen:
     # die Auswahl unten bliebe leer, der Export saehe VMs ohne MAC, und kein
     # Fehler haette je einen Namen gehabt. Der Wachhund laeuft VOR der Auswahl

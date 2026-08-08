@@ -108,7 +108,7 @@ function ansible_effective_datastore(array $mission, array $vm): string
     return $override !== '' ? $override : trim((string) ($mission['hypervisor_datastorage'] ?? ''));
 }
 
-function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = '', int $startWait = VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT): string
+function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = '', int $startWait = VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT, string $mode = VIRTUSPHERE_DEPLOY_MODE_FULL): string
 {
     // Mission-wide values: they feed the mission_configuration block below and
     // act as the fallback for every VM without an own override. The datacenter
@@ -120,6 +120,11 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
 
     foreach ($vms as $vm) {
         $out .= '  - vm_name: ' . ansible_yaml_string((string) ($vm['vm_name'] ?? '')) . "\n";
+        // Stage 9 identity: the name selects a candidate, the instance UUID
+        // proves which VM owns it. MOID is carried as the current inventory
+        // handle for diagnostics and refreshes, never as the durable identity.
+        $out .= '    vm_moid: ' . ansible_yaml_string(trim((string) ($vm['vm_moid'] ?? ''))) . "\n";
+        $out .= '    vm_instance_uuid: ' . ansible_yaml_string(trim((string) ($vm['vm_instance_uuid'] ?? ''))) . "\n";
         $out .= '    memory: ' . ansible_positive_int($vm['vm_ram'] ?? null, (int) VIRTUSPHERE_VM_DEFAULTS['ram_mb']) . "\n";
         $out .= '    vcpus: ' . ansible_positive_int($vm['vm_cpu'] ?? null, (int) VIRTUSPHERE_VM_DEFAULTS['cpu_count']) . "\n";
         // Hot-add options (Paket F), applied by the create playbook only. Absent
@@ -169,6 +174,11 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
     $out .= "\nPowerCycleWaitSeconds: " . $powerCycleWait . "\n";
     $out .= 'StartWaitSeconds: ' . $startWait . "\n";
     $out .= 'CreateSettleSeconds: ' . VIRTUSPHERE_CREATE_SETTLE_SECONDS . "\n";
+    // Only a full pipeline may pass an unbound VM after create: the first
+    // playbook in that same && sequence proved the name absent and created it.
+    // A standalone power/export/start/autostart run has no such proof and must
+    // require an identity previously learned by export or explicit adoption.
+    $out .= 'identity_unbound_allowed: ' . ($mode === VIRTUSPHERE_DEPLOY_MODE_FULL ? 'true' : 'false') . "\n";
 
     $missionAutostart = ansible_mission_autostart($mission);
     $out .= "\nmission_configuration:\n";

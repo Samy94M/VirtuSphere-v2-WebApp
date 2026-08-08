@@ -7,6 +7,39 @@
     - ./accounts.yml
 
   tasks:
+    - name: Ziel-VMs fuer die Identitaetspruefung lesen
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: false
+        datacenter: "{{ item.datacenter_name }}"
+        name: "{{ item.vm_name }}"
+      delegate_to: localhost
+      loop: "{{ vm_configurations }}"
+      register: start_identity_results
+
+    - name: Name und Instance-UUID vor dem Start validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (identity_unbound_allowed | default(false) | bool)
+            or
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before start for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}.
+      loop: "{{ start_identity_results.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
     # Sekunden, nie Minuten: der Wert kommt aus VIRTUSPHERE_START_WAIT_SECONDS_*
     # und muss unter dem SSH-Idle-Budget des Workers bleiben. Als `minutes:`
     # gelesen wurde daraus die Stille, die jeden full-/start-Deploy getötet hat.

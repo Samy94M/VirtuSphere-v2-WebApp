@@ -17,7 +17,7 @@ final class AnsibleMacExportContractTest extends TestCase
             $playbook
         );
         self::assertStringContainsString(
-            'content: \'{{ vm_info.results | to_nice_json }}\'',
+            'content: \'{{ vm_info_identity_results | to_nice_json }}\'',
             str_replace(chr(34), chr(39), $playbook)
         );
         self::assertMatchesRegularExpression(

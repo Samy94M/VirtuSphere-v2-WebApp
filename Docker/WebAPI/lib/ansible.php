@@ -81,7 +81,7 @@ function ansible_prepare_job_artifacts(
     );
     ansible_write_file(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
-        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'])
+        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'], (string) $payload['mode'])
     );
     ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId, $jobId);
 

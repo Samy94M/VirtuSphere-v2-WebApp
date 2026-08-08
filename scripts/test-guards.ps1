@@ -389,6 +389,16 @@ $cases = @(
         Edit-Fixture $fx 'Ansible/createVMs-ESXi_playbook.yml' 'version: 21' 'version: 22'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-unknown\]'
     } }
+    @{ Name = 'doc-semantics.vcenter-deploy-boundary'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/DEPLOYMENT.md' '| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory |' '| vCenter (`api_type = VirtualCenter`) | deploy yes |'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.vcenter-deploy-boundary\]'
+    } }
+    @{ Name = 'doc-semantics.vcenter-deploy-zero-match'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/DEPLOYMENT.md' '| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory |' '| Management endpoint | deploy **no**, partial read-only inventory |'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.vcenter-deploy-boundary\]'
+    } }
 
     @{ Name = 'lang-audit.green'; Body = {
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci')) @(0)
