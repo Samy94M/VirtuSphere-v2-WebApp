@@ -1069,7 +1069,8 @@ label > .compound-field {
 }
 
 .status-time,
-.status-cadence {
+.status-cadence,
+.status-trust {
     display: block;
     color: var(--muted);
     font-size: 12px;

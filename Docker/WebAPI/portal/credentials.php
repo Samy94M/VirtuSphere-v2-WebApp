@@ -336,9 +336,9 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>
                             <small class="status-cadence"><?php echo h(credential_cadence_esxi($inventoryIntervalHours, $esxiState, $ansibleHostSelected)); ?></small>
                             <?php if (credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_STRICT) { ?>
-                                <small class="status-cadence"><?php echo portal_badge('info', __t('credentials.trust_strict')); ?></small>
+                                <small class="status-trust"><?php echo portal_badge('info', __t('credentials.trust_strict')); ?></small>
                             <?php } else { ?>
-                                <small class="status-cadence"><?php echo portal_badge('warning', __t('credentials.trust_legacy')); ?></small>
+                                <small class="status-trust"><?php echo portal_badge('warning', __t('credentials.trust_legacy')); ?></small>
                             <?php } ?>
                         <?php } elseif ($isAnsible) {
                             $pfState = $ansiblePreflightStates[$rowId] ?? null;
