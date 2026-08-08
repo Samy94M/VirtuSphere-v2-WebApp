@@ -25,6 +25,21 @@ function mac_import_error(string $code, ?int $vmId, string $vmName, string $vlan
     return $error;
 }
 
+/**
+ * Identity fields of a vmware_guest_info result (Entscheidung 6). Additive on
+ * the wire: both keys are optional, and an absent field comes back as '' so a
+ * pre-identity playbook result keeps importing without touching what is stored.
+ *
+ * @return array{moid:string, instance_uuid:string}
+ */
+function mac_import_extract_identity(array $instance): array
+{
+    return [
+        'moid' => mac_import_bounded_identifier(trim((string) ($instance['moid'] ?? '')), 64),
+        'instance_uuid' => mac_import_bounded_identifier(trim((string) ($instance['instance_uuid'] ?? '')), 64),
+    ];
+}
+
 /** @return array<string,mixed> */
 function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, array $unscopedErrors): array
 {

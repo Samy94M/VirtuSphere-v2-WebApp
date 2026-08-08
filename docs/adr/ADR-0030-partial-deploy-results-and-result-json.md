@@ -69,9 +69,13 @@ Vertrag in `deploy_jobs.result_json`, nie über Exitcodes oder stdout:
   dadurch nie fälschlich scheitern.
 - **Fehlercodes sind eine feste Liste** (`interface_not_found`, `duplicate_mac`,
   `invalid_mac`, `ambiguous_vlan`, `vm_not_in_mission`, `vm_not_in_job_scope`,
-  `missing_name`, `missing_nic_data`, `esxi_query_failed`, `duplicate_result`)
-  plus längenbegrenzte technische Identifikatoren. Keine Credentials, keine
-  Rohantworten, keine freien Remote-Fehlertexte.
+  `missing_name`, `missing_nic_data`, `esxi_query_failed`, `duplicate_result`,
+  `identity_mismatch`) plus längenbegrenzte technische Identifikatoren. Keine
+  Credentials, keine Rohantworten, keine freien Remote-Fehlertexte.
+  `identity_mismatch` gehört zur VM-Identität: das Ergebnis nennt
+  denselben VM-Namen mit einer anderen Instance-UUID als der gespeicherten,
+  spricht also über eine fremde VM. Diese VM wird komplett verworfen, nicht nur
+  ihre Identitätsfelder.
 - `counts.expected_vms` ist die Anzahl der VMs im **Job-Scope** (Payload-Auswahl
   bzw. ganze Mission), nicht die Anzahl der Inputzeilen: nur so deckt die Bilanz
   auch Zeilen, die der Export gar nicht liefern konnte.

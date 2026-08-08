@@ -500,6 +500,171 @@ final class MacImportCallbackTest extends TestCase
         self::assertNull($decoded3['correlation_id']);
     }
 
+    /**
+     * Etappe 9 (Entscheidung 6): the export result has always carried the
+     * hypervisor identity (instance.moid, instance.instance_uuid); the callback
+     * now persists it so every later mutation can prove it is talking about the
+     * same VM and not a foreign one that merely shares the name.
+     */
+    public function testCallbackPersistsTheVmIdentityFromTheInstance(): void
+    {
+        $missionId = $this->insertMission('identity');
+        $vmId = $this->insertVm($missionId, 'IDENT');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('IDENT'),
+                'moid' => 'vm-4242',
+                'instance_uuid' => $this->uuid('ident'),
+                'hw_eth0' => ['macaddress' => $this->mac('id0'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        self::assertSame('success', json_decode($body, true, 512, JSON_THROW_ON_ERROR)['outcome']);
+        self::assertSame(['vm-4242', $this->uuid('ident')], $this->vmIdentity($vmId));
+    }
+
+    /**
+     * A stored instance UUID is the VM's identity; a callback naming the same
+     * VM name with a DIFFERENT instance UUID talks about a foreign VM. Nothing
+     * of that row may be written - not the MACs, not the state, and least of
+     * all the foreign identity itself.
+     */
+    public function testAnIdentityMismatchRejectsTheVmWithoutAnyWrite(): void
+    {
+        $missionId = $this->insertMission('mismatch');
+        $vmId = $this->insertVm($missionId, 'FOREIGN');
+        $this->insertInterface($vmId, 'WDS');
+        $this->setVmIdentity($vmId, 'vm-1', $this->uuid('ours'));
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('FOREIGN'),
+                'moid' => 'vm-9',
+                'instance_uuid' => $this->uuid('theirs'),
+                'hw_eth0' => ['macaddress' => $this->mac('fo0'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('failed', $response['outcome']);
+        $vmResults = array_column($response['vm_results'], null, 'vm_name');
+        self::assertSame(['identity_mismatch'], $vmResults[$this->vmName('FOREIGN')]['error_codes']);
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'), 'a foreign VM result must not write a MAC');
+        self::assertSame(['ready', 'not_ready', 0], $this->vmState($vmId));
+        self::assertSame(['vm-1', $this->uuid('ours')], $this->vmIdentity($vmId), 'the stored identity must survive');
+        self::assertSame([$vmId], $this->jobResult($jobId)['failed_vm_ids']);
+    }
+
+    /**
+     * The instance UUID is the identity, the MOID is the host's current handle:
+     * an unregister/re-register keeps the former and changes the latter, so a
+     * matching UUID refreshes the MOID instead of arguing with it.
+     */
+    public function testAMatchingIdentityRefreshesTheMoid(): void
+    {
+        $missionId = $this->insertMission('refresh');
+        $vmId = $this->insertVm($missionId, 'REFRESH');
+        $this->insertInterface($vmId, 'WDS');
+        $this->setVmIdentity($vmId, 'vm-old', $this->uuid('same'));
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('REFRESH'),
+                'moid' => 'vm-new',
+                'instance_uuid' => $this->uuid('same'),
+                'hw_eth0' => ['macaddress' => $this->mac('rf0'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        self::assertSame('success', json_decode($body, true, 512, JSON_THROW_ON_ERROR)['outcome']);
+        self::assertSame(['vm-new', $this->uuid('same')], $this->vmIdentity($vmId));
+        self::assertSame(virtusphere_normalize_mac($this->mac('rf0')), $this->interfaceMac($vmId, 'WDS'));
+    }
+
+    /**
+     * Identity fields are additive on the wire: a result without them (an older
+     * playbook copy still deployed on an Ansible host) imports exactly as
+     * before and neither erases a stored identity nor invents one.
+     */
+    public function testACallbackWithoutIdentityFieldsKeepsTheStoredIdentity(): void
+    {
+        $missionId = $this->insertMission('legacywire');
+        $keeperVm = $this->insertVm($missionId, 'KEEPER');
+        $blankVm = $this->insertVm($missionId, 'BLANK');
+        $this->insertInterface($keeperVm, 'WDS');
+        $this->insertInterface($blankVm, 'WDS');
+        $this->setVmIdentity($keeperVm, 'vm-7', $this->uuid('keeper'));
+        $jobId = $this->insertJob($missionId, [$keeperVm, $blankVm]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [
+                ['instance' => [
+                    'hw_name' => $this->vmName('KEEPER'),
+                    'hw_eth0' => ['macaddress' => $this->mac('ke0'), 'summary' => 'WDS'],
+                ]],
+                ['instance' => [
+                    'hw_name' => $this->vmName('BLANK'),
+                    'hw_eth0' => ['macaddress' => $this->mac('bl0'), 'summary' => 'WDS'],
+                ]],
+            ],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        self::assertSame('success', json_decode($body, true, 512, JSON_THROW_ON_ERROR)['outcome']);
+        self::assertSame(['vm-7', $this->uuid('keeper')], $this->vmIdentity($keeperVm));
+        self::assertSame([null, null], $this->vmIdentity($blankVm));
+        self::assertSame(virtusphere_normalize_mac($this->mac('ke0')), $this->interfaceMac($keeperVm, 'WDS'));
+    }
+
+    private function uuid(string $salt): string
+    {
+        $hex = hash('sha256', $this->prefix . '_uuid_' . $salt);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12)
+        );
+    }
+
+    /** @return array{0:?string,1:?string} */
+    private function vmIdentity(int $vmId): array
+    {
+        $stmt = $this->db->prepare('SELECT vm_moid, vm_instance_uuid FROM deploy_vms WHERE id = ?');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        self::assertIsArray($row);
+
+        return [$row['vm_moid'] ?? null, $row['vm_instance_uuid'] ?? null];
+    }
+
+    private function setVmIdentity(int $vmId, string $moid, string $instanceUuid): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_vms SET vm_moid = ?, vm_instance_uuid = ? WHERE id = ?');
+        $stmt->bind_param('ssi', $moid, $instanceUuid, $vmId);
+        $stmt->execute();
+    }
+
     /** @return array{0:int,1:string} */
     private function post(array $payload): array
     {

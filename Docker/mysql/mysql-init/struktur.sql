@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     vm_notes TEXT,
+    -- Hypervisor identity (Entscheidung 6): the instance UUID is who the VM is,
+    -- the MOID is the host's current handle for it (re-register changes only the
+    -- MOID). Written by the MAC-import callback and the explicit adoption action;
+    -- NULL means "never seen on a host", never "matches anything".
+    vm_moid VARCHAR(64) NULL,
+    vm_instance_uuid VARCHAR(64) NULL,
     UNIQUE KEY mission_vm_unique (mission_id, vm_name),
     CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

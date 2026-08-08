@@ -58,7 +58,7 @@ final class MacImportTransactionContractTest extends TestCase
         }
 
         $planner = $this->source('lib/mac_import.php');
-        foreach (['interface_not_found', 'duplicate_mac', 'invalid_mac', 'ambiguous_vlan', 'vm_not_in_mission', 'missing_name', 'missing_nic_data', 'esxi_query_failed'] as $code) {
+        foreach (['interface_not_found', 'duplicate_mac', 'invalid_mac', 'ambiguous_vlan', 'vm_not_in_mission', 'missing_name', 'missing_nic_data', 'esxi_query_failed', 'identity_mismatch'] as $code) {
             self::assertStringContainsString("'{$code}'", $planner, $code);
         }
         self::assertStringContainsString('mac_import_bounded_identifier', $planner);

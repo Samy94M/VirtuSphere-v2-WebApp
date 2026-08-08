@@ -19,6 +19,7 @@ const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NAME = 'missing_name';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA = 'missing_nic_data';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_ESXI_QUERY_FAILED = 'esxi_query_failed';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_RESULT = 'duplicate_result';
+const VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH = 'identity_mismatch';
 require_once __DIR__ . '/mac_import_result.php';
 
 /** @return array{0:int,1:?int,2:array<int,mixed>,3:bool} */
@@ -210,6 +211,17 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
             continue;
         }
 
+        // Entscheidung 6: a stored instance UUID is the VM's identity. A result
+        // naming the same vm_name with a different UUID talks about a foreign
+        // VM, so nothing of that row may be written - least of all its identity.
+        $identity = mac_import_extract_identity($instance);
+        $storedUuid = trim((string) ($vm['vm_instance_uuid'] ?? ''));
+        if ($identity['instance_uuid'] !== '' && $storedUuid !== '' && strcasecmp($storedUuid, $identity['instance_uuid']) !== 0) {
+            mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH);
+            continue;
+        }
+        $vmPlans[$vmId]['identity'] = $identity;
+
         $nicCount = 0;
         foreach ($instance as $key => $value) {
             if (!str_starts_with((string) $key, 'hw_eth')) {
@@ -285,7 +297,7 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
 /** @return array{0:array<int,array<string,mixed>>,1:array<string,array<string,mixed>>} */
 function mac_import_mission_vms(mysqli $db, int $missionId): array
 {
-    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated FROM deploy_vms WHERE mission_id = ? ORDER BY id FOR UPDATE');
+    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated, vm_instance_uuid FROM deploy_vms WHERE mission_id = ? ORDER BY id FOR UPDATE');
     $stmt->bind_param('i', $missionId);
     $stmt->execute();
     $byId = [];
@@ -302,7 +314,7 @@ function mac_import_mission_vms(mysqli $db, int $missionId): array
 /** @return array<string,mixed>|null */
 function mac_import_mission_vm_by_name(mysqli $db, int $missionId, string $vmName): ?array
 {
-    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated FROM deploy_vms WHERE mission_id = ? AND vm_name = ? LIMIT 1');
+    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated, vm_instance_uuid FROM deploy_vms WHERE mission_id = ? AND vm_name = ? LIMIT 1');
     $stmt->bind_param('is', $missionId, $vmName);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -358,7 +370,7 @@ function mac_import_validate_duplicate_macs(mysqli $db, array &$vmPlans): void
 function mac_import_ensure_vm_plan(array &$vmPlans, array $vm): void
 {
     $vmId = (int) $vm['id'];
-    $vmPlans[$vmId] ??= ['vm' => $vm, 'input_indexes' => [], 'updates' => [], 'errors' => []];
+    $vmPlans[$vmId] ??= ['vm' => $vm, 'input_indexes' => [], 'updates' => [], 'errors' => [], 'identity' => null];
 }
 
 function mac_import_add_vm_error(array &$vmPlan, string $code, string $vlan = '', string $mac = '', ?int $otherVmId = null): void

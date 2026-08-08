@@ -117,6 +117,10 @@ try {
 
     $updateInterface = $connection->prepare('UPDATE deploy_interfaces SET mac = ? WHERE id = ? AND vm_id = ?');
     $updateVm = $connection->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, updated_at = NOW() WHERE id = ?');
+    // Entscheidung 6: persist the hypervisor identity the export proved. NULLIF
+    // keeps the stored value when a pre-identity playbook result omits a field;
+    // a mismatching UUID never reaches this write (the plan fails that VM).
+    $updateIdentity = $connection->prepare("UPDATE deploy_vms SET vm_moid = COALESCE(NULLIF(?, ''), vm_moid), vm_instance_uuid = COALESCE(NULLIF(?, ''), vm_instance_uuid) WHERE id = ?");
     $insertStatusEvent = $connection->prepare('INSERT INTO deploy_vm_status_events (vm_id, lifecycle_state, mecm_sync_state, legacy_status, note) VALUES (?, ?, ?, ?, ?)');
     $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
     $mecmState = VIRTUSPHERE_MECM_SYNC_PENDING;
@@ -130,6 +134,12 @@ try {
             $interfaceId = (int) $update['id'];
             $updateInterface->bind_param('sii', $mac, $interfaceId, $vmId);
             $updateInterface->execute();
+        }
+
+        $identity = is_array($vmPlan['identity'] ?? null) ? $vmPlan['identity'] : null;
+        if ($identity !== null && ($identity['moid'] !== '' || $identity['instance_uuid'] !== '')) {
+            $updateIdentity->bind_param('ssi', $identity['moid'], $identity['instance_uuid'], $vmId);
+            $updateIdentity->execute();
         }
 
         $vm = $vmPlan['vm'];

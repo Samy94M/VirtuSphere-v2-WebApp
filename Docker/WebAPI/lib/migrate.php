@@ -987,6 +987,16 @@ SQL;
         $db->query('DROP TABLE deploy_tokens');
         migrator_out('0034: dropped deploy_tokens (' . $total . ' row(s), ' . $active . ' non-expired)');
     },
+    '0035_vm_identity' => function (mysqli $db): void {
+        // Hypervisor identity (Entscheidung 6): instance UUID = who the VM is,
+        // MOID = the host's current handle (re-register changes only the MOID).
+        // Nullable with no backfill on purpose - existing rows have never proven
+        // which host VM they are, and a guessed identity presented as a fact is
+        // exactly what the same-name conflict gate exists to prevent. They fill
+        // in on their next export callback or through the explicit adoption.
+        migrator_add_column($db, 'deploy_vms', 'vm_moid', 'VARCHAR(64) NULL');
+        migrator_add_column($db, 'deploy_vms', 'vm_instance_uuid', 'VARCHAR(64) NULL');
+    },
 ];
 
 try {
