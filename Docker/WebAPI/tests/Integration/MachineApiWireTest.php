@@ -58,6 +58,92 @@ final class MachineApiWireTest extends TestCase
         }
     }
 
+    /** ADR-0019/E3: the mission already rides on getDeviceList. */
+    public function testRetiredMissionNameActionUsesTheUnknownActionEnvelope(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->get('/mecm-api.php?action=getMissionName&mission_id=1');
+
+        self::assertSame(400, $status);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame(['message' => 'Invalid action specified'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * ADR-0019/E3: getDeviceInfos is a read-only bootstrap read with an exact,
+     * deliberately small payload. Lifecycle progress belongs to the explicit
+     * client-ready acknowledgement below, never to a GET.
+     */
+    public function testDeviceInfosIsMinimalAndDoesNotAdvanceLifecycle(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'device-infos');
+
+        try {
+            [$status, $headers, $body] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=' . urlencode($fixture['mac']));
+
+            self::assertSame(200, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($payload);
+            self::assertSame(
+                ['interfaces', 'mission_id', 'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
+                $this->sortedKeys($payload)
+            );
+            self::assertSame([
+                'dns1', 'dns2', 'gateway', 'ip', 'mac', 'mode', 'subnet', 'type', 'vlan',
+            ], $this->sortedKeys($payload['interfaces'][0]));
+            self::assertSame($fixture['mac'], $payload['interfaces'][0]['mac']);
+
+            $state = $this->vmState($db, $fixture['vm_id']);
+            self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYED, $state['lifecycle_state']);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $state['mecm_sync_state']);
+            self::assertSame(0, $this->statusEventCount($db, $fixture['vm_id']));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * The new POST is the sole 5/5 writer. Retrying after an uncertain network
+     * result is safe and must not produce another status-history event.
+     */
+    public function testClientReadyAcknowledgementIsPostOnlyAndIdempotent(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'client-ready');
+
+        try {
+            [$status, , $body] = $this->get('/mecm_client_ack.php');
+            self::assertSame(405, $status, $body);
+            self::assertSame(['error' => 'Method not allowed'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+            [$status, $headers, $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac']]);
+            self::assertSame(200, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            self::assertSame(
+                ['success' => true, 'vm_id' => $fixture['vm_id']],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+
+            $state = $this->vmState($db, $fixture['vm_id']);
+            self::assertSame(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, $state['lifecycle_state']);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_REGISTERED, $state['mecm_sync_state']);
+            self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
+
+            [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac']]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['success' => true, 'vm_id' => $fixture['vm_id'], 'deduplicated' => true],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+            self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
     public function testWrongMethodIs405ButUnknownActionIs400(): void
     {
         // db_importMAC.php and mecm_updateid.php must keep the two cases
@@ -188,5 +274,81 @@ final class MachineApiWireTest extends TestCase
         }
 
         return [$status, implode("\n", $headers), $body];
+    }
+
+    /** @return array{mission_id:int,vm_id:int,mac:string} */
+    private function createClientFixture(mysqli $db, string $label): array
+    {
+        $suffix = bin2hex(random_bytes(5));
+        $missionName = 'phpunit-e3-' . $label . '-' . $suffix;
+        $stmt = $db->prepare('INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)');
+        $active = 'active';
+        $stmt->bind_param('ss', $missionName, $active);
+        $stmt->execute();
+        $missionId = (int) $db->insert_id;
+
+        $vmName = 'E3-' . strtoupper(substr($suffix, 0, 8));
+        $hostname = strtolower($vmName);
+        $domain = 'example.test';
+        $os = 'Windows 11';
+        $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
+        $mecm = VIRTUSPHERE_MECM_SYNC_PENDING;
+        $status = VIRTUSPHERE_STATUS_DEPLOYED;
+        $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_domain, vm_os, lifecycle_state, mecm_sync_state, vm_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssssss', $missionId, $vmName, $hostname, $domain, $os, $lifecycle, $mecm, $status);
+        $stmt->execute();
+        $vmId = (int) $db->insert_id;
+
+        $mac = '02:' . strtoupper(implode(':', str_split(substr($suffix, 0, 10), 2)));
+        $ip = '192.0.2.10';
+        $subnet = '255.255.255.0';
+        $gateway = '192.0.2.1';
+        $dns1 = '192.0.2.53';
+        $dns2 = '';
+        $vlan = 'E3';
+        $mode = 'static';
+        $type = 'vmxnet3';
+        $stmt = $db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, dns1, dns2, vlan, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssssssss', $vmId, $ip, $subnet, $gateway, $dns1, $dns2, $vlan, $mac, $mode, $type);
+        $stmt->execute();
+
+        return ['mission_id' => $missionId, 'vm_id' => $vmId, 'mac' => $mac];
+    }
+
+    /** @return array{lifecycle_state:string,mecm_sync_state:string} */
+    private function vmState(mysqli $db, int $vmId): array
+    {
+        $stmt = $db->prepare('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ? LIMIT 1');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        $state = $stmt->get_result()->fetch_assoc();
+        self::assertIsArray($state);
+
+        return $state;
+    }
+
+    private function statusEventCount(mysqli $db, int $vmId): int
+    {
+        $stmt = $db->prepare('SELECT COUNT(*) AS amount FROM deploy_vm_status_events WHERE vm_id = ?');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+
+        return (int) $stmt->get_result()->fetch_assoc()['amount'];
+    }
+
+    private function deleteClientFixture(mysqli $db, int $missionId): void
+    {
+        $stmt = $db->prepare('DELETE FROM deploy_missions WHERE id = ?');
+        $stmt->bind_param('i', $missionId);
+        $stmt->execute();
+    }
+
+    /** @return list<string> */
+    private function sortedKeys(array $value): array
+    {
+        $keys = array_keys($value);
+        sort($keys);
+
+        return $keys;
     }
 }

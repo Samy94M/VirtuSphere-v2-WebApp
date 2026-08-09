@@ -20,7 +20,7 @@ Entscheidungen: ADR-0012 (Mechanik), ADR-0027 (Schalter, Upload, HSTS).
    `https://<host>:<WEB_HTTPS_PORT>`.
 5. Erst danach "Umleitung aktivieren"; HTTP-Portalaufrufe werden nun mit
    301/308 auf HTTPS geleitet. Die Maschinen-Schnittstelle (MECM,
-   PowerShell, `db_importMAC.php`, `mecm_report.php`) und `health.php`
+   PowerShell, `db_importMAC.php`, `mecm_report.php`, `mecm_client_ack.php`) und `health.php`
    bleiben grundsätzlich auf HTTP erreichbar.
 6. HSTS erst aktivieren, wenn HTTPS dauerhaft bleiben soll: Browser merken
    sich die Vorgabe 180 Tage, auch über ein späteres Abschalten hinaus.
@@ -74,6 +74,11 @@ Watcher-Durchlauf; kein Container-Neustart nötig.
 Dieser Abschnitt beschrieb die Maschinenkette lange als „Ausblick nach E3" und
 schickte den Administrator dabei zum falschen Registry-Wert. Beides war unwahr:
 die Kette kann TLS, und die Umstellung ist konfigurierbar.
+
+HTTPS bleibt optional. Der Standard `http` einschließlich Client-Ready-ACK
+funktioniert ohne CA, Zertifikat oder Thumbprint; der Portal-Redirect erfasst die
+Maschinenendpunkte nicht. Die folgenden Schritte gelten nur für den bewussten
+Wechsel auf HTTPS.
 
 **Was schon vorher da war:** `Get-VsConfig` liest den Registry-Wert `Scheme`, der
 Installer bietet `-Scheme https`, und die Client-Skripte haben mit

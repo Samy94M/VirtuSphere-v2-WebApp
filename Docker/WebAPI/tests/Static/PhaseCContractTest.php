@@ -26,7 +26,7 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('Package payload absent; leaving deploy_packages untouched.', $packages);
         self::assertStringContainsString('TaskSequence payload absent; leaving deploy_os untouched.', $packages);
 
-        foreach (['mecm-api.php', 'mecm_updateid.php', 'mecm_packages.php', 'mecm_report.php', 'db_importMAC.php'] as $file) {
+        foreach (['mecm-api.php', 'mecm_updateid.php', 'mecm_packages.php', 'mecm_report.php', 'mecm_client_ack.php', 'db_importMAC.php'] as $file) {
             $source = $this->source($file);
             self::assertStringContainsString('machine_api_log_warning', $source, $file);
             self::assertStringContainsString("'Interner Serverfehler'", $source, $file);
@@ -35,8 +35,8 @@ final class PhaseCContractTest extends TestCase
 
     public function testReportChannelStaysDisplayOnlyAndTokenIsHashed(): void
     {
-        // ADR-0018: the report channel never mutates VM lifecycle state - that
-        // stays exclusive to the legacy read surface (mecm-api.php).
+        // ADR-0018: the report channel never mutates VM lifecycle state. The
+        // separate explicit ACK owns that write (ADR-0019/E3).
         $report = $this->source('mecm_report.php');
         self::assertStringNotContainsString('repo_set_vm_state', $report);
         self::assertStringContainsString('machine_api_report_token_ok', $report);
@@ -50,6 +50,13 @@ final class PhaseCContractTest extends TestCase
         // reportRun is display-only telemetry too: it records run reports, never
         // VM lifecycle state.
         self::assertStringContainsString('repo_record_run_report', $report);
+
+        $read = $this->source('mecm-api.php');
+        self::assertStringNotContainsString('repo_set_vm_state', $read, 'getDeviceInfos must remain a side-effect-free GET');
+        self::assertStringNotContainsString('getMissionName', $read, 'the redundant E3 action must stay retired');
+        $ack = $this->source('mecm_client_ack.php');
+        self::assertStringContainsString('repo_set_vm_state_forward', $ack);
+        self::assertStringContainsString("\$_SERVER['REQUEST_METHOD'] !== 'POST'", $ack);
 
         $machineApi = $this->source('lib/machine_api.php');
         self::assertStringContainsString('hash_equals', $machineApi);
@@ -102,6 +109,7 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('virtusphere_normalize_mac', $this->source('lib/machine_api.php'));
         self::assertStringContainsString('virtusphere_normalize_mac', $this->source('mecm-api.php'));
         self::assertStringContainsString('virtusphere_normalize_mac', $this->source('mecm_report.php'));
+        self::assertStringContainsString('virtusphere_normalize_mac', $this->source('mecm_client_ack.php'));
     }
 
     public function testPackageSyncRetiresInsteadOfDeleting(): void

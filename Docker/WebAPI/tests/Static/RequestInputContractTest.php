@@ -30,7 +30,7 @@ final class RequestInputContractTest extends TestCase
      */
     private const SCANNED_DIRS = ['portal', 'lib'];
     private const SCANNED_ROOT_FILES = [
-        'mecm-api.php', 'mecm_report.php', 'mecm_updateid.php', 'db_importMAC.php',
+        'mecm-api.php', 'mecm_report.php', 'mecm_client_ack.php', 'mecm_updateid.php', 'db_importMAC.php',
         'mecm_packages.php',
     ];
 

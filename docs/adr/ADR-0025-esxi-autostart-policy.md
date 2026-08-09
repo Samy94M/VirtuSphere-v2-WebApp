@@ -54,3 +54,20 @@ Either way the facts are written to the job log first, fresh or not, so the run 
 - The `php` container mounts `Ansible/` read-only outside the webroot, so the playbook contract tests read the file the deploy would upload instead of skipping. A skipped test has silently stopped guarding anything.
 - `lib/ansible.php` had grown to carry two unrelated jobs and passed its size budget. The inventory transport and its parsers moved to `lib/ansible_inventory.php` (ADR-0006, split by domain).
 - Verified against a productive host on rollout, like every ESXi field path in this project.
+
+## Amendment (2026-08-09): Host bleibt eine Auftragswahl; ausgeschaltet ist No-op
+
+Die frühere Vorbedingung „eine Mission = ein Host“ wird nicht technisch als
+Mission-Host-Bindung eingeführt. Der Host bleibt bewusst bei jedem Auftrag frei
+wählbar. Damit wird akzeptiert, dass hostweite `system_defaults` bei mehreren
+Autostart-aktivierten Missionen vom zuletzt auf diesem Host ausgeführten
+Autostart-Auftrag bestimmt werden.
+
+Die sichere Leersemanik bleibt davon getrennt: Ist Autostart in der Mission
+nicht gesetzt oder ausgeschaltet, hängt ein normaler `full`-Rollout das
+Autostart-Playbook nicht an und ändert **gar nichts** an den hostweiten
+Autostart-Standards. Nur der ausdrücklich gewählte Modus `autostart` läuft bei
+ausgeschalteter Mission als Rückbauweg; er entfernt die ausgewählten
+Missions-VMs aus der Autostartliste (`start_action: none`), schreibt aber weiter
+niemals `system_defaults.enabled: false` und schaltet damit keine fremde Mission
+ab. Diese Unterscheidung ist durch `AutostartPolicyTest` festgeschrieben.

@@ -41,8 +41,8 @@ ADR-0015).
    als PHP-Konstanten, keine DB-ENUMs. Zeitstempel = Server-`NOW()`.
 3. **Portal**: Statusseite `portal/system_status.php` (alle angemeldeten
    Nutzer, read-only) mit Staleness-Ampel je Quelle; Dashboard-Kachel mit
-   Worst-Status; Client-Phasen-Panel in der VM-Detailansicht. Der
-   Lifecycle-Seiteneffekt von `getDeviceInfos` bleibt unangetastet;
+   Worst-Status; Client-Phasen-Panel in der VM-Detailansicht. Der damalige
+   Lifecycle-Seiteneffekt von `getDeviceInfos` blieb zunächst unangetastet;
    `mecm_report.php` ruft nie `repo_set_vm_state` (statisch getestet).
 4. **Wartungs-Worker** `lib/maintenance_worker.php` als zweiter Loop-Container
    (`maintenance-worker`, Muster `deploy-worker`): aktive
@@ -123,6 +123,14 @@ Diagnose- oder Reparaturaktionen wie eine einmalige TCP-Prüfung, einen
 ESXi-Inventarauftrag oder eine bestätigte VLAN-Neuzuweisung auslösen.
 `mecm_report.php` bleibt trotzdem strikt display-only und ruft weiterhin nie
 `repo_set_vm_state()` auf.
+
+## Amendment (2026-08-09): expliziter Client-Ready-ACK bleibt außerhalb
+
+ADR-0019/E3 macht `getDeviceInfos` seiteneffektfrei. Der verbindliche
+Client-Ready-POST lebt in `mecm_client_ack.php`, nicht als weitere Report-Action:
+er schreibt den Lifecycle und gehört deshalb ausdrücklich nicht in diesen
+anzeigenden Kanal. `reportPhase` bleibt best effort; nur der getrennte ACK ist
+für `client_getinfo` erfolgskritisch und idempotent wiederholbar.
 
 Die bisher implizite Eingabe „leerer MECM-Host = automatisch" wird im Formular
 durch `probe_mode=auto|manual` sichtbar gemacht. Aus Kompatibilitätsgründen bleibt

@@ -10,7 +10,7 @@ virtusphere_error_response_mode('json');
 
 require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
-require_once __DIR__ . '/lib/repo/status_events.php';
+require_once __DIR__ . '/lib/status.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -30,6 +30,26 @@ function machine_vm_interfaces(mysqli $db, int $vmId, bool $onlyWithMac): array
         ? "SELECT * FROM deploy_interfaces WHERE mac != '' AND mac IS NOT NULL AND vm_id = ? ORDER BY id"
         : 'SELECT * FROM deploy_interfaces WHERE vm_id = ? ORDER BY id';
     $stmt = $db->prepare($sql);
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+/**
+ * The PXE client contract, not a database-row export (ADR-0019/E3).
+ * Keep this projection in the order the client consumes it and never replace
+ * it with SELECT *: ids, notes and lifecycle/provenance fields do not belong on
+ * every deployed Windows machine.
+ */
+function machine_client_interfaces(mysqli $db, int $vmId): array
+{
+    $stmt = $db->prepare(
+        'SELECT vlan, mac, mode, ip, subnet, gateway, dns1, dns2, type
+         FROM deploy_interfaces
+         WHERE vm_id = ?
+         ORDER BY id'
+    );
     $stmt->bind_param('i', $vmId);
     $stmt->execute();
 
@@ -82,17 +102,15 @@ try {
         }
 
         $vmId = (int) $row['vm_id'];
-        repo_set_vm_state($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLED, null, 'mecm client info');
-
-        $stmt = $connection->prepare('SELECT * FROM deploy_vms WHERE id = ? LIMIT 1');
+        // Read only (ADR-0019/E3): downloading configuration proves neither
+        // that the registry write finished nor that the client can acknowledge
+        // it. The explicit POST to mecm_client_ack.php owns the 5/5 transition.
+        $stmt = $connection->prepare('SELECT vm_name, vm_hostname, vm_domain, vm_os, mission_id FROM deploy_vms WHERE id = ? LIMIT 1');
         $stmt->bind_param('i', $vmId);
         $stmt->execute();
         $data = $stmt->get_result()->fetch_assoc() ?: [];
         if ($data !== []) {
-            $data['vm_status'] = virtusphere_legacy_status_from_states((string) $data['lifecycle_state'], (string) $data['mecm_sync_state']);
-            $data['interfaces'] = machine_vm_interfaces($connection, $vmId, false);
-            $data['packages'] = machine_vm_packages($connection, $vmId);
-            $data['mission'] = machine_vm_mission($connection, (int) $data['mission_id']);
+            $data['interfaces'] = machine_client_interfaces($connection, $vmId);
         }
 
         machine_api_json($data);
@@ -130,18 +148,6 @@ try {
         }
 
         machine_api_json($data);
-    }
-
-    if ($action === 'getMissionName') {
-        $missionId = request_int($_GET, 'mission_id');
-        if ($missionId <= 0) {
-            machine_api_json(['error' => 'Invalid mission_id'], 400);
-        }
-
-        $stmt = $connection->prepare('SELECT mission_name FROM deploy_missions WHERE id = ? LIMIT 1');
-        $stmt->bind_param('i', $missionId);
-        $stmt->execute();
-        machine_api_json($stmt->get_result()->fetch_assoc() ?: []);
     }
 
     machine_api_json(['message' => 'Invalid action specified'], 400);

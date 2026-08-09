@@ -356,6 +356,9 @@ Collection erzeugt, die es meist noch nicht gibt.
 Werden als MECM-Anwendungen auf die Clients verteilt; Reihenfolge über
 Anwendungsabhängigkeiten: `client_getinfo` → `client_hostname` →
 `client_staticip` → `Set-VMDisksOnline`. Details in `clients/README.md`.
+V23 trennt das read-only `getDeviceInfos` vom verbindlichen, idempotenten
+`mecm_client_ack.php`-POST. Beide verwenden denselben Schema-Schalter; mit dem
+Default `http` funktionieren sie ohne CA, Zertifikat oder Thumbprint.
 
 ## Bekannte Punkte / Wartung
 

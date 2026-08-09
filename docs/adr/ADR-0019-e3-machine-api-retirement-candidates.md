@@ -1,7 +1,7 @@
 # ADR-0019: E3 Machine-API Retirement Candidates
 
 Date: 2026-07-08
-Status: Proposed
+Status: Accepted
 
 ## Context
 
@@ -75,3 +75,38 @@ side-effect freedom, and the machine-API HTTPS move each remain their own
 future decision with their own wire-test-first cut. Candidate 5's motivation
 shifts slightly: with `access.php` gone, the report token is the remaining
 cleartext concern.
+
+## Amendment 2 (2026-08-09): candidates 1-3 implemented, HTTP retained
+
+The coordinated E3 decision is now made:
+
+1. `getMissionName` is removed. No shipped PowerShell script calls it;
+   `getDeviceList` remains the MECM server's single read and already embeds the
+   mission.
+2. `getDeviceInfos` returns exactly the five client bootstrap fields
+   (`vm_name`, `vm_hostname`, `vm_domain`, `vm_os`, `mission_id`) plus the nine
+   client interface fields. It no longer exports database ids, notes, creator,
+   packages, lifecycle state or the full mission.
+3. `getDeviceInfos` is read-only. V23 `client_getinfo.ps1` writes its complete
+   registry data first, then POSTs the MAC to the separate
+   `mecm_client_ack.php` endpoint. That endpoint alone advances the VM to 5/5,
+   is POST-only and deduplicates retries. It deliberately does not share
+   `mecm_report.php`, whose display-only boundary from ADR-0018 remains intact.
+   Only after a confirmed ACK does the client set `SetupState=complete`. Thus a
+   process abort during delivery cannot leave a false green detection marker;
+   if only the response was lost, the repeated POST is harmless.
+
+Candidate 5 is resolved differently from the proposal: **HTTP and HTTPS both
+remain supported, and HTTP remains the default.** The machine API is never
+forced through the portal redirect and the HTTP listener is not closed. With
+`Scheme=http`, PowerShell needs no CA, certificate or thumbprint. HTTPS remains
+an explicit operator choice for networks that have the required trust setup.
+The trade-off is visible and accepted: an optional report token sent over HTTP
+crosses the LAN in cleartext; IP allowlisting limits reach but does not provide
+confidentiality.
+
+This is a coordinated wire cut: deploy the V23 client content and refresh its
+distribution points together with the WebApp. An old V22 client can still read
+configuration from the new server, but it has no explicit ACK and therefore
+does not advance from 4/5. Re-running `install-VirtuSphere-Clients.ps1` replaces
+the content and invokes `Update-CMDistributionPoint` for existing applications.

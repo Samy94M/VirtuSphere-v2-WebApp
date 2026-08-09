@@ -125,10 +125,11 @@ final class CreatorProvenanceTest extends TestCase
     }
 
     /**
-     * mecm-api.php embeds the mission row with `SELECT *`, so this column is an
-     * additive `mission.mission_creator` key on getDeviceInfos/getDeviceList.
+     * getDeviceList embeds the mission row with `SELECT *`, so this column is an
+     * additive `mission.mission_creator` key on that MECM server wire. The E3
+     * client bootstrap payload is deliberately smaller (ADR-0019).
      */
-    public function testMissionCreatorColumnExistsForTheMachineApiPayload(): void
+    public function testMissionCreatorColumnExistsForTheDeviceListPayload(): void
     {
         $column = repo_fetch_one($this->db, "SHOW COLUMNS FROM deploy_missions LIKE 'mission_creator'");
 

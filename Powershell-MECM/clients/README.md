@@ -51,10 +51,21 @@ WebApp (`mecm_report.php`), sodass der Deploy-Fortschritt im Portal an der VM
 sichtbar wird. `staticip` meldet `started` **vor** der IP-Umstellung (der
 Client kann danach durch einen VLAN-Wechsel offline sein — das Portal zeigt
 dann „ausgeführt, Bestätigung ausstehend"), `hostname` meldet `finished`
-**vor** dem Reboot. Der Rückkanal ist best effort und blockiert nie.
+**vor** dem Reboot. Diese Phasenmeldungen sind best effort und blockieren nie.
+
+Davon getrennt ist der verbindliche Client-Ready-ACK von `client_getinfo`:
+Nachdem Basisfelder und Interfaces lokal geschrieben sind, sendet V23 die MAC
+per POST an `mecm_client_ack.php`. Erst das setzt die VM auf 5/5; erst die
+bestätigte Antwort setzt lokal `SetupState=complete`. Damit hinterlässt auch ein
+harter Abbruch während des POSTs keinen falschen MECM-Erkennungsstatus; der
+Server dedupliziert einen bereits angekommenen POST.
 
 Die Client-Phasen authentifizieren sich über ihre bereits bekannte MAC; sie senden
 keinen Rückkanal-Token (der Token gilt nur für die Server-Heartbeats).
+
+Alle URLs — einschließlich des ACK — laufen durch `Get-VsApiUrl`. Standard ist
+`http`; dafür werden weder CA noch Zertifikat noch Thumbprint benötigt. `https`
+bleibt eine optionale Registry-/Paketkonfiguration und ändert keine Endpunkte.
 
 ## MECM-Anwendungsdefinitionen
 
@@ -97,9 +108,11 @@ Aufbewahrung).
 ## Wichtige Verhaltensdetails
 
 - **client_getinfo** löscht vor dem Schreiben den alten `Interfaces`-Zweig und
-  setzt den Erfolgs-Marker `SetupState=complete` erst nach vollständigem
-  Schreiben — so kann eine neu ausgerollte VM mit weniger NICs keine veraltete
-  Netzconfig erben, und Folgephasen starten nie mit halben Daten.
+  bestätigt nach vollständigem Schreiben Client-Ready explizit. Den
+  Erfolgs-Marker `SetupState=complete` setzt es erst nach dem ACK. So kann eine
+  neu ausgerollte VM mit weniger NICs
+  keine veraltete Netzconfig erben, und Folgephasen starten nie mit halben oder
+  serverseitig unbestätigten Daten.
 - **client_staticip** ist idempotent (Re-Run überschreibt sauber) und meldet
   echten Erfolg/Fehlschlag statt pauschal „installed".
 - Nur **Workgroup**-Computer werden umbenannt; Domain-Computer überspringt

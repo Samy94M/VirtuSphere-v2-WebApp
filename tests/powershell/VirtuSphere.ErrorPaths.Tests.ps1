@@ -747,6 +747,35 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match "(?s)Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*Resolve-VsApi"
     }
 
+    It 'client_getinfo bestaetigt Client-Ready explizit und macht einen fehlgeschlagenen ACK wiederholbar' {
+        # Das GET liefert nur Konfiguration. Nach vollstaendig geschriebenen
+        # Nutzdaten bestaetigt der Client 5/5 per POST und setzt erst danach den
+        # MECM-Marker; so hinterlaesst auch ein harter Abbruch im POST kein gruen.
+        $text = Get-ClientText -Name 'client_getinfo.ps1'
+        $text | Should -Match "(?s)Confirm-VsClientReady -Api \`$api -Mac \`$usedMac.*Save-VsValue -Path \`$registryBase -Name 'SetupState' -Value 'complete'.*Send-VsPhase -Mac \`$usedMac -Phase 'getinfo' -PhaseEvent 'finished'"
+        $text | Should -Match "(?s)catch \{.*Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*PhaseEvent 'failed'"
+    }
+
+    It 'der zwingende Client-Ready-ACK benutzt auch im HTTP-Modus den gemeinsamen URL-Bauer' {
+        $text = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
+        $text | Should -Match "function Confirm-VsClientReady"
+        $text | Should -Match "(?s)Confirm-VsClientReady.*Get-VsApiUrl -Api \`$Api -Path '/mecm_client_ack.php'.*-Method Post"
+
+        Invoke-InFileScope -Path $script:ClientCommon -Body {
+            $script:VsDefaultScheme = 'http'
+            Mock Get-ItemProperty { throw 'kein Override' }
+            (Get-VsApiUrl -Api 'virtusphere.lan:8021' -Path '/mecm_client_ack.php') |
+                Should -Be 'http://virtusphere.lan:8021/mecm_client_ack.php'
+        }
+    }
+
+    It 'kein ausgeliefertes PowerShell-Skript ruft die pensionierte MissionName-Action auf' {
+        $offenders = @(Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse |
+            Where-Object { (Get-Content -Path $_.FullName -Raw) -match 'action=getMissionName' } |
+            Select-Object -ExpandProperty FullName)
+        $offenders | Should -BeNullOrEmpty
+    }
+
     It 'die Paketvorlage schreibt den Erkennungswert nicht bei leerem Skriptordner' {
         # Sonst meldet MECM das Paket als installiert, obwohl nichts installiert
         # wurde, und versucht es nie erneut.

@@ -21,6 +21,7 @@ verknüpfen                  Collections zu)               --->  mecm_updateid.p
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
                                                                 getDeviceInfos        staticip (Netz konfigurieren)
                                                                                         disks (Platten online)
+                                                          <---  mecm_client_ack.php (Client bereit, 5/5)
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
 ```
 
@@ -42,7 +43,7 @@ bewusst noch kein Deployment auf eine Collection an.
 |---|---|---|
 | Ubuntu-Host | `192.0.2.10` | Host mit dem produktiven Repo und der WebApp |
 | WebAPI | `virtusphere.lan:8021` oder `192.0.2.10:8021` | Ohne `http://` oder `https://` an den Installer übergeben |
-| Schema | `http` | `http` oder `https`; HTTPS braucht ein zum Zielnamen passendes Zertifikat |
+| Schema | `http` | `http` oder `https`; HTTP braucht weder CA noch Zertifikat noch Thumbprint, HTTPS braucht eingerichtetes Vertrauen |
 | MECM-Server | `MECM-01` | Server, auf dem die MECM-Konsole und die Installer laufen |
 | `PackagesRoot` | `D:\VirtuSphere\Packages` | Lokale Paketablage für den Autoimporter |
 | `PackagesShare` | `\\MECM-01\VirtuSphere\Packages\files` | UNC-Pfad, der exakt auf `PackagesRoot\files` zeigt |
@@ -218,6 +219,14 @@ gesetzt werden. Dann den Client-Installer ausführen:
     -DpGroupName 'DP Group - VirtuSphere-Applications'
 ```
 
+Seit V23 ist das ein koordinierter Wire-Wechsel: `client_getinfo` bestätigt das
+vollständige lokale Schreiben mit einem POST an `mecm_client_ack.php`; der
+vorherige GET ist read-only. Deshalb den Client-Installer beim WebApp-Update
+erneut ausführen und danach die aktualisierte Content-Verteilung abwarten. Ein
+V22-Client kann seine Konfiguration weiterhin lesen, bleibt ohne den neuen ACK
+im Portal aber auf 4/5. Der Installer ersetzt beide Dateien und stößt bei einer
+bestehenden Anwendung `Update-CMDistributionPoint` an.
+
 In der MECM-Konsole danach prüfen:
 
 1. Unter *Softwarebibliothek → Anwendungsverwaltung → Anwendungen →
@@ -277,14 +286,12 @@ zusätzlich an der VM im Portal.
 | Deploy-Fortschritt (Ist-Zustand) | WebApp: `deploy_client_events` + Heartbeats (ab Etappe 1) |
 | Ersteller einer Mission / VM | WebApp-Session beim Anlegen; danach unveränderlich (`mission_creator`, `vm_creator`) |
 
-> **Wire-Hinweis (Migration 0015):** `mecm-api.php` bettet die Missionszeile per
-> `SELECT *` ein. `getDeviceInfos` und `getDeviceList` liefern im `mission`-Objekt
-> daher zusätzlich `mission_creator`. Die Ergänzung ist additiv; PowerShell-Clients
-> lesen benannte Eigenschaften und ignorieren unbekannte. Es ist ein reines
-> Anzeigefeld: keine Skript-Logik darf darauf verzweigen. Zeilen aus der Zeit vor
-> der Migration liefern `null`, ebenso Missionen, die seinerzeit über die
-> inzwischen entfernte Token-API (ADR-0035) angelegt wurden: dort gab es keinen
-> Benutzerkontext, nur eine Token-Rolle.
+> **Wire-Hinweis (ADR-0019/E3):** Nur `getDeviceList` bettet für den MECM-Server
+> die Missionszeile ein und führt dort auch `mission_creator`. Das clientseitige
+> `getDeviceInfos` ist ein exakter Minimalvertrag: fünf Basisfelder plus neun
+> Interface-Felder, ohne Notizen, Ersteller, Pakete oder Lifecycle-Zustand.
+> `getMissionName` ist entfernt; das ausgelieferte Device-Sync-Skript verwendete
+> schon vorher ausschließlich die eingebettete Mission.
 
 ## VM außer Betrieb nehmen
 
@@ -349,6 +356,19 @@ zeigt das Portal nach 15 Minuten „ausgeführt, Bestätigung ausstehend" (kein
 Fehler). Schutzmechanismen: 8-KB-Body-Limit (413), Dedupe identischer
 Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 
+### Client-Ready-ACK (Windows-Client, verbindlich und idempotent)
+
+Nach dem vollständigen Schreiben der Registry-Nutzdaten sendet
+V23 `POST /mecm_client_ack.php` mit `{"mac":"00:50:56:AB:CD:EF"}`. Nur dieser
+Endpoint setzt 5/5; `getDeviceInfos` verändert keinen Zustand mehr. Scheitert der
+POST, liefert `client_getinfo` Exitcode 1, damit MECM den Lauf wiederholt. Erst
+nach der ACK-Antwort setzt es `SetupState=complete`; damit hinterlässt auch ein
+harter Abbruch während der Anfrage keinen falschen Erkennungsstatus. Ging nur die
+Antwort verloren, antwortet der Server beim Retry
+mit `deduplicated:true` und erzeugt keine zweite Statuszeile. Dieser ACK ist
+absichtlich nicht Teil von `mecm_report.php`, dessen Phasenmeldungen weiterhin
+rein anzeigend und best effort bleiben.
+
 ### Anzeige im Portal
 
 - **Systemstatus** (alle angemeldeten Nutzer, URL weiterhin
@@ -396,7 +416,9 @@ einen getunten Takt also nicht zurück. SSoT der Spannen ist
 `$script:VsIntervalBounds` in `mecm\VirtuSphere-Common.ps1`.
 
 Hinweis HTTP/HTTPS: Die API-Aufrufe der Skripte laufen standardmäßig über HTTP,
-und das Portal-HTTPS leitet sie nie um (ADR-0027). HTTPS ist für die
+und das Portal-HTTPS leitet sie nie um (ADR-0027). Das gilt auch für den neuen
+Client-Ready-ACK. Im HTTP-Modus sind **keine** CA, kein Zertifikat und kein
+Thumbprint zu konfigurieren. HTTPS ist für die
 Maschinenkette aber nicht mehr Ausblick, sondern eingebaut: `-Scheme https` am
 Installer schreibt das Schema in die Registry, `Initialize-VsTls` setzt TLS 1.2 in
 **jeder** der vier Aufgaben (nicht nur im Installerprozess, der in seinem eigenen
@@ -647,7 +669,9 @@ Kernpunkte:
   `staticip` meldet `started` vor der IP-Umstellung, `hostname` `finished` vor
   dem Reboot (VLAN-/Reboot-robust, „Bestätigung ausstehend" ist kein Fehler).
 - **Stale-Fix (getinfo):** alter `Interfaces`-Zweig wird vor dem Schreiben
-  gelöscht, Erfolgs-Marker `SetupState=complete` erst danach gesetzt.
+  gelöscht. Danach läuft der verbindliche Client-Ready-ACK, und erst seine
+  Bestätigung setzt `SetupState=complete`; der idempotente Server-POST darf
+  wiederholt werden.
 - **Idempotenz (staticip):** Re-Run überschreibt sauber und meldet echten
   Erfolg/Fehlschlag statt pauschal „installed".
 - Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30 Tage).

@@ -8,7 +8,7 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 - **2/5 Registered:** Portal-Datensatz existiert. Auf ESXi muss noch keine VM vorhanden sein.
 - **3/5 Deployed:** der scoped MAC-Rückruf des Ansible-Hosts wurde angenommen. MECM hat noch keine ResourceID bestätigt.
 - **4/5 OS Installing:** MECM Device-Sync hat ResourceID und Zuordnung zurückgemeldet. Die VM kann per PXE in die Task Sequence gehen.
-- **5/5 OS Installed:** die erste `getinfo`-Clientmeldung ist angekommen. Das ist kein Beweis, dass Hostname, statische IP und Datenträgerphasen bereits beendet sind; dafür gelten die Client-Phasen im VM-Editor.
+- **5/5 OS Installed:** `client_getinfo` hat seine Registry-Daten vollständig geschrieben und den Client-Ready-ACK bestätigt bekommen. Das ist kein Beweis, dass Hostname, statische IP und Datenträgerphasen bereits beendet sind; dafür gelten die Client-Phasen im VM-Editor.
 
 ## Auftragsstatus
 

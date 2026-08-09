@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # ============================================================================
-# client_getinfo.ps1 (V22) - holt die Geraeteinformationen der VM von der
+# client_getinfo.ps1 (V23) - holt die Geraeteinformationen der VM von der
 # VirtuSphere-WebAPI (per MAC) und legt sie in der Registry
 # HKLM:\SOFTWARE\VirtuSphere ab. Erste Phase der Client-Kette.
 #
@@ -13,6 +13,8 @@
 #    wendet veraltete Netzconfig an)
 #  - Erfolgs-Marker (SetupState=complete) erst NACH vollstaendigem Schreiben
 #  - Whitelist der geschriebenen Felder (kein Datenmuell/Notizen auf dem Client)
+#  - expliziter, wiederholbarer Client-Ready-ACK statt Lifecycle-Seiteneffekt
+#    des Konfigurations-GETs
 #  - Retry (3x/10s) + Datei-Logging + reportPhase
 # ============================================================================
 
@@ -118,12 +120,22 @@ try {
         $index++
     }
 
-    # --- Erfolgs-Marker ZULETZT --------------------------------------------
-    Save-VsValue -Path $registryBase -Name 'SetupState' -Value 'complete'
     Write-VsClientLog "Registry geschrieben ($index Interface(s))."
+    # Verbindlich nach allen Nutzdaten: ein GET beweist nur, dass Daten gelesen
+    # wurden. Erst dieser POST darf die VM im Portal auf 5/5 setzen.
+    Confirm-VsClientReady -Api $api -Mac $usedMac
+
+    # --- MECM-Erfolgs-Marker wirklich ZULETZT ------------------------------
+    # Nach dem ACK, damit ein Prozessabbruch/Power-Loss waehrend des POSTs nie
+    # einen gruenen Detection-State ohne bestaetigten Serverzustand hinterlaesst.
+    # ACK erfolgreich + Marker-Schreibfehler ist sicher: der Retry dedupliziert.
+    Save-VsValue -Path $registryBase -Name 'SetupState' -Value 'complete'
     Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'finished' -Detail "$index interfaces"
 } catch {
-    Write-VsClientLog -Level ERROR "Schreiben fehlgeschlagen: $($_.Exception.Message)"
+    # ACK kann serverseitig angekommen sein, waehrend die Antwort verloren ging.
+    # Marker entfernen -> MECM wiederholt; der Server dedupliziert den POST.
+    Remove-ItemProperty -Path $registryBase -Name 'SetupState' -ErrorAction SilentlyContinue
+    Write-VsClientLog -Level ERROR "Schreiben oder Client-Ready-ACK fehlgeschlagen: $($_.Exception.Message)"
     Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'failed' -Detail $_.Exception.Message
     exit 1
 }

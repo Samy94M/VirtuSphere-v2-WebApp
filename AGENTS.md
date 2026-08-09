@@ -6,7 +6,7 @@
 - `Docker/WebAPI/portal/`: server-rendered web UI using sessions, CSRF and shared helpers from `lib/`.
 - `Docker/WebAPI/lib/`: shared helpers for DB, EnvBoot, headers, CSRF, constants, defaults, status mapping, migrations, auth/permissions, crypto, SSH and deploy work. `layout.php` renders the page chrome; `layout_modals.php` holds the portal's two `<dialog>` modals (confirm, session expiry) and is the only place a modal is built.
 - `Docker/WebAPI/lang/` and `Docker/WebAPI/lib/lang.php`: portal i18n catalog and helper. Portal strings use `__t('module.key')` with DE/EN parity.
-- Machine API surface: `mecm-api.php`, `mecm_updateid.php`, `mecm_packages.php`, `db_importMAC.php`, `mecm_report.php`. Harden these, but do not remove or silently change their wire contract. `mecm_report.php` (ADR-0018) is display-only telemetry and must never write VM lifecycle state.
+- Machine API surface: `mecm-api.php`, `mecm_client_ack.php`, `mecm_updateid.php`, `mecm_packages.php`, `db_importMAC.php`, `mecm_report.php`. Harden these, but do not remove or silently change their wire contract. `mecm_report.php` (ADR-0018) is display-only telemetry and must never write VM lifecycle state; the POST-only client-ready ACK owns the 5/5 transition (ADR-0019).
 - Worker containers: `lib/deploy_worker.php` (`deploy-worker`) runs Ansible deploy jobs; `lib/maintenance_worker.php` (`maintenance-worker`) runs retention purges, the deploy-job reaper/convergence sweep and integration transition audits (no outbound MECM probe; the TCP-445 probe was removed, ADR-0018). Both are `--loop` CLIs that survive MySQL restarts.
 - PowerShell integration lives in `Powershell-MECM/` (`mecm/` server scripts, `clients/` client phase scripts, installer). All environment specifics come from the Windows registry, not the code; server scripts report run results and MECM site health, client scripts report install phases, to `mecm_report.php`.
 - The former desktop token API is removed (ADR-0035); its paths answer 404 by contract. Do not reintroduce token-based machine auth; machine access is the IP allowlist plus the optional report-channel token.
@@ -44,7 +44,8 @@ Forbidden patterns live only in `GROK.md` section 1 and are not restated here; t
 
 ## Endpoint Map
 
-- `mecm-api.php`: MECM read surface, keeps `getDeviceList`, `getMissionName`, `getDeviceInfos&mac=...`.
+- `mecm-api.php`: read surface with `getDeviceList` and the minimal, side-effect-free `getDeviceInfos&mac=...`; `getMissionName` was retired by ADR-0019.
+- `mecm_client_ack.php`: POST-only, idempotent client-ready acknowledgement by known MAC; sole writer of the 5/5 transition.
 - `mecm_updateid.php`: accepts `deviceResourceID` and `deviceid`.
 - `mecm_packages.php`: package/task sequence sync.
 - `db_importMAC.php`: Ansible MAC import; payload `{ "mission_id": 123, "job_id": 45, "results": [...] }`, `job_id` required (ADR-0035).

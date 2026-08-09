@@ -93,7 +93,7 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
 
 // The boundary is emit-only, so there is no inverse of the mapping above. Every
 // machine-API write names both states explicitly and passes the legacy string
-// as a literal alongside them (mecm-api.php, mecm_updateid.php,
+// as a literal alongside them (mecm_client_ack.php, mecm_updateid.php,
 // db_importMAC.php); nothing ever derives the pair back from a legacy string.
 // An inverse existed and was never called, which is worse than none: it would
 // have answered a question no caller asked, from a table nothing checked. An

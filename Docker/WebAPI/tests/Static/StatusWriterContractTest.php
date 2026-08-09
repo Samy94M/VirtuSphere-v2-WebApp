@@ -13,8 +13,8 @@ require_once dirname(__DIR__, 2) . '/lib/status.php';
  *
  * What the help promised, and what the code does:
  *
- *  - "5/5 OS Installed means the client chain is finished." The FIRST client call
- *    (mecm-api.php getDeviceInfos, from client_getinfo.ps1) writes it, before
+ *  - "5/5 OS Installed means the client chain is finished." The FIRST client
+ *    phase (mecm_client_ack.php, from client_getinfo.ps1) writes it, before
  *    hostname, IP and disks have run at all.
  *  - "The ResourceID feedback sets 3/5." It sets 4/5. 3/5 comes from the Ansible
  *    MAC callback, with no MECM involvement whatsoever.
@@ -36,7 +36,7 @@ final class StatusWriterContractTest extends TestCase
     private const WRITERS = [
         VIRTUSPHERE_STATUS_DEPLOYED => ['db_importMAC.php', VIRTUSPHERE_LIFECYCLE_DEPLOYED],
         VIRTUSPHERE_STATUS_OS_INSTALLING => ['mecm_updateid.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING],
-        VIRTUSPHERE_STATUS_OS_INSTALLED => ['mecm-api.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLED],
+        VIRTUSPHERE_STATUS_OS_INSTALLED => ['mecm_client_ack.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLED],
     ];
 
     /**

@@ -143,6 +143,7 @@ The legacy machine API remains wire-compatible during migration, but the WP1 hot
 - `mecm_packages.php` rejects a completely empty JSON payload (`{}` or `[]`) with HTTP 400 before catalog sync can run. Missing payload types are now non-destructive: if a request contains only packages, `deploy_os` is left untouched; if it contains only task sequences, `deploy_packages` is left untouched. The absent type is logged as a warning.
 - `db_importMAC.php?action=updateInterface` requires `{ "mission_id": 123, "job_id": 456, "results": [...] }` (ADR-0035). Existing response fields remain; `result_version`, `outcome`, `job_id`, `vm_results`, `counts` and bounded `errors` are additive. Per-VM failures return HTTP 200 with `success:false` and write no NIC or deployed state for that VM. Job/mission/status conflicts return 409 without writes.
 - `mecm-api.php?action=getDeviceInfos&mac=...` deliberately keeps its old IP-or-MAC allowlist behavior. The legacy 403 response still echoes the client IP for compatibility in the LAN contract.
+- Since ADR-0019/E3 that GET is side-effect-free and returns only the client bootstrap fields. V23 posts client readiness to `mecm_client_ack.php`; the POST uses the same IP-or-known-MAC authentication, is idempotent, and works over the default HTTP mode without CA/certificate/thumbprint configuration.
 - Unhandled machine-API exceptions return the existing JSON envelope shape with generic `Interner Serverfehler`; internal details are written through `machine_api_log_warning`/fallback logging instead of being sent to clients.
 
 ## Operational preflight
@@ -193,7 +194,7 @@ Completed in code and runtime-tested:
 - Phase 2 validation and edge cases: shared `ValidationException`/`Validator`, VM/credential/mission/catalog/deploy preflight validation, empty MECM payload guard, mandatory MAC-import `mission_id`, unmatched MAC import entries with `status:error`.
 - Phase 3 Ops/QOL backend: `setup.sh`, `.env.example` Ubuntu `openssl` hint, `migrate.php --check`, JSON health endpoint and backend-side form error plumbing.
 - Findings/SSoT update: unsafe legacy web entry points were first retired and later removed in Phase D, root `intern.php` remains only a redirect stub, nginx denies internal webroot paths, credential/deploy/status/role/settings/machine-API literals centralized, ESXi URL normalization writes `esxi_hostname` plus `esxi_port`, Ansible required files derive from `VIRTUSPHERE_PLAYBOOKS`, `VIRTUSPHERE_TABLES` removed, and real historical log files are removed from Git tracking.
-- Contract preservation: machine API status strings, `updated`, `mecm_id`, `mecm-api.php?action=getDeviceInfos&mac=...` IP-or-MAC allowlist behavior and the legacy 403 IP echo are intentionally preserved. The desktop token API is since removed (ADR-0035).
+- Contract preservation: machine API status strings, `updated`, `mecm_id`, `mecm-api.php?action=getDeviceInfos&mac=...` IP-or-MAC allowlist behavior and the legacy 403 IP echo are intentionally preserved. ADR-0019/E3 explicitly retired `getMissionName`, narrowed `getDeviceInfos`, and moved its lifecycle side effect to the POST-only ACK. The desktop token API is since removed (ADR-0035).
 
 Not claimed as complete by this audit:
 

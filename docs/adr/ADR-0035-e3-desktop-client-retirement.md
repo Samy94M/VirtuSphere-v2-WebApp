@@ -72,7 +72,8 @@ Deliberately **kept**:
 ## Consequences
 
 - ADR-0019 candidates 1-3 and 5 (getMissionName, getDeviceInfos trimming and
-  side-effect, machine-API HTTPS) remain open and keep their own decisions.
+  side-effect, machine-API transport) were not decided by this ADR. They were
+  resolved separately in ADR-0019 amendment 2 on 2026-08-09.
 - The MECM/PowerShell/Ansible wire contract is untouched; the full E2E deploy
   proves the machine chain.
 - A future "desktop client" would be a new decision against the portal's

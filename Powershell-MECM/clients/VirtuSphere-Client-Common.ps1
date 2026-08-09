@@ -246,6 +246,24 @@ function Get-VsErrorDetail {
     return $detail
 }
 
+# --- Verbindlicher Rueckkanal: Client ist bereit ----------------------------
+# Anders als reportPhase ist dieser POST nicht best effort: erst sein Erfolg
+# setzt serverseitig 5/5. Get-VsApiUrl haelt HTTP und HTTPS gleichwertig; im
+# HTTP-Default werden weder CA noch Zertifikat noch Thumbprint gebraucht.
+function Confirm-VsClientReady {
+    param(
+        [Parameter(Mandatory)][string]$Api,
+        [Parameter(Mandatory)][string]$Mac
+    )
+
+    $body = @{ mac = $Mac } | ConvertTo-Json
+    $response = Invoke-RestMethod -Uri (Get-VsApiUrl -Api $Api -Path '/mecm_client_ack.php') -Method Post `
+        -ContentType 'application/json' -Body $body -TimeoutSec 10
+    if (-not $response -or -not $response.success) {
+        throw 'Client-Ready-ACK wurde von der WebApp nicht bestaetigt.'
+    }
+}
+
 # --- Rueckkanal: Client-Phase melden (best effort) --------------------------
 # Meldet eine Phase. $Mac muss die in der VirtuSphere-DB hinterlegte MAC sein.
 # Auth erfolgt serverseitig ueber die bereits bekannte MAC; der Rueckkanal-Token

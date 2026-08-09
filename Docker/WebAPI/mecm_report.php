@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 // Machine report channel (ADR-0018): Windows clients report deploy-phase
 // events by MAC, MECM server sync loops report heartbeats. POST-only, JSON.
-// This endpoint never mutates deploy_vms lifecycle state - lifecycle writes
-// stay exclusive to the legacy read surface. Display-only telemetry.
+// This endpoint never mutates deploy_vms lifecycle state. The explicit
+// mecm_client_ack.php POST owns the client-ready transition (ADR-0019/E3).
+// This channel remains display-only telemetry.
 
 // JSON on the wire even for an uncaught error; must precede mysql.php, which
 // connects while it loads (see virtusphere_error_response_mode).
