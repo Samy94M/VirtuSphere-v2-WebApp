@@ -1,52 +1,54 @@
-# Installation Anleitung
+# Installationsanleitung
 
-Diese Anleitung beschreibt den Ubuntu/Docker-Betrieb der VirtuSphere PHP-Web-App. Sie ist fuer Test- und Staging-Umgebungen gedacht und dokumentiert den aktuellen Backend/Ops-Stand. HTTPS wird nachtraeglich komplett im Portal aktiviert (Abschnitt "HTTPS" unten); der grundlegende Ablauf hier bleibt davon unberuehrt.
+Diese Anleitung beschreibt die Installation und den Betrieb der VirtuSphere PHP-Web-App auf Ubuntu mit Docker. Der Stack startet bewusst über HTTP; HTTPS wird anschließend im Portal aktiviert (Abschnitt „HTTPS“), ohne den grundlegenden Ablauf zu ändern.
 
-## Begriffe kurz erklaert
+## Begriffe kurz erklärt
 
-- Ubuntu: Linux-Serverbetriebssystem, auf dem Docker laeuft.
+- Ubuntu: Linux-Serverbetriebssystem, auf dem Docker läuft.
 - Docker Engine: Dienst, der Container startet.
 - Docker Compose: Werkzeug, das mehrere Container zusammen startet, zum Beispiel nginx, PHP und MySQL.
-- Image: Vorlage fuer einen Container.
+- Image: Vorlage für einen Container.
 - Container: laufender Dienst aus einem Image.
 - `.env`: lokale Konfigurationsdatei mit Secrets und Ports. Diese Datei wird nicht in Git committed.
-- `APP_KEY`: geheimer Schluessel fuer serverseitige Verschluesselung, zum Beispiel Credentials.
+- `APP_KEY`: geheimer Schlüssel für serverseitige Verschlüsselung, zum Beispiel Zugangsdaten.
 - Migration: PHP-Skript, das die Datenbankstruktur auf den erwarteten Stand bringt.
 - Seed: optionales Anlegen eines ersten Admin-Benutzers.
 - ESXi: Hypervisor, auf dem VirtuSphere VMs erzeugt.
-- MECM: Microsoft Endpoint Configuration Manager; die Maschinen-API bleibt waehrend der Migration kompatibel.
-- Ansible Host: separater Ubuntu-Host, auf dem `ansible-playbook` gegen ESXi ausgefuehrt wird.
+- MECM: Microsoft Endpoint Configuration Manager; die Maschinen-API bleibt während der Migration kompatibel.
+- Ansible-Host: Linux-Host, auf dem `ansible-playbook` gegen ESXi ausgeführt wird. Er kann mit dem Portal-Host identisch sein.
 
-## Aktueller Backend/Ops-Stand
+## Funktionsumfang
 
-Der Backend/Ops-Stand vom 2026-07-05 ist fuer lokale Tests nutzbar:
+Die Installation stellt den gehärteten Portal- und Worker-Stack bereit:
 
 - `/index.php` leitet auf `/portal/login.php`.
 - Unsichere Alt- und Test-Endpunkte (`testdata.php`, `db_cleanup.php`, `upgradeMysqlLatest.php`, `mecm_api_old.php`, `portal/createUser.php`, `portal/create_user.php`, `portal/TESTintern.php`) sind aus dem WebAPI-Webroot entfernt.
 - nginx blockiert direkte URL-Zugriffe auf interne Pfade wie `lib/`, `vendor/`, `logs/`, `var/`, `tests/` sowie Composer-/Lock-Dateien.
-- `migrate.php --check` prueft EnvBoot, Datenbank, Daten-Preflight und ausstehende Migrationen ohne Schema-Aenderung.
+- `migrate.php --check` prüft EnvBoot, Datenbank, Daten-Preflight und ausstehende Migrationen ohne Schemaänderung.
 - `/portal/health.php` meldet DB, Log-Schreibbarkeit und Deploy-Worker-Status als JSON.
 - VM-Speicherpfade validieren Namen, OS, RAM/CPU, Disks, Interfaces, DNS und MAC serverseitig.
 - Credentials validieren Typ, Name, Host/URL, Port, Username, Secret-Pflicht und Duplicate-Namen je Typ.
-- Missionen, OS, VLANs und Packages validieren Pflichtfelder, Laengen, Dubletten und fehlende IDs backendseitig.
-- Deploy-Jobs werden vor dem Queuen auf User, Mission, mindestens eine VM und vollstaendige ESXi-/Ansible-Credentials geprueft. Datacenter und Datastore werden nur fuer Modi verlangt, die einen Standort lesen; der Modus `autostart` schreibt allein die Startreihenfolge des Hosts und kommt ohne beide aus.
-- Login schuetzt zusaetzlich gegen viele Fehlversuche von derselben IP.
+- Missionen, OS, VLANs und Packages validieren Pflichtfelder, Längen, Dubletten und fehlende IDs backendseitig.
+- Deploy-Jobs werden vor dem Einreihen auf Benutzer, Mission, mindestens eine VM und vollständige ESXi-/Ansible-Zugänge geprüft. Datacenter und Datastore werden nur für Modi verlangt, die einen Standort lesen; der Modus `autostart` schreibt allein die Startreihenfolge des Hosts und kommt ohne beide aus.
+- Login schützt zusätzlich gegen viele Fehlversuche von derselben IP.
 
-Der Portal-UX-Slice ergaenzt dazu Sticky-Formulare mit Fehlern pro Feld (OS, VLANs, Packages, Credentials, Benutzer, Missionen, Settings und VM-Editor), Suche und IP-Filter im Log-Viewer sowie die Benutzeridentitaet in der Topbar als kompakter Konto-Link. Bewusst offen bleibt nur noch das rein visuelle Portal-Design (Settings-Optik, weitere Formularanordnung und Navigationsfeinschliff), das der Frontend-Kollege auf Basis der bestehenden Portal-Struktur weiterfuehren kann.
+Das Portal ergänzt dazu Sticky-Formulare mit Fehlern pro Feld, Suche und IP-Filter im Log-Viewer sowie die Benutzeridentität in der Topbar. Die funktionale und visuelle Basis ist umgesetzt und wird durch die Portal-Vertragstests abgesichert.
 
-Abschlusspruefung: Der Backend/Ops-Plan und das Findings-/SSoT-Update sind umgesetzt; HTTPS-Konfiguration und das visuelle Portal-Design sind inzwischen ebenfalls fertig, und der Stack lief in einer Erstinbetriebnahme auf dem Produktionshost. Das E3-Retirement der frueheren Token-API ist umgesetzt (ADR-0035); offen bleibt die Clean-Checkout-Releaseprobe als formaler Release-Nachweis. Die lokalen Setup-Aequivalente wurden ueber Docker Build/Start, `migrate.php --check`, Migration und Healthcheck verifiziert.
+Die Maschinen-API verwendet weiterhin die dokumentierten Legacy-Drahtverträge. Die frühere Desktop-Token-API ist entfernt (ADR-0035); der optionale Report-Token schützt ausschließlich den Rückkanal. Release-Evidenz wird pro Version nach `PRE-SHIP-CHECKLIST.md` erzeugt und nicht als dauerhafte Eigenschaft dieser Anleitung behauptet.
 
 ## Voraussetzungen
 
-Auf dem Ubuntu-Server muessen vorhanden sein:
+Auf dem Portal-Host müssen vorhanden sein:
 
 - Docker Engine.
 - Docker Compose Plugin (`docker compose ...`).
 - `git`, falls der Code direkt aus einem Repository geholt wird.
-- `openssl` fuer lokale Secret-Erzeugung.
-- Schreibrechte im Repository fuer `.env`, `Docker/WebAPI/logs`, `Docker/logs/nginx` und `Docker/mysql/mysql-data`.
+- `openssl` für lokale Secret-Erzeugung.
+- Schreibrechte im Repository für `.env`, `Docker/WebAPI/logs`, `Docker/logs/nginx` und `Docker/mysql/mysql-data`.
 
-Vor air-gapped Betrieb muessen benoetigte Docker Images und Composer/vendor-Inhalte bereits lokal vorhanden sein. Das Setup-Skript installiert keine Betriebssystempakete und laedt zur Laufzeit keine externen Pakete nach. Die lokale QA-Basis mit PHPUnit, Hook-Scan und Lang-Audit ist in `docs/QA.md` dokumentiert; Composer-Updates muessen `composer.lock` und passende `Docker/WebAPI/vendor`-Artefakte zusammen halten.
+Auf dem Ansible-Ausführungs-Host müssen `python3`, `ansible-playbook` aus `ansible-core`, die Python-Module `pyvmomi` und `requests` sowie die Collection `community.vmware` vorhanden sein. Der dedizierte SSH-Benutzer benötigt Schreibrechte in seinem Home-Verzeichnis und unter `/tmp`; ausgehend müssen ESXi auf Port 443 und die konfigurierte Portal-API-Basis-URL erreichbar sein.
+
+Vor dem Air-Gap-Betrieb müssen benötigte Docker-Images, Composer-/Vendor-Inhalte und die Ansible-Toolchain bereits lokal vorhanden sein. Das Setup-Skript installiert keine Betriebssystempakete und lädt zur Laufzeit keine externen Pakete nach. Die lokale QA-Basis mit PHPUnit, Hook-Scan und Lang-Audit ist in `docs/QA.md` dokumentiert; Composer-Updates müssen `composer.lock` und passende `Docker/WebAPI/vendor`-Artefakte zusammenhalten.
 
 ## Frischer Checkout
 
@@ -74,7 +76,7 @@ sed -i "s#^DB_PASS=.*#DB_PASS=$(openssl rand -base64 32)#" .env
 sed -i "s#^MYSQL_ROOT_PASSWORD=.*#MYSQL_ROOT_PASSWORD=$(openssl rand -base64 32)#" .env
 ```
 
-Optional fuer den ersten Admin vor dem Setup diese Werte in `.env` setzen:
+Optional für den ersten Admin vor dem Setup diese Werte in `.env` setzen:
 
 ```bash
 SEED_ADMIN_USER=admin
@@ -90,20 +92,20 @@ Ohne diese Werte wird kein Benutzer automatisch angelegt.
 Docker/scripts/setup.sh
 ```
 
-Das Skript fuehrt aus:
+Das Skript führt aus:
 
 - `.env` anlegen, wenn sie fehlt, und dabei frische lokale Secrets (`APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD`) mit `openssl` erzeugen.
-- Eine bereits vorhandene `.env` bleibt unveraendert; zu schwache Secrets darin bricht EnvBoot beim Start mit Klartextmeldung ab (nicht das Setup-Skript).
+- Eine bereits vorhandene `.env` bleibt unverändert; bei zu schwachen Secrets bricht EnvBoot beim Start mit Klartextmeldung ab (nicht das Setup-Skript).
 - Log- und Datenordner anlegen.
-- `docker compose config --quiet` ausfuehren.
+- `docker compose config --quiet` ausführen.
 - Container bauen und starten.
-- `migrate.php --check` ausfuehren.
+- `migrate.php --check` ausführen.
 - Migrationen anwenden.
 - optional ersten Admin seeden.
 
 Erwartung: Das Skript endet ohne Fehler. Wenn ein Secret zu schwach ist, bricht EnvBoot mit einer Klartextmeldung ab.
 
-## Manuelle Pruefungen
+## Manuelle Prüfungen
 
 ```bash
 docker compose config --quiet
@@ -127,7 +129,7 @@ Wenn kein Admin per `.env` angelegt wurde:
 docker compose exec -T php php /var/www/html/lib/seed.php admin '<lange-zufaellige-passphrase>' admin@localhost
 ```
 
-Danach im Browser oeffnen:
+Danach im Browser öffnen:
 
 ```text
 http://127.0.0.1:8021/portal/login.php
@@ -146,7 +148,7 @@ Bei Zugriff von einem anderen Rechner statt `127.0.0.1` die Server-IP verwenden,
 7. Mindestens eine VM in der Mission anlegen.
 8. Deploy-Job queuen.
 
-Wenn ein Deploy-Job nicht queued werden kann, kommt der Fehler jetzt vor dem Worker zurueck: fehlender User, Template-Mission, keine VMs oder unvollstaendige Credentials werden backendseitig blockiert. Ein fehlendes Datacenter oder Datastore blockiert nur die Modi, die einen Standort lesen, nicht `autostart`; Portal und Backend pruefen dabei dieselbe Bedingung.
+Wenn ein Deploy-Job nicht eingereiht werden kann, kommt der Fehler vor dem Worker zurück: fehlender Benutzer, Template-Mission, keine VMs oder unvollständige Zugänge werden backendseitig blockiert. Ein fehlendes Datacenter oder Datastore blockiert nur die Modi, die einen Standort lesen, nicht `autostart`; Portal und Backend prüfen dabei dieselbe Bedingung.
 
 ## Logs und Fehlerreferenzen
 
@@ -166,7 +168,7 @@ Bei einer Fehlerseite die angezeigte Referenz-ID kopieren und suchen:
 grep '<referenz-id>' Docker/WebAPI/logs/error.log
 ```
 
-Wenn PHP gar nicht erreicht wird, zuerst nginx pruefen:
+Wenn PHP gar nicht erreicht wird, zuerst nginx prüfen:
 
 ```bash
 tail -n 100 Docker/logs/nginx/error.log
@@ -174,9 +176,9 @@ tail -n 100 Docker/logs/nginx/error.log
 
 ## Wartung
 
-Alle Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie automatisch wieder. Der Deploy-Worker haelt zudem eine MySQL-Unterbrechung aus: er verbindet sich mit Backoff neu, statt abzustuerzen und Deploy-Jobs im Status `queued` haengen zu lassen. Ein manueller Eingriff ist nur noetig, wenn ein Container dauerhaft in einem Fehlerzustand bleibt (`docker compose ps` pruefen).
+Alle Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie automatisch wieder. Der Deploy-Worker hält zudem eine MySQL-Unterbrechung aus: Er verbindet sich mit Backoff neu, statt abzustürzen und Deploy-Jobs im Status `queued` hängen zu lassen. Ein manueller Eingriff ist nur nötig, wenn ein Container dauerhaft in einem Fehlerzustand bleibt (`docker compose ps` prüfen).
 
-Jeder Dienst hat einen Healthcheck: `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurueck, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Pruefergebnisse.
+Jeder Dienst hat einen Healthcheck: `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurück, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Prüfergebnisse.
 
 ### phpMyAdmin (optional)
 
@@ -187,9 +189,9 @@ docker compose --profile tools up -d phpmyadmin   # starten (nur 127.0.0.1:PMA_P
 docker compose --profile tools rm -sf phpmyadmin  # wieder entfernen
 ```
 
-Hinweis fuer Updates von aelteren Staenden: ein frueher dauerhaft laufender phpMyAdmin-Container bleibt nach dem Update zurueck, weil `docker compose down` Profil-Dienste nicht anfasst. Einmalig mit `docker compose --profile tools rm -sf phpmyadmin` entfernen; danach gilt der On-Demand-Weg oben.
+Hinweis für Updates von älteren Ständen: Ein früher dauerhaft laufender phpMyAdmin-Container bleibt nach dem Update zurück, weil `docker compose down` Profil-Dienste nicht anfasst. Einmalig mit `docker compose --profile tools rm -sf phpmyadmin` entfernen; danach gilt der On-Demand-Weg oben.
 
-Migrationen erneut pruefen:
+Migrationen erneut prüfen:
 
 ```bash
 docker compose exec -T php php /var/www/html/lib/migrate.php --check
@@ -215,34 +217,34 @@ docker compose down
 
 ## Backup und Restore
 
-Kanonisch sind die Skripte unter `scripts/` (die frueheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
+Kanonisch sind die Skripte unter `scripts/` (die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
 
 ```bash
 sh scripts/backup.sh        # DB-Dump, Config-Archiv und SHA-256-Manifest nach Docker/backups/
-sh scripts/restore_test.sh  # Restore-Drill in einer Wegwerf-Umgebung (beruehrt den Stack nicht)
+sh scripts/restore_test.sh  # Restore-Drill in einer Wegwerf-Umgebung (berührt den Stack nicht)
 ```
 
-Der Drill verifiziert das Manifest, spielt den juengsten Dump in einen Wegwerf-MySQL ein, laesst die Migrationen laufen, vergleicht das Schema gegen `struktur.sql`, prueft Invarianten und die Credential-Entschluesselung mit dem gesicherten `APP_KEY` und faehrt einen App-Smoke (Health, Portal-Login, Machine API). Der Ernstfall-Ablauf steht in `docs/operations/backup.md` (Disaster Recovery).
+Der Drill verifiziert das Manifest, spielt den jüngsten Dump in einen Wegwerf-MySQL ein, lässt die Migrationen laufen, vergleicht das Schema gegen `struktur.sql`, prüft Invarianten und die Entschlüsselung der Zugangsdaten mit dem gesicherten `APP_KEY` und fährt einen App-Smoke (Health, Portal-Login, Machine API). Der Ernstfall-Ablauf steht in `docs/operations/backup.md` (Disaster Recovery).
 
-Wichtig: `.env` und `APP_KEY` sind fuer verschluesselte Credentials kritisch. Ohne passenden `APP_KEY` koennen gespeicherte Secrets nicht sinnvoll entschluesselt werden; genau das beweist der Drill in beide Richtungen.
+Wichtig: `.env` und `APP_KEY` sind für verschlüsselte Zugangsdaten kritisch. Ohne passenden `APP_KEY` können gespeicherte Secrets nicht sinnvoll entschlüsselt werden; genau das beweist der Drill in beide Richtungen.
 
-Jeder Backup-Lauf schreibt zusaetzlich eine Statuszeile nach `Docker/backups/status/backup-status.jsonl`. Nur dieses `status/`-Unterverzeichnis wird read-only in den `php`-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), damit das Portal auf der Einstellungen-Seite eine Backup-Karte und bei Problemen ein Dashboard-Banner anzeigt (ADR-0021). Die Dumps und das Config-Tar (mit `.env`) werden nie gemountet. Nach dem ersten Start ohne Backup zeigt die Karte den Zustand `Unbekannt`, bis `scripts/backup.sh` einmal gelaufen ist.
+Jeder Backup-Lauf schreibt zusätzlich eine Statuszeile nach `Docker/backups/status/backup-status.jsonl`. Nur dieses `status/`-Unterverzeichnis wird read-only in den `php`-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), damit das Portal auf der Einstellungen-Seite eine Backup-Karte und bei Problemen ein Dashboard-Banner anzeigt (ADR-0021). Die Dumps und das Config-Tar (mit `.env`) werden nie gemountet. Nach dem ersten Start ohne Backup zeigt die Karte den Zustand `Unbekannt`, bis `scripts/backup.sh` einmal gelaufen ist.
 
 ## HTTPS
 
-HTTPS wird komplett im Portal konfiguriert (Einstellungen, Tab "HTTPS": Zertifikats-Upload als PFX oder PEM plus drei Schalter fuer Listener, Umleitung und HSTS; ADR-0027). HTTP-first bleibt der Startzustand: ohne hochgeladenes Zertifikat aendert sich nichts.
+HTTPS wird nach dem HTTP-Erststart im Portal konfiguriert (Einstellungen, Tab „HTTPS“: Zertifikats-Upload als PFX oder PEM plus Schalter für Listener, Umleitung und HSTS; ADR-0027). Ohne hochgeladenes Zertifikat und aktivierten Listener bleibt HTTP der wirksame Zustand.
 
-Einmalige Host-Voraussetzungen: `WEB_HTTPS_PORT` in `.env` setzen (Vorlage `.env.example`) und `docker compose up -d` ausfuehren, damit Portmapping und Shared-Volume-Mounts entstehen. `Docker/nginx/ssl` und `Docker/nginx/conf.d` muessen fuer uid 33 (`www-data`) schreibbar sein, z. B. `chown 33:33` auf dem Docker-Host. Ablauf, Erneuerung und Stoerungsbilder: `docs/operations/https.md`. Die Maschinen-Schnittstelle wird nie umgeleitet; ihre Skripte koennen HTTPS und wechseln erst mit, wenn sie ausdruecklich umgestellt werden (`docs/operations/https.md`, Abschnitt "Umstellen"). Ein HTTPS-Zwang fuer die Maschinen-API bleibt eine eigene Entscheidung (ADR-0019, Kandidat 5).
+Einmalige Host-Voraussetzungen: `WEB_HTTPS_PORT` in `.env` setzen (Vorlage `.env.example`) und `docker compose up -d` ausführen, damit Portmapping und Shared-Volume-Mounts entstehen. `Docker/nginx/ssl` und `Docker/nginx/conf.d` müssen für uid 33 (`www-data`) schreibbar sein, z. B. per `chown 33:33` auf dem Docker-Host. Ablauf, Erneuerung und Störungsbilder stehen in `docs/operations/https.md`. Die Maschinen-Schnittstelle wird nie umgeleitet; ihre Skripte können HTTPS und wechseln erst mit, wenn sie ausdrücklich umgestellt werden. Ein HTTPS-Zwang für die Maschinen-API bleibt eine eigene Entscheidung (ADR-0019, Kandidat 5).
 
 ## Air-Gap Hinweis
 
-Das Setup-Skript setzt voraus, dass Docker, das Compose-Plugin, die benoetigten Images und die im Repository vorhandenen Vendor-Dateien bereits verfuegbar sind. Es fuehrt keine Paketinstallation aus dem Internet aus. In einer abgeschotteten Umgebung muessen Images und Quellen vorab in die Umgebung gebracht und dort validiert werden.
+Das Setup-Skript setzt voraus, dass Docker, das Compose-Plugin, die benötigten Images und die im Repository vorhandenen Vendor-Dateien bereits verfügbar sind. Es führt keine Paketinstallation aus dem Internet aus. In einer abgeschotteten Umgebung müssen Images und Quellen vorab in die Umgebung gebracht und dort validiert werden.
 
-## Nacharbeiten fuer den Frontend-Handoff
+## Frontend-Wartung
 
-Die funktionale Portal-UX (Sticky-Formulare, Fehler pro Feld, Log-Suche/-Filter, Settings-POST und Account-Identitaet in der Topbar) ist umgesetzt und Teil dieses Standes. Offen bleibt das rein visuelle Design. Der Kollege fuer das Frontend sollte besonders diese Dateien pruefen, wenn Optik und Layout fortgefuehrt werden:
+Die funktionale und visuelle Portal-Basis ist umgesetzt. Für spätere Wartung von Optik und Layout sind besonders diese Stellen relevant:
 
 - `Docker/WebAPI/lib/layout.php` (Navigation, Kopfzeile, Theme)
 - `Docker/WebAPI/portal/settings.php` und `Docker/WebAPI/portal/assets/css/*` (Settings-Optik, Formularanordnung)
 
-Backend-seitig sind `deploy_settings`, `APP_PUBLIC_BASE_URL` und die vorhandenen RBAC-/CSP-Helfer die relevanten Anschlussstellen. Neue Portal-POSTs muessen weiter CSRF nutzen, Sticky-Werte ueber `Docker/WebAPI/lib/forms.php` zurueckspielen und duerfen keine Inline-Skripte oder Inline-Styles ohne Nonce einfuehren.
+Backend-seitig sind `deploy_settings`, `APP_PUBLIC_BASE_URL` und die vorhandenen RBAC-/CSP-Helfer die relevanten Anschlussstellen. Neue Portal-POSTs müssen weiter CSRF nutzen, Sticky-Werte über `Docker/WebAPI/lib/forms.php` zurückspielen und dürfen keine Inline-Skripte oder Inline-Styles ohne Nonce einführen.

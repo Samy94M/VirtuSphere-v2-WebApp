@@ -46,11 +46,10 @@ ApiService.cs
 VirtuSphere_TemporaryKey.pfx
 Docker/WebAPI/.phpunit.result.cache
 
-# Generated, redacted local QA evidence (never a release document). The
-# check.ps1 -Json examples in PRE-SHIP-CHECKLIST.md write qa-*.json into the
-# repo root; those artifacts are per-run evidence, not sources.
+# Generated, redacted local QA evidence (never a release document). All
+# check.ps1 -Json examples write below this dedicated directory; artifacts are
+# per-run evidence, not sources and never live beside repository source files.
 qa-artifacts/
-/qa-*.json
 
 # Offline-release bundles (scripts/build-offline-bundle.sh default output).
 dist/

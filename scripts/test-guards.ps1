@@ -364,6 +364,13 @@ $cases = @(
         Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Backup laeuft taeglich und ist fuer den Betrieb noetig.`n`n## Schritt 3: Backup")
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
     } }
+    @{ Name = 'doc-semantics.installation-ascii-umlaut'; Body = {
+        # Pinnt den weggefallenen Sonderweg: Die Installationsanleitung gehört
+        # zum gleichen deutschen Prosa-Scope wie jedes andere aktive Runbook.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/INSTALLATION-ANLEITUNG.md' '# Installationsanleitung' ("# Installationsanleitung`n`nDiese Ausnahme waere fuer Administratoren stoerend.")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
+    } }
     @{ Name = 'doc-semantics.doc-ascii-umlaut-in-code'; Body = {
         # Gegenrichtung: derselbe Text in Backticks ist ein zitierter Wert. Ein
         # PowerShell-Skript vergleicht wirklich gegen 'Uebersprungen'; dort einen

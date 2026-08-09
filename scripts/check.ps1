@@ -54,7 +54,7 @@
     werden nicht nachgezogen.
 
 .EXAMPLE
-    powershell -NoProfile -File scripts\check.ps1 -Lane Fast -Json qa.json
+    powershell -NoProfile -File scripts\check.ps1 -Lane Fast -Json qa-artifacts/qa-fast.json
 #>
 [CmdletBinding()]
 param(
@@ -86,6 +86,24 @@ $repoRoot = $env:VIRTUSPHERE_CHECK_ROOT
 if (-not $repoRoot) { $repoRoot = Split-Path $scriptDir -Parent }
 $repoRoot = ($repoRoot -replace '\\', '/').TrimEnd('/')
 $isWindowsHost = ($env:OS -eq 'Windows_NT')
+
+# QA evidence belongs below one ignored directory. Keep explicit paths usable,
+# but route the old bare qa-*.json spelling there as well so a copied command
+# cannot litter the repository root. Relative paths are rooted at the repo,
+# independent of the caller's current directory.
+if ($Json) {
+    $jsonLeaf = Split-Path -Leaf $Json
+    $jsonParent = Split-Path -Parent $Json
+    if ((-not $jsonParent) -and $jsonLeaf -like 'qa-*.json') {
+        $Json = Join-Path (Join-Path $repoRoot 'qa-artifacts') $jsonLeaf
+    } elseif (-not [System.IO.Path]::IsPathRooted($Json)) {
+        $Json = Join-Path $repoRoot $Json
+    }
+    $jsonDirectory = Split-Path -Parent $Json
+    if ($jsonDirectory -and -not (Test-Path $jsonDirectory)) {
+        New-Item -ItemType Directory -Force -Path $jsonDirectory | Out-Null
+    }
+}
 
 # Tool-Images fuer containerisierte Gates kommen aus der Tool-Lockdatei
 # (AP4-SSoT): scripts/tool-lock.json pinnt Registry-Images per Digest und

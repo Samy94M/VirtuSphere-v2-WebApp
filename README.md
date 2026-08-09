@@ -4,23 +4,22 @@
 
 VirtuSphere ist eine LAN-interne, server-gerenderte PHP-Web-App; die frühere Desktop-App ist entfernt (ADR-0035). Die technische Basis: Docker Compose mit `.env`, PHP 8.4, MySQL 8.4, nginx HTTP-first, zentrale PHP-Helfer unter `Docker/WebAPI/lib/`, Healthcheck `Docker/WebAPI/portal/health.php`, Migrationsrunner `Docker/WebAPI/lib/migrate.php`, Composer/phpseclib sowie ADR-/Agenten-Doku.
 
-Wichtige Einstiegsdateien:
-- `AGENTS.md` für Entwicklungsregeln und Endpunktkarte.
-- `GROK.md` als SSoT für verbotene Patterns und Integrationsverträge.
-- `docs/adr/README.md` für die ADR-Entscheidungsübersicht.
-- `docs/DEPLOYMENT.md` für persistente Logs und Troubleshooting.
-- `docs/INSTALLATION-ANLEITUNG.md` für das Setup auf einem Host **mit** Netzzugang (`setup.sh` baut die Images). Der luftspaltgetrennte Produktionshost geht stattdessen über `docs/operations/offline-install.md`.
-- `docs/QA.md` für PHPUnit-, Hook-, Lang-Audit- und Git-Hygiene-Befehle.
-- `docs/CHANGELOG.md` für die Migrationshistorie.
-- `docs/operations/` für den laufenden Betrieb, ein Dokument je Frage:
-  - `go-live.md`: erste produktive Inbetriebnahme auf dem Ubuntu-Host, ohne Docker-Vorwissen.
-  - `offline-install.md`: Installation auf einem Host ohne Internetzugang (Bundle prüfen, Images laden statt bauen); ab den Migrationen führt `go-live.md` weiter.
-  - `esxi-inventory.md`: read-only Inventarabruf, ESXi-geführter VLAN-Katalog, Fehlerbilder und was eine 0 auf einer ESXi-Karte bedeutet.
-  - `mecm-integration.md`: Zusammenspiel von Portal, MECM-Server und PXE-Clients.
-  - `https.md`: HTTPS im Portal einschalten (Zertifikat, Listener, HSTS).
-  - `backup.md`: Backup/Restore (`scripts/backup.sh`, `scripts/restore_test.sh`).
-- `PRE-SHIP-CHECKLIST.md` für die Release-Gates.
-- `.env.example` als Vorlage; die lokale `.env` ist bewusst ignoriert.
+## Einstieg nach Aufgabe
+
+Für einen neuen Betreiber ist die Lesereihenfolge bewusst betrieblich, nicht nach Repository-Architektur sortiert:
+
+1. [Go-live](docs/operations/go-live.md): erste produktive Inbetriebnahme und Reihenfolge der Entscheidungen.
+2. [Störungsdiagnose](docs/operations/troubleshooting.md): vom Symptom zur Portal-Seite, Log-Kategorie und ersten Maßnahme.
+3. [Bereitstellungskette](docs/operations/deploy-chain.md): Übergaben und Rückkanäle von Portal über Ansible/ESXi und MECM bis zum Client.
+4. [Glossar](docs/GLOSSARY.md): Statusstufen, Auftragszustände, MECM-Provenienz, VM-Identität und Korrelations-ID.
+
+Danach führen die spezialisierten Betriebshandbücher weiter:
+
+- [Installation mit Netzzugang](docs/INSTALLATION-ANLEITUNG.md); für einen luftspaltgetrennten Produktionshost stattdessen [Offline-Installation](docs/operations/offline-install.md).
+- [ESXi-Inventar](docs/operations/esxi-inventory.md), [MECM-Integration](docs/operations/mecm-integration.md), [HTTPS](docs/operations/https.md) und [Backup/Restore](docs/operations/backup.md).
+- [Deployment- und Supportmatrix](docs/DEPLOYMENT.md), [QA-Bedienung](docs/QA.md), [Qualitätsgates](docs/QUALITY-GATES.md) und [Pre-Ship-Checkliste](PRE-SHIP-CHECKLIST.md).
+
+Für Entwicklung und Architektur folgen erst danach [AGENTS.md](AGENTS.md), [GROK.md](GROK.md) und der [ADR-Index](docs/adr/README.md). Die lokale Konfiguration beginnt mit `.env.example`; `.env` selbst ist bewusst ignoriert. Abgeschlossene Änderungen stehen im [Changelog](docs/CHANGELOG.md).
 
 ## Funktionsumfang der Web-App
 

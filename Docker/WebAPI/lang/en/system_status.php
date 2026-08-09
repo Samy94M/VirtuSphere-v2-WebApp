@@ -132,7 +132,7 @@ return [
     'mecm_heading' => 'MECM',
     'mecm_hint' => 'Data flow and site state of the one connected MECM site.',
     'mecm_ip_mismatch' => 'Several current MECM sources report different sender IPs: :ips. This can be intentional with several network paths; verify the mapping.',
-    'mecm_setup_empty' => 'No MECM connection yet: neither a synchronisation task nor the site-health reporter has reported. The four tasks are set up on the MECM server, not in the portal; the portal only needs the IP allowlist entry for the machine API. The instructions are in docs/operations/mecm-integration.md.',
+    'mecm_setup_empty' => 'No MECM connection yet: neither a synchronisation task nor the site-health reporter has reported. The four tasks are set up on the MECM server, not in the portal; the portal only needs the IP allowlist entry for the machine API. The instructions are in the project directory on the server (not reachable inside the portal): docs/operations/mecm-integration.md.',
     // The same grey state, but with evidence: somebody is knocking and being
     // turned away. "Probably not set up yet" would simply be false here.
     'mecm_setup_denied' => 'The MECM connection appears to be set up but is being refused: accesses have arrived and failed at the machine API IP allowlist (see the note above). So the tasks are running, their server is just not allowed to talk to the portal yet. Allow the IP named there and the first source reports within its interval.',

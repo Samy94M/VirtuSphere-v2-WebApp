@@ -4,6 +4,16 @@ Dieses Dokument führt die **erste** produktive Inbetriebnahme der VirtuSphere-W
 auf dem Ubuntu-Host durch. Zielgruppe sind Administratoren ohne tiefes Docker- oder
 MECM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolge).
 
+## Schritt 0: Kompromittiertes Alt-Credential rotieren (einmalig, vor allem anderen)
+
+Bis zum 2026-07-13 lag im Repository eine Datei `functions.psm1` mit einem **Klartext-MySQL-Passwort** (Benutzer `testkonto`, fester Host, `SslMode=none`). Die Datei war toter WinForms-Code, von nirgends aufgerufen, und ist gelöscht.
+
+Das Passwort bleibt trotzdem kompromittiert: Die Datei stammt aus dem **Initial-Commit**, ein `git rm` entfernt sie also nicht aus der Historie, und jeder mit Repo-Zugriff kann sie weiterhin auslesen.
+
+- [ ] Existiert das Konto `testkonto` auf dem genannten MySQL-Host noch? Wenn ja: **löschen** oder Passwort rotieren.
+- [ ] Prüfen, ob dieses Passwort anderswo wiederverwendet wurde (der Wert steht in der Git-Historie, `git log -p -- functions.psm1`).
+- [ ] Erst danach ist die Frage erledigt. Ein Repo-Rewrite (`filter-repo`) ist nur sinnvoll, wenn das Repo den Kunden je verlässt; die Rotation ist in jedem Fall Pflicht.
+
 ## Wichtig vorab: „committet" heißt nicht „verifiziert"
 
 Der Anwendungskern (Portal, Deploy-Worker, Ansible-Anbindung) und die
@@ -19,10 +29,10 @@ Maschinenkette.
 | Ebene | Stand | Erste echte Abnahme in |
 |---|---|---|
 | PHP-Code und alle Migrationen | lokal und auf dem Prod-Host grün | Schritt 1–2 |
-| MECM-Rückkanal, Ergebnisberichte, Statusseite | lokal grün | Schritt 4 |
-| Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 5 |
-| PowerShell MECM-Server-Skripte | Parser- und Pester-geprüft, nie gegen echtes MECM | Schritt 4 |
-| PowerShell Client-Skripte | Parser- und Pester-geprüft, nie auf echtem Client | Schritt 6 |
+| MECM-Rückkanal, Ergebnisberichte, Statusseite | lokal grün | Schritt 5 |
+| Paket-Pipeline (Autoimporter/Sync) | lokal grün | Schritt 6 |
+| PowerShell MECM-Server-Skripte | Parser- und Pester-geprüft, nie gegen echtes MECM | Schritt 5 |
+| PowerShell Client-Skripte | Parser- und Pester-geprüft, nie auf echtem Client | Schritt 7 |
 
 ## Was NICHT aus `git pull` kommt
 
@@ -35,8 +45,8 @@ des Repos und müssen separat bereitstehen:
 | SSH-/Konsolenzugang zum Ubuntu-Host | sofort | Infrastruktur |
 | MECM-Server-IP | Schritt 4 (ins Portal tippen) | bekannt sein |
 | IP des Ansible-Hosts | Schritt 4 (ins Portal tippen) | bekannt sein |
-| DNS-Eintrag `virtusphere.lan` oder dokumentierter IP-Fallback | erst Schritt 6 (Client-Rollout) | Netz-Admin; befristete IP-Variante im MECM-Admin-Runbook |
-| Report-Token (optional) | Schritt 4 | im Portal generiert |
+| DNS-Eintrag `virtusphere.lan` oder dokumentierter IP-Fallback | erst Schritt 7 (Client-Rollout) | Netz-Admin; befristete IP-Variante im MECM-Admin-Runbook |
+| Report-Token (optional) | Schritt 5 | im Portal generiert |
 
 `APP_KEY`, `DB_PASS` und `MYSQL_ROOT_PASSWORD` kommen bewusst nicht per `git pull`
 mit; EnvBoot bricht hart ab, wenn sie fehlen oder schwach sind.
@@ -82,7 +92,7 @@ Auf dem Host installieren und bereitstellen:
 einem Fehler die fehlende Komponente. Bei gesetzter API-Basis-URL prüft er
 zusätzlich den Rückweg: die Portal-Erreichbarkeit vom Host aus und ob die
 Host-IP in den Machine-API IP-Freigaben steht; fehlt die Freigabe, warnt das
-Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.3). Die eigentlichen vSphere-Rechte liegen im
+Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.4). Die eigentlichen vSphere-Rechte liegen im
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
 erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
@@ -261,12 +271,13 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    `APP_BIND_IP` aus dem LAN erreichbar ist (Schritt 1.2). Bleibt die Verbindung
    aus, während `docker compose ps` alles gesund zeigt und `curl` auf dem Host
    antwortet, ist genau dieser Wert die Ursache.
-3. **Portal-Smoke-Test** (rein WebApp, noch ohne MECM): Login → Dashboard →
-   Mission anlegen → VM anlegen → Paket verknüpfen → Log-Seite öffnen. Damit
-   sind Sessions, CSRF, RBAC und i18n einmal produktiv bestätigt. Die
-   **Portal-Hilfe** (Fragezeichen in der Kopfzeile) erklärt jede Seite mit den
-   echten Konstanten des laufenden Systems; sie ist die einzige Erklärung im
-   Projekt, die nicht veralten kann.
+3. **Portal-Smoke-Test** (rein WebApp, noch ohne MECM) als vollständigen
+   Admin-Klickpfad ausführen: Erstanmeldung und Passwortwechsel → Dashboard →
+   Portal-Hilfe → Zugangsdaten → Einstellungen/Bereitstellung → Kataloge und
+   Inventar → Mission anlegen → VM anlegen → Paket verknüpfen → Deploy-Liste →
+   Systemstatus → Logs. Damit sind Navigation, Sessions, CSRF, RBAC und i18n
+   einmal produktiv bestätigt. Die kontextsensitive Portal-Hilfe erklärt die
+   Bedienung; die Betriebs-Runbooks liegen im Projektordner auf dem Server.
 4. **IP-Freigaben füllen** (Einstellungen → IP-Freigaben). Die Maschinen-
    Schnittstelle ist per Allowlist gesperrt und antwortet jeder nicht
    freigegebenen IP mit **403**, ohne dass im Portal etwas kaputt aussieht.
@@ -385,18 +396,6 @@ Reale VM-/Missionsnamen und MAC-Adressen gegen die neuen Regeln prüfen:
 NetBIOS-Hostname ≤15 Zeichen (Bestandsschutz greift), globale VM-Namen-
 Eindeutigkeit, MAC-Kanonisierung und Dubletten-Guard. Prüfen, ob Bestandsdaten
 Warnungen auslösen, und diese bereinigen.
-
----
-
-## Schritt 0: Kompromittiertes Alt-Credential rotieren (einmalig, vor allem anderen)
-
-Bis zum 2026-07-13 lag im Repository eine Datei `functions.psm1` mit einem **Klartext-MySQL-Passwort** (Benutzer `testkonto`, fester Host, `SslMode=none`). Die Datei war toter WinForms-Code, von nirgends aufgerufen, und ist gelöscht.
-
-Das Passwort bleibt trotzdem kompromittiert: die Datei stammt aus dem **Initial-Commit**, ein `git rm` entfernt sie also nicht aus der Historie, und jeder mit Repo-Zugriff kann sie weiterhin auslesen.
-
-- [ ] Existiert das Konto `testkonto` auf dem genannten MySQL-Host noch? Wenn ja: **löschen** oder Passwort rotieren.
-- [ ] Prüfen, ob dieses Passwort anderswo wiederverwendet wurde (der Wert steht in der Git-Historie, `git log -p -- functions.psm1`).
-- [ ] Erst danach ist die Frage erledigt. Ein Repo-Rewrite (`filter-repo`) ist nur sinnvoll, wenn das Repo den Kunden je verlässt; die Rotation ist in jedem Fall Pflicht.
 
 ## Code auf den Host bringen und Releases nachziehen
 

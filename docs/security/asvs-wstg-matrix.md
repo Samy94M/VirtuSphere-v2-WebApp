@@ -1,6 +1,6 @@
 # Security-Testmatrix: OWASP ASVS 5.0 Level 2 + WSTG
 
-Version 1 (2026-07-17, Plan-Etappe 7/AP7). Diese Matrix ist der versionierte
+Version 2 (2026-08-09, Härtungskampagne Etappen 9–10). Diese Matrix ist der versionierte
 Vertrag, WELCHE Sicherheitszusagen das Projekt prüft, WO der Beweis liegt und
 was offen ist. Sie behauptet nichts, wofür kein Test, Gate oder dokumentierter
 manueller Schritt existiert. Statuswerte: **automatisiert** (läuft in einer
@@ -43,7 +43,8 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Anonymer POST landet am Login (302), keine Writes | automatisiert | E2E `rbac-csrf.spec.js` |
 | Seiten-403 je Rolle (users/settings/logs für user-Rolle) | automatisiert | E2E `health-matrix.spec.js` (denied-Matrix) |
 | IDOR: IDs werden gegen Mission/Besitzer-Scope geprüft (vm_id∈mission, job∈mission) | automatisiert | Repo-Guards (`repo_reset_vm_mecm_id`, `db_importMAC` 409-Pfad) + `MacImportCallbackTest`; Portal-Handler mit Scope-Checks |
-| Machine-API: IP-Allowlist + Token; Ablehnung ungültiger Tokens | automatisiert | `AccessLegacyRbacTest`, `MachineApiWireTest`, Restore-Drill-Smoke (Token-Ablehnung) |
+| Machine-API: IP-Allowlist; optionaler Token nur für den Report-Rückkanal; frühere Desktop-Token-Pfade bleiben 404 | automatisiert | `MachineApiWireTest`, `MachineApiDenialTraceTest`, Restore-Drill-Smoke; ADR-0035 |
+| ESXi-Schreibzugriffe binden Name an Instance-UUID; fremder Namenszwilling blockiert, Adoption ist ausdrücklich | automatisiert | `AnsibleVmIdentityContractTest`, `VmIdentityCollisionTest`, `MacImportCallbackTest`; ADR-0036 |
 
 ## V5 Input-Validierung / Injection
 
@@ -65,6 +66,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Credentials at rest: libsodium mit APP_KEY; falscher Schlüssel scheitert erwartbar | automatisiert | Restore-Drill (`tests/tools/restore-drill-probe.php`: Entschlüsselung mit richtigem, Scheitern mit falschem APP_KEY) |
 | Secrets nie im Klartext zurückgerendert (value leer/maskiert) | automatisiert | `credentials.php`-Markup + E2E-CRUD (Editor zeigt Platzhalter) |
 | TLS: Admin-Upload-Flow, HSTS-Toggle, Redirect-Guards | automatisiert | ADR-0027-Tests + E2E `https-flow.spec.js` |
+| ESXi-TLS: neue Zugänge strikt; Bestandszugänge sichtbar Legacy; Aktivierung erst nach echtem Zertifikatstest, kein stiller Fallback | automatisiert + manuell | `EsxiTrustModeTest`, `EsxiTrustModeIntegrationTest`, E2E `crud-credential.spec.js`; echter Hostwechsel in `PRE-SHIP-CHECKLIST.md` |
 | Private-Key-Dateirechte 0600 vor Sichtbarkeit | automatisiert | `https_write_material` + `HttpsConfigTest`; Restore-Drill prüft Rechte im Config-Archiv |
 
 ## V10/V14 Fehlerbehandlung, Logging, Konfiguration
@@ -76,6 +78,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Security-Header auch auf nginx-eigenen Antworten (403/404) | automatisiert | Header-Maps in `default.conf`; `health-contract`-Gate (nginx -t + Exposure) |
 | Interna nicht erreichbar (/lib,/vendor,/tests,/logs → 403) | automatisiert | `health-contract`-Gate (/tests=403) + nginx deny-Regeln |
 | Audit-Log für Auth-, Rechte- und CSRF-Ereignisse | automatisiert | `portal_guard_post`/`portal_forbid` + `AuditEventsTest`; E2E-Ablehnungen erzeugen Audit-Zeilen |
+| Eine 16-stellige Korrelations-ID verbindet Portal-/Machine-API-/Worker-/PowerShell-Ereignisse und wird vor Ausgabe redigiert | automatisiert | `CorrelationIdTest`, `CorrelationTraceTest`, `ExceptionTraceRedactionTest`, Pester `VirtuSphere.RunReport.Tests.ps1` |
 | Secret-Scan über volle Git-Historie, null unerklärte Funde | automatisiert | `secret-scan`-Gate (Release-Lane), Allowlist-Vertrag `.gitleaks.toml` |
 | Dependency-/Image-CVE-Gates, SBOM, Digest-Pins | automatisiert | composer audit (Fast); `sbom`- und `image-cve`-Gates (Release-Lane, Trivy/Syft mit befristeten Ausnahmen in `.trivyignore.yaml`) |
 | Container-Härtung gepinnt (read_only, cap_drop, no-new-privileges) | automatisiert | Compose gesetzt; `compose-hardening`-Gate in allen Lanes (`scripts/check-compose-hardening.ps1`) |
@@ -90,8 +93,8 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | INPV (Input Validation) | V5-Zeilen; YAML/SQL/XSS/Log-Injection-Beweise |
 | CRYP (Cryptography) | V7-Zeilen; libsodium + TLS-Flow |
 | ERRH (Error Handling) | V10-Zeilen; PhaseC-Contract |
-| CONF (Configuration) | Versionsoffenlegung, deny-Regeln, Secret-Scan, AP8-Rest |
-| BUSL (Business Logic) | Deploy-Statusmaschine (Matrix 1-17, ADR-0030), Idempotenz-/409-Beweise `MacImportCallbackTest` |
+| CONF (Configuration) | Versionsoffenlegung, deny-Regeln, Secret-Scan, Compose-Härtung und Digest-Pins |
+| BUSL (Business Logic) | Deploy-Statusmaschine (ADR-0030/0033), VM-Identität/Adoption (ADR-0036), Idempotenz-/409-Beweise `MacImportCallbackTest` |
 | CLNT (Client-side) | CSP-Nonce-Contract, keine Inline-Handler, `health-matrix` Konsolen-/CSP-Scan |
 
 ## Pflege

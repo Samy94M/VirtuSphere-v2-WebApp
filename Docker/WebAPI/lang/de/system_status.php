@@ -132,7 +132,7 @@ return [
     'mecm_heading' => 'MECM',
     'mecm_hint' => 'Datenfluss und Site-Zustand der einen angebundenen MECM-Site.',
     'mecm_ip_mismatch' => 'Mehrere aktuelle MECM-Quellen melden unterschiedliche Absender-IPs: :ips. Das kann bei mehreren Netzwegen beabsichtigt sein; bitte die Zuordnung prüfen.',
-    'mecm_setup_empty' => 'Noch keine MECM-Anbindung: bisher hat sich weder eine Synchronisationsaufgabe noch der Site-Health-Reporter gemeldet. Die vier Aufgaben werden auf dem MECM-Server eingerichtet, nicht im Portal; das Portal braucht dafür nur die IP-Freigabe für die Machine-API. Die Anleitung dazu steht in docs/operations/mecm-integration.md.',
+    'mecm_setup_empty' => 'Noch keine MECM-Anbindung: bisher hat sich weder eine Synchronisationsaufgabe noch der Site-Health-Reporter gemeldet. Die vier Aufgaben werden auf dem MECM-Server eingerichtet, nicht im Portal; das Portal braucht dafür nur die IP-Freigabe für die Machine-API. Die Anleitung steht im Projektordner auf dem Server (nicht im Portal erreichbar): docs/operations/mecm-integration.md.',
     // Dieselbe graue Lage, aber mit Beweis: es klopft jemand und wird abgewiesen.
     // „Vermutlich noch nicht eingerichtet" wäre hier schlicht falsch.
     'mecm_setup_denied' => 'Die MECM-Anbindung ist offenbar eingerichtet, wird aber abgewiesen: es sind Zugriffe angekommen und an der IP-Freigabe der Machine-API gescheitert (siehe Hinweis oben). Die Aufgaben laufen also, nur darf ihr Server noch nicht mit dem Portal sprechen. Die genannte IP freigeben, dann meldet sich die erste Quelle innerhalb ihres Intervalls.',

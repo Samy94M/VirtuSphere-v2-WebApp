@@ -258,7 +258,7 @@ done
 # --- 14. Deutsche Dokumente schreiben echte Umlaute -----------------------------
 #
 # Dieselbe Regel, die fuer den Portalkatalog schon gilt (ADR-0014): ue/ae/oe statt
-# ue/ae/oe liest sich wie eine Kodierungsstoerung und ist in einem Dokument, das ein
+# ü/ä/ö liest sich wie eine Kodierungsstoerung und ist in einem Dokument, das ein
 # wechselnder Administrator unter Druck liest, genau die falsche Stelle fuer Zweifel
 # am Text. Geprueft wird eine Wortliste statt eines Musters, weil "neue" und
 # "Steuerung" legitim sind: nur Schreibweisen, die im Deutschen nie richtig sind.
@@ -268,13 +268,8 @@ done
 # zitierter Wert, kein Prosatext. `client_hostname erkennt \`Uebersprungen\`` nennt
 # ein String-Literal, das ein PowerShell-Skript wirklich so vergleicht; dort einen
 # Umlaut zu erzwingen wuerde die Doku falsch machen.
-umlaut_words='fuer|ueber|Ueber|waehrend|naechst|moeglich|Moeglich|koenn|Koenn|wuerde|Wuerde|gehoert|loesch|Loesch|oeffn|Oeffn|aender|Aender|Groesse|pruef|Pruef|ausfuehr|Ausfuehr|zurueck|Zurueck|muess|Muess|Loesung|Schluessel|Verzoeger|maessig|gemaess|hoechst|spaeter|gueltig|Gueltig|erfuellt|Uebersicht|bestaetig|Bestaetig|zusaetzlich|Zusaetzlich|taeglich|urspruenglich|beruecksichtig|verfuegbar|Verfuegbar|noetig|Noetig|stoer|Stoer'
+umlaut_words='fuer|ueber|Ueber|waehrend|naechst|moeglich|Moeglich|koenn|Koenn|wuerde|Wuerde|gehoert|loesch|Loesch|oeffn|Oeffn|aender|Aender|Groesse|laeng|Laeng|pruef|Pruef|ausfuehr|Ausfuehr|zurueck|Zurueck|muess|Muess|Loesung|Schluessel|Verzoeger|maessig|gemaess|hoechst|spaeter|gueltig|Gueltig|erfuellt|Uebersicht|bestaetig|Bestaetig|zusaetzlich|Zusaetzlich|taeglich|urspruenglich|beruecksichtig|verfuegbar|Verfuegbar|noetig|Noetig|stoer|Stoer'
 for f in $active_docs; do
-  # docs/INSTALLATION-ANLEITUNG.md ist bewusst ausgenommen: die durchgehende
-  # Umlaut-Korrektur dieses Dokuments ist als eigenes Arbeitspaket eingeplant
-  # (P2). Die Ausnahme steht hier statt im Stillen, damit sie mit dem Paket
-  # verschwindet und nicht mit ihm vergessen wird.
-  [ "$f" = 'docs/INSTALLATION-ANLEITUNG.md' ] && continue
   prose=$(awk '/^[[:space:]]*```/ { fence = !fence; print ""; next } { print (fence ? "" : $0) }' "$f" \
     | sed 's/`[^`]*`//g')
   if printf '%s\n' "$prose" | grep -nE "\b($umlaut_words)" >&2; then
