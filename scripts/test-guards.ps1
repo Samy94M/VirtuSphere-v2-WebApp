@@ -750,7 +750,9 @@ function Invoke-ComposeHardeningGuard {
 }
 function New-ComposeFixture {
     $fx = New-Fixture @('docker-compose.yml', '.env.example',
-        'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile', 'Docker/qa-ansible/Dockerfile')
+        'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
+        'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
+        'Docker/qa-ansible/Dockerfile')
     Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
     return $fx
 }
@@ -813,27 +815,23 @@ $cases += @(
         Edit-Fixture $fx 'docker-compose.yml' '      - tools' '      - werkzeuge'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
     } }
-    @{ Name = 'compose-hardening.image-indirection-drift'; Body = {
-        # Die Gegenrichtung: ohne die Indirektion kann ein luftspaltgetrennter Host
-        # das Image nicht aufloesen, weil docker load keinen RepoDigest
-        # wiederherstellt. Ein umbenannter Variablenname faellt auf, obwohl die
-        # AUFGELOESTE Referenz weiter den Digest traegt - genau die Luecke, die die
-        # Klartextpruefung schliesst.
+    @{ Name = 'compose-hardening.built-image-tag-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture
-        Edit-Fixture $fx 'docker-compose.yml' 'image: ${MYSQL_IMAGE:-' 'image: ${MYSQL_IMAGE_TYPO:-'
-        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.image-indirection\]' -InfraOnExit2
+        Edit-Fixture $fx 'docker-compose.yml' 'image: mysql:8.4-virtusphere' 'image: mysql:8.4-untrusted'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-tag\]' -InfraOnExit2
     } }
-    @{ Name = 'compose-hardening.image-digest-drift'; Body = {
+    @{ Name = 'compose-hardening.built-image-context-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture
-        # Anker digest-unabhaengig, sonst bricht jeder Digest-Bump den Guard.
-        # Die Klammer wird GESCHLOSSEN und der Digest-Rest zum echten
-        # YAML-Kommentar: innerhalb von ${...} ist ein # kein Kommentar, und ein
-        # Standard mit Leerzeichen macht `docker compose config` unparsebar - der
-        # Fall waere dann infra statt Befund.
-        Edit-Fixture $fx 'docker-compose.yml' 'image: ${MYSQL_IMAGE:-mysql:8.4@' 'image: ${MYSQL_IMAGE:-mysql:8.4} # @'
-        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.image-digest\]' -InfraOnExit2
+        Edit-Fixture $fx 'docker-compose.yml' 'context: ./Docker/mysql' 'context: ./Docker/php'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-context\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.built-image-context-zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      context: ./Docker/mysql' '      x-context-disabled: ./Docker/mysql'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-context\]' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.dockerfile-digest-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }

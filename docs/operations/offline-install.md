@@ -7,8 +7,8 @@ Ansible Galaxy oder GitHub. Alles kommt aus dem Offline-Bundle
 
 **Warum es dieses Dokument gibt:** `docs/INSTALLATION-ANLEITUNG.md` beschreibt
 `Docker/scripts/setup.sh`, und das ruft `docker compose build` auf. Die
-Basis-Images sind Digest-gepinnt und liegen nicht im Bundle, also kann dieser
-Aufruf hier nicht durchlaufen. Der Weg unten baut nichts, er lädt fertige Images.
+Basis-Images liegen nicht im Bundle, also kann dieser Aufruf hier nicht
+durchlaufen. Der Weg unten baut nichts, er lädt die bereits gehärteten Images.
 
 Verwandte Dokumente: `docs/operations/go-live.md` ist ab Schritt 2 (Migrationen)
 identisch und bleibt maßgeblich; dieses Dokument ersetzt nur, wie Code und Images
@@ -53,12 +53,12 @@ Container referenziert; `prune` würde genau sie entfernen, und auf diesem Host
 gibt es keinen Weg, sie zurückzuholen.
 
 Warum das ein eigener Absatz ist: `docker load` stellt **keinen RepoDigest**
-wieder her, und ein `docker save`-Archiv enthält gar keinen. Eine digest-gepinnte
-Referenz wie `mysql:8.4@sha256:…` ist auf diesem Host deshalb *nicht auflösbar* -
-Compose würde ziehen wollen und ohne Netz scheitern. Genau dafür liegt
-`.env.offline-images` im Bundle; Schritt 4 hängt sie an die `.env`. Die Integrität
-der Images hängt hier an der Prüfsumme aus Schritt 1, nicht am Registry-Digest,
-den dieser Host ohnehin nie prüfen könnte.
+wieder her. Deshalb referenziert Compose die gehärteten MySQL- und
+phpMyAdmin-Child-Images über feste lokale Tags, die `docker save`/`docker load`
+erhält. Ihre Upstream-Basen bleiben in den Dockerfiles per Digest gepinnt; auf
+dem Air-Gap-Host hängt die Integrität der fertigen Images an der Prüfsumme aus
+Schritt 1. Der Bundle-Build beweist vor der Ausgabe, dass jeder von Compose
+aufgelöste Tag tatsächlich in `images.txt` und einem Image-Archiv liegt.
 
 ## Schritt 3: Quellcode und Abhängigkeiten entpacken
 
@@ -89,17 +89,15 @@ frisch aufzusetzenden Air-Gap-Host war das ein Widerspruch in sich.
 
 ## Schritt 4: `.env` anlegen
 
-Vorlage ist `virtusphere/.env.example`. **Zuerst** die zwei Zeilen aus
-`.env.offline-images` (aus dem Bundle, nicht aus dem Quellbaum) anhängen:
+Vorlage ist `virtusphere/.env.example`:
 
 ```bash
 cp virtusphere/.env.example virtusphere/.env
-cat .env.offline-images >> virtusphere/.env
 ```
 
-Sie setzen `MYSQL_IMAGE` und `PMA_IMAGE` auf die Tags, die Schritt 2 geladen hat.
-Ohne sie greift der Digest-Pin aus `docker-compose.yml`, den dieser Host nicht
-auflösen kann (siehe Schritt 2). Dann zwingend selbst setzen:
+Die geladenen Runtime-Tags stehen bereits fest in `docker-compose.yml`; es gibt
+keinen Image-Override, der auf dem Air-Gap-Host versehentlich einen Pull auslösen
+kann. In `.env` dann zwingend selbst setzen:
 
 | Schlüssel | Warum |
 |---|---|

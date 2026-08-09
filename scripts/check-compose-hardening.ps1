@@ -10,9 +10,9 @@
     das YAML: gepinnt werden read_only+tmpfs, cap_drop ALL, die exakt
     dokumentierten cap_add-Sets, no-new-privileges, PID-/Memory-Limits,
     Healthchecks, service_healthy-Startordnung, restart-Policy, die
-    Loopback-Bindung und das tools-Profil von phpMyAdmin, Tag+Digest-Pins der
-    Registry-Images sowie die Digest-Pins in den FROM-/COPY---from-Zeilen der
-    First-Party-Dockerfiles. Der QA-Override (Docker/qa) aendert nur
+    Loopback-Bindung und das tools-Profil von phpMyAdmin, feste Tags und
+    Build-Kontexte der lokal gehaerteten Runtime-Images sowie die Digest-Pins in
+    den FROM-/COPY---from-Zeilen der First-Party-Dockerfiles. Der QA-Override (Docker/qa) aendert nur
     env_file/volumes/restart und erbt die Haertung; geprueft wird die Basisdatei.
 
     Das aufgeloeste config-JSON enthaelt interpolierte Secrets aus .env und wird
@@ -112,8 +112,10 @@ $dependsHealthy = @{
     'maintenance-worker' = @('mysql')
     'phpmyadmin'         = @('mysql')
 }
-$digestPinnedImages = @('mysql', 'phpmyadmin')
-$imageRefPattern = '^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$'
+$builtRuntimeImages = @{
+    mysql = @{ Tag = 'mysql:8.4-virtusphere'; Context = '/Docker/mysql' }
+    phpmyadmin = @{ Tag = 'phpmyadmin:5.2.3-virtusphere'; Context = '/Docker/phpmyadmin' }
+}
 
 # Welche Umgebungsschluessel ein Service sehen DARF, nach Aufloesung durch
 # `docker compose config`. `$null` heisst "nicht gepinnt", nicht "beliebig".
@@ -272,38 +274,32 @@ if ($findings.Count -eq 0) {
         }
     }
 
-    # Registry-Images: Tag dokumentiert die Linie, Digest pinnt die Bytes.
-    foreach ($name in $digestPinnedImages) {
+    # MySQL/phpMyAdmin are locally hardened child images. Their stable tags
+    # survive docker save/load; reproducibility comes from the digest-pinned
+    # FROM lines below plus the bundle checksum. Both the tag and build context
+    # are part of the contract so an environment override cannot bypass them.
+    foreach ($name in $builtRuntimeImages.Keys) {
         $svc = Get-Prop $servicesNode $name
         $image = "$(Get-Prop $svc 'image')"
-        if ($image -notmatch $imageRefPattern) {
-            Add-Finding 'image-digest' ('{0}: image "{1}" ist nicht als tag@sha256-Digest gepinnt' -f $name, $image)
+        $expected = $builtRuntimeImages[$name]
+        if ($image -ne $expected.Tag) {
+            Add-Finding 'built-image-tag' ('{0}: image "{1}" statt festem Bundle-Tag "{2}"' -f $name, $image, $expected.Tag)
+        }
+        $build = Get-Prop $svc 'build'
+        $context = ''
+        if ($build) { $context = "$(Get-Prop $build 'context')" -replace '\\', '/' }
+        if (-not $build -or -not $context.EndsWith($expected.Context, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Add-Finding 'built-image-context' ('{0}: Build-Kontext "{1}" endet nicht auf "{2}"' -f $name, $context, $expected.Context)
         }
     }
 }
 
-# --- Der Digest muss auch im STANDARD der Indirektion stehen -------------------
-#
-# Beide Registry-Images werden ueber ${VAR:-tag@sha256:...} referenziert, weil
-# `docker load` keinen RepoDigest wiederherstellt und eine digest-gepinnte
-# Referenz auf einem luftspaltgetrennten Host deshalb nicht aufloesbar ist. Die
-# Pruefung oben liest die AUFGELOESTE Referenz und wuerde einen ungepinnten
-# Standard nicht sehen, solange eine Variable gesetzt ist. Deshalb zusaetzlich im
-# Klartext: der Standard selbst ist der Pin.
-$composeText = [System.IO.File]::ReadAllText($composeFile)
-foreach ($indirect in @('MYSQL_IMAGE', 'PMA_IMAGE')) {
-    $match = [regex]::Match($composeText, ('image:\s*\$\{' + $indirect + ':-([^\}]+)\}'))
-    if (-not $match.Success) {
-        Add-Finding 'image-indirection' ("$indirect wird in docker-compose.yml nicht als image: `${${indirect}:-<pin>} referenziert; ohne die Indirektion kann ein Offline-Host das Image nicht aufloesen, mit einer ungepinnten Indirektion ist der Digest weg.")
-        continue
-    }
-    if ($match.Groups[1].Value -notmatch $imageRefPattern) {
-        Add-Finding 'image-indirection' ('{0}: der Standard "{1}" ist nicht als tag@sha256-Digest gepinnt' -f $indirect, $match.Groups[1].Value)
-    }
-}
-
 # --- First-Party-Dockerfiles: FROM/COPY --from per Digest ----------------------
-$dockerfiles = @('Docker/php/Dockerfile', 'Docker/nginx/Dockerfile', 'Docker/qa-ansible/Dockerfile')
+$dockerfiles = @(
+    'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
+    'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
+    'Docker/qa-ansible/Dockerfile'
+)
 $digestRe = '@sha256:[0-9a-f]{64}'
 foreach ($rel in $dockerfiles) {
     $path = Join-Path $root $rel

@@ -4,9 +4,6 @@
 #
 #   images/         docker save der Runtime-Images (per Image-ID dedupliziert)
 #   images.txt      Ref -> Tag -> Image-ID -> RepoDigest je gespeichertem Image
-#   .env.offline-images  MYSQL_IMAGE/PMA_IMAGE auf die geladenen Tags (docker load
-#                   stellt keinen RepoDigest her, also ist der Digest-Pin auf dem
-#                   Zielhost nicht aufloesbar)
 #   deps/           vendor.tar.gz (composer install --no-dev, im PHP-Image)
 #   collections/    ansible-galaxy collection download (Air-Gap-Ansible-Host)
 #   sbom/           SPDX-SBOM je Image (trivy, Digest-Pin aus tool-lock.json)
@@ -166,43 +163,18 @@ docker compose --project-directory "$ROOT" --profile "*" config --images | LC_AL
     printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$tag" "$id" "${digest:-lokal-gebaut}" "images/$safe.tar.gz" >> "$STAGE/images.txt"
 done
 
-# --- 1b) Referenzen, die der Zielhost wirklich aufloesen kann ------------------
-#
-# docker load stellt keinen RepoDigest wieder her, also ist die digest-gepinnte
-# Referenz aus docker-compose.yml auf dem Zielhost nicht aufloesbar. Compose
-# referenziert die beiden Registry-Images deshalb ueber ${MYSQL_IMAGE:-<pin>} bzw.
-# ${PMA_IMAGE:-<pin>}; diese Datei setzt die Variablen auf die reinen Tags, die
-# Schritt 2 der Installation geladen hat. Auf einem vernetzten Host existiert sie
-# nicht, und der Digest gilt.
-echo "==> .env.offline-images schreiben"
-{
-    echo "# Vom Offline-Bundle erzeugt. An .env anhaengen, BEVOR der Stack startet."
-    echo "# Grund: docker load stellt keinen RepoDigest wieder her, also kann der Host"
-    echo "# die digest-gepinnte Referenz nicht aufloesen und wuerde ziehen wollen."
-    while IFS="$(printf '\t')" read -r _ref tag _id _digest _file; do
-        case "$tag" in
-            mysql:*)      echo "MYSQL_IMAGE=$tag" ;;
-            phpmyadmin:*) echo "PMA_IMAGE=$tag" ;;
-        esac
-    done < "$STAGE/images.txt"
-} > "$STAGE/.env.offline-images"
-grep -q '^MYSQL_IMAGE=' "$STAGE/.env.offline-images" \
-    || { echo "offline-bundle: [bundle.image-indirection] kein MYSQL_IMAGE in .env.offline-images; der Zielhost koennte das Image nicht aufloesen." >&2; exit 1; }
-
-# --- 1c) Roundtrip: loesen die Offline-Referenzen wirklich auf? -----------------
+# --- 1b) Roundtrip: loesen die Offline-Referenzen wirklich auf? -----------------
 #
 # Die docker-load-Haelfte laesst sich auf dem Build-Host nicht ehrlicher beweisen
 # als durch den manifest.json-Tag-Check oben (die Images sind hier ohnehin
-# vorhanden; nur ein Wegwerf-Docker-Daemon koennte mehr zeigen). Beweisbar ist
-# die Compose-Haelfte: mit den Variablen aus .env.offline-images darf die
-# aufgeloeste Image-Liste keinen Digest mehr enthalten, und jede Referenz muss
-# als Tag im Bundle liegen - sonst will der Zielhost ziehen.
-echo "==> Compose-Roundtrip mit Offline-Referenzen"
-offline_env=$(grep -v '^#' "$STAGE/.env.offline-images")
-# shellcheck disable=SC2086
-resolved=$(env $offline_env docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u)
+# vorhanden; nur ein Wegwerf-Docker-Daemon koennte mehr zeigen). Die lokal
+# gehaerteten Runtime-Images haben feste Tags, und jede von Compose aufgeloeste
+# Referenz muss unter genau diesem Tag im Bundle liegen. Ein Digest waere nach
+# docker load nicht aufloesbar und bleibt deshalb ein harter Befund.
+echo "==> Compose-Roundtrip mit Bundle-Tags"
+resolved=$(docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u)
 if printf '%s\n' "$resolved" | grep -q '@sha256:'; then
-    echo "offline-bundle: [bundle.roundtrip-digest] compose loest mit .env.offline-images weiterhin eine Digest-Referenz auf; der Zielhost koennte sie nach docker load nicht finden:" >&2
+    echo "offline-bundle: [bundle.roundtrip-digest] compose loest eine Digest-Referenz auf; der Zielhost koennte sie nach docker load nicht finden:" >&2
     printf '%s\n' "$resolved" | grep '@sha256:' >&2
     exit 1
 fi
@@ -344,11 +316,7 @@ Alle Schritte laufen ohne Internetzugang.
    `python3 -m pip install --no-index --find-links deps/wheels -r deps/requirements-ansible-host.txt`
    Danach die Ansible-Collections:
    `ansible-galaxy collection install collections/*.tar.gz` (offline).
-6. Beim Anlegen der `.env` im naechsten Schritt den Inhalt von
-   `.env.offline-images` anhaengen. Ohne diese zwei Zeilen versucht Compose die
-   digest-gepinnten Referenzen aufzuloesen, die ein `docker load` nicht
-   wiederherstellt, und will ziehen - auf diesem Host das Ende.
-7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
+6. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. phpMyAdmin ist optional:
    `docker compose --profile tools up -d phpmyadmin`.

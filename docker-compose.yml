@@ -179,16 +179,12 @@ services:
     mem_limit: 128m
 
   mysql:
-    # Tag documents the line, digest pins the bytes (AP8).
-    # Digest-Pin bleibt der Standard, aber ueber eine Indirektion: docker load
-    # stellt NIE einen RepoDigest wieder her (ein save-Archiv enthaelt keinen), also
-    # ist eine digest-gepinnte Referenz auf einem luftspaltgetrennten Host gar nicht
-    # aufloesbar - compose wuerde ziehen wollen und dort scheitern. Das Offline-Bundle
-    # legt MYSQL_IMAGE auf den reinen Tag, den es geladen hat (.env.offline-images);
-    # auf einem vernetzten Host ist die Variable leer und der Digest gilt. Der
-    # Standard selbst ist gepinnt und wird von check-compose-hardening.ps1 im
-    # Klartext geprueft, nicht nur nach der Aufloesung.
-    image: ${MYSQL_IMAGE:-mysql:8.4@sha256:8dbcf531a03aade657e181b9cf2f1d1803ce621a1d55610cb44cb531ab7d7db6}
+    # The runtime tag is local and survives docker save/load. Its upstream bytes
+    # are pinned in Docker/mysql/Dockerfile; the child image removes the unused
+    # mysql-shell RPM and its independently vulnerable Python runtime.
+    image: mysql:8.4-virtusphere
+    build:
+      context: ./Docker/mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
@@ -223,15 +219,11 @@ services:
     # loopback-only (GROK.md). Previously this ran tagless (implicit :latest)
     # and always-on. Library image, not phpmyadmin/phpmyadmin: the vendor repo
     # stopped rebuilding (hundreds of fixable base CVEs frozen in its 5.2.3).
-    # Digest-Pin bleibt der Standard, aber ueber eine Indirektion: docker load
-    # stellt NIE einen RepoDigest wieder her (ein save-Archiv enthaelt keinen), also
-    # ist eine digest-gepinnte Referenz auf einem luftspaltgetrennten Host gar nicht
-    # aufloesbar - compose wuerde ziehen wollen und dort scheitern. Das Offline-Bundle
-    # legt PMA_IMAGE auf den reinen Tag, den es geladen hat (.env.offline-images);
-    # auf einem vernetzten Host ist die Variable leer und der Digest gilt. Der
-    # Standard selbst ist gepinnt und wird von check-compose-hardening.ps1 im
-    # Klartext geprueft, nicht nur nach der Aufloesung.
-    image: ${PMA_IMAGE:-phpmyadmin:5.2.3@sha256:b68f318c5fd85541795ed8eb4ced28ea6908a89910871783b3e479cc6c6d1e1b}
+    # The opt-in tool gets the same local-tag/offline contract as MySQL. Its
+    # Dockerfile pins upstream and consumes the available Debian security fix.
+    image: phpmyadmin:5.2.3-virtusphere
+    build:
+      context: ./Docker/phpmyadmin
     profiles:
       - tools
     ports:

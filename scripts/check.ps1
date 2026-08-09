@@ -383,7 +383,7 @@ Add-Gate -Name 'compose-hardening' -Lanes $allLanes -Kind 'container' -Body {
     if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
     $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', (Join-Path $scriptDir 'check-compose-hardening.ps1'))
-    if ($r.ExitCode -eq 0) { return New-PassResult 'Container-Haertung und Digest-Pins gepinnt' $r.Output }
+    if ($r.ExitCode -eq 0) { return New-PassResult 'Container-Haertung, Runtime-Tags und Basis-Digests gepinnt' $r.Output }
     if ($r.ExitCode -eq 2) { return New-InfraResult 'check-compose-hardening: Pruefumgebung unvollstaendig' $r.Output }
     New-FailResult ('Haertungs-Contract verletzt (exit ' + $r.ExitCode + ')') $r.Output
 }

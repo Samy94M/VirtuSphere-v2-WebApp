@@ -1,11 +1,12 @@
 # Base and composer are pinned by digest (AP8): the tag documents the intended
 # line, the digest makes the base of every rebuild byte-identical. Bumping a
 # pin is a deliberate commit, never a side effect of a rebuild.
-FROM php:8.4-fpm@sha256:3661dc717d73bdb0ec58bcdc96af36af90f8894c66c09ac74721a012b01da6f4
+FROM php:8.4-fpm@sha256:9467f10bf42897dec0abb73ee20c747ebd45463ec9d6fcc4044cb83eba6dade7
 
 # libfcgi-bin carries cgi-fcgi for the FPM ping healthcheck (docker-compose.yml
 # + fpm.d/zz-virtusphere.conf).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    linux-libc-dev \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \

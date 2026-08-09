@@ -29,7 +29,7 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 cd "$(dirname "$0")/.."
 
 BACKUP_DIR="Docker/backups"
-MYSQL_IMAGE="mysql:8.4"
+MYSQL_IMAGE="${VIRTUSPHERE_MYSQL_IMAGE:-mysql:8.4-virtusphere}"
 PHP_IMAGE="${VIRTUSPHERE_PHP_IMAGE:-virtusphere-v2-webapp-php}"
 SUFFIX="$$"
 NET="vs-restore-net-$SUFFIX"
@@ -57,6 +57,8 @@ command -v docker >/dev/null 2>&1 || envfail "docker fehlt."
 command -v sha256sum >/dev/null 2>&1 || envfail "sha256sum fehlt."
 docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 \
   || envfail "PHP-Image $PHP_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_PHP_IMAGE setzen)."
+docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1 \
+  || envfail "MySQL-Image $MYSQL_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_MYSQL_IMAGE setzen)."
 
 # --- 0. Juengstes Backup-Tripel finden --------------------------------------
 dump=$(ls -1t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | head -n 1 || true)
