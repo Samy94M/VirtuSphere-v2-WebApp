@@ -1040,7 +1040,7 @@ Add-Gate -Name 'offline-bundle' -Lanes @('Release') -Kind 'container' -Network $
         return New-InfraResult 'kein Host-sh (Git Bash): das Bundle-Skript orchestriert docker und kann nicht in den PHP-Container ausweichen'
     }
     $bundleDir = ((Join-Path $artifactDir 'offline-bundle') -replace '\\', '/')
-    $r = Invoke-CheckShell 'build-offline-bundle.sh' @($bundleDir)
+    $r = Invoke-CheckShell 'build-offline-bundle.sh' @('--release', $bundleDir)
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar' }
     if ($r.ExitCode -eq 2) { return New-InfraResult 'Bundle-Umgebung unvollstaendig' $r.Output }
     Format-ToolResult $r ('Offline-Bundle gebaut und offline verifiziert: ' + $bundleDir) 'Offline-Bundle fehlgeschlagen'
