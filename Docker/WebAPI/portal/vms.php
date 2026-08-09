@@ -58,6 +58,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             repo_mark_vm_for_mecm_resync($connection, $missionId, $vmId, (int) $user['id']);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'queued mecm assignment transfer for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
             flash_set('success', __t('portal.vm_mecm_transfer_success'));
+        } elseif ($action === 'restart_progress_watch') {
+            if ($isTemplate) {
+                throw new RuntimeException(__t('vms.progress_template_blocked'));
+            }
+            $kind = repo_restart_vm_progress_watch($connection, $missionId, $vmId, (int) $user['id']);
+            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'restarted ' . $kind . ' observation for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
+            flash_set('success', __t($kind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
+                ? 'vms.progress_flash_pending'
+                : 'vms.progress_flash_installing'));
         } elseif ($action === 'delete') {
             repo_delete_vm_by_id($connection, $missionId, $vmId);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'deleted vm id ' . $vmId . ' from mission id ' . $missionId, (int) $user['id']);
@@ -171,10 +180,15 @@ if (($_GET['export'] ?? '') === 'csv') {
 // exception, and a column of dashes states nothing while pushing the columns
 // that do off a narrow screen (portal display restraint).
 $hasLocationOverride = false;
+$hasProgressAttention = false;
 foreach ($rows as $vmRow) {
     if ($vmLocationOverride($vmRow) !== '') {
         $hasLocationOverride = true;
-        break;
+    }
+    if (($vmRow['progress_attention'] ?? null) !== null
+        || (($vmRow['progress_watch_kind'] ?? null) === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
+            && empty($vmRow['os_install_watch_started_at']))) {
+        $hasProgressAttention = true;
     }
 }
 
@@ -214,7 +228,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'status', __t('common.status'), $sort, $dir, $vmSortParams);
-                ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
                     <tr>
@@ -225,6 +239,23 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_ram'] ?? ''); ?></td>
                         <td><?php echo status_badge((string) ($vm['vm_status'] ?? '')); ?></td>
+                        <?php if ($hasProgressAttention) { ?>
+                            <td><?php
+                                $attention = $vm['progress_attention'] ?? null;
+                                $watchMissing = ($vm['progress_watch_kind'] ?? null) === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
+                                    && empty($vm['os_install_watch_started_at']);
+                                if (is_array($attention)) {
+                                    $label = $attention['kind'] === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
+                                        ? __t('vms.progress_badge_pending')
+                                        : __t('vms.progress_badge_installing');
+                                    ?><a href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo portal_badge('warning', $label); ?></a><?php
+                                } elseif ($watchMissing) {
+                                    ?><a href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo portal_badge('info', __t('vms.progress_badge_unwatched')); ?></a><?php
+                                } else {
+                                    echo '&mdash;';
+                                }
+                            ?></td>
+                        <?php } ?>
                         <?php if ($hasLocationOverride) { $override = $vmLocationOverride($vm); ?>
                             <td><?php echo $override !== '' ? h($override) : '&mdash;'; ?></td>
                         <?php } ?>
@@ -253,7 +284,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="<?php echo ($canWrite ? 12 : 11) + ($hasLocationOverride ? 1 : 0); ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo ($canWrite ? 12 : 11) + ($hasLocationOverride ? 1 : 0) + ($hasProgressAttention ? 1 : 0); ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

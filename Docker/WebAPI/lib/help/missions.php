@@ -40,8 +40,8 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help_missions.status_stuck_heading')); ?></h3>
             <ul>
                 <li><?php echo h(__t('help_missions.status_stuck_1')); ?></li>
-                <li><?php echo h(__t('help_missions.status_stuck_2')); ?></li>
-                <li><?php echo h(__t('help_missions.status_stuck_3')); ?></li>
+                <li><?php echo h(__t('help_missions.status_stuck_2', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])); ?></li>
+                <li><?php echo h(__t('help_missions.status_stuck_3', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)])); ?></li>
             </ul>
         </section>
 

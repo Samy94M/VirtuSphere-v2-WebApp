@@ -1024,6 +1024,17 @@ SQL;
         }
         migrator_out('0037: ESXi credentials carry explicit certificate trust mode');
     },
+    '0038_vm_progress_watch' => function (mysqli $db): void {
+        // Long-running progress states need their own clocks (ADR-0038).
+        // Existing pending rows start observation at rollout time: updated_at
+        // may describe an unrelated edit and must not create a false warning.
+        migrator_add_column($db, 'deploy_vms', 'mecm_pending_since', 'TIMESTAMP NULL AFTER updated_at');
+        migrator_add_column($db, 'deploy_vms', 'os_install_watch_started_at', 'TIMESTAMP NULL AFTER mecm_pending_since');
+        $db->query("UPDATE deploy_vms SET mecm_pending_since = NOW(), updated_at = updated_at WHERE mecm_sync_state = 'pending' AND mecm_pending_since IS NULL");
+        migrator_add_index($db, 'deploy_vms', 'deploy_vms_mecm_pending_watch', 'INDEX deploy_vms_mecm_pending_watch (mecm_sync_state, mecm_pending_since)');
+        migrator_add_index($db, 'deploy_vms', 'deploy_vms_os_install_watch', 'INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at)');
+        migrator_out('0038: dedicated VM progress observation clocks added');
+    },
 ];
 
 try {

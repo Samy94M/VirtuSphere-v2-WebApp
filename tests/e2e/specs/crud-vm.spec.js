@@ -37,7 +37,7 @@ echo 'JSON' . json_encode(['missionId' => $id, 'vmIds' => $vmIds]) . 'JSON';
 function vmRow(id) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT vm_name, mecm_id, mecm_sync_state, lifecycle_state, updated FROM deploy_vms WHERE id = ? LIMIT 1');
+$stmt = $db->prepare('SELECT vm_name, mecm_id, mecm_sync_state, lifecycle_state, updated, updated_at, mecm_pending_since, os_install_watch_started_at FROM deploy_vms WHERE id = ? LIMIT 1');
 $id = ${Number(id)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
@@ -160,6 +160,45 @@ echo 'SEEDED';
     dialog.locator('[data-confirm-accept]').click(),
   ]);
   expect(vmRow(vmId).updated, 'Confirm queued the VM for the device-sync').toBe(1);
+});
+
+// e2e-covers: vm_edit.php:restart_progress_watch
+// e2e-covers-cancel: vm_edit.php:restart_progress_watch
+test('OS observation: Cancel keeps it unset, Confirm starts only the dedicated clock', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'progress-watch', 1);
+  const vmId = seed.vmIds[0];
+  runPhp(`
+$db = db();
+$vmId = ${Number(vmId)};
+$stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = 'os_installing', mecm_sync_state = 'registered', os_install_watch_started_at = NULL, updated_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+  const before = vmRow(vmId);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const observe = page.locator('form:has(input[name="action"][value="restart_progress_watch"]) button');
+  await expect(observe, 'the explicit PXE observation action is visible').toBeVisible();
+
+  await observe.click();
+  await expect(dialog, 'starting the clock asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).os_install_watch_started_at, 'Cancel left the observation unset').toBeNull();
+
+  await observe.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`)),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const after = vmRow(vmId);
+  expect(after.os_install_watch_started_at, 'Confirm started the dedicated observation').not.toBeNull();
+  expect(after.lifecycle_state, 'the lifecycle is display-only').toBe('os_installing');
+  expect(after.mecm_sync_state, 'the MECM state is untouched').toBe('registered');
+  expect(after.updated_at, 'observation is not a VM edit').toBe(before.updated_at);
 });
 
 // e2e-covers: vms.php:delete

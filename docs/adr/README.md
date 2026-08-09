@@ -37,3 +37,4 @@
 - [ADR-0035: E3 accepted: the desktop client and its token API are removed](ADR-0035-e3-desktop-client-retirement.md)
 - [ADR-0036: VM identity and the standalone-ESXi support boundary](ADR-0036-vm-identity-and-standalone-support-boundary.md)
 - [ADR-0037: ESXi certificate trust is explicit and staged](ADR-0037-esxi-certificate-trust-modes.md)
+- [ADR-0038: Long-running VM progress is observed, never inferred from edits](ADR-0038-vm-progress-observation.md)

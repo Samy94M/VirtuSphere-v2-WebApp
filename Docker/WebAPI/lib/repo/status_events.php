@@ -130,14 +130,14 @@ function repo_set_vm_state(mysqli $db, int $vmId, string $lifecycleState, string
     virtusphere_assert_mecm_sync_state($mecmSyncState);
 
     if ($mecmId !== null) {
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = ?, mecm_id = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssisi', $lifecycleState, $mecmSyncState, $legacyStatus, $updated, $mecmId, $vmId);
+        $stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = ?, mecm_id = ?, mecm_pending_since = IF(? = 'pending', COALESCE(mecm_pending_since, NOW()), NULL), os_install_watch_started_at = IF(? IN ('os_installing','deploying'), os_install_watch_started_at, NULL), updated_at = NOW() WHERE id = ?");
+        $stmt->bind_param('sssisssi', $lifecycleState, $mecmSyncState, $legacyStatus, $updated, $mecmId, $mecmSyncState, $lifecycleState, $vmId);
     } elseif ($updated !== null) {
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssii', $lifecycleState, $mecmSyncState, $legacyStatus, $updated, $vmId);
+        $stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = ?, mecm_pending_since = IF(? = 'pending', COALESCE(mecm_pending_since, NOW()), NULL), os_install_watch_started_at = IF(? IN ('os_installing','deploying'), os_install_watch_started_at, NULL), updated_at = NOW() WHERE id = ?");
+        $stmt->bind_param('sssissi', $lifecycleState, $mecmSyncState, $legacyStatus, $updated, $mecmSyncState, $lifecycleState, $vmId);
     } else {
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssi', $lifecycleState, $mecmSyncState, $legacyStatus, $vmId);
+        $stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, mecm_pending_since = IF(? = 'pending', COALESCE(mecm_pending_since, NOW()), NULL), os_install_watch_started_at = IF(? IN ('os_installing','deploying'), os_install_watch_started_at, NULL), updated_at = NOW() WHERE id = ?");
+        $stmt->bind_param('sssssi', $lifecycleState, $mecmSyncState, $legacyStatus, $mecmSyncState, $lifecycleState, $vmId);
     }
 
     $ok = $stmt->execute();

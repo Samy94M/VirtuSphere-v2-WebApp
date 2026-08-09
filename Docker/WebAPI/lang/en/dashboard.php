@@ -9,6 +9,7 @@ return [
     'kpi_templates' => 'Templates',
     'kpi_vms' => 'VMs',
     'kpi_mecm_pending' => 'MECM pending',
+    'kpi_vm_attention' => 'VM check due',
     'kpi_system_status' => 'MECM system status',
     'kpi_integration' => 'Integration',
     'kpi_mecm_site' => 'MECM site',

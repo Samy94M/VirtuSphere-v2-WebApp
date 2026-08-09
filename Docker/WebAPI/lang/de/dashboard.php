@@ -9,6 +9,7 @@ return [
     'kpi_templates' => 'Vorlagen',
     'kpi_vms' => 'VMs',
     'kpi_mecm_pending' => 'MECM ausstehend',
+    'kpi_vm_attention' => 'VM-Prüfung fällig',
     'kpi_system_status' => 'MECM-Systemstatus',
     'kpi_integration' => 'Integration',
     'kpi_mecm_site' => 'MECM-Site',

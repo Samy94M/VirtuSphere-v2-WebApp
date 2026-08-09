@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     updated TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Dedicated progress observations (ADR-0038). They are not lifecycle
+    -- timestamps: warnings derived from them never change VM state.
+    mecm_pending_since TIMESTAMP NULL,
+    os_install_watch_started_at TIMESTAMP NULL,
     vm_notes TEXT,
     -- Hypervisor identity (Entscheidung 6): the instance UUID is who the VM is,
     -- the MOID is the host's current handle for it (re-register changes only the
@@ -86,6 +90,8 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     vm_moid VARCHAR(64) NULL,
     vm_instance_uuid VARCHAR(64) NULL,
     UNIQUE KEY mission_vm_unique (mission_id, vm_name),
+    INDEX deploy_vms_mecm_pending_watch (mecm_sync_state, mecm_pending_since),
+    INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at),
     CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

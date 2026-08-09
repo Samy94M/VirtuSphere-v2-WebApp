@@ -116,7 +116,7 @@ try {
     $resultContract = mac_import_result_contract($plan);
 
     $updateInterface = $connection->prepare('UPDATE deploy_interfaces SET mac = ? WHERE id = ? AND vm_id = ?');
-    $updateVm = $connection->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, updated_at = NOW() WHERE id = ?');
+    $updateVm = $connection->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, mecm_pending_since = COALESCE(mecm_pending_since, NOW()), os_install_watch_started_at = NULL, updated_at = NOW() WHERE id = ?');
     // Entscheidung 6: persist the hypervisor identity the export proved. NULLIF
     // keeps the stored value when a pre-identity playbook result omits a field;
     // a mismatching UUID never reaches this write (the plan fails that VM).

@@ -16,7 +16,7 @@ Für einen neuen Betreiber ist die Lesereihenfolge bewusst betrieblich, nicht na
 Danach führen die spezialisierten Betriebshandbücher weiter:
 
 - [Installation mit Netzzugang](docs/INSTALLATION-ANLEITUNG.md); für einen luftspaltgetrennten Produktionshost stattdessen [Offline-Installation](docs/operations/offline-install.md).
-- [ESXi-Inventar](docs/operations/esxi-inventory.md), [MECM-Integration](docs/operations/mecm-integration.md), [HTTPS](docs/operations/https.md) und [Backup/Restore](docs/operations/backup.md).
+- [ESXi-Inventar](docs/operations/esxi-inventory.md), [MECM-Integration](docs/operations/mecm-integration.md), [VM-Fortschrittsbeobachtung](docs/operations/vm-progress-observation.md), [HTTPS](docs/operations/https.md) und [Backup/Restore](docs/operations/backup.md).
 - [Deployment- und Supportmatrix](docs/DEPLOYMENT.md), [QA-Bedienung](docs/QA.md), [Qualitätsgates](docs/QUALITY-GATES.md) und [Pre-Ship-Checkliste](PRE-SHIP-CHECKLIST.md).
 
 Für Entwicklung und Architektur folgen erst danach [AGENTS.md](AGENTS.md), [GROK.md](GROK.md) und der [ADR-Index](docs/adr/README.md). Die lokale Konfiguration beginnt mit `.env.example`; `.env` selbst ist bewusst ignoriert. Abgeschlossene Änderungen stehen im [Changelog](docs/CHANGELOG.md).

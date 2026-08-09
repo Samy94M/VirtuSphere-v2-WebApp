@@ -99,6 +99,14 @@ const VIRTUSPHERE_MECM_SYNC_STATES = [
     VIRTUSPHERE_MECM_SYNC_FAILED,
 ];
 
+// Display-only attention thresholds for long-running VM progress states
+// (ADR-0038). The dedicated clocks are deliberately separate from updated_at:
+// an unrelated edit must neither create nor postpone an operator warning.
+const VIRTUSPHERE_VM_PROGRESS_MECM_PENDING = 'mecm_pending';
+const VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING = 'os_installing';
+const VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS = 2 * 60 * 60;
+const VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS = 6 * 60 * 60;
+
 // Bulk VM-list actions cap (Paket C): reject selections larger than this.
 const VIRTUSPHERE_VM_BULK_CAP = 200;
 

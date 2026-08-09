@@ -7,6 +7,7 @@ require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/../mac.php';
+require_once __DIR__ . '/../vm_progress.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/status_events.php';
 // The VM delete paths refuse to run while a deploy of the mission is in flight;
@@ -107,6 +108,8 @@ function getVMs($connection, $missionId)
         $vm['packages'] = repo_fetch_related($connection, 'SELECT dp.* FROM deploy_packages dp INNER JOIN deploy_vm_packages dvp ON dp.id = dvp.package_id WHERE dvp.vm_id = ? ORDER BY dp.package_name', $vmId);
         $vm['interfaces'] = repo_fetch_related($connection, 'SELECT * FROM deploy_interfaces WHERE vm_id = ? ORDER BY id', $vmId);
         $vm['disks'] = repo_fetch_related($connection, 'SELECT * FROM deploy_disks WHERE vm_id = ? ORDER BY id', $vmId);
+        $vm['progress_watch_kind'] = virtusphere_vm_progress_watch_kind($vm);
+        $vm['progress_attention'] = virtusphere_vm_progress_attention($vm);
     }
 
     return $vms;
@@ -585,7 +588,7 @@ function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $user
             throw new RuntimeException('VM needs an imported MAC address before MECM ID reset.');
         }
 
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, mecm_id = NULL, updated_at = NOW() WHERE id = ? AND mission_id = ?');
+        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, mecm_id = NULL, mecm_pending_since = NOW(), os_install_watch_started_at = NULL, updated_at = NOW() WHERE id = ? AND mission_id = ?');
         $lifecycleState = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
         $mecmSyncState = VIRTUSPHERE_MECM_SYNC_PENDING;
         $legacyStatus = VIRTUSPHERE_STATUS_DEPLOYED;
@@ -594,6 +597,99 @@ function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $user
 
         repo_record_vm_status_event($db, $vmId, $lifecycleState, $mecmSyncState, $legacyStatus, 'mecm id reset from portal', $userId);
     });
+}
+
+/**
+ * Explicitly starts or restarts the observation clock that is valid for the
+ * VM's current progress state. The clock is operational metadata: updated_at
+ * and all lifecycle/MECM fields deliberately remain untouched.
+ */
+function repo_restart_vm_progress_watch(mysqli $db, int $missionId, int $vmId, ?int $userId = null): string
+{
+    if ($missionId <= 0 || $vmId <= 0) {
+        throw new InvalidArgumentException('Mission and VM are required.');
+    }
+
+    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $userId): string {
+        $current = repo_fetch_one(
+            $db,
+            'SELECT lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE',
+            'ii',
+            [$vmId, $missionId]
+        );
+        if ($current === null) {
+            throw new RuntimeException('VM not found.');
+        }
+
+        $kind = virtusphere_vm_progress_watch_kind($current);
+        if ($kind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) {
+            repo_execute($db, 'UPDATE deploy_vms SET mecm_pending_since = NOW(), updated_at = updated_at WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+            $note = 'MECM pending observation restarted';
+        } elseif ($kind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING) {
+            repo_execute($db, 'UPDATE deploy_vms SET os_install_watch_started_at = NOW(), updated_at = updated_at WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+            $note = 'OS installation observation restarted';
+        } else {
+            throw new RuntimeException('The VM is not in an observable progress state.');
+        }
+
+        repo_record_vm_status_event(
+            $db,
+            $vmId,
+            (string) $current['lifecycle_state'],
+            (string) $current['mecm_sync_state'],
+            (string) $current['vm_status'],
+            $note,
+            $userId
+        );
+
+        return $kind;
+    });
+}
+
+/** Count overdue display-only observations, optionally scoped to one mission. */
+function repo_vm_progress_attention_count(mysqli $db, ?int $missionId = null): int
+{
+    $sql = "SELECT COUNT(*) FROM deploy_vms WHERE ((lifecycle_state = ? AND mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND)) OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND)))";
+    $params = [
+        VIRTUSPHERE_LIFECYCLE_DEPLOYED,
+        VIRTUSPHERE_MECM_SYNC_PENDING,
+        VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS,
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLING,
+        VIRTUSPHERE_MECM_SYNC_REGISTERED,
+        VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS,
+    ];
+    $types = 'ssissi';
+    if ($missionId !== null) {
+        if ($missionId <= 0) {
+            return 0;
+        }
+        $sql .= ' AND mission_id = ?';
+        $types .= 'i';
+        $params[] = $missionId;
+    }
+
+    return (int) repo_scalar($db, $sql, $types, $params);
+}
+
+/** @return array<int,int> Overdue observation count keyed by mission id. */
+function repo_vm_progress_attention_counts_by_mission(mysqli $db): array
+{
+    $stmt = $db->prepare("SELECT mission_id, COUNT(*) AS attention_count FROM deploy_vms WHERE ((lifecycle_state = ? AND mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND)) OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND))) GROUP BY mission_id");
+    $lifecycleDeployed = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
+    $mecmPending = VIRTUSPHERE_MECM_SYNC_PENDING;
+    $pendingSeconds = VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS;
+    $lifecycleInstalling = VIRTUSPHERE_LIFECYCLE_OS_INSTALLING;
+    $mecmRegistered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
+    $installSeconds = VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS;
+    $stmt->bind_param('ssissi', $lifecycleDeployed, $mecmPending, $pendingSeconds, $lifecycleInstalling, $mecmRegistered, $installSeconds);
+    $stmt->execute();
+
+    $counts = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $counts[(int) $row['mission_id']] = (int) $row['attention_count'];
+    }
+
+    return $counts;
 }
 
 /**

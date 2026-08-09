@@ -5,11 +5,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
+require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/format.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
 $type = request_string($_GET, 'type', 'missions');
@@ -119,12 +122,22 @@ $rows = array_values(array_filter(getMissions($connection), static function (arr
     $isTemplate = mission_name_is_template((string) ($mission['mission_name'] ?? ''));
     return $type === 'templates' ? $isTemplate : !$isTemplate;
 }));
+$attentionOnly = !$isTemplateView && request_string($_GET, 'attention') === '1';
+$attentionCounts = $isTemplateView ? [] : repo_vm_progress_attention_counts_by_mission($connection);
+foreach ($rows as &$missionRow) {
+    $missionRow['progress_attention_count'] = $attentionCounts[(int) $missionRow['id']] ?? 0;
+}
+unset($missionRow);
+if ($attentionOnly) {
+    $rows = array_values(array_filter($rows, static fn (array $missionRow): bool => (int) $missionRow['progress_attention_count'] > 0));
+}
 
 // Column sorting (Name, VMs): whitelisted keys keep GET input safe and let the
 // CSV export and the rendered table share the same order.
 [$sort, $dir] = portal_sort_apply($rows, [
     'name' => portal_sort_text('mission_name'),
     'vms' => portal_sort_number('vm_count'),
+    'attention' => portal_sort_number('progress_attention_count'),
 ], 'name');
 
 // CSV list export (A3): read-only GET download of the current list. Streams and
@@ -138,7 +151,7 @@ if (($_GET['export'] ?? '') === 'csv') {
     // target host at deploy time), so the cell is empty rather than invented.
     $header = [
         __t('common.name'), __t('common.status'), __t('missions.th_datastore'),
-        __t('missions.th_datacenter'), __t('common.vms'), __t('common.updated'),
+        __t('missions.th_datacenter'), __t('common.vms'), __t('missions.th_attention'), __t('common.updated'),
     ];
     $csvRows = [];
     foreach ($rows as $mission) {
@@ -148,6 +161,7 @@ if (($_GET['export'] ?? '') === 'csv') {
             (string) ($mission['hypervisor_datastorage'] ?? ''),
             (string) ($mission['hypervisor_datacenter'] ?? ''),
             (string) ($mission['vm_count'] ?? 0),
+            (string) ($mission['progress_attention_count'] ?? 0),
             portal_format_timestamp($mission['updated_at'] ?? ''),
         ];
     }
@@ -274,13 +288,18 @@ layout_header($title, $user, $active, 'missions');
         <div class="actions">
             <a class="button <?php echo $type === 'missions' ? '' : 'button-secondary'; ?>" href="missions.php?type=missions"><?php echo h(__t('missions.tab_missions')); ?></a>
             <a class="button <?php echo $type === 'templates' ? '' : 'button-secondary'; ?>" href="missions.php?type=templates"><?php echo h(__t('missions.tab_templates')); ?></a>
-            <?php if ($rows !== []) { ?><a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
+            <?php if ($attentionOnly) { ?><a class="button button-secondary" href="missions.php?type=missions"><?php echo h(__t('missions.attention_clear')); ?></a><?php } ?>
+            <?php if ($rows !== []) { ?><a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?><?php echo $attentionOnly ? '&attention=1' : ''; ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
         </div>
+        <?php if ($attentionOnly) { ?><p class="muted"><?php echo h(__t('missions.attention_filter_hint')); ?></p><?php } ?>
         <div class="table-wrap" tabindex="0">
             <table>
                 <thead><tr><?php
-                    echo portal_sort_header('missions.php', 'name', __t('common.name'), $sort, $dir, ['type' => $type]);
-                    echo portal_sort_header('missions.php', 'vms', __t('common.vms'), $sort, $dir, ['type' => $type]);
+                    $missionSortParams = ['type' => $type];
+                    if ($attentionOnly) { $missionSortParams['attention'] = '1'; }
+                    echo portal_sort_header('missions.php', 'name', __t('common.name'), $sort, $dir, $missionSortParams);
+                    echo portal_sort_header('missions.php', 'vms', __t('common.vms'), $sort, $dir, $missionSortParams);
+                    echo portal_sort_header('missions.php', 'attention', __t('missions.th_attention'), $sort, $dir, $missionSortParams);
                 ?><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $mission) { ?>
@@ -291,6 +310,9 @@ layout_header($title, $user, $active, 'missions');
                             <?php } ?>
                         </td>
                         <td><?php echo h((string) ($mission['vm_count'] ?? 0)); ?></td>
+                        <td><?php echo (int) ($mission['progress_attention_count'] ?? 0) > 0
+                            ? portal_badge('warning', __t('missions.attention_badge', ['count' => (int) $mission['progress_attention_count']]))
+                            : '&mdash;'; ?></td>
                         <td><?php echo h(portal_format_timestamp($mission['updated_at'] ?? '')); ?></td>
                         <td class="actions">
                             <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $mission['id']); ?>"><?php echo h(__t('common.details')); ?></a>
@@ -324,7 +346,7 @@ layout_header($title, $user, $active, 'missions');
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="4"><?php echo h(__t('missions.empty')); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="5"><?php echo h($attentionOnly ? __t('missions.attention_empty') : __t('missions.empty')); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

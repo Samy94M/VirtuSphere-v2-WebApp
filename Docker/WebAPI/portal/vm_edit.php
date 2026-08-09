@@ -174,6 +174,12 @@ $vmLocationNotes = esxi_inventory_location_notes(
 );
 $interfaces = $vm['interfaces'] ?? vm_default_interfaces($mission);
 $disks = $vm['disks'] ?? vm_default_disks();
+$progressWatchKind = $vmId > 0 && !$isTemplate ? virtusphere_vm_progress_watch_kind((array) $vm) : null;
+$progressAttention = $vmId > 0 && !$isTemplate ? virtusphere_vm_progress_attention((array) $vm) : null;
+$progressWatchSince = $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
+    ? (string) ($vm['mecm_pending_since'] ?? '')
+    : (string) ($vm['os_install_watch_started_at'] ?? '');
+$showProgressWatch = $progressAttention !== null || $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING;
 $title = $vmId > 0 ? __t('vm_edit.title_edit') : __t('vm_edit.title_add');
 layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions');
 ?>
@@ -228,6 +234,49 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
             <?php } ?>
         </div>
     </section>
+
+    <?php if ($showProgressWatch) { ?>
+        <section class="panel stack" aria-labelledby="vm-progress-watch-heading">
+            <div class="actions">
+                <h2 id="vm-progress-watch-heading"><?php echo h(__t('vm_edit.progress_heading')); ?></h2>
+                <?php echo portal_badge($progressAttention !== null ? 'warning' : 'info', $progressAttention !== null
+                    ? __t('vm_edit.progress_overdue_badge')
+                    : __t('vm_edit.progress_observation_badge')); ?>
+            </div>
+            <?php if ($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) { ?>
+                <p><?php echo h(__t('vm_edit.progress_pending_overdue', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+                ])); ?></p>
+            <?php } elseif ($progressWatchSince === '') { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_unwatched')); ?></p>
+            <?php } elseif ($progressAttention !== null) { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_overdue', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+                ])); ?></p>
+            <?php } else { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_watched', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+                ])); ?></p>
+            <?php } ?>
+            <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
+            <?php if ($canWrite) { ?>
+                <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="restart_progress_watch">
+                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+                    <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
+                        ? 'vm_edit.progress_confirm_start'
+                        : 'vm_edit.progress_confirm_restart')); ?>"><?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
+                        ? 'vm_edit.progress_start_button'
+                        : 'vm_edit.progress_restart_button')); ?></button>
+                </form>
+            <?php } ?>
+        </section>
+    <?php } ?>
 
     <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $clientPhaseSummary, $clientEvents); } ?>
 

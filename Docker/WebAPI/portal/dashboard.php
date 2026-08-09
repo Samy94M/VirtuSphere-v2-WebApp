@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/helpers.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
+require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/heartbeats.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
@@ -18,6 +19,7 @@ $missionCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_miss
 $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) = ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $vmCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms');
 $mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ?', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
+$vmProgressAttention = repo_vm_progress_attention_count($connection);
 $healthSnapshot = integration_health_snapshot($connection);
 // The MECM tile shows two separate signals and never a common worst-of: a
 // critical MECM site must not present the data flow as failed, and a failed sync
@@ -57,6 +59,9 @@ layout_header(__t('dashboard.title'), $user, 'dashboard');
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
         <article class="card kpi"><span class="muted"><?php echo h(__t('dashboard.kpi_vms')); ?></span><span class="value"><?php echo h($vmCount); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('dashboard.kpi_mecm_pending')); ?></span><span class="value<?php echo $mecmPending > 0 ? ' value-warning' : ''; ?>"><?php echo h($mecmPending); ?></span></article>
+        <?php if ($vmProgressAttention > 0) { ?>
+            <a class="card kpi" href="missions.php?type=missions&attention=1"><span class="muted"><?php echo h(__t('dashboard.kpi_vm_attention')); ?></span><span class="value value-warning"><?php echo h($vmProgressAttention); ?></span></a>
+        <?php } ?>
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>
