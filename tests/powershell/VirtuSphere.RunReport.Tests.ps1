@@ -503,6 +503,33 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         $script:DeviceSyncText | Should -Match '(?s)\$targetsSkipped -gt 0.*?continue.*?mecm_updateid\.php'
     }
 
+    It 'haelt die VM auch bei verlorener Provenienz in der Warteschlange' {
+        # updateDevice ist der einzige Weg aus getDeviceList. Lief es trotz
+        # fehlgeschlagenem Provenienz-Report, fehlte dem Portal der
+        # Eigentumsnachweis, den ADR-0034 fuer jedes Entfernen verlangt: die VM
+        # behielt ihre alten Collections fuer immer und bekam nach einem
+        # Missionswechsel weiter das alte Image, waehrend MECM korrekt aussah.
+        # Ein "naechster Lauf", auf den sich das vertagen liesse, existiert fuer
+        # diese VM nicht mehr.
+        $catches = @($script:DeviceSyncAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.CatchClauseAst] -and
+                      $n.Extent.Text -match 'membership_report_failed'
+        }, $true))
+        $catches.Count | Should -Be 1 -Because 'sonst prueft dieser Test die falsche Stelle'
+
+        @($catches[0].Body.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ContinueStatementAst]
+        }, $true)).Count | Should -BeGreaterThan 0 -Because 'ohne continue laeuft updateDevice und nimmt die VM aus der Warteschlange'
+
+        # Der Guard darauf, dass ueberhaupt etwas gemeldet werden muss, ist
+        # tragend: ohne ihn bliebe jede VM ohne Aenderung dauerhaft haengen.
+        $script:DeviceSyncText | Should -Match '\$membershipReport\.Count -gt 0'
+
+        # Zaehler statt Datenhinweis: es ist ein Fehlschlag fuer diese VM.
+        $catches[0].Body.Extent.Text | Should -Match '\$itemFailures\+\+'
+        $catches[0].Body.Extent.Text | Should -Not -Match '\$dataWarnings\+\+'
+    }
+
     It 'nennt in der Unvollstaendigkeits-Meldung einen Nenner, den das Skript auch setzt' {
         # Der Nenner stand als $targets.Count da, und $targets existiert im
         # ganzen Skript nicht: unter Set-StrictMode 1.0 wirft schon das Lesen,
@@ -514,7 +541,7 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         # wird deshalb nach Laenge des Extents.
         $ifs = @($script:DeviceSyncAst.FindAll({
             param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
-                      $n.Extent.Text -match 'ResourceID wird NICHT gemeldet'
+                      $n.Extent.Text -match 'Mitgliedschaftsoperationen unvollstaendig'
         }, $true) | Sort-Object { $_.Extent.Text.Length })
         $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
 
@@ -543,7 +570,7 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         # stehen nicht in $desired. Mit $desired.Count allein meldet die Zeile
         # bei einem Missionswechsel "4 von 3 Zuweisungen unvollstaendig".
         $script:DeviceSyncText | Should -Match '\$targetsPlanned\s*=\s*\$desired\.Count\s*\+\s*@\(\$plan\.remove\)\.Count'
-        $script:DeviceSyncText | Should -Match 'ResourceID wird NICHT gemeldet[^"]*"\s*-f\s*\$targetsSkipped,\s*\$targetsPlanned'
+        $script:DeviceSyncText | Should -Match 'Mitgliedschaftsoperationen unvollstaendig[^"]*"\s*-f\s*\$targetsSkipped,\s*\$targetsPlanned'
     }
 
     It 'behandelt einen MAC-Konflikt als Fehlschlag des Devices, nicht als Notiz' {

@@ -358,10 +358,24 @@ while ($true) {
                 }
 
                 # Angewandte Aenderungen zurueckmelden, BEVOR die ResourceID das
-                # Device aus der Warteschlange nimmt. Ein Fehlschlag ist eine
-                # Warnung: die Provenienz konvergiert im naechsten Lauf (der
-                # Report ist idempotent), verloren geht hoechstens eine
-                # ueberzaehlige eigene Zeile, nie eine entfernte Hand-Regel.
+                # Device aus der Warteschlange nimmt.
+                #
+                # Ein Fehlschlag haelt die VM in der Warteschlange, genau wie
+                # eine unvollstaendige Zuweisung zwei Bloecke tiefer. Es gibt
+                # keinen "naechsten Lauf", auf den sich die Provenienz vertagen
+                # liesse: updateDevice setzt die VM auf `registered`, und
+                # getDeviceList liefert sie danach nicht mehr aus. Ohne den
+                # Eigentumsnachweis darf das Portal die eigenen Mitgliedschaften
+                # nie wieder entfernen (ADR-0034 verlangt owned UND present UND
+                # nicht mehr desired), also behaelt die VM nach einem Missions-
+                # oder Paketwechsel dauerhaft das alte Image und die alten
+                # Pakete, waehrend in MECM alles korrekt aussieht.
+                #
+                # Der Count-Guard bleibt: ein Lauf, der nichts geaendert hat,
+                # betritt den Block nicht und wird nicht aufgehalten. Beide
+                # Aufrufe sind idempotent, der Retry kostet nur einen Durchlauf,
+                # und eine haengende VM blockiert keine andere (continue, nicht
+                # break).
                 if ($membershipReport.Count -gt 0) {
                     try {
                         Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body @{
@@ -369,9 +383,10 @@ while ($true) {
                             memberships = @($membershipReport)
                         } | Out-Null
                     } catch {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung fehlgeschlagen: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
-                        $dataWarnings++
+                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung fehlgeschlagen: {0} - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f (Get-VsErrorDetail -ErrorRecord $_))
+                        $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause 'membership_report_failed' -Target $deviceName
+                        continue
                     }
                 }
 
