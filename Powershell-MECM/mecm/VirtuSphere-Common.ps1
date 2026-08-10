@@ -27,6 +27,17 @@ $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 # denselben Namen nutzen, sonst warnt der Sende-Guard dauerhaft.
 $script:VsApplicationsFolderName = 'VirtuSphere_Applications'
 
+# SSoT der erlaubten InstallationBehaviorType-Werte einer config.json.
+# Zwei Seiten beantworten dieselbe Frage: der Autoimporter legt die
+# Detection-Klausel auf HKLM oder HKCU, und Package_Vorlage\install.ps1 schreibt
+# den Schluessel dorthin. Sie rieten frueher entgegengesetzt (Autoimporter auf
+# InstallForSystem, Vorlage auf InstallForUser), also griff die Erkennung bei
+# einem fehlenden oder vertippten Wert nie und die App stand dauerhaft auf
+# Fehler. Der erste Eintrag ist der Standard; die Vorlage fuehrt das Literal
+# gespiegelt, weil sie allein in den Paketordner kopiert wird und Common dort
+# nie existiert.
+$script:VsInstallationBehaviorTypes = @('InstallForSystem', 'InstallForUser')
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------
@@ -1085,6 +1096,36 @@ function Read-VsPackageConfig {
         Write-VsLog -Level WARN -Context $context -Message ('version "{0}" enthaelt einen Bindestrich - nicht erlaubt (verschiebt die Katalog-Gruppierung). Uebersprungen.' -f $cfg.version)
         return $null
     }
+    # InstallationBehaviorType: zwei getrennte Entscheidungen.
+    #
+    # Ein FEHLENDES Feld ist harmlos. Die Blaupause in der README nennt
+    # InstallForSystem, das ist der Normalfall, und ein Bestandspaket ohne das
+    # Feld darf nicht verschwinden. Es wird deshalb kanonisch gesetzt und
+    # zurueckgeschrieben, damit der Autoimporter nur noch einen bekannten Wert
+    # sieht; die Vorlage kommt fuer denselben Ordner zum selben Zweig.
+    #
+    # Ein UNBEKANNTER Wert ist laut. "InstalForSystem" ist keine
+    # Meinungsaeusserung, sondern ein Tippfehler, und config.json wird von Hand
+    # gepflegt. Ohne diese Pruefung legte MECM die Detection auf HKLM, waehrend
+    # das Installationsskript nach HKCU schrieb: die App galt nie als
+    # installiert und wurde bei jedem Re-Evaluierungszyklus erneut versucht,
+    # ohne dass die Ursache irgendwo stand.
+    #
+    # -eq vergleicht case-insensitiv, 'installforsystem' wird also akzeptiert
+    # und hier auf die kanonische Schreibweise gebracht.
+    $behavior = [string]$cfg.InstallationBehaviorType
+    if ([string]::IsNullOrWhiteSpace($behavior)) {
+        $behavior = $script:VsInstallationBehaviorTypes[0]
+    } else {
+        $canonical = @($script:VsInstallationBehaviorTypes | Where-Object { $_ -eq $behavior })
+        if ($canonical.Count -eq 0) {
+            Write-VsLog -Level WARN -Context $context -Message ('InstallationBehaviorType "{0}" ist unbekannt (erlaubt: {1}) - uebersprungen.' -f $behavior, ($script:VsInstallationBehaviorTypes -join ', '))
+            return $null
+        }
+        $behavior = $canonical[0]
+    }
+    $cfg | Add-Member -NotePropertyName 'InstallationBehaviorType' -NotePropertyValue $behavior -Force
+
     # Ein Bindestrich im ProjectName ist erlaubt (Firefox-ESR), er landet links
     # vom letzten Bindestrich und damit im Basisnamen.
     $cfg | Add-Member -NotePropertyName 'FolderName' -NotePropertyValue $context -Force

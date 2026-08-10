@@ -290,6 +290,68 @@ Describe 'Read-VsPackageConfig' {
         $dir = New-PackageFolder -Name 'empty' -Json $null
         Read-Config -Folder $dir | Should -BeNullOrEmpty
     }
+
+    # InstallationBehaviorType entscheidet auf ZWEI Maschinen dieselbe Frage:
+    # der Autoimporter legt die Detection-Klausel auf HKLM oder HKCU, und
+    # Package_Vorlage\install.ps1 schreibt den Schluessel dorthin. Ein fehlendes
+    # Feld schickte sie frueher in verschiedene Zweige, ein Tippfehler ebenso:
+    # die App galt nie als installiert und wurde endlos erneut versucht.
+    It 'normalisiert <case>' -ForEach @(
+        @{ case = 'ein fehlendes InstallationBehaviorType auf InstallForSystem'; json = '{"ProjectName":"F","version":"1"}'; expected = 'InstallForSystem' }
+        @{ case = 'ein leeres Feld auf InstallForSystem'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":""}'; expected = 'InstallForSystem' }
+        @{ case = 'ein gesetztes InstallForUser unveraendert'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":"InstallForUser"}'; expected = 'InstallForUser' }
+        @{ case = 'Kleinschreibung auf die kanonische Form'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":"installforsystem"}'; expected = 'InstallForSystem' }
+    ) {
+        $dir = New-PackageFolder -Name ('beh-' + [guid]::NewGuid().ToString('N')) -Json $json
+        (Read-Config -Folder $dir).InstallationBehaviorType | Should -Be $expected
+    }
+
+    It 'weist ein unbekanntes InstallationBehaviorType ab' {
+        # config.json wird von Hand gepflegt, ein Tippfehler ist der Normalfall
+        # und keine Meinungsaeusserung. Das Paket verschwindet dabei nicht (der
+        # Autoimporter loescht nichts), es bekommt nur keine Aktualisierung, und
+        # der offene Punkt nennt Ordner und Wert.
+        $dir = New-PackageFolder -Name 'typo' -Json '{"ProjectName":"F","version":"1","InstallationBehaviorType":"InstalForSystem"}'
+        Read-Config -Folder $dir | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'InstallationBehaviorType: beide Seiten defaulten in dieselbe Richtung' {
+
+    # Die Vorlage sieht Common nie (sie wird allein in den Paketordner kopiert),
+    # fuehrt das Literal also gespiegelt. Genau das ist die Drift-Gefahr, gegen
+    # die dieser Test steht.
+    BeforeAll {
+        $psRoot = Join-Path $script:RepoRoot 'Powershell-MECM'
+        $script:TemplateText = Get-Content -Raw -Path (Join-Path (Join-Path $psRoot 'Package_Vorlage') 'install.ps1')
+        $script:AutoimporterText = Get-Content -Raw -Path (Join-Path (Join-Path $psRoot 'mecm') 'mecm_autoimporter.ps1')
+        $script:BehaviorTypes = @(Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsInstallationBehaviorTypes })
+    }
+
+    It 'Common fuehrt genau die beiden erlaubten Werte, InstallForSystem zuerst' {
+        $script:BehaviorTypes.Count | Should -Be 2
+        $script:BehaviorTypes[0] | Should -Be 'InstallForSystem' -Because 'der erste Eintrag ist der Standard bei fehlendem Feld'
+        $script:BehaviorTypes | Should -Contain 'InstallForUser'
+    }
+
+    It '<file> nennt keinen Wert, den Common nicht kennt' -ForEach @(
+        @{ file = 'Package_Vorlage/install.ps1' }
+        @{ file = 'mecm_autoimporter.ps1' }
+    ) {
+        $text = if ($file -match 'Vorlage') { $script:TemplateText } else { $script:AutoimporterText }
+        $found = @([regex]::Matches($text, 'Install[A-Za-z]*For[A-Za-z]+') | ForEach-Object { $_.Value } | Select-Object -Unique)
+        $found.Count | Should -BeGreaterThan 0 -Because 'ohne Fundstelle prueft dieser Test nichts'
+        foreach ($value in $found) { $script:BehaviorTypes | Should -Contain $value }
+    }
+
+    It 'beide fragen auf InstallForUser und fallen auf InstallForSystem zurueck' {
+        # Die Richtung ist der Befund: der Autoimporter prueft auf
+        # InstallForUser, die Vorlage prueft frueher auf InstallForSystem. Bei
+        # einem Bestandspaket ohne das Feld legte MECM die Detection auf HKLM,
+        # waehrend die Vorlage nach HKCU schrieb.
+        $script:TemplateText | Should -Match 'InstallationBehaviorType\s+-eq\s+"InstallForUser"'
+        $script:AutoimporterText | Should -Match "InstallationBehaviorType\s+-eq\s+'InstallForUser'"
+    }
 }
 
 Describe 'Get-VsErrorDetail' {

@@ -27,14 +27,22 @@ $projectName     = $config.ProjectName
 $ErrorAction = $config.ErrorAction
 
 # Registrierungspfad je nach Installationstyp setzen
+# Erlaubt sind genau zwei Werte (SSoT: $script:VsInstallationBehaviorTypes in
+# VirtuSphere-Common.ps1, das diese Datei nie sieht - sie wird allein in den
+# Paketordner kopiert):
 # InstallForSystem: Installation fuer alle Benutzer - Registry unter HKLM (HKEY_LOCAL_MACHINE)
 # InstallForUser:   Installation nur fuer den aktuellen Benutzer - Registry unter HKCU (HKEY_CURRENT_USER)
 # Der Pfad enthaelt ProjectName und Version damit verschiedene Versionen nebeneinander
 # in der Registry erfasst werden koennen ohne sich zu ueberschreiben.
-if($config.InstallationBehaviorType -eq "InstallForSystem"){
-    $registryPath = "HKLM:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
-} else {
+#
+# Auf InstallForUser geprueft, nicht auf InstallForSystem: der Autoimporter legt
+# die Detection-Klausel genau so herum an. Andersherum fielen beide Seiten bei
+# einem fehlenden Feld in verschiedene Zweige - MECM suchte in HKLM, dieses
+# Skript schrieb nach HKCU, und die App galt nie als installiert.
+if($config.InstallationBehaviorType -eq "InstallForUser"){
     $registryPath = "HKCU:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
+} else {
+    $registryPath = "HKLM:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
 }
 
 # Verzeichnis fuer Log-Dateien der einzelnen Teilskripte

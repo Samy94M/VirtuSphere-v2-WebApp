@@ -229,8 +229,9 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   (Applications und Device Collections) existieren, und legt sie sonst an.
 - **Change-Detection:** Fingerabdruck über alle `config.json` (Pfad + mtime);
   nur bei Änderung wird voll gescannt.
-- **Validierung:** kaputtes JSON oder fehlende Pflichtfelder
-  (`ProjectName`, `version`) → Ordner wird übersprungen und protokolliert.
+- **Validierung:** kaputtes JSON, fehlende Pflichtfelder (`ProjectName`,
+  `version`) oder ein unbekanntes `InstallationBehaviorType` → Ordner wird
+  übersprungen und protokolliert.
 - Je Paket (`Name-Version`):
   - **Alt-Versions-Bereinigung** (bei `removeOldVersion: "true"`): entfernt
     Deployment, Collection und Application alter Versionen, aber nur mit
@@ -238,8 +239,9 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     bei dem ein `Firefox`-Update auch `Firefox-ESR-*` löschte.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
     Install-Kommando `powershell.exe -ExecutionPolicy Bypass -File install.ps1`,
-    Registry-Detection unter `SOFTWARE\VirtuSphere\Packages\Name-Version` (HKLM bzw. HKCU je
-    nach `InstallationBehaviorType`).
+    Registry-Detection unter `SOFTWARE\VirtuSphere\Packages\Name-Version`
+    (HKCU bei `InstallForUser`, sonst HKLM; dieselbe Richtung wie
+    `Package_Vorlage\install.ps1`).
   - **Collection + Deployment idempotent nachziehen** (bei
     `generateOwnDeviceColletion: "true"`): läuft auch für bestehende Apps und
     heilt frühere Teilfehler (App vorhanden, Collection/Deployment fehlt).
@@ -342,6 +344,17 @@ darf keinen Bindestrich enthalten (der Katalog trennt `Name-Version` am letzten
 Bindestrich). `ErrorAction` (`Stop`/`Continue`) steuert die paketeigene
 `install.ps1`; `DeployTo` leer lassen, sonst wird ein Available-Deployment an eine
 Collection erzeugt, die es meist noch nicht gibt.
+
+`InstallationBehaviorType` kennt genau zwei Werte, `InstallForSystem` und
+`InstallForUser`; Groß-/Kleinschreibung spielt keine Rolle. Fehlt das Feld oder
+ist es leer, gilt `InstallForSystem`. Ein anderer Wert ist ein Tippfehler und
+kein Wunsch: der Ordner wird übersprungen (`package_config_invalid`, die
+Meldung nennt Ordner und Wert), das Paket verschwindet nicht, bekommt aber
+keine Aktualisierung mehr, bis die Datei stimmt. Der Wert entscheidet auf
+beiden Seiten dieselbe Frage, die Detection-Klausel in MECM und den
+Registry-Zweig in `Package_Vorlage\install.ps1`; SSoT ist
+`$script:VsInstallationBehaviorTypes` in `VirtuSphere-Common.ps1`, die Vorlage
+führt das Literal gespiegelt, weil sie allein in den Paketordner kopiert wird.
 
 > **Hinweis Self-Healing:** Die Standard-`install.ps1` und eine
 > `config.json`-Blaupause liefert der Installer aus `Package_Vorlage/` nach
