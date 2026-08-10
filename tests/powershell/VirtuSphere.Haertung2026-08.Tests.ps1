@@ -356,6 +356,12 @@ Describe 'E7 - -NoProfile fehlt an drei von vier Stellen' -Tag 'Haertung' {
         # Ein maschinenweites Profil ist Fremdcode im Installationsprozess, und
         # alles hier laeuft als SYSTEM. Der Aufgaben-Installer macht es richtig
         # und begruendet es in fuenf Kommentarzeilen; drei Stellen fehlen.
+        #
+        # Eine Zeile, die $script:VsPowerShellArgs einsetzt, traegt die Schalter
+        # per Konstruktion: der Plan verlangt genau diese Indirektion als SSoT,
+        # und was in der Konstante steht, pinnt das It darunter. Ohne diese
+        # Ausnahme wuerde der Test den vorgesehenen Fix verbieten und nur noch
+        # kopierte Literale zulassen.
         $offenders = @()
         $seen = 0
         foreach ($file in (Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse)) {
@@ -363,9 +369,8 @@ Describe 'E7 - -NoProfile fehlt an drei von vier Stellen' -Tag 'Haertung' {
             foreach ($line in ($code -split "`r?`n")) {
                 if ($line -notmatch '(?i)powershell\.exe') { continue }
                 $seen++
-                if ($line -notmatch '(?i)-NoProfile') {
-                    $offenders += ('{0}: {1}' -f $file.Name, $line.Trim())
-                }
+                if ($line -match '(?i)-NoProfile' -or $line -match 'VsPowerShellArgs') { continue }
+                $offenders += ('{0}: {1}' -f $file.Name, $line.Trim())
             }
         }
         $seen | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'

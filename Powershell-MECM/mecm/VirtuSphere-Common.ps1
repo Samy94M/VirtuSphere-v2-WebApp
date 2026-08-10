@@ -38,6 +38,30 @@ $script:VsApplicationsFolderName = 'VirtuSphere_Applications'
 # nie existiert.
 $script:VsInstallationBehaviorTypes = @('InstallForSystem', 'InstallForUser')
 
+# SSoT der Schalter, mit denen VirtuSphere eine powershell.exe startet - in den
+# geplanten Aufgaben, in den Deployment-Types der Client-Apps und in denen des
+# Autoimporters. Alles davon laeuft als SYSTEM.
+#
+# -NoProfile: ein maschinenweites Profil (AllUsersAllHosts) ist Fremdcode im
+#   Installations- bzw. Sync-Prozess und kann Kodierung, PSModulePath oder
+#   $ErrorActionPreference setzen, die die Skripte nicht erwarten. Ein
+#   unbeaufsichtigter Dienst laedt kein Profil.
+# -NonInteractive: ohne den Schalter kann eine Rueckfrage die Bereitstellung
+#   haengen lassen, bis MECM sie abbricht - unter SYSTEM sieht sie niemand.
+#
+# Die Paketvorlage fuehrt dieselbe Zeichenkette als Literal, weil sie einzeln in
+# den Paketordner kopiert wird und diese Datei nie sieht; ein Test haelt sie
+# gegen die Konstante.
+$script:VsPowerShellArgs = '-NoProfile -ExecutionPolicy Bypass -NonInteractive'
+
+# Vollstaendige Kommandozeile fuer ein Skript. Der Pfad wird in
+# Anfuehrungszeichen gesetzt, weil er Leerzeichen enthalten kann
+# (C:\Program Files\VirtuSphere\mecm).
+function Get-VsPowerShellCommandLine {
+    param([Parameter(Mandatory)][string]$ScriptPath)
+    return ('powershell.exe {0} -File "{1}"' -f $script:VsPowerShellArgs, $ScriptPath)
+}
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 # niemandem gesetzt und von diesem Skript nie gelesen. Ein Parameter, der nichts
 # tut, ist eine Zusage an den Paketautor, die das Skript nicht einhaelt.
 # Aufgerufen wird immer parameterlos:
-#   powershell.exe -ExecutionPolicy Bypass -File install.ps1
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File install.ps1
 
 # Set-StrictMode: ein vertippter Variablenname ist sonst ein stilles $null.
 # Dieses Skript laeuft als SYSTEM und startet fremde Teilskripte; ein stilles
@@ -206,11 +206,22 @@ foreach ($scriptFile in $dir_script) {
 
             # Skript in einem neuen PowerShell-Prozess ausfuehren
             # & (Aufrufoperator): Fuehrt einen Befehl oder eine Datei aus.
-            # PowerShell.exe -ExecutionPolicy Bypass: Startet einen neuen PowerShell-Prozess
-            #   und umgeht die Ausfuehrungsrichtlinie fuer diesen Prozess.
+            # -NoProfile: alles hier laeuft als SYSTEM, und ein maschinenweites
+            #   Profil (AllUsersAllHosts) ist Fremdcode im Installationsprozess -
+            #   es kann Kodierung, PSModulePath oder $ErrorActionPreference
+            #   setzen, die das Teilskript nicht erwartet.
+            # -ExecutionPolicy Bypass: umgeht die Ausfuehrungsrichtlinie fuer
+            #   diesen Prozess.
+            # -NonInteractive: ohne den Schalter kann eine Rueckfrage (Read-Host,
+            #   eine Bestaetigung) die Bereitstellung haengen lassen, bis MECM
+            #   sie abbricht. Ein Paketautor, der interaktiv liest, bekommt jetzt
+            #   einen Fehler statt eines Haengers.
+            # Dieselben Schalter wie $script:VsPowerShellArgs in
+            #   VirtuSphere-Common.ps1, hier als Literal: diese Datei wird
+            #   einzeln in den Paketordner kopiert und sieht Common nie.
             # -File: Gibt an dass eine Skriptdatei ausgefuehrt werden soll.
             # *> $logPath: Leitet alle Ausgaben (stdout und stderr) in die Log-Datei um.
-            & PowerShell.exe -ExecutionPolicy Bypass -File $scriptFullPath *> $logPath
+            & PowerShell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File $scriptFullPath *> $logPath
 
             # $LASTEXITCODE: Automatische Variable - enthaelt den Exit-Code des zuletzt
             # ausgefuehrten externen Prozesses (hier: PowerShell.exe).

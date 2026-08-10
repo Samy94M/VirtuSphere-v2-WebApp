@@ -91,8 +91,10 @@ function Copy-VsClientContent {
 }
 
 # Die Programm-Befehlszeile eines Deployment-Types (eine Stelle, damit Skript und
-# Test dieselbe Zeichenkette nutzen).
+# Test dieselbe Zeichenkette nutzen). Die Schalter selbst kommen aus
+# $script:VsPowerShellArgs in VirtuSphere-Common.ps1; install-VirtuSphere-Clients.ps1
+# sourct beide Dateien, Common zuerst.
 function Get-VsClientInstallCommand {
     param([Parameter(Mandatory)][pscustomobject]$Spec)
-    return ('powershell.exe -ExecutionPolicy Bypass -File "{0}"' -f $Spec.Script)
+    return (Get-VsPowerShellCommandLine -ScriptPath $Spec.Script)
 }

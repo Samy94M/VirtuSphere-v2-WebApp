@@ -251,7 +251,7 @@ while ($true) {
                     ApplicationName      = $fullName
                     DeploymentTypeName   = "{0} Deployment" -f $fullName
                     ContentLocation      = (Join-Path $networkPath $folderName)
-                    InstallCommand       = 'powershell.exe -ExecutionPolicy Bypass -File install.ps1'
+                    InstallCommand       = (Get-VsPowerShellCommandLine -ScriptPath 'install.ps1')
                     UninstallCommand     = 'cmd.exe /s'
                     EstimatedRuntimeMins = 10
                     RebootBehavior       = 'BasedOnExitCode'

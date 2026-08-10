@@ -252,7 +252,9 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     exaktem Muster `^Name-<Version>$`. Das behebt den früheren Wildcard-Bug,
     bei dem ein `Firefox`-Update auch `Firefox-ESR-*` löschte.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
-    Install-Kommando `powershell.exe -ExecutionPolicy Bypass -File install.ps1`,
+    Install-Kommando
+    `powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "install.ps1"`
+    (Schalter aus `$script:VsPowerShellArgs`),
     Registry-Detection unter `SOFTWARE\VirtuSphere\Packages\Name-Version`
     (HKCU bei `InstallForUser`, sonst HKLM; dieselbe Richtung wie
     `Package_Vorlage\install.ps1`).
@@ -387,6 +389,16 @@ damit auch keinen Neustart mehr an. Der Deployment-Type steht auf
 `RebootBehavior = BasedOnExitCode`, 3010 und 1641 stehen in der
 MECM-Standardtabelle als Neustart-Erfolg: **Clients starten dadurch tatsächlich
 neu, wo sie es vorher nicht taten.**
+
+Teilskripte startet die Vorlage mit
+`-NoProfile -ExecutionPolicy Bypass -NonInteractive` (dieselben Schalter wie
+`$script:VsPowerShellArgs`, hier als Literal, weil die Vorlage einzeln in den
+Paketordner kopiert wird). Ein Teilskript, das interaktiv liest (`Read-Host`,
+eine Bestätigung), bekommt dadurch einen Fehler statt eines Hängers, der die
+Bereitstellung blockiert, bis MECM sie abbricht. Bestehende Deployment-Types
+behalten ihre alte Kommandozeile: Autoimporter und Clients-Installer setzen
+`InstallCommand` nur beim Anlegen. Wer die neue Zeile rückwirkend will, löscht
+die App einmal in der Konsole.
 
 > **Hinweis Self-Healing:** Die Standard-`install.ps1` und eine
 > `config.json`-Blaupause liefert der Installer aus `Package_Vorlage/` nach

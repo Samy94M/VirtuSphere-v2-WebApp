@@ -454,12 +454,11 @@ Write-Step 'Registriere geplante Aufgaben'
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 foreach ($task in $tasks) {
     $scriptFile = Join-Path $installDir $task.Script
-    # -NoProfile: die Aufgaben laufen als SYSTEM, und ein Profilskript unter
-    # SYSTEM (AllUsersAllHosts) ist Fremdcode im Sync-Prozess. Es kann eine
-    # Kodierung, eine PSModulePath oder ein $ErrorActionPreference setzen, das
-    # die Skripte nicht erwarten, und es kostet bei jedem Start Zeit. Ein
-    # unbeaufsichtigter Dienst laedt kein Profil.
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -NonInteractive -File "{0}"' -f $scriptFile)
+    # Schalter aus $script:VsPowerShellArgs (Common), wo auch die Begruendung
+    # steht: -NoProfile gegen Fremdcode im SYSTEM-Prozess, -NonInteractive
+    # gegen eine Rueckfrage, die niemand sieht. Diese Zeile war die einzige, die
+    # es richtig machte, waehrend drei andere Aufrufstellen beides nicht setzten.
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('{0} -File "{1}"' -f $script:VsPowerShellArgs, $scriptFile)
     # Zwei Trigger, nicht einer. -AtStartup allein hiess: nach den drei
     # Neustartversuchen (-RestartCount 3) ist die Aufgabe bis zum naechsten
     # Reboot tot, und ein MECM-Server bootet selten. Der Ausfall sieht dann

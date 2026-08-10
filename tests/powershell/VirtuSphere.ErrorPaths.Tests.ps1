@@ -509,6 +509,83 @@ Describe 'Installer: die vier geplanten Aufgaben' {
     }
 }
 
+Describe 'Jede powershell.exe-Aufrufstelle laeuft ohne Profil und nicht interaktiv' {
+
+    # Alles, was VirtuSphere startet, laeuft als SYSTEM. Ein maschinenweites
+    # Profil (AllUsersAllHosts) ist damit Fremdcode im Sync- bzw.
+    # Installationsprozess und kann Kodierung, PSModulePath oder
+    # $ErrorActionPreference setzen; ohne -NonInteractive kann eine Rueckfrage
+    # die Bereitstellung haengen lassen, bis MECM sie abbricht. Die
+    # Aufgaben-Zeile im Installer begruendete das in fuenf Kommentarzeilen,
+    # waehrend drei andere Aufrufstellen beides nicht setzten.
+    BeforeAll {
+        # Ausnahmen: hier benannt, mit Grund, damit die Liste nicht
+        # stillschweigend waechst. Heute leer.
+        $script:NoProfileExempt = @{}
+
+        function Remove-PsComments {
+            param([string]$Path)
+            $tokens = $null; $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+            $chars = (Get-Content -Path $Path -Raw).ToCharArray()
+            foreach ($t in $tokens) {
+                if ([string]$t.Kind -ne 'Comment') { continue }
+                for ($i = $t.Extent.StartOffset; $i -lt $t.Extent.EndOffset -and $i -lt $chars.Length; $i++) {
+                    if ($chars[$i] -ne "`n" -and $chars[$i] -ne "`r") { $chars[$i] = ' ' }
+                }
+            }
+            -join $chars
+        }
+    }
+
+    It 'Common fuehrt die Schalter als SSoT' {
+        $switches = [string](Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsPowerShellArgs })
+        $switches | Should -Match '(?i)-NoProfile'
+        $switches | Should -Match '(?i)-NonInteractive'
+        $switches | Should -Match '(?i)-ExecutionPolicy Bypass'
+
+        # Der Helfer setzt den Pfad in Anfuehrungszeichen: der Installationspfad
+        # ist C:\Program Files\VirtuSphere\mecm und enthaelt ein Leerzeichen.
+        $line = [string](Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Get-VsPowerShellCommandLine -ScriptPath 'C:\Program Files\x\y.ps1'
+        })
+        $line | Should -Match '(?i)^powershell\.exe .*-NoProfile'
+        $line | Should -Match '-File "C:\\Program Files\\x\\y\.ps1"'
+    }
+
+    It 'keine Aufrufstelle im Baum startet powershell.exe mit Profil' {
+        # Eine Zeile, die $script:VsPowerShellArgs einsetzt, traegt die Schalter
+        # per Konstruktion; was in der Konstante steht, pinnt das It darueber.
+        # Die Paketvorlage fuehrt ihr eigenes Literal, weil sie einzeln in den
+        # Paketordner kopiert wird und Common nie sieht.
+        $offenders = @()
+        $seen = 0
+        foreach ($file in @(Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse -File)) {
+            if ($script:NoProfileExempt.ContainsKey($file.Name)) { continue }
+            foreach ($line in ((Remove-PsComments -Path $file.FullName) -split "`r?`n")) {
+                if ($line -notmatch '(?i)powershell\.exe') { continue }
+                $seen++
+                if ($line -match '(?i)-NoProfile' -and $line -match '(?i)-NonInteractive') { continue }
+                if ($line -match 'VsPowerShellArgs' -or $line -match 'Get-VsPowerShellCommandLine') { continue }
+                $offenders += ('{0}: {1}' -f $file.Name, $line.Trim())
+            }
+        }
+        # Ohne diese Zeile waere der Test nach einer Umbenennung dauerhaft still
+        # gruen - genau der Fehler, den dieses Projekt in der i18n-Regel schon
+        # einmal hatte.
+        $seen | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'
+        $offenders -join ' | ' | Should -BeNullOrEmpty
+    }
+
+    It 'die Paketvorlage nennt dieselben Schalter wie die Konstante' {
+        $switches = [string](Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsPowerShellArgs })
+        $template = Remove-PsComments -Path (Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1')
+        foreach ($switch in ($switches -split '\s+(?=-)')) {
+            $template | Should -Match ('(?i)' + [regex]::Escape($switch.Trim()))
+        }
+    }
+}
+
 Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
 
     # Beide Installer schrieben ihre gruene Schlusszeile, ohne auf das Ergebnis

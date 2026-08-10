@@ -248,7 +248,15 @@ Describe 'Installer: die vier Aufgaben ueberleben ihren eigenen Neustartzaehler'
     It 'die Aufgaben starten ohne Profil' {
         # SYSTEM kann ein AllUsersAllHosts-Profil haben: Fremdcode im Sync-Prozess,
         # der Kodierung, PSModulePath oder $ErrorActionPreference verstellt.
-        $script:InstallerText | Should -Match "New-ScheduledTaskAction[^\r\n]*-NoProfile"
+        #
+        # Die Schalter selbst stehen seit E7 in $script:VsPowerShellArgs
+        # (VirtuSphere-Common.ps1), weil drei weitere Aufrufstellen sie nicht
+        # setzten. Was in der Konstante steht und dass JEDE powershell.exe-Zeile
+        # im Baum sie traegt, pinnt die Describe
+        # "Jede powershell.exe-Aufrufstelle laeuft ohne Profil und nicht
+        # interaktiv" in ErrorPaths; hier bleibt die Frage, ob die Aufgabe ihre
+        # Kommandozeile von dort bezieht.
+        $script:InstallerText | Should -Match "New-ScheduledTaskAction[^\r\n]*(-NoProfile|VsPowerShellArgs)"
     }
 
     It 'jede Aufgabe hat zwei Trigger: Systemstart und Wiederholung' {
