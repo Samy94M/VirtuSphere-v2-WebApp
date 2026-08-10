@@ -64,19 +64,50 @@ try {
         exit 1
     }
 
-    # Sicherheitsnetz: NetBIOS-Grenzen. Weicht das Ergebnis ab -> melden.
+    # Sicherheitsnetz: NetBIOS-Grenzen (15 Zeichen, nur Buchstaben, Ziffern,
+    # Bindestrich).
+    #
+    # Die verbindliche Pruefung sitzt im Portal: es erzwingt die Regeln bei jeder
+    # neuen VM und bei jeder Aenderung eines Hostnamens (lib/repo/vms.php). Nur
+    # Altzeilen, die seitdem niemand angefasst hat, erreichen diesen Zweig
+    # ueberhaupt noch, und ihre lockere Regel laesst ihnen das Portal
+    # ausdruecklich, damit eine unabhaengige Bearbeitung nicht am Hostnamen
+    # scheitert. Ein harter Abbruch hier wuerde diese Entscheidung von der
+    # anderen Seite kassieren und heute laufende Deployments rot faerben.
+    #
+    # Deshalb: weitermachen und ehrlich melden. Der Zweig meldete frueher
+    # 'failed', und derselbe Lauf danach 'finished'; was das Portal anzeigte,
+    # hing davon ab, welche Meldung zuletzt ankam. Die Abweichung steht jetzt im
+    # Log und im Detail der EINEN terminalen Meldung.
     $sanitized = ($newHostname -replace '[^a-zA-Z0-9\-]', '')
     if ($sanitized.Length -gt 15) { $sanitized = $sanitized.Substring(0, 15) }
+
+    # Ein Name nur aus Sonderzeichen bereinigt sich zu Leer. Ohne diesen Guard
+    # laeuft das Skript in Rename-Computer -NewName '' und meldet eine
+    # Framework-Exception statt einer Ursache. Der einzige Pfad, der weiterhin
+    # 'failed' meldet, und dann auch nur diese eine Meldung: hier gibt es
+    # tatsaechlich keinen setzbaren Namen.
+    if ([string]::IsNullOrWhiteSpace($sanitized)) {
+        Write-VsClientLog -Level ERROR "Soll-Hostname '$newHostname' enthaelt kein einziges fuer NetBIOS gueltiges Zeichen - es gibt keinen setzbaren Namen."
+        Set-MecmDetection -Values @{ Status = 'Fehler'; Hostname = $current; Reason = 'Sollname ohne gueltige Zeichen' }
+        if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'failed' -Detail "sanitized '$newHostname' -> leer" }
+        exit 1
+    }
+
+    # Die Abweichung reist im Detail der terminalen Meldung mit, damit ein
+    # Operator die verbleibenden Altzeilen findet, ohne dass ein Deployment
+    # scheitert.
+    $sanitizeNote = ''
     if ($sanitized -ne $newHostname) {
-        Write-VsClientLog -Level WARN "Soll-Hostname '$newHostname' verletzt NetBIOS-Regeln, verwende '$sanitized'."
-        if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'failed' -Detail "sanitized '$newHostname' -> '$sanitized'" }
+        Write-VsClientLog -Level WARN "Soll-Hostname '$newHostname' verletzt NetBIOS-Regeln, verwende '$sanitized'. Die verbindliche Pruefung sitzt im Portal; diese VM traegt noch die alte, lockere Regel."
+        $sanitizeNote = " (bereinigt aus '$newHostname')"
     }
     $newHostname = $sanitized
 
     if ($current -eq $newHostname) {
         Write-VsClientLog 'Hostname bereits korrekt.'
         Set-MecmDetection -Values @{ Status = 'Erfolgreich'; Hostname = $current; Reason = 'Bereits korrekt' }
-        if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail 'already correct' }
+        if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail ('already correct{0}' -f $sanitizeNote) }
         exit 0
     }
 
@@ -86,7 +117,7 @@ try {
     Set-MecmDetection -Values @{ Status = 'Erfolgreich'; OldHostname = $current; NewHostname = $newHostname }
 
     # finished VOR dem Reboot melden (danach ist der Client evtl. offline).
-    if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail "renamed to $newHostname" }
+    if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'hostname' -PhaseEvent 'finished' -Detail ('renamed to {0}{1}' -f $newHostname, $sanitizeNote) }
 
     Write-VsClientLog 'Neustart in 60s.'
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c "timeout /t 60 /nobreak && shutdown -r -f -t 0"' -WindowStyle Hidden

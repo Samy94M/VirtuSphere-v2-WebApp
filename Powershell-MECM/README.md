@@ -433,6 +433,19 @@ Die Modusnamen gehören `VIRTUSPHERE_INTERFACE_MODES` in
 `Docker/WebAPI/lib/defaults.php`; ein Pester-Test hält die beiden
 PowerShell-Literale dagegen.
 
+`client_hostname` kürzt und bereinigt den Namen nach den NetBIOS-Regeln und
+**meldet die Abweichung, bricht aber nicht ab**: die verbindliche Prüfung sitzt
+im Portal, das die Regeln bei jeder neuen VM und jeder Hostnamensänderung
+erzwingt. Erreichbar ist der Bereinigungszweig nur noch für Altzeilen, die
+seitdem niemand angefasst hat, und ihre lockere Regel lässt ihnen das Portal
+bewusst. Ein Lauf meldet dadurch genau ein terminales Ereignis; vorher meldete
+derselbe Durchgang `failed` und danach `finished`, und was das Portal anzeigte,
+hing davon ab, welche Meldung zuletzt ankam. Welcher Name gewünscht war und
+welcher gesetzt wurde, steht im Detail dieser einen Meldung und als WARN-Zeile
+im Log. Ergibt die Bereinigung einen leeren Namen, ist das ein benannter
+Fehlschlag mit `failed` und Exit-Code 1, weil es dann tatsächlich keinen
+setzbaren Namen gibt.
+
 ## Bekannte Punkte / Wartung
 
 - **Boundary Group vs. DP Group:** `mecm_autoimporter.ps1` verteilt Content an

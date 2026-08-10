@@ -1029,6 +1029,46 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match '\$appliedStatic, \$appliedDhcp'
     }
 
+    It 'client_hostname meldet je Lauf hoechstens ein terminales Phasenereignis' {
+        # Der Bereinigungszweig meldete 'failed', das Skript benannte die
+        # Maschine trotzdem um, und derselbe Lauf meldete danach 'finished'. Was
+        # das Portal anzeigt, hing davon ab, welche Meldung zuletzt ankam.
+        #
+        # Geprueft wird pro Pfad: zwischen einem terminalen Send-VsPhase und dem
+        # naechsten muss das Skript die Ausfuehrung verlassen (exit oder throw).
+        $path = Join-Path $script:ClientsDir 'client_hostname.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+
+        $terminal = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
+                      $n.GetCommandName() -eq 'Send-VsPhase' -and
+                      $n.Extent.Text -match "PhaseEvent '(finished|failed)'"
+        }, $true) | Sort-Object { $_.Extent.StartOffset })
+        $terminal.Count | Should -BeGreaterThan 1 -Because 'sonst prueft dieser Test die falsche Stelle'
+
+        $source = Get-ClientText -Name 'client_hostname.ps1'
+        for ($i = 0; $i -lt $terminal.Count - 1; $i++) {
+            $from = $terminal[$i].Extent.EndOffset
+            $to = $terminal[$i + 1].Extent.StartOffset
+            $between = $source.Substring($from, $to - $from)
+            ($between -match '(?m)^\s*(exit\b|throw\b)') | Should -BeTrue -Because (
+                "zwischen '{0}' und der naechsten terminalen Meldung verlaesst kein Pfad das Skript" -f $terminal[$i].Extent.Text)
+        }
+    }
+
+    It 'client_hostname traegt die Namensabweichung im Detail statt in einer zweiten Meldung' {
+        # Der Operator soll die verbleibenden Altzeilen finden koennen, ohne dass
+        # ein Deployment scheitert: die verbindliche NetBIOS-Pruefung sitzt im
+        # Portal, das sie bei jeder neuen VM und jeder Aenderung erzwingt.
+        $text = Get-ClientText -Name 'client_hostname.ps1'
+        $text | Should -Match '\$sanitizeNote'
+        $text | Should -Match "verletzt NetBIOS-Regeln"
+        # Und der Bereinigungszweig selbst meldet nichts mehr.
+        $branch = [regex]::Match($text, "(?s)if \(\`$sanitized -ne \`$newHostname\) \{.*?\n    \}")
+        $branch.Success | Should -BeTrue -Because 'sonst prueft dieser Test die falsche Stelle'
+        $branch.Value | Should -Not -Match 'Send-VsPhase'
+    }
+
     It 'client_getinfo raeumt den Erfolgs-Marker vor jeder Abbruchmoeglichkeit weg' {
         # Der Stale-Fix muss VOR dem API-Aufruf laufen: sonst ueberlebt ein
         # SetupState=complete des Vorlaufs einen Abbruch, und client_staticip
