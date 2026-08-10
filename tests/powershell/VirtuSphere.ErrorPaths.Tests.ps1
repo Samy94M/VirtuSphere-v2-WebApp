@@ -509,6 +509,105 @@ Describe 'Installer: die vier geplanten Aufgaben' {
     }
 }
 
+Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
+
+    # Beide Installer schrieben ihre gruene Schlusszeile, ohne auf das Ergebnis
+    # zu schauen: der Clients-Installer unbedingt (jeder App-Fehler war nur eine
+    # Warnung), der MECM-Installer allein an $allRunning, also an der Frage, ob
+    # die vier Aufgaben laufen. Vier laufende Aufgaben plus ein Portal, das mit
+    # 403 antwortet, ergaben eine gruene Erstinstallation - und genau dieser 403
+    # ist der Naechste-Schritte-Punkt 1 desselben Skripts.
+    #
+    # Blindes Mitzaehlen ALLER Warnungen waere die falsche Korrektur gewesen:
+    # ein korrekter Erstlauf ginge gelb, weil die DP-Gruppe legitim erst spaeter
+    # entsteht. Deshalb zwei Ausgabefunktionen, deren Wahl an der Aufrufstelle
+    # steht und hier geprueft wird.
+    BeforeAll {
+        $script:InstallerFiles = @(
+            @{ name = 'install-VirtuSphere-MECM.ps1';    path = (Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1');    success = 'Erstinstallation abgeschlossen' }
+            @{ name = 'install-VirtuSphere-Clients.ps1'; path = (Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1'); success = 'Client-Applikationen bereit' }
+        )
+
+        function Get-InstallerAst {
+            param([string]$Path)
+            $t = $null; $e = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$t, [ref]$e)
+        }
+    }
+
+    It '<name>: die Erfolgszeile haengt an einer Bedingung, die den Blockerzaehler liest' -ForEach @(
+        @{ name = 'install-VirtuSphere-MECM.ps1';    success = 'Erstinstallation abgeschlossen' }
+        @{ name = 'install-VirtuSphere-Clients.ps1'; success = 'Client-Applikationen bereit' }
+    ) {
+        $ast = Get-InstallerAst -Path (Join-Path $script:PsRoot $name)
+        $ifs = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.IfStatementAst]
+        }, $true) | Where-Object { $_.Extent.Text -match [regex]::Escape($success) } |
+            Sort-Object { $_.Extent.Text.Length })
+        $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $ifs[0].Clauses[0].Item1.Extent.Text | Should -Match 'VsInstallBlockers'
+    }
+
+    It '<name>: kann mit einem Fehlercode enden' -ForEach @(
+        @{ name = 'install-VirtuSphere-MECM.ps1' }
+        @{ name = 'install-VirtuSphere-Clients.ps1' }
+    ) {
+        # Der Exit-Code ist die maschinenlesbare Fassung der Schlusszeile und
+        # Voraussetzung dafuer, dass ein Rollout-Skript den Installer je pruefen
+        # kann. Beide endeten immer mit 0.
+        $ast = Get-InstallerAst -Path (Join-Path $script:PsRoot $name)
+        $exits = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ExitStatementAst]
+        }, $true) | Where-Object { $_.Extent.Text -notmatch '^exit\s+0\s*$' })
+        $exits.Count | Should -BeGreaterThan 0
+    }
+
+    It '<name>: nur Write-Warn zaehlt, Write-Hint nicht' -ForEach @(
+        @{ name = 'install-VirtuSphere-MECM.ps1' }
+        @{ name = 'install-VirtuSphere-Clients.ps1' }
+    ) {
+        # Die Trennung ist der ganze Wert dieser Etappe: waere sie in einer
+        # zentralen Liste versteckt, muesste man beim Lesen einer Warnung
+        # anderswo nachschlagen, und ein neuer Warnungstext koennte sich
+        # unbemerkt in die falsche Klasse legen.
+        $ast = Get-InstallerAst -Path (Join-Path $script:PsRoot $name)
+        $funcs = @{}
+        foreach ($f in @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]
+        }, $true))) { $funcs[$f.Name] = $f }
+
+        $funcs.ContainsKey('Write-Warn') | Should -BeTrue
+        $funcs.ContainsKey('Write-Hint') | Should -BeTrue
+        $funcs['Write-Warn'].Body.Extent.Text | Should -Match '\$script:VsInstallBlockers\+\+'
+        $funcs['Write-Hint'].Body.Extent.Text | Should -Not -Match 'VsInstallBlockers'
+
+        # Beide Klassen muessen tatsaechlich benutzt werden. Ohne diese Pruefung
+        # waere eine Datei, in der jemand alle Hinweise wieder zu Blockern macht,
+        # still gruen.
+        foreach ($fn in @('Write-Warn', 'Write-Hint')) {
+            $calls = @($ast.FindAll({
+                param($n) $n -is [System.Management.Automation.Language.CommandAst]
+            }, $true) | Where-Object { $_.GetCommandName() -eq $fn })
+            $calls.Count | Should -BeGreaterThan 0 -Because "$fn ohne Aufrufstelle ist eine Klassifizierung, die niemand trifft"
+        }
+    }
+
+    It '<name>: schreibt seine Blocker auch ins Tageslog' -ForEach @(
+        @{ name = 'install-VirtuSphere-MECM.ps1' }
+        @{ name = 'install-VirtuSphere-Clients.ps1' }
+    ) {
+        # Das Konsolenfenster ueberlebt den Feierabend nicht, und eine
+        # Erstinbetriebnahme wird oft erst am naechsten Tag nachvollzogen.
+        $text = Get-Content -Raw -Path (Join-Path $script:PsRoot $name)
+        $text | Should -Match 'Initialize-VsLog'
+        $ast = Get-InstallerAst -Path (Join-Path $script:PsRoot $name)
+        $warn = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-Warn'
+        }, $true))
+        $warn[0].Body.Extent.Text | Should -Match 'Write-VsLog'
+    }
+}
+
 Describe 'Kein Organisationskuerzel in Registry- und Programmpfaden' {
 
     # Die Skripte laufen in fremden Umgebungen, deren Organisationskuerzel wir

@@ -97,14 +97,44 @@ $registryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 $installDir = Join-Path $env:ProgramFiles 'VirtuSphere\mecm'
 $logRoot = Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
 
+# Zwei Klassen von Warnung, und die Einordnung steht an der Aufrufstelle statt
+# in einer zentralen Liste: nur so ist sie beim Lesen der Zeile sichtbar und im
+# Test pruefbar.
+#
+# Write-Warn = BLOCKER. Die Erstinstallation hat ihre Arbeit nicht geleistet:
+#   Aufgabe laeuft nicht, Portal antwortet nicht oder mit 403, kein frisches
+#   Log, Freigabe zeigt nicht auf den Paketpfad. Faerbt die Schlusszeile und
+#   setzt den Exit-Code.
+# Write-Hint = HINWEIS. Etwas ist bemerkenswert, aber der Lauf ist trotzdem
+#   gelungen: die DP-Gruppe darf legitim erst spaeter entstehen, DNS loest hier
+#   anders auf als im Deploy-VLAN, und ein nicht abfragbarer Site-Health-Provider
+#   heisst laut Common ausdruecklich "nicht abfragbar", nicht "Site krank".
+#
+# Ohne diese Trennung waere ein blindes Mitzaehlen aller Warnungen die falsche
+# Korrektur: ein voellig korrekter Erstlauf ginge gelb.
+$script:VsInstallBlockers = 0
 function Write-Step { param([string]$Message) ; Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Message) ; Write-Host "    OK  $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) ; Write-Host "    !!  $Message" -ForegroundColor Yellow }
+function Write-Warn {
+    param([string]$Message)
+    $script:VsInstallBlockers++
+    # Ueber Write-VsLog statt Write-Host: das Konsolenfenster ueberlebt den
+    # Feierabend nicht, und eine Erstinbetriebnahme wird oft erst am naechsten
+    # Tag nachvollzogen.
+    Write-VsLog -Level WARN -Context 'setup' -Message ("    !!  {0}" -f $Message) -Color Yellow
+}
+function Write-Hint {
+    param([string]$Message)
+    Write-VsLog -Level INFO -Context 'setup' -Message ("    ~~  {0}" -f $Message) -Color DarkYellow
+}
 
 # Common frueh dot-sourcen: liefert Convert-VsWebApi (Normalisierung) sowie
 # Get-VsErrorDetail/-StatusCode fuer die spaetere Verifikation. Nur Funktionen und
 # $script:-Variablen, keine Schleife - unschaedlich.
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
+
+# Vor der ersten Warnung, damit auch sie im Tageslog landet.
+Initialize-VsLog -Component 'setup' -LogRoot $logRoot
 
 # --- WebApi normalisieren (host:port, kein Schema/Pfad) ---------------------
 $WebApi = Convert-VsWebApi $WebApi
@@ -171,7 +201,9 @@ try {
         Where-Object { $_.Name -like 'site_*' } | Select-Object -First 1
     if ($ns) { $siteCode = $ns.Name -replace '^site_', '' }
 } catch { Write-Debug $_ }
-if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Warn 'Site-Code nicht automatisch erkennbar - Skripte nutzen WMI/PSDrive zur Laufzeit.' }
+# Hinweis, kein Blocker: die Skripte ermitteln den Site-Code zur Laufzeit selbst
+# ueber WMI bzw. PSDrive; der Installer braucht ihn nur fuer seine eigene Anzeige.
+if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Hint 'Site-Code nicht automatisch erkennbar - Skripte nutzen WMI/PSDrive zur Laufzeit.' }
 
 # DP-Gruppe pruefen: der Installer nimmt den Namen nur entgegen, verteilt selbst
 # nichts. Ein Tippfehler oder ein Namenszusatz der Umgebung (im Feld gesehen: die
@@ -189,14 +221,14 @@ if ($siteCode) {
         if (-not $dpGroup) {
             $known = ($dpGroups | ForEach-Object { "'{0}'" -f $_.Name }) -join ', '
             if (-not $known) { $known = '(keine)' }
-            Write-Warn ("DP-Gruppe '{0}' existiert in Site {1} NICHT. Der Autoimporter kann neue Anwendungen dann nicht verteilen: App und Deployment entstehen, der Content fehlt. Vorhandene Gruppen: {2}. Gruppe anlegen oder -DpGroupName korrigieren." -f $DpGroupName, $siteCode, $known)
+            Write-Hint ("DP-Gruppe '{0}' existiert in Site {1} NICHT. Der Autoimporter kann neue Anwendungen dann nicht verteilen: App und Deployment entstehen, der Content fehlt. Vorhandene Gruppen: {2}. Gruppe anlegen oder -DpGroupName korrigieren." -f $DpGroupName, $siteCode, $known)
         } elseif ([int]$dpGroup.MemberCount -eq 0) {
-            Write-Warn ("DP-Gruppe '{0}' existiert, hat aber keine Verteilungspunkte. Verteilte Anwendungen erreichen damit keinen Client." -f $DpGroupName)
+            Write-Hint ("DP-Gruppe '{0}' existiert, hat aber keine Verteilungspunkte. Verteilte Anwendungen erreichen damit keinen Client." -f $DpGroupName)
         } else {
             Write-Ok ("DP-Gruppe '{0}' gefunden ({1} Verteilungspunkte)" -f $DpGroupName, [int]$dpGroup.MemberCount)
         }
     } catch {
-        Write-Warn ("DP-Gruppe '{0}' nicht pruefbar: {1}" -f $DpGroupName, (Get-VsErrorDetail -ErrorRecord $_))
+        Write-Hint ("DP-Gruppe '{0}' nicht pruefbar: {1}" -f $DpGroupName, (Get-VsErrorDetail -ErrorRecord $_))
     }
 }
 
@@ -206,12 +238,12 @@ if ($siteCode) {
 # Resolver als das Deploy-VLAN. [System.Net.Dns] statt Resolve-DnsName, damit es
 # nicht am DnsClient-Modul haengt.
 if ($webApiIsIp) {
-    Write-Warn ("WebApi ist eine IP ({0}). Besser ein DNS-Name (z.B. virtusphere.lan:8021): dann ist eine spaetere IP-Aenderung ein reiner DNS-Eintrag, und die Client-Skripte loesen denselben Namen auf. So besitzt DNS die IP statt zweier Konfig-Stellen." -f $webApiHost)
+    Write-Hint ("WebApi ist eine IP ({0}). Besser ein DNS-Name (z.B. virtusphere.lan:8021): dann ist eine spaetere IP-Aenderung ein reiner DNS-Eintrag, und die Client-Skripte loesen denselben Namen auf. So besitzt DNS die IP statt zweier Konfig-Stellen." -f $webApiHost)
 } else {
     $dnsOk = $false
     try { $dnsOk = @([System.Net.Dns]::GetHostAddresses($webApiHost)).Count -gt 0 } catch { Write-Debug $_ }
     if ($dnsOk) { Write-Ok ("DNS-Name '{0}' loest vom MECM-Server aus auf" -f $webApiHost) }
-    else { Write-Warn ("DNS-Name '{0}' loest vom MECM-Server NICHT auf. Im Deploy-VLAN-DNS einen Eintrag anlegen, sonst finden die Clients die WebAPI nicht (ihr DNS kommt per DHCP)." -f $webApiHost) }
+    else { Write-Hint ("DNS-Name '{0}' loest vom MECM-Server NICHT auf. Im Deploy-VLAN-DNS einen Eintrag anlegen, sonst finden die Clients die WebAPI nicht (ihr DNS kommt per DHCP)." -f $webApiHost) }
 }
 
 # --- Registry ---------------------------------------------------------------
@@ -336,7 +368,7 @@ $writableByUsers = (Get-Acl -Path $filesDir).Access | Where-Object {
     $_.IdentityReference -match 'Users|Everyone|Authenticated Users'
 }
 if ($writableByUsers) {
-    Write-Warn ('Paket-Ordner {0} ist fuer normale Benutzer beschreibbar. Paket-Skripte laufen als SYSTEM: Schreibrechte auf Administratoren/SYSTEM begrenzen.' -f $filesDir)
+    Write-Hint ('Paket-Ordner {0} ist fuer normale Benutzer beschreibbar. Paket-Skripte laufen als SYSTEM: Schreibrechte auf Administratoren/SYSTEM begrenzen.' -f $filesDir)
 }
 
 # PackagesShare MUSS die Freigabe von PackagesRoot\files sein: der Autoimporter
@@ -391,7 +423,7 @@ foreach ($task in $tasks) {
         } catch {
             # Kein Abbruch: der Neustart unten setzt die Aufgabe ohnehin neu auf.
             # Die Warnung sagt aber, dass die alte Instanz kurz weiterlaufen kann.
-            Write-Warn ("Aufgabe '{0}' liess sich nicht beenden: {1}" -f $task.Name, $_.Exception.Message)
+            Write-Hint ("Aufgabe '{0}' liess sich nicht beenden: {1}" -f $task.Name, $_.Exception.Message)
         }
     }
 }
@@ -504,7 +536,10 @@ Write-Step 'Pruefe MECM-Site-Provider (Site-Health)'
 $siteHealthProbeConfig = [pscustomobject]@{ SiteCodeFallback = $siteCode; ProviderMachine = $ProviderMachine }
 $siteHealth = Get-VsMecmSiteHealth -Config $siteHealthProbeConfig -ProviderMachine $ProviderMachine
 if ($siteHealth.Outcome -eq 'unknown') {
-    Write-Warn ("Site-Health konnte den SMS-Provider '{0}' nicht abfragen (Kategorie {1}). Rechte und Erreichbarkeit des Providers pruefen." -f $siteHealth.Provider, $siteHealth.ErrorCategory)
+    # Hinweis, kein Blocker: `unknown` heisst laut Common ausdruecklich "nicht
+    # abfragbar", nicht "Site krank", und die Rechte dafuer sind oft eine
+    # getrennte Freigabe, die nach der Installation nachgereicht wird.
+    Write-Hint ("Site-Health konnte den SMS-Provider '{0}' nicht abfragen (Kategorie {1}). Rechte und Erreichbarkeit des Providers pruefen." -f $siteHealth.Provider, $siteHealth.ErrorCategory)
 } else {
     Write-Ok ("Site-Health erreicht den Provider '{0}': Site {1}, Rohstatus {2} -> {3}." -f $siteHealth.Provider, $siteHealth.SiteCode, $siteHealth.RawStatus, $siteHealth.Outcome)
 }
@@ -544,10 +579,17 @@ foreach ($comp in $logComponents) {
 New-ItemProperty -Path $registryPath -Name 'SetupCompleted' -Value (Get-Date -Format 'o') -PropertyType String -Force | Out-Null
 
 Write-Host ''
-if ($allRunning) {
+# Die Schlusszeile haengt an ALLEN Blockern, nicht mehr allein an $allRunning.
+# Vier laufende Aufgaben plus ein Portal, das mit 403 antwortet, ergaben vorher
+# eine gruene Erstinstallation - und ausgerechnet dieser 403 ist der
+# Naechste-Schritte-Punkt 1 desselben Skripts.
+#
+# Die Zahl steht in der Zeile, nicht nur die Farbe: fuer einen Menschen vor der
+# Konsole ist ein Exit-Code unsichtbar.
+if ($script:VsInstallBlockers -eq 0) {
     Write-Host 'Erstinstallation abgeschlossen.' -ForegroundColor Green
 } else {
-    Write-Host 'Erstinstallation abgeschlossen - bitte die Warnungen oben pruefen.' -ForegroundColor Yellow
+    Write-Host ('Erstinstallation abgeschlossen, aber {0} offene(r) Punkt(e) - die mit "!!" markierten Zeilen oben pruefen.' -f $script:VsInstallBlockers) -ForegroundColor Yellow
 }
 Write-Host ('Logs: {0}' -f $logRoot) -ForegroundColor Gray
 Write-Host ''
@@ -559,3 +601,8 @@ if (-not $webApiIsIp) {
 }
 Write-Host ('  4. Client-Paritaet: die Client-Skripte lesen den WebAPI-Namen aus $VsDefaultDnsApi in VirtuSphere-Client-Common.ps1. Beim Default "virtusphere.lan:8021" ist nichts zu tun; weicht euer Name ab, dort denselben Wert wie hier (-WebApi "{0}") setzen.' -f $WebApi) -ForegroundColor Gray
 Write-Host '  5. Seite "Systemstatus" im Portal beobachten - die Ampeln werden gruen.' -ForegroundColor Gray
+
+# Exit-Code als maschinenlesbare Fassung der Schlusszeile: Voraussetzung dafuer,
+# dass ein Rollout-Skript den Installer je pruefen kann.
+if ($script:VsInstallBlockers -gt 0) { exit 1 }
+exit 0

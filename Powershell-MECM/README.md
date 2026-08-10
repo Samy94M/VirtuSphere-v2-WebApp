@@ -48,6 +48,20 @@ Skripte. Die vier Intervalle und `MECM_ProviderMachine` behalten dabei ihren
 eingestellten Wert, wenn der jeweilige Parameter nicht angegeben wird; ein
 Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 
+**Ergebnis beider Installer.** Sie unterscheiden zwei Klassen von Meldung. Ein
+**Blocker** (`!!`) heißt, die Installation hat ihre Arbeit nicht geleistet: eine
+Aufgabe läuft nicht, das Portal antwortet nicht oder mit 403, ein Tageslog bleibt
+leer, die Freigabe zeigt nicht auf den Paketpfad, oder eine Application, ihr
+Content oder die Vorlage fehlt. Die Schlusszeile nennt dann die Zahl der offenen
+Punkte, und der Prozess endet mit Exit-Code 1. Ein **Hinweis** (`~~`) berührt das
+Ergebnis nicht: die DP-Gruppe darf legitim erst nach der Installation entstehen,
+DNS löst auf dem MECM-Server anders auf als im Deploy-VLAN, der Paketordner ist
+für Benutzer beschreibbar (eine ACL-Entscheidung), der Site-Health-Provider ist
+nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“), und die
+Abhängigkeitskette der Client-Apps wird bewusst nur best effort gesetzt. Ohne
+offene Punkte endet der Installer mit 0. Beide Klassen stehen zusätzlich im
+Tageslog unter `Logs`, weil das Konsolenfenster den Feierabend nicht überlebt.
+
 ## Die vier geplanten Aufgaben (MECM-Server)
 
 | Aufgabe | Skript | Zweck | Intervall |

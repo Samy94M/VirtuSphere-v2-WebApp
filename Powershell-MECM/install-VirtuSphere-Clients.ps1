@@ -57,9 +57,38 @@ Set-StrictMode -Version 1.0
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPackaging.ps1')
 
+# Zwei Klassen von Warnung, Einordnung an der Aufrufstelle (dieselbe Trennung
+# wie in install-VirtuSphere-MECM.ps1):
+#
+# Write-Warn = BLOCKER. Die Applikation, ihre Content-Verteilung oder die
+#   Freigabe hat nicht funktioniert; die Schlusszeile und der Exit-Code lesen
+#   den Zaehler.
+# Write-Hint = HINWEIS. Der Lauf ist gelungen, es gibt nur etwas zu wissen:
+#   keine DP-Gruppe angegeben (der Admin verteilt dann bewusst von Hand), der
+#   Paketordner ist fuer Benutzer beschreibbar (eine ACL-Entscheidung), und die
+#   Abhaengigkeitskette ist ausdruecklich best effort (siehe die Begruendung
+#   unten: eine bestehende Kette wird nicht angetastet).
+$script:VsInstallBlockers = 0
 function Write-Step { param([string]$Message) ; Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Message) ; Write-Host "    OK  $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) ; Write-Host "    !!  $Message" -ForegroundColor Yellow }
+function Write-Warn {
+    param([string]$Message)
+    $script:VsInstallBlockers++
+    # Ueber Write-VsLog: das Log wurde bisher initialisiert und nie benutzt,
+    # waehrend genau eine Erstinbetriebnahme spaeter nachvollzogen werden muss.
+    Write-VsLog -Level WARN -Context 'client-packaging' -Message ("    !!  {0}" -f $Message) -Color Yellow
+}
+function Write-Hint {
+    param([string]$Message)
+    Write-VsLog -Level INFO -Context 'client-packaging' -Message ("    ~~  {0}" -f $Message) -Color DarkYellow
+}
+
+# Log vor der ersten Warnung initialisieren: die Freigabe- und ACL-Pruefung
+# laeuft vor der MECM-Site, ihre Meldungen gehoeren trotzdem ins Tageslog.
+# Get-VsConfig braucht kein CM (nur die Registry) und darf $null sein.
+$config = Get-VsConfig
+$logRoot = if ($config) { $config.LogRoot } else { $null }
+Initialize-VsLog -Component 'client-packaging' -LogRoot $logRoot
 
 $ContentShare = $ContentShare.TrimEnd('\')
 $specs = Get-VsClientAppSpecs
@@ -95,14 +124,11 @@ $writableByUsers = (Get-Acl -Path $PackagesBase).Access | Where-Object {
     $_.IdentityReference -match 'Users|Everyone|Authenticated Users'
 }
 if ($writableByUsers) {
-    Write-Warn ("PackagesBase '{0}' ist fuer normale Benutzer beschreibbar. Der Content laeuft als SYSTEM auf den Clients: Schreibrechte auf Administratoren/SYSTEM begrenzen." -f $PackagesBase)
+    Write-Hint ("PackagesBase '{0}' ist fuer normale Benutzer beschreibbar. Der Content laeuft als SYSTEM auf den Clients: Schreibrechte auf Administratoren/SYSTEM begrenzen." -f $PackagesBase)
 }
 
 # --- MECM-Site initialisieren -----------------------------------------------
 Write-Step 'Initialisiere MECM-Site'
-$config = Get-VsConfig   # fuer SiteCodeFallback/LogRoot; darf $null sein
-$logRoot = if ($config) { $config.LogRoot } else { $null }
-Initialize-VsLog -Component 'client-packaging' -LogRoot $logRoot
 $siteCode = Initialize-VsCmSite -Config $config
 if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar (MECM-Konsole/Site-Drive pruefen).' }
 Write-Ok "Site-Drive $siteCode aktiv"
@@ -173,7 +199,9 @@ foreach ($spec in $specs) {
         # Content verteilen bzw. aktualisieren (der DP muss die ersetzten Dateien
         # neu ziehen, sonst serviert er die alten). Nicht fatal.
         if ([string]::IsNullOrWhiteSpace($DpGroupName)) {
-            Write-Warn ("Keine DP-Gruppe angegeben - '{0}' NICHT verteilt. Manuell verteilen." -f $spec.AppName)
+            # Hinweis: leer heisst laut Parameterhilfe ausdruecklich "der Admin
+            # verteilt manuell", also eine Wahl und kein Fehlschlag.
+            Write-Hint ("Keine DP-Gruppe angegeben - '{0}' NICHT verteilt. Manuell verteilen." -f $spec.AppName)
         } else {
             try {
                 if (-not $existing) {
@@ -211,16 +239,33 @@ foreach ($spec in $specs) {
         Add-CMDeploymentTypeDependency -DeploymentTypeDependency $depDt -IsAutoInstall $true -InputObject $group -ErrorAction Stop | Out-Null
         Write-Ok ("{0} haengt ab von {1}" -f $spec.AppName, $spec.DependsOn)
     } catch {
-        Write-Warn ("Abhaengigkeit {0} -> {1} nicht gesetzt (ggf. schon vorhanden): {2}" -f $spec.AppName, $spec.DependsOn, (Get-VsErrorDetail -ErrorRecord $_))
+        # Hinweis, kein Blocker: die CM-Dependency-Cmdlets sind fiddelig, und
+        # das Setzen ist laut dem Kommentar oben ausdruecklich best effort -
+        # eine bestehende Kette wird bewusst nicht angetastet.
+        Write-Hint ("Abhaengigkeit {0} -> {1} nicht gesetzt (ggf. schon vorhanden): {2}" -f $spec.AppName, $spec.DependsOn, (Get-VsErrorDetail -ErrorRecord $_))
     }
 }
 
 # --- Abschluss --------------------------------------------------------------
+# Jeder App-Fehler war eine blosse Warnung, und die gruene Schlusszeile stand
+# unbedingt darunter: eine Erstinstallation, bei der keine einzige Application
+# entstanden ist, meldete "bereit" und endete mit 0. Die Zahl steht in der
+# Zeile, weil ein Exit-Code fuer einen Menschen vor der Konsole unsichtbar ist.
 Write-Host ''
-Write-Host 'Client-Applikationen bereit.' -ForegroundColor Green
+if ($script:VsInstallBlockers -eq 0) {
+    Write-Host 'Client-Applikationen bereit.' -ForegroundColor Green
+} else {
+    Write-Host ('Client-Applikationen mit {0} offene(n) Punkt(en) - die mit "!!" markierten Zeilen oben pruefen.' -f $script:VsInstallBlockers) -ForegroundColor Yellow
+}
 Write-Host ''
 Write-Host 'Naechste Schritte:' -ForegroundColor Gray
 Write-Host ('  1. In der Konsole unter Softwarebibliothek > Anwendungen > {0} die vier Apps pruefen (Detection, Abhaengigkeitskette, verteilter Content).' -f $AppFolder) -ForegroundColor Gray
 Write-Host '  2. WICHTIG bei client_hostname: dass die Detection BEIDE Werte als ODER prueft - Status = "Erfolgreich" ODER "Uebersprungen". Nur mit beiden wird ein domaenengebundener Client (der "Uebersprungen" schreibt) je als installiert erkannt, sonst laeuft er endlos. Der DetectionClauseConnector wird per Skript gesetzt, ist aber die eine CM-Stelle, die hier nicht testbar war - in der Konsole gegenpruefen.' -ForegroundColor Gray
 Write-Host '  3. Deployment an die Ziel-Collection(s) anlegen (Required) - das macht der Admin bewusst, dieses Skript deployt nicht.' -ForegroundColor Gray
 Write-Host '  4. Bei client_hostname pruefen, dass der Rueckgabecode 1641 als "Erfolg mit Neustart" gilt (MECM-Standardtabelle deckt das ab).' -ForegroundColor Gray
+
+# Maschinenlesbare Fassung der Schlusszeile. Der Content-Teil weiter oben bricht
+# bei einem Fehler weiterhin hart ab ($ErrorActionPreference = 'Stop'); der
+# Zaehler betrifft nur die CM-Phase.
+if ($script:VsInstallBlockers -gt 0) { exit 1 }
+exit 0
