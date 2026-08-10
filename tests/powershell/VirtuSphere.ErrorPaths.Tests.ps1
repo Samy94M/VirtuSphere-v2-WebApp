@@ -959,6 +959,76 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match 'schon eine Standardroute'
     }
 
+    It 'client_staticip stellt eine Karte auch auf DHCP zurueck' {
+        # Ein Interface mit Mode != Static durchlief den Block ohne jede Aktion
+        # und erhoehte trotzdem $applied: eine Karte, die vorher statisch war und
+        # laut Portal jetzt DHCP sein soll, behielt ihre alte Adresse, und der
+        # Lauf meldete Erfolg. Derselbe Fehlertyp, gegen den der Kommentar
+        # zwanzig Zeilen tiefer ausdruecklich argumentiert.
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match 'Set-NetIPInterface -InterfaceIndex[^\r\n]*-Dhcp Enabled'
+        # DNS zurueck an DHCP: eine haendisch gesetzte Serveradresse ueberlebt
+        # die Umstellung sonst und zeigt weiter ins alte VLAN.
+        $text | Should -Match 'Set-DnsClientServerAddress[^\r\n]*-ResetServerAddresses'
+        # Nachlesen statt annehmen, wie im statischen Zweig.
+        $text | Should -Match 'steht nach der Umstellung weiterhin auf Dhcp'
+    }
+
+    It 'client_staticip macht einen unbekannten Modus zum Fehlschlag' {
+        # Kein stilles $applied++ mehr fuer einen Adapter, an dem nichts
+        # geschehen ist.
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match "unbekannter Modus"
+
+        # $applied darf nur in einem Zweig hochgezaehlt werden, der auch etwas
+        # verifiziert hat: kein $applied++ ausserhalb der beiden Modus-Zweige.
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:ClientsDir 'client_staticip.ps1'), [ref]$null, [ref]$null)
+        $increments = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.UnaryExpressionAst] -and
+                      $n.Child.Extent.Text -eq '$applied'
+        }, $true))
+        $increments.Count | Should -Be 2 -Because 'genau ein Zweig fuer Static, einer fuer DHCP'
+    }
+
+    It 'client_staticip vergleicht dieselben Modi, die das Portal kennt' {
+        # Erste Stelle, an der eine PHP-Konstante gegen die PowerShell-Clientseite
+        # gepinnt wird. VIRTUSPHERE_INTERFACE_MODES ist KLEIN geschrieben; das
+        # Skript trifft die Werte nur, weil -eq case-insensitiv vergleicht. Ein
+        # spaeterer Wechsel auf -ceq oder eine dritte Modusart braeche das
+        # lautlos.
+        $defaults = Get-Content -Raw -Path (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib') 'defaults.php')
+        $match = [regex]::Match($defaults, "const VIRTUSPHERE_INTERFACE_MODES\s*=\s*\[([^\]]*)\]")
+        $match.Success | Should -BeTrue -Because 'ohne Fundstelle prueft dieser Test nichts'
+
+        # 'dhcp' steht dort als benannte Konstante, 'static' als Literal.
+        $phpModes = @($match.Groups[1].Value -split ',' | ForEach-Object {
+            $token = $_.Trim().Trim("'")
+            if ($token -eq 'VIRTUSPHERE_INTERFACE_MODE_DHCP') { 'dhcp' } else { $token }
+        } | Where-Object { $_ })
+        $phpModes.Count | Should -Be 2
+
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $psModes = @([regex]::Matches($text, "^\`$mode[A-Za-z]+\s*=\s*'([^']+)'", 'Multiline') |
+            ForEach-Object { $_.Groups[1].Value })
+        $psModes.Count | Should -Be 2 -Because 'die beiden Modusliterale stehen benannt am Kopf des Skripts'
+
+        foreach ($mode in $psModes) {
+            $phpModes | Should -Contain $mode.ToLowerInvariant()
+        }
+        foreach ($mode in $phpModes) {
+            @($psModes | ForEach-Object { $_.ToLowerInvariant() }) | Should -Contain $mode
+        }
+    }
+
+    It 'client_staticip nennt die Modusverteilung im Detail' {
+        # Die Portalkarte zeigte eine Zahl ohne Aussage; "3 Ziele, 2 statisch,
+        # 1 DHCP" beantwortet die Frage, die davor stand.
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Match 'static=\{1\} dhcp=\{2\}'
+        $text | Should -Match '\$appliedStatic, \$appliedDhcp'
+    }
+
     It 'client_getinfo raeumt den Erfolgs-Marker vor jeder Abbruchmoeglichkeit weg' {
         # Der Stale-Fix muss VOR dem API-Aufruf laufen: sonst ueberlebt ein
         # SetupState=complete des Vorlaufs einen Abbruch, und client_staticip

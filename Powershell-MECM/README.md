@@ -421,6 +421,18 @@ V23 trennt das read-only `getDeviceInfos` vom verbindlichen, idempotenten
 `mecm_client_ack.php`-POST. Beide verwenden denselben Schema-Schalter; mit dem
 Default `http` funktionieren sie ohne CA, Zertifikat oder Thumbprint.
 
+`client_staticip` setzt beide Modi, die das Portal kennt: `static` konfiguriert
+Adresse, Präfix, Gateway und DNS, `dhcp` stellt eine zuvor statische Karte
+wieder auf DHCP zurück (samt Zurücksetzen der DNS-Server); vorher lief eine
+solche Karte ohne jede Aktion durch und wurde trotzdem als erfolgreich gezählt.
+Beide Zweige lesen den Sollzustand danach nach; gezählt wird nur, was
+verifiziert ist. Ein Modus, den das Skript nicht kennt, ist ein benannter
+Fehlschlag. Das Detail des Laufs nennt die Verteilung
+(`applied=3 (static=2 dhcp=1)`), damit die Portalkarte mehr zeigt als eine Zahl.
+Die Modusnamen gehören `VIRTUSPHERE_INTERFACE_MODES` in
+`Docker/WebAPI/lib/defaults.php`; ein Pester-Test hält die beiden
+PowerShell-Literale dagegen.
+
 ## Bekannte Punkte / Wartung
 
 - **Boundary Group vs. DP Group:** `mecm_autoimporter.ps1` verteilt Content an

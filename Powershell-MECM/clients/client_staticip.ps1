@@ -69,8 +69,25 @@ foreach ($entry in @(Get-ChildItem -Path $interfacesRoot)) {
 
 if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'started' -Detail "$($configByMac.Count) target(s)" }
 
+# Die Modusnamen sind eine PHP-SSoT: VIRTUSPHERE_INTERFACE_MODES in
+# Docker\WebAPI\lib\defaults.php, dort KLEIN geschrieben ('dhcp', 'static').
+# Getroffen werden sie hier nur, weil -eq in PowerShell case-insensitiv
+# vergleicht; ein spaeterer Wechsel auf -ceq oder eine dritte Modusart braeche
+# das lautlos. Ein Pester-Test haelt diese beiden Literale gegen die
+# PHP-Konstante.
+$modeStatic = 'Static'
+$modeDhcp = 'DHCP'
+
+# $applied zaehlt nur Adapter, deren Sollzustand danach VERIFIZIERT wurde. Ein
+# Interface mit einem anderen Modus als 'Static' durchlief den Block vorher ohne
+# jede Aktion und erhoehte den Zaehler trotzdem: eine Karte, die vorher statisch
+# war und laut Portal jetzt DHCP sein soll, behielt ihre alte Adresse, und der
+# Lauf meldete Erfolg. Genau der Fehlertyp, gegen den der Kommentar am Ende
+# dieser Datei ausdruecklich argumentiert.
 $applied = 0
 $failed = 0
+$appliedStatic = 0
+$appliedDhcp = 0
 # Eine Standardroute pro VM, nicht eine pro statischer Schnittstelle. Zwei
 # Default-Gateways auf einer Maschine sind kein Ausfall, aber eine Wette: Windows
 # waehlt nach Metrik, und welche Schnittstelle den Verkehr traegt, haengt dann an
@@ -94,7 +111,7 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
             }
         }
 
-        if ($cfg.Mode -eq 'Static') {
+        if ($cfg.Mode -eq $modeStatic) {
             $prefix = Convert-VsSubnetMaskToPrefix $cfg.Subnet
             # -eq $null statt -not: /0 ist eine gueltige Praefixlaenge und faellt
             # sonst faelschlich in den Fehlerzweig.
@@ -139,9 +156,44 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
             if ($liveAddress.AddressState -in @('Duplicate', 'Invalid')) {
                 throw "Adresse $($cfg.Ip) ist im Zustand $($liveAddress.AddressState) (Adresskonflikt im Netz?)."
             }
-            Write-VsClientLog "Statische IP $($cfg.Ip)/$prefix auf '$($cfg.Name)' gesetzt und geprueft."
+            Write-VsClientLog "Adapter '$($cfg.Name)' ($mac), Ziel $modeStatic : IP $($cfg.Ip)/$prefix gesetzt und geprueft."
+            $appliedStatic++
+            $applied++
+        } elseif ($cfg.Mode -eq $modeDhcp) {
+            # Der Client spricht moeglicherweise ueber genau diese Karte, und die
+            # Umstellung kann die Verbindung kappen. Das ist gedeckt: 'started'
+            # geht vor der ersten Umstellung raus (wie beim VLAN-Wechsel), die
+            # terminale Meldung ist best effort.
+            #
+            # Idempotent: erst nachsehen, dann nur bei Bedarf umstellen. Danach
+            # in jedem Fall nachlesen statt annehmen, wie im statischen Zweig.
+            $ipInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+            if ($ipInterface.Dhcp -ne 'Enabled') {
+                # Die statische Adresse und ihre Standardroute muessen weg, sonst
+                # bleibt die alte Adresse neben der geleasten liegen.
+                Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -Confirm:$false -ErrorAction SilentlyContinue
+                Remove-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
+                Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp Enabled -ErrorAction Stop
+            }
+            # DNS ebenfalls zurueck an DHCP: eine haendisch gesetzte
+            # Serveradresse ueberlebt die Umstellung sonst und zeigt weiter ins
+            # alte VLAN. Das Gateway kommt vom DHCP-Server, $gatewaySet bleibt
+            # deshalb unberuehrt.
+            Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses -ErrorAction Stop
+
+            $liveInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+            if ($liveInterface.Dhcp -ne 'Enabled') {
+                throw "Schnittstelle steht nach der Umstellung weiterhin auf Dhcp=$($liveInterface.Dhcp)."
+            }
+            Write-VsClientLog "Adapter '$($cfg.Name)' ($mac), Ziel $modeDhcp : auf DHCP zurueckgestellt und geprueft."
+            $appliedDhcp++
+            $applied++
+        } else {
+            # Weder Static noch DHCP: die Registry traegt einen Wert, den dieses
+            # Skript nicht kennt. Frueher lief der Adapter hier ohne jede Aktion
+            # durch und wurde trotzdem als erfolgreich gezaehlt.
+            throw "unbekannter Modus '$($cfg.Mode)' (erwartet: $modeStatic oder $modeDhcp)"
         }
-        $applied++
     } catch {
         $failed++
         Write-VsClientLog -Level ERROR "Adapter $mac fehlgeschlagen: $($_.Exception.Message)"
@@ -156,7 +208,9 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
 # stimmt eine Annahme nicht (MAC-Abweichung, Karte nicht Up, falsches VLAN), und
 # das muss jemand sehen.
 $success = ($failed -eq 0 -and $applied -gt 0)
-$detail = "applied={0} failed={1} targets={2}" -f $applied, $failed, $configByMac.Count
+# Die Modusverteilung steht mit im Detail, damit die Portalkarte "3 Ziele, 2
+# statisch, 1 DHCP" zeigen kann statt nur einer Zahl ohne Aussage.
+$detail = "applied={0} (static={1} dhcp={2}) failed={3} targets={4}" -f $applied, $appliedStatic, $appliedDhcp, $failed, $configByMac.Count
 if ($applied -eq 0 -and $failed -eq 0) {
     $detail += ' (no matching adapter)'
     Write-VsClientLog -Level ERROR "Keiner der $($configByMac.Count) konfigurierten Adapter wurde gefunden: MAC-Adressen, Adapterstatus und VLAN pruefen."
