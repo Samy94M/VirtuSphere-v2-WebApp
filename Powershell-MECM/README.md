@@ -245,8 +245,13 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
 - **Ordner-Self-Healing:** Nach jeder Site-Initialisierung stellt der
   Autoimporter sicher, dass die beiden `VirtuSphere_Applications`-Ordner
   (Applications und Device Collections) existieren, und legt sie sonst an.
-- **Change-Detection:** Fingerabdruck über alle `config.json` (Pfad + mtime);
-  nur bei Änderung wird voll gescannt.
+- **Change-Detection:** Fingerabdruck über alle `config.json` (Pfad + mtime)
+  **und** über `Package_Vorlage\install.ps1`; nur bei Änderung wird voll
+  gescannt. Der Fingerabdruck erfasst damit ausdrücklich **nicht** den übrigen
+  Paketinhalt: wer Installationsdateien innerhalb derselben Versionsnummer
+  austauscht, löst keinen Abgleich aus. Das ist Absicht, weil sonst jede Datei
+  im Baum (auch Logs und temporäre Dateien) den Vollscan auslösen würde; der
+  vorgesehene Weg ist eine neue `version`.
 - **Validierung:** kaputtes JSON, fehlende Pflichtfelder (`ProjectName`,
   `version`) oder ein unbekanntes `InstallationBehaviorType` → Ordner wird
   übersprungen und protokolliert.
@@ -271,10 +276,11 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     Lässt sich die Collection nicht anlegen, ist das ein offener Punkt
     (`collection_missing`) und der Deployment-Versuch entfällt, damit die
     Ursache nicht als `package_deploy_failed` erscheint.
-    Content-Verteilung an die DP-Gruppe, solange `Test-VsContentDistributed`
-    den Content dort nicht sieht, auch für bestehende Apps; ein Fehlschlag ist
-    ein offener Punkt (`package_content_failed`) und wird im nächsten
-    Durchlauf wiederholt.
+    Content-Verteilung an die DP-Gruppe, solange
+    `Get-VsContentDistributionState` den Content dort nicht als `succeeded`
+    meldet, auch für bestehende Apps; jeder andere Zustand
+    (`not_started`/`in_progress`/`failed`/`unknown`) ist ein offener Punkt mit
+    eigenem Ursachen-Code und wird im nächsten Durchlauf erneut geprüft.
   - Optionales Available-Deployment an die Collection aus `DeployTo`
     (fehlende Ziel-Collection ist ein Konfigurationsfehler; Warnung ohne
     Dauer-Retry).
