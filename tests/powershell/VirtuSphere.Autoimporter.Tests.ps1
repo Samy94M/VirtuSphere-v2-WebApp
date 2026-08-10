@@ -427,6 +427,46 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
         $script:TemplateText | Should -Match '(?s)try\s*\{[^}]*ConvertFrom-Json.*?\}\s*catch'
     }
 
+    It 'fuehrt die Erfolgscodeliste genau einmal' {
+        # Sie stand doppelt: einmal als Kommentar, einmal als vierfache
+        # -eq-Kette. Ueber den AST gezaehlt, damit der erklaerende Kommentar
+        # nicht mitzaehlt.
+        $literals = @($script:TemplateAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ConstantExpressionAst] -and
+                      $n.Value -is [int] -and $n.Value -eq 1707
+        }, $true))
+        $literals.Count | Should -Be 1 -Because '1707 kommt nur in der Erfolgscodeliste vor'
+        $script:TemplateText | Should -Match '\$successExitCodes\s+-contains\s+\$LASTEXITCODE'
+    }
+
+    It 'kann einen Neustartcode an MECM weiterreichen' {
+        # 3010 und 1641 wurden auf "Erfolg" eingeebnet und der Wrapper endete
+        # mit 0, obwohl der Deployment-Type auf BasedOnExitCode steht: das
+        # Neustartverhalten war konfiguriert und unerreichbar gemacht.
+        $exits = @($script:TemplateAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ExitStatementAst]
+        }, $true) | Where-Object { $_.Extent.Text -match 'rebootCode' })
+        $exits.Count | Should -BeGreaterThan 0
+
+        # Rangfolge: der Fehlschlag wird VOR dem Neustartcode geprueft, sonst
+        # meldet ein Paket "bitte neu starten" statt "hat nicht funktioniert".
+        $script:TemplateText | Should -Match '(?s)-not \$Fullsuccess.*?exit 1.*?\$rebootCode -ne 0.*?exit \$rebootCode'
+        # 1641 vor 3010: dort ist der Neustart bereits eingeleitet, und MECM
+        # darf keinen zweiten planen.
+        $script:TemplateText | Should -Match '\$rebootExitCodes\s*=\s*@\(1641,\s*3010\)'
+    }
+
+    It 'merkt keinen Neustartcode fuer ein uebersprungenes Teilskript' {
+        # Sonst forderte ein Paket, das beim ersten Lauf 3010 lieferte und beim
+        # zweiten den Skip-Zweig nimmt, bei jedem Lauf erneut einen Neustart.
+        $ifs = @($script:TemplateAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                      $n.Extent.Text -match 'bereits erfolgreich ausgefuehrt'
+        }, $true) | Sort-Object { $_.Extent.Text.Length })
+        $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $ifs[0].ElseClause.Extent.Text | Should -Not -Match 'rebootCode'
+    }
+
     It 'prueft dieselben Pflichtfelder wie Read-VsPackageConfig' {
         # Zwillingsbeziehung, keine gemeinsame Datei: die Vorlage sieht Common
         # nie. Driftet eine der beiden Listen, akzeptiert eine Seite ein Paket,

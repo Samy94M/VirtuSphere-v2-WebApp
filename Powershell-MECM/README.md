@@ -377,6 +377,17 @@ einer leeren Konfiguration weiter, schrieb nach `…\Packages\-` und startete
 trotzdem alle Teilskripte als SYSTEM; MECM fing das erst über die nicht
 erfüllte Detection ab, also nach der Ausführung.
 
+Ihr Exit-Code folgt einer Rangfolge: **Fehler (1) → 1641 (Neustart eingeleitet)
+→ 3010 (Neustart nötig) → 0**. Ein Fehlschlag gewinnt, sonst meldete ein Paket
+„bitte neu starten“ statt „hat nicht funktioniert“; 1641 gewinnt gegen 3010,
+weil der Neustart dort schon läuft und MECM sonst einen zweiten plant. Als
+Erfolg gelten `0`, `1707`, `3010` und `1641` (`$successExitCodes`, genau einmal
+im Quelltext). Ein übersprungenes Teilskript liefert keinen Code und fordert
+damit auch keinen Neustart mehr an. Der Deployment-Type steht auf
+`RebootBehavior = BasedOnExitCode`, 3010 und 1641 stehen in der
+MECM-Standardtabelle als Neustart-Erfolg: **Clients starten dadurch tatsächlich
+neu, wo sie es vorher nicht taten.**
+
 > **Hinweis Self-Healing:** Die Standard-`install.ps1` und eine
 > `config.json`-Blaupause liefert der Installer aus `Package_Vorlage/` nach
 > `<PackagesRoot>\Package_Vorlage`. Beim Anlegen eines Pakets überschreibt

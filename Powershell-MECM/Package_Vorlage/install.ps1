@@ -86,6 +86,28 @@ $logDirectory = "$($env:ProgramFiles)\VirtuSphere\Logs\"
 
 ############ Ab hier nichts aendern
 
+# Exit-Codes eines Teilskripts, die als ERFOLG gelten. Genau einmal im Quelltext,
+# damit Kommentar und Bedingung nicht auseinanderlaufen koennen:
+#   0    - erfolgreich, kein Neustart notwendig
+#   1707 - MSI-Installationspaket erfolgreich installiert
+#   3010 - erfolgreich, ein Neustart wird empfohlen
+#   1641 - erfolgreich, der Neustart wurde bereits eingeleitet
+# Alles andere ist ein Fehler; 1 ist der generische Windows-Fehlercode.
+$successExitCodes = @(0, 1707, 3010, 1641)
+
+# Neustartcodes in der Reihenfolge, in der sie gewinnen. 1641 schlaegt 3010,
+# weil 1641 heisst, dass ein Teilskript den Neustart bereits eingeleitet hat:
+# MECM muss das wissen, um nicht selbst einen zweiten zu planen. Ein Fehlschlag
+# schlaegt beide, sonst meldet ein Paket "bitte neu starten" statt "hat nicht
+# funktioniert".
+$rebootExitCodes = @(1641, 3010)
+
+# Hoechster gesehener Neustartcode ueber alle Teilskripte dieses Laufs.
+# Vorher wurden 3010 und 1641 auf "Erfolg" eingeebnet und der Wrapper endete mit
+# 0, obwohl der Deployment-Type auf RebootBehavior = 'BasedOnExitCode' steht: das
+# Neustartverhalten war konfiguriert und vom Wrapper unerreichbar gemacht.
+$rebootCode = 0
+
 # $Fullsuccess: Gesamtstatus der Installation.
 # Startet als $true. Wird auf $false gesetzt sobald ein Teilskript fehlschlaegt.
 # Entscheidet am Ende ob der MECM-Detection-Key (Version) in die Registry geschrieben wird.
@@ -192,18 +214,23 @@ foreach ($scriptFile in $dir_script) {
 
             # $LASTEXITCODE: Automatische Variable - enthaelt den Exit-Code des zuletzt
             # ausgefuehrten externen Prozesses (hier: PowerShell.exe).
-            #
-            # Bedeutung der Erfolgs-Exit-Codes:
-            #   0    - Erfolgreich abgeschlossen, kein Neustart notwendig
-            #   1707 - MSI-Installationspaket erfolgreich installiert
-            #   3010 - Erfolgreich, aber ein Neustart wird empfohlen
-            #   1641 - Erfolgreich, Neustart wurde eingeleitet
-            #
-            # Alle anderen Exit-Codes werden als Fehler gewertet.
-            # Exit-Code 1 ist ein generischer Windows-Fehlercode und bedeutet FEHLER.
-            if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 1707 -or $LASTEXITCODE -eq 3010 -or $LASTEXITCODE -eq 1641) {
+            # Die Erfolgscodes stehen als $successExitCodes am Kopf der Datei,
+            # samt ihrer Bedeutung - genau einmal.
+            if ($successExitCodes -contains $LASTEXITCODE) {
                 $success = "Erfolg"
                 Write-Host "Skript $scriptName wurde erfolgreich durchgelaufen. Exit-Code: $LASTEXITCODE" -ForegroundColor Green
+                # Neustartwunsch merken. Nur der HOECHSTRANGIGE gewinnt, und nur
+                # aus einem tatsaechlich gelaufenen Teilskript: ein Paket, das
+                # beim ersten Lauf 3010 lieferte und beim zweiten uebersprungen
+                # wird (Skip-Zweig unten), darf nicht ewig Neustarts anfordern.
+                foreach ($code in $rebootExitCodes) {
+                    if ($LASTEXITCODE -eq $code) {
+                        if ($rebootCode -eq 0 -or ($rebootExitCodes.IndexOf($code) -lt $rebootExitCodes.IndexOf($rebootCode))) {
+                            $rebootCode = $code
+                        }
+                        break
+                    }
+                }
             } else {
                 $success = "Fehler"
                 $Fullsuccess = $false
@@ -270,11 +297,23 @@ if($Fullsuccess){
 write-host "----------------------------" -ForegroundColor Magenta
 write-host "install.ps1 finish" -ForegroundColor Magenta
 
-# Gesamtergebnis als Exit-Code zurueckgeben
-# exit 0: Alle Skripte erfolgreich - MECM wertet die Installation als erfolgreich
-# exit 1: Mindestens ein Skript fehlgeschlagen - MECM zeigt Fehler an
-if($Fullsuccess){
-    exit 0
-} else {
+# Gesamtergebnis als Exit-Code zurueckgeben. Rangfolge:
+#
+#   Fehler (1)  >  1641 (Neustart eingeleitet)  >  3010 (Neustart noetig)  >  0
+#
+# Ein Fehlschlag gewinnt, sonst meldete ein Paket "bitte neu starten" statt "hat
+# nicht funktioniert". 1641 gewinnt gegen 3010, weil der Neustart dort schon
+# eingeleitet ist und MECM sonst einen zweiten planen wuerde.
+#
+# 3010 und 1641 stehen in der MECM-Standard-Rueckgabecodetabelle als
+# Neustart-Erfolg; es ist also kein Eingriff in der Konsole noetig, damit der
+# Deployment-Type sie versteht (er steht auf RebootBehavior = 'BasedOnExitCode').
+if (-not $Fullsuccess) {
+    write-host "Mindestens ein Teilskript ist fehlgeschlagen - Exit-Code 1." -ForegroundColor Red
     exit 1
 }
+if ($rebootCode -ne 0) {
+    write-host "Alle Teilskripte erfolgreich, ein Neustart ist noetig - Exit-Code $rebootCode wird an MECM weitergereicht." -ForegroundColor Yellow
+    exit $rebootCode
+}
+exit 0
