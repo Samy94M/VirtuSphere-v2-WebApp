@@ -155,7 +155,10 @@ if (Test-Path $registryPath) {
 $tokenExists = -not [string]::IsNullOrEmpty($existingToken)
 
 # Sichere interaktive Eingabe statt Klartext-CLI-Argument (History/Prozessliste).
-if ([string]::IsNullOrEmpty($ReportToken)) {
+#
+# Auf $PSBoundParameters, nicht auf den Wert: `-ReportToken ''` fiel sonst in
+# die Abfrage, obwohl der Aufrufer den Parameter ausdruecklich genannt hat.
+if (-not $PSBoundParameters.ContainsKey('ReportToken')) {
     if ([Environment]::UserInteractive) {
         $tokenPrompt = if ($tokenExists) { 'Rueckkanal-Token (leer lassen = bestehenden behalten)' } else { 'Rueckkanal-Token (im Portal generiert, leer lassen fuer ohne Token)' }
         $secureToken = Read-Host -AsSecureString $tokenPrompt
@@ -170,10 +173,32 @@ if ([string]::IsNullOrEmpty($ReportToken)) {
     Write-Warning 'ReportToken wurde als Kommandozeilen-Argument uebergeben und ist damit in der PowerShell-History und Prozessliste sichtbar. Fuer Produktivumgebungen das Skript ohne -ReportToken starten und den Token interaktiv eingeben.'
 }
 
-# Effektiver Token: leer + bestehender vorhanden => behalten (nicht loeschen).
-if ([string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
+# Effektiver Token. Drei Ausgaenge, und alle drei werden protokolliert, nie der
+# Wert selbst:
+#
+#   behalten  - der Parameter wurde nicht genannt und es gibt einen Token.
+#   ersetzt   - ein neuer Wert kam (per Parameter oder aus der Abfrage).
+#   geloescht - der Parameter wurde ausdruecklich leer uebergeben.
+#
+# Die Bedingung liest $PSBoundParameters, nicht nur den Wert. Vorher stellte
+# diese Zeile den alten Token schon wieder her, bevor die Erhaltungslogik weiter
+# unten ueberhaupt nachschauen konnte, ob '' ausdruecklich kam: ein einmal
+# gesetzter Token liess sich nur noch durch Loeschen des Registry-Werts
+# entfernen, waehrend der Kommentar dort das Gegenteil zusagte.
+#
+# Die Loeschung ist auf WARN-Ebene sichtbar: ein still verschwindender
+# Rueckkanal ist genau der Fehler, den die Erhaltungslogik urspruenglich behoben
+# hat, also muss auch die GEWOLLTE Loeschung im Tageslog stehen. Sie geht
+# bewusst nicht ueber Write-Warn: sie ist eine ausdrueckliche Bedienhandlung und
+# kein offener Punkt, und ein Blocker wuerde den Installer dafuer mit 1 enden
+# lassen.
+if (-not $PSBoundParameters.ContainsKey('ReportToken') -and [string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
     $ReportToken = $existingToken
     Write-Ok 'Bestehenden Rueckkanal-Token behalten (kein neuer uebergeben).'
+} elseif ($PSBoundParameters.ContainsKey('ReportToken') -and [string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
+    Write-VsLog -Level WARN -Context 'setup' -Message '    !!  Rueckkanal-Token wird GELOESCHT (-ReportToken ausdruecklich leer uebergeben). Die Sync-Tasks melden ab sofort ohne Authentisierung.' -Color Yellow
+} elseif (-not [string]::IsNullOrEmpty($ReportToken)) {
+    Write-Ok 'Rueckkanal-Token gesetzt.'
 }
 
 # Provider-Rechner ebenso behandeln wie den Token: ein Re-Run ohne
@@ -323,8 +348,11 @@ $parameterToSetting = @{
     DpGroupName    = 'DpGroupName'
     PackagesRoot   = 'PackagesRoot'
     # Ein Re-Run ohne -ReportToken loeschte den Token: der Meldekanal verlor
-    # damit still seine Authentisierung. Ausdruecklich '' uebergeben leert ihn
-    # weiterhin, weil dann $PSBoundParameters den Namen enthaelt.
+    # damit still seine Authentisierung. Die Sonderbehandlung weiter oben (beim
+    # Einlesen des bestehenden Werts) liest inzwischen ebenfalls
+    # $PSBoundParameters, weshalb ein ausdrueckliches -ReportToken '' den Token
+    # tatsaechlich leert. Vorher stellte jene Zeile den alten Wert wieder her,
+    # bevor diese Tabelle ueberhaupt drankam.
     ReportToken    = 'ReportToken'
 }
 foreach ($parameterName in $parameterToSetting.Keys) {

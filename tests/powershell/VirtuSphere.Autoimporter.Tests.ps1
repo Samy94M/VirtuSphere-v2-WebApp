@@ -339,6 +339,48 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         }
     }
 
+    It 'ein ausdruecklich leerer ReportToken loescht ihn' {
+        # Der ReportToken hat eine Sonderbehandlung VOR der Erhaltungstabelle,
+        # genau wie MECM_ProviderMachine. Sie stellte den alten Wert wieder her,
+        # sobald der neue leer war - ohne zu pruefen, ob '' ausdruecklich kam.
+        # Die Tabelle unten prueft $PSBoundParameters zwar korrekt, kommt aber zu
+        # spaet: $ReportToken trug da laengst wieder den alten Wert. Ein einmal
+        # gesetzter Token liess sich damit nur noch durch Loeschen des
+        # Registry-Werts entfernen, waehrend der Kommentar das Gegenteil zusagte.
+        #
+        # Per AST, nicht per Textsuche: getroffen werden muss die Bedingung, in
+        # der die Wiederherstellung haengt, nicht irgendein Vorkommen des Namens.
+        $restore = @($script:InstallerAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                      $n.Extent.Text -match '\$ReportToken\s*=\s*\$existingToken'
+        }, $true) | Sort-Object { $_.Extent.Text.Length })
+        $restore.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $restore[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+
+        # Dieselbe Frage an der interaktiven Abfrage: -ReportToken '' fiel dort
+        # in den Read-Host, obwohl der Aufrufer den Parameter genannt hat.
+        # Hier die Bedingung selbst filtern: das innerste if um den Read-Host
+        # ist [Environment]::UserInteractive und beantwortet eine andere Frage.
+        $prompt = @($script:InstallerAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                      $n.Extent.Text -match 'Read-Host' -and
+                      $n.Clauses[0].Item1.Extent.Text -match 'ReportToken'
+        }, $true))
+        $prompt.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $prompt[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+    }
+
+    It 'die Loeschung des Tokens steht im Log' {
+        # Ein still verschwindender Rueckkanal ist der Fehler, den die
+        # Erhaltungslogik urspruenglich behoben hat: auch die GEWOLLTE Loeschung
+        # muss sichtbar sein. Kein Blocker, weil sie eine Bedienhandlung ist.
+        $text = Get-Content -Path $script:Installer -Raw
+        $text | Should -Match "(?i)Rueckkanal-Token wird GELOESCHT"
+        $text | Should -Match "(?s)Rueckkanal-Token wird GELOESCHT[^\r\n]*"
+        # Nie der Wert selbst.
+        $text | Should -Not -Match '(?i)Token[^\r\n]{0,40}\{0\}[^\r\n]{0,40}-f \$ReportToken'
+    }
+
     It 'jeder erhaltene Settingname ist ein echter Installer-Parameter' {
         $parameters = @(Get-InstallerParameterNames)
         foreach ($entry in (Get-PreservedMap).GetEnumerator()) {

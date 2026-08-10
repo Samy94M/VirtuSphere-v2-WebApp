@@ -32,7 +32,11 @@ beide Installer und die Abnahmecheckliste.
    dann fragt er den Token verdeckt ab (`Read-Host -AsSecureString`) und schreibt
    ihn in die nur für Administratoren lesbare Registry. Den Token nicht als
    Klartext-Argument übergeben, da er sonst in der PowerShell-History und
-   Prozessliste sichtbar bleibt.
+   Prozessliste sichtbar bleibt. Ein Re-Run **ohne** `-ReportToken` behält den
+   eingestellten Token; **entfernt** wird er durch `-ReportToken ''`, also den
+   ausdrücklich leer übergebenen Parameter. Alle drei Ausgänge (behalten,
+   ersetzt, gelöscht) stehen im Tageslog, die Löschung als WARN-Zeile, nie der
+   Wert selbst.
 3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
    MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
    drei Sync-Quellen und der MECM-Site-Status sollten auf „OK“ springen.
