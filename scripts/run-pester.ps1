@@ -106,6 +106,12 @@ if (-not $SkipTests) {
     $config.Run.Path = $testRoot
     $config.Run.PassThru = $true
     $config.Output.Verbosity = 'Detailed'
+    # Das Haertungsregister (Tag 'Haertung') ist absichtlich rot, bis der
+    # jeweilige Fix steht: seine roten Tests sind die To-do-Liste der Kampagne
+    # 2026-08, keine Regression. Es darf das Gate deshalb nicht blockieren,
+    # sonst haengt jeder unabhaengige Hotfix hinter einer Aufraeumaktion. Die
+    # offene Zahl wird unten trotzdem gedruckt - siehe die Begruendung dort.
+    $config.Filter.ExcludeTag = 'Haertung'
 
     # Coverage-Ratchet (AP5): die Common-Module tragen die ganze wiederver-
     # wendete Logik der SYSTEM-Skripte; ihr Deckungsgrad darf nur steigen.
@@ -160,6 +166,35 @@ if (-not $SkipTests) {
         $failed = $true
     } else {
         Write-Host ('    OK  {0} Test(s) gruen' -f $result.PassedCount) -ForegroundColor Green
+    }
+
+    # --- Haertungsregister: ausgeklammert, aber nicht unsichtbar --------------
+    #
+    # Ausklammern allein waere genau die Falle, die dieses Projekt schon einmal
+    # getroffen hat: ein Spec, der vier Kataloge verloren hatte und dadurch
+    # dauerhaft still gruen war. Ein ausgeklammerter Test ist ein unsichtbarer
+    # Test, also wird die offene Zahl hier genannt - ohne den Exit-Code zu
+    # beeinflussen, denn es ist geplante Arbeit und kein Fehler dieses Laufs.
+    #
+    # Handproben zaehlen getrennt und nie als bestanden: eine Zahl, die eine
+    # Sichtpruefung an einer echten Maschine mitzaehlt, waere dieselbe
+    # Unehrlichkeit, gegen die die Kampagne antritt.
+    #
+    # Bei 0 offenen Punkten koennen Datei und Tag gemeinsam entfallen; die
+    # Tests, die dauerhaft Wert haben, wandern vorher in die festen Suites.
+    $registerPath = Join-Path $testRoot 'VirtuSphere.Haertung2026-08.Tests.ps1'
+    if (Test-Path $registerPath) {
+        Write-Host '==> Haertungsregister 2026-08 (nicht Teil des Gates)' -ForegroundColor Cyan
+        $regConfig = New-PesterConfiguration
+        $regConfig.Run.Path = $registerPath
+        $regConfig.Run.PassThru = $true
+        $regConfig.Output.Verbosity = 'None'
+        $reg = Invoke-Pester -Configuration $regConfig
+        if ($reg.FailedCount -eq 0) {
+            Write-Host ('    Alle Befunde behoben ({0} gruen, {1} Handprobe(n) offen). Datei und Tag koennen entfallen.' -f $reg.PassedCount, $reg.SkippedCount) -ForegroundColor Green
+        } else {
+            Write-Host ('    {0} Befund(e) offen, {1} behoben, {2} Handprobe(n)' -f $reg.FailedCount, $reg.PassedCount, $reg.SkippedCount) -ForegroundColor Yellow
+        }
     }
 }
 
