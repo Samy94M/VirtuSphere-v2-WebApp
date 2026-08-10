@@ -503,6 +503,49 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         $script:DeviceSyncText | Should -Match '(?s)\$targetsSkipped -gt 0.*?continue.*?mecm_updateid\.php'
     }
 
+    It 'nennt in der Unvollstaendigkeits-Meldung einen Nenner, den das Skript auch setzt' {
+        # Der Nenner stand als $targets.Count da, und $targets existiert im
+        # ganzen Skript nicht: unter Set-StrictMode 1.0 wirft schon das Lesen,
+        # der Wurf landet im aeusseren Catch, und eine reine Datenlage wird als
+        # mecm_unavailable gemeldet - Scan abgebrochen, Site-Drive nach drei
+        # Malen weggeworfen. Die Meldung, die einen Fehler benennen wollte,
+        # erzeugte einen groesseren.
+        # Innerstes if: jedes umschliessende enthaelt denselben Text, sortiert
+        # wird deshalb nach Laenge des Extents.
+        $ifs = @($script:DeviceSyncAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                      $n.Extent.Text -match 'ResourceID wird NICHT gemeldet'
+        }, $true) | Sort-Object { $_.Extent.Text.Length })
+        $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+
+        $assigned = @{}
+        foreach ($a in @($script:DeviceSyncAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst]
+        }, $true))) {
+            $left = $a.Left
+            if ($left -is [System.Management.Automation.Language.ConvertExpressionAst]) { $left = $left.Child }
+            if ($left -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                $assigned[$left.VariablePath.UserPath.ToLowerInvariant()] = $true
+            }
+        }
+
+        foreach ($v in @($ifs[0].Clauses[0].Item2.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst]
+        }, $true))) {
+            $name = $v.VariablePath.UserPath
+            if ($name -match ':') { continue }
+            $assigned.ContainsKey($name.ToLowerInvariant()) | Should -BeTrue -Because "`$$name wird in diesem Skript nie zugewiesen"
+        }
+    }
+
+    It 'zaehlt geplante Entfernungen in den Nenner mit' {
+        # $targetsSkipped zaehlt auch fehlgeschlagene Entfernungen, und die
+        # stehen nicht in $desired. Mit $desired.Count allein meldet die Zeile
+        # bei einem Missionswechsel "4 von 3 Zuweisungen unvollstaendig".
+        $script:DeviceSyncText | Should -Match '\$targetsPlanned\s*=\s*\$desired\.Count\s*\+\s*@\(\$plan\.remove\)\.Count'
+        $script:DeviceSyncText | Should -Match 'ResourceID wird NICHT gemeldet[^"]*"\s*-f\s*\$targetsSkipped,\s*\$targetsPlanned'
+    }
+
     It 'behandelt einen MAC-Konflikt als Fehlschlag des Devices, nicht als Notiz' {
         # MECM wartet dann auf eine MAC, die beim PXE-Boot nie kommt; die VM aus
         # der Warteschlange zu nehmen macht das unbehebbar.

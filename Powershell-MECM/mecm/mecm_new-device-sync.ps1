@@ -306,6 +306,15 @@ while ($true) {
                 $plan = Get-VsMembershipPlan -Desired $desired -Owned $ownedRules -Present $present
                 $membershipReport = New-Object System.Collections.Generic.List[object]
 
+                # Nenner der Unvollstaendigkeits-Meldung weiter unten, und der
+                # heisst hier mit Absicht, was er ist: ALLE Mitgliedschafts-
+                # operationen, die dieser Lauf fuer diese VM vorhat.
+                # $desired.Count allein waere falsch, denn $targetsSkipped zaehlt
+                # auch fehlgeschlagene ENTFERNUNGEN, und die stehen nicht in
+                # $desired: bei einer VM, deren Mission gewechselt hat, meldete
+                # die Zeile sonst "4 von 3 Zuweisungen unvollstaendig".
+                $targetsPlanned = $desired.Count + @($plan.remove).Count
+
                 foreach ($target in @($plan.add)) {
                     # Ein desired-Ziel ohne Collection wurde oben schon als
                     # collection_missing gezaehlt; der Plan kennt es trotzdem
@@ -379,7 +388,7 @@ while ($true) {
                 # dessen Zuweisung unvollstaendig ist. Es bleibt in getDeviceList
                 # und der naechste Scan versucht es erneut.
                 if ($targetsSkipped -gt 0) {
-                    Write-VsLog -Level ERROR -Context $deviceName -Message ("{0} von {1} Zuweisungen unvollstaendig - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $targetsSkipped, $targets.Count)
+                    Write-VsLog -Level ERROR -Context $deviceName -Message ("{0} von {1} Mitgliedschaftsoperationen unvollstaendig - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $targetsSkipped, $targetsPlanned)
                     $itemFailures++
                     continue
                 }
