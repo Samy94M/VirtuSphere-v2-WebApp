@@ -384,3 +384,58 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         }
     }
 }
+
+
+# Die Paketvorlage ist der Zwilling von Read-VsPackageConfig auf der Clientseite:
+# sie wird einzeln in den Paketordner kopiert und sieht VirtuSphere-Common.ps1
+# nie (ADR-0029). Genau deshalb muss ein Test die beiden Pflichtfeldlisten
+# gegeneinander halten, statt sie zu einer Datei zusammenzuziehen.
+Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung geprueft' {
+
+    BeforeAll {
+        $script:Template = Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1'
+        $script:TemplateAst = Get-Ast -Path $script:Template
+        $script:TemplateText = Get-Content -Raw -Path $script:Template
+    }
+
+    It 'bricht ab, bevor das erste Teilskript laeuft' {
+        # Ohne Guard lief das Skript mit $config = $null weiter: der
+        # Registry-Pfad wurde zu "...\Packages\-", und alle Teilskripte liefen
+        # trotzdem als SYSTEM. MECM faengt das erst ueber die nicht erfuellte
+        # Detection ab, also nach der Ausfuehrung.
+        $loops = @($script:TemplateAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst]
+        }, $true))
+        $loops.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $firstLoop = ($loops | Sort-Object { $_.Extent.StartOffset })[0].Extent.StartOffset
+
+        $exitsBefore = @($script:TemplateAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ExitStatementAst]
+        }, $true) | Where-Object { $_.Extent.StartOffset -lt $firstLoop })
+        $exitsBefore.Count | Should -BeGreaterThan 0
+    }
+
+    It 'laeuft unter Set-StrictMode' {
+        # Als einzige Datei im Baum lief sie ohne. Sie startet fremde Skripte
+        # als SYSTEM; ein stilles $null entscheidet hier ueber Registry-Zweig
+        # und Detection-Wert.
+        $script:TemplateText | Should -Match 'Set-StrictMode -Version 1\.0'
+    }
+
+    It 'liest die Datei erst nach einem Test-Path und faengt kaputtes JSON ab' {
+        $script:TemplateText | Should -Match 'Test-Path \$configPath'
+        $script:TemplateText | Should -Match '(?s)try\s*\{[^}]*ConvertFrom-Json.*?\}\s*catch'
+    }
+
+    It 'prueft dieselben Pflichtfelder wie Read-VsPackageConfig' {
+        # Zwillingsbeziehung, keine gemeinsame Datei: die Vorlage sieht Common
+        # nie. Driftet eine der beiden Listen, akzeptiert eine Seite ein Paket,
+        # das die andere ablehnt.
+        $commonText = Get-Content -Raw -Path $script:MecmCommon
+        $required = @('ProjectName', 'version')
+        foreach ($field in $required) {
+            $commonText | Should -Match ([regex]::Escape('$cfg.' + $field))
+            $script:TemplateText | Should -Match ([regex]::Escape('$config.' + $field))
+        }
+    }
+}

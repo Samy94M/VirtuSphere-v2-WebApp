@@ -4,17 +4,52 @@
 # Aufgerufen wird immer parameterlos:
 #   powershell.exe -ExecutionPolicy Bypass -File install.ps1
 
+# Set-StrictMode: ein vertippter Variablenname ist sonst ein stilles $null.
+# Dieses Skript laeuft als SYSTEM und startet fremde Teilskripte; ein stilles
+# $null entscheidet hier ueber Registry-Zweig und Detection-Wert. Version 1.0
+# aus demselben Grund wie in VirtuSphere-Common.ps1: ab 2.0 wuerde auch der
+# Zugriff auf ein legitim fehlendes JSON-Feld werfen.
+#
+# Fuer die Teilskripte aendert sich nichts: sie laufen ueber
+# & PowerShell.exe -File in einem eigenen Prozess, StrictMode wirkt nicht hinein.
+# $LASTEXITCODE wird erst NACH dem ersten &-Aufruf gelesen, ist dort also
+# gesetzt; eine spaetere Umstellung auf Version 2.0 muesste das pruefen.
+Set-StrictMode -Version 1.0
+
 # Set-Location: Wechselt das Arbeitsverzeichnis auf den Ordner, in dem install.ps1 liegt.
 # $PSScriptRoot: Automatische Variable - enthaelt immer den vollstaendigen Pfad des aktuellen Skripts.
 # Wichtig damit alle relativen Pfade (.\powershell\, .\config.json) korrekt aufgeloest werden.
 Set-Location $PSScriptRoot
 
-# Konfigurationsdatei einlesen
-# Get-Content: Liest den Inhalt einer Datei als Text.
-# ConvertFrom-Json: Wandelt den JSON-Text in ein PowerShell-Objekt um,
-# auf dessen Felder dann per Punkt-Notation zugegriffen werden kann (z.B. $config.ProjectName).
+# Konfigurationsdatei einlesen und PRUEFEN, bevor irgendein Teilskript laeuft.
+#
+# Ohne diese Pruefung lief das Skript mit $config = $null weiter: der
+# Registry-Pfad wurde zu "...\Packages\-", alle Teilskripte liefen trotzdem als
+# SYSTEM, und der Wrapper konnte mit 0 enden. MECM faengt das am Ende ueber die
+# nicht erfuellte Detection ab - da sind die Skripte aber schon gelaufen.
+# Dasselbe Skript hat weiter unten einen ausfuehrlich begruendeten Guard dafuer,
+# dass ein leerer powershell-Ordner ein Fehlschlag ist; fuer seine eigene
+# Konfigurationsdatei hatte es keinen.
+#
+# Bewusst ohne Helfer aus VirtuSphere-Common.ps1: diese Datei wird einzeln in
+# den Paketordner kopiert und laeuft dort ohne die Bibliothek (ADR-0029). Die
+# Pflichtfelder sind dieselben, die Read-VsPackageConfig serverseitig prueft;
+# ein Test haelt beide Listen gegeneinander.
 $configPath = ".\config.json"
-$config = Get-Content $configPath | ConvertFrom-Json
+if (-not (Test-Path $configPath)) {
+    Write-Host "config.json fehlt im Paketordner ($PSScriptRoot) - ohne sie ist weder der Registry-Pfad noch die Version bestimmbar. Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+try {
+    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+} catch {
+    Write-Host "config.json ist kein gueltiges JSON ($configPath): $($_.Exception.Message). Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+if (-not $config -or -not $config.ProjectName -or -not $config.version) {
+    Write-Host "config.json ohne ProjectName/version ($configPath) - beide bilden den Registry-Pfad und den Detection-Wert. Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
 
 # Skriptverzeichnis und Konfigurationswerte aus der config.json uebernehmen
 $scriptDirectory = ".\powershell\"

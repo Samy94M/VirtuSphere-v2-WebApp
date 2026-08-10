@@ -370,6 +370,13 @@ Registry-Zweig in `Package_Vorlage\install.ps1`; SSoT ist
 `$script:VsInstallationBehaviorTypes` in `VirtuSphere-Common.ps1`, die Vorlage
 führt das Literal gespiegelt, weil sie allein in den Paketordner kopiert wird.
 
+Die Vorlage prüft `config.json`, **bevor** das erste Teilskript läuft: fehlende
+Datei, kaputtes JSON oder fehlendes `ProjectName`/`version` beenden sie mit
+Exit-Code 1 und einer Meldung, die Pfad und Grund nennt. Vorher lief sie mit
+einer leeren Konfiguration weiter, schrieb nach `…\Packages\-` und startete
+trotzdem alle Teilskripte als SYSTEM; MECM fing das erst über die nicht
+erfüllte Detection ab, also nach der Ausführung.
+
 > **Hinweis Self-Healing:** Die Standard-`install.ps1` und eine
 > `config.json`-Blaupause liefert der Installer aus `Package_Vorlage/` nach
 > `<PackagesRoot>\Package_Vorlage`. Beim Anlegen eines Pakets überschreibt
