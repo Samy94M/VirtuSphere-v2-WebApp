@@ -348,6 +348,50 @@ Describe 'Resolve-VsApi trennt Adresswahl von Gesundheit' {
     }
 }
 
+Describe 'Invoke-VsApi serialisiert eine Liste immer als JSON-Array' {
+
+    # Gegenstueck zur Empfangsrichtung eine Describe weiter unten: PS 5.1 packt
+    # ein einelementiges Array auch auf dem WEG NACH DRAUSSEN aus, sobald es per
+    # Pipeline in ConvertTo-Json geht. Der Packages-Sync sendet als einziger
+    # Aufrufer eine Liste; bei genau einem Katalogeintrag antwortet
+    # mecm_packages.php dann 400, der Hash wird nicht gemerkt, und der Fehler
+    # wiederholt sich jede Minute - gemeldet als mecm_unavailable.
+    BeforeAll {
+        function Get-SentBody {
+            param([object]$Body)
+            # @(,$Body): ohne das Komma zerlegt @() die Liste in ihre Eintraege
+            # und der Splat im Kindscope bindet eine Hashtable als benannte
+            # Parameter statt als Wert.
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $Body) -Body {
+                param($b)
+                $script:captured = $null
+                function Invoke-RestMethod {
+                    param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType)
+                    $script:captured = [string]$Body
+                }
+                $cfg = [pscustomobject]@{ WebApi = 'host:1'; Scheme = 'http'; ReportToken = '' }
+                Invoke-VsApi -Config $cfg -Path '/p' -Method POST -Body $b | Out-Null
+                $script:captured
+            }
+        }
+    }
+
+    It 'sendet <count> Eintraege als Array' -ForEach @(
+        @{ count = 0 }
+        @{ count = 1 }
+        @{ count = 2 }
+    ) {
+        $list = New-Object System.Collections.Generic.List[object]
+        for ($i = 0; $i -lt $count; $i++) { $list.Add(@{ type = 'Package'; name = ('P{0}' -f $i) }) }
+        (Get-SentBody -Body $list).TrimStart() | Should -Match '^\['
+    }
+
+    It 'laesst eine Hashtable ein Objekt bleiben' {
+        # Der Device-Sync sendet Hashtables. Der Fix darf sie nicht umdrehen.
+        (Get-SentBody -Body @{ deviceid = 1 }).TrimStart() | Should -Match '^\{'
+    }
+}
+
 Describe 'Device-Sync: leere JSON-Geraeteliste unter Windows PowerShell 5.1' {
 
     It 'normalisiert das von Invoke-RestMethod verschachtelte leere Array auf 0 Devices' {

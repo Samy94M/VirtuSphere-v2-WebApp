@@ -338,7 +338,15 @@ function Invoke-VsApi {
         Headers    = (Get-VsApiHeaders -Config $Config)
     }
     if ($null -ne $Body) {
-        $params['Body'] = ($Body | ConvertTo-Json -Depth 6)
+        # -InputObject statt Pipeline: Windows PowerShell 5.1 packt eine
+        # einelementige Liste auf dem Weg durch die Pipeline aus und serialisiert
+        # sie als Objekt statt als Array. Der Packages-Sync ist der einzige
+        # Aufrufer, der eine Liste sendet; bei genau einem Katalogeintrag
+        # (frische Site) antwortet mecm_packages.php dann dauerhaft 400, weil es
+        # ueber die Werte des Objekts iteriert und Strings statt Eintraege
+        # findet. Dieselbe 5.1-Eigenart ist in mecm_new-device-sync.ps1 fuer die
+        # Empfangsrichtung dokumentiert; hier ist die Senderichtung.
+        $params['Body'] = (ConvertTo-Json -InputObject $Body -Depth 6)
         $params['ContentType'] = 'application/json'
     }
 

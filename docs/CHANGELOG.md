@@ -2,6 +2,10 @@
 
 All notable migration changes for VirtuSphere are tracked here. Do not duplicate changelog entries in `CLAUDE.md` or `GROK.md`.
 
+## 2026-08-10
+
+- **Ein Katalog mit genau einem Eintrag kommt jetzt an (PowerShell/MECM-Härtung, E1).** `Invoke-VsApi` serialisierte den Body über die Pipeline, und Windows PowerShell 5.1 packt dabei eine einelementige Liste aus: der Packages-Sync sendete ein JSON-Objekt statt eines Arrays, `mecm_packages.php` fand Strings statt Einträgen und antwortete 400. Weil der Hash eines abgelehnten Sendevorgangs nicht gemerkt wird, wiederholte sich das jede Minute, gemeldet als `mecm_unavailable`. Betroffen war die frische Site mit einem einzigen Katalogeintrag, also genau der Fall, bei dem jemand zuschaut. Der Fix sitzt zentral in `Invoke-VsApi` (`ConvertTo-Json -InputObject`), nicht an der Aufrufstelle, damit der nächste Listen-Sender nicht wieder betroffen ist; eine Hashtable bleibt unverändert ein Objekt.
+
 ## 2026-08-09
 
 - **Dauerhaft hängende VM-Fortschritte werden sichtbar, aber niemals automatisch umgedeutet (ADR-0038).** Migration 0038 ergänzt getrennte Beobachtungsuhren: MECM-pending warnt nach mehr als zwei Stunden; die sechsstündige OS-Installationsbeobachtung beginnt erst mit der bestätigten Bedienaktion „PXE jetzt beobachten“, weil die MECM-Registrierung keinen PXE-Start beweist. Exakte Grenze, fehlende, ungültige und zukünftige Zeiten bleiben unauffällig; `updated_at` ist ausdrücklich kein Ersatz. Dashboard, Missionsfilter, VM-Liste und Editor führen zur Prüfung und erlauben einen bewussten Neustart, ohne Status oder Edit-Zeit zu ändern. Es gibt keinen automatischen Fail, Delete oder Maintenance-Reaper. Das Runbook enthält Upgrade-Reihenfolge und Produktions-SQL; die tatsächliche Produktionseintragung bleibt mangels Zugriff „nicht durchgeführt“.
