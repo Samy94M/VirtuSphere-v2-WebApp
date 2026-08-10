@@ -685,6 +685,220 @@ Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 }
 
+# ===========================================================================
+# Die drei systemischen Waechter der Haertungskampagne 2026-08
+# ---------------------------------------------------------------------------
+# Alle 30 Befunde der Einzelpruefung vom 2026-08-09 stammen aus genau drei
+# Mustern, und jedes davon ist eine Klasse, keine Einzelstelle:
+#
+#   1. Ein Fehlerpfad ohne Zaehler. Der Fehler wird protokolliert, erreicht aber
+#      den Run-Report nicht, also meldet der Lauf `ok`.
+#   2. Eine gelesene Variable, die niemand zuweist. Unter Set-StrictMode wirft
+#      das, und der Wurf landet im aeusseren Catch: eine Datenlage wird als
+#      Infrastrukturausfall gemeldet.
+#   3. Ein Erfolgssatz ohne Bedingung. Die Schlusszeile schaut nicht auf das
+#      Ergebnis.
+#
+# Die Einzelfaelle sind behoben; diese drei Tests fangen den naechsten am Build
+# statt in Produktion. Sie stehen bewusst hier und nicht im Register: das
+# Register war die To-do-Liste der Kampagne, diese hier sind Vertrag.
+# ===========================================================================
+
+Describe 'Waechter 1: kein Catch ohne Konsequenz' {
+
+    BeforeAll {
+        # Die vier Endlosschleifen. Ein Fehler, den hier niemand zaehlt, ist als
+        # SYSTEM unsichtbar: kein Fenster, kein Anwender, nur die Ampel im
+        # Systemstatus, die dann faelschlich gruen bleibt.
+        $script:LoopScripts = @(
+            'mecm_new-device-sync.ps1'
+            'mecm_Packages-TaskSeq-sync.ps1'
+            'mecm_autoimporter.ps1'
+            'mecm_site-health.ps1'
+        )
+
+        # Benannte Ausnahmen, jede mit ihrem Grund. Die Liste ist der ehrliche
+        # Preis dieses Waechters und darf nicht stillschweigend wachsen: sie ist
+        # nach Datei UND Startzeile geschluesselt, damit ein zweiter tolerierter
+        # Catch in derselben Datei nicht mitgedeckt wird.
+        $script:CatchExempt = @{
+            'mecm_new-device-sync.ps1|Auto-Approve nicht moeglich' =
+                'Auto-Approve ist best effort: die Genehmigung kann bereits gesetzt sein oder in dieser Site gar nicht verlangt werden. Ein Fehlschlag hindert den Import nicht, und die Zuweisung danach zaehlt ihren eigenen.'
+        }
+    }
+
+    It '<name>: jeder Catch zaehlt, wirft oder meldet das Ergebnis' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        $path = Join-Path (Join-Path $script:PsRoot 'mecm') $name
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+
+        $catches = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.CatchClauseAst]
+        }, $true))
+        $catches.Count | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'
+
+        $offenders = @()
+        foreach ($catch in $catches) {
+            $body = $catch.Body.Extent.Text
+
+            # (a) Ein Zaehler, der den Run-Report erreicht.
+            if ($body -match '\+\+') { continue }
+            # (b) Weiterwerfen: der naechste Rahmen entscheidet.
+            if ($body -match '\bthrow\b') { continue }
+            # (c) Das Ergebnis des Laufs selbst setzen (die aeusseren Catches).
+            if ($body -match "\`$outcome\s*=\s*'(fail|warning)'") { continue }
+            # (d) Den Fehlschlag an den Aufrufer zurueckgeben: eine Variable
+            #     setzen, die die umschliessende Funktion auch zurueckliefert.
+            #     So macht es New-VsDeviceCollection mit FolderFailed, und der
+            #     Aufrufer zaehlt.
+            $fn = $catch.Parent
+            while ($fn -and -not ($fn -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $fn = $fn.Parent }
+            if ($fn) {
+                $returned = ($fn.Body.FindAll({
+                    param($n) $n -is [System.Management.Automation.Language.ReturnStatementAst]
+                }, $true) | ForEach-Object { $_.Extent.Text }) -join ' '
+                $assignedHere = @($catch.Body.FindAll({
+                    param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst]
+                }, $true) | ForEach-Object { $_.Left.Extent.Text })
+                $reaches = $false
+                foreach ($v in $assignedHere) {
+                    if ($v -and $returned -match [regex]::Escape($v.TrimStart('$'))) { $reaches = $true }
+                }
+                if ($reaches) { continue }
+            }
+
+            # (e) Benannte Ausnahme mit Grund.
+            $exempt = $false
+            foreach ($key in $script:CatchExempt.Keys) {
+                $parts = $key -split '\|', 2
+                if ($parts[0] -eq $name -and $body -match [regex]::Escape($parts[1])) { $exempt = $true }
+            }
+            if ($exempt) { continue }
+
+            $offenders += ('{0}:{1} {2}' -f $name, $catch.Extent.StartLineNumber, (($body -replace '\s+', ' ')))
+        }
+
+        $offenders -join ' || ' | Should -BeNullOrEmpty
+    }
+
+    It 'die Ausnahmeliste zeigt auf keinen Catch, den es nicht mehr gibt' {
+        # Andersherum gelesen: eine Ausnahme, die ins Leere zeigt, deckt kuenftig
+        # den falschen Fall. Genau der Fehler, an dem in diesem Projekt schon
+        # einmal ein Spec vier Kataloge verloren hat, ohne rot zu werden.
+        foreach ($key in $script:CatchExempt.Keys) {
+            $parts = $key -split '\|', 2
+            $path = Join-Path (Join-Path $script:PsRoot 'mecm') $parts[0]
+            Test-Path $path | Should -BeTrue -Because "$($parts[0]) existiert nicht mehr"
+            (Get-Content -Raw -Path $path) | Should -Match ([regex]::Escape($parts[1]))
+            [string]$script:CatchExempt[$key] | Should -Not -BeNullOrEmpty -Because 'eine Ausnahme ohne Grund ist keine Entscheidung'
+        }
+    }
+}
+
+Describe 'Waechter 2: keine gelesene Variable ohne Zuweisung' {
+
+    It '<name>: liest keine Variable, die das Skript nie zuweist' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+        @{ name = 'mecm_autoimporter.ps1' }
+        @{ name = 'mecm_site-health.ps1' }
+    ) {
+        # Set-StrictMode 1.0 wirft beim Lesen einer nicht gesetzten Variablen.
+        # In einer Endlosschleife als SYSTEM landet der Wurf im aeusseren Catch:
+        # $targets.Count stand ausgerechnet in dem Zweig, der eine unvollstaendige
+        # Zuweisung melden wollte, und machte daraus einen Scan-Abbruch samt
+        # weggeworfenem Site-Drive - eine Datenlage, gemeldet als
+        # Infrastrukturausfall.
+        $path = Join-Path (Join-Path $script:PsRoot 'mecm') $name
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+
+        $assigned = @{}
+        foreach ($a in @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst]
+        }, $true))) {
+            $left = $a.Left
+            if ($left -is [System.Management.Automation.Language.ConvertExpressionAst]) { $left = $left.Child }
+            if ($left -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                $assigned[$left.VariablePath.UserPath.ToLowerInvariant()] = $true
+            }
+        }
+        foreach ($f in @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst]
+        }, $true))) { $assigned[$f.Variable.VariablePath.UserPath.ToLowerInvariant()] = $true }
+        foreach ($p in @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.ParameterAst]
+        }, $true))) { $assigned[$p.Name.VariablePath.UserPath.ToLowerInvariant()] = $true }
+
+        # Automatik-Variablen und alles mit Namensraum ($env:, $script:) sind
+        # keine Zuweisung dieses Skripts. Die Liste steht ausgeschrieben, damit
+        # sie nicht stillschweigend waechst.
+        $allow = @('_', 'psitem', 'psscriptroot', 'pscmdlet', 'psboundparameters',
+                   'true', 'false', 'null', 'args', 'error', 'lastexitcode',
+                   'matches', 'host', 'pwd', 'input', 'foreach', 'switch')
+
+        $seen = 0
+        $unassigned = @()
+        foreach ($v in @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst]
+        }, $true))) {
+            $varName = $v.VariablePath.UserPath
+            if ($varName -match ':') { continue }
+            $seen++
+            $lower = $varName.ToLowerInvariant()
+            if ($allow -contains $lower) { continue }
+            if (-not $assigned.ContainsKey($lower)) { $unassigned += $varName }
+        }
+        $seen | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'
+
+        @($unassigned | Select-Object -Unique) -join ', ' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Waechter 3: kein unbedingter Erfolgssatz' {
+
+    It '<name>: die abschliessende Erfolgsmeldung haengt an einer Bedingung' -ForEach @(
+        @{ name = 'install-VirtuSphere-MECM.ps1';    success = 'Erstinstallation abgeschlossen' }
+        @{ name = 'install-VirtuSphere-Clients.ps1'; success = 'Client-Applikationen bereit' }
+    ) {
+        # Dieselbe Frage wie in der Installer-Describe oben, hier aber als
+        # Klasse formuliert: die Erfolgsausgabe muss ueberhaupt in einem
+        # IfStatementAst liegen. Ein neuer Installer, der seine Schlusszeile
+        # unbedingt schreibt, faellt damit auf, auch wenn er den Blockerzaehler
+        # nie kennengelernt hat.
+        $path = Join-Path $script:PsRoot $name
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+
+        $calls = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.CommandAst]
+        }, $true) | Where-Object { $_.Extent.Text -match [regex]::Escape($success) })
+        $calls.Count | Should -BeGreaterThan 0 -Because 'ohne Fundstelle prueft dieser Test nichts'
+
+        foreach ($call in $calls) {
+            $p = $call.Parent
+            $inIf = $false
+            while ($p) {
+                if ($p -is [System.Management.Automation.Language.IfStatementAst]) { $inIf = $true; break }
+                $p = $p.Parent
+            }
+            $inIf | Should -BeTrue -Because "die Erfolgszeile '$success' steht unbedingt"
+        }
+    }
+
+    It 'die Paketvorlage schreibt ihren Detection-Wert nur nach vollstaendigem Erfolg' {
+        # Die Vorlage laedt keine Bibliothek und hat keinen Blockerzaehler; ihr
+        # Aequivalent des Erfolgssatzes ist der Registry-Wert, den MECM als
+        # Erkennung liest. Textpruefung, weil die Datei allein ausgeliefert wird.
+        $text = Get-Content -Raw -Path (Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1')
+        $text | Should -Match '(?s)if\s*\(\s*\$Fullsuccess\s*\)\s*\{\s*Set-ItemProperty[^\r\n]*Version'
+        # Und der Schluss-Exit liest dasselbe Ergebnis, statt immer 0 zu liefern.
+        $text | Should -Match '(?s)if \(-not \$Fullsuccess\) \{[^}]*exit 1'
+    }
+}
+
 Describe 'Kein Organisationskuerzel in Registry- und Programmpfaden' {
 
     # Die Skripte laufen in fremden Umgebungen, deren Organisationskuerzel wir
