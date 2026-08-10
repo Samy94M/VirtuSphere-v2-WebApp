@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # ============================================================================
 # mecm_autoimporter.ps1 - erzeugt aus config.json-Paketordnern automatisch
 # MECM-Applications, Collections und Deployments.
@@ -177,218 +177,241 @@ while ($true) {
                 }
                 $folders++
 
-            $appName = [string]$cfg.ProjectName
-            $version = [string]$cfg.version
-            $fullName = "{0}-{1}" -f $appName, $version
-            $folderName = $cfg.FolderName
+                $appName = [string]$cfg.ProjectName
+                $version = [string]$cfg.version
+                $fullName = "{0}-{1}" -f $appName, $version
+                $folderName = $cfg.FolderName
 
-            # --- Alt-Versions-Bereinigung (EXAKTES Muster!) ----------------
-            if ("$($cfg.removeOldVersion)" -eq 'true') {
-                # Nur den exakten Stamm 'Name-<version>' entfernen, nicht die
-                # aktuelle Version und keine Fremdpakete wie 'Name-ESR-*'.
-                # Suche ueber Collections UND Applications, damit auch Pakete
-                # ohne eigene Collection (generateOwnDeviceColletion=false)
-                # bereinigt werden.
-                $pattern = Get-VsSupersededNamePattern -AppName $appName
-                $oldNames = @{}
-                foreach ($c in @(Get-CMDeviceCollection -Name ("{0}-*" -f $appName) -ErrorAction SilentlyContinue)) {
-                    if ($c.Name -match $pattern -and $c.Name -ne $fullName) { $oldNames[$c.Name] = $true }
-                }
-                foreach ($a in @(Get-CMApplication -Name ("{0}-*" -f $appName) -Fast -ErrorAction SilentlyContinue)) {
-                    $n = [string]$a.LocalizedDisplayName
-                    if ($n -match $pattern -and $n -ne $fullName) { $oldNames[$n] = $true }
-                }
-                foreach ($old in $oldNames.Keys) {
-                    Write-VsLog -Context $old -Message 'Entferne alte Version.'
-                    try {
-                        Get-CMApplicationDeployment -Name $old -ErrorAction SilentlyContinue | Remove-CMApplicationDeployment -Force -ErrorAction Stop
-                        if (Get-CMDeviceCollection -Name $old -ErrorAction SilentlyContinue) {
-                            Remove-CMDeviceCollection -Name $old -Force -ErrorAction Stop
-                        }
-                        if (Get-CMApplication -Name $old -Fast -ErrorAction SilentlyContinue) {
-                            Remove-CMApplication -Name $old -Force -ErrorAction Stop
-                        }
-                        $deletedCount++
-                    } catch {
-                        Write-VsLog -Level WARN -Context $old -Message ("Alt-Version nicht vollstaendig entfernt - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $old
+                # --- Alt-Versions-Bereinigung (EXAKTES Muster!) ----------------
+                if ("$($cfg.removeOldVersion)" -eq 'true') {
+                    # Nur den exakten Stamm 'Name-<version>' entfernen, nicht die
+                    # aktuelle Version und keine Fremdpakete wie 'Name-ESR-*'.
+                    # Suche ueber Collections UND Applications, damit auch Pakete
+                    # ohne eigene Collection (generateOwnDeviceColletion=false)
+                    # bereinigt werden.
+                    $pattern = Get-VsSupersededNamePattern -AppName $appName
+                    $oldNames = @{}
+                    foreach ($c in @(Get-CMDeviceCollection -Name ("{0}-*" -f $appName) -ErrorAction SilentlyContinue)) {
+                        if ($c.Name -match $pattern -and $c.Name -ne $fullName) { $oldNames[$c.Name] = $true }
                     }
-                }
-            }
-
-            # --- Self-Healing der install.ps1 (bei JEDEM Scan) -------------
-            #
-            # Nicht mehr nur bei $isNew: die Vorlage gewinnt laut Vertrag, aber der
-            # $isNew-Zweig gab ihr genau einen Versuch. Ein Fehlschlag dort war
-            # endgueltig, weil die Application danach existierte. Wiederholt wird,
-            # solange der Inhalt abweicht, und ein Fehlschlag ist ein offener Punkt.
-            $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
-            $templateScript = Join-Path $templatePath 'install.ps1'
-            $packageScript = Join-Path $pkgFolder 'install.ps1'
-            if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
-                try {
-                    Copy-Item $templateScript -Destination $packageScript -Force -ErrorAction Stop
-                    Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen.'
-                } catch {
-                    Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
-                    $scanWarnings++
-                    Add-VsRunCause -Causes $causes -Cause 'package_template_failed' -Target $fullName
-                }
-            }
-
-            # --- Application anlegen (falls neu) ---------------------------
-            # Das Objekt wird behalten: der Verteilstatus unten adressiert per
-            # CI_ID statt -Name, wo es eines gibt (B7).
-            $app = Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue
-            $isNew = -not $app
-            if ($isNew) {
-                Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
-                New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null
-
-                $registryDetection = "SOFTWARE\VirtuSphere\Packages\{0}-{1}" -f $appName, $version
-                $dtParams = @{
-                    ApplicationName      = $fullName
-                    DeploymentTypeName   = "{0} Deployment" -f $fullName
-                    ContentLocation      = (Join-Path $networkPath $folderName)
-                    InstallCommand       = (Get-VsPowerShellCommandLine -ScriptPath 'install.ps1')
-                    UninstallCommand     = 'cmd.exe /s'
-                    EstimatedRuntimeMins = 10
-                    RebootBehavior       = 'BasedOnExitCode'
-                }
-                if ($cfg.InstallationBehaviorType -eq 'InstallForUser') {
-                    $clause = New-CMDetectionClauseRegistryKeyValue -Hive CurrentUser -KeyName $registryDetection -PropertyType String -ValueName 'Version' -ExpressionOperator IsEquals -ExpectedValue $version -Is64Bit -Value
-                    $dtParams['AddDetectionClause'] = $clause
-                    $dtParams['InstallationBehaviorType'] = 'InstallForUser'
-                    $dtParams['LogonRequirementType'] = 'OnlyWhenUserLoggedOn'
-                } else {
-                    $clause = New-CMDetectionClauseRegistryKeyValue -Hive LocalMachine -KeyName $registryDetection -PropertyType String -ValueName 'Version' -ExpressionOperator IsEquals -ExpectedValue $version -Is64Bit -Value
-                    $dtParams['AddDetectionClause'] = $clause
-                    $dtParams['InstallationBehaviorType'] = 'InstallForSystem'
-                    # Korrigierter Enum-Wert (frueher 'WhereOrNotUserLoggedOn').
-                    $dtParams['LogonRequirementType'] = 'WhetherOrNotUserLoggedOn'
-                }
-                try {
-                    Add-CMScriptDeploymentType @dtParams -ErrorAction Stop | Out-Null
-                } catch {
-                    # Ohne Deployment-Type ist die Application unbrauchbar, und der naechste
-                    # Scan wuerde sie ueber den else-Zweig faelschlich als "vorhanden"
-                    # behandeln und den Teilzustand nie heilen. Daher die unvollstaendige
-                    # Application entfernen, damit sie beim naechsten Lauf neu entsteht.
-                    Write-VsLog -Level WARN -Context $fullName -Message ('Deployment-Type-Erstellung fehlgeschlagen, entferne unvollstaendige Application fuer erneuten Versuch: {0}' -f $_.Exception.Message)
-                    Remove-CMApplication -Name $fullName -Force -ErrorAction SilentlyContinue | Out-Null
-                    throw
-                }
-
-                Get-CMApplication -Name $fullName | Move-CMObject -FolderPath $appOrgFolder -ErrorAction SilentlyContinue | Out-Null
-                $newCount++
-            } else {
-                Write-Host ("  {0} bereits vorhanden" -f $fullName) -ForegroundColor DarkGray
-            }
-
-            # --- Collection + Deployments idempotent nachziehen -------------
-            # Laeuft auch fuer bestehende Apps und heilt damit fruehere
-            # Teilfehler (App vorhanden, aber Collection/Deployment fehlt).
-            if ("$($cfg.generateOwnDeviceColletion)" -eq 'true') {
-                $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
-                if (-not $collection) {
-                    New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -ErrorAction SilentlyContinue | Out-Null
-                    Start-Sleep -Seconds 2
-                    $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
-                }
-                # Das Verschieben wird WIEDERHOLT, nicht nur beim Anlegen versucht.
-                # Es lief unter SilentlyContinue genau einmal; scheiterte es, lag
-                # die Collection dauerhaft im Wurzelordner. Der Paket-Sync liest
-                # aber genau VirtuSphere_Applications als Katalogquelle, also fehlte
-                # das Paket dauerhaft im Portal, obwohl in MECM alles da war.
-                if ($collection -and -not (Test-VsInOrgFolder -Collection $collection -FolderPath $collectionOrgFolder)) {
-                    try {
-                        $collection | Move-CMObject -FolderPath $collectionOrgFolder -ErrorAction Stop | Out-Null
-                    } catch {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Collection nicht in '{0}' verschoben - Wiederholung im naechsten Durchlauf: {1}" -f $collectionOrgFolder, $_.Exception.Message)
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection $fullName
+                    foreach ($a in @(Get-CMApplication -Name ("{0}-*" -f $appName) -Fast -ErrorAction SilentlyContinue)) {
+                        $n = [string]$a.LocalizedDisplayName
+                        if ($n -match $pattern -and $n -ne $fullName) { $oldNames[$n] = $true }
                     }
-                }
-
-                # Mehrwertiger Verteilzustand (B7): nur `succeeded` heisst
-                # "nichts zu tun". Die alte Ja/Nein-Frage las Targeted > 0 als
-                # fertig und niemand las NumberErrors: eine auf jedem DP
-                # gescheiterte Verteilung galt als erledigt, der Stamp wurde
-                # gemerkt, die Karte blieb gruen. Jetzt haelt jeder Zustand
-                # ausser succeeded den Stamp zurueck, der naechste Lauf prueft
-                # erneut. Per CI_ID adressiert, wenn das Objekt da ist ($isNew
-                # hat es geladen); nur eine in diesem Lauf frisch angelegte
-                # Application faellt auf den Namen zurueck.
-                $distState = Get-VsContentDistributionState -ApplicationName $fullName -ApplicationId $(if ($app) { $app.CI_ID } else { $null })
-                switch ($distState) {
-                    'succeeded' { }
-                    'not_started' {
+                    foreach ($old in $oldNames.Keys) {
+                        Write-VsLog -Context $old -Message 'Entferne alte Version.'
                         try {
-                            Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
-                            Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
-                            # Frisch angestossen ist noch nicht angekommen: der
-                            # Stamp wartet, bis ein Lauf `succeeded` sieht.
+                            Get-CMApplicationDeployment -Name $old -ErrorAction SilentlyContinue | Remove-CMApplicationDeployment -Force -ErrorAction Stop
+                            if (Get-CMDeviceCollection -Name $old -ErrorAction SilentlyContinue) {
+                                Remove-CMDeviceCollection -Name $old -Force -ErrorAction Stop
+                            }
+                            if (Get-CMApplication -Name $old -Fast -ErrorAction SilentlyContinue) {
+                                Remove-CMApplication -Name $old -Force -ErrorAction Stop
+                            }
+                            $deletedCount++
+                        } catch {
+                            Write-VsLog -Level WARN -Context $old -Message ("Alt-Version nicht vollstaendig entfernt - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $old
+                        }
+                    }
+                }
+
+                # --- Self-Healing der install.ps1 (bei JEDEM Scan) -------------
+                #
+                # Nicht mehr nur bei $isNew: die Vorlage gewinnt laut Vertrag, aber der
+                # $isNew-Zweig gab ihr genau einen Versuch. Ein Fehlschlag dort war
+                # endgueltig, weil die Application danach existierte. Wiederholt wird,
+                # solange der Inhalt abweicht, und ein Fehlschlag ist ein offener Punkt.
+                $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
+                $templateScript = Join-Path $templatePath 'install.ps1'
+                $packageScript = Join-Path $pkgFolder 'install.ps1'
+                if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
+                    try {
+                        Copy-Item $templateScript -Destination $packageScript -Force -ErrorAction Stop
+                        Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen.'
+                    } catch {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_template_failed' -Target $fullName
+                    }
+                }
+
+                # --- Application anlegen (falls neu) ---------------------------
+                # Das Objekt wird behalten: der Verteilstatus unten adressiert per
+                # CI_ID statt -Name, wo es eines gibt (B7).
+                $app = Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue
+                $isNew = -not $app
+                if ($isNew) {
+                    Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
+                    New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null
+
+                    $registryDetection = "SOFTWARE\VirtuSphere\Packages\{0}-{1}" -f $appName, $version
+                    $dtParams = @{
+                        ApplicationName      = $fullName
+                        DeploymentTypeName   = "{0} Deployment" -f $fullName
+                        ContentLocation      = (Join-Path $networkPath $folderName)
+                        InstallCommand       = (Get-VsPowerShellCommandLine -ScriptPath 'install.ps1')
+                        # Kein UninstallCommand. Der frueher hier stehende Wert
+                        # 'cmd.exe /s' versprach eine Deinstallation, die es nicht
+                        # gibt: /s wirkt nur hinter /c oder /k, beides fehlte, uebrig
+                        # blieb eine Shell, die nichts liest und mit 0 endet - also
+                        # eine erfolgreich gemeldete Deinstallation, die nichts
+                        # entfernt hat. Ausgeloest wurde sie von nichts, weil dieses
+                        # Skript ausschliesslich Install-Deployments anlegt und
+                        # Altversionen aus MECM loescht statt sie zu deinstallieren.
+                        # Ein Paket ist definiert als "fuehre diese Skripte aus", und
+                        # dazu gibt es keine allgemeine Umkehrung; eine echte
+                        # Deinstallation waere eine Funktion mit eigener Vorlage
+                        # (uninstall.ps1), eigenem Vertrag und eigenen Tests.
+                        EstimatedRuntimeMins = 10
+                        RebootBehavior       = 'BasedOnExitCode'
+                    }
+                    if ($cfg.InstallationBehaviorType -eq 'InstallForUser') {
+                        $clause = New-CMDetectionClauseRegistryKeyValue -Hive CurrentUser -KeyName $registryDetection -PropertyType String -ValueName 'Version' -ExpressionOperator IsEquals -ExpectedValue $version -Is64Bit -Value
+                        $dtParams['AddDetectionClause'] = $clause
+                        $dtParams['InstallationBehaviorType'] = 'InstallForUser'
+                        $dtParams['LogonRequirementType'] = 'OnlyWhenUserLoggedOn'
+                    } else {
+                        $clause = New-CMDetectionClauseRegistryKeyValue -Hive LocalMachine -KeyName $registryDetection -PropertyType String -ValueName 'Version' -ExpressionOperator IsEquals -ExpectedValue $version -Is64Bit -Value
+                        $dtParams['AddDetectionClause'] = $clause
+                        $dtParams['InstallationBehaviorType'] = 'InstallForSystem'
+                        # Korrigierter Enum-Wert (frueher 'WhereOrNotUserLoggedOn').
+                        $dtParams['LogonRequirementType'] = 'WhetherOrNotUserLoggedOn'
+                    }
+                    try {
+                        Add-CMScriptDeploymentType @dtParams -ErrorAction Stop | Out-Null
+                    } catch {
+                        # Ohne Deployment-Type ist die Application unbrauchbar, und der naechste
+                        # Scan wuerde sie ueber den else-Zweig faelschlich als "vorhanden"
+                        # behandeln und den Teilzustand nie heilen. Daher die unvollstaendige
+                        # Application entfernen, damit sie beim naechsten Lauf neu entsteht.
+                        Write-VsLog -Level WARN -Context $fullName -Message ('Deployment-Type-Erstellung fehlgeschlagen, entferne unvollstaendige Application fuer erneuten Versuch: {0}' -f $_.Exception.Message)
+                        Remove-CMApplication -Name $fullName -Force -ErrorAction SilentlyContinue | Out-Null
+                        throw
+                    }
+
+                    Get-CMApplication -Name $fullName | Move-CMObject -FolderPath $appOrgFolder -ErrorAction SilentlyContinue | Out-Null
+                    $newCount++
+                } else {
+                    Write-Host ("  {0} bereits vorhanden" -f $fullName) -ForegroundColor DarkGray
+                }
+
+                # --- Collection + Deployments idempotent nachziehen -------------
+                # Laeuft auch fuer bestehende Apps und heilt damit fruehere
+                # Teilfehler (App vorhanden, aber Collection/Deployment fehlt).
+                if ("$($cfg.generateOwnDeviceColletion)" -eq 'true') {
+                    $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
+                    if (-not $collection) {
+                        New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -ErrorAction SilentlyContinue | Out-Null
+                        Start-Sleep -Seconds 2
+                        $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
+                    }
+                    # New-CMDeviceCollection scheitert unter SilentlyContinue lautlos.
+                    # Ohne diese Pruefung lief der Block weiter, das Deployment
+                    # scheiterte an der fehlenden Collection, und der offene Punkt
+                    # hiess package_deploy_failed: die Ursache stand unter dem
+                    # falschen Namen, und der Operator suchte am falschen Ende.
+                    if (-not $collection) {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Device-Collection '{0}' konnte nicht angelegt werden - Deployment uebersprungen, Wiederholung im naechsten Durchlauf." -f $fullName)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $fullName -Collection $fullName
+                    }
+                    # Das Verschieben wird WIEDERHOLT, nicht nur beim Anlegen versucht.
+                    # Es lief unter SilentlyContinue genau einmal; scheiterte es, lag
+                    # die Collection dauerhaft im Wurzelordner. Der Paket-Sync liest
+                    # aber genau VirtuSphere_Applications als Katalogquelle, also fehlte
+                    # das Paket dauerhaft im Portal, obwohl in MECM alles da war.
+                    if ($collection -and -not (Test-VsInOrgFolder -Collection $collection -FolderPath $collectionOrgFolder)) {
+                        try {
+                            $collection | Move-CMObject -FolderPath $collectionOrgFolder -ErrorAction Stop | Out-Null
+                        } catch {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Collection nicht in '{0}' verschoben - Wiederholung im naechsten Durchlauf: {1}" -f $collectionOrgFolder, $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection $fullName
+                        }
+                    }
+
+                    # Mehrwertiger Verteilzustand (B7): nur `succeeded` heisst
+                    # "nichts zu tun". Die alte Ja/Nein-Frage las Targeted > 0 als
+                    # fertig und niemand las NumberErrors: eine auf jedem DP
+                    # gescheiterte Verteilung galt als erledigt, der Stamp wurde
+                    # gemerkt, die Karte blieb gruen. Jetzt haelt jeder Zustand
+                    # ausser succeeded den Stamp zurueck, der naechste Lauf prueft
+                    # erneut. Per CI_ID adressiert, wenn das Objekt da ist ($isNew
+                    # hat es geladen); nur eine in diesem Lauf frisch angelegte
+                    # Application faellt auf den Namen zurueck.
+                    $distState = Get-VsContentDistributionState -ApplicationName $fullName -ApplicationId $(if ($app) { $app.CI_ID } else { $null })
+                    switch ($distState) {
+                        'succeeded' { }
+                        'not_started' {
+                            try {
+                                Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
+                                Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
+                                # Frisch angestossen ist noch nicht angekommen: der
+                                # Stamp wartet, bis ein Lauf `succeeded` sieht.
+                                $scanWarnings++
+                                Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                            } catch {
+                                Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                                $scanWarnings++
+                                Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                            }
+                        }
+                        'in_progress' {
+                            Write-VsLog -Context $fullName -Message 'Content-Verteilung laeuft noch - der Stamp wartet auf die vollstaendige Zielverteilung.'
                             $scanWarnings++
                             Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
-                        } catch {
-                            Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
+                        }
+                        'failed' {
+                            # Benannte Grenze: eine fehlgeschlagene Verteilung wird
+                            # nicht blind neu angestossen (Start-CMContentDistribution
+                            # wirft fuer bereits verteilten Content, und eine
+                            # Redistribution je DP ist ohne MECM-Testumgebung nicht
+                            # pruefbar). Der Punkt bleibt offen und sichtbar, bis der
+                            # Operator in der Konsole neu verteilt.
+                            Write-VsLog -Level WARN -Context $fullName -Message 'Content-Verteilung meldet Fehler auf mindestens einem Verteilungspunkt - in der MECM-Konsole neu verteilen; der Punkt bleibt offen.'
                             $scanWarnings++
                             Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
                         }
+                        'unknown' {
+                            Write-VsLog -Level WARN -Context $fullName -Message 'Verteilstatus nicht abfragbar - es wird nicht verteilt, der naechste Lauf fragt erneut.'
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                        }
                     }
-                    'in_progress' {
-                        Write-VsLog -Context $fullName -Message 'Content-Verteilung laeuft noch - der Stamp wartet auf die vollstaendige Zielverteilung.'
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
-                    }
-                    'failed' {
-                        # Benannte Grenze: eine fehlgeschlagene Verteilung wird
-                        # nicht blind neu angestossen (Start-CMContentDistribution
-                        # wirft fuer bereits verteilten Content, und eine
-                        # Redistribution je DP ist ohne MECM-Testumgebung nicht
-                        # pruefbar). Der Punkt bleibt offen und sichtbar, bis der
-                        # Operator in der Konsole neu verteilt.
-                        Write-VsLog -Level WARN -Context $fullName -Message 'Content-Verteilung meldet Fehler auf mindestens einem Verteilungspunkt - in der MECM-Konsole neu verteilen; der Punkt bleibt offen.'
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
-                    }
-                    'unknown' {
-                        Write-VsLog -Level WARN -Context $fullName -Message 'Verteilstatus nicht abfragbar - es wird nicht verteilt, der naechste Lauf fragt erneut.'
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+
+                    # Ohne Collection gibt es nichts zu deployen; der offene Punkt
+                    # steht bereits als collection_missing.
+                    if ($collection -and -not (Get-CMApplicationDeployment -Name $fullName -CollectionName $fullName -ErrorAction SilentlyContinue)) {
+                        try {
+                            New-CMApplicationDeployment -Name $fullName -CollectionName $fullName -DeployAction Install -DeployPurpose Required -UserNotification DisplaySoftwareCenterOnly -ErrorAction Stop | Out-Null
+                        } catch {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Deployment fehlgeschlagen - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName
+                        }
                     }
                 }
 
-                if (-not (Get-CMApplicationDeployment -Name $fullName -CollectionName $fullName -ErrorAction SilentlyContinue)) {
-                    try {
-                        New-CMApplicationDeployment -Name $fullName -CollectionName $fullName -DeployAction Install -DeployPurpose Required -UserNotification DisplaySoftwareCenterOnly -ErrorAction Stop | Out-Null
-                    } catch {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Deployment fehlgeschlagen - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName
+                # --- Zusatz-Deployment (Available) -----------------------------
+                if (-not [string]::IsNullOrWhiteSpace($cfg.DeployTo)) {
+                    if (-not (Get-CMApplicationDeployment -Name $fullName -CollectionName ([string]$cfg.DeployTo) -ErrorAction SilentlyContinue)) {
+                        try {
+                            New-CMApplicationDeployment -Name $fullName -CollectionName ([string]$cfg.DeployTo) -DeployAction Install -DeployPurpose Available -UserNotification DisplaySoftwareCenterOnly -ErrorAction Stop | Out-Null
+                        } catch {
+                            # Zaehlt jetzt (B7): ohne Zaehler wurde der Stamp gemerkt
+                            # und der Fehlschlag war ab dem zweiten Lauf unsichtbar -
+                            # eine spaeter angelegte DeployTo-Collection bekam ihr
+                            # Deployment nie. Die Meldung nennt die echte Ursache
+                            # statt der Vermutung "nicht gefunden".
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Zusatz-Deployment auf '{0}' fehlgeschlagen - Wiederholung im naechsten Durchlauf: {1}" -f $cfg.DeployTo, $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName -Collection ([string]$cfg.DeployTo)
+                        }
                     }
                 }
             }
-
-            # --- Zusatz-Deployment (Available) -----------------------------
-            if (-not [string]::IsNullOrWhiteSpace($cfg.DeployTo)) {
-                if (-not (Get-CMApplicationDeployment -Name $fullName -CollectionName ([string]$cfg.DeployTo) -ErrorAction SilentlyContinue)) {
-                    try {
-                        New-CMApplicationDeployment -Name $fullName -CollectionName ([string]$cfg.DeployTo) -DeployAction Install -DeployPurpose Available -UserNotification DisplaySoftwareCenterOnly -ErrorAction Stop | Out-Null
-                    } catch {
-                        # Zaehlt jetzt (B7): ohne Zaehler wurde der Stamp gemerkt
-                        # und der Fehlschlag war ab dem zweiten Lauf unsichtbar -
-                        # eine spaeter angelegte DeployTo-Collection bekam ihr
-                        # Deployment nie. Die Meldung nennt die echte Ursache
-                        # statt der Vermutung "nicht gefunden".
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Zusatz-Deployment auf '{0}' fehlgeschlagen - Wiederholung im naechsten Durchlauf: {1}" -f $cfg.DeployTo, $_.Exception.Message)
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target $fullName -Collection ([string]$cfg.DeployTo)
-                    }
-                }
-            }
-        }
 
             if ($scanWarnings -gt 0) {
                 # Stamp nicht merken: naechster Durchlauf wiederholt die offenen

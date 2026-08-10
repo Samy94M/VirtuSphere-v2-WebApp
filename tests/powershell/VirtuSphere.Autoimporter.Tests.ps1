@@ -381,6 +381,21 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         $text | Should -Not -Match '(?i)Token[^\r\n]{0,40}\{0\}[^\r\n]{0,40}-f \$ReportToken'
     }
 
+    It 'der Autoimporter verspricht keine Deinstallation, die es nicht gibt' {
+        # 'cmd.exe /s' als UninstallCommand: /s wirkt nur hinter /c oder /k,
+        # beides fehlte. Uebrig blieb eine Shell, die nichts liest und mit 0
+        # endet, also eine erfolgreich gemeldete Deinstallation, die nichts
+        # entfernt hat. Ausgeloest wurde sie von nichts, aber ein Feld, das eine
+        # Zusage macht, die das System nicht haelt, gehoert nicht in einen
+        # Deployment-Type. Eine echte Deinstallation waere eine Funktion mit
+        # eigener Vorlage und eigenem Vertrag.
+        $text = Get-Content -Path $script:Importer -Raw
+        $text | Should -Not -Match '(?i)UninstallCommand\s*='
+        # Der Test darf nicht daran haengen, dass die Datei irgendwo 'cmd.exe'
+        # nennt: geprueft wird die Zuweisung, und dass $dtParams noch da ist.
+        $text | Should -Match '\$dtParams\s*=\s*@\{'
+    }
+
     It 'jeder erhaltene Settingname ist ein echter Installer-Parameter' {
         $parameters = @(Get-InstallerParameterNames)
         foreach ($entry in (Get-PreservedMap).GetEnumerator()) {

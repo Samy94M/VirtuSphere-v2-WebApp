@@ -46,7 +46,15 @@ $script:VsDefaultScheme = 'http'
 $script:VsAllowSelfSignedTls = $false
 
 $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
-$script:VsLogDir = 'C:\Program Files\VirtuSphere\Logs'
+# Aus der Umgebung, nicht hart verdrahtet: auf einem System mit verschobenem
+# oder anders benanntem Programmverzeichnis (lokalisiertes Windows, umgezogenes
+# ProgramFiles) legte der Client sein Log sonst neben das, was alle anderen
+# Teile benutzen. Derselbe Fallback wie auf der Serverseite.
+$script:VsLogDir = if ($env:ProgramFiles) {
+    Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
+} else {
+    Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs'
+}
 $script:VsLogComponent = 'client'
 $script:VsResolvedApi = $null
 
@@ -361,10 +369,13 @@ function Get-VsReportMac {
             if (-not [string]::IsNullOrWhiteSpace($mac)) { return [string]$mac }
         }
     } catch { Write-Debug $_ }
-    # Fallback: erste aktive Nicht-Loopback-MAC
+    # Fallback: erste aktive Nicht-Loopback-MAC. Normalisiert wie der Wert aus
+    # der Registry-Interfaces, den client_getinfo dort bereits normalisiert
+    # ablegt: reportPhase authentisiert ueber die bekannte MAC, und zwei
+    # Schreibweisen desselben Adapters sind fuer das Portal zwei Adapter.
     try {
         $nic = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled='True'" | Select-Object -First 1
-        if ($nic) { return [string]$nic.MACAddress }
+        if ($nic) { return (ConvertTo-VsNormalizedMac $nic.MACAddress) }
     } catch { Write-Debug $_ }
     return $null
 }

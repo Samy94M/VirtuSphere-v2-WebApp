@@ -616,6 +616,23 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
 # damit konstruktionsbedingt unantastbar; adoptiert wird nie im Sync, sondern
 # nur ausdruecklich im Portal. Der alte Vertrag ("es gibt gar kein Remove") ist
 # hier bewusst neu geschnitten worden.
+Describe 'Die Fehlerkategorie nennt den Gespraechspartner, der ausgefallen ist' {
+
+    # Beide Sync-Schleifen reden mit ZWEI Systemen. Der Packages-Sync setzte in
+    # seinem aeusseren Catch immer mecm_unavailable, obwohl sein Sendeblock mit
+    # dem Portal spricht: ein abgelehnter Payload beschuldigte dauerhaft MECM,
+    # und der Operator suchte am falschen Ende.
+    It '<name> leitet die Kategorie aus der Phase ab' -ForEach @(
+        @{ name = 'mecm_new-device-sync.ps1' }
+        @{ name = 'mecm_Packages-TaskSeq-sync.ps1' }
+    ) {
+        $text = Get-ScriptText -Name $name
+        $text | Should -Match "\`$phase\s*=\s*'portal'"
+        $text | Should -Match "\`$phase\s*=\s*'mecm'"
+        $text | Should -Match "\`$category\s*=\s*if \(\`$phase -eq 'portal'\) \{ 'portal_unreachable' \} else \{ 'mecm_unavailable' \}"
+    }
+}
+
 Describe 'Mitgliedschaften entfernt nur der Device-Sync, und nur mit Provenienz-Beweis' {
 
     It '<name> ruft kein Remove-Cmdlet auf einer Mitgliedschaft oder einem Geraet auf' -ForEach @(

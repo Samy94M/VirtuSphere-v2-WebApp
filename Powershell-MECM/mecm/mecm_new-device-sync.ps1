@@ -47,21 +47,31 @@ $consecutiveErrors = 0
 $loop = 0
 
 # Legt eine Device Collection an (falls noetig) und verschiebt sie in den
-# VirtuSphere-Ordner. Liefert die Collection zurueck.
+# VirtuSphere-Ordner.
+#
+# Liefert Collection UND das Ergebnis des Verschiebens, weil der Fehlschlag den
+# Aufrufer erreichen muss: er wurde vorher nur als WARN protokolliert, ohne
+# Zaehler und ohne Ursache, also meldete der Lauf `ok`, waehrend die Collection
+# im Wurzelordner liegen blieb. Ein Fehlerpfad ohne Zaehler erreicht den
+# Run-Report nicht.
 function New-VsDeviceCollection {
     param([string]$Name, [string]$FolderPath)
     $existing = Get-CMDeviceCollection -Name $Name -ErrorAction SilentlyContinue
-    if ($existing) { return $existing }
+    # Eine bestehende Collection wird bewusst nicht angefasst: wo sie liegt, hat
+    # dann jemand entschieden.
+    if ($existing) { return [pscustomobject]@{ Collection = $existing; FolderFailed = $false } }
 
     New-CMDeviceCollection -Name $Name -LimitingCollectionName 'All Systems' -Comment 'Autogeneriert by VirtuSphere' -ErrorAction Stop | Out-Null
     Start-Sleep -Seconds 3
     $created = Get-CMDeviceCollection -Name $Name -ErrorAction SilentlyContinue
+    $folderFailed = $false
     if ($created -and $FolderPath) {
         try { $created | Move-CMObject -FolderPath $FolderPath -ErrorAction Stop | Out-Null } catch {
             Write-VsLog -Level WARN -Context $Name -Message ("Collection angelegt, aber Verschieben nach '{0}' fehlgeschlagen: {1}" -f $FolderPath, $_.Exception.Message)
+            $folderFailed = $true
         }
     }
-    return $created
+    return [pscustomobject]@{ Collection = $created; FolderFailed = $folderFailed }
 }
 
 while ($true) {
@@ -153,8 +163,12 @@ while ($true) {
             foreach ($tsName in $taskSequences) {
                 if (-not $collectionCache.ContainsKey($tsName)) {
                     try {
-                        $c = New-VsDeviceCollection -Name $tsName -FolderPath $osFolder
-                        if ($c) { $collectionCache[$tsName] = $c.CollectionID }
+                        $result = New-VsDeviceCollection -Name $tsName -FolderPath $osFolder
+                        if ($result.Collection) { $collectionCache[$tsName] = $result.Collection.CollectionID }
+                        if ($result.FolderFailed) {
+                            $dataWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection $tsName
+                        }
                     } catch {
                         Write-VsLog -Level WARN -Context $tsName -Message ("Task-Sequence-Collection konnte nicht angelegt werden: {0}" -f $_.Exception.Message)
                         $dataWarnings++
@@ -191,8 +205,12 @@ while ($true) {
                 # Mission-Collection sicherstellen
                 if (-not $collectionCache.ContainsKey($missionName)) {
                     try {
-                        $c = New-VsDeviceCollection -Name $missionName -FolderPath $missionFolder
-                        if ($c) { $collectionCache[$missionName] = $c.CollectionID }
+                        $result = New-VsDeviceCollection -Name $missionName -FolderPath $missionFolder
+                        if ($result.Collection) { $collectionCache[$missionName] = $result.Collection.CollectionID }
+                        if ($result.FolderFailed) {
+                            $dataWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Target $deviceName -Collection $missionName
+                        }
                     } catch {
                         Write-VsLog -Level WARN -Context $missionName -Message ("Mission-Collection fehlgeschlagen: {0}" -f $_.Exception.Message)
                         $dataWarnings++

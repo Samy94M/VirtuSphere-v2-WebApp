@@ -51,6 +51,12 @@ $lastPayloadHash = ''
 $lastFullSync = [datetime]::MinValue
 $consecutiveErrors = 0
 
+# Einmal vor der Schleife, nicht je Iteration: eine Endlosschleife legte den
+# Hash-Anbieter sonst jede Minute neu an, ohne ihn je freizugeben. Kein Dispose,
+# weil die Instanz genauso lange lebt wie der Prozess; ein try/finally um eine
+# Endlosschleife waere die unehrlichere Form.
+$sha = [System.Security.Cryptography.SHA256]::Create()
+
 while ($true) {
     # Neuer Lauf: run_id minten, Start melden, Abschluss im finally garantieren.
     $runId = New-VsRunId
@@ -65,6 +71,10 @@ while ($true) {
     $sent = 0
     $unchanged = 0
     $sleepSeconds = $intervalSeconds
+    # Mit wem sprechen wir gerade? Der aeussere Catch setzte immer
+    # mecm_unavailable, obwohl der Sendeblock mit dem Portal spricht: ein
+    # Payloadfehler beschuldigte MECM. Dieselbe Loesung wie im Device-Sync.
+    $phase = 'mecm'
 
     try {
         if (-not $siteCode) {
@@ -109,7 +119,6 @@ while ($true) {
             } else {
                 # --- Change-Detection ----------------------------------------------
                 $json = ($payload | Sort-Object { $_.type }, { $_.name } | ConvertTo-Json -Depth 4)
-                $sha = [System.Security.Cryptography.SHA256]::Create()
                 $hash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))) -replace '-', ''
                 $forceDue = ((Get-Date) - $lastFullSync).TotalSeconds -ge $forceSyncEverySeconds
 
@@ -118,6 +127,10 @@ while ($true) {
                     $unchanged = 1
                 } else {
                     # --- Senden ---------------------------------------------------------
+                    # Ab hier spricht das Skript mit dem Portal, nicht mehr mit
+                    # MECM: ein Fehler unterhalb dieser Zeile ist kein
+                    # MECM-Ausfall.
+                    $phase = 'portal'
                     try {
                         $response = Invoke-VsApi -Config $config -Path '/mecm_packages.php' -Method POST -Body $payload
                         $lastPayloadHash = $hash
@@ -147,10 +160,13 @@ while ($true) {
     } catch {
         $consecutiveErrors++
         $detail = Get-VsErrorDetail -ErrorRecord $_
-        Write-VsLog -Level ERROR -Message ("Sync-Fehler (Versuch {0}): {1}" -f $consecutiveErrors, $detail)
-        # SMS-Provider/WMI-Abfrage, Init oder ein unerwarteter Sendefehler.
+        Write-VsLog -Level ERROR -Message ("Sync-Fehler in Phase '{0}' (Versuch {1}): {2}" -f $phase, $consecutiveErrors, $detail)
+        # Die Kategorie folgt der Phase, in der es gescheitert ist: SMS-Provider,
+        # WMI-Abfrage oder Site-Init sind MECM, alles ab dem Sendeblock ist das
+        # Portal. Vorher stand hier immer mecm_unavailable, und ein abgelehnter
+        # Payload (etwa der 400 aus E1) beschuldigte dauerhaft MECM.
         $outcome = 'fail'
-        $category = 'mecm_unavailable'
+        $category = if ($phase -eq 'portal') { 'portal_unreachable' } else { 'mecm_unavailable' }
         if ($consecutiveErrors -ge 3) {
             $siteCode = $null   # naechster Durchlauf initialisiert MECM neu (Site-Drive-Recovery)
             $sleepSeconds = 60

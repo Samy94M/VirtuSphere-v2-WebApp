@@ -55,7 +55,17 @@ try {
 
     $existing = @($offline | Where-Object { $_.PartitionStyle -ne 'RAW' })
     $raw = @($offline | Where-Object { $_.PartitionStyle -eq 'RAW' -and $_.Size -gt 0 })
-    Write-VsClientLog "Offline: $($offline.Count) (bestehend $($existing.Count), neu $($raw.Count))"
+    # Ein RAW-Datentraeger mit Groesse 0 fiel aus BEIDEN Listen und wurde
+    # trotzdem in ProcessedDisks mitgezaehlt: die Zahl behauptete Arbeit, die
+    # niemand geleistet hat. Er bekommt eine eigene Kategorie, wird benannt und
+    # nicht mitgezaehlt. Formatieren laesst er sich nicht (es gibt nichts zu
+    # partitionieren), ein Fehlschlag ist er aber auch nicht: die Ursache liegt
+    # am Hypervisor, nicht am Gast.
+    $sizeless = @($offline | Where-Object { $_.PartitionStyle -eq 'RAW' -and $_.Size -le 0 })
+    Write-VsClientLog "Offline: $($offline.Count) (bestehend $($existing.Count), neu $($raw.Count), ohne Groesse $($sizeless.Count))"
+    foreach ($disk in $sizeless) {
+        Write-VsClientLog -Level WARN "Datentraeger $($disk.Number) ist RAW und meldet Groesse 0 - uebersprungen (am Host pruefen, ob die virtuelle Platte wirklich angehaengt ist)."
+    }
 
     foreach ($disk in $existing) {
         try {
@@ -95,9 +105,11 @@ try {
         }
     }
 
-    $detail = "existing={0} new={1}" -f $existing.Count, $raw.Count
+    $detail = "existing={0} new={1} sizeless={2}" -f $existing.Count, $raw.Count, $sizeless.Count
     if ($exitCode -eq 0) {
-        Set-DiskStatus -Status 'Success' -Extra @{ ProcessedDisks = "$($offline.Count)" }
+        # ProcessedDisks zaehlt, was das Skript angefasst hat, nicht was offline
+        # war: die uebersprungenen groessenlosen Datentraeger gehoeren nicht dazu.
+        Set-DiskStatus -Status 'Success' -Extra @{ ProcessedDisks = "$($existing.Count + $raw.Count)" }
         if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'disks' -PhaseEvent 'finished' -Detail $detail }
     } else {
         Set-DiskStatus -Status 'Error' -Extra @{ LastError = 'completed with errors' }

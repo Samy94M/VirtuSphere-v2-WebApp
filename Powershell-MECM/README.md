@@ -261,10 +261,16 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     (Schalter aus `$script:VsPowerShellArgs`),
     Registry-Detection unter `SOFTWARE\VirtuSphere\Packages\Name-Version`
     (HKCU bei `InstallForUser`, sonst HKLM; dieselbe Richtung wie
-    `Package_Vorlage\install.ps1`).
+    `Package_Vorlage\install.ps1`). **Kein `UninstallCommand`:** ein Paket ist
+    definiert als „führe diese Skripte aus“, und dazu gibt es keine allgemeine
+    Umkehrung; der frühere Wert `cmd.exe /s` entfernte nichts und meldete
+    trotzdem Erfolg.
   - **Collection + Deployment idempotent nachziehen** (bei
     `generateOwnDeviceColletion: "true"`): läuft auch für bestehende Apps und
     heilt frühere Teilfehler (App vorhanden, Collection/Deployment fehlt).
+    Lässt sich die Collection nicht anlegen, ist das ein offener Punkt
+    (`collection_missing`) und der Deployment-Versuch entfällt, damit die
+    Ursache nicht als `package_deploy_failed` erscheint.
     Content-Verteilung an die DP-Gruppe, solange `Test-VsContentDistributed`
     den Content dort nicht sieht, auch für bestehende Apps; ein Fehlschlag ist
     ein offener Punkt (`package_content_failed`) und wird im nächsten

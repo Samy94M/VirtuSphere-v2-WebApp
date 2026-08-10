@@ -63,7 +63,16 @@ if (-not $api) {
 Write-VsClientLog "WebAPI: $api"
 
 # --- Alle IP-aktiven NICs durchprobieren ------------------------------------
-$macs = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled='True'" | Select-Object -ExpandProperty MACAddress)
+# Normalisiert, bevor die MAC den Rechner verlaesst: das WMI-Format
+# (Grossbuchstaben, Doppelpunkte) passt heute zufaellig zu dem, was das Portal
+# speichert. ConvertTo-VsNormalizedMac ist die gemeinsame Wahrheit (mac-vectors,
+# ADR-0029) und macht aus dem Zufall eine Zusage; client_staticip tut dasselbe.
+# Eine MAC, die sich nicht normalisieren laesst, hat kein 12-stelliges Hex und
+# kann in keiner Abfrage treffen.
+$macs = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled='True'" |
+    Select-Object -ExpandProperty MACAddress |
+    ForEach-Object { ConvertTo-VsNormalizedMac $_ } |
+    Where-Object { $_ })
 $data = $null
 $usedMac = $null
 foreach ($mac in $macs) {

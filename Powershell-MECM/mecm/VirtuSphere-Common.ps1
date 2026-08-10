@@ -161,7 +161,14 @@ function Write-VsLog {
         $line = '{0} | {1,-5} | {2} | {3} | {4} | {5}' -f (Get-Date -Format 'o'), $Level, $script:VsLogComponent, $Context, $Message, $script:VsCorrelationId
         $file = Join-Path $script:VsLogRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), $script:VsLogComponent)
         Add-Content -Path $file -Value $line -Encoding UTF8
-        Invoke-VsLogRetention
+        # Nicht bei jeder Zeile: der Device-Sync schreibt im 10-Sekunden-Takt,
+        # und die Retention machte je Zeile ein Test-Path plus ein Get-Content
+        # auf der Markerdatei. Das Faelligkeitsdatum steht deshalb in einer
+        # Skriptvariablen, die Markerdatei bleibt die prozessuebergreifende
+        # Wahrheit fuer den ersten Lauf des Tages.
+        if ($null -eq $script:VsLogRetentionNextCheck -or (Get-Date) -ge $script:VsLogRetentionNextCheck) {
+            Invoke-VsLogRetention
+        }
     } catch {
         # Logging darf den Hauptprozess nie stoppen. Der verschluckte Fehler ist
         # per -Debug sichtbar; ohne diese Zeile waere ein dauerhaft nicht
@@ -170,16 +177,26 @@ function Write-VsLog {
     }
 }
 
+# Naechster Zeitpunkt, zu dem Write-VsLog die Retention ueberhaupt anfassen
+# muss. $null heisst "noch nie geprueft" und faellt in den ersten Aufruf.
+$script:VsLogRetentionNextCheck = $null
+
 function Invoke-VsLogRetention {
     $marker = Join-Path $script:VsLogRoot 'last_cleanup.txt'
     $due = $true
     if (Test-Path $marker) {
         try {
             $last = [datetime](Get-Content $marker -ErrorAction Stop | Select-Object -First 1)
-            if (((Get-Date) - $last).TotalDays -lt 1) { $due = $false }
+            if (((Get-Date) - $last).TotalDays -lt 1) {
+                $due = $false
+                # Bis dahin muss auch der Prozess nicht mehr nachsehen: ein
+                # anderer Prozess hat heute schon aufgeraeumt.
+                $script:VsLogRetentionNextCheck = $last.AddDays(1)
+            }
         } catch { Write-Debug $_ }
     }
     if (-not $due) { return }
+    $script:VsLogRetentionNextCheck = (Get-Date).AddDays(1)
 
     try {
         $cutoff = (Get-Date).AddDays(-30)
@@ -661,9 +678,6 @@ function Test-VsTemplateScriptCurrent {
     return ($template -eq $package)
 }
 
-# Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
-# Strings, damit ein Tippfehler beim Aufruf sofort auffaellt; die Liste oben ist
-# die SSoT und wird von der Pester-Suite in beide Richtungen dagegen gehalten.
 # ---------------------------------------------------------------------------
 # MECM-Mitgliedschafts-Reconciliation (ADR-0034)
 # ---------------------------------------------------------------------------
@@ -718,6 +732,10 @@ function Get-VsMembershipPlan {
     return $plan
 }
 
+# Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
+# Strings, damit ein Tippfehler beim Aufruf sofort auffaellt;
+# $script:VsRunCauseVocabulary weiter oben ist die SSoT und wird von der
+# Pester-Suite in beide Richtungen dagegen gehalten.
 function Add-VsRunCause {
     param(
         [Parameter(Mandatory)]$Causes,

@@ -1029,6 +1029,42 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match '\$appliedStatic, \$appliedDhcp'
     }
 
+    It '<name> normalisiert jede MAC, bevor sie den Rechner verlaesst' -ForEach @(
+        @{ name = 'client_getinfo.ps1' }
+        @{ name = 'client_staticip.ps1' }
+    ) {
+        # Das WMI-Format passt heute zufaellig zu dem, was das Portal speichert.
+        # ConvertTo-VsNormalizedMac ist die gemeinsame Wahrheit (mac-vectors,
+        # drei Implementierungen) und macht aus dem Zufall eine Zusage; ohne sie
+        # sind zwei Schreibweisen desselben Adapters fuer das Portal zwei
+        # Adapter, und reportPhase authentisiert ueber genau diesen Wert.
+        $text = Get-ClientText -Name $name
+        $text | Should -Match 'ConvertTo-VsNormalizedMac'
+        # Kein roher MACAddress-Wert, der ohne Normalisierung weitergereicht wird.
+        $text | Should -Not -Match '(?m)^\s*\$macs\s*=\s*@\(Get-CimInstance[^\r\n]*MACAddress\)\s*$'
+    }
+
+    It 'Get-VsReportMac normalisiert auch die Fallback-MAC' {
+        # Der Registry-Wert ist normalisiert (client_getinfo schreibt ihn so),
+        # der WMI-Fallback war es nicht: derselbe Adapter kam je nach Pfad in
+        # zwei Schreibweisen beim Portal an.
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ClientCommon, [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-VsReportMac'
+        }, $true))
+        $fn.Count | Should -Be 1 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $fn[0].Body.Extent.Text | Should -Match 'ConvertTo-VsNormalizedMac'
+    }
+
+    It 'der Client-Logpfad kommt aus der Umgebung, nicht aus einem Literal' {
+        # Hart auf C:\Program Files verdrahtet, waehrend die Serverseite
+        # $env:ProgramFiles benutzt: auf einem System mit verschobenem
+        # Programmverzeichnis schrieb der Client neben alles andere.
+        $text = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
+        $text | Should -Match '\$script:VsLogDir\s*=\s*if \(\$env:ProgramFiles\)'
+        $text | Should -Not -Match "VsLogDir\s*=\s*'C:\\Program Files"
+    }
+
     It 'client_hostname meldet je Lauf hoechstens ein terminales Phasenereignis' {
         # Der Bereinigungszweig meldete 'failed', das Skript benannte die
         # Maschine trotzdem um, und derselbe Lauf meldete danach 'finished'. Was
