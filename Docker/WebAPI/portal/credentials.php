@@ -89,6 +89,7 @@ if (!can('credentials.manage', $user)) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
+    $redirect = 'credentials.php';
 
     try {
         $action = request_string($_POST, 'action');
@@ -175,6 +176,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'label' => __t('credentials.test_esxi_action'),
                 ]);
             } else {
+                // The System-status card reuses this exact handler rather than
+                // growing a second preflight implementation. The return token is
+                // a closed value, never a caller-provided URL (open redirects are
+                // impossible), and only the Ansible branch accepts it. Resolve it
+                // before the checks so validation and runtime errors return to the
+                // page that initiated the test as well.
+                $returnToAnsibleStatus = request_string($_POST, 'return_to') === 'ansible_status';
+                if ($returnToAnsibleStatus) {
+                    // Land at the page top so the one-shot result/technical detail
+                    // is visible. The flash action below leads back to this row.
+                    $redirect = 'system_status.php';
+                }
                 // The preflight also probes the portal return route, so it needs
                 // the configured API base URL (empty is fine: that check is then
                 // skipped, the tooling checks still run). The resolver THROWS when
@@ -227,7 +240,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 // Same shape as the ESXi branch above: a result whose fix lives on
                 // another page carries the way there.
-                flash_set($flashType, credentials_test_message($result), $detail, credentials_test_action($result));
+                $flashAction = credentials_test_action($result);
+                if ($returnToAnsibleStatus && $flashAction === null) {
+                    $flashAction = [
+                        'url' => system_status_url('credential-' . $id),
+                        'label' => __t('credentials.test_action_system_status'),
+                    ];
+                }
+                flash_set($flashType, credentials_test_message($result), $detail, $flashAction);
             }
         }
     } catch (ValidationException $exception) {
@@ -238,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('error', portal_error_message($exception));
     }
 
-    redirect_to('credentials.php');
+    redirect_to($redirect);
 }
 
 $credentials = repo_credentials($connection);

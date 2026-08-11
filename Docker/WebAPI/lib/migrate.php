@@ -1035,6 +1035,14 @@ SQL;
         migrator_add_index($db, 'deploy_vms', 'deploy_vms_os_install_watch', 'INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at)');
         migrator_out('0038: dedicated VM progress observation clocks added');
     },
+    '0039_ansible_activity_index' => function (mysqli $db): void {
+        // The System-status Ansible card derives actual mission history directly
+        // from deploy_jobs instead of duplicating it into the preflight state.
+        // Index that newest-per-credential read so the dashboard/status snapshot
+        // does not turn retained mission history into a growing table scan.
+        migrator_add_index($db, 'deploy_jobs', 'deploy_jobs_ansible_activity', 'INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id)');
+        migrator_out('0039: indexed Ansible mission activity for System status');
+    },
 ];
 
 try {

@@ -65,6 +65,7 @@ return [
     'test_esxi_action' => 'Ergebnis oder Konfiguration öffnen',
     'test_action_allowlist' => 'IP-Freigaben öffnen',
     'test_action_api_base_url' => 'Deploy-Einstellungen öffnen',
+    'test_action_system_status' => 'Ansible-Status anzeigen',
     'test_hint' => 'Ansible-Tests und ESXi-Inventarabrufe zeigen Ergebnis und Zeitpunkt dauerhaft im Systemstatus:',
     'test_hint_link' => 'Systemstatus',
     'trust_why' => 'Warum: HTTPS verschlüsselt die Verbindung, beweist ohne Zertifikatsprüfung aber nicht die Identität des Hosts. Ein Angreifer im LAN könnte sich sonst als ESXi ausgeben und das ESXi-Konto abgreifen.',
@@ -88,5 +89,5 @@ return [
     // Der Abruf ist ein Bereitstellungsauftrag: ohne laufenden Deploy-Dienst wird
     // er eingereiht und nie ausgeführt.
     'cadence_esxi_no_worker' => 'kein automatischer Abruf, der Bereitstellungsdienst läuft nicht',
-    'cadence_manual' => 'nur auf Klick, :days Tage gültig',
+    'cadence_manual' => 'manueller Volltest, nur auf Klick, :days Tage gültig',
 ];

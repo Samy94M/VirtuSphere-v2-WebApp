@@ -65,6 +65,7 @@ return [
     'test_esxi_action' => 'Open result or configuration',
     'test_action_allowlist' => 'Open IP allowlist',
     'test_action_api_base_url' => 'Open deploy settings',
+    'test_action_system_status' => 'Show Ansible status',
     'test_hint' => 'Ansible tests and ESXi inventory pulls keep their result and timestamp in System status:',
     'test_hint_link' => 'System status',
     'trust_why' => 'Why: HTTPS encrypts the connection, but without certificate verification it does not prove the host identity. An attacker on the LAN could otherwise impersonate ESXi and capture the ESXi account.',
@@ -88,5 +89,5 @@ return [
     // The pull is a deploy job: without a running deploy service it is queued and
     // never executed.
     'cadence_esxi_no_worker' => 'no automatic pull, the deploy service is not running',
-    'cadence_manual' => 'on click only, valid for :days days',
+    'cadence_manual' => 'manual full test, on click only, valid for :days days',
 ];

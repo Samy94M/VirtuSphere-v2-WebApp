@@ -15,7 +15,9 @@ const MARK = 'e2eint';
 function cleanup() {
   runPhp(`
 $db = db();
-$db->query("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
+$db->query("DELETE l FROM deploy_logs l INNER JOIN deploy_credentials c ON l.log_message LIKE CONCAT('tested credential id ', c.id, ':%') WHERE c.name LIKE '${MARK}%'");
+$db->query("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%') OR credential_ansible_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%') OR mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_ansible_preflight_state WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
 $db->query("DELETE FROM deploy_esxi_inventory_state WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
 $db->query("DELETE FROM deploy_credentials WHERE name LIKE '${MARK}%'");
 $db->query("DELETE FROM deploy_vlan WHERE vlan_name LIKE 'E2EVLAN-%'");
@@ -27,6 +29,79 @@ echo 'CLEANED';
 
 test.beforeAll(() => cleanup());
 test.afterAll(() => cleanup());
+
+// e2e-covers: system_status.php:test
+test('Ansible card separates an outdated full test from mission evidence and can retest in place', async ({ page }) => {
+  const seed = phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$credential = repo_create_credential($db, [
+    'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE,
+    'name' => '${MARK}-ansible-status',
+    'host' => '127.0.0.1',
+    'port' => 1,
+    'username' => 'ansible',
+], 'secret123', $admin);
+repo_ansible_preflight_record($db, $credential, VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK, null);
+$age = VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS + 1;
+$db->query('UPDATE deploy_ansible_preflight_state SET last_checked_at = DATE_SUB(NOW(), INTERVAL ' . $age . ' DAY) WHERE credential_id = ' . $credential);
+$mission = repo_create_mission($db, [
+    'mission_name' => '${MARK}-ansible-mission',
+    'hypervisor_datastorage' => 'ds1',
+    'hypervisor_datacenter' => 'DC1',
+    'domain' => 'seed.example.local',
+    'wds_vlan' => 'E2EVLAN-STATUS',
+], false, null);
+$status = VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED;
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, credential_ansible_id) VALUES (?, ?, ?)');
+$stmt->bind_param('isi', $mission, $status, $credential);
+$stmt->execute();
+echo 'JSON' . json_encode(['credential' => $credential, 'job' => (int) $db->insert_id]) . 'JSON';
+`, ['lib/repo/credentials.php', 'lib/repo/ansible_preflight.php', 'lib/repo/missions.php']);
+
+  await page.goto('system_status.php');
+  const row = page.locator('#ansible article.status-row').filter({ hasText: `${MARK}-ansible-status` });
+  await expect(row.locator('.status-row-head .badge')).toHaveText(/Test veraltet|Test outdated/);
+  await expect(row).toContainText(/Letzter beendeter Missionsauftrag|Last completed mission job/);
+  await expect(row).toContainText(/Erfolgreich|Succeeded/);
+  await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.job)}"]`)).toBeVisible();
+
+  const form = row.locator('form[action="credentials.php"]:has(input[name="return_to"][value="ansible_status"])');
+  await expect(form.getByRole('button', { name: /Volltest jetzt starten|Run full test now/ })).toBeVisible();
+
+  // Three facts plus the action must stay usable when the card collapses to a
+  // single-column mobile layout. This is the wrap boundary changed by the new
+  // operational-history fact, so prove geometry rather than only text.
+  await page.setViewportSize({ width: 360, height: 800 });
+  const geometry = await row.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      viewport: document.documentElement.clientWidth,
+      pageWidth: document.documentElement.scrollWidth,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1);
+  expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport);
+
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('credentials.php') && response.request().method() === 'POST'),
+    form.getByRole('button').click(),
+  ]);
+  await expect(page).toHaveURL(/system_status\.php$/);
+  await expect(page.locator('.alert-error').first(), 'the failed localhost SSH test reports its real outcome').toBeVisible();
+
+  const recorded = phpJson(`
+$db = db();
+$state = $db->query('SELECT last_status FROM deploy_ansible_preflight_state WHERE credential_id = ${Number(seed.credential)}')->fetch_assoc();
+$audit = $db->query("SELECT id FROM deploy_logs WHERE category = 'credentials' AND log_message LIKE 'tested credential id ${Number(seed.credential)}:%' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+echo 'JSON' . json_encode(['status' => $state['last_status'] ?? null, 'audited' => $audit !== null]) . 'JSON';
+`);
+  expect(recorded.status).toBe('failed');
+  expect(recorded.audited, 'the existing credential audit protocol is reused').toBe(true);
+});
 
 // e2e-covers: system_status.php:refresh_inventory
 test('refresh_inventory: the targeted refresh enqueues a system job for the credential', async ({ page }) => {

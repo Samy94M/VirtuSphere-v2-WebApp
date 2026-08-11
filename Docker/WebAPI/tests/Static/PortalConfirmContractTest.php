@@ -52,6 +52,7 @@ final class PortalConfirmContractTest extends TestCase
 
         // Read-only or idempotent refreshes.
         'credentials.php:test' => 'runs a diagnostic or queues a read-only inventory pull; no managed object is deleted',
+        'system_status.php:test' => 'delegates to the same non-destructive Ansible diagnostic from its status card',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
 

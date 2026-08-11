@@ -1,7 +1,7 @@
 # ADR-0013: Frontend Design Baseline
 
 Date: 2026-06-28
-Updated: 2026-07-25
+Updated: 2026-08-11
 Status: Accepted
 
 ## Context
@@ -21,6 +21,8 @@ Accessibility and responsiveness are part of the baseline, not add-ons:
 - Wide content (data tables) scrolls inside its own `.table-wrap`; grid/stack children carry `min-width: 0` so a wide table never forces the whole page to scroll horizontally. The page body must never scroll sideways on mobile.
 - Below the 860px breakpoint the left navigation collapses behind a header toggle (`[data-nav-toggle]` in `lib/layout.php`, handler in `assets/core.js`, styles in `layout.css`) so content is reachable without scrolling past the full nav. The toggle is a real button with `aria-expanded`; no inline handlers (CSP).
 - The base font is a local system-font stack (`system-ui, "Segoe UI", …`); no web-font download (air-gap/CSP).
+
+Operational status must name the evidence it actually represents. A badge is not a generic “works” verdict: its label and timestamp identify the check that produced it, while materially narrower runtime evidence is shown as a separate fact with its own outcome, time and diagnostic link. One signal must never silently refresh or recolour another. Staleness means missing current evidence, not failure, and is written that way; known failures do not age into neutral. Colour is never the only distinction. If an operator can repair or renew a state from the portal, the status row carries the permission-gated action and the existing audit/log route instead of requiring knowledge of another page.
 
 Restrained ("dezent") glassmorphism is part of the baseline (Paket D). A single token set in `base.css` (`--glass-bg`, `--glass-border`, `--glass-blur`, `--glass-shadow`, plus a subtle `--bg-accent-glow` body gradient, per theme) drives it — no scattered values. Glass (translucent background + `backdrop-filter`) applies only to the structural/chrome surfaces: sidebar, topbar, panels/cards, alerts and modals (`.modal-box`). **Data surfaces stay solid** — tables (`.table-wrap`) and form controls keep an opaque `--surface` background so contrast is unaffected. Rules: at most two stacked blur layers; both light and dark are styled and stay WCAG-AA on the glass; a `@supports not (backdrop-filter)` fallback swaps every glass surface back to opaque `--surface` (no grey haze). All assets stay local (no external blur/image); no inline styles.
 

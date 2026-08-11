@@ -11,6 +11,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/repo/ansible_activity.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/heartbeats.php';
@@ -57,6 +58,10 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
     }
 
     $preflightStates = repo_ansible_preflight_states($db);
+    // Actual mission history is a second, display-only signal. It never enters
+    // ansible_preflight_ampel(): a successful start/shutdown job does not prove
+    // the SFTP, callback and allowlist checks of the dedicated full test.
+    $missionJobs = repo_latest_completed_ansible_mission_jobs($db);
     $ansibleRows = [];
     $ansibleWorst = null;
     foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) as $credential) {
@@ -69,7 +74,12 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         if ($ansibleWorst === null || virtusphere_heartbeat_state_rank($state) > virtusphere_heartbeat_state_rank($ansibleWorst)) {
             $ansibleWorst = $state;
         }
-        $ansibleRows[] = ['credential' => $credential, 'state_row' => $stateRow, 'state' => $state];
+        $ansibleRows[] = [
+            'credential' => $credential,
+            'state_row' => $stateRow,
+            'state' => $state,
+            'last_mission_job' => $missionJobs[$credentialId] ?? null,
+        ];
     }
 
     $esxiRows = esxi_inventory_summaries($db);

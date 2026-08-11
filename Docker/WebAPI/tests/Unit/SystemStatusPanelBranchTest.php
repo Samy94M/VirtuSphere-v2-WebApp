@@ -186,16 +186,21 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.dev_template_badge'), $this->renderDeviations($entry, true));
     }
 
-    /** @param array<string,mixed>|null $stateRow */
-    private function renderAnsible(string $state, ?array $stateRow): string
+    /**
+     * @param array<string,mixed>|null $stateRow
+     * @param array<string,mixed>|null $lastMissionJob
+     * @param array<string,mixed>|null $user
+     */
+    private function renderAnsible(string $state, ?array $stateRow, ?array $lastMissionJob = null, ?array $user = null): string
     {
         $snapshot = ['ansible' => ['rows' => [[
             'credential' => ['id' => 5, 'name' => 'ansible-01', 'host' => '10.0.0.9'],
             'state_row' => $stateRow,
             'state' => $state,
+            'last_mission_job' => $lastMissionJob,
         ]]]];
         ob_start();
-        system_status_render_ansible($snapshot, ['id' => 1, 'role' => 'admin']);
+        system_status_render_ansible($snapshot, $user ?? ['id' => 1, 'role' => 'admin']);
 
         return (string) ob_get_clean();
     }
@@ -214,6 +219,49 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.ansible_allowlist_detail'), $html);
         self::assertStringNotContainsString(__t('system_status.ansible_failed_component', ['component' => 'allowlist']), $html);
         self::assertStringContainsString(__t('system_status.ansible_state_stale'), $html);
+        self::assertStringContainsString(__t('system_status.ansible_stale_detail', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]), $html);
+        self::assertStringContainsString('action="credentials.php"', $html);
+        self::assertStringContainsString('name="return_to" value="ansible_status"', $html);
+        self::assertStringContainsString('href="logs.php?tab=security&amp;category=credentials"', $html);
+    }
+
+    public function testMissionHistoryIsSeparateEvidenceAndNeverHidesAStaleFullTest(): void
+    {
+        $html = $this->renderAnsible(
+            'stale',
+            ['last_status' => 'ok', 'last_component' => null, 'last_checked_at' => '2026-07-01 10:00:00'],
+            [
+                'id' => 812,
+                'mission_name' => 'MISSION-ALPHA',
+                'status' => VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+                'updated_at' => '2026-08-11 08:09:10',
+            ]
+        );
+
+        self::assertStringContainsString(__t('system_status.ansible_state_stale'), $html);
+        self::assertStringContainsString(__t('system_status.ansible_job_succeeded'), $html);
+        self::assertStringContainsString(__t('system_status.ansible_job_identity', ['id' => 812, 'mission' => 'MISSION-ALPHA']), $html);
+        self::assertStringContainsString('href="deploy_log.php?id=812"', $html);
+    }
+
+    public function testARegularOperatorCanInspectTheJobButCannotStartTheCredentialTest(): void
+    {
+        $html = $this->renderAnsible(
+            'ok',
+            ['last_status' => 'ok', 'last_component' => null, 'last_checked_at' => '2026-08-11 08:09:10'],
+            [
+                'id' => 813,
+                'mission_name' => 'MISSION-BETA',
+                'status' => VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+                'updated_at' => '2026-08-11 08:10:11',
+            ],
+            ['id' => 2, 'role' => 'user']
+        );
+
+        self::assertStringContainsString(__t('system_status.ansible_job_cancelled'), $html);
+        self::assertStringContainsString('href="deploy_log.php?id=813"', $html);
+        self::assertStringNotContainsString('name="return_to" value="ansible_status"', $html);
+        self::assertStringNotContainsString('category=credentials', $html);
     }
 
     public function testAPreflightFailureStillNamesItsBrokenComponent(): void

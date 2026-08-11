@@ -29,6 +29,12 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 - **Provenienz:** gespeicherter Nachweis aus Ziel, Typ, MECM-ID, Herkunft, Akteur und Zeitpunkt. Nur dieser Nachweis erlaubt eine automatische Entfernung eigener veralteter Regeln.
 - **Reconciliation:** Vergleich von gewünschtem Zustand, eigener Provenienz und tatsächlich vorhandenem MECM-Zustand. Das Ergebnis ist ein Plan aus Hinzufügen, Entfernen, Bewahren und Konflikten.
 
+## Ansible-Nachweise
+
+- **Manueller Volltest:** auf Klick ausgeführter Gesamttest des gespeicherten Ansible-Zugangs: SSH, Toolchain, SFTP und – sofern konfiguriert – Portal-Rückweg samt IP-Allowlist. Er wird durch Missionsaufträge nicht erneuert.
+- **Test veraltet:** der letzte bestandene oder eingeschränkt bestandene Volltest liegt außerhalb des Gültigkeitsfensters. Das meldet keinen Defekt; der aktuelle Gesamtzustand ist unbekannt. Ein bekannter Fehlschlag bleibt dagegen rot.
+- **Letzter beendeter Missionsauftrag:** jüngster terminaler, einer Mission zugeordneter Job des Ansible-Zugangs. Er belegt nur den ausgeführten Modus und verweist auf dessen Auftragsprotokoll; missionslose Inventarjobs und laufende Aufträge zählen nicht.
+
 ## ESXi-Identität und Diagnose
 
 - **MOID:** Managed Object ID; aktueller Griff eines vSphere-Inventarobjekts. Sie kann sich bei erneuter Registrierung ändern und ist allein kein dauerhafter Identitätsbeweis.

@@ -96,6 +96,15 @@ Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.4). Die eigentlichen v
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
 erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
+Der Systemstatus benennt diesen Nachweis als **manuellen Volltest**. Nach dem
+Gültigkeitsfenster steht dort „Test veraltet": Das ist kein gemeldeter Fehler,
+sondern fehlender aktueller Gesamtnachweis. Ein erfolgreich beendeter
+Missionsauftrag steht mit Zeit und direktem Jobprotokoll getrennt daneben und
+erneuert den Volltest nicht, weil sein Modus nur einen Teil der Prüfkette
+ausgeführt haben kann. Der Volltest lässt sich direkt in derselben Zeile erneut
+starten; sein Audit bleibt unter Protokolle → Sicherheit, Kategorie
+`credentials`.
+
 ---
 
 ## Schritt 1: Stack hochfahren
