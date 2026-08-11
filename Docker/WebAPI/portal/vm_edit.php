@@ -483,6 +483,7 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
                 <?php foreach (array_values($disks) as $index => $disk) { render_disk_row($disk, $index, $canWrite); } ?>
             </div>
             <template data-template="disks"><?php render_disk_row(vm_default_disks()[0], '__INDEX__', true, true); ?></template>
+            <?php render_disk_type_hint(); ?>
         </section>
 
         <section class="panel">

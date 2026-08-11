@@ -101,6 +101,15 @@ return [
     'label_type' => 'Typ',
     'label_mac' => 'MAC',
     'label_size_gb' => 'Größe GB',
+    // Die Auswahl trug bisher die rohen Ansible-Werte (thin, thick,
+    // eagerzeroedthick). Der gespeicherte Wert bleibt der Token, sichtbar ist
+    // der VMware-Name. Die Erklärung steht im Hinweis darunter und nicht in der
+    // Option: ein Zusatz in Klammern wird in der geschlossenen Auswahl
+    // abgeschnitten und ist damit genau dort weg, wo entschieden wird.
+    'disk_type_thin' => 'Thin',
+    'disk_type_thick' => 'Thick',
+    'disk_type_eagerzeroedthick' => 'Eager Zeroed Thick',
+    'disk_type_hint' => 'Der Typ legt fest, wie ESXi den Platz auf dem Datastore belegt: Thin wächst mit dem Verbrauch, Thick belegt den Platz sofort und nullt jeden Block erst beim ersten Zugriff, Eager Zeroed Thick belegt ihn sofort und bringt ihn bereits genullt mit. Vorbelegt ist :default. Die Angabe wirkt nur beim Erstellen der VM; bei einer bereits erstellten Festplatte ändert eine Umstellung nichts.',
     'hotplug_heading' => 'Hot-Add (CPU/RAM)',
     'cpu_hotplug' => 'CPU-Hot-Add',
     'ram_hotplug' => 'RAM-Hot-Add',

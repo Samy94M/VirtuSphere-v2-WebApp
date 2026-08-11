@@ -86,7 +86,7 @@
                     "hotadd_memory": true,
                     "disks": [
                         { "size_gb": 100, "type": "thin" },
-                        { "size_gb": 50, "type": "thick" }
+                        { "size_gb": 50, "type": "eagerzeroedthick" }
                     ],
                     "network": [
                         { "name": "no", "device_type": "e1000" },
@@ -109,7 +109,7 @@
                     "hotadd_cpu": true,
                     "hotadd_memory": true,
                     "disks": [
-                        { "size_gb": 50, "type": "thick" }
+                        { "size_gb": 50, "type": "eagerzeroedthick" }
                     ],
                     "network": [
                         { "name": "no", "device_type": "vmxnet3" }

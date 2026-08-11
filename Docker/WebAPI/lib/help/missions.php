@@ -59,6 +59,21 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
+            <h2><?php echo h(__t('help_missions.disktype_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.disktype_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_missions.disktype_thin')); ?></li>
+                <li><?php echo h(__t('help_missions.disktype_thick')); ?></li>
+                <li><?php echo h(__t('help_missions.disktype_eager')); ?></li>
+            </ul>
+            <?php // Der vorbelegte Typ und die Zeitgrenze kommen aus ihren Konstanten:
+                  // beide stehen sonst als Zahl bzw. Name im Text und lügen, sobald
+                  // jemand die Konstante bewegt. ?>
+            <p><?php echo h(__t('help_missions.disktype_p2', ['default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type'])])); ?></p>
+            <p><?php echo h(__t('help_missions.disktype_p3', ['minutes' => intdiv(VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS, 60)])); ?></p>
+        </section>
+
+        <section class="panel">
             <h2><?php echo h(__t('help_missions.vm_delete_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.vm_delete_p1')); ?></p>
             <p><?php echo h(__t('help_missions.vm_delete_step1')); ?></p>

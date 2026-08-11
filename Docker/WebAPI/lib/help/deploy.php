@@ -54,10 +54,11 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.deploy_storage_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_storage_p1', [
-                // The default disk size with its unit, from the constant the
-                // creator actually applies, so the example and the default
-                // cannot drift apart.
+                // The default disk size with its unit and the default
+                // provisioning type, from the constants the creator actually
+                // applies, so the example and the default cannot drift apart.
                 'size' => VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'] . ' GB',
+                'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
             ])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_storage_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_storage_p3')); ?></p>

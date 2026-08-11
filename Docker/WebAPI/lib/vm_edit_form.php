@@ -199,11 +199,27 @@ function render_disk_row(array $disk, int|string $index, bool $canWrite, bool $t
         <label><?php echo h(__t('vm_edit.label_size_gb')); ?><input name="<?php echo $prefix; ?>[disk_size]" type="number" min="1" value="<?php echo h((string) ($disk['disk_size'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'])); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_type')); ?><select name="<?php echo $prefix; ?>[disk_type]" <?php echo $canWrite ? '' : 'disabled'; ?>>
             <?php foreach (VIRTUSPHERE_DISK_TYPES as $option) { ?>
-                <option value="<?php echo h($option); ?>" <?php echo $type === $option ? 'selected' : ''; ?>><?php echo h($option); ?></option>
+                <option value="<?php echo h($option); ?>" <?php echo $type === $option ? 'selected' : ''; ?>><?php echo h(disk_type_label($option)); ?></option>
             <?php } ?>
         </select></label>
         <?php if ($canWrite) { ?><button class="button button-danger" type="button" data-remove-row><?php echo h(__t('common.remove')); ?></button><?php } ?>
     </div>
+    <?php
+}
+
+/**
+ * Der Satz unter der Datenträgerliste. Die Auswahl selbst trägt nur noch
+ * sprechende Bezeichnungen; was hier fehlte, war die Vorbelegung und der
+ * Hinweis, dass der Typ eine bestehende Platte nicht mehr anfasst. Der
+ * vorbelegte Typ kommt aus der Konstante, nicht als ausgeschriebener Name:
+ * sonst nennt der Satz beim nächsten Wechsel den falschen.
+ */
+function render_disk_type_hint(): void
+{
+    ?>
+    <p class="hint"><?php echo h(__t('vm_edit.disk_type_hint', [
+        'default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
+    ])); ?></p>
     <?php
 }
 

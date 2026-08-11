@@ -10,7 +10,10 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'guest_id' => 'windows2019srv_64Guest',
     'disk_name' => 'System',
     'disk_size_gb' => 50,
-    'disk_type' => 'thick',
+    // Eager zeroed: blocks are pre-zeroed at creation, so the first write to a
+    // block carries no zeroing penalty. Creation itself takes correspondingly
+    // longer unless the array offloads it via VAAI Block Zero.
+    'disk_type' => 'eagerzeroedthick',
     'interface_mode' => 'dhcp',
     'interface_type' => 'vmxnet3',
     // CPU/RAM hot-add, enabled by default; only applied when a VM is created
@@ -111,6 +114,14 @@ const VIRTUSPHERE_POWERCYCLE_WAIT_MAX = 300;
 // which requires this file, so the bound cannot be written as an expression of
 // it); tests/Static/AnsiblePauseBudgetContractTest.php walks every pause
 // directive in Ansible/*.yml against the emitting constant and that budget.
+//
+// There are TWO layers above a pause, and this is the looser one. The
+// stale-heartbeat reaper gives up after VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+// well below MAX, so a long pause survives only because the transport's silence
+// tick keeps the job heartbeat fresh through a step that prints nothing. Raising
+// MAX is therefore not a decision about the SSH timeout alone: past the reap
+// window the pause rides on that one mechanism, and when it stops the job is
+// marked failed while the playbook keeps mutating the ESXi host.
 const VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT = 300;
 const VIRTUSPHERE_START_WAIT_SECONDS_MIN = 1;
 const VIRTUSPHERE_START_WAIT_SECONDS_MAX = 1500;
@@ -122,6 +133,29 @@ const VIRTUSPHERE_START_WAIT_SECONDS_MAX = 1500;
 // playbook so it is inside the same pause budget as the two configurable waits:
 // a pause nobody owns is a pause nothing checks.
 const VIRTUSPHERE_CREATE_SETTLE_SECONDS = 60;
+
+/**
+ * The operator-facing name of one provisioning type. The stored value is the
+ * token vmware_guest expects, and a bare `eagerzeroedthick` in a select tells a
+ * reader nothing about what the choice costs. Exhaustive match without a
+ * default, so a type added to VIRTUSPHERE_DISK_TYPES fails here loudly instead
+ * of reaching the form as a raw token again; DiskTypeLabelTest walks the
+ * constant against it.
+ *
+ * Reachable before the portal bootstrap (the workers load this file), so __t()
+ * is optional and the token itself is the fallback.
+ */
+function disk_type_label(string $type): string
+{
+    $key = match ($type) {
+        'thin' => 'vm_edit.disk_type_thin',
+        'thick' => 'vm_edit.disk_type_thick',
+        'eagerzeroedthick' => 'vm_edit.disk_type_eagerzeroedthick',
+    };
+    $label = function_exists('__t') ? __t($key) : $key;
+
+    return $label === $key ? $type : $label;
+}
 
 function virtusphere_guest_os_ids(): array
 {
