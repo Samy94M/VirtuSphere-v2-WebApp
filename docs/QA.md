@@ -98,11 +98,23 @@ End-to-end browser tests gate the Integration and Release lanes, never the PR-fa
 
 `Docker/WebAPI/tests/Integration/DeployJobReaperTest.php` exercises the real database path for stale running jobs. It creates only `phpunit_phase_c_*` missions, removes them in setup/teardown, and skips if unrelated running deploy jobs exist because the production reaper is intentionally global.
 
+`Docker/WebAPI/tests/Unit/DeployReapObserverGraceTest.php` pins the rule that a failure detector must not count silence it was not awake to observe: an observer that has just (re)connected is blind, an unset one counts as blind too, and the grace outlasts what a live worker needs to restore its heartbeat after the database returns while staying under the staleness window. That the gate cannot be bypassed is proven by the reaper integration tests, which all had to start declaring an observer; `MaintenanceReapTest` asserts both directions on the same job, and `DeployJobReaperTest` pins that the established cause travels into `last_error` and the job log while a caller without one keeps the bare observation.
+
+`Docker/WebAPI/tests/Static/CliRequireClosureContractTest.php` walks the require closure of every CLI entrypoint and fails on a call the closure does not define. A portal page may call `h()` without requiring `lib/layout.php`, because the bootstrap loaded it; a worker has no bootstrap. `lib/deploy_worker_outcome.php` called `repo_record_worker_result()` without requiring `lib/repo/heartbeats.php`, so the deploy worker never wrote its System status row and the page told the operator to restart a worker that was up and processing jobs. Nothing caught it: the report is wrapped in `catch (Throwable)` so an `Error` decayed into one STDERR line per minute, `PhaseCContractTest` pins the call and passes while the callee is missing, and `WorkerTrafficLightTest` requires `lib/maintenance_tasks.php`, which pulls the module in and made the broken entry point green. What counts as "our function" is every name `lib/` defines, never a prefix list; the three source-reachable but CLI-unreachable calls sit in `GUARDED` with their guard.
+
 The PHP container mounts `Docker/WebAPI` as `/var/www/html`, so schema baseline files outside that tree are checked from the host when relevant:
 
 ```powershell
 Select-String -Path Docker\mysql\mysql-init\struktur.sql -Pattern 'deploy_interfaces_mac_lookup'
 ```
+
+Three contract tests read above that mount (`VmProgressWatchContractTest`, `StatusWriterContractTest`, `E2eActionCoverageContractTest`: `struktur.sql` and the E2E specs). They **skip** in the container and only enforce in a run that sees the repo root, so a change to those files is proven by the command below, not by `composer test`:
+
+```powershell
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-v2-webapp-php ./vendor/bin/phpunit --no-coverage tests/Static tests/Unit
+```
+
+Skipping is the deliberate choice over failing: the documented container command has to stay green, or a lane that is always red is a lane nobody reads. What must never happen is the third option, passing. `file_get_contents()` on a missing path returns false, and an empty haystack makes every `assertStringNotContainsString()` vacuously true, so these tests ask `is_file()` first and assert the file is non-empty before scanning it.
 
 ## MECM Report Channel Coverage (reportRun + Site Health)
 
