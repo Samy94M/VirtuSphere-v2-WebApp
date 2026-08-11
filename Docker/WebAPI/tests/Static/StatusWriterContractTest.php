@@ -115,10 +115,15 @@ final class StatusWriterContractTest extends TestCase
      */
     public function testInitializingIsWrittenByNobodyAndIsNotTheStartingStage(): void
     {
-        $schema = (string) file_get_contents(dirname(__DIR__, 4) . '/Docker/mysql/mysql-init/struktur.sql');
-        if ($schema === '') {
+        // Asked before reading, not after: file_get_contents() on the missing
+        // path emitted a PHP warning on every container run, and a warning that
+        // is always there is one nobody reads when it finally means something.
+        $schemaPath = dirname(__DIR__, 4) . '/Docker/mysql/mysql-init/struktur.sql';
+        if (!is_file($schemaPath)) {
             self::markTestSkipped('Repo root not visible; struktur.sql only exists outside the container mount.');
         }
+        $schema = (string) file_get_contents($schemaPath);
+        self::assertNotSame('', $schema, 'struktur.sql is readable but empty; the regexes below would prove nothing');
 
         self::assertMatchesRegularExpression(
             "/vm_status VARCHAR\(64\) NOT NULL DEFAULT '" . preg_quote(VIRTUSPHERE_STATUS_REGISTERED, '/') . "'/",
