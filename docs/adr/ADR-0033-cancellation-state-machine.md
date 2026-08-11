@@ -44,6 +44,18 @@ the portal therefore showed a terminal job whose sequence was still executing:
   a repeated cancel POST is idempotent.
 - The legacy job_id-less callback path is untouched here; it falls with E3
   (Etappe 5b), not with this ADR.
+- **The reaper may only judge silence it was awake for** (amendment
+  2026-08-11). A stale heartbeat proves that nobody wrote, not that the worker
+  died: while the database was unreachable nothing could write, so the moment it
+  returns every running job looks abandoned. A process records when its current
+  connection was established and waits out
+  VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS before reaping; an observer
+  that was connected throughout was never blind and reaps without any delay.
+  The verdict names the cause it established, never one it assumed - the
+  convergence note claimed "the worker died before confirming" on a path that
+  is also reached with the worker alive. This is a bound on WHEN the reaper
+  speaks, not a change to the state machine above: a stale `cancelling` job
+  still converges to `cancelled`, never to `failed`.
 
 ## Consequences
 

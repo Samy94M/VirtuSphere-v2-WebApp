@@ -964,15 +964,25 @@ function repo_touch_deploy_job_heartbeat(mysqli $db, int $jobId, string $workerI
     return $stmt->execute() && $stmt->affected_rows === 1;
 }
 
-function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS): array
+/**
+ * @param string $cause What the caller established about the missing heartbeat,
+ *        appended to both messages. The bare "no heartbeat for N seconds" names
+ *        the mechanism that noticed, never what happened: a stopped service and
+ *        a database outage under a perfectly healthy worker produced the same
+ *        sentence, and the second one also invalidates the "the worker died"
+ *        clause of the cancellation message. Empty keeps the old wording for a
+ *        caller that genuinely cannot tell.
+ */
+function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, string $cause = ''): array
 {
     $staleAfterSeconds = max(60, $staleAfterSeconds);
     $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
     $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
     $failed = VIRTUSPHERE_DEPLOY_STATUS_FAILED;
     $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
-    $failedMessage = 'Reaped stale deploy job after missing heartbeat for ' . $staleAfterSeconds . ' seconds.';
-    $cancelledMessage = 'Cancellation converged by the reaper: the worker died before confirming (no heartbeat for ' . $staleAfterSeconds . ' seconds).';
+    $suffix = $cause === '' ? '' : ' ' . $cause;
+    $failedMessage = 'Reaped stale deploy job after missing heartbeat for ' . $staleAfterSeconds . ' seconds.' . $suffix;
+    $cancelledMessage = 'Cancellation converged by the reaper: no heartbeat for ' . $staleAfterSeconds . ' seconds.' . $suffix;
 
     return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $cancelled, $failedMessage, $cancelledMessage): array {
         $stmt = $db->prepare('SELECT id, mission_id, status, payload_json, credential_esxi_id, locked_by FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');

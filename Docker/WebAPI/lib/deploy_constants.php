@@ -59,6 +59,22 @@ const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
 const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
 const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
 
+// A failure detector must not count silence it was not awake to observe. While
+// the database was unreachable NOTHING could write a heartbeat, so at the moment
+// it returns every running job looks abandoned and the reaper cannot tell a dead
+// worker from its own blindness - it fails a healthy job whose playbook then
+// keeps running against ESXi under a terminal job row. Kubernetes' node
+// controller solves the same problem the same way, stopping evictions once too
+// large a share of nodes looks unhealthy at once.
+//
+// So a process that has just (re)connected waits this long before it reaps. The
+// value must outlast what a LIVE worker needs to restore its job heartbeat after
+// the database returns: its reconnect backoff (capped at 30 s) plus one
+// VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS, doubled for margin. It costs
+// nothing in the case that matters: an observer that has been connected all
+// along was never blind and reaps a genuinely dead worker without any delay.
+const VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS = 120;
+
 // SSH transport hardening (AP6). A remote command used to run with an
 // unbounded timeout, and a timed-out exec came back as exit 0. These four
 // constants are the SSoT for the bounded transport in lib/ssh.php:

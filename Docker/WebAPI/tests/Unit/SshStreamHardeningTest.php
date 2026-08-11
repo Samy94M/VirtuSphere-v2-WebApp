@@ -148,6 +148,38 @@ final class SshStreamHardeningTest extends TestCase
         self::assertLessThanOrEqual(VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS, VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS);
         self::assertGreaterThan(0, VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS);
 
+        // The tick is the only thing that reaches the heartbeat during a silent
+        // step, so a tick slower than the heartbeat cadence silently demotes the
+        // heartbeat to the tick's rate. deploy_constants.php has always SAID
+        // "must stay below HEARTBEAT_INTERVAL"; nothing enforced it, and the two
+        // were only ever compared against STALE_AFTER separately.
+        self::assertLessThan(
+            VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS,
+            VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS,
+            'a silence tick at or above the heartbeat interval sets the real heartbeat cadence'
+        );
+
+        // "Well inside" is a number, not a feeling: the reaper must survive
+        // several missed heartbeats, or one slow DB write ends a healthy job.
+        self::assertGreaterThanOrEqual(
+            5 * VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS,
+            VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+            'the reap window must tolerate several missed heartbeats, not just one'
+        );
+
+        // The transport tolerates silence far longer than the reaper does
+        // (1800 s vs 600 s today), so between those two numbers the ONLY thing
+        // keeping a live job alive is the tick above. That is a deliberate
+        // asymmetry - a clone or an eager-zeroed disk is legitimately silent for
+        // longer than the reap window - but it means the tick has no fallback,
+        // and a job reaped while its worker is still running keeps mutating ESXi
+        // under a terminal job row. Pinned so the asymmetry stays a decision.
+        self::assertGreaterThan(
+            VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+            VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
+            'if the transport gave up FIRST, the reaper would never see a live worker; that is a different design and needs its own decision'
+        );
+
         // SFTP upload bounds (AP6-Rest): both positive, and one file's per-op
         // timeout must fit inside the whole-directory budget, or the total cap
         // could never trip before a single operation already blew past it.

@@ -60,6 +60,21 @@ final class MaintenanceReapTest extends TestCase
         ], JSON_THROW_ON_ERROR);
         $jobId = $this->insertStaleRunningJob($missionId, [$importedVmId, $stuckVmId], $resultJson);
 
+        // A just-connected observer must NOT reap: while it was blind nothing
+        // could write a heartbeat, so every running job looks abandoned and a
+        // healthy one would be failed under a playbook that keeps running.
+        deploy_reap_observer_since(time());
+        maintenance_worker_reap_deploy_jobs($this->db);
+        self::assertSame(
+            VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+            $this->row('SELECT status FROM deploy_jobs WHERE id = ' . $jobId)['status'],
+            'a blind observer must leave the job alone'
+        );
+
+        // The reaper only trusts an observer that has been connected longer than
+        // its grace; an unset one counts as blind, which is the production
+        // default on a fresh connection. Declare this observer as long-established.
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
         maintenance_worker_reap_deploy_jobs($this->db);
 
         $job = $this->row('SELECT status, locked_by FROM deploy_jobs WHERE id = ' . $jobId);
@@ -85,6 +100,9 @@ final class MaintenanceReapTest extends TestCase
         $vmId = $this->insertVm($missionId, 'vm-live', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertStaleRunningJob($missionId, [$vmId], null, 0);
 
+        // Long-established observer, so this proves the freshness rule itself
+        // and not the blindness guard above it.
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
         maintenance_worker_reap_deploy_jobs($this->db);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, $this->row('SELECT status FROM deploy_jobs WHERE id = ' . $jobId)['status']);

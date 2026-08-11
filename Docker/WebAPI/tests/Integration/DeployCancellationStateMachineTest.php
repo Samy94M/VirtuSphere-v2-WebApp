@@ -168,6 +168,11 @@ final class DeployCancellationStateMachineTest extends TestCase
         $cancellingId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER, staleHeartbeat: true);
         $runningId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER, staleHeartbeat: true);
 
+        // The reaper only trusts an observer that has been connected longer than
+        // its grace; an unset one counts as blind, which is the production
+        // default on a fresh connection. Declare this observer as long-established.
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
+
         deploy_worker_reap_stale_jobs($this->db);
 
         // The operator asked for the cancel; a dead worker must not repaint

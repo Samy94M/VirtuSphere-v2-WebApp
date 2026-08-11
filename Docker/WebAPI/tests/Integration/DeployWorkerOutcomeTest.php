@@ -218,6 +218,11 @@ final class DeployWorkerOutcomeTest extends TestCase
         $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]), VIRTUSPHERE_DEPLOY_STATUS_RUNNING, true);
 
+        // The reaper only trusts an observer that has been connected longer than
+        // its grace; an unset one counts as blind, which is the production
+        // default on a fresh connection. Declare this observer as long-established.
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
+
         deploy_worker_reap_stale_jobs($this->db);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));

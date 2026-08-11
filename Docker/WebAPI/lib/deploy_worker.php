@@ -94,7 +94,13 @@ function deploy_worker_connect_db(array $options): mysqli
     while (true) {
         $attempt++;
         try {
-            return db(true);
+            $db = db(true);
+            // Every connect AND every reconnect: the gap in front of this
+            // moment was unobserved, so the reaper waits out its grace before
+            // it calls anybody else dead (deploy_reap_observer_is_blind).
+            deploy_reap_observer_since(time());
+
+            return $db;
         } catch (mysqli_sql_exception $exception) {
             if ($maxAttempts > 0 && $attempt >= $maxAttempts) {
                 throw $exception;

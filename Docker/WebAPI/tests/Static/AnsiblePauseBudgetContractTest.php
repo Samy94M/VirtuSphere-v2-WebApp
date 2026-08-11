@@ -170,6 +170,29 @@ final class AnsiblePauseBudgetContractTest extends TestCase
             self::assertGreaterThanOrEqual(1, (int) $bounds['min'], $variable . ': the pause module raises anything below 1 s to 1 s.');
             self::assertGreaterThanOrEqual((int) $bounds['min'], (int) $bounds['default'], $variable . ': the default is below its own minimum.');
             self::assertLessThanOrEqual((int) $bounds['max'], (int) $bounds['default'], $variable . ': the default is above its own maximum.');
+
+            // The SSH idle budget is not the closest layer above a pause. The
+            // stale-heartbeat reaper is, at VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+            // and today every registered maximum is allowed to exceed it: the
+            // pause is only survivable because the transport's silence tick keeps
+            // the job heartbeat fresh through a step that prints nothing. Naming
+            // that dependency here is the point - a pause beyond the reap window
+            // rides on ONE mechanism, and when it fails the job is marked failed
+            // while the playbook keeps running (see SshStreamHardeningTest).
+            if ((int) $bounds['max'] >= VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS) {
+                self::assertLessThan(
+                    VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+                    VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS,
+                    sprintf(
+                        '%s may be configured up to %d s, past the %d s reap window. That is only survivable while the '
+                        . 'silence tick refreshes the heartbeat; with the tick at %d s it does not.',
+                        $variable,
+                        (int) $bounds['max'],
+                        VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+                        VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS
+                    )
+                );
+            }
         }
     }
 

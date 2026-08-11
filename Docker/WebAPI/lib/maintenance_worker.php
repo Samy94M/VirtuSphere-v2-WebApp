@@ -81,7 +81,13 @@ function maintenance_worker_connect_db(array $options): mysqli
     while (true) {
         $attempt++;
         try {
-            return db(true);
+            $db = db(true);
+            // Same reason as in the deploy worker: this process could not
+            // observe anything before this moment, and the reaper it runs on
+            // its interval must not read that blind spot as a dead worker.
+            deploy_reap_observer_since(time());
+
+            return $db;
         } catch (mysqli_sql_exception $exception) {
             if ($maxAttempts > 0 && $attempt >= $maxAttempts) {
                 throw $exception;
