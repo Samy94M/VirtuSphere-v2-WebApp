@@ -94,6 +94,76 @@ final class DiskTypeLabelTest extends TestCase
         );
     }
 
+    /**
+     * A label helper only helps where it is called. The storage-demand
+     * paragraph of the deploy help interpolated VIRTUSPHERE_VM_DEFAULTS
+     * ['disk_type'] directly, so one sentence still said "eagerzeroedthick"
+     * while every other visible place said "Eager Zeroed Thick". Renderers are
+     * derived from their directories rather than listed, so a new help page or
+     * form module has to make the same decision.
+     */
+    public function testNoRendererInterpolatesTheRawDefaultToken(): void
+    {
+        $renderers = array_merge(
+            glob(dirname(__DIR__, 2) . '/lib/help/*.php') ?: [],
+            glob(dirname(__DIR__, 2) . '/lib/*_form.php') ?: [],
+            glob(dirname(__DIR__, 2) . '/portal/*.php') ?: []
+        );
+        self::assertNotSame([], $renderers, 'no renderer sources found, so this contract proved nothing');
+
+        $seen = 0;
+        foreach ($renderers as $path) {
+            foreach ($this->translationCalls((string) file_get_contents($path)) as $call) {
+                if (!str_contains($call, "VIRTUSPHERE_VM_DEFAULTS['disk_type']")) {
+                    continue;
+                }
+                $seen++;
+                self::assertStringContainsString(
+                    'disk_type_label(',
+                    $call,
+                    basename($path) . ' interpolates the stored provisioning token into visible text instead of its label'
+                );
+            }
+        }
+
+        self::assertGreaterThan(0, $seen, 'no visible text names the default provisioning type at all; the scan matched nothing');
+    }
+
+    /**
+     * The text of every __t() call in a source, so the check can ask what
+     * reaches a sentence rather than what the file merely mentions: the same
+     * constant is a legitimate *value* in the form state a few lines above.
+     *
+     * @return list<string>
+     */
+    private function translationCalls(string $source): array
+    {
+        $tokens = token_get_all($source);
+        $calls = [];
+        foreach ($tokens as $index => $token) {
+            if (!is_array($token) || $token[0] !== T_STRING || $token[1] !== '__t') {
+                continue;
+            }
+            $depth = 0;
+            $text = '';
+            for ($cursor = $index + 1, $total = count($tokens); $cursor < $total; $cursor++) {
+                $piece = is_array($tokens[$cursor]) ? $tokens[$cursor][1] : $tokens[$cursor];
+                if ($piece === '(') {
+                    $depth++;
+                } elseif ($piece === ')') {
+                    $depth--;
+                    if ($depth === 0) {
+                        break;
+                    }
+                }
+                $text .= $piece;
+            }
+            $calls[] = $text;
+        }
+
+        return $calls;
+    }
+
     /** The preselected type is one of the labelled ones, in both directions. */
     public function testTheDefaultTypeIsALabelledKnownType(): void
     {

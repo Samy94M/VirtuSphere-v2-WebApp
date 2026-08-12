@@ -109,7 +109,7 @@ return [
     'disk_type_thin' => 'Thin',
     'disk_type_thick' => 'Thick',
     'disk_type_eagerzeroedthick' => 'Eager Zeroed Thick',
-    'disk_type_hint' => 'The type decides how ESXi allocates the space on the datastore: Thin grows with actual use, Thick takes the space now and zeroes each block only on the first write, Eager Zeroed Thick takes it now and brings it already zeroed. The preselected value is :default. It only applies when the VM is created; for a disk that already exists, changing it does nothing.',
+    'disk_type_hint' => 'The type decides how ESXi allocates the space on the datastore: Thin grows with actual use, Thick reserves the space now and zeroes each block only on the first write, Eager Zeroed Thick reserves it now and brings it already zeroed. The preselected value is :default. It only applies when the VM is created; for a disk that already exists, changing it does nothing.',
     'hotplug_heading' => 'Hot-add (CPU/RAM)',
     'cpu_hotplug' => 'CPU hot-add',
     'ram_hotplug' => 'RAM hot-add',

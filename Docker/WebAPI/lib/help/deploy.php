@@ -57,8 +57,11 @@ declare(strict_types=1);
                 // The default disk size with its unit and the default
                 // provisioning type, from the constants the creator actually
                 // applies, so the example and the default cannot drift apart.
+                // The type goes through the label: the stored value is the
+                // vmware_guest token, and "eagerzeroedthick" in a sentence about
+                // storage demand tells a reader nothing.
                 'size' => VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'] . ' GB',
-                'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
+                'type' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
             ])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_storage_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_storage_p3')); ?></p>

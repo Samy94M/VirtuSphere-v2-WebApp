@@ -109,7 +109,7 @@ return [
     'disk_type_thin' => 'Thin',
     'disk_type_thick' => 'Thick',
     'disk_type_eagerzeroedthick' => 'Eager Zeroed Thick',
-    'disk_type_hint' => 'Der Typ legt fest, wie ESXi den Platz auf dem Datastore belegt: Thin wächst mit dem Verbrauch, Thick belegt den Platz sofort und nullt jeden Block erst beim ersten Zugriff, Eager Zeroed Thick belegt ihn sofort und bringt ihn bereits genullt mit. Vorbelegt ist :default. Die Angabe wirkt nur beim Erstellen der VM; bei einer bereits erstellten Festplatte ändert eine Umstellung nichts.',
+    'disk_type_hint' => 'Der Typ legt fest, wie ESXi den Platz auf dem Datastore belegt: Thin wächst mit dem Verbrauch, Thick reserviert den Platz sofort und nullt jeden Block erst beim ersten Schreibzugriff, Eager Zeroed Thick reserviert ihn sofort und bringt ihn bereits genullt mit. Vorbelegt ist :default. Die Angabe wirkt nur beim Erstellen der VM; bei einer bereits erstellten Festplatte ändert eine Umstellung nichts.',
     'hotplug_heading' => 'Hot-Add (CPU/RAM)',
     'cpu_hotplug' => 'CPU-Hot-Add',
     'ram_hotplug' => 'RAM-Hot-Add',
