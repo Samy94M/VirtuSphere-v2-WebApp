@@ -52,19 +52,35 @@ $mission = repo_create_mission($db, [
     'domain' => 'seed.example.local',
     'wds_vlan' => 'E2EVLAN-STATUS',
 ], false, null);
+// attempts = 1 is what makes this a job a worker actually claimed and ran.
+// Seeding the schema default would prove the card with a row that never
+// executed, which is exactly the display the reader now refuses.
 $status = VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED;
-$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, credential_ansible_id) VALUES (?, ?, ?)');
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, attempts, payload_json, credential_ansible_id, updated_at) VALUES (?, ?, 1, \'{"mode":"start"}\', ?, DATE_SUB(NOW(), INTERVAL 1 HOUR))');
 $stmt->bind_param('isi', $mission, $status, $credential);
 $stmt->execute();
-echo 'JSON' . json_encode(['credential' => $credential, 'job' => (int) $db->insert_id]) . 'JSON';
+$processed = (int) $db->insert_id;
+// Newer, but cancelled straight out of the queue: never claimed, never ran.
+// It must not become the evidence the operator reads.
+$cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, attempts, credential_ansible_id, updated_at) VALUES (?, ?, 0, ?, NOW())');
+$stmt->bind_param('isi', $mission, $cancelled, $credential);
+$stmt->execute();
+echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'never_ran' => (int) $db->insert_id]) . 'JSON';
 `, ['lib/repo/credentials.php', 'lib/repo/ansible_preflight.php', 'lib/repo/missions.php']);
 
   await page.goto('system_status.php');
   const row = page.locator('#ansible article.status-row').filter({ hasText: `${MARK}-ansible-status` });
   await expect(row.locator('.status-row-head .badge')).toHaveText(/Test veraltet|Test outdated/);
-  await expect(row).toContainText(/Letzter beendeter Missionsauftrag|Last completed mission job/);
+  await expect(row).toContainText(/Letzter vom Worker bearbeiteter Missionsauftrag|Last mission job processed by the worker/);
   await expect(row).toContainText(/Erfolgreich|Succeeded/);
+  // Which mode ran decides how much the row proves, so it has to be readable.
+  await expect(row).toContainText(/Modus start|Mode start/);
   await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.job)}"]`)).toBeVisible();
+  // The newer never-claimed job stays out of the card entirely: neither its
+  // outcome nor its log link may stand in for work that never happened.
+  await expect(row).not.toContainText(/Abgebrochen|Cancelled/);
+  await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.never_ran)}"]`)).toHaveCount(0);
 
   const form = row.locator('form[action="credentials.php"]:has(input[name="return_to"][value="ansible_status"])');
   await expect(form.getByRole('button', { name: /Volltest jetzt starten|Run full test now/ })).toBeVisible();

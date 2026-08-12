@@ -98,10 +98,11 @@ erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
 Der Systemstatus benennt diesen Nachweis als **manuellen Volltest**. Nach dem
 Gültigkeitsfenster steht dort „Test veraltet": Das ist kein gemeldeter Fehler,
-sondern fehlender aktueller Gesamtnachweis. Ein erfolgreich beendeter
-Missionsauftrag steht mit Zeit und direktem Jobprotokoll getrennt daneben und
-erneuert den Volltest nicht, weil sein Modus nur einen Teil der Prüfkette
-ausgeführt haben kann. Der Volltest lässt sich direkt in derselben Zeile erneut
+sondern fehlender aktueller Gesamtnachweis. Der letzte vom Worker bearbeitete
+Missionsauftrag steht mit Ausgang, Zeit und direktem Jobprotokoll getrennt
+daneben und erneuert den Volltest nicht, weil sein Modus nur einen Teil der
+Prüfkette ausgeführt haben kann. Ein Auftrag, der vor dem Start aus der
+Warteschlange abgebrochen wurde, erscheint dort nicht. Der Volltest lässt sich direkt in derselben Zeile erneut
 starten; sein Audit bleibt unter Protokolle → Sicherheit, Kategorie
 `credentials`.
 

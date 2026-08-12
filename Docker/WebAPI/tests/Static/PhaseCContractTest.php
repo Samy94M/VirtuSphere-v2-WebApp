@@ -164,10 +164,13 @@ final class PhaseCContractTest extends TestCase
 
         // The fetch-state category on the system status page is localized too,
         // rather than printing the raw VARCHAR of the state row. Read across all
-        // panel modules, so which module owns the ESXi card stays a layout
-        // decision instead of silently disarming this check.
+        // system-status modules, so which module owns the ESXi card stays a
+        // layout decision instead of silently disarming this check. The pattern
+        // deliberately stops at "system_status_" rather than "*panels.php": the
+        // Ansible mission-activity presenter left the panels file for its own
+        // module (Etappe 3) and would have fallen out of this surface.
         $systemStatus = '';
-        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/system_status_*panels.php') ?: [] as $panelModule) {
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/system_status_*.php') ?: [] as $panelModule) {
             $systemStatus .= (string) file_get_contents($panelModule);
         }
         self::assertNotSame('', $systemStatus, 'no system status panel module found');

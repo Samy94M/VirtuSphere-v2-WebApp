@@ -1038,8 +1038,8 @@ SQL;
     '0039_ansible_activity_index' => function (mysqli $db): void {
         // The System-status Ansible card derives actual mission history directly
         // from deploy_jobs instead of duplicating it into the preflight state.
-        // Index that newest-per-credential read so the dashboard/status snapshot
-        // does not turn retained mission history into a growing table scan.
+        // The reader walks it backwards per credential and stops at the first
+        // terminal row a worker claimed, so history cannot become a table scan.
         migrator_add_index($db, 'deploy_jobs', 'deploy_jobs_ansible_activity', 'INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id)');
         migrator_out('0039: indexed Ansible mission activity for System status');
     },

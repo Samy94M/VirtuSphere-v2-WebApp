@@ -58,13 +58,20 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
     }
 
     $preflightStates = repo_ansible_preflight_states($db);
+    $ansibleCredentials = repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
     // Actual mission history is a second, display-only signal. It never enters
     // ansible_preflight_ampel(): a successful start/shutdown job does not prove
     // the SFTP, callback and allowlist checks of the dedicated full test.
-    $missionJobs = repo_latest_completed_ansible_mission_jobs($db);
+    // The reader takes the credential ids this loop is about to render: one
+    // indexed lookup each beats a window function over the whole unpurged
+    // mission history, and the bound is visible right where it is paid.
+    $missionJobs = repo_latest_completed_ansible_mission_jobs(
+        $db,
+        array_map(static fn (array $credential): int => (int) $credential['id'], $ansibleCredentials)
+    );
     $ansibleRows = [];
     $ansibleWorst = null;
-    foreach (repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE) as $credential) {
+    foreach ($ansibleCredentials as $credential) {
         $credentialId = (int) $credential['id'];
         $stateRow = $preflightStates[$credentialId] ?? null;
         // Same derivation as the badge on the Credentials page. This used to be

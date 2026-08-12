@@ -33,7 +33,7 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 
 - **Manueller Volltest:** auf Klick ausgeführter Gesamttest des gespeicherten Ansible-Zugangs: SSH, Toolchain, SFTP und – sofern konfiguriert – Portal-Rückweg samt IP-Allowlist. Er wird durch Missionsaufträge nicht erneuert.
 - **Test veraltet:** der letzte bestandene oder eingeschränkt bestandene Volltest liegt außerhalb des Gültigkeitsfensters. Das meldet keinen Defekt; der aktuelle Gesamtzustand ist unbekannt. Ein bekannter Fehlschlag bleibt dagegen rot.
-- **Letzter beendeter Missionsauftrag:** jüngster terminaler, einer Mission zugeordneter Job des Ansible-Zugangs. Er belegt nur den ausgeführten Modus und verweist auf dessen Auftragsprotokoll; missionslose Inventarjobs und laufende Aufträge zählen nicht.
+- **Letzter vom Worker bearbeiteter Missionsauftrag:** jüngster terminaler, einer Mission zugeordneter Job des Ansible-Zugangs, den ein Worker mindestens einmal übernommen hat (`attempts > 0`). Er belegt nur den ausgeführten Modus und verweist auf dessen Auftragsprotokoll; missionslose Inventarjobs, laufende Aufträge und ein vor dem Start aus der Warteschlange abgebrochener Auftrag zählen nicht. Genannt werden der ausgeführte Modus und der **aktuelle** Missionsname, kein Namensschnappschuss des Laufs: nach einer Umbenennung steht dort der neue Name.
 
 ## ESXi-Identität und Diagnose
 

@@ -105,8 +105,8 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'Etappe 13',
     ],
     'Docker/WebAPI/lib/system_status_panels.php' => [
-        'lines' => 506,
-        'why' => 'MECM, site, Ansible and internal panels read separate sources',
+        'lines' => 464,
+        'why' => 'MECM, site and internal panels read separate sources; the Ansible mission-activity presenter already left for lib/system_status_ansible_activity.php (Etappe 3)',
         'stage' => 'Etappe 13',
     ],
     'Docker/WebAPI/portal/credentials.php' => [

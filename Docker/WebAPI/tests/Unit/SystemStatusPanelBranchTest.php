@@ -234,6 +234,7 @@ final class SystemStatusPanelBranchTest extends TestCase
                 'id' => 812,
                 'mission_name' => 'MISSION-ALPHA',
                 'status' => VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+                'payload_json' => '{"mode":"start"}',
                 'updated_at' => '2026-08-11 08:09:10',
             ]
         );
@@ -242,6 +243,9 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.ansible_job_succeeded'), $html);
         self::assertStringContainsString(__t('system_status.ansible_job_identity', ['id' => 812, 'mission' => 'MISSION-ALPHA']), $html);
         self::assertStringContainsString('href="deploy_log.php?id=812"', $html);
+        // A start job proves less than a full run, and the help says so; the row
+        // has to name which one it was or that sentence cannot be acted on.
+        self::assertStringContainsString(__t('system_status.ansible_job_mode', ['mode' => 'start']), $html);
     }
 
     public function testARegularOperatorCanInspectTheJobButCannotStartTheCredentialTest(): void

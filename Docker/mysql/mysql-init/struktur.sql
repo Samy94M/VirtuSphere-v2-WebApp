@@ -321,8 +321,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     INDEX deploy_jobs_mission_status (mission_id, status),
     INDEX deploy_jobs_schedule (status, scheduled_at),
     INDEX deploy_jobs_group (group_id),
-    -- System status reads the newest completed mission job per Ansible
-    -- credential. Completion time and id make that lookup deterministic.
+    -- System status reads the newest mission job a worker actually processed,
+    -- per Ansible credential: a backwards walk over this index that stops at
+    -- the first terminal row with attempts > 0. Completion time and id make
+    -- that lookup deterministic.
     INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id),
     CONSTRAINT fk_deploy_jobs_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_jobs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
