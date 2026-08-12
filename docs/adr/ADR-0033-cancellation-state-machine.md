@@ -56,6 +56,37 @@ the portal therefore showed a terminal job whose sequence was still executing:
   is also reached with the worker alive. This is a bound on WHEN the reaper
   speaks, not a change to the state machine above: a stale `cancelling` job
   still converges to `cancelled`, never to `failed`.
+- **The reap message states observation, never cause** (amendment 2026-08-12).
+  `deploy_job_reap_observation()` is the one wording, pure so it can be pinned
+  without a database, and it carries exactly what the transaction can see: job
+  id, heartbeat age against the limit that made it stale, `locked_by`, and the
+  transition. A caller with a further OBSERVATION may append it, labelled as
+  separate - the deploy worker appends whether a deploy service is reporting its
+  status row right now. That row identifies no process: a restart writes a fresh
+  one, so "reporting" does not establish that this job's owner survived and
+  "not reporting" does not establish that it died.
+- **`--once` never reaps** (amendment 2026-08-12). It connects and reaps
+  immediately, so it is always inside its own observer grace. This is a tool
+  contract, not a side effect: a one-shot run has observed nothing and has no
+  business concluding somebody else's job. A forced reap would need its own
+  named operator switch.
+- **A database outage during a run is not a job failure** (amendment
+  2026-08-12). The playbook executes on the Ansible host; the job log and the
+  heartbeat are a side channel, and a side channel must not end the run whose
+  exit code is the only remaining evidence about the VMs it created. Every write
+  of a running job goes through `DeployWorkerDbChannel`, which owns the live
+  connection (callbacks ask for the handle, they never capture one), announces
+  an outage exactly once on STDERR redacted, spools finished redacted log lines
+  in a bounded FIFO, and attempts at most one backed-off reconnect per tick so
+  the SSH stream keeps being read. After a reconnect the order is ownership,
+  heartbeat, spool - draining first would write into a job that was reaped and
+  re-claimed meanwhile. A job whose ownership is gone stops WITHOUT publishing a
+  result, because overwriting an established terminal state with a guess is
+  worse than the gap. When the remote command ends during the outage the loop
+  worker waits bounded for the database and finalizes exactly once; `--once`
+  stays bounded and reports the non-persistable outcome explicitly. This closes
+  the reaper's blind spot at its source: fewer heartbeat gaps to judge, and the
+  ones that remain are judged only by an observer that was awake.
 
 ## Consequences
 

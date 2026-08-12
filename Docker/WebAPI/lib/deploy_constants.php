@@ -75,6 +75,34 @@ const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
 // along was never blind and reaps a genuinely dead worker without any delay.
 const VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS = 120;
 
+// The database channel a running job writes through (lib/deploy_worker_db_channel.php).
+// A job log line and a job heartbeat are a SIDE channel: losing the database
+// while a playbook is executing on the Ansible host must not end the SSH stream,
+// because the remote work continues either way and its exit code is the only
+// thing that can still be learned about it.
+//
+// SPOOL_MAX_LINES bounds what the outage may cost in memory. Ansible with -vvv
+// can emit thousands of lines a minute, so an unbounded spool turns a database
+// restart into an OOM kill of the very process that is holding the job. The
+// oldest lines are dropped, not the newest: the tail is what explains how the
+// run ended, and the count of what fell out is reported as its own SYSTEM line,
+// so a gap is never silent.
+//
+// The backoff is per channel, doubling between BACKOFF_MIN and BACKOFF_MAX. It
+// exists so a callback attempts at most ONE reconnect per tick: a retry loop
+// inside a stream callback would stop reading the SSH channel, which is how a
+// database outage turns into a lost playbook.
+// Once the remote command has ENDED, the exit code exists only in this process,
+// so waiting for the database is worth more than failing fast - but only in the
+// loop worker, which is a service. `--once` is tooling and stays bounded by the
+// same three attempts its initial connect uses, then says out loud that the
+// outcome could not be persisted rather than pretending to have concluded.
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES = 2000;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MIN_SECONDS = 2;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MAX_SECONDS = 30;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE = 3;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP = 20;
+
 // SSH transport hardening (AP6). A remote command used to run with an
 // unbounded timeout, and a timed-out exec came back as exit 0. These four
 // constants are the SSoT for the bounded transport in lib/ssh.php:

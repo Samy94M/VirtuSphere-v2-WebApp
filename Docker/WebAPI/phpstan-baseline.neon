@@ -34,13 +34,13 @@ parameters:
 			message: '#^Comparison operation "\<" between int\<1, max\> and 1 is always false\.$#'
 			identifier: smaller.alwaysFalse
 			count: 1
-			path: lib/repo/deploy_jobs.php
+			path: lib/repo/deploy_job_input.php
 
 		-
 			message: '#^Offset ''vm_name'' on array\{id\: int, vm_name\: string\} on left side of \?\? always exists and is not nullable\.$#'
 			identifier: nullCoalesce.offset
 			count: 1
-			path: lib/repo/deploy_jobs.php
+			path: lib/repo/deploy_job_queue.php
 
 		-
 			message: '#^Strict comparison using \!\=\= between mixed and null will always evaluate to true\.$#'

@@ -23,11 +23,28 @@ Der Missionsnachweis wird direkt aus `deploy_jobs` gelesen: neuester terminaler 
 
 „Volltest jetzt starten“ im Systemstatus verwendet denselben CSRF-/RBAC-geschützten Handler wie die Seite Zugangsdaten. Das Ergebnis aktualisiert `deploy_ansible_preflight_state` und schreibt wie bisher genau eine Auditzeile in **Protokolle → Sicherheit**, Kategorie `credentials`; **Prüfprotokolle öffnen** führt dorthin. Missionsausgabe bleibt ausschließlich in `deploy_job_logs`, erreichbar über den direkten Link am Missionsnachweis.
 
+## Datenbankausfall, während ein Auftrag läuft
+
+Das Playbook läuft auf dem Ansible-Host, nicht im Worker. Auftragsprotokoll und Herzschlag sind ein Nebenkanal dieses Laufs, und ein Nebenkanal darf den Lauf nicht beenden: der Remote-Exitcode ist das Einzige, was über die bereits erzeugten VMs noch zu erfahren ist. Ein Datenbankausfall schließt den SSH-Stream deshalb nicht.
+
+Der Worker führt jeden Schreibzugriff eines laufenden Auftrags über einen Kanal, der die aktuell gültige Verbindung besitzt; die Callbacks fragen ihn bei jedem Zugriff nach dem Handle, statt eine Verbindung festzuhalten, die nach einem Reconnect tot wäre. Beobachtbar wird die Störung so:
+
+- Genau eine redigierte Zustandszeile je Störung im Containerlog (`docker compose logs deploy-worker`). Sie sagt ausdrücklich, dass der entfernte Lauf weiterläuft.
+- Fertige, bereits redigierte Protokollzeilen werden in einer größenbegrenzten FIFO gehalten (`VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES`). Nach der Rückkehr steht im Auftragsprotokoll zuerst eine SYSTEM-Zeile mit Ausfalldauer, Anzahl der gepufferten Zeilen und, falls die Grenze griff, der Anzahl der ältesten verworfenen Zeilen. Danach folgen die gepufferten Zeilen in ihrer ursprünglichen Reihenfolge.
+- Ein Reconnect wird höchstens einmal je Tick und nur bei fälligem Backoff versucht, damit das Lesen des SSH-Streams nicht stehen bleibt. Der dateibasierte Container-Heartbeat bleibt währenddessen aktuell, denn ein Worker, der einen Ausfall aussitzt, ist gesund.
+- Nach dem Reconnect ist die Reihenfolge fest: zuerst Ownership, dann Jobheartbeat, dann die Spool. Gehört der Auftrag inzwischen jemand anderem, wird der entfernte Lauf beendet, ohne ein Ergebnis zu schreiben; die gepufferten Zeilen werden verworfen, weil sie zu einem Lauf gehören, dessen Abschluss bereits ein anderer veröffentlicht hat.
+
+Endet der Remote-Befehl während der Störung, existiert sein Exitcode zunächst nur im Workerprozess. Der Loop-Worker wartet begrenzt auf die Datenbank, prüft die Ownership und finalisiert genau einmal. `deploy_worker.php --once` bleibt begrenzt und meldet auf STDERR ausdrücklich, dass dieser Ausgang nicht persistiert werden konnte und der Auftrag beansprucht bleibt. Missions- und Inventaraufträge verwenden denselben Kanal; es gibt keinen zweiten Reconnectpfad mit abweichendem Verhalten.
+
 ## Ein Auftrag, den die Aufsicht beendet hat
 
-Steht als letzter Fehler „Reaped stale deploy job after missing heartbeat", hat nicht der Auftrag versagt, sondern es kam für die Dauer des Fensters kein Herzschlag an. Der Satz dahinter nennt, was die Aufsicht dazu feststellen konnte: meldet sich der Bereitstellungsdienst weiterhin, ist er nicht gestorben, der Herzschlag blieb aus einem anderen Grund aus (meist eine kurz nicht erreichbare Datenbank), und der Playbook-Lauf kann auf dem Ansible-Host noch weiterlaufen. Dann ist ein Neustart des Dienstes die falsche Maßnahme; der Auftrag wird erneut ausgeführt, nachdem der Lauf beendet ist. Meldet sich der Dienst ebenfalls nicht mehr, ist er der Befund, und der Systemstatus zeigt ihn.
+Steht als letzter Fehler „Reaped stale deploy job", hat nicht der Auftrag versagt, sondern es kam über das Fenster `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` kein Herzschlag an. Die Meldung nennt ausschließlich Beobachtbares: Job-ID, Alter des letzten Herzschlags gegen dieses Limit, wer den Lock hielt und den daraus folgenden Übergang. Ein abbrechender Auftrag konvergiert dabei zu `cancelled`, ein laufender zu `failed`.
 
-Eine Aufsicht, die selbst gerade erst verbunden ist, urteilt nicht: sie kann in dieser Zeit einen toten Dienst nicht von ihrer eigenen Blindheit unterscheiden. Nach einem Neustart des Wartungsdienstes oder einem Datenbankausfall bleibt ein verwaister Auftrag deshalb kurz stehen, bevor er beendet wird. War die Aufsicht durchgehend verbunden, entsteht keine Verzögerung.
+Eine Ursache steht dort bewusst nicht. Ein ausbleibender Herzschlag beweist, dass niemand geschrieben hat, nicht warum. Der Deploy-Worker hängt einen ausdrücklich getrennten zweiten Satz an: ob sich in diesem Moment ein Bereitstellungsdienst über seine Statuszeile meldet. Das ist eine Aussage über jetzt, nicht über den Prozess, der den Auftrag hielt, denn ein Neustart erzeugt eine frische Statuszeile. „Meldet sich" beweist deshalb nicht, dass der damalige Besitzer überlebt hat, und „meldet sich nicht" nicht, dass er gestorben ist.
+
+Zuerst das Auftragsprotokoll und das Containerlog lesen, dann handeln: eine Zustandszeile des DB-Kanals im Containerlog erklärt die Stille ohne toten Worker, und der Lauf auf dem Ansible-Host kann noch aktiv sein. Ein Neustart des Dienstes ist keine Standardmaßnahme, sondern die Folge eines Befundes.
+
+Eine Aufsicht, die selbst gerade erst verbunden ist, urteilt nicht: sie kann in dieser Zeit einen toten Dienst nicht von ihrer eigenen Blindheit unterscheiden. Nach einem Neustart eines Workers oder einem Datenbankausfall bleibt ein verwaister Auftrag deshalb bis zu `VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS` stehen, bevor er beendet wird; das Containerlog zeigt diesen Holdoff einmal je Verbindung. War die Aufsicht durchgehend verbunden, entsteht keine Verzögerung. `deploy_worker.php --once` verbindet und reapt sofort, liegt damit immer im eigenen Grace-Fenster und beendet deshalb bewusst nie einen fremden Auftrag; ein erzwungenes Reaping bräuchte einen eigenen benannten Operatorschalter.
 
 ## Vor jeder Mutation: VM-Identität
 

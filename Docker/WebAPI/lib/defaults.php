@@ -144,6 +144,16 @@ const VIRTUSPHERE_CREATE_SETTLE_SECONDS = 60;
  *
  * Reachable before the portal bootstrap (the workers load this file), so __t()
  * is optional and the token itself is the fallback.
+ *
+ * The parameter is narrowed to the three SSoT tokens so the match is provably
+ * exhaustive without a default arm: PHPStan otherwise reports the open `string`
+ * remainder, and adding a default to silence it is exactly the silent fallback
+ * this function exists to prevent. The union is a second copy of
+ * VIRTUSPHERE_DISK_TYPES, so DiskTypeLabelTest reads this docblock and compares
+ * it against the constant; a fourth token then fails there and at every call
+ * site that passes it, instead of drifting.
+ *
+ * @param 'thin'|'thick'|'eagerzeroedthick' $type one of VIRTUSPHERE_DISK_TYPES
  */
 function disk_type_label(string $type): string
 {

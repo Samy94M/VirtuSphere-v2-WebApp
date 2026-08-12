@@ -20,7 +20,7 @@ final class DeployConvergenceContractTest extends TestCase
 
     public function testWorkerDemandsTheDbResultForExportSequencesOnly(): void
     {
-        $outcome = $this->source('lib/deploy_worker_outcome.php');
+        $outcome = $this->workerSource();
 
         // The mode predicate is derived from the playbook sequence, never a
         // second hand-kept list; the verdict comes from the DB, never stdout.
@@ -41,34 +41,41 @@ final class DeployConvergenceContractTest extends TestCase
         // decisions must live in the requireable module - a decision inlined
         // back into deploy_worker.php would be unreachable for the integration
         // tests that prove the matrix.
-        $worker = $this->source('lib/deploy_worker.php');
+        $worker = $this->workerSource();
         self::assertStringContainsString("require_once __DIR__ . '/deploy_worker_outcome.php'", $worker);
-        self::assertStringContainsString('deploy_worker_conclude_sequence($db, $job, $workerId, $vmIds, $priorLifecycles)', $worker);
+        // Since the DB channel (Masterplan Etappe 2) the handle is asked for at
+        // the call, never carried: a `$db` captured before a long remote step is
+        // a dead mysqli object after a reconnect, and handing it to the outcome
+        // layer would throw exactly where the job's only result gets written.
+        self::assertStringContainsString('deploy_worker_conclude_sequence($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles)', $worker);
         // The claim-time marking must feed the restore, or a green create/start
         // job leaves `deploying` VMs for the sweep to falsely fail.
         self::assertStringContainsString('$priorLifecycles = deploy_worker_mark_vms_deploying(', $worker);
         // The stop reason travels with it: "cancelled", "the row is gone" and
         // "somebody else concluded it" are the same stop but not the same finding,
         // and the log line is the only place that difference can survive.
-        self::assertStringContainsString('deploy_worker_handle_cancelled($db, $job, $vmIds, $cancelled->getMessage())', $worker);
+        self::assertStringContainsString('deploy_worker_handle_cancelled($channel->connection(), $job, $vmIds, $cancelled->getMessage())', $worker);
         // The ownership check itself lives in the requireable module too, or the
         // four states it distinguishes would again be unreachable for a test.
-        self::assertStringContainsString('function deploy_worker_assert_job_is_ours', $this->source('lib/deploy_worker_outcome.php'));
-        self::assertStringNotContainsString('function deploy_worker_assert_job_is_ours', $worker);
+        self::assertStringContainsString('function deploy_worker_assert_job_is_ours', $this->workerSource());
+        self::assertStringNotContainsString('function deploy_worker_assert_job_is_ours', $this->source('lib/deploy_worker.php'));
         // Since B6 the message leaves through the secret redactor first; the
         // handler call itself stays in the entrypoint's catch.
-        self::assertStringContainsString('deploy_worker_handle_failure($db, $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]))', $worker);
-        self::assertStringNotContainsString('VIRTUSPHERE_DEPLOY_STATUS_PARTIAL', $worker);
+        self::assertStringContainsString('deploy_worker_handle_failure($channel->connection(), $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]))', $worker);
+        // The partial verdict belongs to the outcome layer; neither the CLI
+        // shell nor either job processor may decide it on its own.
+        foreach (['lib/deploy_worker.php', 'lib/deploy_worker_loop.php', 'lib/deploy_worker_mission.php', 'lib/deploy_worker_inventory.php'] as $entry) {
+            self::assertStringNotContainsString('VIRTUSPHERE_DEPLOY_STATUS_PARTIAL', $this->source($entry), $entry);
+        }
     }
 
     public function testFailureMarkingIsSelectiveAndSetsMecmStateWithLifecycle(): void
     {
-        $outcome = $this->source('lib/deploy_worker_outcome.php');
+        $outcome = $this->workerSource();
 
         // The blanket "all VMs failed" path is gone; successful_vm_ids from the
         // committed import keep their deployed state on a late follow-up error.
         self::assertStringNotContainsString('deploy_worker_mark_mission_vms', $outcome);
-        self::assertStringNotContainsString('deploy_worker_mark_mission_vms', $this->source('lib/deploy_worker.php'));
         self::assertStringContainsString("\$keepVmIds = \$macResult !== null ? \$macResult['successful_vm_ids'] : []", $outcome);
         self::assertStringContainsString('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated_at = NOW() WHERE id = ?', $outcome);
 
@@ -78,9 +85,9 @@ final class DeployConvergenceContractTest extends TestCase
 
     public function testCancelConvergesOnlyStillDeployingVms(): void
     {
-        $outcome = $this->source('lib/deploy_worker_outcome.php');
+        $outcome = $this->workerSource();
 
-        self::assertStringContainsString('catch (DeployWorkerCancelled', $this->source('lib/deploy_worker.php'));
+        self::assertStringContainsString('catch (DeployWorkerCancelled', $this->workerSource());
         self::assertStringContainsString("cancelled while deploying', \$vmIds, [], true)", $outcome);
         self::assertStringContainsString("\$lifecycle !== VIRTUSPHERE_LIFECYCLE_DEPLOYING", $outcome);
         // The reaper keeps VMs whose import already committed.
@@ -100,7 +107,7 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('repo_sweep_orphaned_deploying_vms($db)', $maintenance);
         self::assertStringContainsString('VIRTUSPHERE_LOG_CATEGORY_DEPLOY', $maintenance);
 
-        $repo = $this->source('lib/repo/deploy_jobs.php');
+        $repo = $this->deployJobRepoSource();
         self::assertStringContainsString('function repo_sweep_orphaned_deploying_vms', $repo);
         // Only deploying orphans: an ACTIVE job (the SSoT set, cancelling
         // included since ADR-0033) protects its mission's VMs, and the sweep
@@ -121,7 +128,7 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString("maintenance_worker_due(\$state, 'deploy-job-reap', VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS", $maintenance);
         self::assertStringContainsString('deploy_worker_reap_stale_jobs($db)', $maintenance);
         self::assertStringNotContainsString('repo_reap_stale_deploy_jobs', $maintenance);
-        self::assertStringContainsString('deploy_worker_reap_stale_jobs($db)', $this->source('lib/deploy_worker.php'));
+        self::assertStringContainsString('deploy_worker_reap_stale_jobs($db)', $this->workerSource());
     }
 
     public function testPlaybookExecIsBoundedAndHeartbeatIsTimeBased(): void
@@ -135,7 +142,7 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('idle timeout', $ssh);
         self::assertStringContainsString('total time limit', $ssh);
 
-        $worker = $this->source('lib/deploy_worker.php');
+        $worker = $this->workerSource();
         self::assertStringContainsString('$heartbeatOnSilence', $worker);
         self::assertStringContainsString('ansible_step_failure_suffix($currentStep)', $worker);
 
@@ -186,5 +193,47 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertFileExists($path);
 
         return (string) file_get_contents($path);
+    }
+
+    /**
+     * The deploy worker is a facade plus domain modules (ADR-0006 amendment
+     * 2026-08-11): CLI shell, the two job processors, stream logging, runtime,
+     * VM state, reaper and outcome. Every positive assertion about "the worker
+     * does X" therefore reads the whole owner set, because a contract pinned to
+     * one filename stops guarding the moment its subject moves. A negative
+     * assertion of the form "this must NOT be inlined into the entrypoint"
+     * deliberately keeps naming that one file, since that is what it means.
+     */
+    private function workerSource(): string
+    {
+        require_once dirname(__DIR__, 2) . '/lib/deploy_worker_modules.php';
+
+        $source = '';
+        foreach (VIRTUSPHERE_DEPLOY_WORKER_MODULES as $module) {
+            $source .= $this->source($module) . "\n";
+        }
+        self::assertNotSame('', $source, 'the deploy worker module registry produced no source.');
+
+        return $source;
+    }
+
+    /**
+     * The deploy job repository is a facade over domain modules (ADR-0006
+     * amendment 2026-08-11). Reading the facade alone would leave every
+     * assertion below silently unchecked after the split, so this walks the
+     * owner registry; DeployJobRepoFacadeContractTest keeps that registry and
+     * the filesystem in agreement.
+     */
+    private function deployJobRepoSource(): string
+    {
+        require_once dirname(__DIR__, 2) . '/lib/repo/deploy_job_modules.php';
+
+        $source = '';
+        foreach (VIRTUSPHERE_DEPLOY_JOB_REPO_MODULES as $module) {
+            $source .= $this->source($module) . "\n";
+        }
+        self::assertNotSame('', $source, 'the deploy job repo module registry produced no source.');
+
+        return $source;
     }
 }

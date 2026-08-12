@@ -1,14 +1,20 @@
 # Masterplan: Deploy-Zuverlässigkeit, Fehlerherkunft und Portal-UX
 
-Stand: 2026-08-11, zusammengeführte ausführbare Fassung nach Repository-Review und Online-Faktenprüfung.
+Stand: 2026-08-12, zusammengeführte ausführbare Fassung nach Repository-Review, Online-Faktenprüfung und Integration des Joblog-/Abbruch-/Protokollreviews.
 
-Dieser Masterplan verbindet drei bisher getrennte Arbeitsstränge:
+Dieser Masterplan verbindet vier bisher getrennte Arbeitsstränge. Die ursprüngliche Fassung führte zunächst diese drei zusammen:
 
 1. die Korrektur der im Review gefundenen Lücken an Reaper/DB-Ausfall, Ansible-Aktivitätsnachweis, CLI-SSoT, Festplattentexten, Doku und Fast-Gate;
 2. die bereits detailliert geplante eindeutige Fehlerherkunft des ESXi-Inventar-Abrufs;
 3. den kritisch geprüften UX-Plan für verständliche Zustände, handlungsfähige Deploy-Blocker, barrierearme Formulare, Operatorfilter und reproduzierbare visuelle QA.
 
-Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Erst anschließend werden Portalvokabular, Bedienung und Design geändert, damit die UX keine noch instabilen Betriebsverträge kaschiert. Diese Datei ersetzt getrennte Restlisten und die vorherigen Fassungen als ausführende SSoT vollständig; der geprüfte UX-Einzelplan bleibt nur als ausführliche Reviewspur erhalten.
+Mit der Erweiterung vom 2026-08-12 kommt als vierter Arbeitsstrang hinzu:
+
+4. Datenkorrektheit und Bedienbarkeit des Bereitstellungsprotokolls, tatsächlich wirksame Abbruchgrenzen, eine eindeutige Terminalergebnis-SSoT, durchgängige Secret-/Ausgabehärtung sowie konsistente Audit-, CSV- und PowerShell-Protokolle.
+
+Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Nach Etappe 10 schließen die Ergänzungsetappen 10A–10D die Terminal-, Joblog- und Protokollverträge, bevor die bestehenden UX-Etappen 11–17 darauf aufbauen. So kaschiert die UX weder einen unvollständig gelesenen Logtail noch einen Abbruch, den der Worker technisch noch nicht einhalten kann. Diese Datei ersetzt getrennte Restlisten und die vorherigen Fassungen als ausführende SSoT vollständig; die geprüften Einzelpläne und Befundtexte bleiben nur als ausführliche Reviewspur erhalten.
+
+Die Erweiterung ändert den bereits ausgeführten Verlauf nicht: Etappe 1 bleibt mit ihrer vorhandenen grünen Abnahme abgeschlossen. Etappe 2 war am 2026-08-12 bereits begonnen und behält ihren DB-/Reaper-Umfang; die neuen Playbook-Abbruchgrenzen gehören in die noch ausstehende Etappe 8, die neuen Portal-/Protokollverträge in 10A–10D. Bereits grün nachgewiesene Hunks werden weder wiederholt noch umnummeriert.
 
 ---
 
@@ -21,18 +27,18 @@ Der Arbeitsbaum ist parallel verändert. Vor jeder Etappe gilt deshalb:
 1. `git status --short` lesen.
 2. Den ungestageten Diff jeder betroffenen Datei und besonders der betroffenen Funktion lesen.
 3. Fremde Änderungen erhalten; keine Datei auf einen früheren Stand zurücksetzen.
-4. Nur eigene Hunks stagen, falls die ausführende Sitzung ausdrücklich committen soll.
+4. Nur eigene, der aktuellen Etappe eindeutig zugeordnete Hunks stagen. Der Commit/Push-Abschluss nach grün abgenommener Etappe ist für die ausführende Sitzung verpflichtend.
 5. `git add -A`, `git reset --hard` und ein pauschales Checkout veränderter Dateien sind ausgeschlossen.
 
 Aktuell überlappen unter anderem `lib/deploy_constants.php`, `lib/deploy_worker.php`, `lib/deploy_worker_outcome.php`, die DE/EN-Dateien für `help_deploy`, `help_system_status` und `system_status`, `SshStreamHardeningTest.php`, `SystemStatusPanelBranchTest.php`, `docs/CHANGELOG.md` und `docs/operations/esxi-inventory.md`. Auch die nur gelesenen Breitenquellen `struktur.sql` und `lib/migrate.php` sind bereits verändert. Diese Liste ist nur ein Startpunkt; maßgeblich ist immer der dann aktuelle Diff.
 
 Es gibt keine akzeptierten roten Tests und keine feste Testanzahl. Der kanonische Runner ist `scripts/check.ps1`. Die Fast-Lane führt Unit/Static bereits mit vollem Repo-Mount und `--fail-on-skipped` aus; ein zweiter identischer Repo-Root-Lauf ist kein zusätzlicher Nachweis.
 
-Eine Etappe ist nur abgeschlossen, wenn Code/SSoT, passende Tests, sichtbare Texte und Hilfe, technische und betriebliche Dokumentation sowie betroffene Protokoll-/Logpfade innerhalb **derselben Etappe** zusammenpassen. Hilfe, Doku, Changelog, ADR/Runbook, Audit, Joblog, Containerlog oder Wire-Vertrag sind keine nachgelagerte Sammelarbeit. Was eine Etappe fachlich verändert, wird in dieser Etappe vollständig nachgezogen und abgenommen. Ist ein Bereich nachweislich nicht betroffen, trägt das Abnahmeprotokoll dafür `nicht betroffen` samt kurzer Begründung; ein leeres Feld ist kein Nachweis.
+Eine Etappe ist nur abgeschlossen, wenn Code/SSoT, passende Tests, sichtbare Texte und Hilfe, technische und betriebliche Dokumentation sowie betroffene Protokoll-/Logpfade innerhalb **derselben Etappe** zusammenpassen und der geprüfte Etappenstand anschließend sauber committed und erfolgreich zum vorgesehenen Upstream gepusht wurde. Hilfe, Doku, Changelog, ADR/Runbook, Audit, Joblog, Containerlog oder Wire-Vertrag sind keine nachgelagerte Sammelarbeit. Was eine Etappe fachlich verändert, wird in dieser Etappe vollständig nachgezogen und abgenommen. Ist ein Bereich nachweislich nicht betroffen, trägt das Abnahmeprotokoll dafür `nicht betroffen` samt kurzer Begründung; ein leeres Feld ist kein Nachweis.
 
 ### Verbindlicher Etappenabschluss
 
-Nach **jeder** Etappe wird die Umsetzung angehalten und gegen den Plan geprüft. Erst ein grüner Soll/Ist-Abgleich gibt die nächste Etappe frei:
+Nach **jeder** Etappe wird die Umsetzung angehalten und gegen den Plan geprüft. Erst ein grüner Soll/Ist-Abgleich zusammen mit dem bestätigten Commit-/Push-Abschluss gibt die nächste Etappe frei:
 
 1. Die Anforderungen und Negativabgrenzungen der Etappe erneut lesen und jede einzelne als umgesetzt, getestet oder begründet nicht betroffen markieren.
 2. `git status --short` und den vollständigen Diff der Etappe lesen; dabei auch neu entstandene Dateien, indirekte Aufrufer, Spiegel/SSoT-Verbraucher und versehentlich mitgeänderte Fremdhunks prüfen.
@@ -41,8 +47,58 @@ Nach **jeder** Etappe wird die Umsetzung angehalten und gegen den Plan geprüft.
 5. Audit-, Job-, Container- und Fehlerlogs sowie technische Protokolle/Wire-Contracts prüfen: Quelle und Kategorie, Wortlaut und Ursache, Redigierung von Secrets, RBAC/Deep-Link, Retention, Maschinenvertrag und Rückwärtskompatibilität. Notwendige Änderungen gehören in dieselbe Etappe; bei unverändertem Vertrag wird auch das als geprüft festgehalten.
 6. Die gezielten positiven, negativen und Zero-Match-Tests der Etappe ausführen. Mehrteilige Runner folgen der `[n/total] RUN`-/`[n/total] PASS|FAIL`-Vorgabe aus `AGENTS.md`; bei gepufferter Ausgabe wird blockweise ausgeführt oder der Fortschritt beobachtbar gepollt.
 7. Das Abnahmeprotokoll mit Soll/Ist-Nachweis, Testnachweis, Help/Doku-Nachweis und Logs/Protokolle-Nachweis fortführen. Entdeckte Lücken werden noch in derselben Etappe geschlossen und erneut geprüft, nicht auf eine spätere Etappe oder den Gesamtabgleich verschoben.
+8. Erst nach diesem vollständigen grünen Nachweis den Commit-/Push-Abschluss aus dem folgenden Abschnitt durchführen. Die nächste Etappe bleibt bis zur bestätigten Upstream-Synchronität gesperrt.
 
 Der Gesamtabgleich am Ende ist damit eine unabhängige Gegenprüfung, keine vorgesehene Reparaturphase. Findet er eine Lücke, wird die verursachende Etappe wieder geöffnet, korrigiert und mit ihren gezielten Nachweisen erneut abgenommen.
+
+### Verbindlicher Commit-/Push-Abschluss je Etappe
+
+„Sauber committed und gepusht“ bedeutet einen reproduzierbaren Etappenstand, nicht lediglich einen erfolgreichen `git commit`-Aufruf:
+
+1. Commit und Push beginnen ausschließlich nach dem vollständigen grünen Etappenabschluss. Rote, übersprungene oder noch ausstehende Anforderungen, Tests, Help-/Doku-/Log-/Protokollfelder verbieten den Commit ebenso wie ein nicht geklärter Soll/Ist-Befund.
+2. Unmittelbar davor werden `git status --short`, `git diff --check`, der vollständige ungestagete Diff und alle neuen Dateien erneut gelesen. Eigene Etappen-Hunks werden über explizite Pfade beziehungsweise bei überlappenden Dateien hunkgenau gestaged; `git add -A`, pauschales Staging eines Verzeichnisses und die Mitnahme fremder Änderungen bleiben verboten.
+3. Der Index wird mit `git diff --cached --check`, `git diff --cached --stat` und dem vollständigen `git diff --cached` geprüft. Er enthält genau Code, Migration/Fresh-Schema, Tests, Help, Doku, Changelog, Agentregeln sowie Log-/Protokollanpassungen dieser Etappe, aber keine Secrets, lokalen QA-Ausgaben, Screenshots mit realen Daten, temporären Dateien oder fachfremden Hunks.
+4. Ein verbliebener eigener, für die Etappe notwendiger Hunk bedeutet, dass die Etappe nicht vollständig ist. Verbleibende fremde Änderungen dürfen den Commit nicht blockieren, werden aber mit Pfad/Hunk als bewusst nicht enthalten protokolliert. „Sauber“ bezieht sich in einem parallelen Arbeitsbaum auf die vollständige Eigentumsmenge der Etappe, nicht auf einen künstlich global leeren Worktree.
+5. Im Normalfall entsteht genau ein Etappenabschluss-Commit mit einer konkreten deutschen Nachricht nach dem Muster `Etappe <Kennung>: <fachliche Wirkung>`. Braucht eine Etappe aus Gründen der sicheren Revertierbarkeit mehrere Commits, etwa getrennte Struktur-, Migrations- und Verhaltenscommits, werden alle Hashes derselben Etappe zugeordnet; kein Zwischencommit wird vor der vollständigen grünen Etappe gepusht.
+6. Commit-Hooks oder Formatter, die Dateien verändern, öffnen die Indexprüfung erneut. Die geänderten Dateien werden gelesen, die betroffenen gezielten Tests erneut ausgeführt und erst danach committed. Bereits gepushte Historie wird nicht amendiert oder umgeschrieben; notwendige Korrekturen öffnen die verursachende Etappe und erhalten einen normalen Folgecommit.
+7. Nach dem Commit werden Commit-Hash, Betreff, enthaltene Pfade/Hunks und der danach verbleibende `git status --short` im Abnahmeprotokoll festgehalten. Der Commit darf erst dann gepusht werden, wenn der protokollierte Hash exakt `HEAD` ist und keine erforderliche Etappenänderung uncommitted blieb.
+8. Gepusht wird ausschließlich ohne Force auf den für den aktuellen Branch konfigurierten Upstream. Fehlt ein eindeutiger Upstream, darf `--set-upstream` nur für den bereits vorgesehenen Remote/Branch verwendet werden; ist das Ziel nicht eindeutig, bleibt die Etappe gesperrt und die Sitzung meldet den Infrastruktur-/Berechtigungsblocker statt einen Remote zu erraten.
+9. Nach dem Push müssen lokales `HEAD` und Upstream-Ref denselben Hash besitzen; geprüft wird das explizit mit `git rev-parse HEAD` und `git rev-parse '@{upstream}'`. Remote, Branch, Hash und Pushzeit werden in der Etappenzeile protokolliert. Ein abgelehnter Push, divergierter Upstream oder fehlende Berechtigung ist kein grüner Abschluss: Remoteänderungen werden sicher geprüft und integriert, betroffene Tests/Diffs erneut abgenommen und niemals mit `--force` oder `--force-with-lease` überschrieben.
+10. Erst die Kombination aus vollständigem Soll/Ist-Abgleich, grünen Nachweisen, geprüftem Commit und bestätigtem Push setzt `Ergebnis = grün` und gibt die nächste Etappe frei. Ein lokaler Commit ohne Push, ein Push ohne Hashgleichheit oder ein pauschaler Mischcommit erfüllt den Vertrag nicht.
+
+Übergangsregel für den Stand vom 2026-08-12: Etappe 1 wurde vor Einführung dieses Vertrags fachlich grün abgeschlossen, während Etappe 2 bereits begonnen wurde und beide Stände im parallelen Arbeitsbaum liegen. Vor dem ersten neuen Etappenabschluss werden die bereits geprüften Etappe-1-Hunks anhand des Abnahmeprotokolls und des aktuellen Diffs von Etappe 2 und fremden Arbeiten getrennt, ihre betroffenen Nachweise bei zwischenzeitlicher Überlappung erneut ausgeführt und als eigener Etappe-1-Nachtragscommit gepusht. Etappe-2-Hunks bleiben dabei ungestaged. Ist eine sichere Hunkzuordnung nicht beweisbar, wird nicht gemischt committed; die Sitzung dokumentiert den Blocker und klärt die Eigentumsgrenze. Diese Übergangshygiene ändert den fachlichen Umfang von Etappe 2 nicht.
+
+### Verbindlicher Refactoring-Vertrag
+
+ADR-0006 setzt für neue PHP-Seiten und -Module eine Zielgrenze von ungefähr 400 physischen Zeilen und verlangt Splits nach Fachdomäne. Die Bestandsaufnahme vom 2026-08-11 zeigt mehrere Dateien, die nicht nur groß sind, sondern drei oder mehr unabhängige Verantwortlichkeiten bündeln und in diesem Masterplan ohnehin fachlich geändert werden. Diese Dateien werden deshalb vor ihrer ersten semantischen Änderung in derselben Etappe strukturell zerlegt.
+
+Ein Split ist kein Freibrief für einen Big Bang:
+
+1. Zuerst pinnen Charakterisierungs-, Require-Closure-, Static- und gegebenenfalls Integrationstests den aktuellen Vertrag. Danach folgt ein eigener rein struktureller Hunk; erst bei grüner Parität beginnt der fachliche Hunk der Etappe.
+2. Der bisherige öffentliche Require-Pfad bleibt als kleine Kompatibilitätsfassade bestehen und lädt die Domänenmodule in deterministischer Reihenfolge. Öffentliche Funktionsnamen, Signaturen, Transaktionen, Lockreihenfolge, Queryergebnis, Exceptions, Audit-/Joblogtexte und Wire-Felder bleiben beim Split byte- beziehungsweise verhaltensgleich.
+3. Kein neues oder extrahiertes PHP-Modul überschreitet 400 physische Zeilen. Gesplittet wird nach Datenquelle/Fachverantwortung, nicht willkürlich nach Zeilennummer. Zyklische Includes, doppelte Helper und ein zweites Mapping sind ausgeschlossen.
+4. Static-Tests, die heute genau eine Quelldatei lesen, werden auf einen zentralen Modul-Glob beziehungsweise eine Owner-Registry umgestellt. Ein Split darf keinen POST, Confirm, RBAC-, Require-, SQL- oder SSoT-Guard leise aus dessen Prüffläche entfernen.
+5. `scripts/check-file-size.php --ci` wird als dauerhafter Guard für first-party PHP-Seiten/-Module eingeführt. Er hat stabile Diagnose-IDs, positive, negative und Zero-Match-Fixtures in `scripts/test-guards.ps1`; explizite Legacy-Ausnahmen tragen Pfad, aktuellen Grund und eine benannte Abbauetappe. Die Ausnahmeliste darf nicht wachsen und wird nach jedem hier geplanten Split verkleinert.
+6. Help, Doku, Agentregeln, Logs und Protokolle werden auch beim rein strukturellen Hunk geprüft. Normalfall ist `nicht betroffen: öffentliche Funktionen und Ausgaben unverändert`; geänderte Modulownership, Require-Pfade, QA-Befehle und Troubleshootingpfade werden dagegen sofort dokumentiert.
+
+Verbindliche, etappengebundene Splits:
+
+| Aktueller Hotspot (physische Zeilen vor Umsetzung) | Begründete Zielgrenze | Etappe und Zielstruktur |
+|---|---|---|
+| `lib/repo/deploy_jobs.php` (1220) | Payload/Scheduling, Leseabfragen/Logs, Queue/Cancel, Worker-Ownership und Maintenance sind getrennte Transaktionsdomänen | Etappe 1 als struktureller Vorlauf zu Etappe 2: Fassade plus `deploy_job_input.php`, `deploy_job_queries.php`, `deploy_job_queue.php`, `deploy_job_worker.php`, `deploy_job_maintenance.php` |
+| `lib/deploy_worker_outcome.php` (693) und `lib/deploy_worker.php` (521) | CLI-Loop, Missions-/Inventarprozess, Stream, Reaper, Klassifikation, VM-Konvergenz und Audit ändern sich in Etappen 2/8 unabhängig | Etappe 2 vor DB-Verhalten: Entry-/Outcome-Fassaden plus Runtime/Stream, Reaper, VM-State und Audit; Etappe 8 ergänzt getrennte Mission-/Inventory-Prozessoren und Klassifikation ohne neue Monolithen |
+| `lib/repo/esxi_inventory.php` (794) | Cache-Replace, Status/Pause, Abfragen und VLAN-Sync ändern sich in Etappen 5–9 unabhängig | Etappe 5 vor der Vokabularänderung: Fassade plus `esxi_inventory_cache.php`, `esxi_inventory_state.php`, `esxi_inventory_queries.php`, `esxi_inventory_vlan.php` |
+| `lib/esxi_inventory.php` (606) | Credentialauflösung/Enqueue, Abweichungsanalyse, Ampel/Summary und Scheduler sind getrennte Servicedomänen | Etappe 5: Fassade plus `esxi_inventory_scheduler.php`, `esxi_inventory_deviations.php`, `esxi_inventory_display.php` |
+| `lib/ansible_inventory.php` (714) und `lib/ansible_command.php` (523) | Artifact/Remotecommand, Outputparser, Datastore/Capability/Hostparser sowie Mode/Marker/Preflight werden in Etappen 7–8 getrennt geändert | Etappe 7 vor gemeinsamer Fehlerabbildung: Fassaden plus Inventory-Parserdomänen; Etappe 8: Modes/Marker und Preflight/Command getrennt, CLI-Require-Closure bleibt vollständig |
+| `scripts/check.ps1` (1209) | CLI/Umgebung, Gate-Registry und drei Lane-Ausführungen werden in Etappe 11 ohnehin für Browser/Visual geändert | Etappe 11: öffentliches Entry-Point-/JSON-Schema bleibt; reine Module unter `scripts/lib/check/` für Runtime/Tools, Gate-Registry und lane-spezifische Ausführung |
+| `portal/deploy.php` (667) und `assets/deploy.js` (440) | POST-Dispatch, Viewmodel, Queueformular, Jobliste, Poller, Formularlocks und Storage-Liveansicht wachsen mit dem Blockermodell | Etappe 12: dünne Seite plus `lib/deploy_actions.php`, `lib/deploy_page_model.php`, Queue-/Jobrenderer; JS getrennt in Poller, Formular/Blocker und Storage, mit zentraler Script-Ladereihenfolge |
+| `portal/settings.php` (934) | elf POST-Aktionen, fünf Tabs, Viewmodel und große Renderer; wird durch Help-SSoT und Formular-API berührt | Etappe 12 strukturell vorbereiten, Etappe 14 migrieren: `lib/settings_actions.php`, `lib/settings_view_model.php`, Partials unter `lib/settings/`; Seite bleibt Auth/RBAC/CSRF-Shell |
+| `lib/layout.php` (666) | Chrome, Flash, Auth, Formatierung, Badges, Statuslabels und Katalogfilter sind nicht eine Darstellungsdomäne | Etappe 13: Chrome/Fassade plus `portal_flash.php`, `portal_format.php`, `portal_badges.php`, `portal_catalog_filter.php`; öffentliche Helpernamen und Bootstrapverfügbarkeit bleiben erhalten |
+| `lib/system_status_panels.php` (506) und `portal/credentials.php` (451) | MECM, Site, Ansible und interne Panels beziehungsweise POST/Test/Listenrenderer sind bereits getrennte Quellen | Etappe 13: source-spezifische Systemstatusmodule und Credentials-Actions/-Renderer; jeder Guard globbt alle Owner-Module |
+| `lib/repo/vms.php` (888) und `portal/vm_edit.php` (514) | Legacy-Fassade, Validierung, Bundlepersistenz, Identität, Bulk-/Recoveryaktionen und Formrenderer sind getrennt | Etappe 14: Repo-Fassade plus `vm_validation.php`, `vm_persistence.php`, `vm_operations.php`, bewusst isolierte Legacyfunktionen; VM-Seite als Shell über bestehende/ergänzte `vm_edit_*`-Module |
+| `assets/css/components.css` (1715) | Controls, Feedback/Modal, Tabellen, Datenkarten und Seitenelemente werden in Etappe 16 ohnehin tokenisiert | Etappe 16: domänenspezifische Stylesheets mit einer zentralen, cachegebusteten Ladereihenfolge für Portal und Login; `base.css`, `layout.css`, `status.css` behalten ihre Ownership |
+
+Nicht als Teil dieses Masterplans allein wegen der Größe zerlegt werden `lib/migrate.php` (geordnete Migrationsregistry), `lib/constants.php` (SSoT-Registry), `lib/ansible_yaml.php` sowie die großen Pester-Suiten. `Powershell-MECM/mecm/VirtuSphere-Common.ps1` wird in Etappe 10D wegen seines tatsächlich berührten Loggingblocks nicht länger pauschal ausgenommen: Vor der Änderung pinnen Dot-Source-, Funktionsinventar-, Installer-/Packaging- und Pester-Verträge das Verhalten; anschließend wird ausschließlich die kohärente Logging-/Retention-Domäne in ein mitinstalliertes Modul extrahiert, wenn der Vorher/Nachher-Nachweis die getrennten Server- und Clientpakete nach ADR-0029 vollständig bewahrt. Die Pester-Suiten selbst werden dabei nicht allein wegen ihrer Größe zerlegt. Die knapp über 400 Zeilen liegenden, derzeit kohärenten Bestandsmodule `repo/missions.php`, `esxi_inventory_options.php`, `status.php`, `errors.php` und `auth.php` bleiben begründete Legacy-Ausnahmen; jede Etappe prüft, ob ihr eigener fachlicher Hunk eine echte neue Domäne erzeugt. `ssh.php` verliert in Etappe 6 seine SFTP-Domäne und muss danach aus der Ausnahme entfallen.
 
 ---
 
@@ -59,6 +115,8 @@ Umsetzung:
 3. Aussagen wie „every CLI entrypoint“ in `docs/QA.md` und `.claude/rules/webapi.md` werden erst verwendet, wenn der Vertrag sie tatsächlich beweist. Die starre Aussage über genau drei oberhalb des Container-Mounts lesende Tests wird durch eine ableitbare oder bewusst generische Beschreibung ersetzt.
 4. `tests/e2e/shot.tmp.js` wird als lokales temporäres Artefakt entfernt und nicht committet. Falls seine Funktion dauerhaft gebraucht wird, entsteht ein benanntes Tool unter der bestehenden E2E-Konfiguration und liest Benutzer/Passwort aus `tests/e2e/lib/auth.js` beziehungsweise den vorhandenen Umgebungsvariablen.
 5. `git status`, Migrationstatus und der noch offene Index `0039_ansible_activity_index` werden als Basis protokolliert. Die Migration wird nicht beiläufig in dieser Etappe angewandt; ihr Schema-/Query-Nachweis gehört zu Etappe 3.
+6. `scripts/check-file-size.php --ci` setzt den Refactoring-Vertrag als Fast-Gate um. Der initiale Legacy-Ausnahmesatz wird aus dem hier protokollierten Bestand begründet, nicht automatisch aus jedem Lauf erneuert. Positive, negative und Zero-Match-Fixtures beweisen neue Oversize-Datei, erlaubte kleine Datei, fehlende/gewachsene Ausnahme und leeren Scope.
+7. Danach wird `lib/repo/deploy_jobs.php` als rein struktureller Hunk in die im Refactoring-Vertrag benannten fünf Domänenmodule zerlegt. Die alte Datei bleibt Fassade und einziger öffentlicher Require-Pfad. Static-Tests wie `DeployConvergenceContractTest` und `PhaseCContractTest` prüfen über eine zentrale Owner-Registry alle Module statt nur die Fassade. Sämtliche bestehenden Deploy-Repo-Unit-/Integrationstests laufen vor und nach dem Split mit identischem Ergebnis, bevor Etappe 2 Verhalten ändert.
 
 Help/Doku/Logs/Protokolle in derselben Etappe:
 
@@ -72,10 +130,13 @@ Gezielte Abnahme:
 - `CliRequireClosureContractTest` beweist positive, negative und Zero-Match-Fälle sowie `seed.php`.
 - Doku-Suche findet keine veraltete feste Testanzahl und keine überbreite CLI-Behauptung.
 - Der Arbeitsbaum enthält `shot.tmp.js` nicht mehr; fremde ungetrackte Dateien bleiben unangetastet.
+- Der File-Size-Guard ist mutationsgeprüft; `deploy_jobs.php` ist eine kleine Fassade, jedes neue Repo-Modul bleibt bei höchstens 400 physischen Zeilen und direkte Requires sowie alle bisherigen öffentlichen Funktionen funktionieren unverändert.
 
 ### Etappe 2: Aktiver DB-Ausfall, Reaper und belegbare Ursachen
 
 Die Observer-Grace bleibt eine Schutzregel für einen Reaper, der die vergangene Stille nicht selbst beobachten konnte. Sie ist **keine** Wiederaufnahme eines bereits laufenden Jobs und darf nicht mehr so dokumentiert oder getestet werden.
+
+Vor der Verhaltensänderung werden `deploy_worker.php` und `deploy_worker_outcome.php` rein strukturell entlang CLI-Runtime/Stream, Reaper, VM-State/Konvergenz und Audit/Finalisierung zerlegt. Die bisherigen Dateien bleiben Entry-/Outcome-Fassaden; `deploy_worker.php --once/--loop`, alle öffentlichen Helper, Require-Reihenfolge, STDERR-/Joblogzeilen und Workerexitcodes bleiben identisch. `CliRequireClosureContractTest`, `PhaseCContractTest`, Worker-Outcome-/Ownership-/Reaper-/Convergence-Tests und ein subprocess-basierter CLI-Smoke laufen vor und nach dem Split. Erst bei grüner Parität wird der neue DB-Kanal implementiert. Neue Module bleiben unter 400 physischen Zeilen und werden durch eine gemeinsame Worker-Owner-Registry von allen Static-Scannern erfasst.
 
 Umsetzung des laufenden Workerpfads:
 
@@ -100,6 +161,7 @@ Gezielte Abnahme:
 - Weitere Tests beweisen Ownership-Verlust während der Störung, begrenzte Spool/Überlaufzeile, Logreihenfolge, Secret-Redigierung, `--once`, Reconnect-Backoff und exakt eine Zustandsmeldung je Störung.
 - Reaper-Integrationstests unterscheiden `current service reporting`, `not reporting`, Neustart und fremdes `locked_by`, ohne daraus eine unbelegte Ursache zu formulieren.
 - ADR-0033, Deployment-, QA-, Deploy-Chain-, Troubleshooting-, Changelog- und Agentregel werden in dieser Etappe gegen das tatsächlich implementierte Verhalten korrigiert.
+- Der Worker-Split erfüllt ADR-0006; Fassade, CLI-Require-Closure, Exitcode-/Logparität und der negative Owner-Registry-Fall sind grün.
 
 ### Etappe 3: Aussagekräftiger Ansible-Aktivitätsnachweis
 
@@ -241,6 +303,8 @@ Diese Reihenfolge löst den früheren Widerspruch: Ein künstlich in `CONFIG` pl
 
 ## 4. Etappe 5: Vokabular- und SSoT-Vertrag
 
+Vor dem neuen Vokabular wird `lib/repo/esxi_inventory.php` rein strukturell in Cache-, State/Pause-, Query- und VLAN-Module zerlegt; die bisherige Datei bleibt Require-Fassade und alle Funktionsnamen bleiben erhalten. Gleichzeitig wird die Servicefassade `lib/esxi_inventory.php` in Credentialauflösung/Scheduler, Abweichungsanalyse und Ampel-/Summarydarstellung getrennt. `EsxiInventoryCacheTest`, VLAN-Sync/-Reassign, Deviation-, Options-, Enqueue-, Scheduler-, Summary- und Pause-Tests laufen vor und nach der Extraktion. Static-Scanner erhalten eine gemeinsame `esxi_inventory`-Owner-Registry. Erst nach nachgewiesener SQL-/Transaktions-/Log-/Renderparität beginnt die Fehlercodeänderung. Alle neuen Module bleiben unter 400 physischen Zeilen; beide Legacy-Ausnahmen werden aus dem File-Size-Guard entfernt.
+
 Neu: `Docker/WebAPI/tests/Static/InventoryErrorVocabularyContractTest.php`.
 
 Der Test liest die realen Quellen und prüft:
@@ -263,6 +327,8 @@ Ergänzend prüft der Vertrag:
 - nur `auth` ist pausefähig.
 
 Noch in Etappe 5 werden die neuen Kategorien in `common.php`, der Systemstatus-Hilfe und der Fehlerbildtabelle des Inventar-Runbooks vollständig angelegt, DE/EN- und Platzhalterparität hergestellt und die Legacy-/Pauseaussagen korrigiert. Der Changelog-Eintrag wird mit dem Vokabular- und SSoT-Anteil begonnen. Audit-/Joblogkategorien und Machine-API-Wire-Contracts werden auf Auswirkungen geprüft; diese Etappe führt keine zweite Fehlercode- oder Log-SSoT ein. Etappe 5 endet erst, wenn der neue Vertrag gegen die echten Texte, Hilfen und Dokumentationsquellen grün ist und ihr Etappenabschluss protokolliert wurde.
+
+Der Etappenabschluss enthält zusätzlich den Vorher-/Nachher-Nachweis des Repo-Splits, die vollständige Require-Closure und die Bestätigung, dass keine vorbereitete SQL-Anweisung, Lock- oder `repo_transaction()`-Grenze verschoben wurde.
 
 ---
 
@@ -337,9 +403,13 @@ Der direkte `false`-Rückgabepfad von `SSH2::login()` im SSH-Zugangstest wird au
 
 Etappe 6 zieht gleichzeitig alle von den neuen Exceptiontypen und Zeitbudgets betroffenen Hilfe-/Dokusätze nach. Technische Fehltexte bleiben für Job-/Containerlogs aussagekräftig, werden auf Secret-Redigierung und falsche Ursachenbehauptungen geprüft und verändern keinen Machine-API- oder MECM-Wire-Contract. Require-Closure, Timeouttexte, Betriebsanweisung und Logwirkung werden im Etappenabschluss gemeinsam gegen den Diff geprüft; nichts davon wird zur späteren Text- oder Dokuetappe zurückgestellt.
 
+Der Etappenabschluss entfernt `ssh.php` aus der File-Size-Legacy-Ausnahme und beweist, dass `ssh.php` und `ssh_sftp.php` jeweils unter 400 physischen Zeilen bleiben, ohne Login-, Cleanup-, Callback- oder Exceptionverhalten zu duplizieren.
+
 ---
 
 ## 6. Etappe 7: Gemeinsame Ansible-Abbildung
+
+Vor der Mappingänderung wird `lib/ansible_inventory.php` als verhaltensgleiche Fassade entlang Artifact/Remotecommand, Kern-Outputnormalisierung, Datastore/Query sowie Capability/Host-Parsing zerlegt. Öffentliche Funktionsnamen und Marker-/Logzeilen bleiben erhalten; `AnsibleInventoryParseTest`, Datastore-/Capability-/Hosttests und ein isolierter Require-Closure-Load laufen vor/nach dem Split. Static-Scanner lesen die zentrale Ansible-Inventory-Owner-Registry. Erst nach Parser-/Logparität wird die gemeinsame Fehlerabbildung verschoben; alle neuen Module bleiben unter 400 physischen Zeilen.
 
 Die source-spezifische Abbildung lebt nicht im Worker-Modul. Sie kommt verbindlich in das bereits dafür zuständige, dependency-arme `lib/connection_errors.php`.
 
@@ -367,9 +437,13 @@ Die reinen Prädikate auf gespeicherten Codes leben bei deren Konstanten in `dep
 
 Etappe 7 aktualisiert zugleich alle Verbraucherbeschreibungen dieser gemeinsamen Abbildung: Hilfe und Betriebsdoku unterscheiden Ansible- und ESXi-Ursprung, Changelog und gegebenenfalls ADR/QA nennen die neue Ownership, und Audit-/Pauseprotokolle werden auf die gemeinsame Prädikat-SSoT umgestellt oder nachweislich als unverändert bestätigt. Der Abschluss sucht ausdrücklich nach einer zweiten Mapping-Tabelle, alten `auth`-Sonderfällen und Texten, die weiterhin den falschen Host oder die falsche Reparaturstelle nennen.
 
+Der Etappenabschluss entfernt `ansible_inventory.php` aus der File-Size-Ausnahme und protokolliert Fassade, Owner-Registry, CLI-Require-Closure sowie Parser-/Logparität.
+
 ---
 
-## 7. Etappe 8: Worker-Wiring, Pause und Logging
+## 7. Etappe 8: Worker-Wiring, Playbookgrenzen, Abbruch, Pause und Logging
+
+Vor der semantischen Wiringänderung wird `lib/ansible_command.php` in Mode-/Markerlogik sowie Preflight-/Commandbau getrennt; die alte Datei bleibt Fassade. Die in Etappe 2 vorbereitete Workerstruktur erhält getrennte Missions- und Inventarprozessoren, statt die neuen Phasen wieder in den Entry Point zu schieben. Modefolge, Shellquoting, Marker, Preflightoutput, CLI-Require-Closure und vorhandene Worker-Logs werden vor/nach dem Strukturhunk charakterisiert. Alle neuen Module bleiben unter 400 physischen Zeilen; Owner-Registries sind die einzige Prüfflächen-SSoT.
 
 ### 7.1 Phasen
 
@@ -412,7 +486,36 @@ Ein transienter `mysqli_sql_exception` aus Stream-Logger oder Heartbeat wird zue
 
 Die technische Fehlermeldung im Joblog bleibt durch `deploy_worker_redact_secrets()` gegen ESXi- und Ansible-Secret redigiert. `logs/error.log` wird nicht als Speicherort des Originalfehlers dokumentiert.
 
-Etappe 8 ist erst abgeschlossen, wenn Workerzustand, Pause, Audit, Joblog und Containerlog als zusammenhängender Beobachtbarkeitsvertrag geprüft sind. In derselben Etappe werden die dazugehörigen Hilfesätze, das Inventar-Runbook, QA-/Deployment-Aussagen und der Changelog-Abschnitt aktualisiert. Der Soll/Ist-Abgleich beweist außerdem, dass kein Fehler als erfolgreich persistiert wird, kein Secret in einem dauerhaften oder flüchtigen Log landet und keine neue Kategorie den Machine-API-Wire-Contract erreicht.
+### 7.7 Tatsächliche Playbook-Grenzen und atomarer Abbruch
+
+`ansible_playbooks_for_mode()` bleibt die SSoT für Reihenfolge und Modusinhalt, liefert dem Worker aber geordnete Schrittdeskriptoren statt einer einzigen entfernten `command1 && command2`-Kette. Ein Missionsauftrag hält einen strikt jobgebundenen Remote-Arbeitsordner und startet jedes Playbook als eigenen SSH-Befehl. Preflight und Upload werden nicht pro Schritt dupliziert; Marker, Quoting, Umgebung, Exitcode und redigierte Ausgabe jedes Einzelschritts bleiben vollständig beobachtbar.
+
+Vor dem ersten mutierenden Schritt und nach jedem beendeten Remote-Schritt entscheidet ein gemeinsamer Repo-Helper in einer kurzen Transaktion anhand von `id`, `locked_by` und `status`:
+
+- `running` mit eigener Ownership erlaubt den nächsten Schritt;
+- `cancelling` mit eigener Ownership bestätigt den Abbruch und startet keinen weiteren Schritt;
+- verlorene Ownership oder ein terminaler Fremdzustand beendet den lokalen Ablauf, ohne ihn zu überschreiben;
+- ein fehlgeschlagener Schritt wird nach demselben Ownership-Recheck genau einmal finalisiert.
+
+Die letzte-Schritt-Race wird durch konkurrierende Compare-and-swap-Updates entschieden, nicht durch einen vorher gelesenen Status: Erfolg/Teil-Erfolg/Fehler darf nur aus `running` mit eigener Ownership finalisieren. Ist die Abbruchanforderung zuerst committet, trifft der Abschluss-CAS null Zeilen, lädt `cancelling` neu und bestätigt `cancelled`; gewinnt der Terminal-CAS zuerst, kann ein späterer Cancel-POST den bereits terminalen Job nicht mehr verändern. Damit gibt es weder „erfolgreich trotz angenommener Abbruchanforderung“ noch `cancelled` mit weiterlaufendem nächsten Playbook.
+
+Ein normaler Abbruch beendet den aktuell laufenden Remote-Schritt nicht hart. Die UI und ADR-0033 sagen deshalb exakt: Der aktuelle Schritt kann externe Änderungen vollständig ausführen; anschließend startet der Worker keinen weiteren Schritt. Die bestehende Gruppenaktion bleibt gemäß ADR-0022 bewusst auf noch wartende Gruppenjobs beschränkt und behauptet nicht, den bereits laufenden Slot abzubrechen. Doppel-POSTs verändern weder den ersten Akteur/Zeitpunkt noch erzeugen sie zusätzliche Logzeilen. Abbruch zwischen jedem Modusschritt, während DB-Reconnect, nach Ownership-Verlust und im Rennen mit dem letzten Schritt wird deterministisch getestet.
+
+### 7.8 Ausgabegrenzen, Phasen, Secret-Sentinel und Remote-Artefakte
+
+Alle Worker-Ausgaben laufen vor Persistenz durch genau eine Normalisierungs-/Redigierungsfunktion. Sie normalisiert Zeilenenden und ungültiges UTF-8, entfernt ANSI-Escape- und nicht darstellbare C0-/DEL-Steuersequenzen mit bewusst erlaubtem Tab, begrenzt die UTF-8-Bytezahl einer Zeile und das Gesamtvolumen je Job und schreibt bei jeder Kappungsart genau eine redigierte SYSTEM-Zeile. Die Grenzwerte liegen als Konstanten-SSoT in `deploy_constants.php`, werden anhand repräsentativer `-vvv`-Fixtures begründet und durch den Bounds-Sync-Guard mit Hilfe, Doku und Tests gekoppelt. Ein erreichtes Ausgabelimit beendet weder Heartbeat noch Playbook; es markiert die Diagnose als gekappt und verhindert unbegrenztes DB-/DOM-Wachstum.
+
+Da die aktuelle Shellumleitung `2>&1` Ansible-stdout und -stderr vereinigt, darf Portal, Rohdownload und Doku diese Zeilen nicht als echten Einzelstream bezeichnen. Der persistierte Quellcode wird für neue Zeilen ehrlich als `ansible` geführt; historische `stdout`-/`stderr`-Zeilen werden durch denselben Displayhelper als „Ansible-Ausgabe“ dargestellt. `system` und `worker_error` bleiben getrennte technische Quellen. Eine spätere echte Kanaltrennung wäre eine eigene Änderung an `ssh_execute_command()` und darf nicht durch UI-Text vorgetäuscht werden.
+
+Die vorhandenen `::virtusphere-step:: begin/end`-Marker bleiben technische SSoT. Ein dependency-armer Parser erzeugt daraus Phasenüberschriften und die aktuelle Phase; Worker, JSON und Portal führen keine zweite handgepflegte Playbook-/Phasenreihenfolge. Unbekannte oder unvollständige Marker bleiben als neutrale technische Zeilen sichtbar und können den Poller nicht brechen.
+
+Der Sicherheitsnachweis verwendet ein synthetisches eindeutiges Secret-Sentinel und verfolgt es automatisiert durch generierte `accounts.yml`, produktive Playbooks, Remote-Ausgabe, Worker/Redigierung, `deploy_job_logs`, Polling-JSON, serverseitiges HTML, Browser-DOM, Rohdownload sowie Audit-, PHP- und Containerfehlerlog. Der Test prüft auch `-vvv`, Fehler- und Timeoutpfade; er druckt den Sentinel selbst nie in QA-Artefakte. `no_log` bleibt Defense-in-depth und wird nicht als vollständiger Schutz gegen `ANSIBLE_DEBUG` dokumentiert. Die Hilfe beschreibt `-vvv` ausschließlich als erhöhte Diagnoseausgabe und verspricht weder Variablenanzeige noch Geheimnisfreiheit.
+
+Lokales und entferntes Jobmaterial wird im normalen `finally` entfernt. Zusätzlich räumt ausschließlich der `deploy-worker` beim sicheren Kontakt mit einem Ansible-Zugang verwaiste Remote-Verzeichnisse auf: nur kanonisch validierte Pfade mit VirtuSphere-Präfix, Job-ID/Ownershipmarker und abgelaufenem Alter; niemals ein berechneter breiter Pfad oder fremdes Verzeichnis. Positive/negative Tests beweisen normalen Cleanup, Verbindungsabbruch, hart unterbrochenen Vorlauf, Symlink-/Traversalabwehr, falschen Owner und den gedrosselten Sweep-Logeintrag.
+
+Etappe 8 ist erst abgeschlossen, wenn Workerzustand, Schrittgrenzen, Cancel-CAS, Pause, Audit, Joblog, Remote-Cleanup und Containerlog als zusammenhängender Beobachtbarkeitsvertrag geprüft sind. In derselben Etappe werden die dazugehörigen Hilfesätze, ADR-0033, das Inventar-/Deploy-Runbook, QA-/Deployment-Aussagen und der Changelog-Abschnitt aktualisiert. Der Soll/Ist-Abgleich beweist außerdem, dass kein Fehler als erfolgreich persistiert wird, kein angenommener Abbruch ein weiteres Playbook startet, kein Secret in einem dauerhaften oder flüchtigen Log landet und keine neue Kategorie den Machine-API-Wire-Contract erreicht.
+
+Zusätzlich sind `ansible_command.php` und die Worker-Fassaden aus der File-Size-Ausnahme entfernt; Mode-/Preflight-/Command-, Missions-/Inventory-Prozessor- und Static-Owner-Nachweise sind grün.
 
 ---
 
@@ -507,26 +610,109 @@ Der Etappenabschluss vergleicht Runbook, Deployment-/QA-Anleitung, Changelog, Po
 
 ---
 
-## B. UX-Etappen 11–17
+## B. Ergänzungsetappen 10A–10D: Joblog, Terminalergebnis und Protokoll-SSoT
+
+Diese Etappen wurden am 2026-08-12 ergänzt, nachdem Etappe 1 abgeschlossen und Etappe 2 begonnen war. Sie ändern deshalb weder deren Umfang noch deren Abnahme. Etappe 8 stellt zuvor die echten Worker-Schritt- und Abbruchgrenzen her; 10A–10D schließen anschließend Datenmodell, Lesevertrag und systemübergreifende Protokolle. Erst danach beginnen die bestehenden UX-Etappen 11–17.
+
+### Etappe 10A: Vollständiger Joblog-Tail, Drain und Rohprotokoll
+
+Der aktuelle Initialabruf `seq > 0 ORDER BY seq ASC LIMIT 1000` zeigt bei langen Jobs den Anfang statt das Ende; ein Poll mit höchstens 500 Zeilen darf außerdem nicht nur deshalb aufhören, weil derselbe Response bereits einen terminalen Status trägt. Die Reparatur ist ein Repository-/JSON-Vertrag, kein clientseitiger Scrolltrick.
+
+1. Das Repo erhält getrennte, eindeutig benannte Cursorabfragen für initialen Tail, Vorwärts-Drain und ältere Seiten. Der initiale Tail liest die neuesten `limit` Zeilen über eine absteigende innere Auswahl und liefert sie für die Anzeige wieder streng aufsteigend. `after_seq` liest vorwärts; `before_seq` liest die unmittelbar älteren Zeilen. Alle Limits sind positiv, hart begrenzt und SSoT-Konstanten.
+2. Jede JSON-Seite liefert additive Cursor-Metadaten: `oldest_seq`, `newest_seq`, `has_older`, `has_more` und `caught_up`. `has_more` wird mit `limit + 1` bewiesen; `caught_up` ist nur wahr, wenn im konsistenten Read-Snapshot keine höhere Sequenz existiert. Leere Jobs und durch Retention geleerte Logs haben unterscheidbare, lokalisierte Zustände.
+3. Alle Terminalpfade schreiben ihre letzte SYSTEM-Zeile und den terminalen Jobzustand in derselben Transaktion. Danach darf kein normaler Writer weitere Joblogzeilen anhängen. Der Poller beendet sich erst bei `job.terminal === true && caught_up === true`; `terminal && has_more` drainiert ohne das normale Intervall weiter, aber weiterhin single-flight und mit begrenztem Backoff bei Fehlern.
+4. Der HTML-Erstabruf verwendet denselben Tailhelper wie JSON. Mehr als 1.000 vorhandene Zeilen zeigen daher das tatsächliche Ende, nicht die ersten Zeilen. „Ältere Zeilen laden“ verwendet den stabilen `before_seq`-Cursor und erhält den sichtbaren Scrollanker; parallel eintreffende neue Zeilen erzeugen weder Duplikate noch Lücken.
+5. Ein eigener `format=raw`-Pfad streamt alle noch aufbewahrten Zeilen in Sequenzreihenfolge mit Quelle, UTC-/Portalzeitvertrag und Zeilentext, ohne sie vollständig in PHP-Speicher oder DOM zu laden. Er verwendet dieselbe `deploy.run`-Autorisierung, `nosniff`, eine sichere feste Dateinamenform und keine Inline-Ausführung. Retention wird sichtbar im Portal und im Downloadheader benannt; ein gelöschtes Detail kann nicht durch eine zweite Schattenkopie rekonstruiert werden.
+6. Der unendlich wachsende Browser-DOM wird durch ein dokumentiertes Fenster begrenzt. Entfernte ältere Zeilen bleiben über „Ältere Zeilen laden“ beziehungsweise den vollständigen Rohdownload erreichbar; die UI behauptet nie, das DOM-Fenster sei das vollständige Protokoll.
+
+Gezielte Abnahme:
+
+- Integrationstests verwenden einen Job mit mehr als 1.000 Startzeilen und mehr als 500 während des Pollings nachgelieferten Zeilen; jede Sequenz erscheint genau einmal und die letzte persistierte Zeile ist sichtbar.
+- Terminalstatus mit verbleibendem Rückstand, leerer Log, Retention-Purge, paralleler Append, Cursorgrenzen, ungültige Cursor, Sessionablauf, `403`, Netzfehler und parallele Pollversuche sind abgedeckt.
+- Rohdownload beweist RBAC, Content-Type/Disposition, konstante Speichernutzung, Retentionhinweis, Reihenfolge, Redigierung und vollständige Ausgabe auch jenseits des DOM-Limits.
+- DE/EN-Hilfe, Deploy-Hilfe, ADR-0033, `docs/DEPLOYMENT.md`, Deploy-Chain, Troubleshooting, QA, Changelog sowie Job-/Fehler-/Auditlogwirkung werden in 10A aktualisiert und abgenommen.
+
+### Etappe 10B: Terminalergebnis-SSoT und ehrliche Abbruchmetadaten
+
+`status` bleibt die Workflow-SSoT. Die bereits vorhandenen `cancel_requested_at`, `cancel_requested_by` und `result_json` werden verwendet, statt parallele Felder mit gleicher Bedeutung einzuführen. Additiv kommen `terminal_reason_code` und ein größenbegrenztes `terminal_reason_detail` hinzu; Migration und Frischschema bleiben synchron. Codes und erlaubte Statuskombinationen liegen zentral bei den Deploy-Konstanten, nicht in Portalzweigen.
+
+1. `cancel_requested_*` beschreibt den ersten normalen Operatorwunsch. `cancelled_at` beschreibt den bestätigten Endzeitpunkt. Der anfordernde Benutzer wird für Anzeigezwecke separat gejoint; nach Löschung bleibt die historische ID erhalten und wird lokalisiert als „Benutzer #N (gelöscht)“ dargestellt. Doppelabbruch überschreibt weder Akteur noch Zeitpunkt.
+2. `result_json` trägt die versionierte strukturierte Erfolgs-/Teil-Erfolgszusammenfassung. `terminal_reason_code/detail` trägt begrenzte technische Abschlussgründe wie Reaper, Ownership-Verlust, Timeout oder explizite Operator-Cancellation. `last_error` bleibt ausschließlich der redigierte Fehler-Fallback eines tatsächlich fehlgeschlagenen Jobs nach Ablauf der ausführlichen Joblogretention; Erfolg, Teil-Erfolg, Abbruchwunsch und normaler Abbruch schreiben dort nichts.
+3. Ein zentraler Presenter rendert aus Status, Cancelmetadaten, Resultat und Terminalgrund die DE/EN-Blöcke „Ergebnis“, „Abschlussgrund“ und „Abbruch“. Persistierte Ansible-Ausgabe, Codes und Machine-API-Felder werden weder übersetzt noch rückwirkend umgeschrieben. Ein cancelled Job zeigt nie „Letzter Fehler“.
+4. Die Cancel-Transition schreibt genau eine unveränderliche SYSTEM-Zeile: bei `queued -> cancelled` die sofortige Stornierung, bei `running -> cancelling` die angenommene Anforderung. Die spätere Workerbestätigung erzeugt keine zweite Cancel-Zeile. Gruppenabbruch füllt dieselben Metadaten pro noch wartendem Job und lässt `last_error` leer; die bestehende Regel, einen laufenden Gruppenslot nicht abzubrechen, bleibt sichtbar.
+5. Historische Zeilen werden nicht spekulativ migriert. Bei alten `cancelled`-Jobs unterdrückt der Presenter `last_error` unabhängig vom Text und zeigt vorhandene Cancelmetadaten oder einen neutralen Legacy-Fallback. Bei alten `failed`-Jobs bleibt der vorhandene redigierte Fehler sichtbar. Ein Stringvergleich allein entscheidet nie die Semantik.
+6. Ein Cancel aus `deploy_log.php` kehrt über einen validierten Origin-Token zum selben Joblog zurück. Der Pollresponse enthält additiv die gerenderten Cancel-/Terminalblöcke und erlaubten Aktionen; Status, Metadaten und Buttonzustand aktualisieren sich deshalb auch nach einem Abbruch aus einem zweiten Tab. Alle mutierenden POSTs bleiben CSRF-/RBAC-/Confirm-geschützt.
+
+Gezielte Abnahme:
+
+- Migration/Fresh-Schema, erlaubte Code-/Statuskombinationen, Resultatschema, Detailbounds und Presenter-Exhaustivität sind statisch und integriert geprüft.
+- queued/running, Doppel- und Gruppenabbruch, gelöschter Benutzer, DB-Ausfall, Reaper, Ownership-Verlust sowie die letzte-Schritt-Race erzeugen genau den definierten Zustand und höchstens eine Cancel-SYSTEM-Zeile.
+- Normale Cancellation erscheint niemals als „Letzter Fehler“; echter `failed`-Fallback bleibt nach Log-Purge sichtbar, Teil-Erfolg steht ausschließlich im Ergebnisblock.
+- ADR-0033, ADR-0022, Deploy-Hilfe, Deployment-/Troubleshootingdoku, Retentiontext, DE/EN-Katalog, Audit-, Job-/Containerlog und Machine-Wire-Nichtbetroffenheit werden in 10B abgeschlossen.
+
+### Etappe 10C: Strukturierte Audits, sichere Altpfade und sichtbare CSV-Kappung
+
+1. Vor der Änderung inventarisiert eine Migrationsmatrix jeden first-party `audit()`-/`machine_api_audit_warning()`-Producer mit Ereignis, Objekt, Ergebnis, Kontext, Kategorie und Aufrufer. Neue additive Felder `event_code`, `object_type`, `object_id`, `result` und größenbegrenztes `context_json` bilden für neue Zeilen die SSoT; die bestehende Beschreibung bleibt als kompatible, aus denselben Daten gerenderte Anzeige beziehungsweise als unveränderter Legacy-Fallback erhalten. Historische Freitexte werden nicht geraten oder umgeschrieben.
+2. Eventcodes und zulässige Kontextfelder liegen in einer zentralen Registry. Kontext ist allowlist-basiert, typisiert, bytebegrenzt und vor Persistenz redigiert; Passwörter, Tokens, vollständige Payloads und freie Exceptiondumps sind verboten. Ein Guard findet neue freie Auditproducer, unbekannte Codes, übergangene Registryowner sowie positive, negative und Zero-Match-Fixtures.
+3. Die ungenutzte Legacyfunktion `addLog()` in `lib/repo/log.php` wird nach statischem und dynamischem Zero-Caller-Nachweis entfernt. Ein Security-Guard verbietet Audit-/Logsignaturen, die Auth-Tokens als speicherbaren Parameter annehmen, sowie Tokenwerte in Repo-, PHP-, Container- und Testausgaben. `audit()`/`audit_event()` sind danach die einzigen Portal-Audit-Entry-Points.
+4. Audit-CSV verwendet exakt denselben validierten Filterstruct und dieselbe Sortierung wie die Tabelle. Vor dem Streamen wird die Trefferzahl bestimmt; bei mehr als 10.000 Zeilen zeigen Portal und lokalisierter Hinweis „erste 10.000 von N“, die Responseheader tragen Gesamtzahl, Limit und `truncated=1`, und ein strukturiertes Export-Audit protokolliert Filterfingerprint, ausgegebene/gesamte Anzahl und Kappung, aber keine sensiblen Suchwerte. Die CSV-Struktur erhält keine überraschende Kommentarzeile.
+5. Heartbeat und `reportRun` behalten ihren spamfreien Vertrag: kein Audit pro Heartbeat. Wiederholte Zustell-, Sink- oder Providerfehler werden gedrosselt und ein Recovery wird höchstens einmal pro Störungsfenster protokolliert. ADR-0018 und Machine-Wire-Felder bleiben unverändert.
+6. Die in Troubleshooting derzeit zu früh empfohlene Korrelationssuche wird in 10C auf den tatsächlich verfügbaren Stand korrigiert. Erst Etappe 15 darf sie nach implementierter exakter Suche, Anzeige, Kopieraktion und Export wieder als Bedienweg dokumentieren.
+
+Gezielte Abnahme:
+
+- Registry-/Schema-/Fresh-Migration, vollständiges Producerinventar, Legacyanzeige, Kontextbounds/Redigierung und Guardmutationen sind grün.
+- Zero-Caller-Nachweis plus Repositorysuche beweisen, dass `addLog()` entfernt ist und kein Token-Sink übrig blieb.
+- CSV-Fälle 0, 1, 9.999, 10.000 und 10.001 prüfen Tabelle/CSV-Parität, Header, sichtbare Kappung, RBAC, Locale und genau ein redigiertes Export-Audit.
+- ADR-0018, ADR-0026, ADR-0032, QA, Troubleshooting, Protokollhilfe, Changelog sowie Audit-/Fehler-/Containerlogvertrag werden in 10C synchron abgenommen.
+
+### Etappe 10D: Einheitlicher PowerShell-Logvertrag ohne Heartbeat-Spam
+
+MECM-Server- und Clientskripte bleiben nach ADR-0029 getrennte Laufzeitpakete und teilen keinen zur Laufzeit nachzuladenden Web-/Cloudcode. Ihre Loggingimplementierungen erhalten jedoch denselben statisch geprüften Schema- und Retentionvertrag:
+
+1. Beide Zeilentypen verwenden `ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID`, dieselbe Levelmenge, dieselbe Normalisierung/Redigierung und Tagesdateien `yyyy-MM-dd_<komponente>.log`. Jeder Prozesslauf mintet eine nicht geheime Korrelations-ID; Client-Phasen reichen sie durch ihre vorhandenen Reportaufrufe weiter, soweit deren additiver Headervertrag dies bereits erlaubt. Machine-API-Payloadfelder ändern sich nicht.
+2. Die 30-Tage-Retention, tägliche Prüffälligkeit, Dateinamensform und Bounds sind gespiegelte Konstanten mit einem gemeinsamen Pester-Paritätsvertrag. Server- und Clientpaket besitzen weiter je ihre lokale Implementation; ein Unterschied benötigt einen expliziten ADR-Grund und einen Negativtest.
+3. Schreibfehler stoppen den Hauptprozess nicht, verschwinden aber nicht mehr ausschließlich in `Write-Debug`: pro Prozess und Störungsfenster entsteht höchstens eine redigierte `Write-Warning`-/zulässige lokale Fallbackmeldung „Log-Sink gestört“, bei Erholung höchstens eine Recoverymeldung. Der Fallback schreibt nicht rekursiv in denselben defekten Sink und erzeugt weder Heartbeat- noch Auditspam.
+4. Vor jeder Extraktion pinnen Pester-Tests Dot-Source-Exports, Funktionssignaturen, Skriptaufrufer, Installer-/Packagingkopien und Linux-CI-Load. Die Server-Loggingdomäne darf aus `mecm/VirtuSphere-Common.ps1`, die Clientdomäne aus `clients/VirtuSphere-Client-Common.ps1` in je ein lokales Modul ziehen; Installer und ClientPackaging kopieren diese atomar mit. Fehlt eine Datei oder weicht ihre Version ab, scheitert Setup/Packaging sichtbar statt erst der geplante Task.
+5. `Powershell-MECM/README.md`, Client-README, Installation, MECM-Runbook, Troubleshooting, QA, Changelog und Help nennen Format, Pfad, Retention, Korrelationsgrenze und Sinkstörung exakt. Die vorhandene Regel „kein Audit je Heartbeat“ bleibt ausdrücklich bestehen.
+
+Gezielte Abnahme:
+
+- Pester prüft Server/Client-Zeilenparität, Dateinamen, Unicode, Zeilen-/Nachrichtenbounds, Redigierung, tägliche Retention, 29/30/31 Tage, parallele Prozesse, defekten Sink, Drosselung und Recovery.
+- Dot-Source-/Funktionsinventar, Installer, Upgrade, Neuinstallation, ClientPackaging und gepackte Clientphase laufen mit vollständigem Modulsatz; ein fehlendes beziehungsweise versionsfalsches Loggingmodul ist ein harter, verständlicher Testfehler.
+- Heartbeat-/ReportRun-Tests beweisen unveränderte Payload-/Statusverträge, keine Auditzeile pro Heartbeat und gedrosselte Fehlerpfade.
+- Help/Doku, lokale Logs, Reportprotokolle, Retention und Machine-Wire-Nichtbetroffenheit werden in derselben Etappe abgenommen.
+
+---
+
+## C. UX-Etappen 11–17
 
 Für alle folgenden Etappen bleiben Machine-API-Wire-Verträge, die fünf Legacy-Statusstrings, technische DB-/Workerwerte, persistente Joblogs, RBAC, CSRF, CSP und Runtime-Air-Gap unverändert, soweit eine Etappe nicht ausdrücklich einen additiven Portal-JSON-Vertrag nennt. Technische MECM-/Ansible-Begriffe werden nicht übersetzt, wenn sie echte Schnittstellenwerte sind. Sichtbare geschlossene Zustandsmengen werden dagegen auf der Portalebene lokalisiert.
 
 ### Etappe 11: Kollisionssichere UX-Basis und deterministischer Visual-Harness
 
-1. Vor Beginn müssen Etappen 1–10 einschließlich ihrer Abnahmezeilen grün sein. Unter `qa-artifacts/` entsteht ein Manifest mit HEAD, Branch, `git status --short`, Diffstat, `git diff --check`, Dirty-/Clean-Status aller UX-Zieldateien und SHA-256 jedes dirty oder untracked Zielinhalts. Untracked Inhalte werden nicht nur über Patchhashes geprüft. Vor jedem Schreibvorgang wird der Dateihash erneut verglichen; eine Kollision führt zum erneuten Lesen des betroffenen Diffs, nicht zum Zurücksetzen fremder Arbeit.
-2. Die Fast-Basis läuft über `scripts/check.ps1 -Lane Fast`. Der benutzer- und revisionsgebundene Chromium-Fallback in `check.ps1` entfällt. `check.ps1` und Playwright konsumieren einen gemeinsamen, getesteten Browser-Resolver beziehungsweise denselben Auflösungsvertrag; zwei eigenständige „höchste Revision“-Algorithmen sind unzulässig.
-3. Das Visual-Projekt wird in die bestehende Playwright-Konfiguration integriert und teilt Base-URL, Auth und Reporter. Es verwendet ausschließlich einen synthetischen Wegwerf-QA-Stack mit idempotentem Seed. Worker werden nur dort nach Ausschluss aktiver Jobs pausiert und in `finally` in den Ausgangszustand versetzt; ein Shared-, Dev- oder Produktionsstack darf nicht für Baselines angehalten werden.
-4. Pixelbaselines laufen in genau einem deklarierten Chromium-Projekt mit festem OS-, Browser-, Playwright- und Fontvertrag. Firefox, WebKit und Edge bleiben funktionale Releaseprojekte, teilen aber keine Pixelbaseline. Metadaten nennen OS, Browserrevision, Playwright-Version, Fonts/-hashes, Locale, Portalzeitzone, Viewports, `deviceScaleFactor` und Screenshotscale. Ein Mismatch ist `infrastructure_error`, kein Grund für automatische Neubaselines.
-5. Uhr, Zufallsquelle, Hell-/Dunkelzustand, Locale, Zeitzone, Viewports und `prefers-reduced-motion` werden fixiert; Screenshots verwenden deaktivierte Animationen und versteckten Caret. Deterministische Seedwerte haben Vorrang vor Masken. Jede unvermeidbare Maske ist eng, benannt und reviewed; Statusbadges werden nie maskiert. Vergleich erfolgt pixelbasiert mit dokumentierter enger Toleranz, nicht über PNG-Bytes.
-6. Browser/Fonts werden über den vorhandenen offline-fähigen QA-/Dev-Pfad bereitgestellt; es entsteht keine Runtime-Downloadabhängigkeit.
+1. Vor Beginn müssen Etappen 1–10D einschließlich ihrer Abnahmezeilen grün sein. Unter `qa-artifacts/` entsteht ein Manifest mit HEAD, Branch, `git status --short`, Diffstat, `git diff --check`, Dirty-/Clean-Status aller UX-Zieldateien und SHA-256 jedes dirty oder untracked Zielinhalts. Untracked Inhalte werden nicht nur über Patchhashes geprüft. Vor jedem Schreibvorgang wird der Dateihash erneut verglichen; eine Kollision führt zum erneuten Lesen des betroffenen Diffs, nicht zum Zurücksetzen fremder Arbeit.
+2. Die Fast-Basis läuft über `scripts/check.ps1 -Lane Fast`. Vor der Browseränderung wird der Runner strukturell zerlegt: `check.ps1` bleibt einziger öffentlicher Entry Point und behält Parameter, Exitcodes, Gate-IDs/-Reihenfolge, Lane-Zuordnung, `[n/total]`-Ausgabe und JSON-Schema. Dot-sourcete Module unter `scripts/lib/check/` besitzen keine Import-Nebenwirkung und lösen Pfade ausschließlich über `$PSScriptRoot`/den expliziten Check-Root auf. Ein Golden-Vertrag vergleicht Gatekatalog, `-Help`, ungültige Argumente, Fast-Auswahl und JSON vor/nach Split; `VirtuSphere.ProgressReporting.Tests.ps1` deckt den neuen kanonischen Ausführungspfad ab.
+3. Danach entfällt der benutzer- und revisionsgebundene Chromium-Fallback. Runner und Playwright konsumieren einen gemeinsamen, getesteten Browser-Resolver beziehungsweise denselben Auflösungsvertrag; zwei eigenständige „höchste Revision“-Algorithmen sind unzulässig.
+4. Das Visual-Projekt wird in die bestehende Playwright-Konfiguration integriert und teilt Base-URL, Auth und Reporter. Es verwendet ausschließlich einen synthetischen Wegwerf-QA-Stack mit idempotentem Seed. Worker werden nur dort nach Ausschluss aktiver Jobs pausiert und in `finally` in den Ausgangszustand versetzt; ein Shared-, Dev- oder Produktionsstack darf nicht für Baselines angehalten werden.
+5. Pixelbaselines laufen in genau einem deklarierten Chromium-Projekt mit festem OS-, Browser-, Playwright- und Fontvertrag. Firefox, WebKit und Edge bleiben funktionale Releaseprojekte, teilen aber keine Pixelbaseline. Metadaten nennen OS, Browserrevision, Playwright-Version, Fonts/-hashes, Locale, Portalzeitzone, Viewports, `deviceScaleFactor` und Screenshotscale. Ein Mismatch ist `infrastructure_error`, kein Grund für automatische Neubaselines.
+6. Uhr, Zufallsquelle, Hell-/Dunkelzustand, Locale, Zeitzone, Viewports und `prefers-reduced-motion` werden fixiert; Screenshots verwenden deaktivierte Animationen und versteckten Caret. Deterministische Seedwerte haben Vorrang vor Masken. Jede unvermeidbare Maske ist eng, benannt und reviewed; Statusbadges werden nie maskiert. Vergleich erfolgt pixelbasiert mit dokumentierter enger Toleranz, nicht über PNG-Bytes.
+7. Browser/Fonts werden über den vorhandenen offline-fähigen QA-/Dev-Pfad bereitgestellt; es entsteht keine Runtime-Downloadabhängigkeit.
 
 Etappenabschluss:
 
 - Fast-Basis grün; zwei identische Visual-Läufe beider Themes bleiben innerhalb der Toleranz; Vorherbilder und Metadaten sind reviewbar.
-- Positive/negative Tests beweisen Browserresolver, falsche Runner-Metadaten, Worker-Restore und Seed-Isolation.
+- Positive/negative Tests beweisen Runner-Parität, import-nebenwirkungsfreie Module, Browserresolver, falsche Runner-Metadaten, Worker-Restore und Seed-Isolation. `check.ps1` ist deutlich unter der früheren Monolithgröße; alle neuen Runner-Module bleiben fachlich fokussiert und im vereinbarten Budget.
 - `docs/QA.md`, ADR-0028 und Changelog beschreiben Resolver, Visualprojekt, Updatepolitik und Restore. Portalhilfe, Audit-, Job-, Container- und Wire-Verträge werden geprüft und begründet als nicht betroffen protokolliert.
 
 ### Etappe 12: Hochwirksame UX-Korrekturen und vollständige Deploy-Blocker
+
+Struktureller Vorlauf mit unverändertem Verhalten:
+
+- `portal/deploy.php` wird Auth/RBAC-/Request-Shell. POST-Aktionen, Viewmodel, Queueformular/Blocker und Jobliste ziehen in fokussierte `lib/deploy_*`-Module; `PortalActionInventory`, Confirm-/Post-Guard- und Phase-C-Scanner erfassen diese über einen gemeinsamen Owner-Glob. Vor und nach dem Split sind POST-Redirects, Sticky-State, Bestätigungen, Repoaufrufe und HTML-Snapshots identisch.
+- Der vorhandene `assets/deploy.js` wird vor dem neuen Blockerclient in getrennte IIFEs für Joblogpolling, Formularnavigation/-locks, Blocker/Warnungen und Storage/Capacity zerlegt. `layout_app_scripts()` hält die einzige Ladereihenfolge; kein Modul greift auf nicht exportierte Zustände eines anderen zu. JS-less Verhalten bleibt vollständig serverseitig.
+- `portal/settings.php` wird vor der Help-/Formänderung in Action-Dispatcher, Viewmodel und tabbezogene Partials unter `lib/settings/` zerlegt. Die Seite selbst bleibt Auth/RBAC/CSRF-Shell. `$actionTabs`, `settings_url()` und die gerenderten Panel-/Section-IDs bleiben eine SSoT; Deep-Link-, Redirect-, Confirm- und Post-Guard-Tests globben Seite plus Partials.
+- Jeder neue PHP-Owner bleibt unter 400 physischen Zeilen. Erst nach Fast-/gezielter E2E-Parität beginnen die folgenden fachlichen Änderungen.
 
 Passwort und kleine Darstellung:
 
@@ -550,10 +736,18 @@ Navigation und Help-SSoT:
 Etappenabschluss:
 
 - Unit/Static/E2E decken Passwortattribute, Blocker-Union, alle Live-Änderungen, stale Responses, `401`/`403`, Repo-Recheck, Links, Dauergrenzen, `updated` und Helpanker ab; Lang-Audit und Fast-Lane sind grün.
+- Deploy-/Settings-Shells und ihre neuen Module erfüllen ADR-0006; Script- und Renderer-Owner-Registries sind vollständig, und ein negativer Guard beweist, dass eine zusätzliche Partial-/Scriptdatei nicht unbemerkt aus Confirm-, POST-, CSP- oder Assetreihenfolge-Prüfungen fällt.
 - `AGENTS.md`, `.claude/rules/portal.md`, `GROK.md`, Portalhilfe, `docs/QA.md` und Changelog sind synchron.
 - Backend-Gate, Bestätigungen, RBAC, Audit-/Joblogs, Session-/Fehlerprotokolle und Machine-Wire-Verträge werden im Etappenprotokoll explizit nachgewiesen.
 
 ### Etappe 13: Verständlicher Portal-Zustandswortschatz und robuster Jobpoller
+
+Struktureller Vorlauf mit unverändertem Render-/POST-Vertrag:
+
+- `lib/layout.php` behält Chrome, Header/Footer und die bootstrapweit erwarteten öffentlichen Funktionsnamen, delegiert Flash, Portalformatierung, Badges/Statusdarstellung und Katalogfilter aber an fokussierte Module. Bootstrap- und CLI-Require-Closure werden explizit getestet; `portal_format_timestamp()`, `portal_badge()` und alle bisherigen Aufrufer bleiben ohne zusätzliche Seiten-Requires verfügbar. `AGENTS.md`, `GROK.md` und Portalregel nennen anschließend die tatsächliche Owner-Datei statt einer historischen.
+- `lib/system_status_panels.php` wird entlang seiner Datenquellen in MECM-/Site-, Ansible- und interne Panelmodule zerlegt; die bestehende ESXi-Datei bleibt separat. Übersicht und gemeinsame kleine Presenter bleiben in der Fassade. Alle Panel-/Branch-/RBAC-/Geometrietests globben die vollständige Owner-Menge.
+- `portal/credentials.php` wird in Request-Shell, Test-/Actionhelper und Renderer zerlegt. Auditkontext, Confirmklassifikation, Zielberechtigungen, Sticky-Fehler und genau eine bestehende Credentials-Auditzeile des Volltests bleiben unverändert.
+- Erst nach HTML-/Branch-/Integration-Parität beginnen Lokalisierung und Polleränderung; jedes neue PHP-Modul bleibt unter 400 physischen Zeilen.
 
 1. Technische Werte bleiben roh in Konstanten, DB, Worker, persistenten Joblogs, Maschinenfeldern und bestehenden JSON-Feldern wie `status`. Portal-only-Labels liegen zentral in `lib/portal_status_display.php` für Lifecycle/MECM und `lib/deploy_display.php` für Jobstatus, Modi und Payloadanzeige; DE/EN verwenden einen gemeinsamen Statuskatalog.
 2. `lifecycle_badge()` und `mecm_sync_badge()` beziehen die Variante aus bestehender Meta-SSoT, sichtbaren Text aus dem neuen Labelhelper und zeigen für Unknown einen neutralen lokalisierten Fallback ohne Rohwert. Konstanten-Walk-Tests prüfen alle Lifecycle-/MECM-Werte und beide Sprachen; ein Render erzeugt kein Drift-`error_log`.
@@ -561,14 +755,27 @@ Etappenabschluss:
 4. Der JSON-Poller liefert immer `application/json`: `401` bei fehlender/abgelaufener Session ohne Login-Redirect/-HTML, `403` bei fehlender Berechtigung, lokalisierte `404` bei unbekanntem Job. Auth, RBAC und Locale werden ermittelt, dann wird vor der DB-Pollabfrage `session_write_close()` ausgeführt. Der Client stoppt bei `401`/`403`, prüft Content-Type, arbeitet ohne parallele Requests und loggt erfolgreiche Polls weder in Audit noch Fehlerlog.
 5. `virtusphere_deploy_mode_labels()` bleibt technische Validierungs-SSoT. Portal-only-Helper benennen die sechs postbaren Modi sowie den nicht postbaren Systemmodus `inventory`; `deploy_job_payload_summary()` bleibt für technische persistente Logs unverändert.
 6. Dashboard-Missionsstatus zeigt `active` lokalisiert als „Aktiv“, leer als Gedankenstrich und andere freie Legacywerte neutral mit ihrem Text; das freie VARCHAR wird nicht fälschlich als Enum behandelt.
+7. Das Joblog-Modul setzt den in 10A bewiesenen Cursorvertrag als pausierbaren Follow-Modus um. Solange der Benutzer am Ende steht, folgt die Ansicht neuen Batches ohne Smooth-Scroll. Die Bottom-Erkennung verwendet eine kleine zentral getestete Toleranz, weil `scrollTop` nicht ganzzahlig sein muss, `scrollHeight` und `clientHeight` aber gerundet sind. Scrollt der Benutzer hoch, pausiert Follow automatisch; ein nicht modaler Hinweis zeigt „N neue Zeilen · Zum Ende“ und setzt den Zähler erst nach bewusster Rückkehr zurück.
+8. Ein expliziter DE/EN-Schalter „Live folgen“ speichert nur diese UI-Präferenz lokal. Der Verbindungszustand unterscheidet „Live“, „Verbindung unterbrochen“, „Letzte Aktualisierung …“, Sessionende und fehlende Berechtigung. Reine Netzfehler verwenden begrenzten Backoff und eine Wiederholen-Aktion; `401`/`403` stoppen wie in Punkt 4. Erfolgreiche Polls sowie normale Hintergrundpausen erzeugen kein Audit- oder Fehlerlog.
+9. Bei `document.hidden` pausiert das normale Pollintervall. Beim `visibilitychange` zurück zu sichtbar startet genau ein sofortiger Catch-up-/Drain-Lauf; Single-flight und Cursor verhindern Parallelität und Doppelzeilen. Terminale Jobs werden nach vollständigem Drain offline lesbar und führen kein nutzloses Intervall fort.
+10. Der Logcontainer erhält `role="log"` mit zurückhaltender höflicher Live-Semantik, niemals `assertive`. Ein Pollbatch wird atomar ergänzt und ein gedrosselter, lokalisierter Status fasst neue Zeilen zusammen; Screenreader werden nicht durch jede einzelne Ansiblezeile unterbrochen. Tastaturfokus, „Zum Ende“, „Ältere Zeilen“, Such-/Filtercontrols und Wrap-Schalter besitzen sichtbare Labels und Focus-Visible-Nachweise.
+11. Step-Marker aus Etappe 8 rendern Phasenüberschriften und „Aktuelle Phase“ aus demselben Parser. Ein Wrap-Schalter, Freitextsuche sowie Quell-/Phasenfilter arbeiten serverseitig innerhalb genau dieses Jobs und aller noch aufbewahrten Zeilen; Filterzustand ist sichtbar, URL-/Cursor-validiert und sagt ausdrücklich, wenn nur Treffer statt des vollständigen Ablaufs gezeigt werden. Follow ist im gefilterten Zustand bewusst aus oder folgt nur dem dokumentierten Treffer-Cursor; ein Wechsel kann keine ungesehenen Vollprotokollzeilen als gelesen markieren. Der Rohdownload aus 10A bleibt die vollständige retained Ausgabe.
+12. Status-, Cancel-/Terminalmetadaten und erlaubte Aktionen aus 10B werden bei jedem Poll gemeinsam aktualisiert. Ein zweiter Tab kann den Abbruchknopf daher durch „Abbruch angefordert durch … um …“ ersetzen; der Satz erklärt, dass der aktuelle Schritt noch abgeschlossen wird und keine weiteren Schritte starten. Ein terminaler Job zeigt den zentral gerenderten Ergebnis-/Abschlussblock, niemals eine clientseitig nachgebaute Interpretation.
 
 Etappenabschluss:
 
-- Konstanten-Walk-, Unknown-, Additiv-JSON-, `cancelling`-, Auth-/Content-Type- und Poll-Single-Flight-Tests sowie Visuals beider Themes sind grün; Fast und Integration laufen.
-- DE/EN-Hilfe, Statusglossar, `docs/QA.md`, Changelog und Portalregeln sind aktualisiert.
-- Persistente Joblogs, Rohwerte, bestehende JSON-Felder, Auditverhalten und Machine-Wire-Verträge sind unverändert oder additiv belegt.
+- Konstanten-Walk-, Unknown-, Additiv-JSON-, `cancelling`-, Auth-/Content-Type-, Poll-Single-Flight-, Tail-/Drain-, Scrolltoleranz-, Follow-Pause-, Visibility-/Catch-up-, Filter-/Wrap-, ARIA- und Live-Aktions-Tests sowie Visuals beider Themes sind grün; Fast und Integration laufen.
+- Layout-, Systemstatus- und Credentials-Splits erfüllen ADR-0006; Bootstrap-/Require-, Panel-Glob-, POST-/Confirm- und Audit-Paritätsnachweise sind grün.
+- DE/EN-Hilfe, Statusglossar, Deploy-/Loghilfe, `docs/QA.md`, Troubleshooting, Changelog und Portalregeln sind aktualisiert.
+- Persistente Joblogs, Rohwerte, bestehende JSON-Felder, Auditverhalten und Machine-Wire-Verträge sind unverändert oder additiv belegt; der Browser zeigt nachweislich jede retained Terminalzeile oder benennt Filter/Retention/Kappung sichtbar.
 
 ### Etappe 14: Selbstbeschreibende und barrierearme Formulare
+
+Struktureller Vorlauf:
+
+- `lib/repo/vms.php` wird Fassade für getrennte Validierungs-, Bundlepersistenz- und Operator-/Recoverymodule. Legacyfunktionen für Machine-/Übergangspfade bleiben bewusst isoliert, mit identischem Namen und Wireverhalten. Transaktionsgrenzen von Interface-/Disk-/Package-Replacement und `repo_save_vm()`, MAC-/MECM-Erhalt, Optimistic Locking, Provenienz und Identity-Checks werden vor/nach Split durch bestehende Unit-/Integrationstests charakterisiert. Static-Scanner verwenden eine VM-Repo-Owner-Registry.
+- `portal/vm_edit.php` wird Request-/Layout-Shell; Diagnostik/Progress, dynamische Formgruppen und Aktionen liegen in bestehenden oder ergänzten `vm_edit_*`-Modulen. `portal/settings.php`-Partials aus Etappe 12 werden jetzt ebenfalls über die gemeinsame Formular-API migriert. Jede Seite/jedes neue PHP-Modul bleibt unter 400 physischen Zeilen.
+- Erst nach Repo-/HTML-/POST-/Confirm-Parität beginnt die ARIA-/Hint-Migration.
 
 1. Vor Änderung entsteht eine Migrationsmatrix aller Feld-/Gruppen-/JS-Hints und Fehler. Sie nennt Seite, Feld, ID/Label, vorhandene Hint-/Error-ID, Gruppenziel, dynamische Erzeugung und geplante Migration. Allgemeine Prosa wird ausdrücklich ausgeschlossen; eine Anzahl allein genügt nicht.
 2. `lib/forms.php` vereinigt `form_hint_id()`, `form_error_id()`, `form_control_attrs()` und `form_error_html()`. `form_control_attrs()` integriert die bisherige `form_input_class()`-Funktionalität, setzt `aria-invalid` am Control und verbindet Hint plus Fehler in `aria-describedby`. Fehlerausgabe erhält eine stabile ID. IDs werden aus Form, Feld und optionaler Zeilen-/Gruppekennung sicher normalisiert; es entsteht keine zweite konkurrierende API. `vm_field_error()` wird Wrapper dieser Kernlogik.
@@ -578,6 +785,7 @@ Etappenabschluss:
 Etappenabschluss:
 
 - Die Migrationsmatrix ist vollständig abgearbeitet; Fast und Integration, DOM-/axe-/E2E-Tests und Visuals sind grün.
+- VM-Repo, VM-Editor und Settings-Partials erfüllen ADR-0006; Legacy-Require-/Wire-, Transaktions-, POST-/Confirm- und Owner-Glob-Negativtests sind grün.
 - `docs/QA.md`, Formular-/Portalhilfe, DE/EN-Texte, Changelog und dauerhafte Formularregeln sind synchron.
 - Audit-, Job-, Container- und Wire-Verträge werden geprüft und, sofern wirklich unberührt, begründet als nicht betroffen protokolliert.
 
@@ -593,19 +801,25 @@ Portalnavigation und Tabellen:
 
 Logfilter und Korrelation:
 
-6. `lib/log_filter.php` normalisiert Freitext, IP, Tab/Kategorie, lokale Von-/Bis-Daten, UTC-Untergrenze, exklusive UTC-Obergrenze und Korrelations-ID. Der lokale Zeitraum ist `[von 00:00, Tag nach bis 00:00)` in Portalzeitzone, niemals `+86400`; DST, ungültige Tage, leere Grenzen und `von > bis` werden getestet. Das Repository erhält einen dokumentierten Filter-Struct statt langer Positionsparameter.
+6. `lib/log_filter.php` normalisiert Freitext, IP, Tab/Kategorie, lokale Von-/Bis-Daten, UTC-Untergrenze, exklusive UTC-Obergrenze, Korrelations-ID sowie die in 10C eingeführten strukturierten Felder Eventcode, Objekttyp/-ID und Ergebnis. Der lokale Zeitraum ist `[von 00:00, Tag nach bis 00:00)` in Portalzeitzone, niemals `+86400`; DST, ungültige Tage, leere Grenzen und `von > bis` werden getestet. Event-/Objekt-/Ergebniswerte werden gegen ihre Registry validiert. Das Repository erhält einen dokumentierten Filter-Struct statt langer Positionsparameter.
 7. Ein URL-Builder trägt den validierten Zustand durch Pagination, Tab, Kategorie, Reset, CSV und Korrelationslinks. Ungültige Daten/Korrelation bleiben sichtbar, erzeugen Feldfehler und keine Repository-Abfrage. Tab/Kategorie werden über die Logtaxonomie validiert.
-8. Audit-Tabelle und -CSV sowie Deploy-Log-Kopf zeigen die Korrelations-ID. Bei Exaktfilter zeigt `logs.php` passende Jobs mit ID, Mission/Systemjob, lokalisiertem Status und `deploy_job_log_url()`. Auditseite bleibt `users.manage`, Joblogziel zusätzlich `deploy.run`.
-9. Passende Jobs sind deterministisch sortiert und begrenzt oder paginiert; Kappung wird sichtbar benannt. Hilfe dokumentiert Retention-Asymmetrie zwischen Audit, Missionsjobs und missionslosen Systemjobs. Korrelation bleibt Diagnostik, keine Autorisierungsgrenze.
+8. Audit-Tabelle und -CSV sowie Deploy-Log-Kopf zeigen die Korrelations-ID mit einer tastaturbedienbaren Kopieraktion und sichtbarer Kopierbestätigung. Suche ist ausschließlich exakt und normalisiert; Teiltreffer werden abgelehnt, damit eine Diagnose-ID nicht wie Freitext wirkt. Bei Exaktfilter zeigt `logs.php` passende Jobs mit ID, Mission/Systemjob, lokalisiertem Status und `deploy_job_log_url()`. Auditseite bleibt `users.manage`, Joblogziel zusätzlich `deploy.run`.
+9. Passende Jobs sind deterministisch sortiert und begrenzt oder paginiert; Kappung wird sichtbar benannt. Die CSV-Kappungs-/Header-/Auditsemantik aus 10C bleibt mit jeder Filterkombination erhalten. Hilfe dokumentiert Retention-Asymmetrie zwischen Audit, Missionsjobs und missionslosen Systemjobs. Korrelation bleibt Diagnostik, keine Autorisierungsgrenze. Erst der grüne E2E-Nachweis dieser Etappe gibt den in 10C vorläufig entfernten Troubleshooting-Suchweg wieder frei.
 10. Indizes auf `deploy_logs.correlation_id` und `deploy_jobs.correlation_id` werden mit repräsentativem `EXPLAIN` vor/nach Änderung belegt; weitere Datums-/Kategorieindizes nur bei nachgewiesenem Nutzen. Migration und Fresh-Schema bleiben synchron; Schema-Konvergenz ist Pflicht.
 
 Etappenabschluss:
 
-- Filter-/DST-/Invalid-Input-Units, kombinierte Repo-Integration, Korrelation Audit→Job→Joblog, CSV-State, Katalogleerzustände, Navigation/Sticky/Wrap und RBAC sind grün; Fast und Integration laufen.
+- Filter-/DST-/Invalid-Input-Units, strukturierte Auditfilter, exakte Korrelation samt Kopieraktion Audit→Job→Joblog, CSV-State/-Kappung, Katalogleerzustände, Navigation/Sticky/Wrap und RBAC sind grün; Fast und Integration laufen.
 - Portalhilfe, ADR-0032, `docs/QA.md`, betroffene Runbooks, Changelog und Agentregeln sind aktualisiert.
 - Audit-CSV/-Tabelle, Joblogdeep-links, Retention, Berechtigungen, Logs/Protokolle und unveränderte Machine-Wire-Verträge sind im selben Etappenabschluss geprüft.
 
 ### Etappe 16: Slate-/Indigo-Refresh, Farbtoken und belastbarer Kontrast
+
+Struktureller Vorlauf:
+
+- `components.css` wird vor jeder Farbänderung anhand bestehender Komponentenownership in fokussierte Stylesheets für Controls/Forms, Feedback/Modals, Tabellen/Listen und Daten-/Seitenelemente zerlegt. Regeln werden nicht umbenannt oder semantisch verändert; Selektor, Deklarationsreihenfolge und Kaskadenergebnis werden per CSS-AST-/Browservergleich sowie den vorhandenen Modal-, Klassen- und Spacing-Contracts gepinnt.
+- `layout_app_styles()` (Name nach lokaler Konvention) ist die einzige cachegebustete Ladereihenfolge und wird von normalem Portal sowie Login verwendet. `status.css` bleibt nach seinen gleich spezifischen Basissheets; keine `@import`-Kette umgeht Versionierung oder Air-Gap. CSS-Class- und Farbguards globben alle Portalstyles und besitzen einen Negativfall für eine neue, nicht registrierte Datei.
+- Erst nach berechneter Style-/Geometrie-/Visualparität des reinen Splits beginnt der Tokenumbau.
 
 1. Beide Themes erhalten eine gemessene Slate-/Indigo-Identität. Info-Blau bleibt vom Akzent unterscheidbar; Sidebar nutzt eigene Tokens und ist von der Inhaltsfläche getrennt. Datenflächen bleiben opak, solide Buttons verwenden `--btn-bg`/`--btn-fg`, Danger bleibt solide und semantisch unverändert.
 2. Glows, Schatten und Glas werden dezenter; maximal zwei Blur-Ebenen. Der vorhandene opake `@supports not (backdrop-filter)`-Fallback wird angepasst und getestet, kein zweiter Fallback aufgebaut. Keine externen Assets.
@@ -617,6 +831,7 @@ Etappenabschluss:
 Etappenabschluss:
 
 - Farbguard samt Mutation, Browserkontrast, Farb-nicht-allein-Gegenprobe, axe, Forced Colors, Fast/Integration und Visualvergleich gegen Etappe 11 sind grün.
+- Der CSS-Split besitzt Kaskaden-/Computed-Style-/Geometrieparität vor dem Designhunk; alle Stylesheets sind zentral registriert und der frühere `components.css`-Monolith ist aufgelöst.
 - ADR-0013, `docs/QA.md`, Portalhilfe, Changelog und UI-Agentregeln sind synchron.
 - Danger-/Bestätigungssemantik, Audit-, Job-, Containerlogs und Wire-Verträge werden ausdrücklich geprüft und bei Unberührtheit begründet.
 
@@ -638,6 +853,23 @@ Bewusst nachgelagert und nicht durch diesen Masterplan freigegeben bleiben: ein 
 
 ## 10. Testmatrix
 
+### Strukturelle Refactoring-Parität
+
+| Nachweis | Beweis |
+|---|---|
+| `check-file-size.php` + Guard-Fixtures | neue/gewachsene Oversize-Datei rot; kleine Datei und Zero-Match grün; Legacy-Ausnahmen begründet und nur schrumpfend |
+| Repo-Fassaden-Contract | alte Require-Pfade laden alle bisherigen öffentlichen Funktionen; neue Module bleiben unter 400 Zeilen; keine Zyklen/doppelten Definitionen |
+| Deploy-Repo Vorher/Nachher | Payload/Schedule, Queries/Logs, Queue/Cancel, Claim/Heartbeat/Finish, Reaper/Purge/Sweep verhalten sich identisch vor Etappe 2 |
+| Worker Vorher/Nachher | CLI-Entry, Mission/Inventory, Stream, Reaper, VM-State, Audit/Finalisierung, Exitcodes und Logs bleiben vor Etappe 2/8 identisch |
+| ESXi Repo/Service Vorher/Nachher | Cache, State/Pause, Queries, VLAN, Scheduler, Deviations und Summary behalten Prepared SQL, Transaktionen, Ergebnisse, Renderwerte und Logs vor Etappe 5 |
+| Ansible Vorher/Nachher | Artifact/Parser/Capability/Host sowie Mode/Marker/Preflight/Command behalten Parsing, Quoting, Marker, Logzeilen und Require-Closure vor Etappe 7/8 |
+| PowerShell-Logging Vorher/Nachher | Server-/Client-Dot-Source, Funktionssignaturen, Installer-/Packagingdateimenge und Report-Wire bleiben vor Etappe 10D vollständig; extrahierte Loggingmodule werden atomar mitgeführt |
+| Runner-Golden-Contract | `check.ps1` behält Parameter, Exitcodes, Gate-IDs/-Reihenfolge, Lane-Auswahl, Progress und JSON-Schema; Module sind import-nebenwirkungsfrei |
+| Portal-Owner-Registry | POST-, Confirm-, RBAC-, CSP-, Deep-Link- und Action-Inventories globben Seite plus Module; neue unregistrierte Partialdatei macht den Test rot |
+| VM-Repo Vorher/Nachher | Legacy-/Machinefunktionen, Validierung, Save/Replace, MAC/MECM, Provenienz, Identity und Recovery behalten Transaktions-/Wireverhalten |
+| CSS-Asset-/Kaskadenvertrag | zentrale Ladereihenfolge für Portal/Login; keine unregistrierte CSS-Datei; gleiche Computed Styles/Geometrie vor dem Designhunk |
+| Help/Doku/Logs/Protokolle je Split | Ownership/Require-/QA-Doku aktualisiert oder konkrete Nichtbetroffenheit; keine Text-/Log-/Wireänderung im Strukturhunk |
+
 ### Review-Korrekturen und Worker-Resilienz
 
 | Test | Beweis |
@@ -651,6 +883,22 @@ Bewusst nachgelagert und nicht durch diesen Masterplan freigegeben bleiben: ein 
 | `AnsibleActivityContractTest` | Query-/Index-/Frischschema-Vertrag und keine zweite Statuskopie |
 | `system-status.spec.js` | vorsichtige Aktivitätsbezeichnung, RBAC-Joblink und responsive Geometrie mit realistischem `attempts` |
 | Lang-/Help-/Doc-Suchen | keine rohen Disk-Tokens, Performance-Absolutaussagen, falschen Reaperursachen oder Ausführungsbehauptungen |
+
+### Joblog, Abbruch, Terminalergebnis und Protokolle
+
+| Test | Beweis |
+|---|---|
+| Playbook-Grenz-/Cancel-CAS | jeder Modusschritt einzeln; Cancel vor/nach jedem Schritt, Doppel-/Gruppenabbruch, DB-Reconnect, Ownership-Verlust und letzter-Schritt-Race; kein weiterer Schritt nach angenommener Anforderung |
+| Ausgabenormalisierung | ANSI/C0/DEL/ungültiges UTF-8, Zeilen-/Gesamtbytegrenze, exakt eine Kappungszeile, Heartbeat läuft weiter; historische Quellen ehrlich benannt |
+| Secret-Sentinel | kein Sentinel in Remoteausgabe, Worker, DB, JSON, HTML, Browser, Rohdownload, Audit-, PHP- oder Containerlog; `-vvv`, Fehler und Timeout enthalten |
+| Remote-Artefakt-Sweep | normaler Cleanup, abgebrochener Lauf, Alters-/Owner-/Präfixprüfung, Symlink/Traversal/fremder Pfad und gedrosselte Meldung |
+| Tail-/Drain-Cursor | mehr als 1.000 initial und mehr als 500 nachgeliefert; `has_older`, `has_more`, `caught_up`, Terminalrückstand, paralleler Append, keine Lücke/Duplikate |
+| Rohdownload/Retention | vollständige retained Reihenfolge bei bounded Memory/DOM; RBAC, sichere Header/Dateinamen, Redigierung und ehrlicher Purgehinweis |
+| Terminalergebnis | Statuskombinationen, `result_json`, Terminalcode/detail, Cancelakteur/-zeit, gelöschter Benutzer, echter Fehlerfallback; Cancel nie als „Letzter Fehler“ |
+| Audit-Eventregistry | jeder first-party Producer inventarisiert; Codes/Objekte/Ergebnisse exhaustiv; Kontext allowlist-/bytebegrenzt und redigiert; Legacyzeilen bleiben lesbar |
+| Legacy-Tokenpfad | `addLog()` Zero-Caller und entfernt; Guard findet Tokenparameter/-werte in Audit-/Log-Sinks mit positiven, negativen und Zero-Match-Fixtures |
+| CSV-Kappung | 0/1/9.999/10.000/10.001; Tabelle/Filter/CSV gleich; sichtbarer Hinweis, Responseheader und genau ein strukturiertes Export-Audit |
+| PowerShell-Logvertrag | Server-/Clientformat, Dateiname, Korrelation, Bounds, 29/30/31-Tage-Retention, parallele Prozesse, Sinkausfall-Drosselung/Recovery, Installer und Packaging |
 
 ### Unit/Static
 
@@ -702,10 +950,10 @@ Mindestens diese Klassifikationsfälle sind verpflichtend:
 | Deploy-Blocker | exhaustive Union; alle Blockerarten; Live-Änderungen; stale Response; `401`/`403`; Content-Type; serverseitiger Recheck; Bestätigung/RBAC |
 | Help-SSoT | Panel-/Abschnitts-IDs in beide Richtungen; glob-erfasste Partials; keine handgeschriebenen Links; verschachteltes Ziel öffnet korrekt |
 | Passwort/Dauer/`updated` | Autocomplete/Label/Minlength-SSoT; Singulargrenzen; kontextbezogene Flagdarstellung ohne Wireänderung |
-| Statusanzeige | Konstanten-Walk DE/EN und Unknown; sieben Jobzustände; additives `label`; Rohfelder unverändert; Poll-Single-Flight und Sessionende |
+| Statusanzeige/Joblog | Konstanten-Walk DE/EN und Unknown; sieben Jobzustände; additives `label`; Rohfelder unverändert; Poll-Single-Flight und Sessionende; Follow/Scrollpause/Neue-Zeilen-Zähler, Visibility-Catch-up, Live/Offline/Letzte Aktualisierung, Filter/Wrap, Phasen, Cancelaktionen und Terminalblöcke |
 | Formulare | vollständige Migrationsmatrix; keine toten `aria-describedby`; keine doppelten IDs; Fehler-/Erfolgszustand; dynamische Zeilen; axe/Keyboard |
 | Navigation/Tabellen | Seitennavigation mit `aria-current`, kein falsches Tabwidget; Sticky-/Wrap-/Scroll-/Mobile-Geometrie; fünf Statuskarten |
-| Katalog/Logs | echte vs. gefilterte Leere; Sortierzustand; DST/Invalid-Input; keine Query bei Fehler; CSV/Pagination; bounded Korrelation und RBAC |
+| Katalog/Logs | echte vs. gefilterte Leere; Sortierzustand; DST/Invalid-Input; keine Query bei Fehler; strukturierte Auditfilter; CSV/Pagination/Kappung; exakte kopierbare bounded Korrelation und RBAC |
 | Schema/Performance | Migration/Fresh-Schema synchron; repräsentatives `EXPLAIN` vor/nach Korrelationsindizes; keine unbegrenzte Jobliste |
 | Design/Contrast | parserbasierter Farbguard mit Mutationen; Forced-Colors-Ausnahmen; Text/UI/Fokus/Backdrop-Kontrast; axe; Tokenmutation macht Visual rot |
 | Baselines | separater Updatebefehl; Release kann nicht aktualisieren; Metadatenmismatch rot; Diffbild und Grund reviewbar; keine echten Daten |
@@ -728,11 +976,19 @@ Der vorhandene ESXi-Inventar-Integrationstest wird anschließend für Etappen 5 
 - Speichern hebt eine Legacy-Pause auf;
 - Failure-Streak und `last_error_category` bleiben konsistent.
 
+Für Etappen 8 und 10A–10D beweist die echte QA-Schicht zusätzlich:
+
+- einzelne Playbookschritte, Abbruch-CAS und alle Terminalwriter halten Ownership, Status, letzte SYSTEM-Zeile und „keine Logs nach terminal“ atomar zusammen;
+- Tail/Older/Forward-Cursor, Terminaldrain, Rohdownload und Retention arbeiten gegen echte Repositoryabfragen auch oberhalb beider früherer Limits;
+- Schema/Fresh-Migration für Terminalgrund und strukturierte Audits konvergiert; Cancel-/Resultat-/Fehleranzeige folgt ausschließlich dem zentralen Presenter;
+- Audit-CSV-Kappung und Exportaudit stimmen bei echten Counts; Heartbeats bleiben auditfrei und Fehler gedrosselt;
+- PowerShell-Server-/Clientlogging, Installer und Packaging erfüllen denselben statisch geprüften Vertrag ohne Änderung der MECM-Wire-Payloads.
+
 Für Etappen 11 bis 17 beweist die echte QA-Schicht zusätzlich:
 
 - Deploy-Blocker-Endpunkt und Queue-POST verwenden denselben normalisierten Zustand und dasselbe Repo-Gate;
-- Polling liefert auch bei Sessionablauf/Berechtigungsfehler ausschließlich den vereinbarten JSON-Vertrag;
-- kombinierte Logfilter, lokale DST-Grenzen, CSV-State und Korrelationsnavigation arbeiten gegen echte Repositoryabfragen;
+- Polling liefert auch bei Sessionablauf/Berechtigungsfehler ausschließlich den vereinbarten JSON-Vertrag; Follow-/Visibility-Zustände erzeugen weder Parallelrequests noch Auditspam;
+- kombinierte strukturierte Logfilter, lokale DST-Grenzen, CSV-State/-Kappung und exakte Korrelationsnavigation arbeiten gegen echte Repositoryabfragen;
 - Korrelationsmigration konvergiert aus Alt- und Frischschema und die Ergebnisliste bleibt begrenzt;
 - Visualprojekt läuft ausschließlich gegen den synthetischen QA-Stack und stellt Workerzustand zuverlässig wieder her.
 
@@ -744,7 +1000,7 @@ Da die wichtigsten Nebenwirkungen nur gegen die Datenbank beweisbar sind, sind g
 
 ### Entwicklungszyklen
 
-Jede Etappe ist ein eigener Entwicklungs- und Abnahmezyklus: Implementierung, gezielte positive/negative/Zero-Match-Tests, Help/Doku, Logs/Protokolle, vollständiger Diff-Abgleich und Eintrag im Abnahmeprotokoll. Die nächste Etappe beginnt erst danach. Der gezielte Integrationstest folgt bereits in der Etappe, die die Pause-Nebenwirkung ändert; er wird nicht bis zur finalen Integration-Lane aufgeschoben. Keine reale Wartezeit für Budgets, kein echter SSH-/SFTP-Server für die reinen Klassifikationsfälle.
+Jede Etappe ist ein eigener Entwicklungs- und Abnahmezyklus: Implementierung, gezielte positive/negative/Zero-Match-Tests, Help/Doku, Logs/Protokolle, vollständiger Diff-Abgleich und Eintrag im Abnahmeprotokoll. Die nächste Etappe beginnt erst nach dem zusätzlich bestätigten Commit-/Push-Abschluss. Der gezielte Integrationstest folgt bereits in der Etappe, die die Pause-Nebenwirkung ändert; er wird nicht bis zur finalen Integration-Lane aufgeschoben. Keine reale Wartezeit für Budgets, kein echter SSH-/SFTP-Server für die reinen Klassifikationsfälle.
 
 Für jeden bekannten mehrteiligen Prüfumfang gelten die Fortschrittszeilen aus `AGENTS.md`. Bei einem gepufferten Transport wird der Lauf in beobachtbare Blöcke geteilt oder sein letzter `[n/total]`-Stand mindestens einmal pro Minute gemeldet. Das Abnahmeprotokoll nennt den letzten vollständigen Stand und jede fehlgeschlagene Einheit; eine bloße Aussage „Tests laufen“ oder „grün“ genügt nicht.
 
@@ -761,13 +1017,16 @@ Maßstab:
 - Fast vollständig grün, ohne Skips im Unit/Static-Gate;
 - Integration vollständig grün, insbesondere Pause-Test und `migrate-check`;
 - Release vollständig grün; der kontrollierte Staging-Drill dokumentiert DB-Unterbrechung, Worker-Reconnect und den finalen Jobzustand;
+- Release enthält einen synthetischen langen Joblog-/Terminaldrain-Drill, die Cancel-Race an jeder Playbookgrenze, Rohdownload oberhalb des DOM-Limits und den vollständigen redigierten `-vvv`-Sentinelpfad; weder Sentinelwert noch reale Secrets erscheinen im QA-Artefakt;
+- die PowerShell-Pester-Gates prüfen Server-/Client-Logparität, Sinkausfall-Drosselung sowie Installer-/Packagingvollständigkeit; Heartbeat-/ReportRun-Payloads bleiben unverändert und auditfrei pro Heartbeat;
 - Release führt das Visualprojekt im deklarierten Baseline-Runner aus, ohne Snapshot-Update; Runner-/Fontmetadaten stimmen exakt;
 - keine feste Testanzahl;
 - keine geduldeten roten Tests;
 - keine neue CSP-/Zeilenbudgetwarnung;
+- alle im Refactoring-Vertrag benannten PHP-Hotspots sind aus der Legacy-Ausnahmeliste entfernt; keine neue/extrahierte Seite oder kein Modul überschreitet 400 physische Zeilen;
 - `git diff --check` grün;
-- DE/EN-Hilfe im Portal stichprobenartig sichtbar, ohne hartkodierte Dev-Zugangsdaten in dieser Planung.
-- manueller PRE-SHIP-Nachweis für Tastatur, Fokus, Screenreader-Stichprobe, Hell/Dunkel, Wrap/Mobile und screenshots ohne reale Daten.
+- DE/EN-Hilfe im Portal stichprobenartig sichtbar, ohne hartkodierte Dev-Zugangsdaten in dieser Planung;
+- manueller PRE-SHIP-Nachweis für Tastatur, Fokus, Screenreader-Stichprobe einschließlich höflichem Joblog-Liveverhalten, Hell/Dunkel, Follow-Pause, Wrap/Mobile und Screenshots ohne reale Daten.
 
 Die Fast-Lane enthält bereits PHPStan, Unit/Static mit vollem Repo-Mount, Sprach-, Bounds-, Doku- und CSP-Gates. Diese Prüfungen werden nicht als scheinbar zusätzliche Einzelbeweise dupliziert.
 
@@ -775,29 +1034,35 @@ Die Fast-Lane enthält bereits PHPStan, Unit/Static mit vollem Repo-Mount, Sprac
 
 ## 12. Reihenfolge
 
-1. Arbeitsbaum und Zielfunktionen erneut lesen; Basis im Protokoll festhalten.
-2. Etappe 1: Fast-Blocker, vollständiger CLI-Require-Vertrag, QA-Text und temporäres E2E-Artefakt; danach gezielte Gates, Soll/Ist-Abgleich und Abnahmezeile.
-3. Etappe 2: aktiver DB-Kanal, Reconnect, bounded Logspool, Ownership und ausschließlich beobachtende Reapermeldung; danach Unit/Integration, Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile.
+Jede nachfolgende Etappe endet zwingend mit dem vollständigen Commit-/Push-Abschluss aus Abschnitt 0. Die Formulierung wird in den einzelnen Zeilen nicht wiederholt, ist aber weder optional noch bis zum Ende mehrerer Etappen aufschiebbar.
+
+1. Arbeitsbaum und Zielfunktionen erneut lesen; den fortgeschriebenen Basisstand im Protokoll prüfen. Die aktuelle Session übernimmt vorhandene Hunks und setzt nichts zurück.
+2. Etappe 1 ist fachlich abgeschlossen: Die vorhandene grüne Abnahme für Fast-Blocker, File-Size-Guard, CLI-Require-Vertrag und `deploy_jobs`-Repo-Split bleibt unverändert; die Implementierung wird nicht erneut ausgeführt oder um neue Anforderungen erweitert. Vor Fortsetzung bis zum Abschluss von Etappe 2 wird ausschließlich der in Abschnitt 0 definierte Etappe-1-Nachtragscommit samt erforderlicher Überlappungsgegenprüfung und Push abgeschlossen.
+3. Etappe 2 ist begonnen: vorhandenen Worker-/Outcome-Split und Diff vollständig lesen, dann den bereits geplanten aktiven DB-Kanal, Reconnect, bounded Logspool, Ownership und die ausschließlich beobachtende Reapermeldung fertigstellen; danach Unit/Integration, Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile. Keine Arbeit aus 8 oder 10A–10D wird rückwirkend in diese Etappe gezogen.
 4. Etappe 3: Ansible-Aktivitätsquery mit `attempts > 0`, vorsichtige Anzeige, Migration/Index und Query-Plan; danach Unit/Integration/E2E, Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile.
 5. Etappe 4: Disk-Label-SSoT und faktisch belastbare DE/EN-Hilfe; danach Unit/Static/Lang/Golden, Doku-/Audit-/Wire-Abgleich und Abnahmezeile.
-6. Etappe 5: Inventar-Vokabularvertrag mit negativen Fixtures, betroffenen Texten/Hilfe/Doku, Changelog-Anteil und Logs-/Protokollprüfung; danach Soll/Ist-Abgleich und Abnahmezeile.
-7. Etappe 6: Exception-Datei, Require-Contract und alle SSH-/SFTP-Producer samt Hilfe-/Doku-/Logwirkung; danach Soll/Ist-Abgleich und Abnahmezeile.
-8. Etappe 7: gemeinsame dependency-arme Ansible-Abbildung samt Verbrauchertexten, Audit-/Pausewirkung und Betriebsdoku; danach Soll/Ist-Abgleich und Abnahmezeile.
-9. Etappe 8: Phasen, Throwable-Wiring, Preflight, Playbook-Klassifikation, Pause und Logging auf Basis des DB-Kanals samt zugehöriger Hilfe/Doku/Protokolle; gezielte Integration inklusive, danach Soll/Ist-Abgleich und Abnahmezeile.
+6. Etappe 5: zuerst verhaltensgleicher ESXi-Inventory-Repo-Split, dann Vokabularvertrag mit negativen Fixtures, betroffenen Texten/Hilfe/Doku, Changelog-Anteil und Logs-/Protokollprüfung; danach Soll/Ist-Abgleich und Abnahmezeile.
+7. Etappe 6: Exception-Datei, Require-Contract und alle SSH-/SFTP-Producer einschließlich abgeschlossenem `ssh.php`-Domänensplit samt Hilfe-/Doku-/Logwirkung; danach Soll/Ist-Abgleich und Abnahmezeile.
+8. Etappe 7: zuerst Ansible-Inventory-Parser-/Artifact-Split, dann gemeinsame dependency-arme Ansible-Abbildung samt Verbrauchertexten, Audit-/Pausewirkung und Betriebsdoku; danach Soll/Ist-Abgleich und Abnahmezeile.
+9. Etappe 8: zuerst Ansible-Command- sowie Missions-/Inventory-Prozessor-Split, dann Phasen, Throwable-Wiring, Preflight, Playbook-Klassifikation und Pause. Anschließend einzelne Remote-Playbookschritte, Ownership-/Cancel-CAS, Ausgabe-/Volumenhärtung, Markerphasen, Remote-Artefaktsweep und vollständiger Secret-Sentinel auf Basis des DB-Kanals; gezielte Unit/Integration sowie Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile.
 10. Etappe 9: sichtbare Portalzweige, handlungsfähige Links und Zugangstest samt Help/Doku/Log-/RBAC-Abgleich; danach Soll/Ist-Abgleich und Abnahmezeile.
 11. Etappe 10: Betriebsabnahme und getrennter Deploy-QoL-Hunk samt aktualisierter Hilfe/Doku/Logs/Protokolle; danach Soll/Ist-Abgleich und Abnahmezeile.
-12. Etappe 11: kollisionssichere UX-Basis, gemeinsamer Browserresolver und isolierter Visual-Harness; danach Fast-/Determinismusnachweise, Help/Doku/Logs/Protokolle und Abnahmezeile.
-13. Etappe 12: Passwort/Dauer/`updated`, vollständige Live-Deploy-Blocker, Missionslinks und Help-URL-SSoT; danach gezielte Unit/Static/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
-14. Etappe 13: lokalisierter Portal-Zustandswortschatz und robuster JSON-Poller; danach Unit/Integration/Visual, unveränderte Roh-/Wire-Verträge und Abnahmezeile.
-15. Etappe 14: Formular-Migrationsmatrix und gemeinsame Accessibility-API; danach DOM/axe/Keyboard/Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
-16. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie Log-/Korrelationsfilter; danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
-17. Etappe 16: Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
-18. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
-19. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-20. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-21. Release-Lane, Visualprojekt und kontrollierten Staging-DB-Unterbrechungsdrill vollständig und mit `[n/total]`-Fortschritt grün.
-22. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
-23. Gestageten Diff nur lesen/stagen, wenn ein Commit ausdrücklich beauftragt ist.
+12. Etappe 10A: Repositorycursor, echter Initial-Tail, vollständiger Terminaldrain, Older-Pagination, bounded DOM-Grundvertrag und vollständiger autorisierter Rohdownload; danach Limit-/Race-/Retention-/RBAC-Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
+13. Etappe 10B: additive Terminalgrundmigration, `result_json`-/Cancel-/Fehler-SSoT, zentraler Presenter, genau eine Cancel-SYSTEM-Zeile und Rückkehr zum selben Log; danach Schema/Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+14. Etappe 10C: Audit-Producerinventar, additive Event-/Objekt-/Ergebnis-/Kontext-SSoT, Entfernung von `addLog()`, Token-Sink-Guard und sichtbare/auditierbare CSV-Kappung; danach Migration/Guard/Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
+15. Etappe 10D: gespiegelter Server-/Client-PowerShell-Logvertrag, lokale Loggingmodule, Retention, Sinkstörungsdrosselung sowie Installer-/Packagingparität ohne Wireänderung; danach Pester/Packaging/Upgrade, Help/Doku/Logs/Protokolle und Abnahmezeile.
+16. Etappe 11: kollisionssichere UX-Basis, verhaltensgleicher `check.ps1`-Modulsplit, gemeinsamer Browserresolver und isolierter Visual-Harness; danach Runner-Golden-/Fast-/Determinismusnachweise, Help/Doku/Logs/Protokolle und Abnahmezeile.
+17. Etappe 12: zuerst Deploy-/Settings-Seiten- und Deploy-JS-Splits, dann Passwort/Dauer/`updated`, vollständige Live-Deploy-Blocker, Missionslinks und Help-URL-SSoT; danach gezielte Unit/Static/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+18. Etappe 13: zuerst Layout-/Systemstatus-/Credentials-Splits, dann lokalisierter Portal-Zustandswortschatz, robuster JSON-Poller und die auf 10A/10B aufbauende Joblog-UX mit Follow, Scrollpause, Visibility-Catch-up, Livezustand, Phasen, Suche/Filter/Wrap und live aktualisiertem Cancel-/Terminalblock; danach Unit/Integration/Visual, Help/Doku/Logs/Protokolle, unveränderte Roh-/Wire-Verträge und Abnahmezeile.
+19. Etappe 14: zuerst VM-Repo-/VM-Editor-Splits, dann Formular-Migrationsmatrix und gemeinsame Accessibility-API einschließlich Settings-Partials; danach DOM/axe/Keyboard/Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
+20. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie strukturierte Audit-/exakte Korrelationsfilter mit Kopieraktion und CSV-Kappungsparität; danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+21. Etappe 16: zuerst kaskadengleicher `components.css`-Split und zentrale Style-Registry, dann Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
+22. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
+23. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+24. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+25. Release-Lane, Visualprojekt sowie kontrollierten Staging-DB-, langen Joblog-, Cancel-Race- und Secret-Sentinel-Drill vollständig und mit `[n/total]`-Fortschritt grün.
+26. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
+27. Der Gesamtabgleich erzeugt keinen Sammelcommit für vergessene Arbeiten. Findet er einen notwendigen Hunk, wird dessen verursachende Etappe wieder geöffnet, erneut vollständig geprüft, separat committed und gepusht; abschließend müssen alle eigenen Planänderungen in den protokollierten Upstream-Hashes enthalten sein.
 
 ---
 
@@ -809,24 +1074,27 @@ Voraussichtlich betroffen:
 |---|---|
 | `Docker/WebAPI/lib/defaults.php` | typisierte exhaustive Disk-Label-SSoT; EZT-Default bleibt |
 | `Docker/WebAPI/lib/deploy_worker_db_channel.php` | neu: veränderbare aktive DB-Verbindung, Backoff und bounded Logspool |
-| `Docker/WebAPI/lib/deploy_constants.php` | neun neue Kategorien, Herkunfts-/Pause-Prädikate und Legacy-Kommentare |
+| `Docker/WebAPI/lib/deploy_constants.php` | neue Herkunftskategorien, Herkunfts-/Pause-Prädikate, Terminalgrund-/Statuskombinationen sowie Joblog-Zeilen-/Volumen-/Cursorbounds |
 | `Docker/WebAPI/lib/ssh_transport_exceptions.php` | neu: Budget-, SFTP- und lokale Transportkonfigurationstypen |
 | `Docker/WebAPI/lib/connection_errors.php` | gemeinsame exhaustive Ansible-Abbildung |
 | `Docker/WebAPI/lib/ssh_sftp.php` | neu aus `ssh.php`: SFTP-Producer, Operations-Guard, Gesamtbudget und Probe |
 | `Docker/WebAPI/lib/ssh.php` | SSH-Producer, Modul-Require und Zugangstest-Mapping |
-| `Docker/WebAPI/lib/deploy_worker_outcome.php` | Observer-/Reapervertrag, DB-Kanal-Hooks, SFTP-Phase und Throwable-/Phasenklassifikation |
-| `Docker/WebAPI/lib/deploy_worker.php` | aktiver Reconnect, Streamspool, Ownership, Phasen-Wiring, `$exception`, Preflight-Code |
+| `Docker/WebAPI/lib/deploy_worker_outcome.php`, `deploy_worker.php` und neue Worker-Domänenmodule | kleine Fassaden; Runtime/Stream, Reaper, VM-State, Audit, Mission/Inventory und Klassifikation unter Budget; DB-Kanal, einzelne Playbookschritte, Cancel-CAS, Ausgabenormalisierung, Terminalwriter und Remote-Artefaktsweep |
 | `Docker/WebAPI/lib/maintenance_worker.php` | identischer Observer-/Reapervertrag |
 | `Docker/WebAPI/lib/integration_health.php` | aktueller Dienststatus bleibt Beobachtung, keine Besitzerursache |
 | `Docker/WebAPI/lib/repo/ansible_activity.php` | letzter vom Worker bearbeiteter Missionsjob, `attempts > 0` |
-| `Docker/WebAPI/lib/repo/deploy_jobs.php` | Claim-/Attempts- und Reaperbeobachtung bleiben SSoT |
-| `Docker/WebAPI/lib/ansible_inventory.php` | `ansible_config`, Privilege-Escalation-Timeout |
-| `Docker/WebAPI/lib/repo/esxi_inventory.php` | Pause über SSoT-Helper bzw. exakten Code |
+| `Docker/WebAPI/lib/repo/deploy_jobs.php` | kleine Kompatibilitätsfassade; bisheriger öffentlicher Require-Pfad bleibt |
+| `Docker/WebAPI/lib/repo/deploy_job_{input,queries,guards,worker,queue,cancel,maintenance}.php` | Splitbestand aus Etappe 1; in 8/10A/10B erweitert um Schritt-/Cancel-CAS, Tail/Forward/Older-Cursor, atomare Terminalzeile, Cancelmetadaten und Terminalgrund |
+| `Docker/WebAPI/lib/ansible_inventory.php` plus Parser-/Artifact-Domänenmodule | Fassade unter Budget; Parser-/Logparität; `ansible_config`, Privilege-Escalation-Timeout |
+| `Docker/WebAPI/lib/ansible_command.php` plus Mode-/Marker-/Preflight-/Commandmodule | Fassade unter Budget; Modefolge, geordnete Einzelschrittdeskriptoren, Quoting, Marker und Preflightverhalten |
+| `Docker/WebAPI/lib/repo/esxi_inventory.php` | kleine Kompatibilitätsfassade; bisheriger Require-Pfad bleibt |
+| `Docker/WebAPI/lib/repo/esxi_inventory_{cache,state,queries,vlan}.php` | neu: Cache-/Pause-/Query-/VLAN-Domänen; Fehlerwirkung anschließend über SSoT-Helper |
+| `Docker/WebAPI/lib/esxi_inventory.php` plus Scheduler-/Deviation-/Displaymodule | Servicefassade unter Budget; Credentialauflösung, Abweichungen, Summary/Ampel und Due-Enqueue getrennt |
 | `Docker/WebAPI/lib/system_status_esxi_panels.php` | Ansible-Statuslink über URL-SSoT; Joblog-RBAC bleibt getrennt |
-| `Docker/WebAPI/lib/system_status_panels.php` | vorsichtige Ansible-Aktivitätsanzeige und bestehender Log-Deep-Link |
+| `Docker/WebAPI/lib/system_status_panels.php` und neue source-spezifische Panelmodule | unter 400 Zeilen; vorsichtige Ansible-Aktivitätsanzeige und bestehender Log-Deep-Link |
 | `Docker/WebAPI/lib/help/deploy.php` | sichtbarer Disktyp über `disk_type_label()` |
 | `Docker/WebAPI/lib/help/missions.php` | Defaultlabel und belastbare Disk-Erklärung |
-| `Docker/WebAPI/portal/credentials.php` | Ansible-Aktivitätsnachweis ohne Statuskopie |
+| `Docker/WebAPI/portal/credentials.php` plus Credentials-Actions/-Renderer | Seite unter 400 Zeilen; Ansible-Aktivitätsnachweis ohne Statuskopie; POST-/Auditvertrag unverändert |
 | `Docker/WebAPI/lib/credentials_test_message.php` | Vokabular-Ownership im Docblock richtigstellen; Mapping bleibt zentral |
 | `Docker/WebAPI/lang/{de,en}/common.php` | neun neue Basissätze, Legacy-Text |
 | `Docker/WebAPI/lang/{de,en}/help_system_status.php` | neun Fixtexte, Pause-/Link-/Timeout-Korrekturen |
@@ -836,6 +1104,7 @@ Voraussichtlich betroffen:
 | `Docker/WebAPI/lang/{de,en}/help_missions.php` | storageabhängige Disktypen ohne Performance-Absolutaussage |
 | `Docker/WebAPI/lang/{de,en}/vm_edit.php` | erster Schreibzugriff, Default und nur Create-Wirkung |
 | `Docker/WebAPI/tests/Static/CliRequireClosureContractTest.php` | vollständiger CLI-Entry-Point-Vertrag inklusive `seed.php` |
+| `Docker/WebAPI/tests/Static/FileSizeDisciplineContractTest.php` bzw. Guard-Contract | neue/berührte PHP-Dateien unter Budget; Legacy-Ausnahmen begründet und schrumpfend |
 | `Docker/WebAPI/tests/Static/AnsibleActivityContractTest.php` | Query-/Index-/Frischschema-Vertrag |
 | `Docker/WebAPI/tests/Static/InventoryErrorVocabularyContractTest.php` | neu |
 | `Docker/WebAPI/tests/Static/SshTransportExceptionRequireContractTest.php` | neu |
@@ -855,42 +1124,57 @@ Voraussichtlich betroffen:
 | Reaper-/Outcome-Integrationstests | DB-Reconnect, Ownership, belegbarer Reapertext und Finalisierung |
 | `tests/e2e/specs/system-status.spec.js` | Aktivitätsanzeige, Loglink und Geometrie |
 | `tests/e2e/shot.tmp.js` | temporäres Artefakt entfernen, nicht committen |
-| `scripts/check.ps1` | benutzergebundenen Chromium-Fallback entfernen; gemeinsamer Resolver; Release-Visualprojekt ohne Updatepfad |
+| `scripts/check.ps1` und `scripts/lib/check/*.ps1` | Entry-Point-Vertrag bewahren; Runtime/Tools, Gate-Registry und Lanes trennen; Chromiumresolver und Visual-Gate |
+| `scripts/check-file-size.php` und `scripts/test-guards.ps1` | neuer ADR-0006-Guard samt positiver, negativer und Zero-Match-Fixtures |
 | `tests/e2e/playwright.config.js` | isoliertes Visualprojekt, deklarierter Runner, Metadaten, Viewports/Themes und bestehende funktionale Projekte |
 | `tests/e2e/package.json` und Lockdatei | nur falls für pixelbasierten Vergleich/Resolver tatsächlich nötig; keine Runtime-Abhängigkeit |
 | `tests/e2e/lib/{auth,visual-seed,visual-runner}.js` bzw. lokale Konvention | bestehende Auth wiederverwenden; synthetischer Seed, Uhr/Locale/Fonts/Worker-Restore zentralisieren |
 | `tests/e2e/visual/**` und Baselineverzeichnis | Visualspecs, deterministische Fixtures, reviewte Sollbilder und Metadaten; keine echten Daten |
 | `Docker/WebAPI/lib/deploy_page.php` | diskriminierte `deploy_queue_blockers()`-SSoT einschließlich Aktionen und Konfliktdaten |
 | `Docker/WebAPI/lib/deploy_form_state.php` | exakt ein normalisierter Formularzustand für Render, Blocker-JSON und Queue-POST |
-| `Docker/WebAPI/portal/deploy.php` und neuer read-only Blocker-JSON-Pfad | Anzeige/Queue aus derselben Blockerliste; JSON-Auth/RBAC/Content-Type; Repo-Recheck |
-| `Docker/WebAPI/portal/assets/deploy.js` | Live-Blocker debounced/Single-Flight, stale-Abwehr, DOM-Renderer und lokalisierte Authfehler |
+| `Docker/WebAPI/portal/deploy.php`, `lib/deploy_{actions,page_model,...}.php` und neuer read-only Blocker-JSON-Pfad | Seite/Module unter Budget; Anzeige/Queue aus derselben Blockerliste; JSON-Auth/RBAC/Content-Type; Repo-Recheck; validierte Cancel-Rückkehr zum selben Joblog |
+| Deploy-JS-Module unter `Docker/WebAPI/portal/assets/` | Poller, Joblog-Follow/Visibility/Filter/Wrap, Formular/Blocker und Storage getrennt; Single-Flight, Cursor-/stale-Abwehr, bounded DOM, lokalisierte Auth-/Netzfehler und Live-Aktionen |
+| `Docker/WebAPI/portal/settings.php`, `lib/settings_{actions,view_model}.php`, `lib/settings/*.php` | Seite/Module unter Budget; Action-/Tab-/Deep-Link-/Formvertrag bleibt vollständig |
 | `Docker/WebAPI/lib/help_page.php` | neu: Panel-/Abschnitts-SSoT und validierter `help_url()` |
-| `Docker/WebAPI/lib/layout.php`, `Docker/WebAPI/lib/help/*.php`, `Docker/WebAPI/portal/help.php` | Headeranker, Abschnittsvertrag, Dauerpluralisierung und korrektes Öffnen verschachtelter Hilfeziele |
+| `Docker/WebAPI/lib/layout.php`, neue `portal_{flash,format,badges,catalog_filter}.php`, `lib/help/*.php`, `portal/help.php` | Layout unter Budget; öffentliche Helper kompatibel; Headeranker, Dauer und Hilfeziele |
 | `Docker/WebAPI/portal/{users,account,mission_details,vms,vm_edit}.php` | Passwortattribute/-labels, Bereitstellungslinks, `updated`, Titel, Sticky-Aktionen und Formularzuordnung |
 | `Docker/WebAPI/lib/portal_status_display.php` | neu: lokalisierte Lifecycle-/MECM-Anzeige geschlossener Zustände |
 | `Docker/WebAPI/lib/deploy_display.php` | neu: lokalisierte Jobstatus-/Deploymodus-/Payloadanzeige ohne technische Logmutation |
-| `Docker/WebAPI/portal/deploy_log.php` | additives Statuslabel, lokalisierte JSON-Fehler und früher Session-Lock-Abschluss |
+| `Docker/WebAPI/portal/deploy_log.php` plus fokussierte Joblog-Cursor-/Presenter-/Downloadhelper | echter Initial-Tail, Forward-/Older-Cursor, `has_more`/`caught_up`, Rohdownload, Phasen/Quelle, lokalisierte JSON-Fehler, früher Session-Lock-Abschluss sowie Cancel-/Resultat-/Terminaldarstellung |
+| `Docker/WebAPI/lib/audit_events.php`, `lib/repo/log.php` und neue Audit-Registry/Presenterhelper | strukturierte Event-/Objekt-/Ergebnis-/Kontext-SSoT, Legacyfallback, Kontextbounds/Redigierung; totes tokenfähiges `addLog()` entfernen |
 | `Docker/WebAPI/lib/forms.php` | gemeinsame IDs, Controlattribute und Fehlerausgabe für Hint-/Error-Zuordnung |
+| `Docker/WebAPI/lib/repo/vms.php` und neue `vm_{validation,persistence,operations}.php`/Legacy-Domäne | Repo-Fassade unter Budget; Validierung, Transaktionen, Recovery und Machine-Verträge getrennt |
+| `Docker/WebAPI/portal/vm_edit.php` und `Docker/WebAPI/lib/vm_edit_*.php` | Seite/Module unter Budget; Diagnostik, Gruppenrenderer und Aktionen getrennt |
 | betroffene Portalformulare und JS-Zeilentemplates | vollständige Formular-Migrationsmatrix, eindeutige IDs und dynamisches `aria-describedby` |
-| `Docker/WebAPI/portal/{missions,os,packages,vlans,logs}.php` | Seitennavigation, Katalogleerzustände/-filter, Zeitzone und normalisierte Logfilter/Korrelation |
+| `Docker/WebAPI/portal/{missions,os,packages,vlans,logs}.php` | Seitennavigation, Katalogleerzustände/-filter, Zeitzone, strukturierte Auditfilter, exakte kopierbare Korrelation und sichtbare CSV-Kappung |
 | `Docker/WebAPI/lib/system_status_panels.php` | fünfte Übersichtskarte mit gemeinsamem Abweichungs-Count und SSoT-Link |
-| `Docker/WebAPI/lib/log_filter.php` | neu: validierter Filter-Struct, lokale Tagesgrenzen und URL-State |
-| `Docker/WebAPI/lib/repo/log.php` und `Docker/WebAPI/lib/repo/deploy_jobs.php` | strukturierter Logfilter und begrenzte/paginierte Korrelationssuche |
-| `Docker/WebAPI/portal/assets/css/{base,components}.css` und weitere Portal-CSS-Dateien | Slate-/Indigo-Tokens, vorhandener Glass-Fallback, Sticky-Geometrie, Forced Colors und keine rohen Verbraucherfarben |
+| `Docker/WebAPI/lib/log_filter.php` | neu: validierter Filter-Struct, lokale Tagesgrenzen, Event-/Objekt-/Ergebnisfelder, exakte Korrelation und URL-State |
+| `Docker/WebAPI/lib/repo/log.php` und Deploy-Job-Querymodule | strukturierter Logfilter, gezählte/auditierte CSV-Kappung und begrenzte/paginierte Korrelationssuche |
+| `Docker/WebAPI/portal/assets/css/*.css` und zentrale Style-Registry | `components.css` nach Controls/Feedback/Tabellen/Daten splitten; Kaskadenreihenfolge, Tokens, Glass-Fallback, Forced Colors und keine rohen Verbraucherfarben |
 | `Docker/WebAPI/lang/{de,en}/**` | Passwort-/Blocker-/Status-/Form-/Navigation-/Filter-/Kontrasttexte und Help-Parität pro verursachender Etappe |
 | UX-Unit-/Static-Tests unter `Docker/WebAPI/tests/` | Blocker-, Help-, Status-, Form-, Filter-, CSS-Farb- und Kontrastverträge mit positiven/negativen/Zero-Match-Fällen |
 | UX-E2E-Specs unter `tests/e2e/specs/` | Live-Blocker, Poller, Navigation, Form-DOM, Sticky/Wrap, Logfilter/RBAC, axe/Forced Colors und Visuals |
-| `Docker/mysql/mysql-init/struktur.sql` | Aktivitätsindex aus Etappe 3, Fehlerkategoriebreite aus Etappe 5 und belegte Korrelationsindizes aus Etappe 15 als Frischschema-SSoT |
-| `Docker/WebAPI/lib/migrate.php` | Migration 0039 gegen Query-Plan prüfen/anpassen; Fehlerkategoriebreite aus Etappe 5 sowie begründete Korrelationsindizes aus Etappe 15 spiegeln |
+| Joblog-/Audit-Unit-, Static-, Integration- und E2E-Tests unter `Docker/WebAPI/tests/`/`tests/e2e/specs/` | Playbook-/Cancel-Races, Outputbounds/Sentinel/Cleanup, Tail/Drain/Download, Terminalpresenter, Auditregistry/Token-Guard, CSV-Kappung sowie Follow/ARIA/Visibility/Filter |
+| `Docker/mysql/mysql-init/struktur.sql` | Aktivitätsindex aus Etappe 3, Fehlerkategoriebreite aus Etappe 5, Terminalgrund/Auditfelder aus 10B/10C und belegte Korrelationsindizes aus Etappe 15 als Frischschema-SSoT |
+| `Docker/WebAPI/lib/migrate.php` | Migration 0039 gegen Query-Plan prüfen/anpassen; Fehlerkategoriebreite, additive Terminalgrund-/Auditfelder sowie begründete Korrelationsindizes spiegeln |
+| `Powershell-MECM/mecm/VirtuSphere-Common.ps1` und lokales Server-Loggingmodul | Loggingdomäne unter Paritätsnachweis extrahieren; einheitliches Schema, Retention, Korrelation und gedrosselter Sinkstatus |
+| `Powershell-MECM/clients/VirtuSphere-Client-Common.ps1` und lokales Client-Loggingmodul | getrennte ADR-0029-Implementation mit statisch gleichem Schema/Bounds/Retention und gedrosseltem Sinkstatus |
+| `Powershell-MECM/install-VirtuSphere-{MECM,Clients}.ps1`, ClientPackaging und Paketdateilisten | Loggingmodule bei Neuinstallation, Upgrade und Clientpaket atomar kopieren und Version/Vollständigkeit sichtbar prüfen |
+| `tests/powershell/VirtuSphere.*.Tests.ps1` | Server-/Client-Logparität, Dot-Source-/Funktionsinventar, Installer/Packaging, Sinkausfall/Recovery und unveränderte Report-/Heartbeatverträge |
+| `Powershell-MECM/{README.md,clients/README.md}` | Format, Pfad, Retention, Korrelation, Sinkstörung und getrennte Runtimepakete dokumentieren |
 | `docs/operations/esxi-inventory.md` | Tabelle, Heading, Logging, RBAC, Altbestand, Detailgrenze |
-| `docs/operations/deploy-chain.md` | aktiver DB-Kanal, Observergrenze und belegbare Reaperdiagnose |
-| `docs/operations/troubleshooting.md` | Containerlogpfad, Reaperbeobachtung und Wiederanlauf |
-| `docs/DEPLOYMENT.md` | Worker-, Fehlerherkunfts-, Joblog- und unveränderten Wire-Vertrag abgleichen |
+| `docs/operations/deploy-chain.md` | aktiver DB-Kanal, Observergrenze, einzelne Playbook-/Abbruchgrenzen, Terminal-/Joblogvertrag und belegbare Reaperdiagnose |
+| `docs/operations/troubleshooting.md` | Containerlogpfad, Reaperbeobachtung, Tail/Drain/Retention, Cancelgrenze, Korrelation erst nach Etappe 15 und Wiederanlauf |
+| `docs/DEPLOYMENT.md` | Worker-, Fehlerherkunfts-, Schritt-/Cancel-, Joblog-/Download-/Terminal- und unveränderten Wire-Vertrag abgleichen |
 | `docs/QA.md` | neue Contract-/Integrationsnachweise und etappenweise Abnahme |
+| `docs/adr/ADR-0006-file-size-discipline.md` | Guard, Kompatibilitätsfassaden, Owner-Glob und begründete Ausnahme-/Abbaupolitik |
 | `docs/adr/ADR-0013-frontend-design-baseline.md` | Slate/Indigo, Token-/Glas-/Forced-Colors-/Kontrastvertrag und unveränderte Danger-Semantik |
 | `docs/adr/ADR-0028-playwright-dev-e2e-layer.md` | Visualrunner, Browserresolver, Baseline-Metadaten und bewusster Updateworkflow |
-| `docs/adr/ADR-0032-correlation-id.md` | Portal-Korrelationssuche, RBAC/Retention, Begrenzung und belegte Indexannahmen |
-| `docs/adr/ADR-0033-cancellation-state-machine.md` | Observer/Reaper/Ownership ohne falsche Ursachenbehauptung |
+| `docs/adr/ADR-0018-machine-report-channel-and-maintenance-worker.md` | strukturierte/gedrosselte Reportprotokolle ohne Audit je Heartbeat und unveränderte Wirefelder |
+| `docs/adr/ADR-0022-portal-timezone-and-deploy-scheduling.md` | Gruppenabbruch bleibt queued-only; Cancelmetadaten normaler Jobs |
+| `docs/adr/ADR-0026-log-retention-windows.md` | Joblog-/Rohdownload-/Audit-/CSV-/PowerShell-Retention und Kappung |
+| `docs/adr/ADR-0032-correlation-id.md` | Portal-Korrelationssuche/-kopie/-export, RBAC/Retention, Begrenzung und belegte Indexannahmen |
+| `docs/adr/ADR-0033-cancellation-state-machine.md` | einzelne Playbookgrenzen, Cancel-/Terminal-CAS, Observer/Reaper/Ownership, Metadaten und keine harte Standardtötung |
 | `.claude/rules/webapi.md` | vollständiger CLI-Vertrag und ehrliche Reaperregel |
 | `.claude/rules/portal.md`, `AGENTS.md`, `GROK.md` | Blocker-/Help-/Status-/Form-/Farbverträge unmittelbar mit ihren Etappen |
 | `docs/CHANGELOG.md` | sichtbare Verhaltensänderung und Altbestand |
@@ -912,8 +1196,11 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 - Behauptung eines tatsächlich realisierten Festplattentyps ohne Rücklese-Evidenz von ESXi.
 - Generischer Dashboard-„Nächster Schritt“, Help-Inhaltsverzeichnisse und noch nicht gegen den finalen Blockervertrag spezifizierte Cadence-Zeilen.
 - Sticky-Speichern/Dirty-Warnung im VM-Editor und ein seitenübergreifender Auto-Refresh-Controller; der eng begrenzte Live-Blocker-Endpunkt aus Etappe 12 bleibt Bestandteil.
-- Generische persistente `failure_code`-/`failure_phase`-Spalten für alle Jobs, globale Volltextsuche, Digest/Benachrichtigungen und Ersteinrichtungsassistent.
+- Generische persistente `failure_code`-/`failure_phase`-Spalten für alle Jobs, globale Volltextsuche über alle Joblogs, Digest/Benachrichtigungen und Ersteinrichtungsassistent. Die eng definierte `terminal_reason_code`-SSoT aus 10B und die jobgebundene Suche aus Etappe 13 sind davon ausdrücklich nicht ausgeschlossen.
 - Rückwirkende Übersetzung persistenter technischer Logs oder Änderung bestehender technischer JSON-/Machine-API-Felder.
+- Breiter fachfremder Split von `Powershell-MECM/mecm/VirtuSphere-Common.ps1` sowie Größenzerlegung von `VirtuSphere.ErrorPaths.Tests.ps1` und `VirtuSphere.RunReport.Tests.ps1`. Etappe 10D darf ausschließlich die tatsächlich geänderte Logging-/Retention-Domäne unter vollständigem Pester-/Dot-Source-/Installer-/Packaging-Paritätsnachweis extrahieren; übrige Wire-/MECM-/Installerdomänen bleiben unberührt.
+- Hartes Beenden des laufenden Ansible-Prozesses als normaler Cancelpfad. Es bleibt bei „aktuellen Schritt auslaufen lassen, keinen nächsten starten“; ein späterer Notfall-Kill bräuchte eine eigene Remote-Prozessgruppen-, Cleanup- und Operatorrisiko-Spezifikation.
+- Zerlegung linearer SSoT-Registries wie `lib/migrate.php` oder `lib/constants.php` allein aufgrund der Zeilenzahl. Neue fachlich eigenständige Helper dürfen weiterhin extrahiert werden, ohne die geordnete Registry zu verteilen.
 
 ---
 
@@ -932,6 +1219,12 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 - Playwright weist auf renderumgebungsabhängige Screenshots hin und dokumentiert Pixelvergleich, Baseline-Updates, feste Uhr sowie Locale/Zeitzone/Viewport: <https://playwright.dev/docs/test-snapshots>, <https://playwright.dev/docs/clock> und <https://playwright.dev/docs/emulation>
 - PHP dokumentiert Sessionlocking und den frühen Abschluss per `session_write_close()`: <https://www.php.net/manual/en/function.session-write-close.php> und <https://www.php.net/manual/en/session.examples.basic.php>
 - MySQL verlangt für konkrete Indexentscheidungen eine Prüfung des Ausführungsplans; zusammengesetzte Indizes wirken abhängig von Spaltenreihenfolge und Query: <https://dev.mysql.com/doc/refman/8.4/en/using-explain.html> und <https://dev.mysql.com/doc/refman/8.0/en/multiple-column-indexes.html>
+- POSIX definiert AND-OR-Listen so, dass die Shell den nächsten `&&`-Befehl nach erfolgreichem Vorgänger selbst ausführt; ein entfernter Gesamtbefehl bietet dem lokalen Worker dazwischen keine Abbruchgrenze: <https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html>
+- AWX dokumentiert selbst für einen aktiven Prozessabbruch, dass bereits an Remotehosts ausgesandte Modultasks häufig bis zum Ende laufen; deshalb verspricht dieser Plan keinen rückwirkungsfreien Hard-Cancel: <https://docs.ansible.com/projects/awx/en/24.6.1/administration/troubleshooting.html#cancel-an-awx-job>
+- Ansible dokumentiert `block`/`always` als Cleanupstruktur innerhalb eines laufenden Playbooks; ein harter Prozessabbruch wird daraus nicht als garantierter Cleanup abgeleitet: <https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_blocks.html>
+- Ansible warnt, dass gespeicherte Ausgabe Geheimnisse enthalten kann und `no_log` Debugausgabe nicht schützt; die CLI beschreibt `-vvv` als erhöhte Diagnoseausgabe und `-vvvv` als mögliche Verbindungsdiagnose, nicht als garantierte Variablenanzeige: <https://docs.ansible.com/projects/ansible/latest/reference_appendices/logging.html> und <https://docs.ansible.com/projects/ansible-core/devel/cli/ansible-playbook.html>
+- MDN dokumentiert die Rundungsdifferenz von `scrollTop` gegenüber `scrollHeight`/`clientHeight` und empfiehlt eine Bottom-Toleranz; die Page Visibility API liefert `visibilitychange` für Pause und Catch-up eines Hintergrundtabs: <https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollHeight#determine_if_an_element_has_been_totally_scrolled> und <https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API>
+- WAI-ARIA 1.2 definiert `role="log"` als geordnete Live-Region mit implizitem `aria-live="polite"`; der Plan verwendet deshalb keine aggressive `assertive`-Ansage: <https://www.w3.org/TR/wai-aria-1.2/#log>
 
 Die externen Primärquellen und offiziellen Dokumentationen stützen Standards, Werkzeugverhalten, Taxonomie und Textgestaltung. Die konkrete VirtuSphere-Wirkung wird ausschließlich durch Repository-Code, Schema, Tests und Etappenprotokolle bewiesen.
 
@@ -939,43 +1232,48 @@ Die externen Primärquellen und offiziellen Dokumentationen stützen Standards, 
 
 ## 16. Abnahmeprotokoll
 
-Die ausführende Sitzung ergänzt je Etappe eine Zeile, bevor die nächste Etappe beginnt. Jedes Nachweisfeld enthält entweder einen konkreten Diff-/Test-/Pfadnachweis oder `nicht betroffen: <Begründung>`. Ein leeres Feld bedeutet nicht abgeschlossen. `Ergebnis = grün` ist nur zulässig, wenn der Soll/Ist-Abgleich keine offene Anforderung und keine auf später verschobene Help-/Doku-/Log-/Protokollarbeit enthält.
+Die ausführende Sitzung ergänzt je Etappe eine Zeile, bevor die nächste Etappe beginnt. Jedes Nachweisfeld enthält entweder einen konkreten Diff-/Test-/Pfadnachweis oder `nicht betroffen: <Begründung>`. Ein leeres Feld bedeutet nicht abgeschlossen. `Ergebnis = grün` ist nur zulässig, wenn der Soll/Ist-Abgleich keine offene Anforderung und keine auf später verschobene Help-/Doku-/Log-/Protokollarbeit enthält und das Feld `Commit/Push` Commit-Hash, Betreff, Remote/Branch, bestätigte Upstream-Hashgleichheit und Pushzeit nachweist.
 
-| Etappe | Datum | Ergebnis | Soll/Ist und Diff | Tests/Gates | Help/Doku | Logs/Protokolle | Abweichung/Begründung |
-|---|---|---|---|---|---|---|---|
-| Basis/Arbeitsbaum | | | | | | | |
-| 1 Fast/CLI/Hygiene | | | | | | | |
-| 2 DB-Ausfall/Reaper | | | | | | | |
-| 3 Ansible-Aktivität | | | | | | | |
-| 4 Disk-SSoT/Hilfe | | | | | | | |
-| 5 Inventar-Vokabularvertrag | | | | | | | |
-| 6 Budgettyp und Producer | | | | | | | |
-| 7 gemeinsame Ansible-Abbildung | | | | | | | |
-| 8 Worker/Pause/Logging | | | | | | | |
-| 9 Anzeige/Links/Zugangstest | | | | | | | |
-| 10 Betriebsabnahme/Deploy-QoL | | | | | | | |
-| 11 UX-Basis/Visual-Harness | | | | | | | |
-| 12 UX-Quick-Wins/Deploy-Blocker/Help | | | | | | | |
-| 13 Portal-Zustände/Jobpoller | | | | | | | |
-| 14 Formular-Accessibility | | | | | | | |
-| 15 Navigation/Tabellen/Logfilter/Korrelation | | | | | | | |
-| 16 Design/Farbguard/Kontrast | | | | | | | |
-| 17 Visual-Baselines/Release-Gate | | | | | | | |
-| Fast-Lane | | | | | | | |
-| Integration-Lane | | | | | | | |
-| Release-Lane/Staging-Drill | | | | | | | |
-| Gesamtabgleich | | | | | | | |
+| Etappe | Datum | Ergebnis | Soll/Ist und Diff | Tests/Gates | Help/Doku | Logs/Protokolle | Commit/Push | Abweichung/Begründung |
+|---|---|---|---|---|---|---|---|---|
+| Basis/Arbeitsbaum | 2026-08-11 | grün | HEAD `fd132ff`, Branch `main`, `git status --short` nur `M docs/audits/2026-08-11-deploy-reliability-master-plan.md`, `M docs/audits/2026-08-11-ux-implementation-plan-v4.md` (fremde Planaktualisierung, unangetastet) und `?? tests/e2e/shot.tmp.js`; `git diff --check` grün; die in Abschnitt 0 genannten Überlappungen (`deploy_constants.php`, `deploy_worker*.php`, help/system_status-Kataloge, `struktur.sql`, `migrate.php`) sind in diesem Arbeitsbaum **nicht** verändert, der Bestand ist committet | `migrate.php --check`: `pending=1`, `pending 0039_ansible_activity_index`, sonst `ok`; Migration bewusst nicht angewandt (gehört zu Etappe 3) | nicht betroffen: Bestandsaufnahme ohne Code-/Textänderung | nicht betroffen: keine Ausführung, kein Audit-/Job-/Containerlogeintrag erzeugt | historischer Basiscommit `fd132ff`; vor Einführung des etappenweisen Pushvertrags | Fremde Änderungen an beiden Planfassungen bleiben erhalten; es wurde nichts gestaged und nichts zurückgesetzt |
+| Refactoring-Inventar/File-Size-Guard | 2026-08-11 | fachlich grün / Push offen | Bestand `find lib portal -name '*.php' \| xargs wc -l`: 23 Dateien über 400 Zeilen, größte `lib/repo/deploy_jobs.php` (1220). Neu `scripts/check-file-size.php` (Scope `lib/`+`portal/`, Budget 400, `FILE_SIZE_ALLOWANCES` mit exakter Größe/Grund/Abbauetappe je Eintrag), Gate `file-size` in allen drei Lanes von `scripts/check.ps1`, Zweig in `.claude/hooks/session-start.sh` | Guard-Harness `file-size.*`: 6/6 proven (green, small-file-allowed, oversize, grown, stale-allowance, zero-match); Fast-Gate `[12/28] pass file-size` | ADR-0006 Amendment 2026-08-11 (Guard, Ratchet in beide Richtungen, Fassadenregel, Owner-Glob-Folgerung); `docs/QA.md` Drift-Checks-Abschnitt; `AGENTS.md` Skriptliste; `docs/CHANGELOG.md` | nicht betroffen: reiner Build-Guard, schreibt kein Audit, keinen Joblog und keine Containerlogzeile im Betrieb; Diagnose-IDs `[file-size.*]` sind CI-Ausgabe | offen: gehört zum Etappe-1-Nachtragscommit; Hash/Upstream/Pushzeit nachtragen | Die Ausnahmeliste startet mit dem hier protokollierten Bestand (23), nicht automatisch pro Lauf; nach dem Etappe-1-Split sind es 22 |
+| 1 Fast/CLI/Hygiene | 2026-08-11 | fachlich grün / Push offen | (1) `disk_type_label()` mit `@param 'thin'\|'thick'\|'eagerzeroedthick'`, `match` weiterhin ohne `default`; (2) `CliRequireClosureContractTest` leitet die Entry-Point-Menge aus dem Top-Level-CLI-Wächter ab, `DUAL_SAPI` nur für `lib/migrate.php`, Gegenprüfung über alle `php .../lib/*.php`-Aufrufe in Compose/Healthcheck/Setup; gefundene echte Lücke behoben (`lib/repo/log.php` requirt jetzt `lib/lang.php`); (3) QA-/Regeltext auf den bewiesenen Vertrag korrigiert; (4) `tests/e2e/shot.tmp.js` entfernt, keine fremde ungetrackte Datei angefasst; (5) Basis protokolliert (Zeile oben); (6) File-Size-Guard (eigene Zeile); (7) `lib/repo/deploy_jobs.php` 1220 → 50 Zeilen Fassade plus `deploy_job_{input,queries,guards,worker,queue,cancel,maintenance}.php` (251/184/172/110/277/145/204 Zeilen) und Owner-Registry `deploy_job_modules.php` | Fast-Lane 28/28 pass, 0 fail/skip (`qa-artifacts/qa-e1-fast.json`); PHPUnit unit/static 808 Tests/19085 Assertions ohne Skip mit vollem Repo-Mount; Integration 246 Tests (1 Skip: `DeployJobReaperTest` überspringt bei fremden laufenden Jobs im Dev-Stack, Vertragsverhalten); PHPStan grün (Baseline-Einträge auf `deploy_job_input.php`/`deploy_job_queue.php` umgezogen, kein neuer Eintrag); Guard-Harness 88/88 proven; Zeilenparitätsbeweis des Splits: jede Nicht-Leerzeile überlebt mit gleicher Vielfachheit, nichts hinzugekommen | `docs/QA.md` (CLI-Vertrag abgeleitet statt behauptet, feste „drei Tests"-Zahl durch ableitbare Beschreibung ersetzt, File-Size-Abschnitt), `.claude/rules/webapi.md` (abgeleitete Entry-Point-Menge), `AGENTS.md`, ADR-0006, `docs/CHANGELOG.md` | nicht betroffen: PHPDoc-, Guard- und reiner Strukturhunk erzeugen keine neue Portalhilfe, keine Auditkategorie, keine Joblogzeile und keinen Wire-Contract; die Joblogtexte des Deploy-Repos (`Deploy job queued: …`, `Retry of deploy job …`, Reaper-/Cancel-Sätze) wurden beim Split byte-gleich mitgenommen und sind durch den Zeilenparitätsbeweis belegt | offen: eigener Nachtragscommit/-push gemäß Übergangsregel; Etappe-2-/fremde Hunks nicht mitnehmen | Abweichung zur Plan-Modulliste: sieben statt fünf Domänenmodule. Grund: mit den fünf benannten Modulen läge `deploy_job_queue.php` bei ~430 und mit den Vorbedingungs-Asserts bei ~510 Zeilen und damit über der im selben Vertrag verbindlichen 400-Zeilen-Grenze. Zusätzlich sind `deploy_job_guards.php` (sperrende Vorbedingungen, eigene Lockreihenfolge) und `deploy_job_cancel.php` (ADR-0033-Zustandsmaschine inkl. Worker-Bestätigung) entstanden. `FileSizeDisciplineContractTest` wurde bewusst nicht angelegt: der Plan nennt „bzw. Guard-Contract", und ein PHPUnit-Zwilling des Guards wäre eine zweite SSoT derselben Regel |
+| 2 DB-Ausfall/Reaper | 2026-08-12 | grün, mit benanntem Fremdblocker | **Strukturhunk:** `deploy_worker.php` 521 → 53, `deploy_worker_outcome.php` 693 → 45 Zeilen Fassaden plus `deploy_worker_{loop,mission,inventory,stream,runtime,vm_state,reaper,finish}.php`, Owner-Registry `VIRTUSPHERE_DEPLOY_WORKER_MODULES`, `DeployWorkerModuleContractTest` (Registry↔Dateisystem beidseitig), subprocess-basierter `DeployWorkerCliSmokeTest`, Zeilenparität bewiesen. **Verhalten:** `DeployWorkerDbChannel` besitzt die Verbindung, Callbacks lesen sie über `$channel->connection()`; genau eine redigierte STDERR-Zeile je Störung, bounded FIFO (`VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES`) mit ausgewiesenem Überlauf, höchstens ein Reconnect je Tick mit Backoff, Resume-Reihenfolge Ownership→Heartbeat→Spool, Ownershipverlust beendet ohne Ergebnis, `deploy_worker_settle_db_channel()` trennt `--once` (begrenzt, meldet nicht persistierten Ausgang) von `--loop`; Mission und Inventar teilen den Kanal. **Reaper:** `deploy_job_reap_observation()` als reine Funktion schreibt nur Job-ID, Heartbeatalter gegen Limit, `locked_by` und Übergang; die drei Ursachensätze sind entfernt, der Singletonstatus steht als ausdrücklich getrennte Momentaufnahme daneben; `--once` reapt bauartbedingt nie. **Diff-Gegenprüfung:** `DeployConvergenceContractTest` pinnte noch `deploy_worker_conclude_sequence($db, …)` und wurde auf `$channel->connection()` umgestellt, weil genau das die neue Aussage ist; `DeployJobReaperTest` trug noch den alten Wortlaut `600 seconds` statt `limit 600 s` | Gezielt 28/28 (`DeployWorkerDbChannelRecovery\|DeployJobReaper\|MaintenanceReap\|DeployWorkerOutcome\|DeployCancellationStateMachine`). PHPUnit unit/static 831 Tests/20513 Assertions, 2 Failures, **beide fremd** (`LangCatalogTest`: DE-Schlüssel `users.*` aus `lib/users_{accounts_panels,admin,directory_admin}.php`; `LogRetentionTest`: Kategorie `directory`). Integration 248 Tests/1116 Assertions, **0 Failures**, 5 Errors **alle fremd** (`Unknown column 'auth_source'`, `lib/auth.php:198`, Migration 0040 bewusst nicht angewandt), 1 umgebungsbedingter Skip (`EsxiInventoryEnqueueTest`, verlangt genau einen ESXi-Zugang). Bedingung protokolliert: Integration nur mit pausierten Dev-Stack-Workern deterministisch, sonst beansprucht der laufende `deploy-worker` den `queued`-Job von `DeployCancellationStateMachineTest` (`cancelling` statt `cancelled`). PHPStan: meine zwei Befunde behoben (Dead-catch durch `@throws mysqli_sql_exception` an der Seam; redundantes `??` im Modulvertrag), verbleibende 3 fremd. Guard-Harness 86/88 proven; die 2 unproven sind `file-size.green`/`.small-file-allowed`, beide durch fremdes Wachstum (`auth.php` 469, `constants.php` 603, `migrate.php` 1188, `directory_ldap.php` 444). Fast-Lane 23/28; alle 5 roten Gates fremd zugeordnet | ADR-0033 (drei Amendments 2026-08-12: Beobachtung statt Ursache, `--once` reapt nie, DB-Ausfall ist kein Jobfehler); `docs/operations/deploy-chain.md` (neuer Abschnitt „Datenbankausfall, während ein Auftrag läuft"; die Ursachenbehauptungen „ist er nicht gestorben"/„meist eine kurz nicht erreichbare Datenbank"/„Neustart ist die falsche Maßnahme" ersetzt); `docs/operations/troubleshooting.md` (drei Zeilen: Protokolllücke mit Replay, korrigierte Reaperzeile, Holdoff nach Neustart, jeweils mit `docker compose logs deploy-worker maintenance-worker`); `docs/QA.md`; `docs/DEPLOYMENT.md`; `docs/CHANGELOG.md` (drei Einträge 2026-08-12); `.claude/rules/webapi.md` (ehrliche Reaperregel plus neue Seitenkanalregel). Nicht betroffen: Portalhilfe und DE/EN-Kataloge, weil diese Etappe keinen sichtbaren Portaltext ändert | Containerlog: genau eine redigierte Zustandszeile je Störung, im Integrationslauf beobachtet (`[deploy-worker] database unreachable while deploy job 11650 …`), Holdoff einmal je Verbindung (`[deploy-reap] holding off for up to 120 s …`), nicht persistierbarer Ausgang als eigene STDERR-Zeile. Joblog: neue SYSTEM-Replayzeile mit Ausfalldauer, Anzahl gepufferter und verworfener Zeilen, danach die Zeilen in Originalreihenfolge; Reapertext ohne Ursachenbehauptung, `DeployJobReaperTest` verbietet „did not die"/„database outage"/„the worker died" explizit. Nicht betroffen: keine neue Auditkategorie (Reap schreibt weiter nur SYSTEM-Joblog plus `last_error`), keine Änderung an Machine-API-Wire-Feldern, keine Retention berührt | | **Abweichung 1:** `lib/deploy_worker_db_channel.php` lag nach dem Verhaltenshunk bei 453 Zeilen und riss das ADR-0006-Gate. Nach Domäne zerlegt in Kanal-Zustandsmaschine, Repository-Adapter (`deploy_worker_db_operations.php`) und Warte-Policy (`deploy_worker_db_recovery.php`); der bisherige Require-Pfad bleibt der einzige öffentliche und lädt beide. **Abweichung 2:** Nebenbefund an eigenem Werkzeug behoben: `check-file-size.php` entfernte den Repo-Root per `str_replace` und traf dadurch auch das `lib/repo/`-Verzeichnis, sodass ein unter `/repo` gemounteter Checkout `libx.php` meldete; jetzt Präfix-Strip. **Fremdblocker:** ein paralleler AD/LDAPS-Strang hält Fast-Lane und volle Suite rot (siehe Tests/Gates). Der einzige Eingriff dort war auf ausdrückliche Nutzerfreigabe ein Zeichenpaar: `lib/repo/directory.php:64` schloss den SQL-String vorzeitig (`COALESCE(s.last_outcome, '')`) und ließ jeden Test scheitern, der `lib/layout.php` lädt; escaped wie in Zeile 66. Sonst wurde die fremde Arbeit nicht angefasst und nicht gestaged |
+| 3 Ansible-Aktivität | | | | | | | | |
+| 4 Disk-SSoT/Hilfe | | | | | | | | |
+| 5 Inventar-Vokabularvertrag | | | | | | | | |
+| 6 Budgettyp und Producer | | | | | | | | |
+| 7 gemeinsame Ansible-Abbildung | | | | | | | | |
+| 8 Worker/Playbookgrenzen/Cancel/Pause/Logging | | | | | | | | |
+| 9 Anzeige/Links/Zugangstest | | | | | | | | |
+| 10 Betriebsabnahme/Deploy-QoL | | | | | | | | |
+| 10A Joblog-Tail/Drain/Rohdownload | | | | | | | | |
+| 10B Terminalergebnis/Cancelmetadaten | | | | | | | | |
+| 10C Audit-SSoT/Tokenpfad/CSV | | | | | | | | |
+| 10D PowerShell-Logvertrag | | | | | | | | |
+| 11 UX-Basis/Visual-Harness | | | | | | | | |
+| 12 UX-Quick-Wins/Deploy-Blocker/Help | | | | | | | | |
+| 13 Portal-Zustände/Jobpoller/Log-Follow | | | | | | | | |
+| 14 Formular-Accessibility | | | | | | | | |
+| 15 Navigation/Tabellen/strukturierte Logfilter/Korrelation | | | | | | | | |
+| 16 Design/Farbguard/Kontrast | | | | | | | | |
+| 17 Visual-Baselines/Release-Gate | | | | | | | | |
+| Fast-Lane | | | | | | | | |
+| Integration-Lane | | | | | | | | |
+| Release-Lane/Staging-Drill | | | | | | | | |
+| Gesamtabgleich | | | | | | | | |
 
 ### Befundabgleich
 
 | Befund | Erledigt durch | Nachweis |
 |---|---|---|
-| Fast-Gate scheitert an `disk_type_label()` | 1 | |
-| CLI-Guard behauptet mehr Entry-Points als er prüft | 1 | |
-| temporäres E2E-Screenshot-Skript liegt im Arbeitsbaum | 1 | |
-| Grace stellt aktiven Jobheartbeat nach DB-Ausfall nicht wieder her | 2 | |
-| Reaper leitet Besitzerursache aus aktuellem Singletonstatus ab | 2 | |
-| `--once`-Reaping ist implizit dauerhaft blockiert | 2 | |
+| Fast-Gate scheitert an `disk_type_label()` | 1 | Vorher reproduziert (`match.unhandled`, `lib/defaults.php:150`); eingeengter `@param`, `match` ohne `default`; PHPStan grün, `DiskTypeLabelTest` 5 Tests inkl. Docblock-Union gegen `VIRTUSPHERE_DISK_TYPES` |
+| CLI-Guard behauptet mehr Entry-Points als er prüft | 1 | Menge wird aus dem CLI-Wächter abgeleitet, `DUAL_SAPI` nur `lib/migrate.php`, Aufruf-Gegenscan über Compose/Healthcheck/Setup; `seed.php` erstmals erfasst, dadurch echte Lücke `lib/repo/log.php` → `lib/lang.php` behoben; Positiv-, Negativ- und Zero-Match-Fixtures |
+| temporäres E2E-Screenshot-Skript liegt im Arbeitsbaum | 1 | `tests/e2e/shot.tmp.js` entfernt, nie committet; `git status --short` zeigt es nicht mehr, fremde ungetrackte Dateien unangetastet |
+| Grace stellt aktiven Jobheartbeat nach DB-Ausfall nicht wieder her | 2 | Die Grace bleibt reine Beobachtergrenze; die Wiederherstellung leistet jetzt der Kanal: `DeployWorkerDbChannel` versucht je Tick höchstens einen Reconnect mit Backoff und schreibt nach Ownership sofort den Jobheartbeat, bevor er die Spool leert. `DeployWorkerDbChannelTest` beweist Reihenfolge und Backoff ohne DB, `DeployWorkerDbChannelRecoveryTest::testATransientOutageReplaysTheJobLogAndStillFinalizesExactlyOnce` den aufgefrischten Heartbeat und genau eine Finalisierung gegen den Server |
+| Reaper leitet Besitzerursache aus aktuellem Singletonstatus ab | 2 | `deploy_job_reap_observation()` ist die eine, reine Formulierung und trägt nur Job-ID, Heartbeatalter gegen Limit, `locked_by` und Übergang. Der Singletonstatus wird als ausdrücklich getrennte Momentaufnahme angehängt („That is a statement about now, not about the process that held this job"). `DeployJobReapObservationTest` (5 Fälle) pinnt den Satz ohne DB, `DeployJobReaperTest::testTheMessageStatesOnlyWhatTheRowShows` verbietet „did not die", „stopped reporting as well", „database outage" und „the worker died" im echten `last_error` |
+| `--once`-Reaping ist implizit dauerhaft blockiert | 2 | Aus einem impliziten Nebeneffekt wurde ein benannter Werkzeugvertrag: `deploy_worker_reap_stale_jobs()` dokumentiert, dass `--once` immer im eigenen Grace liegt und deshalb nie reapt, weil ein Prozess ohne Beobachtung keinen fremden Auftrag beenden darf; ein erzwungenes Reaping bräuchte einen eigenen Operatorschalter. Gepinnt von `DeployReapObserverGraceTest`, dokumentiert in ADR-0033, `deploy-chain.md`, `troubleshooting.md` und `.claude/rules/webapi.md` |
 | queued-cancelled gilt als tatsächlich ausgeführte Ansible-Aktivität | 3 | |
 | Aktivitätsquery skaliert ungeprüft über unbegrenzte Missionshistorie | 3 | |
 | Disk-Hilfe umgeht Label-SSoT oder verspricht pauschale Performance | 4 | |
@@ -991,6 +1289,30 @@ Die ausführende Sitzung ergänzt je Etappe eine Zeile, bevor die nächste Etapp
 | Doku verspricht Alert-Detail und `logs/error.log` | 10 | |
 | Joblog-Link verschweigt RBAC/Retention | 9–10 | |
 | Altbestand/Fehlpause ohne Abhilfe | 10 | |
+| Initiales Joblog zeigt bei mehr als 1.000 Zeilen den Anfang statt des tatsächlichen Endes | 10A | |
+| Poller stoppt bei terminalem Status trotz mehr als 500 noch ungelesener Zeilen | 10A | |
+| Joblog wächst im Browser unbegrenzt oder bietet keinen vollständigen retained Rohdownload | 10A, 13 | |
+| Auto-Scroll würde hochgescrollte Operatoren gegen ihren Willen zum Ende zwingen | 13 | |
+| Hintergrundtab pollt weiter oder erzeugt beim Zurückkehren Parallelrequests/Doppelzeilen | 13 | |
+| Joblog besitzt keinen höflichen ARIA-Live-/Tastaturvertrag | 13 | |
+| entfernte `&&`-Playbookkette bietet entgegen ADR-/Hilfetext keine lokale Abbruchgrenze | 8 | |
+| letzter Schritt, Cancel und Erfolg können ohne gemeinsamen CAS widersprüchlich finalisieren | 8, 10B | |
+| Cancel aus Joblog springt zur Liste; zweiter Tab aktualisiert Aktion/Akteur/Zeitpunkt nicht | 10B, 13 | |
+| normaler Abbruch steht doppelt in SYSTEM-Log und `last_error` und erscheint als „Letzter Fehler“ | 10B | |
+| `last_error` vermischt Fehler, Teil-Erfolg, Abbruchwunsch, Abbruch und Reapergrund | 10B | |
+| gelöschter Cancel-Akteur oder historische Cancel-Zeile hat keinen stabilen Darstellungsfallback | 10B | |
+| `2>&1` wird im Portal fälschlich als trennbarer stdout-/stderr-Stream dargestellt | 8, 13 | |
+| Step-Marker werden nicht als aktuelle Phase/Phasenüberschrift genutzt | 8, 13 | |
+| Jobausgabe hat keine zentrale ANSI-/Steuerzeichen-, Zeilen- und Gesamtvolumengrenze | 8 | |
+| harter Abbruch/Hostverlust kann entferntes `accounts.yml`-/Jobmaterial trotz EXIT-Trap verwaisen lassen | 8 | |
+| Hilfe behauptet für `-vvv` Variablenanzeige oder überdehnt `no_log` als Vollschutz | 8 | |
+| Secret-Redigierung ist nicht von `accounts.yml` bis Browser/Rohdownload/Audit-/PHP-Log bewiesen | 8, 10A | |
+| Troubleshooting empfiehlt eine noch nicht implementierte Korrelationssuche | 10C, 15 | |
+| Audit-SSoT besteht überwiegend aus freien englischen Meldungen ohne Event/Objekt/Ergebnis/strukturierten Kontext | 10C, 15 | |
+| Audit-CSV kappt bei 10.000 ohne sichtbare Gesamtzahl und auditierbaren Kappungsnachweis | 10C, 15 | |
+| totes `addLog()` könnte einen übergebenen Auth-Token persistieren | 10C | |
+| PowerShell-Server-/Clientlogs driften in Format/Dateiname und verschlucken Sinkfehler nur in `Write-Debug` | 10D | |
+| Heartbeat-/Reportfehler dürfen bei Sichtbarmachung des Sinkzustands keinen Auditspam erzeugen | 10C, 10D | |
 | `check.ps1` besitzt persönlichen revisionsgebundenen Chromium-Fallback und driftet von Playwright | 11 | |
 | Visualplan kann Worker eines falschen Stacks pausieren oder Baselines auf anderem Runner überschreiben | 11, 17 | |
 | Deploy-Blockeraggregation wäre nach Live-Auswahl veraltet oder fachlich unvollständig | 12 | |
@@ -1004,3 +1326,15 @@ Die ausführende Sitzung ergänzt je Etappe eine Zeile, bevor die nächste Etapp
 | pauschales Named-Color-Verbot würde erforderliche Systemfarben in Forced Colors verhindern | 16 | |
 | Computed Style allein beweist Kontrast auf transparentem Glas nicht; Fokusziel war unvollständig | 16 | |
 | Snapshot-Update könnte im Gate laufen oder Umgebungsdrift als Sollzustand committen | 17 | |
+| `repo/deploy_jobs.php` bündelt fünf Transaktions-/Lebenszyklusdomänen auf 1220 Zeilen | 1 Strukturhunk | Fassade 50 Zeilen plus sieben Domänenmodule (größtes 277); Owner-Registry `VIRTUSPHERE_DEPLOY_JOB_REPO_MODULES`, von `DeployConvergenceContractTest` und `PhaseCContractTest` gelesen; `DeployJobRepoFacadeContractTest` prüft Registry↔Dateisystem beidseitig, 40 öffentliche Funktionen nach isoliertem Require nur der Fassade und Doppeldefinitionen; Zeilenparität bewiesen; alle Deploy-Repo-Unit-/Integrationstests grün |
+| Worker-/Outcome-Dateien bündeln CLI, zwei Jobarten, Stream, Reaper, VM-State und Audit auf 521/693 Zeilen | 2/8 Strukturhunks | Etappe-2-Anteil erledigt: Fassaden 53/45 Zeilen plus elf Domänenmodule, jedes unter 400. Owner-Registry `VIRTUSPHERE_DEPLOY_WORKER_MODULES` ist die Prüffläche von `DeployConvergenceContractTest`/`PhaseCContractTest`; `DeployWorkerModuleContractTest` hält sie beidseitig gegen `lib/deploy_worker*.php`, sodass ein neues unregistriertes Modul rot wird. CLI-Parität durch `DeployWorkerCliSmokeTest` (Subprozess) und Zeilenparität belegt; beide Worker-Fassaden sind aus `FILE_SIZE_ALLOWANCES` entfallen. Offen bleibt der Etappe-8-Anteil (Klassifikation, Mode-/Marker-/Preflighttrennung) |
+| `repo/esxi_inventory.php` mischt Cache, Pause/State, Queries und VLAN auf 794 Zeilen | 5 Strukturhunk | |
+| ESXi-Service mischt Scheduler, Abweichungen und Darstellung auf 606 Zeilen | 5 Strukturhunk | |
+| Ansible-Inventory/-Command mischen Parser-, Artifact-, Mode-, Marker- und Preflightdomänen auf 714/523 Zeilen | 7/8 Strukturhunks | |
+| `VirtuSphere-Common.ps1` bündelt Logging mit MECM-/Wire-/Packaginglogik; 10D berührt aber nur die Loggingdomäne | 10D Strukturhunk | |
+| `check.ps1` mischt Runtime, Registry und drei Lanes auf 1209 Zeilen | 11 Strukturhunk | |
+| `deploy.php`/`deploy.js` würden durch Live-Blocker weiter über ihre Verantwortungsgrenze wachsen | 12 Strukturhunk | |
+| `settings.php` mischt elf Aktionen, fünf Tabs, Viewmodel und Renderer auf 934 Zeilen | 12/14 Strukturhunk | |
+| `layout.php`, Systemstatus und Credentials überschreiten trotz trennbarer Presenter-/Datenquellen das ADR-0006-Ziel | 13 Strukturhunk | |
+| VM-Repo und VM-Editor mischen Legacy, Persistenz, Recovery und Formdarstellung | 14 Strukturhunk | |
+| `components.css` bündelt unabhängige Komponentenfamilien auf 1715 Zeilen | 16 Strukturhunk | |

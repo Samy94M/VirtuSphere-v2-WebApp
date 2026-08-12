@@ -22,9 +22,12 @@ for check in enum-sync php-version-sync doc-hygiene doc-semantics; do
   fi
 done
 
-# PHP-basierter Grenzwert-Check (eigener Zweig: die Schleife oben fasst nur .sh)
-if command -v php >/dev/null 2>&1 && [ -f scripts/check-bounds-sync.php ]; then
-  if ! php scripts/check-bounds-sync.php --quiet >/dev/null 2>&1; then
-    echo "VirtuSphere warning: Drift in check-bounds-sync; run php scripts/check-bounds-sync.php"
-  fi
+# PHP-basierte Checks (eigener Zweig: die Schleife oben fasst nur .sh)
+if command -v php >/dev/null 2>&1; then
+  for phpcheck in bounds-sync file-size; do
+    script="scripts/check-$phpcheck.php"
+    if [ -f "$script" ] && ! php "$script" --quiet >/dev/null 2>&1; then
+      echo "VirtuSphere warning: Drift in check-$phpcheck; run php $script"
+    fi
+  done
 fi

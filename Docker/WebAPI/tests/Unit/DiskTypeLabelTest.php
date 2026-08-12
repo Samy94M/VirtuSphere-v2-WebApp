@@ -62,7 +62,36 @@ final class DiskTypeLabelTest extends TestCase
     {
         Lang::load('de');
         $this->expectException(\UnhandledMatchError::class);
+        // The narrowed @param makes this a static error on purpose: the call is
+        // the deliberate violation that proves the runtime arm still exists.
+        // @phpstan-ignore argument.type
         disk_type_label('thickprovisioned');
+    }
+
+    /**
+     * The narrowed @param on disk_type_label() is what lets the match stay
+     * exhaustive without a default, and it is a hand-written copy of
+     * VIRTUSPHERE_DISK_TYPES. A copy nothing compares is a copy that drifts: a
+     * fourth token added to the constant plus the docblock would keep PHPStan
+     * quiet while the match arm is missing, which is the failure the exhaustive
+     * match was built to catch.
+     */
+    public function testTheNarrowedParameterUnionMatchesTheConstant(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/defaults.php');
+        $found = preg_match('/@param\s+([^\s]+)\s+\$type\s/', $source, $matches);
+        self::assertSame(1, $found, 'disk_type_label() lost its narrowed @param; the match can no longer be proven exhaustive.');
+
+        $union = array_map(
+            static fn (string $literal): string => trim($literal, "'"),
+            explode('|', $matches[1])
+        );
+        self::assertNotSame([], $union, 'the parsed @param union came back empty; this test would pass on anything.');
+        self::assertSame(
+            VIRTUSPHERE_DISK_TYPES,
+            $union,
+            'The @param union in lib/defaults.php and VIRTUSPHERE_DISK_TYPES disagree, so a type can exist without a label arm.'
+        );
     }
 
     /** The preselected type is one of the labelled ones, in both directions. */

@@ -209,6 +209,7 @@ $enumFixtureFiles = @(
     'Docker/WebAPI/lib/deploy_constants.php', 'Docker/WebAPI/lib/credentials.php',
     'Docker/mysql/mysql-init/struktur.sql', 'Docker/WebAPI/lib/migrate.php'
 )
+$fileSizeFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal')
 $phpVerFixtureFiles = @(
     'Docker/php/Dockerfile', 'Docker/WebAPI/composer.json',
     'Docker/WebAPI/lib/constants.php', 'CLAUDE.md', 'AGENTS.md'
@@ -459,6 +460,40 @@ $cases = @(
         $fx = New-Fixture $boundsFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/validate.php' "'netbios_hostname'" "'zz_renamed_netbios'"
         Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.stale-exempt\].*netbios_hostname'
+    } }
+
+    @{ Name = 'file-size.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'file-size.small-file-allowed'; Body = {
+        # The positive direction: a new module inside the budget is silent. A
+        # guard that only ever fires is one nobody can add a file next to.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_small.php' ("<?php`n" + ("// small`n" * 20))
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'file-size.oversize'; Body = {
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_big.php' ("<?php`n" + ("// filler`n" * 420))
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.oversize\].*zz_guard_big'
+    } }
+    @{ Name = 'file-size.grown'; Body = {
+        # A recorded exception is a ceiling: the file may shrink, never grow.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' 'declare(strict_types=1);' "declare(strict_types=1);`n// guard probe`n// guard probe"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.grown\].*migrate\.php'
+    } }
+    @{ Name = 'file-size.stale-allowance'; Body = {
+        # An exception that outlives its split silently re-opens the budget.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/constants.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.stale\].*constants\.php'
+    } }
+    @{ Name = 'file-size.zero-match'; Body = {
+        # An empty scope must never read as "no file is too large".
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'README.md' "placeholder`n"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.zero-match\]'
     } }
 
     @{ Name = 'csp.file-clean'; Body = {

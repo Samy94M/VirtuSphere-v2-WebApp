@@ -181,12 +181,12 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('[health]', $this->source('portal/health.php'));
         self::assertStringContainsString('deploy_interfaces_mac_lookup', $this->source('lib/migrate.php'));
 
-        $repo = $this->source('lib/repo/deploy_jobs.php');
+        $repo = $this->deployJobRepoSource();
         self::assertStringContainsString('function repo_reap_stale_deploy_jobs', $repo);
         self::assertStringContainsString('FOR UPDATE SKIP LOCKED', $repo);
         self::assertStringContainsString('WHERE id = ? AND locked_by = ? AND status = ?', $repo);
 
-        $worker = $this->source('lib/deploy_worker.php');
+        $worker = $this->workerSource();
         self::assertStringContainsString('deploy_worker_reap_stale_jobs($db);', $worker);
         self::assertStringContainsString('deploy_worker_heartbeat_tick(', $worker);
         self::assertStringContainsString('deploy_worker_log_stream_chunk', $worker);
@@ -213,7 +213,7 @@ final class PhaseCContractTest extends TestCase
         // its loop on require), and it must keep carrying the integration report:
         // that is what keeps the System status row green through one long remote
         // step (WorkerTrafficLightTest proves the behaviour; this pins the wiring).
-        $outcome = $this->source('lib/deploy_worker_outcome.php');
+        $outcome = $this->workerSource();
         self::assertStringContainsString('function deploy_worker_heartbeat_tick', $outcome);
         self::assertMatchesRegularExpression(
             '/function deploy_worker_heartbeat_tick.*?deploy_worker_report_alive\(\$db\);/s',
@@ -234,5 +234,43 @@ final class PhaseCContractTest extends TestCase
         self::assertFileExists($path);
 
         return (string) file_get_contents($path);
+    }
+
+    /**
+     * The deploy worker is a facade plus domain modules (ADR-0006 amendment
+     * 2026-08-11). The phase wiring, preflight probe and redaction assertions
+     * below are about the worker layer, not about one filename, so they read
+     * the owner registry; DeployWorkerModuleContractTest keeps that registry
+     * and the filesystem in agreement.
+     */
+    private function workerSource(): string
+    {
+        require_once dirname(__DIR__, 2) . '/lib/deploy_worker_modules.php';
+
+        $source = '';
+        foreach (VIRTUSPHERE_DEPLOY_WORKER_MODULES as $module) {
+            $source .= $this->source($module) . "\n";
+        }
+        self::assertNotSame('', $source, 'the deploy worker module registry produced no source.');
+
+        return $source;
+    }
+
+    /**
+     * The deploy job repository is a facade over domain modules (ADR-0006
+     * amendment 2026-08-11); reading the facade alone would leave the reaper
+     * and ownership assertions above checking an empty surface.
+     */
+    private function deployJobRepoSource(): string
+    {
+        require_once dirname(__DIR__, 2) . '/lib/repo/deploy_job_modules.php';
+
+        $source = '';
+        foreach (VIRTUSPHERE_DEPLOY_JOB_REPO_MODULES as $module) {
+            $source .= $this->source($module) . "\n";
+        }
+        self::assertNotSame('', $source, 'the deploy job repo module registry produced no source.');
+
+        return $source;
     }
 }

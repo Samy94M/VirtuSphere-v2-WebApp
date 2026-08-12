@@ -50,7 +50,7 @@ final class DeployJobReaperTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $stale['status']);
         self::assertNull($stale['locked_by']);
         self::assertNull($stale['heartbeat_at']);
-        self::assertStringContainsString('600 seconds', (string) $stale['last_error']);
+        self::assertStringContainsString('limit 600 s', (string) $stale['last_error']);
         self::assertSame(1, $this->systemLogCount($staleJobId, 'Reaped stale deploy job%'));
 
         $fresh = $this->job($freshJobId);
@@ -67,28 +67,31 @@ final class DeployJobReaperTest extends TestCase
      * likely wrong as right. The caller establishes the cause and it travels
      * into last_error and the job log, which are the two places anybody looks.
      */
-    public function testTheReapMessageCarriesTheCauseTheCallerEstablished(): void
+    public function testTheReapMessageCarriesTheCallersSeparateObservation(): void
     {
         $this->skipWhenForeignRunningJobsExist();
 
         $missionId = $this->insertMission($this->prefix . '_cause');
         $jobId = $this->insertRunningJob($missionId, 'worker-gone', 700);
-        $cause = 'The deploy service stopped reporting as well, so it is down or was restarted.';
+        $observation = 'Separate observation at this moment: no deploy service is reporting its status row.';
 
-        repo_reap_stale_deploy_jobs($this->db, 600, $cause);
+        repo_reap_stale_deploy_jobs($this->db, 600, $observation);
 
         $job = $this->job($jobId);
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
-        self::assertStringContainsString('600 seconds', (string) $job['last_error'], 'the observation stays');
-        self::assertStringContainsString($cause, (string) $job['last_error'], 'and the cause joins it');
-        self::assertSame(1, $this->systemLogCount($jobId, '%' . $cause . '%'), 'the job log carries the same sentence');
+        self::assertStringContainsString('limit 600 s', (string) $job['last_error'], 'the observation stays');
+        self::assertStringContainsString($observation, (string) $job['last_error'], 'and the caller\'s note joins it');
+        self::assertSame(1, $this->systemLogCount($jobId, '%' . $observation . '%'), 'the job log carries the same sentence');
     }
 
     /**
-     * A caller that cannot establish anything keeps the bare observation rather
-     * than inventing a cause; the old wording is what an empty note produces.
+     * The message is an account of what this transaction could see, and nothing
+     * else: the job, who held its lock, how stale its heartbeat is against the
+     * limit, and the transition. It used to end at "no heartbeat for N seconds",
+     * which names the mechanism that noticed rather than the event, and the
+     * sentence that followed asserted a cause nothing had checked.
      */
-    public function testWithoutACauseTheMessageStaysTheBareObservation(): void
+    public function testTheMessageStatesOnlyWhatTheRowShows(): void
     {
         $this->skipWhenForeignRunningJobsExist();
 
@@ -98,7 +101,17 @@ final class DeployJobReaperTest extends TestCase
         repo_reap_stale_deploy_jobs($this->db, 600);
 
         $lastError = (string) $this->job($jobId)['last_error'];
-        self::assertSame('Reaped stale deploy job after missing heartbeat for 600 seconds.', $lastError);
+        self::assertStringContainsString('Reaped stale deploy job.', $lastError);
+        self::assertStringContainsString('Job ' . $jobId . ':', $lastError, 'the job it is about');
+        self::assertStringContainsString('lock held by worker-gone', $lastError, 'who held it');
+        self::assertStringContainsString('limit 600 s', $lastError, 'against which limit');
+        self::assertStringContainsString('running -> failed', $lastError, 'and the transition that follows');
+        self::assertMatchesRegularExpression('/last heartbeat \d+ s ago/', $lastError);
+
+        // No cause is claimed anywhere in it.
+        foreach (['did not die', 'stopped reporting as well', 'database outage', 'the worker died'] as $claim) {
+            self::assertStringNotContainsString($claim, $lastError, 'the reaper must not assert a cause it did not establish');
+        }
     }
 
     public function testFinishDeployJobRequiresMatchingWorkerLockAndRunningStatus(): void

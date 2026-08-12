@@ -459,6 +459,12 @@ Add-Gate -Name 'bounds-sync' -Lanes $allLanes -Kind 'native' -Body {
     Format-ToolResult $r 'keine ausgeschriebenen Grenzwerte' 'Grenzwert-Drift in Portal-Texten'
 }
 
+Add-Gate -Name 'file-size' -Lanes $allLanes -Kind 'native' -Body {
+    $r = Invoke-CheckPhp 'check-file-size.php' @('--ci')
+    if ($null -eq $r) { return New-InfraResult 'weder Host-PHP noch Projekt-Image verfuegbar' }
+    Format-ToolResult $r 'ADR-0006-Budget eingehalten' 'PHP-Datei ueber Budget oder Ausnahme veraltet'
+}
+
 Add-Gate -Name 'doc-hygiene' -Lanes $allLanes -Kind 'native' -Body {
     $r = Invoke-CheckShell 'check-doc-hygiene.sh' @('--ci')
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }

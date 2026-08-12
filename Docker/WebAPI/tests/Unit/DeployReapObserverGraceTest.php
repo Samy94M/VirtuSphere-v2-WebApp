@@ -91,4 +91,44 @@ final class DeployReapObserverGraceTest extends TestCase
             'the grace must guard the reap window, not replace it'
         );
     }
+
+    /**
+     * The `--once` tool contract, made explicit rather than left as a side
+     * effect: a one-shot run connects and immediately reaps, so it is blind by
+     * construction and never concludes anybody else's job.
+     *
+     * That is the wanted behaviour, not a limitation. A short-lived process has
+     * observed nothing, so every stale-looking job it sees might be perfectly
+     * alive; a forced reap is an operator decision that would need its own named
+     * switch and its own confirmation, not a side effect of a debugging run.
+     *
+     * Deliberately expressed through the same predicate the loop uses: a special
+     * case for `--once` would be a second rule that could drift from the first.
+     */
+    public function testAOneShotRunIsBlindByConstruction(): void
+    {
+        $startedAt = 1_800_000_000;
+
+        // The entire life of a `--once` run: connect, reap, claim, process. Even
+        // an unusually long one stays far inside the grace.
+        foreach ([0, 1, 30, VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1] as $elapsed) {
+            self::assertTrue(
+                deploy_reap_observer_is_blind($startedAt, $startedAt + $elapsed),
+                sprintf('a --once run %d s after connecting must not reap: it has observed nothing', $elapsed)
+            );
+        }
+    }
+
+    /**
+     * The reap gate lives inside deploy_worker_reap_stale_jobs(), and it is the
+     * observer store - not a parameter - that feeds it. A caller that could pass
+     * its own value could pass a wrong one; this pins that the only way to be
+     * non-blind is to have actually been connected.
+     */
+    public function testTheGateReadsTheProcessObserverAndNotAnArgument(): void
+    {
+        $reflection = new ReflectionFunction('deploy_worker_reap_stale_jobs');
+        self::assertSame(1, $reflection->getNumberOfParameters(), 'the reaper must take only the connection; a grace argument would be a bypass.');
+        self::assertSame('db', $reflection->getParameters()[0]->getName());
+    }
 }
