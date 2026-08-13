@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/inventory_error_constants.php';
 
 // Declaration order is the ENUM mirror order (ADR-0016, check-enum-sync):
 // cancelling sits between running and the terminal states, exactly where the
@@ -224,37 +225,6 @@ const VIRTUSPHERE_INVENTORY_QUERY_SKIPPED = 'skipped';
 // full playbook output is already in the same job log, and one runaway message
 // must not push the summary line out of a reader's view.
 const VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH = 200;
-
-// Connection failure categories: the shared vocabulary for the inventory fetch
-// (stored in deploy_esxi_inventory_state.last_error_category) and the credential
-// connection test. Two classifiers feed it, because their inputs differ:
-// ansible_categorize_inventory_error() reads playbook stdout,
-// connection_error_category() reads PHP/OpenSSL/phpseclib error text.
-// Only AUTH pauses a credential (repo_esxi_inventory_record_failure).
-const VIRTUSPHERE_INVENTORY_ERROR_DNS = 'dns';
-const VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE = 'unreachable';
-const VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE = 'certificate';
-const VIRTUSPHERE_INVENTORY_ERROR_TLS = 'tls';
-const VIRTUSPHERE_INVENTORY_ERROR_AUTH = 'auth';
-const VIRTUSPHERE_INVENTORY_ERROR_AUTHZ = 'authz';
-const VIRTUSPHERE_INVENTORY_ERROR_HTTP = 'http';
-const VIRTUSPHERE_INVENTORY_ERROR_SSH = 'ssh';
-const VIRTUSPHERE_INVENTORY_ERROR_WORKER = 'worker';
-const VIRTUSPHERE_INVENTORY_ERROR_PARSE = 'parse';
-const VIRTUSPHERE_INVENTORY_ERROR_CONFIG = 'config';
-const VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES = [
-    VIRTUSPHERE_INVENTORY_ERROR_DNS,
-    VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
-    VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE,
-    VIRTUSPHERE_INVENTORY_ERROR_TLS,
-    VIRTUSPHERE_INVENTORY_ERROR_AUTH,
-    VIRTUSPHERE_INVENTORY_ERROR_AUTHZ,
-    VIRTUSPHERE_INVENTORY_ERROR_HTTP,
-    VIRTUSPHERE_INVENTORY_ERROR_SSH,
-    VIRTUSPHERE_INVENTORY_ERROR_WORKER,
-    VIRTUSPHERE_INVENTORY_ERROR_PARSE,
-    VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
-];
 
 // Why the interval automation would skip an ESXi credential. The scheduler
 // decides with these and the Credentials page names them, so a fourth blocker

@@ -64,16 +64,6 @@ const FILE_SIZE_ALLOWANCES = [
     // lib/deploy_worker.php (521) and lib/deploy_worker_outcome.php (693) left
     // this table in Etappe 2: CLI shell, the two job processors, stream, runtime,
     // VM state, reaper and outcome are now separate modules behind two facades.
-    'Docker/WebAPI/lib/repo/esxi_inventory.php' => [
-        'lines' => 794,
-        'why' => 'cache replace, status/pause, queries and VLAN sync are separate write domains',
-        'stage' => 'Etappe 5',
-    ],
-    'Docker/WebAPI/lib/esxi_inventory.php' => [
-        'lines' => 606,
-        'why' => 'credential resolution/enqueue, deviation analysis, traffic light/summary and scheduler are separate service domains',
-        'stage' => 'Etappe 5',
-    ],
     'Docker/WebAPI/lib/ssh.php' => [
         'lines' => 419,
         'why' => 'SFTP is its own transport domain and moves to lib/ssh_sftp.php',

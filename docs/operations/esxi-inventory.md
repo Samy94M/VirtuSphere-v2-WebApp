@@ -43,13 +43,22 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 | `tls` | TLS-Handshake außerhalb der Zertifikatsprüfung gescheitert | HTTPS-Port, TLS-Version und Gegenstelle prüfen |
 | `auth` | Falscher Benutzer/Passwort | Zugangsdatum korrigieren; **Auto-Abruf pausiert** bis zur Änderung (Kontosperren-Schutz), kein Auto-Retry |
 | `authz` | Rechte reichen nicht | ESXi-Rolle des Kontos erweitern (Profil oben) |
-| `http` | Host antwortet mit unerwartetem Status | Statuscode ansehen; erscheint bei ESXi-Abrufen nicht mehr |
-| `ssh` | Ansible-Host nicht erreichbar/Preflight | Ansible-Zugangsdatum und Host prüfen (wie bei Deploy-Jobs) |
-| `worker` | Deploy-Worker verlor während des Abrufs sein Lebenszeichen | Deploy-Worker im Systemstatus prüfen und neu starten; das Jobprotokoll nennt die Reaper-Ursache |
-| `parse` | Ausgabe unerwartet/Marker fehlt | Job-Log ansehen; Playbook/Modulversion gegen den Host prüfen |
-| `config` | Zugangsdatum unvollständig oder Typ nicht unterstützt | Host, Benutzername und Typ im Zugangsdatum prüfen |
+| `ansible_dns` | Ansible-Hostname nicht auflösbar | Ansible-Hostname sowie DNS/Suchdomäne des Portal-Containers prüfen |
+| `ansible_unreachable` | Verbindung zum Ansible-Host kam nicht zustande | Netzwerk, Firewall und SSH-Port zwischen Portal und Ansible-Host prüfen |
+| `ansible_auth` | Anmeldung am Ansible-Host abgelehnt | Ansible-Zugangsdatum und SSH-Anmeldeverfahren prüfen; der ESXi-Zugang pausiert nicht |
+| `ansible_authz` | Ansible-Sitzung oder entfernte Aktion nicht erlaubt | Rechte der Ansible-Sitzung und der betroffenen Aktion prüfen; der ESXi-Zugang pausiert nicht |
+| `ansible_preflight` | Ansible-Host erreichbar, Toolchain-Vorprüfung fehlgeschlagen | Im Jobprotokoll die fehlgeschlagene Komponente nachsehen und den Host vervollständigen |
+| `ansible_config` | Playbook, Modul, Collection oder Ausführungsumgebung unvollständig | Ansible-Installation, Collections und Python-Abhängigkeiten prüfen |
+| `ansible_sftp` | SFTP-Subsystem oder Dateiübertragung fehlgeschlagen | Zielpfad, Rechte, freien Speicher und SFTP-Subsystem auf dem Ansible-Host prüfen |
+| `ansible_timeout` | VirtuSphere-SSH-/SFTP-Zeitbudget nach aufgebauter Verbindung überschritten | Jobprotokoll auf einen stillstehenden Schritt prüfen; dies ist kein ESXi-Timeout |
+| `ansible_transport` | Sonstiger SSH-/Transportfehler zum Ansible-Host | SSH-Dienst, Transportweg und technischen Text im Jobprotokoll prüfen |
+| `http` | Nur lesbarer Legacy-Wert eines älteren Abrufs | Einen neuen Abruf starten; neue Läufe schreiben diesen Code nicht mehr |
+| `ssh` | Nur lesbarer Legacy-Wert ohne sichere Herkunft | Einen neuen Abruf starten; neue Läufe trennen Ansible- und ESXi-Ursachen |
+| `worker` | Worker- oder Datenbankfehler | Deploy-Worker, Datenbankverbindung und Jobprotokoll prüfen |
+| `parse` | Marker, Ausgabe oder Ergebnisvertrag unerwartet | Technischen Text im Jobprotokoll prüfen |
+| `config` | Portal-/Auftragskonfiguration vor dem entfernten Lauf unvollständig | Portal- und Auftragskonfiguration prüfen; Ansible-Voraussetzungen haben eigene Codes |
 
-Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_*` in `lib/deploy_constants.php`. Der technische Originaltext steht im Portal hinter „Technische Details" am Alert und zusätzlich in `logs/error.log`.
+Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES` in `lib/inventory_error_constants.php`; der bestehende Require-Pfad `lib/deploy_constants.php` lädt sie mit. Nur der exakte Code `auth` pausiert einen ESXi-Zugang; insbesondere `ansible_auth` und `ansible_authz` tun das nicht. `ssh` und `http` bleiben ausschließlich lesbar, damit alte Zustandszeilen darstellbar sind, werden von neuen Abrufen aber nicht mehr geschrieben. Der technische Originaltext steht im Portal hinter „Technische Details" am Alert und zusätzlich in `logs/error.log`.
 
 Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` bei fehlgeschlagenem letzten Abruf, noch nie erfolgreichem Zugangsdatum oder veraltetem Erfolg (älter als `VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR` x Intervall, aktuell 2x); `danger` bei Fehlerserie ab `VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER` (aktuell 3) oder Auth-Pause. Bei Intervall 0 (Automatik aus) entfällt die Veraltet-Warnung; das Alter beweist dann nichts. Die Hilfe interpoliert dieselben Konstanten in ihrer Erklärung, Text und Verhalten können nicht auseinanderlaufen.
 

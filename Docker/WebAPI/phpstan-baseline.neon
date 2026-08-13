@@ -43,12 +43,6 @@ parameters:
 			path: lib/repo/deploy_job_queue.php
 
 		-
-			message: '#^Strict comparison using \!\=\= between mixed and null will always evaluate to true\.$#'
-			identifier: notIdentical.alwaysTrue
-			count: 3
-			path: lib/repo/esxi_inventory.php
-
-		-
 			message: '#^Ternary operator condition is always true\.$#'
 			identifier: ternary.alwaysTrue
 			count: 1
