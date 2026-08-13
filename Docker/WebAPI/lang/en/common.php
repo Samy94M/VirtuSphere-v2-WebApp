@@ -57,7 +57,7 @@ return [
     'conn_ansible_timeout' => 'A VirtuSphere SSH or SFTP time budget expired after the connection had been established.',
     'conn_ansible_transport' => 'Another SSH transport operation to the Ansible host failed.',
     'conn_http' => 'Historical HTTP failure from an older pull (status :status).',
-    'conn_ssh' => 'Historical SSH failure from an older pull whose origin was not distinguished.',
+    'conn_ssh' => 'SSH failure whose origin has not yet been distinguished.',
     'conn_worker' => 'The pull failed because of a worker or database error.',
     'conn_parse' => 'The pull marker, output or result contract was unexpected.',
     'conn_config' => 'Portal or job configuration was incomplete before the remote run started.',

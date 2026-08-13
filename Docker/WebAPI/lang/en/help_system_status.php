@@ -117,7 +117,7 @@ return [
     'esxi_cause_fix_ansible_timeout' => 'Check the job log and Ansible host for a stalled SSH or SFTP step; this is a VirtuSphere time budget, not an ESXi timeout.',
     'esxi_cause_fix_ansible_transport' => 'Check the job log plus the SSH service and transport path to the Ansible host.',
     'esxi_cause_fix_http' => 'Readable legacy value only. A fresh pull classifies an old record with the current vocabulary.',
-    'esxi_cause_fix_ssh' => 'Readable legacy value only, without reliable origin. A fresh pull separates Ansible and ESXi causes.',
+    'esxi_cause_fix_ssh' => 'Transitional value without reliable origin. Until producer migration, inspect the technical job-log text; afterwards fresh pulls separate Ansible and ESXi causes.',
     'esxi_cause_fix_worker' => 'Check the deploy worker, database connection and job log; this category does not claim a transport cause.',
     'esxi_cause_fix_parse' => 'Check the job log for a missing marker, unexpected output or a broken result contract.',
     'esxi_cause_fix_config' => 'Check portal and job configuration. This code applies before the remote run; Ansible-side prerequisites have their own category.',
