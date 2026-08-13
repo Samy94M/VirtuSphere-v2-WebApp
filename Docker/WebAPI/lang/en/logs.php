@@ -20,6 +20,7 @@ return [
     'category_legacy_api' => 'Legacy API',
     'category_users' => 'Users',
     'category_credentials' => 'Credentials',
+    'category_directory' => 'Active Directory',
     // Refused machine access. In the security tab, not under "MECM integration":
     // this answers "who knocked and was turned away", not "is the data flowing".
     'category_machine_api' => 'Refused machine access',

@@ -104,7 +104,8 @@ Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind st
    ```
    `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
 5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen und erst dann `docker compose up -d`. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die Rechte läuft er, kann aber nicht protokollieren (siehe `go-live.md`, Schritt 1a).
-6. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
+6. AD-Restore-Konvergenz ausführen: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`. Das deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; Details stehen in `docs/operations/active-directory.md`.
+7. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
 ## Was deckt das Backup ab, was kommt aus Git
 

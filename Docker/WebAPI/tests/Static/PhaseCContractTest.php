@@ -132,8 +132,9 @@ final class PhaseCContractTest extends TestCase
     public function testPortalGuardsAndI18nContractsArePresent(): void
     {
         $users = $this->source('portal/users.php');
-        self::assertStringContainsString('function user_is_last_active_admin', $users);
-        self::assertStringContainsString("__t('users.err_last_admin')", $users);
+        $users .= $this->source('lib/users_admin.php');
+        self::assertStringContainsString('function user_is_last_active_local_admin', $users);
+        self::assertStringContainsString("__t('users.err_last_local_admin')", $users);
         self::assertStringContainsString('portal_error_message($exception)', $users);
 
         $login = $this->source('portal/login.php');

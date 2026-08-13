@@ -43,6 +43,8 @@ final class PortalConfirmNamingContractTest extends TestCase
         'portal.vm_mecm_reset_confirm',
         'portal.vm_mecm_transfer_confirm',
         'settings.allowlist_confirm_delete',
+        'directory.confirm_deactivate_controller',
+        'directory.confirm_delete_controller',
         'users.confirm_deactivate',
         'users.confirm_reset_password',
         'users.confirm_role',
@@ -60,6 +62,8 @@ final class PortalConfirmNamingContractTest extends TestCase
         'settings.https_confirm_redirect' => 'a global switch, not a row',
         'settings.report_token_confirm_clear' => 'the one machine-API token, not a row',
         'settings.report_token_confirm_regenerate' => 'the one machine-API token, not a row',
+        'directory.confirm_disable' => 'the one directory login switch, not a row',
+        'directory.confirm_delete_config' => 'the singleton directory configuration, not a row',
         'users.confirm_role_self' => 'the target is the signed-in user themselves; "your own role" is the name',
         'vms.bulk_confirm_delete' => 'acts on the checkbox selection, which has no single name',
         'vms.bulk_confirm_reset' => 'acts on the checkbox selection, which has no single name',
@@ -78,6 +82,9 @@ final class PortalConfirmNamingContractTest extends TestCase
         // its confirm prompts out of this contract.
         foreach (glob($root . '/lib/system_status_*panels.php') ?: [] as $renderer) {
             $pages[$root . '/portal/system_status.php'] .= (string) file_get_contents($renderer);
+        }
+        foreach (glob($root . '/lib/users_*_panels.php') ?: [] as $renderer) {
+            $pages[$root . '/portal/users.php'] .= (string) file_get_contents($renderer);
         }
         self::assertNotSame([], $pages, 'no portal pages found');
 

@@ -44,6 +44,8 @@ final class PortalConfirmContractTest extends TestCase
         'credentials.php:create' => 'creates a new credential',
         'missions.php:create' => 'creates a new mission',
         'users.php:create' => 'creates a new user',
+        'users.php:directory_add_controller' => 'adds a controller in a disabled state',
+        'users.php:directory_import' => 'creates an imported account and leaves existing accounts untouched',
         'settings.php:allow_create' => 'adds an allowlist entry',
         'mission_details.php:clone_template' => 'creates a new mission from a template',
         'mission_details.php:save_as_template' => 'creates a new template',
@@ -55,6 +57,9 @@ final class PortalConfirmContractTest extends TestCase
         'system_status.php:test' => 'delegates to the same non-destructive Ansible diagnostic from its status card',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
+        'users.php:directory_search' => 'performs a read-only directory search',
+        'users.php:directory_test_controller' => 'runs a read-only controller diagnostic',
+        'users.php:directory_sync_user' => 'refreshes the cached display attributes of one imported user',
 
         // Edits of the record the user is already looking at, with its own form.
         'credentials.php:update' => 'edits the credential the form belongs to',
@@ -68,6 +73,8 @@ final class PortalConfirmContractTest extends TestCase
         'settings.php:save_session' => 'overwrites a value shown in the same input',
         'settings.php:save_retire_threshold' => 'overwrites a value shown in the same input',
         'settings.php:save_timezone' => 'overwrites a value shown in the same select',
+        'users.php:directory_save_config' => 'replaces the configuration shown in the same form after validating its revision',
+        'users.php:directory_move_controller' => 'changes a visible, reversible priority ordering',
 
         // Deliberate, documented exceptions.
         'users.php:clear_lock' => 'unlocking a locked-out account is a reversible remediation, not a loss',

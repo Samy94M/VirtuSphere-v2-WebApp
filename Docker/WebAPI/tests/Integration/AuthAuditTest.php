@@ -16,6 +16,7 @@ require_once dirname(__DIR__, 2) . '/lib/auth.php';
 final class AuthAuditTest extends TestCase
 {
     private const PREFIX = 'phpunit_auth_';
+    private const CLIENT_IP = '198.51.100.77';
 
     private ?mysqli $db = null;
     private int $userId = 0;
@@ -30,6 +31,7 @@ final class AuthAuditTest extends TestCase
             self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
         }
         $this->cleanup();
+        $_SERVER['REMOTE_ADDR'] = self::CLIENT_IP;
 
         $this->userName = self::PREFIX . bin2hex(random_bytes(3));
         $hash = password_hash($this->password, PASSWORD_DEFAULT);
@@ -46,6 +48,7 @@ final class AuthAuditTest extends TestCase
         if ($this->db !== null) {
             $this->cleanup();
         }
+        unset($_SERVER['REMOTE_ADDR']);
     }
 
     private function cleanup(): void
@@ -59,6 +62,7 @@ final class AuthAuditTest extends TestCase
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $this->userId);
         }
         $this->db->query("DELETE FROM deploy_login_attempts WHERE username LIKE '" . self::PREFIX . "%'");
+        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address = '" . self::CLIENT_IP . "'");
         $this->db->query("DELETE FROM deploy_users WHERE name LIKE '" . self::PREFIX . "%'");
         $this->userId = 0;
     }
@@ -90,7 +94,7 @@ final class AuthAuditTest extends TestCase
         self::assertTrue($result['ok'] ?? false);
 
         $messages = array_column($this->authLogsForUser(), 'log_message');
-        self::assertContains('login succeeded', $messages);
+        self::assertNotEmpty(array_filter($messages, static fn (string $message): bool => str_starts_with($message, 'login succeeded')));
     }
 
     public function testAFailedLoginIsAuditedWithTheTypedName(): void
@@ -137,7 +141,7 @@ final class AuthAuditTest extends TestCase
         // attempts while the limit is active must not add any. Otherwise an
         // unauthenticated client could grow the audit log by one row per request.
         for ($i = 0; $i < VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT + 5; $i++) {
-            login($this->userName, 'wrong-password', $this->db);
+            login(self::PREFIX . 'unknown_' . $i, 'wrong-password', $this->db);
         }
 
         $result = $this->db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE category = 'auth' AND log_message LIKE 'ip rate limited%'");

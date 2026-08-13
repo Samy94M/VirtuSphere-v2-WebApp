@@ -9,17 +9,31 @@ SET FOREIGN_KEY_CHECKS = 0;
 CREATE TABLE IF NOT EXISTS deploy_users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    password VARCHAR(255) NOT NULL,
+    auth_source ENUM('local','active_directory') NOT NULL DEFAULT 'local',
+    password VARCHAR(255) NULL,
     email VARCHAR(255) NOT NULL,
     role ENUM('admin','user') NOT NULL DEFAULT 'user',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+    ad_object_guid BINARY(16) NULL,
+    ad_upn VARCHAR(255) NULL,
+    ad_sam_account_name VARCHAR(255) NULL,
+    ad_display_name VARCHAR(255) NULL,
+    ad_account_enabled TINYINT(1) NULL,
+    ad_last_checked_at TIMESTAMP NULL,
     password_changed_at TIMESTAMP NULL,
     last_seen_at TIMESTAMP NULL,
     locked_until TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY user_name_unique (name)
+    UNIQUE KEY user_name_unique (name),
+    UNIQUE KEY deploy_users_ad_guid_unique (ad_object_guid),
+    INDEX deploy_users_auth_active (auth_source, is_active),
+    CONSTRAINT deploy_users_auth_shape CHECK (
+        (auth_source = _utf8mb4'local' AND password IS NOT NULL AND ad_object_guid IS NULL)
+        OR
+        (auth_source = _utf8mb4'active_directory' AND password IS NULL AND ad_object_guid IS NOT NULL AND ad_upn IS NOT NULL AND must_change_password = 0 AND locked_until IS NULL)
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_missions (
@@ -257,12 +271,72 @@ CREATE TABLE IF NOT EXISTS deploy_migrations (
 
 CREATE TABLE IF NOT EXISTS deploy_login_attempts (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(191) NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    auth_source ENUM('local','active_directory') NOT NULL DEFAULT 'local',
     ip_address VARCHAR(45) NOT NULL,
     success TINYINT(1) NOT NULL DEFAULT 0,
+    result ENUM('pending','success','credential_failure','infrastructure') NOT NULL DEFAULT 'pending',
     attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX login_attempt_lookup (username, ip_address, attempted_at),
+    INDEX login_attempt_source_lookup (auth_source, username, ip_address, attempted_at),
+    INDEX login_attempt_result_lookup (result, attempted_at),
+    INDEX login_attempt_user_lookup (auth_source, username, attempted_at, result),
     INDEX login_attempt_ip_lookup (ip_address, attempted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_config (
+    id TINYINT UNSIGNED PRIMARY KEY,
+    enabled TINYINT(1) NOT NULL DEFAULT 0,
+    revision INT UNSIGNED NOT NULL DEFAULT 1,
+    default_naming_context VARCHAR(1024) NULL,
+    user_search_base_dn VARCHAR(1024) NULL,
+    bind_upn VARCHAR(255) NOT NULL,
+    bind_secret_ciphertext TEXT NOT NULL,
+    ca_certificate_pem MEDIUMTEXT NOT NULL,
+    automatic_bind_blocked_revision INT UNSIGNED NULL,
+    automatic_bind_blocked_at TIMESTAMP NULL,
+    automatic_bind_blocked_reason VARCHAR(64) NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT deploy_ad_config_singleton CHECK (id = 1),
+    CONSTRAINT fk_deploy_ad_config_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_ad_config_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_controllers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    config_id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    host VARCHAR(253) NOT NULL,
+    port INT UNSIGNED NOT NULL DEFAULT 636,
+    priority INT UNSIGNED NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 0,
+    validated_revision INT UNSIGNED NULL,
+    validated_at TIMESTAMP NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_ad_controller_endpoint_unique (config_id, host, port),
+    UNIQUE KEY deploy_ad_controller_priority_unique (config_id, priority),
+    CONSTRAINT fk_deploy_ad_controllers_config FOREIGN KEY (config_id) REFERENCES deploy_ad_config(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_ad_controllers_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_ad_controllers_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_controller_state (
+    controller_id INT PRIMARY KEY,
+    config_revision INT UNSIGNED NOT NULL,
+    last_attempt_at TIMESTAMP NULL,
+    last_success_at TIMESTAMP NULL,
+    last_outcome VARCHAR(64) NOT NULL DEFAULT 'unavailable',
+    consecutive_transport_failures INT UNSIGNED NOT NULL DEFAULT 0,
+    retry_after TIMESTAMP NULL,
+    certificate_sha256 VARCHAR(95) NULL,
+    certificate_not_after TIMESTAMP NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_deploy_ad_controller_state_controller FOREIGN KEY (controller_id) REFERENCES deploy_ad_controllers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_credentials (

@@ -4,6 +4,7 @@
   "type": "project",
   "license": "proprietary",
   "require": {
+    "ext-ldap": "*",
     "php": ">=8.4",
     "phpseclib/phpseclib": "^3.0"
   },

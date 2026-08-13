@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libfreetype6-dev \
     libonig-dev \
+    libldap2-dev \
     libxml2-dev \
     libzip-dev \
     libfcgi-bin \
@@ -18,7 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     unzip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install gd mysqli zip \
+    && LDAP_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
+    && docker-php-ext-configure ldap --with-libdir="lib/${LDAP_MULTIARCH}" \
+    && docker-php-ext-install gd ldap mysqli zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

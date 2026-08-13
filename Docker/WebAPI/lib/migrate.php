@@ -96,6 +96,14 @@ function migrator_fk_exists(mysqli $db, string $table, string $constraint): bool
     return migrator_statement_count($stmt, 'foreign key exists') > 0;
 }
 
+function migrator_check_exists(mysqli $db, string $table, string $constraint): bool
+{
+    $stmt = $db->prepare('SELECT COUNT(*) AS c FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = "CHECK"');
+    $stmt->bind_param('ss', $table, $constraint);
+    $stmt->execute();
+    return migrator_statement_count($stmt, 'check constraint exists') > 0;
+}
+
 // csp-allow: interpolated-sql
 function migrator_add_column(mysqli $db, string $table, string $column, string $definition): void
 {
@@ -310,11 +318,16 @@ $migrations = [
     '0002_support_tables' => function (mysqli $db): void {
         $db->query("CREATE TABLE IF NOT EXISTS deploy_login_attempts (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            username VARCHAR(191) NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            auth_source ENUM('local','active_directory') NOT NULL DEFAULT 'local',
             ip_address VARCHAR(45) NOT NULL,
             success TINYINT(1) NOT NULL DEFAULT 0,
+            result ENUM('pending','success','credential_failure','infrastructure') NOT NULL DEFAULT 'pending',
             attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX login_attempt_lookup (username, ip_address, attempted_at),
+            INDEX login_attempt_source_lookup (auth_source, username, ip_address, attempted_at),
+            INDEX login_attempt_result_lookup (result, attempted_at),
+            INDEX login_attempt_user_lookup (auth_source, username, attempted_at, result),
             INDEX login_attempt_ip_lookup (ip_address, attempted_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
@@ -1042,6 +1055,105 @@ SQL;
         // terminal row a worker claimed, so history cannot become a table scan.
         migrator_add_index($db, 'deploy_jobs', 'deploy_jobs_ansible_activity', 'INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id)');
         migrator_out('0039: indexed Ansible mission activity for System status');
+    },
+    '0040_active_directory_authentication' => function (mysqli $db): void {
+        // Existing rows predate authentication sources and therefore must all
+        // be valid local accounts. Refuse to reinterpret a broken/empty hash as
+        // an external identity merely to make the migration pass.
+        if (migrator_table_exists($db, 'deploy_users') && !migrator_column_exists($db, 'deploy_users', 'auth_source')) {
+            $invalidLocalUsers = migrator_count($db, "SELECT COUNT(*) AS c FROM deploy_users WHERE password IS NULL OR password = ''");
+            if ($invalidLocalUsers > 0) {
+                throw new RuntimeException('Preflight blocked: deploy_users contains local account(s) without a password hash.');
+            }
+        }
+
+        migrator_add_column($db, 'deploy_users', 'auth_source', "ENUM('local','active_directory') NOT NULL DEFAULT 'local' AFTER name");
+        if (migrator_table_exists($db, 'deploy_users')) {
+            $db->query('ALTER TABLE deploy_users MODIFY password VARCHAR(255) NULL');
+        }
+        migrator_add_column($db, 'deploy_users', 'ad_object_guid', 'BINARY(16) NULL AFTER must_change_password');
+        migrator_add_column($db, 'deploy_users', 'ad_upn', 'VARCHAR(255) NULL AFTER ad_object_guid');
+        migrator_add_column($db, 'deploy_users', 'ad_sam_account_name', 'VARCHAR(255) NULL AFTER ad_upn');
+        migrator_add_column($db, 'deploy_users', 'ad_display_name', 'VARCHAR(255) NULL AFTER ad_sam_account_name');
+        migrator_add_column($db, 'deploy_users', 'ad_account_enabled', 'TINYINT(1) NULL AFTER ad_display_name');
+        migrator_add_column($db, 'deploy_users', 'ad_last_checked_at', 'TIMESTAMP NULL AFTER ad_account_enabled');
+        migrator_add_index($db, 'deploy_users', 'deploy_users_ad_guid_unique', 'UNIQUE INDEX deploy_users_ad_guid_unique (ad_object_guid)');
+        migrator_add_index($db, 'deploy_users', 'deploy_users_auth_active', 'INDEX deploy_users_auth_active (auth_source, is_active)');
+        if (migrator_check_exists($db, 'deploy_users', 'deploy_users_auth_shape')) {
+            $db->query('ALTER TABLE deploy_users DROP CHECK deploy_users_auth_shape');
+        }
+        $db->query("ALTER TABLE deploy_users ADD CONSTRAINT deploy_users_auth_shape CHECK ((auth_source = 'local' AND password IS NOT NULL AND ad_object_guid IS NULL) OR (auth_source = 'active_directory' AND password IS NULL AND ad_object_guid IS NOT NULL AND ad_upn IS NOT NULL AND must_change_password = 0 AND locked_until IS NULL))");
+
+        migrator_add_column($db, 'deploy_login_attempts', 'auth_source', "ENUM('local','active_directory') NOT NULL DEFAULT 'local' AFTER username");
+        if (migrator_table_exists($db, 'deploy_login_attempts')) {
+            $db->query('ALTER TABLE deploy_login_attempts MODIFY username VARCHAR(255) NOT NULL');
+        }
+        migrator_add_column($db, 'deploy_login_attempts', 'result', "ENUM('pending','success','credential_failure','infrastructure') NULL AFTER success");
+        $db->query("UPDATE deploy_login_attempts SET result = IF(success = 1, 'success', 'credential_failure') WHERE result IS NULL");
+        $db->query("ALTER TABLE deploy_login_attempts MODIFY result ENUM('pending','success','credential_failure','infrastructure') NOT NULL DEFAULT 'pending'");
+        migrator_add_index($db, 'deploy_login_attempts', 'login_attempt_source_lookup', 'INDEX login_attempt_source_lookup (auth_source, username, ip_address, attempted_at)');
+        migrator_add_index($db, 'deploy_login_attempts', 'login_attempt_result_lookup', 'INDEX login_attempt_result_lookup (result, attempted_at)');
+        migrator_add_index($db, 'deploy_login_attempts', 'login_attempt_user_lookup', 'INDEX login_attempt_user_lookup (auth_source, username, attempted_at, result)');
+
+        $db->query("CREATE TABLE IF NOT EXISTS deploy_ad_config (
+            id TINYINT UNSIGNED PRIMARY KEY,
+            enabled TINYINT(1) NOT NULL DEFAULT 0,
+            revision INT UNSIGNED NOT NULL DEFAULT 1,
+            default_naming_context VARCHAR(1024) NULL,
+            user_search_base_dn VARCHAR(1024) NULL,
+            bind_upn VARCHAR(255) NOT NULL,
+            bind_secret_ciphertext TEXT NOT NULL,
+            ca_certificate_pem MEDIUMTEXT NOT NULL,
+            automatic_bind_blocked_revision INT UNSIGNED NULL,
+            automatic_bind_blocked_at TIMESTAMP NULL,
+            automatic_bind_blocked_reason VARCHAR(64) NULL,
+            created_by INT NULL,
+            updated_by INT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT deploy_ad_config_singleton CHECK (id = 1),
+            CONSTRAINT fk_deploy_ad_config_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_deploy_ad_config_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        migrator_add_column($db, 'deploy_ad_config', 'automatic_bind_blocked_revision', 'INT UNSIGNED NULL AFTER ca_certificate_pem');
+        migrator_add_column($db, 'deploy_ad_config', 'automatic_bind_blocked_at', 'TIMESTAMP NULL AFTER automatic_bind_blocked_revision');
+        migrator_add_column($db, 'deploy_ad_config', 'automatic_bind_blocked_reason', 'VARCHAR(64) NULL AFTER automatic_bind_blocked_at');
+
+        $db->query("CREATE TABLE IF NOT EXISTS deploy_ad_controllers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            config_id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+            host VARCHAR(253) NOT NULL,
+            port INT UNSIGNED NOT NULL DEFAULT 636,
+            priority INT UNSIGNED NOT NULL,
+            enabled TINYINT(1) NOT NULL DEFAULT 0,
+            validated_revision INT UNSIGNED NULL,
+            validated_at TIMESTAMP NULL,
+            created_by INT NULL,
+            updated_by INT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY deploy_ad_controller_endpoint_unique (config_id, host, port),
+            UNIQUE KEY deploy_ad_controller_priority_unique (config_id, priority),
+            CONSTRAINT fk_deploy_ad_controllers_config FOREIGN KEY (config_id) REFERENCES deploy_ad_config(id) ON DELETE CASCADE,
+            CONSTRAINT fk_deploy_ad_controllers_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_deploy_ad_controllers_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $db->query("CREATE TABLE IF NOT EXISTS deploy_ad_controller_state (
+            controller_id INT PRIMARY KEY,
+            config_revision INT UNSIGNED NOT NULL,
+            last_attempt_at TIMESTAMP NULL,
+            last_success_at TIMESTAMP NULL,
+            last_outcome VARCHAR(64) NOT NULL DEFAULT 'unavailable',
+            consecutive_transport_failures INT UNSIGNED NOT NULL DEFAULT 0,
+            retry_after TIMESTAMP NULL,
+            certificate_sha256 VARCHAR(95) NULL,
+            certificate_not_after TIMESTAMP NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_deploy_ad_controller_state_controller FOREIGN KEY (controller_id) REFERENCES deploy_ad_controllers(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        migrator_out('0040: Active Directory authentication schema added');
     },
 ];
 

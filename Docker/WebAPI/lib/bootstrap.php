@@ -19,6 +19,7 @@ require_once __DIR__ . '/lang.php';
 require_once __DIR__ . '/csrf.php';
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/db.php';
 // Before auth.php: sign-in records security events through it, and every portal

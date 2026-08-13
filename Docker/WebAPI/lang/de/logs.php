@@ -20,6 +20,7 @@ return [
     'category_legacy_api' => 'Legacy-API',
     'category_users' => 'Benutzer',
     'category_credentials' => 'Zugangsdaten',
+    'category_directory' => 'Active Directory',
     // Abgewiesene Maschinenzugriffe. Im Sicherheitsbereich, nicht bei „MECM-
     // Integration": das ist die Frage „wer hat angeklopft und wurde abgewiesen",
     // nicht „läuft der Datenfluss".

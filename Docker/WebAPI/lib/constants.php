@@ -173,6 +173,10 @@ const VIRTUSPHERE_LOG_CATEGORY_SYSTEM = 'system';
 const VIRTUSPHERE_LOG_CATEGORY_LEGACY_API = 'legacy_api';
 const VIRTUSPHERE_LOG_CATEGORY_USERS = 'users';
 const VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS = 'credentials';
+// AD configuration, controller validation and throttled availability state.
+// Authentication decisions stay in `auth`; account imports/roles stay in
+// `users`, so one investigation is not duplicated across categories.
+const VIRTUSPHERE_LOG_CATEGORY_DIRECTORY = 'directory';
 const VIRTUSPHERE_LOG_CATEGORY_MISSIONS = 'missions';
 const VIRTUSPHERE_LOG_CATEGORY_OS = 'os';
 const VIRTUSPHERE_LOG_CATEGORY_SETTINGS = 'settings';
@@ -195,6 +199,7 @@ const VIRTUSPHERE_LOG_CATEGORIES = [
     VIRTUSPHERE_LOG_CATEGORY_LEGACY_API,
     VIRTUSPHERE_LOG_CATEGORY_USERS,
     VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+    VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
     VIRTUSPHERE_LOG_CATEGORY_MISSIONS,
     VIRTUSPHERE_LOG_CATEGORY_OS,
     VIRTUSPHERE_LOG_CATEGORY_SETTINGS,
@@ -226,6 +231,7 @@ const VIRTUSPHERE_LOG_TABS = [
         VIRTUSPHERE_LOG_CATEGORY_AUTH,
         VIRTUSPHERE_LOG_CATEGORY_USERS,
         VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+        VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
         // A refused machine access is a security event, so it inherits the long
         // retention window of this tab on purpose: the misconfiguration it
         // reports (a missing IP allowlist entry) can sit unnoticed for months.

@@ -85,7 +85,7 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'Etappe 12',
     ],
     'Docker/WebAPI/portal/settings.php' => [
-        'lines' => 934,
+        'lines' => 952,
         'why' => 'eleven POST actions, five tabs, view model and large renderers',
         'stage' => 'Etappe 12/14',
     ],
@@ -118,12 +118,12 @@ const FILE_SIZE_ALLOWANCES = [
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1094,
+        'lines' => 1206,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 597,
+        'lines' => 603,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],
@@ -150,11 +150,6 @@ const FILE_SIZE_ALLOWANCES = [
     'Docker/WebAPI/lib/errors.php' => [
         'lines' => 411,
         'why' => 'one error-handling domain just over the target',
-        'stage' => 'bei naechster fachlicher Aenderung pruefen',
-    ],
-    'Docker/WebAPI/lib/auth.php' => [
-        'lines' => 401,
-        'why' => 'one session/auth domain one line over the target',
         'stage' => 'bei naechster fachlicher Aenderung pruefen',
     ],
 ];

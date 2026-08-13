@@ -70,5 +70,27 @@ $passwordMinLength = password_policy_min_length(db());
             </ul>
             <p><?php echo h(__t('help_users.usersmgmt_audit_p1')); ?></p>
         </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_users.directory_heading')); ?></h2>
+            <p><?php echo h(__t('help_users.directory_p1')); ?></p>
+            <ol>
+                <li><?php echo h(__t('help_users.directory_step_config')); ?></li>
+                <li><?php echo h(__t('help_users.directory_step_controller')); ?></li>
+                <li><?php echo h(__t('help_users.directory_step_import')); ?></li>
+                <li><?php echo h(__t('help_users.directory_step_enable')); ?></li>
+            </ol>
+            <p><?php echo h(__t('help_users.directory_breakglass')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_users.directory_troubleshooting_heading')); ?></h2>
+            <ul>
+                <li><?php echo h(__t('help_users.directory_troubleshooting_tls')); ?></li>
+                <li><?php echo h(__t('help_users.directory_troubleshooting_bind')); ?></li>
+                <li><?php echo h(__t('help_users.directory_troubleshooting_session')); ?></li>
+                <li><?php echo h(__t('help_users.directory_troubleshooting_restore')); ?></li>
+            </ul>
+        </section>
         <?php endif; ?>
     </div>

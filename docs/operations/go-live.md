@@ -1,5 +1,11 @@
 # Go-Live-Runbook: Erstinbetriebnahme
 
+Für eine geplante Active-Directory-Aktivierung gelten zusätzlich das
+Betriebshandbuch `docs/operations/active-directory.md` und der zwingende
+Zielsystemnachweis in
+`docs/audits/2026-08-13-ldaps-target-ad-validation-protocol.md`. Ohne diesen
+Nachweis bleibt die Verzeichnisanmeldung deaktiviert.
+
 Dieses Dokument führt die **erste** produktive Inbetriebnahme der VirtuSphere-WebApp
 auf dem Ubuntu-Host durch. Zielgruppe sind Administratoren ohne tiefes Docker- oder
 MECM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolge).

@@ -13,4 +13,8 @@ return [
     'new_password' => 'Neues Passwort',
     'confirm_password' => 'Passwort bestätigen',
     'change_password' => 'Passwort ändern',
+    'source_directory' => 'Active Directory',
+    'source_local' => 'Lokales Konto',
+    'directory_upn' => 'Anmeldung mit :upn',
+    'directory_password_external' => 'Das Passwort wird in Active Directory verwaltet und kann in VirtuSphere nicht geändert werden.',
 ];

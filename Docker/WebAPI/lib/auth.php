@@ -3,12 +3,15 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/audit_events.php';
+require_once __DIR__ . '/auth_directory_login.php';
+require_once __DIR__ . '/auth_rate_limit.php';
+require_once __DIR__ . '/auth_password_rehash.php';
+require_once __DIR__ . '/auth_schema.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/headers.php';
 require_once __DIR__ . '/permissions.php';
-
-const VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT = 5;
-const VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT = 25;
+require_once __DIR__ . '/repo/helpers.php';
 
 // Absolute session lifetime fallback. The clock starts at login and is only
 // ever refreshed when the user explicitly clicks "Verlaengern"
@@ -86,69 +89,6 @@ function is_request_secure(): bool
     return virtusphere_is_request_secure();
 }
 
-function auth_client_ip(): string
-{
-    return (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-}
-
-function auth_record_login_attempt(mysqli $db, string $username, bool $success): void
-{
-    $ip = auth_client_ip();
-    $successInt = $success ? 1 : 0;
-    $stmt = $db->prepare('INSERT INTO deploy_login_attempts (username, ip_address, success) VALUES (?, ?, ?)');
-    $stmt->bind_param('ssi', $username, $ip, $successInt);
-    $stmt->execute();
-}
-
-function auth_failed_attempt_count(mysqli $db, string $username): int
-{
-    $ip = auth_client_ip();
-    $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
-    $stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND ip_address = ? AND success = 0 AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)');
-    $stmt->bind_param('ssi', $username, $ip, $window);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-
-    return (int) ($row['c'] ?? 0);
-}
-
-function auth_failed_ip_attempt_count(mysqli $db): int
-{
-    $ip = auth_client_ip();
-    $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
-    $stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE ip_address = ? AND success = 0 AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)');
-    $stmt->bind_param('si', $ip, $window);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-
-    return (int) ($row['c'] ?? 0);
-}
-
-/**
- * Records one failed sign-in and audits the IP rate-limit onset: the attempt
- * that tips the counter over VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT writes one
- * line, later attempts in the window only count. One row per rejected request
- * would hand an unauthenticated client a way to fill the auth channel for the
- * whole retention window; this bounds it to the per-attempt failures below the
- * limit plus one onset line per IP and window. The counter table itself still
- * records every attempt (it has to, it is the limit).
- */
-function auth_record_failed_login(mysqli $db, string $username): void
-{
-    $before = auth_failed_ip_attempt_count($db);
-    auth_record_login_attempt($db, $username, false);
-    if ($before < VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT && auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT) {
-        // Both numbers interpolated: an audit line that states a duration the
-        // code no longer enforces is worse than one that states none, because an
-        // operator reading the log has no way to tell.
-        audit_auth($db, sprintf(
-            'ip rate limited for %d minutes after %d failed sign-ins',
-            VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
-            VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT
-        ));
-    }
-}
-
 /**
  * Sign-in outcomes reach the `auth` audit channel, not just the lockout counter
  * in deploy_login_attempts, which no page ever shows. The typed user name is
@@ -164,65 +104,81 @@ function auth_record_failed_login(mysqli $db, string $username): void
  * onset once), so an unauthenticated client cannot write more than the
  * below-limit failures plus one line per window into deploy_logs.
  */
-function login(string $username, string $password, ?mysqli $db = null): array
+function login(string $username, string $password, ?mysqli $db = null, string $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL): array
 {
     session_start_secure();
     $db = $db ?? db();
     $username = trim($username);
-    if ($username === '' || $password === '') {
-        // An empty form submit touches nothing and is not an event.
+    if ($username === '' || $password === '' || !in_array($source, VIRTUSPHERE_AUTH_SOURCES, true)) {
+        // An empty/invalid form submit touches neither LDAP nor the counters.
         return ['ok' => false, 'reason' => 'invalid'];
     }
 
-    if (auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT) {
-        // Counted but not audited: the onset line from auth_record_failed_login()
-        // already marks this window, and a per-attempt line would let anyone
-        // without credentials grow the audit log one row per request.
-        auth_record_login_attempt($db, $username, false);
+    try {
+        $reservation = auth_reserve_login_attempt($db, $username, $source);
+    } catch (Throwable) {
+        return ['ok' => false, 'reason' => 'directory_unavailable'];
+    }
+    if (!$reservation['ok']) {
         return [
             'ok' => false,
-            'reason' => 'ip_locked',
-            // Was the literal 900. The client is told to come back when the
-            // counting window has moved on, so it is that window, not the
-            // account lockout, that decides the number.
+            'reason' => $reservation['reason'],
             'retry_after_seconds' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES * 60,
         ];
     }
+    $attemptId = (int) $reservation['id'];
 
-    $stmt = $db->prepare('SELECT id, name, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE name = ? LIMIT 1');
-    $stmt->bind_param('s', $username);
+    if ($source === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) {
+        return auth_login_directory($db, $username, $password, $attemptId);
+    }
+
+    return auth_login_local($db, $username, $password, $attemptId);
+}
+
+function auth_login_local(mysqli $db, string $username, string $password, int $attemptId = 0): array
+{
+    $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+    if (auth_user_source_schema_available($db)) {
+        $stmt = $db->prepare('SELECT id, name, auth_source, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE name = ? AND auth_source = ? LIMIT 1');
+        $stmt->bind_param('ss', $username, $source);
+    } else {
+        $stmt = $db->prepare("SELECT id, name, 'local' AS auth_source, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE name = ? LIMIT 1");
+        $stmt->bind_param('s', $username);
+    }
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
 
     if ($user && !empty($user['locked_until']) && strtotime((string) $user['locked_until']) > time()) {
-        auth_record_failed_login($db, $username);
+        auth_finish_failed_login($db, $attemptId, $username, $source);
         audit_auth($db, 'login rejected: account is locked', (int) $user['id']);
         return ['ok' => false, 'reason' => 'locked'];
     }
 
     if ($user) {
         $valid = (int) $user['is_active'] === 1
-            && password_verify($password, (string) $user['password']);
+            && is_string($user['password'])
+            && password_verify($password, $user['password']);
     } else {
-        // Burn a hash comparison for unknown usernames too, so response timing
-        // does not reveal whether an account exists (OWASP authentication
-        // cheat sheet, user-enumeration guidance).
+        // Burn a hash comparison for unknown local usernames too.
         password_verify($password, '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG');
         $valid = false;
     }
 
     if (!$valid) {
-        auth_record_failed_login($db, $username);
-        if ($user && auth_failed_attempt_count($db, $username) >= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT) {
-            $lockStmt = $db->prepare('UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?');
+        auth_finish_failed_login($db, $attemptId, $username, $source);
+        if ($user && auth_failed_attempt_count($db, $username, $source) >= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT) {
+            $lockSql = auth_user_source_schema_available($db)
+                ? 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ? AND auth_source = ?'
+                : 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?';
+            $lockStmt = $db->prepare($lockSql);
             $lockMinutes = VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES;
             $userId = (int) $user['id'];
-            $lockStmt->bind_param('ii', $lockMinutes, $userId);
+            if (auth_user_source_schema_available($db)) {
+                $lockStmt->bind_param('iis', $lockMinutes, $userId, $source);
+            } else {
+                $lockStmt->bind_param('ii', $lockMinutes, $userId);
+            }
             $lockStmt->execute();
-            // The lockout itself, not just the failed attempt that tripped it.
-            // The duration comes from the same constant the UPDATE above uses:
-            // it said "15 minutes" in the text while the SQL already read the
-            // constant, so raising the constant made the audit line lie.
             audit_auth($db, sprintf(
                 'account locked for %d minutes after %d failed sign-ins',
                 VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES,
@@ -231,9 +187,6 @@ function login(string $username, string $password, ?mysqli $db = null): array
             return ['ok' => false, 'reason' => 'locked'];
         }
 
-        // A deactivated account with the right password is a different story from
-        // a wrong password, and only the log gets to know it: the response stays
-        // the same generic "invalid" either way.
         $reason = $user && (int) $user['is_active'] !== 1
             ? 'login rejected: account is deactivated'
             : 'login failed for user "' . audit_snippet($username) . '"';
@@ -242,62 +195,54 @@ function login(string $username, string $password, ?mysqli $db = null): array
         return ['ok' => false, 'reason' => 'invalid'];
     }
 
-    auth_record_login_attempt($db, $username, true);
-    audit_auth($db, 'login succeeded', (int) $user['id']);
+    repo_transaction($db, function () use ($db, $attemptId, $username, $source, $user, $password): void {
+        if ($attemptId > 0) {
+            auth_finish_login_attempt($db, $attemptId, VIRTUSPHERE_LOGIN_RESULT_SUCCESS);
+        } else {
+            auth_record_login_attempt($db, $username, true, $source);
+        }
+        audit_auth($db, 'login succeeded (local)', (int) $user['id']);
+        auth_rehash_password_if_needed($db, (int) $user['id'], $password, (string) $user['password']);
+        auth_mark_login_seen($db, (int) $user['id']);
+    });
 
-    // Upgrade a hash that predates the current cost/algorithm, while we hold the
-    // one thing needed to do it: the plaintext. Anything else would mean a forced
-    // password reset for every user (OWASP password-storage cheat sheet).
-    auth_rehash_password_if_needed($db, (int) $user['id'], $password, (string) $user['password']);
+    return auth_complete_login($user, $source);
+}
 
+function auth_complete_login(array $user, string $source): array
+{
     session_regenerate_id(true);
-    // Rotate the CSRF token with the session ID. The pre-login token was handed
-    // to an unauthenticated visitor; there is no reason for it to keep working
-    // inside a privileged session, and rotating on privilege change is a one-line
-    // habit worth having.
     unset($_SESSION['_csrf']);
     $_SESSION['user_id'] = (int) $user['id'];
     $_SESSION['user'] = (string) $user['name'];
     $_SESSION['user_role'] = (string) $user['role'];
-    $_SESSION['must_change_password'] = (int) $user['must_change_password'] === 1;
+    $_SESSION['auth_source'] = $source;
+    $_SESSION['must_change_password'] = $source === VIRTUSPHERE_AUTH_SOURCE_LOCAL
+        && (int) $user['must_change_password'] === 1;
+    if ($source === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) {
+        $_SESSION['directory_verified_at'] = time();
+        unset($_SESSION['directory_retry_at']);
+    } else {
+        unset($_SESSION['directory_verified_at'], $_SESSION['directory_retry_at']);
+    }
     session_touch_expiry();
-
-    $seenStmt = $db->prepare('UPDATE deploy_users SET last_seen_at = NOW(), locked_until = NULL WHERE id = ?');
-    $userId = (int) $user['id'];
-    $seenStmt->bind_param('i', $userId);
-    $seenStmt->execute();
 
     return ['ok' => true, 'user' => $user, 'must_change_password' => $_SESSION['must_change_password']];
 }
 
-/**
- * Re-hashes the password when the stored hash no longer matches the current
- * algorithm or cost (PASSWORD_DEFAULT moves with the PHP version). Sign-in is the
- * only moment the plaintext exists, so it is the only moment this is possible
- * without forcing everyone to reset.
- *
- * Best effort by design: a failed rehash must never turn a valid sign-in into a
- * rejected one. The old hash keeps working, and the next login tries again.
- */
-function auth_rehash_password_if_needed(mysqli $db, int $userId, string $plaintext, string $storedHash): void
+function auth_mark_login_seen(mysqli $db, int $userId): void
 {
-    if (!password_needs_rehash($storedHash, PASSWORD_DEFAULT)) {
-        return;
+    $seenSql = auth_user_source_schema_available($db)
+        ? 'UPDATE deploy_users SET last_seen_at = NOW(), locked_until = IF(auth_source = ?, NULL, locked_until) WHERE id = ?'
+        : 'UPDATE deploy_users SET last_seen_at = NOW() WHERE id = ?';
+    $seenStmt = $db->prepare($seenSql);
+    $local = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+    if (auth_user_source_schema_available($db)) {
+        $seenStmt->bind_param('si', $local, $userId);
+    } else {
+        $seenStmt->bind_param('i', $userId);
     }
-    // A password already stored can be longer than today's limit; do not re-hash
-    // it into a *different* truncation. Leave it and let the next change fix it.
-    if (strlen($plaintext) > VIRTUSPHERE_PASSWORD_MAX_BYTES) {
-        return;
-    }
-
-    try {
-        $hash = password_hash($plaintext, PASSWORD_DEFAULT);
-        $stmt = $db->prepare('UPDATE deploy_users SET password = ? WHERE id = ?');
-        $stmt->bind_param('si', $hash, $userId);
-        $stmt->execute();
-    } catch (Throwable) {
-        // Deliberately silent: the user is signed in either way.
-    }
+    $seenStmt->execute();
 }
 
 function logout(): void
@@ -344,12 +289,46 @@ function current_user(?mysqli $db = null): ?array
     }
 
     $db = $db ?? db();
-    $stmt = $db->prepare('SELECT id, name, email, role, is_active, must_change_password, last_seen_at FROM deploy_users WHERE id = ? LIMIT 1');
+    $userSelect = auth_user_source_schema_available($db)
+        ? 'SELECT id, name, auth_source, email, role, is_active, must_change_password, last_seen_at, ad_object_guid, ad_upn, ad_sam_account_name, ad_display_name, ad_account_enabled, ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1'
+        : "SELECT id, name, 'local' AS auth_source, email, role, is_active, must_change_password, last_seen_at, NULL AS ad_object_guid, NULL AS ad_upn, NULL AS ad_sam_account_name, NULL AS ad_display_name, NULL AS ad_account_enabled, NULL AS ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1";
+    $stmt = $db->prepare($userSelect);
     $stmt->bind_param('i', $userId);
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
     if (!$user || (int) $user['is_active'] !== 1) {
         return null;
+    }
+
+    if ((string) $user['auth_source'] === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) {
+        $verifiedAt = (int) ($_SESSION['directory_verified_at'] ?? 0);
+        if (!directory_is_enabled($db)) {
+            audit_auth($db, 'Active Directory session ended: directory integration disabled', $userId);
+            logout();
+            return null;
+        }
+        if ($verifiedAt === 0 || time() - $verifiedAt >= VIRTUSPHERE_DIRECTORY_SESSION_RECHECK_SECONDS) {
+            $retryAt = (int) ($_SESSION['directory_retry_at'] ?? 0);
+            if ($retryAt > time()) {
+                return $user;
+            }
+            $check = directory_revalidate_user($db, $user);
+            if ($check['ok']) {
+                $_SESSION['directory_verified_at'] = time();
+                unset($_SESSION['directory_retry_at']);
+                $fresh = repo_directory_user_by_guid($db, (string) $user['ad_object_guid']);
+                if ($fresh !== null) {
+                    $user = $fresh;
+                }
+            } elseif ($check['temporary'] && $verifiedAt > 0 && time() - $verifiedAt < VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS) {
+                $remainingGrace = VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS - (time() - $verifiedAt);
+                $_SESSION['directory_retry_at'] = time() + min(60, max(1, $remainingGrace));
+            } else {
+                audit_auth($db, 'Active Directory session ended: ' . audit_snippet($check['reason']), $userId);
+                logout();
+                return null;
+            }
+        }
     }
 
     return $user;
@@ -384,11 +363,18 @@ function can(string $permission, ?array $user = null): bool
 
 function change_own_password(mysqli $db, int $userId, string $currentPassword, string $newPassword): bool
 {
-    $stmt = $db->prepare('SELECT password FROM deploy_users WHERE id = ? LIMIT 1');
+    $passwordSelect = auth_user_source_schema_available($db)
+        ? 'SELECT auth_source, password FROM deploy_users WHERE id = ? LIMIT 1'
+        : "SELECT 'local' AS auth_source, password FROM deploy_users WHERE id = ? LIMIT 1";
+    $stmt = $db->prepare($passwordSelect);
     $stmt->bind_param('i', $userId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
-    if (!$row || !password_verify($currentPassword, (string) $row['password'])) {
+    if (!$row
+        || (string) $row['auth_source'] !== VIRTUSPHERE_AUTH_SOURCE_LOCAL
+        || !is_string($row['password'])
+        || !password_verify($currentPassword, $row['password'])
+    ) {
         return false;
     }
 

@@ -66,6 +66,7 @@ final class LogRetentionTest extends TestCase
         $expected = [
             VIRTUSPHERE_LOG_CATEGORY_AUTH,
             VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+            VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
             VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
             VIRTUSPHERE_LOG_CATEGORY_USERS,
         ];

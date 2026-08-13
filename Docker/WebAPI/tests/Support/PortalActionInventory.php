@@ -73,6 +73,13 @@ final class PortalActionInventory
             $pages['portal/system_status.php'] .= (string) file_get_contents($renderer);
         }
 
+        // users.php follows the same controller/renderer split for account and
+        // directory administration. Keep its forms inside the one closed action
+        // inventory even when another focused renderer is added later.
+        foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/users_*_panels.php') ?: [] as $renderer) {
+            $pages['portal/users.php'] .= (string) file_get_contents($renderer);
+        }
+
         return $pages;
     }
 }

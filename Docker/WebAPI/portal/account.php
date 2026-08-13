@@ -11,6 +11,11 @@ $user = portal_require_user($connection, true);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
 
+    if ((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) !== VIRTUSPHERE_AUTH_SOURCE_LOCAL) {
+        flash_set('error', __t('account.directory_password_external'));
+        redirect_to('account.php');
+    }
+
     $currentPassword = request_string($_POST, 'current_password');
     $newPassword = request_string($_POST, 'new_password');
     $confirmPassword = request_string($_POST, 'confirm_password');
@@ -45,6 +50,11 @@ $summary = trim((string) ($user['email'] ?? '')) !== ''
     <section class="panel">
         <h2><?php echo h((string) $user['name']); ?></h2>
         <p class="muted"><?php echo h($summary); ?></p>
+        <p><?php echo portal_badge((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? 'info' : 'neutral', (string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? __t('account.source_directory') : __t('account.source_local')); ?></p>
+        <?php if ((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) { ?>
+        <p><?php echo h(__t('account.directory_upn', ['upn' => (string) ($user['ad_upn'] ?? '')])); ?></p>
+        <div class="alert alert-info"><?php echo h(__t('account.directory_password_external')); ?></div>
+        <?php } else { ?>
         <?php if ((int) $user['must_change_password'] === 1) { ?><div class="alert alert-error"><?php echo h(__t('account.must_change')); ?></div><?php } ?>
         <form class="stack narrow-form" method="post" action="account.php">
             <?php echo csrf_field(); ?>
@@ -53,6 +63,7 @@ $summary = trim((string) ($user['email'] ?? '')) !== ''
             <label for="confirm_password"><?php echo h(__t('account.confirm_password')); ?><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required></label>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('account.change_password')); ?></button></div>
         </form>
+        <?php } ?>
     </section>
 </div>
 <?php layout_footer(); ?>

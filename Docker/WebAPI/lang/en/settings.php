@@ -197,6 +197,7 @@ return [
     'https_err_expired' => 'The certificate is expired; please install a valid one.',
     'https_err_no_material' => 'HTTPS can only be enabled once a certificate is installed.',
     'https_err_redirect_requires' => 'The redirect requires HTTPS to be enabled.',
+    'https_err_directory_active' => 'HTTPS and its redirect cannot be disabled while Active Directory sign-in is enabled.',
     'https_meta_title' => 'Installed certificate',
     'https_meta_none' => 'No certificate installed yet.',
     'https_meta_subject' => 'Issued to (CN)',

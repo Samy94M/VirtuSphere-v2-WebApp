@@ -244,6 +244,8 @@ echo "Lasse Migrationen gegen den Restore laufen ..."
 run_php "$APP_KEY" /repo/Docker/WebAPI/lib/migrate.php || fail "Migrationen laufen auf dem Restore nicht durch."
 run_php "$APP_KEY" /repo/Docker/WebAPI/lib/migrate.php --check | grep -q 'pending=0' \
   || fail "migrate --check meldet offene Migrationen nach dem Restore."
+run_php "$APP_KEY" /repo/Docker/WebAPI/lib/directory_restore_converge.php \
+  || fail "AD-Restore-Konvergenz konnte die Verzeichnisanmeldung nicht sicher deaktivieren."
 
 echo "Pruefe Schema-Konvergenz gegen struktur.sql ..."
 drill_sql "DROP DATABASE IF EXISTS vs_drill_fresh; CREATE DATABASE vs_drill_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/ansible.php';
+require_once __DIR__ . '/../lib/directory_config.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/repo/settings.php';
@@ -202,12 +203,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($enable && !https_material_present()) {
                 throw new ValidationException(['https_enabled' => __t('settings.https_err_no_material')]);
             }
-            $redirectWasOn = repo_setting_value($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, '0') === '1';
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_ENABLED, $enable ? '1' : '0');
-            if (!$enable && $redirectWasOn) {
-                // Never leave a redirect pointing at a listener that is gone.
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, '0');
-            }
+            $redirectWasOn = false;
+            repo_transaction($connection, function () use ($connection, $enable, &$redirectWasOn): void {
+                if (directory_schema_available($connection)) {
+                    directory_lock_activation_state($connection);
+                    if (!$enable && directory_is_enabled($connection)) {
+                        throw new ValidationException(['https_enabled' => __t('settings.https_err_directory_active')]);
+                    }
+                }
+                $redirectWasOn = repo_setting_value($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, '0') === '1';
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_ENABLED, $enable ? '1' : '0');
+                if (!$enable && $redirectWasOn) {
+                    // Never leave a redirect pointing at a listener that is gone.
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, '0');
+                }
+            });
             https_apply_state($connection);
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, $enable ? 'enabled https' : 'disabled https' . ($redirectWasOn ? ' (redirect auto-disabled)' : ''), (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_enabled_on') : (!$redirectWasOn ? __t('settings.https_enabled_off') : __t('settings.https_enabled_off_redirect')));
@@ -219,10 +229,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'save_https_redirect') {
         $enable = ($_POST['https_redirect_enabled'] ?? '') === '1';
         try {
-            if ($enable && repo_setting_value($connection, VIRTUSPHERE_SETTING_HTTPS_ENABLED, '0') !== '1') {
-                throw new ValidationException(['https_redirect_enabled' => __t('settings.https_err_redirect_requires')]);
-            }
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, $enable ? '1' : '0');
+            repo_transaction($connection, function () use ($connection, $enable): void {
+                if (directory_schema_available($connection)) {
+                    directory_lock_activation_state($connection);
+                    if (!$enable && directory_is_enabled($connection)) {
+                        throw new ValidationException(['https_redirect_enabled' => __t('settings.https_err_directory_active')]);
+                    }
+                }
+                if ($enable && repo_setting_value($connection, VIRTUSPHERE_SETTING_HTTPS_ENABLED, '0') !== '1') {
+                    throw new ValidationException(['https_redirect_enabled' => __t('settings.https_err_redirect_requires')]);
+                }
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, $enable ? '1' : '0');
+            });
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, ($enable ? 'enabled' : 'disabled') . ' http to https redirect', (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_redirect_on') : __t('settings.https_redirect_off'));
         } catch (ValidationException $exception) {

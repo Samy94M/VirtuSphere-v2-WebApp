@@ -197,6 +197,7 @@ return [
     'https_err_expired' => 'Das Zertifikat ist abgelaufen; bitte ein gültiges installieren.',
     'https_err_no_material' => 'HTTPS kann erst aktiviert werden, wenn ein Zertifikat installiert ist.',
     'https_err_redirect_requires' => 'Die Umleitung setzt aktiviertes HTTPS voraus.',
+    'https_err_directory_active' => 'HTTPS und die Umleitung können nicht deaktiviert werden, solange die Active-Directory-Anmeldung aktiv ist.',
     'https_meta_title' => 'Installiertes Zertifikat',
     'https_meta_none' => 'Noch kein Zertifikat installiert.',
     'https_meta_subject' => 'Ausgestellt für (CN)',

@@ -1,6 +1,6 @@
 # UX-Umsetzungsplan v4.1: verständliches Portal für wechselndes Adminpersonal
 
-Stand: 2026-08-11, kritisch gegen Repository, bestehende ADRs und offizielle Webstandards geprüft. Diese Fassung ist in den Deploy-/Betriebs-Masterplan integriert; bei abweichender Nummerierung und Reihenfolge ist der Masterplan ausführende SSoT.
+Stand: 2026-08-11, kritisch gegen Repository, bestehende ADRs und offizielle Webstandards geprüft. Diese Fassung ist in den Deploy-/Betriebs-Masterplan integriert; bei abweichender Nummerierung und Reihenfolge ist der Masterplan ausführende SSoT. Die dort etappengenau ergänzten ADR-0006-Refactorings für Runner, Deploy/Settings, Layout/Status/Credentials, VM-Code und CSS sind verbindlicher Bestandteil der UX-Etappen und werden hier nicht als zweite, driftfähige Liste dupliziert.
 
 ## 1. Ziel und Scope
 
