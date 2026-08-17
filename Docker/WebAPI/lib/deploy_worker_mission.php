@@ -137,9 +137,12 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($channel, &$buffer, $stepTracker): void {
                 deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk, $stepTracker);
             }, 0, $heartbeatOnSilence);
+        } catch (DeployWorkerCancelled $cancelled) {
+            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
+            throw $cancelled;
         } catch (RuntimeException $transportError) {
             deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
-            throw new RuntimeException($transportError->getMessage() . ansible_step_failure_suffix($currentStep), 0, $transportError);
+            throw deploy_worker_transport_failure_with_step($transportError, $currentStep);
         }
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
 
@@ -179,6 +182,23 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             ansible_cleanup_artifacts($localDir);
         }
     }
+}
+
+/** Keeps the exact transport type while adding the failed Ansible step. */
+function deploy_worker_transport_failure_with_step(RuntimeException $exception, ?string $currentStep): RuntimeException
+{
+    $message = $exception->getMessage() . ansible_step_failure_suffix($currentStep);
+    if ($exception instanceof SshTransportBudgetExceeded) {
+        return new SshTransportBudgetExceeded($message, 0, $exception);
+    }
+    if ($exception instanceof SftpTransportFailed) {
+        return new SftpTransportFailed($message, 0, $exception);
+    }
+    if ($exception instanceof SshTransportConfigurationException) {
+        return new SshTransportConfigurationException($message, 0, $exception);
+    }
+
+    return new RuntimeException($message, 0, $exception);
 }
 
 /**

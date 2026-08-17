@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use phpseclib3\Net\SFTP;
 use phpseclib3\Net\SSH2;
 
 $autoload = __DIR__ . '/../vendor/autoload.php';
@@ -13,6 +12,15 @@ require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/ssh_transport_exceptions.php';
+require_once __DIR__ . '/ssh_sftp.php';
+
+/** Files that own the SSH/SFTP transport domain, including this facade. */
+const VIRTUSPHERE_SSH_TRANSPORT_MODULES = [
+    'ssh.php',
+    'ssh_sftp.php',
+    'ssh_transport_exceptions.php',
+];
 
 /**
  * Connection tests return a code plus an operator detail, never a ready-made
@@ -104,11 +112,7 @@ function credential_test_ansible(array $credential, string $secret, string $apiB
     try {
         ssh_sftp_probe($credential, $secret);
     } catch (Throwable $exception) {
-        return credential_test_result(
-            false,
-            VIRTUSPHERE_CREDENTIAL_TEST_SFTP,
-            connection_error_detail($exception->getMessage(), $secret)
-        );
+        return credential_test_sftp_failure($exception, $secret);
     }
 
     // The chain is green; the allowlist verdict decides between plain ok and
@@ -146,7 +150,7 @@ function credential_test_ssh(array $credential, string $secret): array
         }
 
         // phpseclib reports a rejected login as false, not as an exception.
-        return credential_test_result(false, VIRTUSPHERE_INVENTORY_ERROR_AUTH, 'SSH login rejected for user ' . $username . '.', $context);
+        return credential_test_result(false, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH, 'SSH login rejected for user ' . $username . '.', $context);
     } catch (Throwable $exception) {
         return credential_test_ssh_failure($exception, $secret, $context);
     }
@@ -160,6 +164,23 @@ function credential_test_ssh(array $credential, string $secret): array
  */
 function credential_test_ssh_failure(Throwable $exception, string $secret, array $context = []): array
 {
+    if ($exception instanceof SshTransportBudgetExceeded) {
+        return credential_test_result(
+            false,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            connection_error_detail($exception->getMessage(), $secret),
+            $context
+        );
+    }
+    if ($exception instanceof SshTransportConfigurationException) {
+        return credential_test_result(
+            false,
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            connection_error_detail($exception->getMessage(), $secret),
+            $context
+        );
+    }
+
     $category = connection_error_category($exception->getMessage());
     if ($category === VIRTUSPHERE_INVENTORY_ERROR_PARSE) {
         $category = VIRTUSPHERE_INVENTORY_ERROR_SSH;
@@ -167,102 +188,17 @@ function credential_test_ssh_failure(Throwable $exception, string $secret, array
 
     return credential_test_result(false, $category, connection_error_detail($exception->getMessage(), $secret), $context);
 }
-
-function ssh_sftp_upload_directory(array $credential, string $secret, string $localDir, string $remoteDir, ?callable $logger = null): void
+function credential_test_sftp_failure(Throwable $exception, string $secret): array
 {
-    if (!class_exists(SFTP::class)) {
-        throw new RuntimeException('phpseclib SFTP is not available.');
+    if ($exception instanceof SshTransportBudgetExceeded) {
+        $code = VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
+    } elseif ($exception instanceof SshTransportConfigurationException) {
+        $code = VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    } else {
+        $code = VIRTUSPHERE_CREDENTIAL_TEST_SFTP;
     }
 
-    $host = (string) ($credential['host'] ?? '');
-    $port = credential_ssh_port($credential['port'] ?? null);
-    $username = (string) ($credential['username'] ?? '');
-    if ($host === '' || $username === '') {
-        throw new RuntimeException('Ansible SSH host and username are required.');
-    }
-    if (!is_dir($localDir)) {
-        throw new RuntimeException('Local deploy work directory does not exist.');
-    }
-
-    $sftp = new SFTP($host, $port, 15);
-    // Per-operation read timeout (AP6): without it a stalled transfer blocks
-    // the worker forever, the same unbounded-wait shape the exec path had. The
-    // constant is the SSoT.
-    $sftp->setTimeout(VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
-    if (!$sftp->login($username, $secret)) {
-        throw new RuntimeException('SFTP login failed.');
-    }
-
-    ssh_sftp_mkdir_recursive($sftp, $remoteDir);
-    $files = scandir($localDir);
-    if ($files === false) {
-        throw new RuntimeException('Cannot read local deploy work directory.');
-    }
-
-    // Wall-clock cap across the whole directory, checked before each file, so a
-    // sequence of slow-but-not-idle transfers cannot run unbounded either.
-    $deadline = time() + VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS;
-    foreach ($files as $file) {
-        if ($file === '.' || $file === '..') {
-            continue;
-        }
-
-        $localPath = $localDir . DIRECTORY_SEPARATOR . $file;
-        if (!is_file($localPath)) {
-            continue;
-        }
-
-        if (time() >= $deadline) {
-            $sftp->disconnect();
-            throw new RuntimeException('SFTP upload exceeded the total time budget of ' . VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS . ' seconds.');
-        }
-
-        $remotePath = rtrim($remoteDir, '/') . '/' . $file;
-        if (!$sftp->put($remotePath, $localPath, SFTP::SOURCE_LOCAL_FILE)) {
-            throw new RuntimeException('SFTP upload failed for ' . $file . '.');
-        }
-
-        if ($logger !== null) {
-            $logger('Uploaded ' . $file . ' to Ansible host.');
-        }
-    }
-
-    $sftp->disconnect();
-}
-
-/**
- * Proves the SFTP path a deploy relies on: log in over SFTP, write a tiny probe
- * file into /tmp and delete it. Throws on any step. This catches a host that
- * allows SSH exec but has the SFTP subsystem disabled, or a /tmp that is not
- * writable for the account, which the SSH-exec preflight cannot see.
- */
-function ssh_sftp_probe(array $credential, string $secret): void
-{
-    if (!class_exists(SFTP::class)) {
-        throw new RuntimeException('phpseclib SFTP is not available.');
-    }
-
-    $host = (string) ($credential['host'] ?? '');
-    $port = credential_ssh_port($credential['port'] ?? null);
-    $username = (string) ($credential['username'] ?? '');
-    if ($host === '' || $username === '') {
-        throw new RuntimeException('Ansible SSH host and username are required.');
-    }
-
-    $sftp = new SFTP($host, $port, 15);
-    $sftp->setTimeout(VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
-    if (!$sftp->login($username, $secret)) {
-        throw new RuntimeException('SFTP login failed (the SSH login worked, so the SFTP subsystem is likely disabled).');
-    }
-
-    $probePath = '/tmp/.virtusphere-preflight-' . bin2hex(random_bytes(4));
-    if ($sftp->put($probePath, 'virtusphere preflight') === false) {
-        $sftp->disconnect();
-        throw new RuntimeException('Cannot write into /tmp over SFTP on the Ansible host.');
-    }
-
-    $sftp->delete($probePath);
-    $sftp->disconnect();
+    return credential_test_result(false, $code, connection_error_detail($exception->getMessage(), $secret));
 }
 
 function ssh_execute_capture(array $credential, string $secret, string $command, int $timeout = 20): array
@@ -297,14 +233,14 @@ function ssh_execute_capture(array $credential, string $secret, string $command,
 function ssh_execute_command(array $credential, string $secret, string $command, callable $stdoutLogger, int $idleTimeout = 0, ?callable $onSilence = null, int $totalTimeout = 0): int
 {
     if (!class_exists(SSH2::class)) {
-        throw new RuntimeException('phpseclib SSH is not available.');
+        throw new SshTransportConfigurationException('phpseclib SSH is not available.');
     }
 
     $host = (string) ($credential['host'] ?? '');
     $port = credential_ssh_port($credential['port'] ?? null);
     $username = (string) ($credential['username'] ?? '');
     if ($host === '' || $username === '') {
-        throw new RuntimeException('Ansible SSH host and username are required.');
+        throw new SshTransportConfigurationException('Ansible SSH host and username are required.');
     }
 
     if ($idleTimeout <= 0) {
@@ -391,7 +327,7 @@ function ssh_stream_command_output(callable $readSlice, callable $stdoutLogger, 
                 $onSilence();
             }
             if (($now - $lastDataAt) >= $idleTimeout) {
-                throw new RuntimeException('Remote command produced no output for ' . $idleTimeout . ' seconds (idle timeout).');
+                throw new SshTransportBudgetExceeded('Remote command produced no output for ' . $idleTimeout . ' seconds (idle timeout).');
             }
         } elseif ($slice !== '') {
             $stdoutLogger($slice);
@@ -399,21 +335,7 @@ function ssh_stream_command_output(callable $readSlice, callable $stdoutLogger, 
         }
 
         if (($now - $startedAt) >= $totalTimeout) {
-            throw new RuntimeException('Remote command exceeded the total time limit of ' . $totalTimeout . ' seconds.');
-        }
-    }
-}
-
-function ssh_sftp_mkdir_recursive(SFTP $sftp, string $dir): void
-{
-    $dir = '/' . trim($dir, '/');
-    $parts = array_values(array_filter(explode('/', $dir), static fn (string $part): bool => $part !== ''));
-    $path = '';
-
-    foreach ($parts as $part) {
-        $path .= '/' . $part;
-        if (!$sftp->is_dir($path) && !$sftp->mkdir($path)) {
-            throw new RuntimeException('Cannot create remote directory: ' . $path);
+            throw new SshTransportBudgetExceeded('Remote command exceeded the total time limit of ' . $totalTimeout . ' seconds.');
         }
     }
 }

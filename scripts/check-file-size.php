@@ -64,11 +64,6 @@ const FILE_SIZE_ALLOWANCES = [
     // lib/deploy_worker.php (521) and lib/deploy_worker_outcome.php (693) left
     // this table in Etappe 2: CLI shell, the two job processors, stream, runtime,
     // VM state, reaper and outcome are now separate modules behind two facades.
-    'Docker/WebAPI/lib/ssh.php' => [
-        'lines' => 419,
-        'why' => 'SFTP is its own transport domain and moves to lib/ssh_sftp.php',
-        'stage' => 'Etappe 6',
-    ],
     'Docker/WebAPI/lib/ansible_inventory.php' => [
         'lines' => 714,
         'why' => 'artifact/remote command, output normalization, datastore queries and capability/host parsing',

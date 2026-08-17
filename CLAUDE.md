@@ -17,6 +17,7 @@ The `.claude/rules` directory contains path-scoped rules. The `.claude/hooks/lin
 
 ## Workflow Checks
 
+- Long multi-gate or multi-test runs must remain observable even when the calling tool buffers output. Tee the live output to a pollable file (or run observable blocks), inspect it at least once per minute, and tell the user the actual latest `[n/total]` runner line. Use `[0/total]` before the first unit when the total is already known; elapsed time alone is not a progress report. The full contract lives in `AGENTS.md`.
 - The default Compose project name creates `virtusphere-v2-webapp-php-1`; use that container name unless the stack was started with a custom project name.
 - For PHP dependency/test setup: `docker exec -e COMPOSER_CACHE_DIR=/tmp/composer-cache virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html install`.
 - For PHPUnit: `docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html test`.

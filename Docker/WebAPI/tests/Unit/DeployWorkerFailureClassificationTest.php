@@ -64,6 +64,44 @@ final class DeployWorkerFailureClassificationTest extends TestCase
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_WORKER, deploy_worker_classify_inventory_failure('surprise', 'anything'));
     }
 
+    public function testExactTransportTypesWinOverTheirText(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            deploy_worker_classify_inventory_failure(
+                VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT,
+                new SshTransportBudgetExceeded('arbitrary words')
+            )
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP,
+            deploy_worker_classify_inventory_failure(
+                VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT,
+                new SftpTransportFailed('permission denied')
+            )
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            deploy_worker_classify_inventory_failure(
+                VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT,
+                new SshTransportConfigurationException('phpseclib is missing')
+            )
+        );
+    }
+
+    public function testMatchingTextDoesNotPromoteAGenericOrCancelledExceptionToBudget(): void
+    {
+        $text = 'Remote command produced no output for 30 seconds (idle timeout).';
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            deploy_worker_classify_inventory_failure(VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, new RuntimeException($text))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            deploy_worker_classify_inventory_failure(VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, new DeployWorkerCancelled($text))
+        );
+    }
+
     public function testSecretsAreRedactedFromFailureMessages(): void
     {
         $message = 'LOGIN failed for esxi with s3cr3t-pw (url https://h/?pw=s3cr3t-pw)';

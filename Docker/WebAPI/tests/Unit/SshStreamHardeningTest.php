@@ -86,7 +86,7 @@ final class SshStreamHardeningTest extends TestCase
     {
         // 15 s per slice, idle budget 30 s: the second consecutive silent
         // slice crosses the budget and must throw, not return exit 0.
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SshTransportBudgetExceeded::class);
         $this->expectExceptionMessage('idle timeout');
 
         ssh_stream_command_output(
@@ -121,7 +121,7 @@ final class SshStreamHardeningTest extends TestCase
 
     public function testTotalTimeoutThrowsEvenWithSteadyOutput(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SshTransportBudgetExceeded::class);
         $this->expectExceptionMessage('total time limit');
 
         ssh_stream_command_output(

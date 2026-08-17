@@ -33,6 +33,14 @@ declare(strict_types=1);
                 'max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX,
                 'idle' => VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
             ])); ?></p>
+            <h3><?php echo h(__t('help_deploy.deploy_transport_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy.deploy_transport_p1', [
+                'sftp_operation' => VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS,
+                'sftp_total' => VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS,
+                'ssh_idle' => VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
+                'ssh_total' => VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS,
+            ])); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_transport_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_identity_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_identity_p2')); ?></p>

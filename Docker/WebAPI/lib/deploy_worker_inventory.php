@@ -179,7 +179,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // of the ways we land here is that the job no longer exists.
         deploy_worker_log_if_job_exists($channel->connection(), $jobId, 'Inventory job stopped. Reason: ' . $cancelled->getMessage());
     } catch (Throwable $exception) {
-        $category = $failCategory ?? deploy_worker_classify_inventory_failure($phase, $exception->getMessage());
+        $category = $failCategory ?? deploy_worker_classify_inventory_failure($phase, $exception);
         $db = $channel->connection();
         try {
             // An auth failure pauses all future auto-pulls of this credential to

@@ -56,8 +56,9 @@ $mission = repo_create_mission($db, [
 // Seeding the schema default would prove the card with a row that never
 // executed, which is exactly the display the reader now refuses.
 $status = VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED;
-$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, attempts, payload_json, credential_ansible_id, updated_at) VALUES (?, ?, 1, \'{"mode":"start"}\', ?, DATE_SUB(NOW(), INTERVAL 1 HOUR))');
-$stmt->bind_param('isi', $mission, $status, $credential);
+$payload = '{"mode":"start"}';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, attempts, payload_json, credential_ansible_id, updated_at) VALUES (?, ?, 1, ?, ?, DATE_SUB(NOW(), INTERVAL 1 HOUR))');
+$stmt->bind_param('issi', $mission, $status, $payload, $credential);
 $stmt->execute();
 $processed = (int) $db->insert_id;
 // Newer, but cancelled straight out of the queue: never claimed, never ran.

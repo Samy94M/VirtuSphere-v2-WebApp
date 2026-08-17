@@ -42,8 +42,21 @@ const VIRTUSPHERE_DEPLOY_PHASE_DB = 'db';
  * the one true "the host answered unexpectedly"; db failures are ours. An
  * unknown phase is a coding error in the worker and reads as `worker`.
  */
-function deploy_worker_classify_inventory_failure(string $phase, string $message): string
+function deploy_worker_classify_inventory_failure(string $phase, Throwable|string $failure): string
 {
+    // Exact transport types win over wording. A generic RuntimeException with
+    // the same sentence is deliberately not promoted to a VirtuSphere budget.
+    if ($failure instanceof SshTransportBudgetExceeded) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
+    }
+    if ($failure instanceof SftpTransportFailed) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP;
+    }
+    if ($failure instanceof SshTransportConfigurationException) {
+        return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    }
+    $message = $failure instanceof Throwable ? $failure->getMessage() : $failure;
+
     switch ($phase) {
         case VIRTUSPHERE_DEPLOY_PHASE_CONFIG:
             return str_contains(strtolower($message), 'certificate')

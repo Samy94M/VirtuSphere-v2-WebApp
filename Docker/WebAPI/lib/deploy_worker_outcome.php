@@ -12,6 +12,7 @@ require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/status_events.php';
+require_once __DIR__ . '/ssh_transport_exceptions.php';
 require_once __DIR__ . '/worker_heartbeat.php';
 
 /**

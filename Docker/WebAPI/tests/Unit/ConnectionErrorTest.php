@@ -85,12 +85,52 @@ final class ConnectionErrorTest extends TestCase
 
     public function testSshLibraryDoesNotOpenHttpStreams(): void
     {
-        $source = file_get_contents(__DIR__ . '/../../lib/ssh.php');
+        self::assertNotSame([], VIRTUSPHERE_SSH_TRANSPORT_MODULES);
+        foreach (VIRTUSPHERE_SSH_TRANSPORT_MODULES as $file) {
+            $source = file_get_contents(__DIR__ . '/../../lib/' . $file);
+            self::assertIsString($source);
+            self::assertStringNotContainsString('file_get_contents', $source, $file);
+            self::assertStringNotContainsString('stream_context_create', $source, $file);
+            self::assertStringNotContainsString('/rest/appliance', $source, $file);
+        }
+    }
 
-        self::assertIsString($source);
-        self::assertStringNotContainsString('file_get_contents', $source);
-        self::assertStringNotContainsString('stream_context_create', $source);
-        self::assertStringNotContainsString('/rest/appliance', $source);
+    public function testCredentialTestUsesExactTransportTypesNotMatchingText(): void
+    {
+        $budgetText = 'Remote command produced no output for 30 seconds (idle timeout).';
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            credential_test_ssh_failure(new SshTransportBudgetExceeded($budgetText), 'secret')['code']
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            credential_test_ssh_failure(new RuntimeException($budgetText), 'secret')['code']
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            credential_test_sftp_failure(new SshTransportConfigurationException('missing local directory'), 'secret')['code']
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            credential_test_sftp_failure(new SshTransportBudgetExceeded('SFTP probe total budget'), 'secret')['code']
+        );
+        self::assertSame(
+            VIRTUSPHERE_CREDENTIAL_TEST_SFTP,
+            credential_test_sftp_failure(new RuntimeException('SFTP probe total budget'), 'secret')['code']
+        );
+    }
+
+    public function testDirectFalseLoginUsesTheAnsibleAuthOriginCode(): void
+    {
+        $source = (string) file_get_contents(__DIR__ . '/../../lib/ssh.php');
+        self::assertMatchesRegularExpression(
+            '/if \(\$ssh->login\(\$username, \$secret\)\).*?VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH/s',
+            $source
+        );
+        self::assertStringNotContainsString(
+            "return credential_test_result(false, VIRTUSPHERE_INVENTORY_ERROR_AUTH, 'SSH login rejected",
+            $source
+        );
     }
 
     public function testFailureResultsNeverCarryAReadyMadeMessage(): void
