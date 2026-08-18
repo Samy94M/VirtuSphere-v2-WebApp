@@ -37,10 +37,13 @@ const VIRTUSPHERE_DEPLOY_PHASE_DB = 'db';
  * category: phase first, text second.
  *
  * Only ssh/transport consult the message, because only there can wording
- * distinguish anything (DNS vs. refused vs. auth); their fallback is `ssh`,
- * never `parse`. Config failures never reached the network; marker failures are
- * the one true "the host answered unexpectedly"; db failures are ours. An
- * unknown phase is a coding error in the worker and reads as `worker`.
+ * distinguish anything (DNS vs. refused vs. auth). Both phases sit entirely on
+ * the Portal-to-Ansible-host leg, so their text is qualified through the
+ * shared ansible_connection_error_category_for_text() (Etappe 7) instead of
+ * the bare generic category; their fallback is `ansible_transport`, never
+ * `parse`. Config failures never reached the network; marker failures are the
+ * one true "the host answered unexpectedly"; db failures are ours. An unknown
+ * phase is a coding error in the worker and reads as `worker`.
  */
 function deploy_worker_classify_inventory_failure(string $phase, Throwable|string $failure): string
 {
@@ -64,9 +67,7 @@ function deploy_worker_classify_inventory_failure(string $phase, Throwable|strin
                 : VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
         case VIRTUSPHERE_DEPLOY_PHASE_SSH:
         case VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT:
-            $category = connection_error_category($message);
-
-            return $category === VIRTUSPHERE_INVENTORY_ERROR_PARSE ? VIRTUSPHERE_INVENTORY_ERROR_SSH : $category;
+            return ansible_connection_error_category_for_text($message);
         case VIRTUSPHERE_DEPLOY_PHASE_MARKER:
             return VIRTUSPHERE_INVENTORY_ERROR_PARSE;
         case VIRTUSPHERE_DEPLOY_PHASE_DB:

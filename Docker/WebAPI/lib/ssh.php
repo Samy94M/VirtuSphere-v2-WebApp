@@ -157,21 +157,14 @@ function credential_test_ssh(array $credential, string $secret): array
 }
 
 /**
- * Maps an SSH-side throwable. Anything the shared classifier cannot place is an
- * SSH transport problem rather than an unparsable response.
+ * Maps an SSH-side throwable using the shared Ansible-origin classifier
+ * (Etappe 7): everything but the local-configuration case is qualified as an
+ * Ansible-host finding, never a bare SSH/parse guess.
  *
  * @param array<string, string|int> $context
  */
 function credential_test_ssh_failure(Throwable $exception, string $secret, array $context = []): array
 {
-    if ($exception instanceof SshTransportBudgetExceeded) {
-        return credential_test_result(
-            false,
-            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
-            connection_error_detail($exception->getMessage(), $secret),
-            $context
-        );
-    }
     if ($exception instanceof SshTransportConfigurationException) {
         return credential_test_result(
             false,
@@ -181,12 +174,12 @@ function credential_test_ssh_failure(Throwable $exception, string $secret, array
         );
     }
 
-    $category = connection_error_category($exception->getMessage());
-    if ($category === VIRTUSPHERE_INVENTORY_ERROR_PARSE) {
-        $category = VIRTUSPHERE_INVENTORY_ERROR_SSH;
-    }
-
-    return credential_test_result(false, $category, connection_error_detail($exception->getMessage(), $secret), $context);
+    return credential_test_result(
+        false,
+        ansible_connection_error_category($exception),
+        connection_error_detail($exception->getMessage(), $secret),
+        $context
+    );
 }
 function credential_test_sftp_failure(Throwable $exception, string $secret): array
 {

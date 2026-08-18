@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/ansible.php';
+require_once dirname(__DIR__, 2) . '/lib/ansible_inventory_modules.php';
 
 /**
  * Playbook hygiene contract (Plan v2, AP5): error tolerance and secret
@@ -222,15 +223,27 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
 
     public function testRemoteCommandBuildersChmodAccountsBeforeAnyPlaybook(): void
     {
-        foreach (['ansible_command.php', 'ansible_inventory.php'] as $file) {
-            $source = file_get_contents(dirname(__DIR__, 2) . '/lib/' . $file);
-            self::assertIsString($source);
-            self::assertStringContainsString(
-                "'chmod 600 accounts.yml'",
-                $source,
-                sprintf('%s must chmod accounts.yml (contains the ESXi password) to 600 before running playbooks.', $file)
-            );
+        $commandSource = file_get_contents(dirname(__DIR__, 2) . '/lib/ansible_command.php');
+        self::assertIsString($commandSource);
+        self::assertStringContainsString(
+            "'chmod 600 accounts.yml'",
+            $commandSource,
+            'ansible_command.php must chmod accounts.yml (contains the ESXi password) to 600 before running playbooks.'
+        );
+
+        // The inventory twin's remote-command builder moved into a domain
+        // module (Etappe 7, ADR-0006); the owner registry is what still
+        // decides which file to read, so a later reshuffle cannot silently
+        // drop this check the way a hardcoded filename would.
+        $inventorySource = '';
+        foreach (VIRTUSPHERE_ANSIBLE_INVENTORY_MODULES as $module) {
+            $inventorySource .= (string) file_get_contents(dirname(__DIR__, 2) . '/' . $module);
         }
+        self::assertStringContainsString(
+            "'chmod 600 accounts.yml'",
+            $inventorySource,
+            'The Ansible inventory modules must chmod accounts.yml (contains the ESXi password) to 600 before running playbooks.'
+        );
     }
 
     /** @return array<string, string> playbook file name => source */

@@ -78,6 +78,11 @@ function connection_error_message(string $category, array $context = []): string
  *
  * Order matters. A DNS failure also says "failed", and a refused TLS port also
  * says "connection", so the most specific evidence is tested first.
+ *
+ * @return 'dns'|'certificate'|'tls'|'unreachable'|'authz'|'auth'|'parse' one of
+ *         the $needles keys above, statically narrowed so
+ *         ansible_connection_error_category_for_text() can match on it
+ *         exhaustively without a silent default (PHPStan match.unhandled).
  */
 function connection_error_category(string $text): string
 {
@@ -161,4 +166,48 @@ function connection_error_excerpt(string $text, int $max = VIRTUSPHERE_CONNECTIO
     $text = trim((string) preg_replace('/\s+/', ' ', $text));
 
     return strlen($text) > $max ? substr($text, 0, $max - 3) . '...' : $text;
+}
+
+/**
+ * Qualifies a throwable's origin as the Ansible host, not the ESXi/vCenter
+ * endpoint (Etappe 7 of the deploy-reliability masterplan). This is the one
+ * place both `deploy_worker_outcome.php` (via deploy_worker_runtime.php) and
+ * `ssh.php` read: before it existed, the worker and the credential test each
+ * duplicated their own approximation and could disagree on the same failure.
+ *
+ * Type checks win over text: an exact VirtuSphere transport type is trusted
+ * outright, because a generic exception with matching wording must not be
+ * promoted, and a real budget/SFTP exception whose message happens to read
+ * like a login rejection must not be demoted either.
+ */
+function ansible_connection_error_category(Throwable $exception): string
+{
+    if ($exception instanceof SshTransportBudgetExceeded) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
+    }
+    if ($exception instanceof SftpTransportFailed) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP;
+    }
+
+    return ansible_connection_error_category_for_text($exception->getMessage());
+}
+
+/**
+ * Text-only half of ansible_connection_error_category(): qualifies whatever
+ * connection_error_category() found as Ansible-host-originated. The mapping is
+ * exhaustive over that function's own return values (no silent default), so a
+ * category it starts returning without a case here fails the build instead of
+ * falling through to a wrong origin.
+ */
+function ansible_connection_error_category_for_text(string $text): string
+{
+    return match (connection_error_category($text)) {
+        VIRTUSPHERE_INVENTORY_ERROR_DNS => VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS,
+        VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE => VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
+        VIRTUSPHERE_INVENTORY_ERROR_AUTH => VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH,
+        VIRTUSPHERE_INVENTORY_ERROR_AUTHZ => VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTHZ,
+        VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE,
+        VIRTUSPHERE_INVENTORY_ERROR_TLS,
+        VIRTUSPHERE_INVENTORY_ERROR_PARSE => VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+    };
 }

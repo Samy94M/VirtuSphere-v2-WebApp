@@ -117,7 +117,7 @@ return [
     'esxi_cause_fix_ansible_timeout' => 'Jobprotokoll und Ansible-Host auf einen stillstehenden SSH- oder SFTP-Schritt prüfen; dies ist ein VirtuSphere-Zeitbudget, kein ESXi-Timeout.',
     'esxi_cause_fix_ansible_transport' => 'Jobprotokoll sowie SSH-Dienst und Transportweg zum Ansible-Host prüfen.',
     'esxi_cause_fix_http' => 'Nur lesbarer Legacy-Wert. Erscheint er an einem alten Datensatz, ordnet ein neuer Abruf die Ursache mit dem aktuellen Vokabular ein.',
-    'esxi_cause_fix_ssh' => 'Übergangswert ohne sichere Herkunft. Bis zur Producer-Umstellung den technischen Text im Jobprotokoll prüfen; danach trennen neue Abrufe Ansible- und ESXi-Ursachen.',
+    'esxi_cause_fix_ssh' => 'Nur noch der Ansible-Preflight-Exitcode schreibt diesen Übergangswert. Exitcode und fehlgeschlagene Komponente im Jobprotokoll prüfen; ältere Zeilen bleiben lesbar.',
     'esxi_cause_fix_worker' => 'Deploy-Worker, Datenbankverbindung und Jobprotokoll prüfen; die Kategorie behauptet keine Transportursache.',
     'esxi_cause_fix_parse' => 'Jobprotokoll auf fehlenden Marker, unerwartete Ausgabe oder einen verletzten Ergebnisvertrag prüfen.',
     'esxi_cause_fix_config' => 'Portal- und Auftragskonfiguration prüfen. Dieser Code gilt vor dem entfernten Lauf; Ansible-seitige Voraussetzungen haben eine eigene Kategorie.',

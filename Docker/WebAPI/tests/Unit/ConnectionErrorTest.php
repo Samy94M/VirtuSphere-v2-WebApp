@@ -42,6 +42,76 @@ final class ConnectionErrorTest extends TestCase
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_PARSE, connection_error_category('something entirely unexpected'));
     }
 
+    /**
+     * Etappe 7: ansible_connection_error_category() qualifies every generic
+     * finding connection_error_category() can return as Ansible-host-
+     * originated. Proven separately from the generic classification above,
+     * per the exact table in section 6 of the masterplan: dns/unreachable/
+     * auth/authz map one-to-one, certificate/tls/parse all collapse to the
+     * one "other Ansible transport problem" code.
+     */
+    public function testAnsibleConnectionErrorCategoryQualifiesEveryGenericFinding(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS,
+            ansible_connection_error_category(new RuntimeException('getaddrinfo failed'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
+            ansible_connection_error_category(new RuntimeException('Connection refused'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH,
+            ansible_connection_error_category(new RuntimeException('Authentication failed for user root'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTHZ,
+            ansible_connection_error_category(new RuntimeException('The session is not authorized to perform this operation'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+            ansible_connection_error_category(new RuntimeException('SSL operation failed: certificate verify failed'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+            ansible_connection_error_category(new RuntimeException('SSL handshake failed: wrong version number'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+            ansible_connection_error_category(new RuntimeException('something entirely unexpected'))
+        );
+    }
+
+    /** Etappe 7: exact transport types win over what their own text says. */
+    public function testAnsibleConnectionErrorCategoryChecksTypeBeforeText(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            ansible_connection_error_category(new SshTransportBudgetExceeded('permission denied'))
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP,
+            ansible_connection_error_category(new SftpTransportFailed('authentication failed'))
+        );
+    }
+
+    /** Every ansible_* code inventory_error_is_ansible() recognizes pauses nothing but auth. */
+    public function testAllAnsibleQualifiedCodesAreRecognizedAndNeverPauseACredential(): void
+    {
+        foreach ([
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTHZ,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+        ] as $category) {
+            self::assertTrue(inventory_error_is_ansible($category), $category . ' must be recognized as Ansible-origin.');
+            self::assertFalse(inventory_error_pauses_credential($category), $category . ' must never pause an ESXi credential.');
+        }
+    }
+
     public function testDetailRedactsSecretAndBasicAuthHeader(): void
     {
         $detail = connection_error_detail('GET failed, Authorization: Basic cm9vdDpodW50ZXIy sent with hunter2', 'hunter2');
@@ -103,7 +173,7 @@ final class ConnectionErrorTest extends TestCase
             credential_test_ssh_failure(new SshTransportBudgetExceeded($budgetText), 'secret')['code']
         );
         self::assertSame(
-            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
             credential_test_ssh_failure(new RuntimeException($budgetText), 'secret')['code']
         );
         self::assertSame(

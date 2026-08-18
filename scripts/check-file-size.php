@@ -64,11 +64,9 @@ const FILE_SIZE_ALLOWANCES = [
     // lib/deploy_worker.php (521) and lib/deploy_worker_outcome.php (693) left
     // this table in Etappe 2: CLI shell, the two job processors, stream, runtime,
     // VM state, reaper and outcome are now separate modules behind two facades.
-    'Docker/WebAPI/lib/ansible_inventory.php' => [
-        'lines' => 714,
-        'why' => 'artifact/remote command, output normalization, datastore queries and capability/host parsing',
-        'stage' => 'Etappe 7',
-    ],
+    // lib/ansible_inventory.php (714) left this table in Etappe 7: artifact/
+    // remote command, output normalization, datastore/query and capability/host
+    // parsing are now separate modules behind a facade.
     'Docker/WebAPI/lib/ansible_command.php' => [
         'lines' => 523,
         'why' => 'mode/marker logic and preflight/command construction change separately',

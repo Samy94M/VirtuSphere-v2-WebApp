@@ -29,16 +29,19 @@ final class DeployWorkerFailureClassificationTest extends TestCase
             'config: unreadable artifact' => [VIRTUSPHERE_DEPLOY_PHASE_CONFIG, 'Cannot read upload_mac_list.py.', VIRTUSPHERE_INVENTORY_ERROR_CONFIG],
             'config: even network-sounding text stays config' => [VIRTUSPHERE_DEPLOY_PHASE_CONFIG, 'timeout while decrypting', VIRTUSPHERE_INVENTORY_ERROR_CONFIG],
 
-            // Inside the ssh/transport phases the text refines the category.
-            'ssh: refused' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Connection refused by 10.0.0.5', VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE],
-            'ssh: dns' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'php_network_getaddresses: getaddrinfo failed', VIRTUSPHERE_INVENTORY_ERROR_DNS],
-            'ssh: auth' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Permission denied (publickey,password)', VIRTUSPHERE_INVENTORY_ERROR_AUTH],
-            'transport: timeout' => [VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, 'Read timed out after 30s', VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE],
+            // Inside the ssh/transport phases the text refines the category and
+            // is qualified as Ansible-host-originated (Etappe 7): both phases
+            // sit entirely on the Portal-to-Ansible-host leg, so a bare
+            // `unreachable`/`dns`/`auth` would misname who to fix.
+            'ssh: refused' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Connection refused by 10.0.0.5', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE],
+            'ssh: dns' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'php_network_getaddresses: getaddrinfo failed', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS],
+            'ssh: auth' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Permission denied (publickey,password)', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH],
+            'transport: timeout' => [VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, 'Read timed out after 30s', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE],
 
             // The old defect: unrecognized transport text fell to `parse` and
-            // blamed the host's answer. It is an SSH-layer failure.
-            'ssh: unrecognized text is ssh, not parse' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'channel 3: open failed', VIRTUSPHERE_INVENTORY_ERROR_SSH],
-            'transport: unrecognized text is ssh, not parse' => [VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, 'sftp write aborted', VIRTUSPHERE_INVENTORY_ERROR_SSH],
+            // blamed the host's answer. It is an Ansible-transport failure.
+            'ssh: unrecognized text is ansible_transport, not parse' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'channel 3: open failed', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT],
+            'transport: unrecognized text is ansible_transport, not parse' => [VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, 'sftp write aborted', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT],
 
             // Only the marker phase may say parse: that is the one place where
             // "the host answered unexpectedly" is the true sentence.
@@ -93,11 +96,11 @@ final class DeployWorkerFailureClassificationTest extends TestCase
     {
         $text = 'Remote command produced no output for 30 seconds (idle timeout).';
         self::assertSame(
-            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
             deploy_worker_classify_inventory_failure(VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, new RuntimeException($text))
         );
         self::assertSame(
-            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
             deploy_worker_classify_inventory_failure(VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, new DeployWorkerCancelled($text))
         );
     }
