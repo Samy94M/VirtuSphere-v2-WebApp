@@ -68,6 +68,20 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
+            <h2><?php echo h(__t('help_system_status.directory_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.directory_p1')); ?></p>
+            <?php // Same sentence the card itself shows (system_status.directory_cadence),
+                  // not a second copy that could drift from it. ?>
+            <p><?php echo h(__t('system_status.directory_cadence')); ?></p>
+            <?php // Same renderer/state set as the card's per-controller table
+                  // (system_status_render_directory(), lib/system_status.php's
+                  // 'directory' legend kind), so a colour there can always be
+                  // looked up here. ?>
+            <?php system_status_legend_items('directory'); ?>
+            <p><?php echo h(__t('help_system_status.directory_p2')); ?></p>
+        </section>
+
+        <section class="panel">
             <h2><?php echo h(__t('help_system_status.mecmfolders_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.mecmfolders_p1')); ?></p>
             <ul>

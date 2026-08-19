@@ -41,17 +41,24 @@ Konfigurationsrevision. Frühere Controllerprüfungen gelten dann nicht mehr.
 
 ## Betrieb und Störungen
 
-Der Systemstatus zeigt Aktivierung, Revision, Anzahl einsatzbereiter Controller
-und den letzten erfolgreichen Kontakt. Detailereignisse stehen im
+Der Systemstatus zeigt Aktivierung, Revision, Anzahl einsatzbereiter Controller,
+den letzten erfolgreichen Kontakt sowie pro Controller Priorität, letzten Test,
+letzten Erfolg, Zertifikatsablauf und einen typisierten Zustand (aktiv,
+Zertifikat läuft bald ab, gestört, veraltet, nicht getestet). Die Gesamtampel
+ist neutral ohne Konfiguration oder bei deaktiviertem AD, rot ohne
+einsatzbereiten Controller oder bei abgewiesenem Suchkonto, gelb sobald
+mindestens ein Controller funktioniert und ein anderer nicht, sonst grün; die
+Hilfe (Systemstatus-Tab) erklärt dieselbe Legende. Detailereignisse stehen im
 Sicherheitsprotokoll in der Kategorie `directory`; Secrets, Benutzerpasswörter,
 DNs und rohe LDAP-Fehler werden dort nicht gespeichert.
 
-Eine technische Störung darf auf den nächsten priorisierten Controller
-ausweichen. Eine abgewiesene Benutzeranmeldung wird nicht gegen weitere
-Controller wiederholt. Wird stattdessen das Suchkonto abgewiesen, öffnet sich
-der revisionsweite Circuit Breaker, damit das Konto nicht durch automatische
-Wiederholungen gesperrt wird. Passwort korrigieren oder einen Controller
-manuell erfolgreich testen, um automatische Versuche wieder freizugeben.
+Eine technische Störung (Verbindung, TLS, Timeout) darf auf den nächsten
+priorisierten Controller ausweichen. Eine abgewiesene Benutzeranmeldung wird
+nicht gegen weitere Controller wiederholt. Wird stattdessen das Suchkonto
+abgewiesen, öffnet sich der revisionsweite Circuit Breaker, damit das Konto
+nicht durch automatische Wiederholungen gesperrt wird. Passwort korrigieren
+oder einen Controller manuell erfolgreich testen, um automatische Versuche
+wieder freizugeben.
 
 Bestehende AD-Sitzungen werden regelmäßig über die unveränderliche
 `objectGUID` geprüft. Kurze technische Ausfälle nutzen eine begrenzte

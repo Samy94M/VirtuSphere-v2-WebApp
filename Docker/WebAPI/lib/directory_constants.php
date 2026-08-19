@@ -36,6 +36,26 @@ const VIRTUSPHERE_DIRECTORY_SESSION_RECHECK_SECONDS = 300;
 const VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS = 900;
 const VIRTUSPHERE_DIRECTORY_IMPORT_CANDIDATE_TTL_SECONDS = 300;
 
+// There is deliberately no periodic controller re-test (section 9.4 of the
+// integration plan): status freshness/expiry-warning windows below are the
+// only staleness signal, so they are wider than a polled interval's factor.
+// A usable controller's last confirmed success ages out of "fresh" evidence
+// after this many days without a new one (login, session recheck or manual
+// test); mirrors VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS's convention
+// for another manually-triggered, unscheduled check.
+const VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS = 7;
+// A usable controller's certificate (only known from its last manual test,
+// section 7.4) is flagged this many days before certificate_not_after, so a
+// rotation can happen before the certificate actually expires and the
+// controller turns red on its own next TLS handshake.
+const VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS = 30;
+
+// Per-controller and overall Ampel state sets (lib/directory_status.php),
+// shape-matched to the existing ESXi/Ansible ones so the shared legend
+// renderer (system_status_legend_items()) needs no directory-specific case.
+const VIRTUSPHERE_DIRECTORY_CONTROLLER_AMPEL_STATES = ['ok', 'warning', 'danger', 'stale', 'unknown'];
+const VIRTUSPHERE_DIRECTORY_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
+
 // Typed outcomes are the only directory diagnostics allowed into DB, audit or
 // UI. Raw LDAP diagnostic messages may contain DNs and directory internals.
 const VIRTUSPHERE_DIRECTORY_OUTCOME_OK = 'ok';

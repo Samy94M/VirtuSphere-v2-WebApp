@@ -1,0 +1,26 @@
+Include /etc/ldap/schema/core.schema
+Include /etc/ldap/schema/cosine.schema
+Include /etc/ldap/schema/inetorgperson.schema
+Include /etc/ldap/schema/virtusphere-fixture.schema
+
+Modulepath /usr/lib/ldap
+Moduleload back_mdb.la
+
+Pidfile /var/lib/ldap-fixture/slapd.pid
+Argsfile /var/lib/ldap-fixture/slapd.args
+
+TLSCACertificateFile @@CA_FILE@@
+TLSCertificateFile @@CERT_FILE@@
+TLSCertificateKeyFile @@KEY_FILE@@
+
+Database mdb
+Suffix "dc=vs-ldap,dc=test"
+RootDN "cn=admin,dc=vs-ldap,dc=test"
+RootPW "fixture-admin-not-a-secret"
+Directory /var/lib/ldap-fixture/data
+Maxsize 1048576000
+
+Database monitor
+Access to dn.subtree="cn=Monitor"
+    by dn.base="cn=svc-bind,dc=vs-ldap,dc=test" read
+    by * none

@@ -51,6 +51,155 @@ services:
       - qa-mysql-data:/var/lib/mysql
     restart: "no"
 
+# Hermetic LDAP-Fixture (Plan-Abschnitt 18.3, Etappe 7): eine gepinnte
+# Test-LDAP-Gegenstelle fuer die Integrationslane, kein PHP-Mock. dc1/dc2
+# sind echte slapd-Instanzen (Dienstkonto-Bind, Suche, objectGUID-Rohwert,
+# Referral, Monitor-Bind-Zaehler); die badcert-*-Dienste und ldap-blackhole
+# sind ein schlanker socat-TLS-/TCP-Stub, weil ein Zertifikatsfehler den
+# Handshake beendet, bevor je ein LDAP-PDU gesendet wird. Zertifikate/CAs in
+# Docker/WebAPI/tests/fixtures/ldap/ (README dort), Rollenlogik in
+# Docker/ldap-fixture/entrypoint.sh. DirectoryLdapFixtureTest.php beweist
+# den nativen PHP/ext-ldap-Pfad dagegen; ausserhalb der Integrationslane
+# (keine dieser Hostnamen aufloesbar) skippt die Suite dynamisch.
+  ldap-dc1:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: root-a
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc1.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-dc2:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: dc2
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc2.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-unknown-ca:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: root-b
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-unknown-ca.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-expired:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: expired
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - expired.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-wrongname:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: wrongname
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-wrongname.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-dc-rotated:
+    # Real slapd, not a tls-stub: the CA-rotation scenario proves a genuine
+    # successful bind once the new CA is trusted, not just a TLS handshake.
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: root-c
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-rotated.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-blackhole:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: blackhole
+    networks:
+      default:
+        aliases:
+          - dc-blackhole.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
 volumes:
   qa-mysql-data:
   qa-ssl:

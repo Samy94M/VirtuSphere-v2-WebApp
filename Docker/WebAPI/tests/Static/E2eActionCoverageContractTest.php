@@ -35,17 +35,10 @@ final class E2eActionCoverageContractTest extends TestCase
      * @var array<string, string>
      */
     private const PENDING_ACTIONS = [
-        'users.php:directory_add_controller' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_delete_config' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_delete_controller' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_import' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_move_controller' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_save_config' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_search' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_set_controller_enabled' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_set_enabled' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_sync_user' => 'LDAPS target-fixture browser slice',
-        'users.php:directory_test_controller' => 'LDAPS target-fixture browser slice',
+        // Etappe 7 (docs/audits/2026-08-17-ldaps-ad-remaining-work.md): the
+        // hermetic LDAP-TLS fixture now exists (Docker/ldap-fixture,
+        // docker-compose.qa.yml) and tests/e2e/specs/directory-ad.spec.js
+        // covers every directory_* action against it.
     ];
 
     /**

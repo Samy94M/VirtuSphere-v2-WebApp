@@ -61,7 +61,17 @@ function directory_ldap_failure(
     if ($number === 49) {
         return new DirectoryLdapException($credentialRejection);
     }
-    if (in_array($number, [81, 85, 91], true)) {
+    // -1 (no libldap result code available) is what the linked OpenLDAP client
+    // actually reports for every connect-level failure: refused/unroutable
+    // TCP, unresolvable DNS, a rejected TLS handshake (untrue CA, expired,
+    // wrong name) and a fired LDAP_OPT_NETWORK_TIMEOUT all surface as errno
+    // -1 "Can't contact LDAP server", not the protocol-level 81/85/91 this
+    // used to check alone. Proven against the hermetic fixture
+    // (DirectoryLdapFixtureTest): without -1 here, a controller with any of
+    // those failures was misclassified as VIRTUSPHERE_DIRECTORY_OUTCOME_SEARCH_FAILED
+    // with transportFailure=false, so directory_read_with_failover() never
+    // tried the next controller for the single most common real outage.
+    if (in_array($number, [-1, 81, 85, 91], true)) {
         return new DirectoryLdapException(
             $number === 85 ? VIRTUSPHERE_DIRECTORY_OUTCOME_TIMEOUT : VIRTUSPHERE_DIRECTORY_OUTCOME_UNAVAILABLE,
             true

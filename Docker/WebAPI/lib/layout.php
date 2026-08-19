@@ -521,6 +521,42 @@ function ansible_preflight_badge(?array $state, ?int $now = null): string
     return ansible_state_badge(ansible_preflight_ampel($state, $now));
 }
 
+/**
+ * Badge for the overall AD status (directory_health_snapshot()'s 'overall').
+ * Same ok/warning/danger/unknown palette as esxi_state_badge(), own labels.
+ */
+function directory_state_badge(string $state): string
+{
+    $meta = virtusphere_heartbeat_meta($state);
+    $label = match ($state) {
+        'ok' => __t('system_status.directory_state_ok'),
+        'warning' => __t('system_status.directory_state_warning'),
+        'danger' => __t('system_status.directory_state_danger'),
+        default => __t('system_status.directory_state_unknown'),
+    };
+
+    return portal_badge((string) $meta['badge'], $label);
+}
+
+/**
+ * Badge for one controller row's state (directory_health_snapshot()'s
+ * per-controller 'state'): adds 'stale' to the overall palette above, same
+ * grey as an aged Ansible preflight result.
+ */
+function directory_controller_state_badge(string $state): string
+{
+    $meta = virtusphere_heartbeat_meta($state);
+    $label = match ($state) {
+        'ok' => __t('system_status.directory_controller_state_ok'),
+        'warning' => __t('system_status.directory_controller_state_warning'),
+        'danger' => __t('system_status.directory_controller_state_danger'),
+        'stale' => __t('system_status.directory_controller_state_stale'),
+        default => __t('system_status.directory_controller_state_unknown'),
+    };
+
+    return portal_badge((string) $meta['badge'], $label);
+}
+
 // Client deploy-phase badge (none|running|unconfirmed|finished|failed).
 function client_phase_badge(string $phaseState): string
 {

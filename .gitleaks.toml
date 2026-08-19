@@ -25,6 +25,9 @@ paths = [
     # der Upload-Parser-Test laedt. .txt-Endung, damit kein Deploy-Tooling sie
     # je als echtes Material einsammelt.
     '''Docker/WebAPI/tests/fixtures/https/.*\.key\.txt''',
+    # LDAP-Hermetik-Fixtures (Docker/ldap-fixture): dieselbe Konvention, siehe
+    # Docker/WebAPI/tests/fixtures/ldap/README.md.
+    '''Docker/WebAPI/tests/fixtures/ldap/.*\.key\.txt''',
     # phpseclib traegt PEM-Header als Format-Templates im Bibliothekscode.
     '''Docker/WebAPI/vendor/phpseclib/.*''',
     # Historischer Dev-Self-Signed-Key, siehe Kopfkommentar.

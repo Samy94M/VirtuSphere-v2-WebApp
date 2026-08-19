@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/directory_constants.php';
 
 /**
  * SSoT for links into the visible System status page. The compatible endpoint
@@ -39,6 +40,11 @@ function system_status_legend_items(string $kind): void
     [$states, $prefix] = match ($kind) {
         'esxi' => [VIRTUSPHERE_ESXI_AMPEL_STATES, 'esxi_legend_'],
         'ansible' => [VIRTUSPHERE_ANSIBLE_AMPEL_STATES, 'ansible_legend_'],
+        // The controller-row state set (5 states, includes 'stale'), not the
+        // coarser overall-card badge: this is what a reader has open when
+        // trying to explain one row's colour, and the overall badge is only
+        // ever a roll-up of these same words minus 'stale' (directory_health_snapshot()).
+        'directory' => [VIRTUSPHERE_DIRECTORY_CONTROLLER_AMPEL_STATES, 'directory_legend_'],
         default => [VIRTUSPHERE_HEARTBEAT_STATES, 'legend_'],
     };
 
@@ -49,6 +55,8 @@ function system_status_legend_items(string $kind): void
         'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER],
         'esxi_legend_danger' => ['streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER],
         'ansible_legend_stale' => ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS],
+        'directory_legend_warning' => ['days' => VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS],
+        'directory_legend_stale' => ['days' => VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS],
     ];
 
     echo '<ul class="ampel-legend">';
@@ -56,6 +64,7 @@ function system_status_legend_items(string $kind): void
         $badge = match ($kind) {
             'esxi' => esxi_state_badge($state),
             'ansible' => ansible_state_badge($state),
+            'directory' => directory_controller_state_badge($state),
             default => heartbeat_badge($state),
         };
         $key = $prefix . $state;
