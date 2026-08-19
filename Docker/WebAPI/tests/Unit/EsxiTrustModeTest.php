@@ -140,7 +140,7 @@ final class EsxiTrustModeTest extends TestCase
             self::assertStringStartsWith('-----BEGIN CERTIFICATE-----', (string) file_get_contents($dir . '/' . VIRTUSPHERE_ESXI_TRUST_FILE));
 
             foreach ([
-                ansible_remote_command('/tmp/deploy', ['mode' => 'create']),
+                ansible_remote_steps('/tmp/deploy', ['mode' => 'create'])[0]['command'],
                 ansible_inventory_remote_command('/tmp/inventory'),
             ] as $command) {
                 self::assertStringContainsString('if [ -f esxi-trust.pem ]; then chmod 600 esxi-trust.pem; fi', $command);

@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_job_log_spool.php';
+require_once __DIR__ . '/deploy_job_output.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 // The channel's own domain is the outage state machine. Its repository adapter
 // and the worker's waiting policy are separate modules (ADR-0006); requiring
@@ -61,10 +63,9 @@ final class DeployWorkerDbChannel
 
     private int $backoffSeconds = VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MIN_SECONDS;
 
-    /** @var list<array{stream: string, line: string}> */
-    private array $spool = [];
+    private DeployJobLogSpool $spool;
 
-    private int $droppedLines = 0;
+    private DeployJobOutputGate $gate;
 
     private bool $ownershipLost = false;
 
@@ -94,6 +95,8 @@ final class DeployWorkerDbChannel
         $this->connector = $connector;
         $this->clock = $clock ?? static fn (): int => time();
         $this->ops = $ops ?? new DeployWorkerDbOperations();
+        $this->spool = new DeployJobLogSpool();
+        $this->gate = new DeployJobOutputGate();
     }
 
     /**
@@ -128,12 +131,12 @@ final class DeployWorkerDbChannel
 
     public function spooledLineCount(): int
     {
-        return count($this->spool);
+        return $this->spool->count();
     }
 
     public function droppedLineCount(): int
     {
-        return $this->droppedLines;
+        return $this->spool->droppedCount();
     }
 
     /**
@@ -153,14 +156,38 @@ final class DeployWorkerDbChannel
     }
 
     /**
+     * The secrets of this job, redacted out of every line before it is stored
+     * (Etappe 8). Set once the processor has loaded them; before that there is
+     * nothing to redact, because nothing remote has run yet.
+     *
+     * @param array<int, mixed> $secrets
+     */
+    public function withSecrets(array $secrets): void
+    {
+        $this->gate->withSecrets($secrets);
+    }
+
+    /**
      * Writes one finished job-log line, or spools it while the database is gone.
-     * The line is expected to be redacted already: the spool must never hold a
-     * secret that a later drain would persist.
+     *
+     * Every line passes the output gate first (Etappe 8): normalisation, secret
+     * redaction and both output limits decide here what may be stored, before
+     * the line can reach the database OR the spool. At the call sites it would
+     * be one rule per caller, and after the spool it would mean an outage can
+     * park a secret that a later drain then persists.
      */
     public function log(string $stream, string $line): void
     {
+        foreach ($this->gate->accept($stream, $line) as $row) {
+            $this->write($row['stream'], $row['line']);
+        }
+    }
+
+    /** The raw write: to the database, or to the spool while it is gone. */
+    private function write(string $stream, string $line): void
+    {
         if (!$this->connected) {
-            $this->spoolLine($stream, $line);
+            $this->spool->push($stream, $line);
 
             return;
         }
@@ -169,7 +196,7 @@ final class DeployWorkerDbChannel
             $this->ops->appendLog($this->db, $this->jobId, $stream, $line);
         } catch (mysqli_sql_exception $exception) {
             $this->enterOutage($exception);
-            $this->spoolLine($stream, $line);
+            $this->spool->push($stream, $line);
         }
     }
 
@@ -248,21 +275,6 @@ final class DeployWorkerDbChannel
         return false;
     }
 
-    /** @param array<int, mixed> $secrets */
-    public function redact(string $message, array $secrets): string
-    {
-        return deploy_worker_redact_secrets($message, $secrets);
-    }
-
-    private function spoolLine(string $stream, string $line): void
-    {
-        $this->spool[] = ['stream' => $stream, 'line' => $line];
-        while (count($this->spool) > VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES) {
-            array_shift($this->spool);
-            $this->droppedLines++;
-        }
-    }
-
     private function enterOutage(mysqli_sql_exception $exception): void
     {
         if (!$this->connected) {
@@ -328,8 +340,7 @@ final class DeployWorkerDbChannel
             // to a run whose conclusion somebody else has already published.
             $this->ownershipLost = true;
             $this->ownershipReason = $lost->getMessage();
-            $this->spool = [];
-            $this->droppedLines = 0;
+            $this->spool->clear();
 
             return true;
         } catch (mysqli_sql_exception $exception) {
@@ -343,10 +354,9 @@ final class DeployWorkerDbChannel
         try {
             $this->ops->touchJobHeartbeat($this->db, $this->jobId, $this->workerId);
 
-            $dropped = $this->droppedLines;
-            $spool = $this->spool;
-            $this->spool = [];
-            $this->droppedLines = 0;
+            $buffered = $this->spool->take();
+            $dropped = $buffered['dropped'];
+            $spool = $buffered['lines'];
 
             $this->ops->appendLog(
                 $this->db,

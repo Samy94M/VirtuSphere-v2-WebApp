@@ -385,7 +385,7 @@ $migrations = [
             id INT AUTO_INCREMENT PRIMARY KEY,
             job_id INT NOT NULL,
             seq INT NOT NULL,
-            stream ENUM('stdout','stderr','system') NOT NULL DEFAULT 'stdout',
+            stream ENUM('stdout','stderr','system','ansible','worker_error') NOT NULL DEFAULT 'stdout',
             line TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY deploy_job_logs_job_seq_unique (job_id, seq),
@@ -1154,6 +1154,18 @@ SQL;
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
         migrator_out('0040: Active Directory authentication schema added');
+    },
+    '0041_deploy_job_log_sources' => function (mysqli $db): void {
+        // Etappe 8: the stored source says what is true. The remote command
+        // redirects with `2>&1`, so `stdout`/`stderr` never were two channels;
+        // new lines are `ansible` (merged remote output) or `worker_error` (the
+        // worker's own finding). Purely additive: no row is rewritten, because
+        // nothing recorded which of the two an old line really was, and a
+        // guessed origin presented as a fact is worse than a legacy label.
+        $db->query("ALTER TABLE deploy_job_logs
+            MODIFY stream ENUM('stdout','stderr','system','ansible','worker_error') NOT NULL DEFAULT 'stdout'");
+
+        migrator_out('0041: deploy job log sources extended (ansible, worker_error)');
     },
 ];
 

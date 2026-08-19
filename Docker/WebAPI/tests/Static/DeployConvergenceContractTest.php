@@ -30,7 +30,7 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('MAC import failed for every VM of this job.', $outcome);
         self::assertStringContainsString('deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary)', $outcome);
 
-        $command = $this->source('lib/ansible_command.php');
+        $command = $this->commandSource();
         self::assertStringContainsString('function ansible_mode_expects_mac_result', $command);
         self::assertStringContainsString("in_array(VIRTUSPHERE_PLAYBOOKS['export'], ansible_playbooks_for_mode(\$mode), true)", $command);
     }
@@ -146,7 +146,7 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('$heartbeatOnSilence', $worker);
         self::assertStringContainsString('ansible_step_failure_suffix($currentStep)', $worker);
 
-        $command = $this->source('lib/ansible_command.php');
+        $command = $this->commandSource();
         self::assertStringContainsString('function ansible_step_marker_line', $command);
         self::assertStringContainsString('function ansible_step_marker_parse', $command);
     }
@@ -204,6 +204,25 @@ final class DeployConvergenceContractTest extends TestCase
      * assertion of the form "this must NOT be inlined into the entrypoint"
      * deliberately keeps naming that one file, since that is what it means.
      */
+    /**
+     * The deploy-mode and preflight command layer is a facade over domain
+     * modules since Etappe 8. Reading its historic filename would now read a
+     * fifteen-line require list: every assertion below would pass vacuously and
+     * this guard would be permanently, silently green.
+     */
+    private function commandSource(): string
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_command_modules.php';
+
+        $source = '';
+        foreach (VIRTUSPHERE_ANSIBLE_COMMAND_MODULES as $module) {
+            $source .= $this->source($module) . "\n";
+        }
+        self::assertNotSame('', $source, 'the Ansible command module registry produced no source.');
+
+        return $source;
+    }
+
     private function workerSource(): string
     {
         require_once dirname(__DIR__, 2) . '/lib/deploy_worker_modules.php';

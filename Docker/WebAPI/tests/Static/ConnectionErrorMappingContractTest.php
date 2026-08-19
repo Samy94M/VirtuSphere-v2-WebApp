@@ -101,6 +101,42 @@ final class ConnectionErrorMappingContractTest extends TestCase
         return $this->resolve(array_merge($groups[1], [$fallback[1]]));
     }
 
+    public function testTheTypedPredicateKnowsExactlyTheTypesTheMappingDecidesByType(): void
+    {
+        // Etappe 8, Befund 6: the SFTP probe keeps a fallback of its own, so it
+        // has to ask whether a throwable was decided by TYPE or only by words -
+        // without repeating a single category. That answer lives in
+        // ansible_connection_error_is_typed(), which is a second hand-written
+        // copy of the instanceof list right above it. A fourth transport type
+        // added to one and not the other is silent in the direction that hurts:
+        // the probe would keep answering `sftp` for a local misconfiguration it
+        // no longer owns, or claim one it does.
+        $mapped = $this->instanceofTypes('ansible_connection_error_category');
+        $predicate = $this->instanceofTypes('ansible_connection_error_is_typed');
+
+        self::assertSame(
+            $this->sorted($mapped),
+            $this->sorted($predicate),
+            'ansible_connection_error_is_typed() no longer lists the same transport types that '
+            . 'ansible_connection_error_category() decides by instanceof. Fix the predicate, not this test.'
+        );
+    }
+
+    /**
+     * @return array<int, string> The class names tested with instanceof in one function.
+     */
+    private function instanceofTypes(string $function): array
+    {
+        $body = $this->functionSource($function);
+        self::assertNotSame(
+            0,
+            preg_match_all('/instanceof\s+([A-Za-z_][A-Za-z0-9_]*)/', $body, $found),
+            sprintf('Zero match: %s() contains no instanceof check at all.', $function)
+        );
+
+        return array_values(array_unique($found[1]));
+    }
+
     /** @return array<int, string> The literals of the @return union. */
     private function documentedUnion(): array
     {

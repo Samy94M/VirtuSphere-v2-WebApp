@@ -58,7 +58,7 @@ return [
     'conn_ansible_timeout' => 'Ein von VirtuSphere gesetztes SSH- oder SFTP-Zeitbudget wurde nach aufgebauter Verbindung überschritten.',
     'conn_ansible_transport' => 'Der sonstige SSH-Transport zum Ansible-Host ist fehlgeschlagen.',
     'conn_http' => 'Historischer HTTP-Fehler eines älteren Abrufs (Status :status).',
-    'conn_ssh' => 'Übergangswert: neue Abrufe schreiben ihn nur noch für einen fehlgeschlagenen Ansible-Preflight.',
+    'conn_ssh' => 'Altwert aus früheren Abrufen: neue Abrufe schreiben ihn nicht mehr.',
     'conn_worker' => 'Der Abruf ist an einem Worker- oder Datenbankfehler gescheitert.',
     'conn_parse' => 'Marker, Ausgabe oder Ergebnisvertrag des Abrufs war unerwartet.',
     'conn_config' => 'Portal- oder Auftragskonfiguration war bereits vor dem entfernten Lauf unvollständig.',

@@ -159,21 +159,14 @@ function credential_test_ssh(array $credential, string $secret): array
 /**
  * Maps an SSH-side throwable using the shared Ansible-origin classifier
  * (Etappe 7): everything but the local-configuration case is qualified as an
- * Ansible-host finding, never a bare SSH/parse guess.
+ * Ansible-host finding, never a bare SSH/parse guess. The local case is not
+ * pre-checked here any more (Etappe 8, Befund 4); the shared function carries
+ * it, so this path cannot drift from the worker's answer to the same type.
  *
  * @param array<string, string|int> $context
  */
 function credential_test_ssh_failure(Throwable $exception, string $secret, array $context = []): array
 {
-    if ($exception instanceof SshTransportConfigurationException) {
-        return credential_test_result(
-            false,
-            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
-            connection_error_detail($exception->getMessage(), $secret),
-            $context
-        );
-    }
-
     return credential_test_result(
         false,
         ansible_connection_error_category($exception),
@@ -181,15 +174,25 @@ function credential_test_ssh_failure(Throwable $exception, string $secret, array
         $context
     );
 }
+
+/**
+ * The SFTP probe's own failure result. Unlike the SSH path it keeps a code of
+ * its own, because it knows WHICH step ran: `credentials.test_err_sftp` says
+ * that login and toolchain are already fine and points at the SFTP subsystem
+ * and /tmp, which the generic `ansible_sftp` sentence cannot.
+ *
+ * That is the only decision left here (Etappe 8, Befund 6): which failures
+ * this path owns. The probe's own SFTP failure and an untyped surprise from
+ * inside the probe stay `sftp`; every other transport type is mapped by the
+ * shared classifier, so no category is named twice.
+ */
 function credential_test_sftp_failure(Throwable $exception, string $secret): array
 {
-    if ($exception instanceof SshTransportBudgetExceeded) {
-        $code = VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
-    } elseif ($exception instanceof SshTransportConfigurationException) {
-        $code = VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
-    } else {
-        $code = VIRTUSPHERE_CREDENTIAL_TEST_SFTP;
-    }
+    $ownsFailure = $exception instanceof SftpTransportFailed
+        || !ansible_connection_error_is_typed($exception);
+    $code = $ownsFailure
+        ? VIRTUSPHERE_CREDENTIAL_TEST_SFTP
+        : ansible_connection_error_category($exception);
 
     return credential_test_result(false, $code, connection_error_detail($exception->getMessage(), $secret));
 }

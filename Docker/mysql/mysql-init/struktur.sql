@@ -410,7 +410,7 @@ CREATE TABLE IF NOT EXISTS deploy_job_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     job_id INT NOT NULL,
     seq INT NOT NULL,
-    stream ENUM('stdout','stderr','system') NOT NULL DEFAULT 'stdout',
+    stream ENUM('stdout','stderr','system','ansible','worker_error') NOT NULL DEFAULT 'stdout',
     line TEXT NOT NULL,
     -- ADR-0032: the owning job's correlation id, filled by the insert helper.
     correlation_id VARCHAR(32) NULL,

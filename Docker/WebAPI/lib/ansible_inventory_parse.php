@@ -246,13 +246,28 @@ function ansible_categorize_inventory_error(string $output, int $exitCode): stri
     // "the playbook: inventoryESXi_playbook.yml could not be found" and told
     // the operator the host had answered unexpectedly, sending them to check a
     // network path that was never used.
-    // Both strings are ansible-playbook's own wording for "I could not load
-    // what you asked me to run". Deliberately narrow: a broader pattern would
-    // swallow a real answer from ESXi that happens to mention a module.
-    if (str_contains($lower, 'could not be found')
+    // Every needle here is ansible-playbook's OWN diagnostic wording for "I
+    // could not load or run what you asked me to". The category names Ansible
+    // rather than the portal (Etappe 8): the operator fixes this on the Ansible
+    // host, by installing a collection or a Python library, not in VirtuSphere.
+    //
+    // Deliberately narrow, and narrower than before: the bare `could not be
+    // found` also matched "The object or item referred to could not be found",
+    // which is vCenter's own answer for a missing datastore, so a genuine ESXi
+    // reply was filed as our misconfiguration. The playbook form carries
+    // Ansible's `ERROR! the playbook:` prefix and cannot be confused with it.
+    if (str_contains($lower, 'error! the playbook:')
         || str_contains($lower, "couldn't resolve module/action")
+        // The controller is missing a Python library the module needs (pyVmomi
+        // is the one this playbook always needs). Ansible names the interpreter
+        // it looked in, so this is evidence about the host, not a guess.
+        || str_contains($lower, 'failed to import the required python library')
+        // Before the general `timed out` needle below, which would otherwise
+        // call a become prompt that never came a network problem. Nothing was
+        // unreachable: the sudo configuration on the Ansible host is wrong.
+        || str_contains($lower, 'waiting for privilege escalation')
     ) {
-        return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG;
     }
     if (str_contains($lower, 'certificate verify failed')
         || str_contains($lower, 'unable to get local issuer')

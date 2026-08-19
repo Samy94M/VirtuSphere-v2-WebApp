@@ -27,6 +27,24 @@ the portal therefore showed a terminal job whose sequence was still executing:
   (`cancelling → cancelled`, only under its own lock). A dead worker is
   converged by the heartbeat reaper: a stale `cancelling` job becomes
   `cancelled`, never `failed` - the operator asked for exactly this outcome.
+- **A step boundary is one playbook** (Etappe 8 of the deploy-reliability
+  masterplan). Until then a mode's playbooks ran as a single remote `a && b`
+  chain, so the only boundaries were before the first and after the last one:
+  this ADR and the portal promised a stop the worker could not perform for a
+  five-playbook pipeline. Each playbook is now its own remote command with an
+  ownership/cancel decision between them. The promise is therefore exactly:
+  *the step that is currently running can carry out its changes on ESXi
+  completely, and no further step is started afterwards* - nothing is killed
+  mid-playbook, because a hard stop inside a VM creation leaves a state no
+  later step can reason about.
+- **The last-step race is decided by competing swaps, never by a status read
+  before it.** Success, partial and failure may only finalise from `running`
+  under this worker's lock. If the cancel committed first, the terminal swap
+  finds zero rows, reloads the row and confirms `cancelled` itself, with a log
+  line saying that the step that was running did complete its work; if the
+  terminal swap won first, a later cancel POST cannot change the finished job.
+  So there is neither "succeeded despite an accepted cancellation" nor a
+  `cancelled` job whose next playbook is still running.
 - **cancelled_at names the end state only.** The wish carries its own
   timestamp and actor; a `cancelling` job has `cancelled_at IS NULL`.
 - **Active means queued, running or cancelling** (one SSoT constant). Deleting

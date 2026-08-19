@@ -278,6 +278,68 @@ final class EsxiInventoryCacheTest extends TestCase
         self::assertNotNull($state['last_success_at']);
     }
 
+    /**
+     * The pause exists to stop an ESXi ACCOUNT from locking itself out, so it
+     * belongs to exactly one category: the ESXi endpoint rejected our login.
+     * Every Ansible-host finding is about the machine in between, and pausing
+     * on one would stop every future auto-pull of a credential whose password
+     * was never wrong - repaired only by re-saving a credential that nobody has
+     * a reason to touch. Proven against the real write path rather than the
+     * predicate alone, because it is an UPDATE that decides this, not a `bool`.
+     */
+    public function testNoAnsibleHostFindingPausesTheEsxiCredential(): void
+    {
+        foreach ([
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTHZ,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_PREFLIGHT,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS,
+        ] as $category) {
+            repo_esxi_inventory_record_failure($this->db, $this->credentialId, $category);
+            $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+            self::assertSame(
+                0,
+                (int) $state['paused_until_credential_change'],
+                $category . ' must not pause the ESXi credential: it names the Ansible host, not the ESXi login.'
+            );
+            self::assertSame($category, $state['last_error_category']);
+        }
+
+        // ...and the one category that does still pauses after all of them.
+        repo_esxi_inventory_record_failure($this->db, $this->credentialId, VIRTUSPHERE_INVENTORY_ERROR_AUTH);
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertSame(1, (int) $state['paused_until_credential_change']);
+    }
+
+    /**
+     * The documented way out of a pause that a pre-origin-split pull wrote for
+     * an Ansible-side failure: saving the ESXi credential resumes the cycle.
+     * It has to keep working, or an operator reading the runbook is left with
+     * a credential that never pulls again.
+     */
+    public function testSavingTheCredentialLiftsALegacyFalsePause(): void
+    {
+        repo_esxi_inventory_record_failure($this->db, $this->credentialId, VIRTUSPHERE_INVENTORY_ERROR_AUTH);
+        repo_esxi_inventory_record_failure($this->db, $this->credentialId, VIRTUSPHERE_INVENTORY_ERROR_AUTH);
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertSame(1, (int) $state['paused_until_credential_change']);
+        self::assertSame(2, (int) $state['failure_streak']);
+
+        repo_esxi_inventory_clear_pause($this->db, $this->credentialId);
+
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertSame(0, (int) $state['paused_until_credential_change']);
+        self::assertSame(0, (int) $state['failure_streak']);
+        // The finding itself survives: the pause is lifted, not the evidence
+        // that the last pull failed, which the card still has to show.
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTH, $state['last_error_category']);
+    }
+
     public function testFetchStatePointsToItsExactRetainedJobAndClearsWithRetention(): void
     {
         $failedJob = $this->makeInventoryJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED);

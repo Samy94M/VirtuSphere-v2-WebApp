@@ -161,6 +161,110 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $this->job($jobId)['status']);
     }
 
+    // --- the last-step race -------------------------------------------------
+
+    /**
+     * The race the previously read status cannot decide (Etappe 8): the last
+     * playbook succeeds at the same moment a cancel is committed.
+     *
+     * The terminal write is a compare-and-swap from `running` under this
+     * worker's lock, so it finds zero rows here. What must NOT happen is what
+     * happened before: the worker logged a lost lock (the lock was still ours)
+     * and walked away, leaving the job in `cancelling` until the reaper noticed
+     * a heartbeat that had stopped - minutes of a job that is neither running
+     * nor finished.
+     */
+    public function testACancelThatWinsTheRaceIsConfirmedInsteadOfTheSuccess(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER);
+
+        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
+        self::assertNotNull($job['cancelled_at']);
+        self::assertNull($job['locked_by']);
+
+        // And the operator learns the one thing "cancelled" alone would hide:
+        // the step that was already running did its work on ESXi.
+        $log = $this->logText($jobId);
+        self::assertStringContainsString('ran to its end', $log);
+        self::assertStringContainsString('no further step was started', $log);
+        self::assertStringNotContainsString('no longer running under this worker', $log);
+    }
+
+    /**
+     * The other side of the same race: the terminal swap won first. A cancel
+     * POST arriving afterwards must not touch an already finished job, and the
+     * result stays the one the run actually produced.
+     */
+    public function testATerminalSwapThatWinsFirstSurvivesALateCancel(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+
+        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, (string) $this->job($jobId)['status']);
+
+        try {
+            repo_cancel_deploy_job($this->db, $jobId, 1);
+            self::fail('a job that already finished must not accept a cancel');
+        } catch (RuntimeException $refused) {
+            self::assertStringContainsString('active', $refused->getMessage());
+        }
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, (string) $this->job($jobId)['status']);
+    }
+
+    /**
+     * A job somebody else concluded is not ours to describe. The message states
+     * what the row shows and claims no cause: the old wording said the lock was
+     * lost even when the status alone had moved on.
+     */
+    public function testAForeignTerminalStateIsReportedWithoutOverwritingIt(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'phpunit:other');
+
+        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, 'ours');
+
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $job['status']);
+        $log = $this->logText($jobId);
+        self::assertStringContainsString('status ' . VIRTUSPHERE_DEPLOY_STATUS_FAILED, $log);
+        self::assertStringContainsString('phpunit:other', $log);
+    }
+
+    /**
+     * The third reason the terminal swap can find zero rows: the job is gone.
+     *
+     * `deploy_job_logs` references `deploy_jobs`, so an append about a deleted
+     * job fails on a foreign key - which would turn a clean stop into an
+     * unexplained crash the operator reads as an ESXi problem. The finish path
+     * therefore reports through the guarded helper.
+     */
+    public function testAVanishedJobIsReportedWithoutWritingAgainstAForeignKey(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE id = ?');
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+
+        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+
+        self::assertSame('', $this->logText($jobId), 'a deleted job has nowhere to log; the line goes to error_log.');
+    }
+
+    private function logText(int $jobId): string
+    {
+        $stmt = $this->db->prepare('SELECT line FROM deploy_job_logs WHERE job_id = ? ORDER BY seq');
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+        $lines = [];
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+            $lines[] = (string) $row['line'];
+        }
+
+        return implode("\n", $lines);
+    }
+
     // --- reaper convergence -------------------------------------------------
 
     public function testTheReaperConvergesAStaleCancellingJobToCancelledNotFailed(): void

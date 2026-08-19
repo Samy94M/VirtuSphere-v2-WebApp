@@ -19,6 +19,12 @@ declare(strict_types=1);
             </ul>
             <h3><?php echo h(__t('help_deploy.deploy_verbose_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_verbose_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_verbose_p2')); ?></p>
+            <h3><?php echo h(__t('help_deploy.deploy_output_limits_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy.deploy_output_limits_p1', [
+                'line_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES,
+                'job_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_JOB_MAX_BYTES,
+            ])); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_powercycle_wait_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_start_wait_heading')); ?></h3>
@@ -56,6 +62,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.deploy_cancel_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_cancel_p1b')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p2')); ?></p>
         </section>
 

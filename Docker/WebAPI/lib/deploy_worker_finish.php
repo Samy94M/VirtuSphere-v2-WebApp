@@ -135,7 +135,7 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
 function deploy_worker_handle_failure(mysqli $db, array $job, string $workerId, array $vmIds, string $message): void
 {
     $jobId = (int) $job['id'];
-    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_STDERR, $message);
+    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
     $macResult = deploy_worker_job_mac_result($db, $jobId);
     $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
     deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' failed', $vmIds, $keepVmIds);
@@ -146,11 +146,64 @@ function deploy_worker_handle_failure(mysqli $db, array $job, string $workerId, 
     deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
 }
 
+/**
+ * Writes the job's terminal status through a compare-and-swap, and resolves the
+ * one race that a previously read status cannot (Etappe 8).
+ *
+ * The swap only fires from `running` under this worker's lock, so the outcome
+ * and a cancel request cannot both win. When it hits zero rows, exactly one
+ * thing is established: this job was not `running` under our lock at that
+ * instant. WHICH of the reasons it was decides what has to happen next, so the
+ * row is read instead of guessed - the old message named a lost lock even when
+ * the lock was still ours and only the status had moved on.
+ *
+ * The reason that must not be left alone is a cancel that committed while the
+ * last step ran: nobody else is going to conclude that job, because the worker
+ * holding it is this one, so it would sit in `cancelling` until the reaper
+ * eventually noticed a heartbeat that stopped. It is confirmed here instead,
+ * and the log says what the operator otherwise could not know: the work of the
+ * step that was already running did happen.
+ */
 function deploy_worker_finish_job(mysqli $db, int $jobId, string $workerId, string $status, ?string $lastError = null): void
 {
-    if (!repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError)) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Terminal status ' . $status . ' skipped because the job is no longer locked by this worker.');
+    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError)) {
+        return;
     }
+
+    $job = repo_deploy_job($db, $jobId);
+    if ($job === null) {
+        // Through the guarded helper, never a direct append: deploy_job_logs
+        // references deploy_jobs, so writing about a row that is gone fails on
+        // a foreign key and turns a clean stop into an unexplained crash.
+        deploy_worker_log_if_job_exists($db, $jobId, 'Terminal status ' . $status . ' was not written: the job row no longer exists.');
+
+        return;
+    }
+
+    $observed = (string) $job['status'];
+    $lockedBy = (string) ($job['locked_by'] ?? '');
+    if ($observed === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING
+        && $lockedBy === $workerId
+        && repo_confirm_deploy_job_cancelled($db, $jobId, $workerId)
+    ) {
+        repo_append_deploy_job_log(
+            $db,
+            $jobId,
+            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+            'Terminal status ' . $status . ' was not written: a cancel request had already been accepted for this job. '
+            . 'The remote step that was running at that moment ran to its end, so its changes on ESXi are in place; no further step was started.'
+        );
+
+        return;
+    }
+
+    repo_append_deploy_job_log(
+        $db,
+        $jobId,
+        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+        'Terminal status ' . $status . ' was not written: the job is no longer running under this worker (status ' . $observed
+        . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . ').'
+    );
 }
 
 /**

@@ -23,10 +23,18 @@ require_once dirname(__DIR__, 2) . '/lib/deploy_worker_modules.php';
  */
 final class DeployWorkerModuleContractTest extends TestCase
 {
-    /** What requiring lib/deploy_worker_outcome.php has to define. */
+    /**
+     * What requiring lib/deploy_worker_outcome.php has to define.
+     *
+     * `deploy_worker_redact_secrets()` left this list in Etappe 8: making text
+     * safe to store is the output gate's domain (`lib/deploy_job_output.php`),
+     * which the repository's insert path also needs and which must not depend
+     * on the worker runtime. The facade still delivers it - the runtime
+     * requires that module - so no caller changed.
+     */
     private const OUTCOME_SURFACE = [
         'deploy_worker_classify_inventory_failure',
-        'deploy_worker_redact_secrets',
+        'deploy_worker_inventory_pause_onset',
         'deploy_worker_report_alive',
         'deploy_worker_queue_detail',
         'deploy_worker_heartbeat_tick',
@@ -60,6 +68,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_transport_failure_with_step',
         'deploy_worker_autostart_preflight',
         'deploy_worker_process_inventory_job',
+        'deploy_worker_cleanup_remote_dir',
         'deploy_worker_credential',
         'deploy_worker_log_stream_chunk',
         'deploy_worker_log_stream_flush',

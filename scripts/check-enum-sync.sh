@@ -87,6 +87,7 @@ check_pair "Deploy-Job-Status" "$LIB/deploy_constants.php" "VIRTUSPHERE_DEPLOY_S
 check_pair "Credential-Typen"  "$LIB/credentials.php"      "VIRTUSPHERE_CREDENTIAL_TYPE_" "type"
 check_pair "Inventory-Kinds"   "$LIB/deploy_constants.php" "VIRTUSPHERE_INVENTORY_KIND_"  "kind"
 check_pair "Autostart-Stop"    "$LIB/deploy_constants.php" "VIRTUSPHERE_AUTOSTART_STOP_ACTION_" "autostart_stop_action"
+check_pair "Joblog-Quellen"    "$LIB/deploy_constants.php" "VIRTUSPHERE_DEPLOY_LOG_"      "stream"
 
 if [ "$errors" -gt 0 ]; then
   echo "check-enum-sync: $errors Drift-Fehler." >&2

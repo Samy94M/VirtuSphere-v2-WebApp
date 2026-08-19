@@ -35,6 +35,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
     $jobId = (int) $job['id'];
     $localDir = null;
+    $remoteDir = null;
+    $remoteStepInFlight = false;
     $esxiSecret = null;
     $ansibleSecret = null;
     $exitCode = null;
@@ -65,6 +67,11 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         $esxiSecret = repo_credential_secret($channel->connection(), (int) $esxiCredential['id']);
         $ansibleSecret = repo_credential_secret($channel->connection(), (int) $ansibleCredential['id']);
+        // From here on every stored line is redacted against both secrets
+        // (Etappe 8). `no_log` on the Ansible side is defence in depth, not a
+        // guarantee: -vvv, a module without it or a failing task can echo a
+        // value back, and the job log is read by everyone with deploy.run.
+        $channel->withSecrets([$esxiSecret, $ansibleSecret]);
         $apiBaseUrl = ansible_resolve_api_base_url($channel->connection());
         $payload = deploy_worker_payload($job);
 
@@ -82,9 +89,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $preflightApiBaseUrl = ansible_mode_expects_mac_result((string) $payload['mode']) ? $apiBaseUrl : '';
         $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, &$preflightOutput): void {
             $preflightOutput .= $chunk;
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
+            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer);
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
         if ($preflightExitCode !== 0) {
@@ -97,6 +104,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
         $artifacts = ansible_prepare_job_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
         $localDir = (string) $artifacts['local_dir'];
+        // Known from here on, so a failed upload is cleaned up too: whatever
+        // reached the host at that point includes accounts.yml.
+        $remoteDir = (string) $artifacts['remote_dir'];
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy files prepared: ' . implode(', ', (array) $artifacts['files']));
         $channel->tick(0);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
@@ -118,50 +128,66 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
 
-        $command = ansible_remote_command((string) $artifacts['remote_dir'], $payload, $autostartEnabled);
+        $steps = ansible_remote_steps($remoteDir, $payload, $autostartEnabled);
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible playbook sequence: ' . deploy_job_payload_summary((string) $job['payload_json']));
         $channel->tick(0);
-        // Failed-phase naming (AP6): the remote command brackets every playbook
-        // with begin/end markers; the last begin without its end is the step
-        // that failed, and it is named in the error instead of leaving the
-        // operator to guess which of up to five playbooks broke the chain.
-        $currentStep = null;
-        $stepTracker = static function (string $line) use (&$currentStep): void {
-            $marker = ansible_step_marker_parse($line);
-            if ($marker !== null) {
-                $currentStep = $marker['event'] === VIRTUSPHERE_ANSIBLE_STEP_BEGIN ? $marker['playbook'] : null;
+
+        foreach ($steps as $step) {
+            // THE step boundary (Etappe 8). Until the sequence became one
+            // remote command per playbook, this decision existed only before
+            // the first and after the last one, so an accepted cancel could not
+            // stop anything the portal had already promised it would stop. All
+            // four outcomes live in one helper: still ours and running, our own
+            // cancel to confirm, ownership lost, or somebody else concluded it.
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+
+            // Named from the descriptor, not derived from the marker stream:
+            // with one command per playbook the worker KNOWS which step it is
+            // in, including before the first marker arrives, so a transport
+            // failure at the very start of a step is named too.
+            $currentStep = $step['playbook'];
+            $buffer = '';
+            // Only a step that RETURNS proves nothing is running on the host
+            // any more. A cancel or a broken transport leaves that open, and
+            // the remote signal trap is what removes the material then.
+            $remoteStepInFlight = true;
+            try {
+                $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $step['command'], static function (string $chunk) use ($channel, &$buffer): void {
+                    deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $chunk);
+                }, 0, $heartbeatOnSilence);
+                $remoteStepInFlight = false;
+            } catch (DeployWorkerCancelled $cancelled) {
+                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
+                throw $cancelled;
+            } catch (RuntimeException $transportError) {
+                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
+                throw deploy_worker_transport_failure_with_step($transportError, $currentStep);
             }
-        };
-        $buffer = '';
-        try {
-            $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($channel, &$buffer, $stepTracker): void {
-                deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk, $stepTracker);
-            }, 0, $heartbeatOnSilence);
-        } catch (DeployWorkerCancelled $cancelled) {
-            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
-            throw $cancelled;
-        } catch (RuntimeException $transportError) {
-            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
-            throw deploy_worker_transport_failure_with_step($transportError, $currentStep);
-        }
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $stepTracker);
+            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
 
-        // The playbook is over and its exit code exists only in this process. If
-        // the database went away during the run, waiting for it here is worth
-        // more than failing fast: the alternative is a finished deploy nobody
-        // can see. `--once` stays bounded and says so out loud instead.
-        deploy_worker_settle_db_channel($channel, $options, $exitCode);
-        if ($channel->hasLostOwnership()) {
-            // Somebody else concluded this job while we could not write. Stop
-            // without publishing a result: overwriting an established terminal
-            // state with our own guess is the one thing worse than a gap.
-            throw new DeployWorkerCancelled('Ownership was lost while the database was unreachable: ' . (string) $channel->ownershipReason());
+            // The step is over and its exit code exists only in this process. If
+            // the database went away during the run, waiting for it here is worth
+            // more than failing fast: the alternative is a finished deploy nobody
+            // can see. `--once` stays bounded and says so out loud instead.
+            deploy_worker_settle_db_channel($channel, $options, $exitCode);
+            if ($channel->hasLostOwnership()) {
+                // Somebody else concluded this job while we could not write. Stop
+                // without publishing a result: overwriting an established terminal
+                // state with our own guess is the one thing worse than a gap.
+                throw new DeployWorkerCancelled('Ownership was lost while the database was unreachable: ' . (string) $channel->ownershipReason());
+            }
+
+            if ($exitCode !== 0) {
+                // Finalised through the same ownership recheck as a success:
+                // the throw lands in the catch below, which finishes the job
+                // with the compare-and-swap, exactly once.
+                throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . ansible_step_failure_suffix($currentStep) . '.');
+            }
         }
+
+        // The last boundary. A cancel committed while the final playbook ran is
+        // honoured here rather than being overtaken by a success.
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
-
-        if ($exitCode !== 0) {
-            throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . ansible_step_failure_suffix($currentStep) . '.');
-        }
 
         deploy_worker_conclude_sequence($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles);
     } catch (DeployWorkerCancelled $cancelled) {
@@ -178,9 +204,67 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // database that is still gone must not turn a handled outcome into an
         // unhandled exception from the finally block.
         $channel->tick(0);
+        deploy_worker_cleanup_remote_dir($channel, $ansibleCredential ?? null, $ansibleSecret, $remoteDir, $remoteStepInFlight);
         if (!empty($options['cleanup'])) {
             ansible_cleanup_artifacts($localDir);
         }
+    }
+}
+
+/**
+ * Removes the job's remote work directory, but only when this worker can prove
+ * that nothing of the job is still running on the host.
+ *
+ * The material is not ordinary scratch: accounts.yml carries the ESXi password
+ * until it is gone. With one chained remote command an EXIT trap removed it;
+ * one command per playbook cannot use EXIT, so the steps carry HUP/INT/TERM
+ * traps for the terminated cases and this runs for the normal one.
+ *
+ * A step that never returned (a cancel accepted mid-playbook, a broken
+ * transport) is deliberately left alone: deleting the directory under a
+ * running playbook would break the very work whose outcome is still unknown,
+ * and the remote trap covers it when that shell ends. Material left behind by
+ * a host this worker can no longer reach is reported, not resolved; it is the
+ * remote-ownership stage that resolves it.
+ *
+ * @param array<string, mixed>|null $credential
+ */
+function deploy_worker_cleanup_remote_dir(
+    DeployWorkerDbChannel $channel,
+    ?array $credential,
+    ?string $secret,
+    ?string $remoteDir,
+    bool $stepInFlight
+): void {
+    if ($remoteDir === null || $remoteDir === '' || $credential === null || $secret === null) {
+        return;
+    }
+    if ($stepInFlight) {
+        $channel->log(
+            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+            'Remote job directory left in place: a remote step did not return, so this worker cannot prove the host is idle.'
+        );
+
+        return;
+    }
+
+    try {
+        ssh_execute_command(
+            $credential,
+            $secret,
+            ansible_remote_cleanup_command($remoteDir),
+            static function (string $chunk): void {
+            },
+            VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS
+        );
+    } catch (Throwable $exception) {
+        // Never the job's outcome: this runs in a finally block, after the
+        // result is decided, and a host that cannot be reached for a cleanup
+        // must not turn a finished deploy into an unhandled exception.
+        $channel->log(
+            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+            'Remote job directory could not be removed: ' . deploy_worker_redact_secrets($exception->getMessage(), [$secret])
+        );
     }
 }
 

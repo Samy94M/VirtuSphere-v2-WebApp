@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../deploy_job_output.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_queries.php';
 
@@ -92,6 +93,17 @@ function repo_insert_deploy_job_log_unlocked(mysqli $db, int $jobId, string $str
     if (!in_array($stream, VIRTUSPHERE_DEPLOY_LOG_STREAMS, true)) {
         throw new InvalidArgumentException('Invalid deploy log stream.');
     }
+
+    // The last thing before the row exists, and therefore the place where
+    // "storable" is guaranteed rather than hoped for (Etappe 8). The worker's
+    // channel already runs the full output gate, but the outcome and cancel
+    // paths write here directly with a `mysqli`, and one of their lines is an
+    // exception message that can quote remote output verbatim - colour codes,
+    // control characters and all. Redaction and the per-job volume budget need
+    // job state and stay in the gate; being displayable is a property of the
+    // column and belongs here. Both steps are idempotent, so a line that
+    // already passed the gate is unchanged by this.
+    $line = deploy_job_output_truncate_line(deploy_job_output_normalize_line($line))['line'];
 
     $stmt = $db->prepare('SELECT seq FROM deploy_job_logs WHERE job_id = ? ORDER BY seq DESC LIMIT 1 FOR UPDATE');
     $stmt->bind_param('i', $jobId);

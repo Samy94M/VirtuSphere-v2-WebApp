@@ -25,7 +25,9 @@
         row.appendChild(time);
 
         var stream = document.createElement('td');
-        stream.textContent = entry.stream || '';
+        // The label is built server-side: it is translated, and what the stored
+        // source means is a statement about the transport with one author.
+        stream.textContent = entry.stream_label || entry.stream || '';
         row.appendChild(stream);
 
         var lineCell = document.createElement('td');

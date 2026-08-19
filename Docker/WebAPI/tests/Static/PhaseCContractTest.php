@@ -206,6 +206,18 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('ansible_preflight_command($preflightApiBaseUrl)', $worker);
         self::assertStringNotContainsString('ansible_preflight_command()', $worker);
 
+        // A non-zero preflight exit code carries its own evidence, so the
+        // category is set BEFORE the throw and the outer transport classifier
+        // cannot overwrite it (Etappe 8). It names the preflight, not the
+        // connection: what failed is a component ON the Ansible host, and the
+        // transitional `ssh` sent the operator to the network instead.
+        self::assertMatchesRegularExpression(
+            '/\$preflightExit !== 0\) \{.*?\$failCategory = VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_PREFLIGHT;.*?throw new RuntimeException/s',
+            $worker,
+            'the inventory preflight must set ansible_preflight before it throws'
+        );
+        self::assertStringNotContainsString('$failCategory = VIRTUSPHERE_INVENTORY_ERROR_SSH;', $worker);
+
         // Thrown inventory failures are classified by phase, never by the old
         // parse-fallback, and failure messages leave through the secret
         // redactor (B6; DeployWorkerFailureClassificationTest proves the map).

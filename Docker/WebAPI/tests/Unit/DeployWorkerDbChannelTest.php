@@ -299,14 +299,21 @@ final class DeployWorkerDbChannelTest extends TestCase
         self::assertTrue($channel->isConnected());
     }
 
-    /** A spooled line is already redacted, and the drain must not undo that. */
+    /**
+     * A spooled line is already redacted, and the drain must not undo that.
+     *
+     * Since Etappe 8 the caller does not redact either: the output gate runs
+     * before the line can reach the spool, precisely so an outage cannot park
+     * a secret that a later drain then persists.
+     */
     public function testTheSpoolNeverPersistsASecretItWasNotGiven(): void
     {
         $channel = $this->channel();
         $this->ops->writesFail = true;
 
         $secret = 'SuperSecretEsxiPassword';
-        $channel->log('stdout', $channel->redact('connecting with ' . $secret . ' now', [$secret]));
+        $channel->withSecrets([$secret]);
+        $channel->log('stdout', 'connecting with ' . $secret . ' now');
 
         $this->ops->writesFail = false;
         $this->connectSucceeds = true;

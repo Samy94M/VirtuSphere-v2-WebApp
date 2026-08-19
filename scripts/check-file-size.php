@@ -67,11 +67,9 @@ const FILE_SIZE_ALLOWANCES = [
     // lib/ansible_inventory.php (714) left this table in Etappe 7: artifact/
     // remote command, output normalization, datastore/query and capability/host
     // parsing are now separate modules behind a facade.
-    'Docker/WebAPI/lib/ansible_command.php' => [
-        'lines' => 523,
-        'why' => 'mode/marker logic and preflight/command construction change separately',
-        'stage' => 'Etappe 8',
-    ],
+    // lib/ansible_command.php (523) left this table in Etappe 8: shell quoting,
+    // mode/marker planning and the preflight/probe domain are now separate
+    // modules behind a facade.
     'Docker/WebAPI/portal/deploy.php' => [
         'lines' => 667,
         'why' => 'POST dispatch, view model, queue form and job list; grows further with the live blocker model',
@@ -111,7 +109,7 @@ const FILE_SIZE_ALLOWANCES = [
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1206,
+        'lines' => 1218,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

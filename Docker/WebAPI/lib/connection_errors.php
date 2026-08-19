@@ -179,6 +179,14 @@ function connection_error_excerpt(string $text, int $max = VIRTUSPHERE_CONNECTIO
  * outright, because a generic exception with matching wording must not be
  * promoted, and a real budget/SFTP exception whose message happens to read
  * like a login rejection must not be demoted either.
+ *
+ * All three transport types are decided HERE (Etappe 8, Befund 4). The local
+ * configuration type is one of them: missing phpseclib, empty mandatory fields
+ * or an unreadable work directory are our own deployment, so qualifying them
+ * as an Ansible-host finding would blame the host for our misconfiguration -
+ * exactly the failure class this shared mapping exists to prevent. Both of
+ * today's callers checked that type themselves before calling; a third caller
+ * that forgot would have received `ansible_transport` for a local cause.
  */
 function ansible_connection_error_category(Throwable $exception): string
 {
@@ -188,8 +196,29 @@ function ansible_connection_error_category(Throwable $exception): string
     if ($exception instanceof SftpTransportFailed) {
         return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP;
     }
+    if ($exception instanceof SshTransportConfigurationException) {
+        return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    }
 
     return ansible_connection_error_category_for_text($exception->getMessage());
+}
+
+/**
+ * True when ansible_connection_error_category() decides this throwable by its
+ * exact type instead of by its wording.
+ *
+ * A caller with a fallback of its own (the SFTP probe) needs to know that
+ * difference without repeating any category: a typed failure has an answer
+ * that is true wherever it was raised, an untyped one only has words, and the
+ * probe's own step name beats a guess at those words. Kept next to the mapping
+ * and pinned against its instanceof list by ConnectionErrorMappingContractTest,
+ * so a fourth transport type cannot land in one of the two and not the other.
+ */
+function ansible_connection_error_is_typed(Throwable $exception): bool
+{
+    return $exception instanceof SshTransportBudgetExceeded
+        || $exception instanceof SftpTransportFailed
+        || $exception instanceof SshTransportConfigurationException;
 }
 
 /**

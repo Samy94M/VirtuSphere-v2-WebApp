@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
 
 $user = portal_require_user($connection);
@@ -28,6 +29,10 @@ if ($format === 'json') {
     $logs = repo_deploy_job_logs($connection, (int) $job['id'], $afterSeq, 500);
     foreach ($logs as &$logEntry) {
         $logEntry['created_at'] = portal_format_timestamp($logEntry['created_at'] ?? null);
+        // The label is rendered here, not in the poller: it is translated, and
+        // the raw stream value is a statement about the transport that must
+        // have exactly one author (Etappe 8).
+        $logEntry['stream_label'] = deploy_job_log_source_label((string) ($logEntry['stream'] ?? ''));
     }
     unset($logEntry);
     echo json_encode([
@@ -105,7 +110,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
                 <tr data-log-seq="<?php echo h((string) $log['seq']); ?>">
                     <td><?php echo h((string) $log['seq']); ?></td>
                     <td><?php echo h(portal_format_timestamp($log['created_at'] ?? '')); ?></td>
-                    <td><?php echo h($log['stream'] ?? ''); ?></td>
+                    <td><?php echo h(deploy_job_log_source_label((string) ($log['stream'] ?? ''))); ?></td>
                     <td><code class="log-line"><?php echo h($log['line'] ?? ''); ?></code></td>
                 </tr>
             <?php } ?>

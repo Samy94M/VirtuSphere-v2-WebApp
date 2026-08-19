@@ -380,13 +380,58 @@ final class AnsibleInventoryParseTest extends TestCase
      */
     public function testOurOwnMissingFilesAreConfigNotAnAnswerFromTheHost(): void
     {
+        // Etappe 8: the category names WHERE the fix is. A missing playbook,
+        // collection or Python library is repaired on the Ansible host, so it
+        // is `ansible_config`, not the portal-side `config`.
         self::assertSame(
-            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
             ansible_categorize_inventory_error('ERROR! the playbook: inventoryESXi_playbook.yml could not be found', 1)
         );
         self::assertSame(
-            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
             ansible_categorize_inventory_error("ERROR! couldn't resolve module/action 'community.vmware.vmware_datastore_info'", 1)
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
+            ansible_categorize_inventory_error(
+                "Failed to import the required Python library (PyVmomi) on ansible01's Python /usr/bin/python3.",
+                2
+            )
+        );
+    }
+
+    /**
+     * The near negative: vCenter says "could not be found" too, and it used to
+     * be the whole needle. A missing datastore is a real answer from the host,
+     * so it must not send the operator to install an Ansible collection.
+     */
+    public function testTheHostsOwnNotFoundAnswerIsNotAnAnsibleConfigProblem(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_PARSE,
+            ansible_categorize_inventory_error('The object or item referred to could not be found.', 2)
+        );
+    }
+
+    /**
+     * Section 2.3: the become timeout is Ansible's own configuration, and its
+     * wording contains the general `timed out` needle. Reading that needle
+     * first called a broken sudo setup a network problem, which is the one
+     * cause an operator cannot find by checking the network.
+     */
+    public function testABecomeTimeoutIsAnsibleConfigNotAnUnreachableHost(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
+            ansible_categorize_inventory_error(
+                'fatal: [ansible01]: FAILED! => {"msg": "Timeout (12s) waiting for privilege escalation prompt: "}',
+                2
+            )
+        );
+        // And the general timeout still means what it says.
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+            ansible_categorize_inventory_error('Unable to connect to the host: timed out', 2)
         );
     }
 

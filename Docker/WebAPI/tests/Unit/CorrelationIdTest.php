@@ -72,7 +72,7 @@ final class CorrelationIdTest extends TestCase
     public function testTheRemoteCommandChainExportsTheCurrentId(): void
     {
         virtusphere_correlation_adopt('feedface00000002');
-        $command = ansible_remote_command('/tmp/vs-deploy', ['mode' => 'export']);
+        $command = ansible_remote_steps('/tmp/vs-deploy', ['mode' => 'export'])[0]['command'];
 
         self::assertStringContainsString("export VS_CORRELATION_ID='feedface00000002'", $command);
         // Before the first playbook, so every step runs inside the trace.

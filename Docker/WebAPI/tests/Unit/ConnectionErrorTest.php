@@ -190,6 +190,63 @@ final class ConnectionErrorTest extends TestCase
         );
     }
 
+    /**
+     * Etappe 8, Befund 4: the shared classifier carries the local type itself.
+     *
+     * Both of today's callers used to check it before calling, so the function
+     * answered `ansible_transport` for a purely local cause - missing
+     * phpseclib, an empty mandatory field, an unreadable work directory - and
+     * blamed the Ansible host for our own misconfiguration. A third caller was
+     * one forgotten pre-check away, and Etappe 8 wires exactly such callers.
+     */
+    public function testTheSharedClassifierCallsALocalMisconfigurationOurs(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            ansible_connection_error_category(new SshTransportConfigurationException('phpseclib SFTP is not available.'))
+        );
+        // And the caller that no longer pre-checks still answers the same.
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_CONFIG,
+            credential_test_ssh_failure(new SshTransportConfigurationException('Host and username are required.'), 'secret')['code']
+        );
+    }
+
+    /**
+     * Etappe 8, Befund 6: the SFTP probe keeps its own step sentence.
+     *
+     * `credentials.test_err_sftp` says that login and toolchain are already
+     * fine and points at the SFTP subsystem and /tmp; the generic
+     * `ansible_sftp` sentence knows none of that. So the probe owns its own
+     * failure and any untyped surprise from inside it, and delegates every
+     * other transport type - without naming a single category twice.
+     */
+    public function testTheSftpProbeOwnsItsOwnFailureButNoOtherMapping(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_CREDENTIAL_TEST_SFTP,
+            credential_test_sftp_failure(new SftpTransportFailed('permission denied'), 'secret')['code']
+        );
+        $source = (string) file_get_contents(__DIR__ . '/../../lib/ssh.php');
+        $start = strpos($source, "\nfunction credential_test_sftp_failure(");
+        self::assertNotFalse($start, 'credential_test_sftp_failure() not found.');
+        $end = strpos($source, "\n}", $start);
+        self::assertNotFalse($end);
+        $body = substr($source, $start, $end - $start);
+        foreach ([
+            'VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT',
+            'VIRTUSPHERE_INVENTORY_ERROR_CONFIG',
+            'VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP',
+        ] as $category) {
+            self::assertStringNotContainsString(
+                $category,
+                $body,
+                'credential_test_sftp_failure() names a category the shared mapping already owns. '
+                . 'It may decide WHICH failures it owns, never what they are called.'
+            );
+        }
+    }
+
     public function testDirectFalseLoginUsesTheAnsibleAuthOriginCode(): void
     {
         $source = (string) file_get_contents(__DIR__ . '/../../lib/ssh.php');

@@ -223,12 +223,18 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
 
     public function testRemoteCommandBuildersChmodAccountsBeforeAnyPlaybook(): void
     {
-        $commandSource = file_get_contents(dirname(__DIR__, 2) . '/lib/ansible_command.php');
-        self::assertIsString($commandSource);
+        // The mission builder moved into a domain module too (Etappe 8); same
+        // reason as the inventory twin below, so both read their registry.
+        require_once dirname(__DIR__, 2) . '/lib/ansible_command_modules.php';
+        $commandSource = '';
+        foreach (VIRTUSPHERE_ANSIBLE_COMMAND_MODULES as $module) {
+            $commandSource .= (string) file_get_contents(dirname(__DIR__, 2) . '/' . $module);
+        }
+        self::assertNotSame('', $commandSource, 'the Ansible command module registry produced no source.');
         self::assertStringContainsString(
             "'chmod 600 accounts.yml'",
             $commandSource,
-            'ansible_command.php must chmod accounts.yml (contains the ESXi password) to 600 before running playbooks.'
+            'The remote command builder must chmod accounts.yml (contains the ESXi password) to 600 before running playbooks.'
         );
 
         // The inventory twin's remote-command builder moved into a domain

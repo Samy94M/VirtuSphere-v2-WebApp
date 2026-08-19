@@ -65,6 +65,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         $esxiSecret = repo_credential_secret($channel->connection(), (int) $esxiCredential['id']);
         $ansibleSecret = repo_credential_secret($channel->connection(), (int) $ansibleCredential['id']);
+        // Same rule as the deploy path: from here on the channel redacts every
+        // stored line against both secrets (Etappe 8).
+        $channel->withSecrets([$esxiSecret, $ansibleSecret]);
         $apiBaseUrl = ansible_resolve_api_base_url($channel->connection());
 
         $phase = VIRTUSPHERE_DEPLOY_PHASE_SSH;
@@ -78,13 +81,18 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $preflightApiBaseUrl = '';
         $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, &$preflightOutput): void {
             $preflightOutput .= $chunk;
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer, $chunk);
+            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk);
         }, 45, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $preflightBuffer);
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer);
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
         if ($preflightExit !== 0) {
-            $failCategory = VIRTUSPHERE_INVENTORY_ERROR_SSH;
+            // Set before the throw, so the outer transport classifier cannot
+            // overwrite evidence the exit code already carries (Etappe 8): the
+            // preflight ran, and what failed is a component ON the Ansible
+            // host, not the connection to it. Until Etappe 8 this wrote the
+            // transitional `ssh`, which pointed at the network instead.
+            $failCategory = VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_PREFLIGHT;
             $failedComponent = ansible_preflight_failed_component($preflightOutput);
             throw new RuntimeException(
                 'Ansible host preflight failed with exit code ' . $preflightExit . '.'
@@ -95,7 +103,11 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $phase = VIRTUSPHERE_DEPLOY_PHASE_CONFIG;
         $artifacts = ansible_prepare_inventory_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
         $localDir = (string) $artifacts['local_dir'];
-        $phase = VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT;
+        // The upload leg has its own phase (Etappe 8): it is the only step that
+        // runs SFTP, so an unrecognized failure here can say "the file transfer
+        // failed" instead of the generic transport fallback. It covers the
+        // upload callbacks too, which run while this phase is set.
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_SFTP;
         ssh_sftp_upload_directory($ansibleCredential, $ansibleSecret, $localDir, (string) $artifacts['remote_dir'], static function (string $line) use ($channel): void {
             $channel->tick();
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
@@ -103,14 +115,15 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
 
+        $phase = VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT;
         $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty($inventoryPayload['verbose']));
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running ESXi inventory playbook.');
         $buffer = '';
         $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($channel, &$buffer, &$fullOutput): void {
             $fullOutput .= $chunk;
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer, $chunk);
+            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $chunk);
         }, 0, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_STDOUT, $buffer);
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
 
         // The remote pull is over; its exit code lives only here. Same rule as
         // the mission path: wait for the database rather than lose the outcome.
@@ -186,17 +199,19 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             // stop the ESXi account from locking out (ADR-0023). That pause blocks
             // deploys of the kind too, so it belongs in the audit trail, once per
             // onset: log only when this failure is what turned the pause on.
-            $wasPaused = ($state = repo_esxi_inventory_state($db, $credentialId)) !== null
-                && (int) $state['paused_until_credential_change'] === 1;
+            $isOnset = deploy_worker_inventory_pause_onset(
+                repo_esxi_inventory_state($db, $credentialId),
+                $category
+            );
             repo_esxi_inventory_record_failure($db, $credentialId, $category, $jobId);
-            if ($category === VIRTUSPHERE_INVENTORY_ERROR_AUTH && !$wasPaused) {
+            if ($isOnset) {
                 audit($db, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'esxi inventory auto-pull paused for credential id ' . $credentialId . ' after an authentication failure; save the credential to resume', null, 'cli');
             }
         } catch (Throwable $stateError) {
             error_log('[inventory] state update failed: ' . $stateError->getMessage());
         }
         $message = '[' . $category . '] ' . deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_STDERR, $message);
+        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a

@@ -46,15 +46,41 @@ const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
 ];
 
+// Where a stored job-log line came from.
+//
+// `stdout`/`stderr` are legacy values and stay readable (Etappe 8). They were
+// never a real channel split: the remote command redirects with `2>&1`, so
+// Ansible's two streams are already merged before the worker sees a single
+// byte, and every line the worker stored as `stdout` could just as well have
+// been stderr. A UI that offered to filter them apart offered something the
+// transport cannot deliver. New lines therefore say what is true: `ansible` is
+// the merged remote output, `worker_error` is the worker's own finding about
+// the job, and `system` stays what it always was - this worker narrating its
+// own steps. A real channel split would be a change to ssh_execute_command(),
+// not a label.
 const VIRTUSPHERE_DEPLOY_LOG_STDOUT = 'stdout';
 const VIRTUSPHERE_DEPLOY_LOG_STDERR = 'stderr';
 const VIRTUSPHERE_DEPLOY_LOG_SYSTEM = 'system';
+const VIRTUSPHERE_DEPLOY_LOG_ANSIBLE = 'ansible';
+const VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR = 'worker_error';
 
 const VIRTUSPHERE_DEPLOY_LOG_STREAMS = [
     VIRTUSPHERE_DEPLOY_LOG_STDOUT,
     VIRTUSPHERE_DEPLOY_LOG_STDERR,
     VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+    VIRTUSPHERE_DEPLOY_LOG_ANSIBLE,
+    VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR,
 ];
+
+// The legacy pair, kept as a set rather than as two literals so the display
+// helper and any later backfill read the same list.
+const VIRTUSPHERE_DEPLOY_LOG_LEGACY_STREAMS = [
+    VIRTUSPHERE_DEPLOY_LOG_STDOUT,
+    VIRTUSPHERE_DEPLOY_LOG_STDERR,
+];
+
+// The stored-output limits and their truncation kinds live with the gate that
+// enforces them, in lib/deploy_job_output.php.
 
 const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
 const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
@@ -128,6 +154,12 @@ const VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS = 14400;
 // tight because these files are small; a legitimate upload finishes in seconds.
 const VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS = 120;
 const VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS = 300;
+
+// Removing the remote work directory after the sequence ended. One `rm -rf` on
+// a directory of a few small files; if that does not answer in this time the
+// host has a problem the cleanup cannot solve, and waiting longer only delays
+// a job whose outcome is already decided.
+const VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS = 30;
 
 // Second reaper (AP6): the deploy worker reaps only at its own loop start, so
 // a worker stuck inside a blocking transport call would never be reaped until

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/connection_errors.php';
+require_once __DIR__ . '/deploy_job_output.php';
 require_once __DIR__ . '/integration_health.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/heartbeats.php';
@@ -28,33 +29,37 @@ final class DeployWorkerCancelled extends RuntimeException
 // blaming the host's answer.
 const VIRTUSPHERE_DEPLOY_PHASE_CONFIG = 'config';
 const VIRTUSPHERE_DEPLOY_PHASE_SSH = 'ssh';
+const VIRTUSPHERE_DEPLOY_PHASE_SFTP = 'sftp';
 const VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT = 'transport';
 const VIRTUSPHERE_DEPLOY_PHASE_MARKER = 'marker';
 const VIRTUSPHERE_DEPLOY_PHASE_DB = 'db';
 
 /**
  * Classifies a thrown inventory-job failure into a VIRTUSPHERE_INVENTORY_ERROR_*
- * category: phase first, text second.
+ * category, in the binding order of the masterplan's section 3.
  *
- * Only ssh/transport consult the message, because only there can wording
- * distinguish anything (DNS vs. refused vs. auth). Both phases sit entirely on
- * the Portal-to-Ansible-host leg, so their text is qualified through the
- * shared ansible_connection_error_category_for_text() (Etappe 7) instead of
- * the bare generic category; their fallback is `ansible_transport`, never
- * `parse`. Config failures never reached the network; marker failures are the
- * one true "the host answered unexpectedly"; db failures are ours. An unknown
- * phase is a coding error in the worker and reads as `worker`.
+ * Two rules are phase-independent, because their origin is certain wherever
+ * they surface: a database failure is ours, and a local transport
+ * misconfiguration is ours too. Everything else is decided by WHERE the job
+ * was. Only the three legs that actually talk to the Ansible host consult the
+ * message, because only there can wording distinguish anything (DNS vs.
+ * refused vs. auth), and there it is qualified through the one shared mapping
+ * (Etappe 7/8) so their fallback is `ansible_transport`, never `parse`. Config
+ * failures never reached the network; marker failures are the one true "the
+ * host answered unexpectedly"; an unknown phase is a coding error in the
+ * worker and reads as `worker`.
  */
 function deploy_worker_classify_inventory_failure(string $phase, Throwable|string $failure): string
 {
-    // Exact transport types win over wording. A generic RuntimeException with
-    // the same sentence is deliberately not promoted to a VirtuSphere budget.
-    if ($failure instanceof SshTransportBudgetExceeded) {
-        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
+    // Section 3, rule 1. A database outage is not a statement about the remote
+    // host, and its phase says nothing about its origin: before this branch a
+    // mysqli failure handed through a transport phase came out as
+    // `ansible_transport` and actively blamed the Ansible host for it.
+    if ($failure instanceof mysqli_sql_exception) {
+        return VIRTUSPHERE_INVENTORY_ERROR_WORKER;
     }
-    if ($failure instanceof SftpTransportFailed) {
-        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP;
-    }
+    // Section 3, rule 2. Missing phpseclib, empty mandatory fields or an
+    // unreadable work directory are our own deployment, in every phase.
     if ($failure instanceof SshTransportConfigurationException) {
         return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
     }
@@ -62,12 +67,32 @@ function deploy_worker_classify_inventory_failure(string $phase, Throwable|strin
 
     switch ($phase) {
         case VIRTUSPHERE_DEPLOY_PHASE_CONFIG:
+            // Rule 3. The budget and SFTP types are deliberately NOT consulted
+            // here: a budget type placed in a phase that never opened a socket
+            // is a coding error, not a remote timeout, and calling it
+            // `ansible_timeout` would name a host this phase never contacted.
             return str_contains(strtolower($message), 'certificate')
                 ? VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE
                 : VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
         case VIRTUSPHERE_DEPLOY_PHASE_SSH:
+        case VIRTUSPHERE_DEPLOY_PHASE_SFTP:
         case VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT:
-            return ansible_connection_error_category_for_text($message);
+            // Rules 6 to 8, all three through the one shared function: exact
+            // type first (a generic RuntimeException with the same sentence is
+            // deliberately not promoted to a VirtuSphere budget), wording only
+            // afterwards.
+            $category = $failure instanceof Throwable
+                ? ansible_connection_error_category($failure)
+                : ansible_connection_error_category_for_text($message);
+
+            // Rule 9. Inside the upload leg the generic transport fallback can
+            // be said more precisely: this phase only ever runs SFTP, so the
+            // operator gets the file-transfer sentence instead of "somewhere
+            // on the way to the Ansible host".
+            return $phase === VIRTUSPHERE_DEPLOY_PHASE_SFTP
+                && $category === VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT
+                    ? VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP
+                    : $category;
         case VIRTUSPHERE_DEPLOY_PHASE_MARKER:
             return VIRTUSPHERE_INVENTORY_ERROR_PARSE;
         case VIRTUSPHERE_DEPLOY_PHASE_DB:
@@ -77,23 +102,25 @@ function deploy_worker_classify_inventory_failure(string $phase, Throwable|strin
 }
 
 /**
- * Strips credential secrets (and their URL-encoded form) out of a failure
- * message before it reaches the job log. Same minimum length as
- * connection_error_detail(): replacing a 1-3 character secret would shred the
- * message. Deliberately no truncation or whitespace collapse here; the job log
- * is the operator's evidence and the full playbook output sits above it anyway.
+ * Whether this failure is the ONSET of an ESXi auto-pull pause, i.e. the one
+ * moment worth an audit line.
  *
- * @param array<int, mixed> $secrets
+ * Two conditions, and both are load-bearing. The category must be exactly
+ * `auth`, because that is the only one that pauses at all: an Ansible-side
+ * rejection would otherwise announce a pause that never happened. And the row
+ * must not already be paused, because a paused credential keeps being retried
+ * by hand, and one audit line per retry buries the sign-in trail it lives in.
+ *
+ * @param array<string, mixed>|null $stateBefore The row as read BEFORE the
+ *        failure was recorded; null when the credential has no state row yet.
  */
-function deploy_worker_redact_secrets(string $message, array $secrets): string
+function deploy_worker_inventory_pause_onset(?array $stateBefore, string $category): bool
 {
-    foreach ($secrets as $secret) {
-        if (is_string($secret) && strlen($secret) >= VIRTUSPHERE_CONNECTION_REDACT_MIN) {
-            $message = str_replace([$secret, rawurlencode($secret)], '***', $message);
-        }
+    if ($category !== VIRTUSPHERE_INVENTORY_ERROR_AUTH) {
+        return false;
     }
 
-    return $message;
+    return $stateBefore === null || (int) ($stateBefore['paused_until_credential_change'] ?? 0) !== 1;
 }
 
 /**
