@@ -1,8 +1,8 @@
 # Masterplan: Deploy-Zuverlässigkeit, Fehlerherkunft und Portal-UX
 
-Stand: 2026-08-13, zusammengeführte ausführbare Fassung nach Repository-Review, Online-Faktenprüfung, Integration des Joblog-/Abbruch-/Protokollreviews und Übernahme der AD/LDAPS-Baseline zwischen Etappe 5 und 6.
+Stand: 2026-08-13, zusammengeführte ausführbare Fassung nach Repository-Review, Online-Faktenprüfung, Integration des Joblog-/Abbruch-/Protokollreviews, Übernahme der AD/LDAPS-Baseline sowie Einordnung der Remote-Recovery-, Create- und Netzwerk/MAC-Erweiterungen.
 
-Dieser Masterplan verbindet vier bisher getrennte Arbeitsstränge. Die ursprüngliche Fassung führte zunächst diese drei zusammen:
+Dieser Masterplan verbindet fünf bisher getrennte Arbeitsstränge. Die ursprüngliche Fassung führte zunächst diese drei zusammen:
 
 1. die Korrektur der im Review gefundenen Lücken an Reaper/DB-Ausfall, Ansible-Aktivitätsnachweis, CLI-SSoT, Festplattentexten, Doku und Fast-Gate;
 2. die bereits detailliert geplante eindeutige Fehlerherkunft des ESXi-Inventar-Abrufs;
@@ -12,7 +12,11 @@ Mit der Erweiterung vom 2026-08-12 kommt als vierter Arbeitsstrang hinzu:
 
 4. Datenkorrektheit und Bedienbarkeit des Bereitstellungsprotokolls, tatsächlich wirksame Abbruchgrenzen, eine eindeutige Terminalergebnis-SSoT, durchgängige Secret-/Ausgabehärtung sowie konsistente Audit-, CSV- und PowerShell-Protokolle.
 
-Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Nach Etappe 10 schließen die Ergänzungsetappen 10A–10D die Terminal-, Joblog- und Protokollverträge, bevor die bestehenden UX-Etappen 11–17 darauf aufbauen. So kaschiert die UX weder einen unvollständig gelesenen Logtail noch einen Abbruch, den der Worker technisch noch nicht einhalten kann. Diese Datei ersetzt getrennte Restlisten und die vorherigen Fassungen als ausführende SSoT vollständig; die geprüften Einzelpläne und Befundtexte bleiben nur als ausführliche Reviewspur erhalten.
+Mit der Konsolidierung vom 2026-08-13 kommt als fünfter Arbeitsstrang hinzu:
+
+5. dauerhafte Remote-Ausführung mit Worker-Fencing/Recovery, anschließend eindeutige VM-Netzwerke und MAC-Retry, die per-VM-Create-Reparatur und zuletzt lokales Supervisor-Self-Healing. Die vollständige Fachspezifikation liegt in `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md`; der Create-Einzelplan bleibt dessen untergeordneter Owner für JID, Identität und Create-Ergebnis.
+
+Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Nach Etappe 7 führt 8R den dauerhaften Remote-Owner ein; die übrige Etappe 8 darf für aktivierte Modi keinen langlebigen direkten SSH-Step mehr verwenden. Nach Etappe 10 schließen 10A–10D die Terminal-, Joblog- und Protokollverträge. Etappe 13 integriert 13R, nach Etappe 14 folgen 14A Netzwerk/MAC, 14B Create und 14C Supervisor, erst danach 15–17. So kaschiert die UX weder einen unvollständig gelesenen Logtail noch einen Abbruch, den der Worker technisch noch nicht einhalten kann, und ein Supervisor startet keinen noch nicht wiederanbindbaren Create-Lauf neu. Diese Datei bleibt die globale Reihenfolge-SSoT; Detailpläne dürfen sie nicht umsortieren.
 
 Die Erweiterung ändert den bereits ausgeführten Verlauf nicht: Etappe 1 bleibt mit ihrer vorhandenen grünen Abnahme abgeschlossen. Etappe 2 war am 2026-08-12 bereits begonnen und behält ihren DB-/Reaper-Umfang; die neuen Playbook-Abbruchgrenzen gehören in die noch ausstehende Etappe 8, die neuen Portal-/Protokollverträge in 10A–10D. Bereits grün nachgewiesene Hunks werden weder wiederholt noch umnummeriert.
 
@@ -91,6 +95,18 @@ Ab dieser Baseline gelten für jede folgende Etappe zusätzlich diese Driftregel
 8. Vor dem Abschluss jeder Etappe wird `rg` auf direkte LDAP-Aufrufe außerhalb der Owner-Module, duplizierte Directory-Konstanten, handgeschriebene Settings-Links und nicht registrierte AD-Aktionen ausgeführt. Die relevanten SSoT-, Sprach-, Doku-, CSP- und File-Size-Gates bleiben grün.
 
 Der interne Code-Nachweis der Baseline ist grün. Als ausdrücklicher externer Restpunkt bleibt ausschließlich das Ziel-AD-Protokoll offen. Wenn eine spätere Etappe AD/LDAPS-Verhalten fachlich verändert, öffnet sie diesen Baseline-Abgleich erneut und aktualisiert ADR, Betriebsdoku, Hilfe, Testmatrix und Aktivierungsnachweis in demselben Etappenabschluss.
+
+### Verbindliche Remote-/Netzwerk-/Create-Erweiterung
+
+Der konsolidierte Fachplan `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md` wird über fünf feste Einhängepunkte ausgeführt:
+
+1. **8R nach Etappe 7 und innerhalb der technischen Etappe 8:** 8R-0 bis 8R-5 führen Planharmonisierung, Runner/Launcher, systemd-User/Linger, Schema, Worker-Epoch/Job-Fencing, Inventarpilot, Reaper-Recovery sowie Export/Start/Autostart/Powercycle stufenweise ein. Reaperverhalten und Modusaktivierung wechseln immer gemeinsam; fehlende Hostvoraussetzung blockiert sichtbar und fällt nicht still auf die alte SSH-Kette zurück.
+2. **13R gemeinsam mit Etappe 13:** gemeinsamer drei-achsiger Deploy-Dienstsnapshot für Verfügbarkeit, Claim-Freigabe und Recovery-Aufmerksamkeit, dazu Queue-/Pause-/Recoverydarstellung und sichere DB-Aktionen. Der vollständige Logtail bleibt in 10A/13, strukturierte Remote-Events in 10C.
+3. **14A nach Etappe 14:** ein Netzwerk-/MAC-Vertrag für alle Writer, Queue, Worker, Callbackresultat und Retry. Create, Full, Powercycle und Export blockieren leere/doppelte VLAN-Zuordnung vor Remote-Arbeit; Start/Autostart warnen.
+4. **14B unmittelbar danach:** der Create-Einzelplan wird unter dem Remote-Owner umgesetzt. Laufende JIDs bleiben am Quelljob; der Reaper löst nur die Lease; Retry ist bis zum bewiesenen Ausgang gesperrt. Pro VM gilt ein `create.vm.<position>`-Handle mit `ExitType=cgroup`-Stagingbeweis.
+5. **14C zuletzt:** PID-1-Supervisor und Kindrestart werden erst aktiviert, wenn alle produktiv freigegebenen Modi reattach-fähig sind. Danach folgen 15 bis 17.
+
+Der frühere Self-Healing-Einzelplan ist Reviewspur, kein paralleler Ausführungsplan. Bei Detailkonflikten gilt die Vorrangsmatrix in Abschnitt 0 des konsolidierten Fachplans. Jede Teilaktivierung ist pro Credential/Modus persistiert, fault-getestet und rückbaubar; ein globaler Big-Bang-Schalter ist verboten.
 
 ### Verbindlicher Refactoring-Vertrag
 
@@ -530,7 +546,9 @@ Die technische Fehlermeldung im Joblog bleibt durch `deploy_worker_redact_secret
 
 ### 7.7 Tatsächliche Playbook-Grenzen und atomarer Abbruch
 
-`ansible_playbooks_for_mode()` bleibt die SSoT für Reihenfolge und Modusinhalt, liefert dem Worker aber geordnete Schrittdeskriptoren statt einer einzigen entfernten `command1 && command2`-Kette. Ein Missionsauftrag hält einen strikt jobgebundenen Remote-Arbeitsordner und startet jedes Playbook als eigenen SSH-Befehl. Preflight und Upload werden nicht pro Schritt dupliziert; Marker, Quoting, Umgebung, Exitcode und redigierte Ausgabe jedes Einzelschritts bleiben vollständig beobachtbar.
+`ansible_playbooks_for_mode()` bleibt die SSoT für Reihenfolge und Modusinhalt, liefert dem Worker aber geordnete Schrittdeskriptoren statt einer einzigen entfernten `command1 && command2`-Kette. Für jeden durch 8R aktivierten Modus startet der Worker einen Schritt nicht als langlebigen direkten SSH-Befehl, sondern über den Prepare/Launch/Poll/Reattach-Vertrag des konsolidierten Fachplans. SSH bleibt kurzer Start-/Beobachtungstransport; DB-Handle, systemd-Unit/Cgroup und dauerhafte Marker besitzen die Laufzeit. Preflight und unveränderliche Uploads werden nicht sinnlos pro Poll dupliziert; Marker, Quoting, Umgebung, Exitcode und redigierte Ausgabe jedes Schritts bleiben vollständig beobachtbar.
+
+Der Create-Descriptor besitzt das Ausführungsmodell `per_vm_async`: Er expandiert die materialisierte Auswahl in `create.vm.<position>`, bindet die Create-Ergebniszeile per FK und verwendet `ExitType=cgroup`, damit ein `poll: 0`-Async-Prozess die Unit aktiv hält. Dieser Zweig wird erst in 14B freigegeben. Ein unbekannter Descriptor oder eine nicht grün aktivierte Modus-/Hostkombination ist ein sichtbarer Blocker, kein Legacy-Fallback.
 
 Vor dem ersten mutierenden Schritt und nach jedem beendeten Remote-Schritt entscheidet ein gemeinsamer Repo-Helper in einer kurzen Transaktion anhand von `id`, `locked_by` und `status`:
 
@@ -553,7 +571,7 @@ Die vorhandenen `::virtusphere-step:: begin/end`-Marker bleiben technische SSoT.
 
 Der Sicherheitsnachweis verwendet ein synthetisches eindeutiges Secret-Sentinel und verfolgt es automatisiert durch generierte `accounts.yml`, produktive Playbooks, Remote-Ausgabe, Worker/Redigierung, `deploy_job_logs`, Polling-JSON, serverseitiges HTML, Browser-DOM, Rohdownload sowie Audit-, PHP- und Containerfehlerlog. Der Test prüft auch `-vvv`, Fehler- und Timeoutpfade; er druckt den Sentinel selbst nie in QA-Artefakte. `no_log` bleibt Defense-in-depth und wird nicht als vollständiger Schutz gegen `ANSIBLE_DEBUG` dokumentiert. Die Hilfe beschreibt `-vvv` ausschließlich als erhöhte Diagnoseausgabe und verspricht weder Variablenanzeige noch Geheimnisfreiheit.
 
-Lokales und entferntes Jobmaterial wird im normalen `finally` entfernt. Zusätzlich räumt ausschließlich der `deploy-worker` beim sicheren Kontakt mit einem Ansible-Zugang verwaiste Remote-Verzeichnisse auf: nur kanonisch validierte Pfade mit VirtuSphere-Präfix, Job-ID/Ownershipmarker und abgelaufenem Alter; niemals ein berechneter breiter Pfad oder fremdes Verzeichnis. Positive/negative Tests beweisen normalen Cleanup, Verbindungsabbruch, hart unterbrochenen Vorlauf, Symlink-/Traversalabwehr, falschen Owner und den gedrosselten Sweep-Logeintrag.
+Nur nachweislich nicht gestartetes temporäres Uploadmaterial wird im normalen `finally` entfernt. Gestartetes oder ungeklärtes Jobmaterial folgt ausschließlich dem Cleanupzustand des konsolidierten Fachplans: bewiesenes Controllerende, abgeschlossene Reconciliation/Callback-/JID-Verträge, persistierter Restlog/Evidence-Fingerprint, Diagnosefrist und Cleanup-Lease. Geheiminputs werden getrennt unmittelbar nach bewiesenem Controllerende gelöscht; redigierte Evidenz bleibt länger. Ausschließlich der `deploy-worker` räumt beim sicheren Kontakt exakte kanonisch validierte Pfade auf; niemals ein breites altersbasiertes `find` oder ein fremdes/manipuliertes Verzeichnis. Positive/negative Tests beweisen normalen Cleanup, Verbindungsabbruch, hart unterbrochenen Vorlauf, aktive/unklare Unit, Symlink-/Traversalabwehr, falschen Owner, Restore-Generation und den gedrosselten Sweep-Logeintrag.
 
 Etappe 8 ist erst abgeschlossen, wenn Workerzustand, Schrittgrenzen, Cancel-CAS, Pause, Audit, Joblog, Remote-Cleanup und Containerlog als zusammenhängender Beobachtbarkeitsvertrag geprüft sind. In derselben Etappe werden die dazugehörigen Hilfesätze, ADR-0033, das Inventar-/Deploy-Runbook, QA-/Deployment-Aussagen und der Changelog-Abschnitt aktualisiert. Der Soll/Ist-Abgleich beweist außerdem, dass kein Fehler als erfolgreich persistiert wird, kein angenommener Abbruch ein weiteres Playbook startet, kein Secret in einem dauerhaften oder flüchtigen Log landet und keine neue Kategorie den Machine-API-Wire-Contract erreicht.
 
@@ -1087,7 +1105,7 @@ Jede nachfolgende Etappe endet zwingend mit dem vollständigen Commit-/Push-Absc
 7. Übergabe zwischen Etappe 5 und 6: den separaten AD/LDAPS-Feature-Branch reviewen und ohne Force integrieren; danach Migration `0040`, deaktivierten Default, grünen internen Code-Nachweis und den weiterhin offenen Ziel-AD-Aktivierungsgate gegen den Baseline-Vertrag aus Abschnitt 0 prüfen. Erst dann Etappe 6 auf der neuen Baseline beginnen.
 8. Etappe 6: Exception-Datei, Require-Contract und alle SSH-/SFTP-Producer einschließlich abgeschlossenem `ssh.php`-Domänensplit samt Hilfe-/Doku-/Logwirkung; danach Soll/Ist-Abgleich und Abnahmezeile.
 9. Etappe 7: zuerst Ansible-Inventory-Parser-/Artifact-Split, dann gemeinsame dependency-arme Ansible-Abbildung samt Verbrauchertexten, Audit-/Pausewirkung und Betriebsdoku; danach Soll/Ist-Abgleich und Abnahmezeile.
-10. Etappe 8: zuerst Ansible-Command- sowie Missions-/Inventory-Prozessor-Split, dann Phasen, Throwable-Wiring, Preflight, Playbook-Klassifikation und Pause. Anschließend einzelne Remote-Playbookschritte, Ownership-/Cancel-CAS, Ausgabe-/Volumenhärtung, Markerphasen, Remote-Artefaktsweep und vollständiger Secret-Sentinel auf Basis des DB-Kanals; gezielte Unit/Integration sowie Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile.
+10. Etappe 8/8R: zuerst Ansible-Command- sowie Missions-/Inventory-Prozessor-Split, dann 8R-0 bis 8R-5 exakt nach Abschnitt 24 des konsolidierten Fachplans. Runner/Launcher und Hostpreflight kommen vor Schema/Fencing; Inventar ist erster Pilot; Reaper-Recovery wird nie vor dem Recoveryconsumer eines Modus aktiviert; Export, Start, Autostart und Powercycle folgen einzeln. Phasen, Throwable-Wiring, Playbook-Klassifikation, Claim-Pause, Ownership-/Cancel-CAS, Ausgabe-/Volumenhärtung, Marker, evidenzgebundener Cleanup und Secret-Sentinel schließen die Etappe. Create/Full bleiben bis 14B gesperrt. Danach gezielte Unit/Integration/Faults sowie Help/Doku/Logs/Protokolle, Soll/Ist-Abgleich und Abnahmezeile.
 11. Etappe 9: sichtbare Portalzweige, handlungsfähige Links und Zugangstest samt Help/Doku/Log-/RBAC-Abgleich; danach Soll/Ist-Abgleich und Abnahmezeile.
 12. Etappe 10: Betriebsabnahme und getrennter Deploy-QoL-Hunk samt aktualisierter Hilfe/Doku/Logs/Protokolle; danach Soll/Ist-Abgleich und Abnahmezeile.
 13. Etappe 10A: Repositorycursor, echter Initial-Tail, vollständiger Terminaldrain, Older-Pagination, bounded DOM-Grundvertrag und vollständiger autorisierter Rohdownload; danach Limit-/Race-/Retention-/RBAC-Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
@@ -1096,16 +1114,19 @@ Jede nachfolgende Etappe endet zwingend mit dem vollständigen Commit-/Push-Absc
 16. Etappe 10D: gespiegelter Server-/Client-PowerShell-Logvertrag, lokale Loggingmodule, Retention, Sinkstörungsdrosselung sowie Installer-/Packagingparität ohne Wireänderung; danach Pester/Packaging/Upgrade, Help/Doku/Logs/Protokolle und Abnahmezeile.
 17. Etappe 11: kollisionssichere UX-Basis, verhaltensgleicher `check.ps1`-Modulsplit, gemeinsamer Browserresolver und isolierter Visual-Harness; danach Runner-Golden-/Fast-/Determinismusnachweise, Help/Doku/Logs/Protokolle und Abnahmezeile.
 18. Etappe 12: zuerst Deploy-/Settings-Seiten- und Deploy-JS-Splits unter Erhalt der AD-/HTTPS-Kopplung und sämtlicher Action-Scanner, dann Passwort/Dauer/`updated`, vollständige Live-Deploy-Blocker, Missionslinks und Help-URL-SSoT; danach gezielte Unit/Static/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
-19. Etappe 13: zuerst Layout-/Systemstatus-/Credentials-Splits unter Erhalt des Directory-Panels, dann lokalisierter Portal-Zustandswortschatz, robuster JSON-Poller und die auf 10A/10B aufbauende Joblog-UX mit Follow, Scrollpause, Visibility-Catch-up, Livezustand, Phasen, Suche/Filter/Wrap und live aktualisiertem Cancel-/Terminalblock; danach Unit/Integration/Visual, Help/Doku/Logs/Protokolle, unveränderte Roh-/Wire-Verträge und Abnahmezeile.
+19. Etappe 13/13R: zuerst Layout-/Systemstatus-/Credentials-Splits unter Erhalt des Directory-Panels, dann lokalisierter Portal-Zustandswortschatz, robuster JSON-Poller und die auf 10A/10B aufbauende Joblog-UX. 13R ergänzt denselben drei-achsigen Deploy-Dienstsnapshot für Dashboard, Deployseite, Systemstatus und Health, Queue-/Pause-/Recoverydarstellung sowie ausschließlich DB-basierte Aktionen. Follow, Scrollpause, Visibility-Catch-up, Livezustand, Phasen, Suche/Filter/Wrap und Cancel-/Terminalblock bleiben Teil derselben Abnahme; danach Unit/Integration/Visual, Help/Doku/Logs/Protokolle und unveränderte Roh-/Wire-Verträge.
 20. Etappe 14: zuerst VM-Repo-/VM-Editor-Splits, dann Formular-Migrationsmatrix und gemeinsame Accessibility-API einschließlich Settings-Partials; Directory-Konfiguration, Zuordnungsformulare und lokale Konten bleiben vollständig in der Matrix. Danach DOM/axe/Keyboard/Integration, Help/Doku/Logs/Protokolle und Abnahmezeile.
-21. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie strukturierte Audit-/exakte Korrelationsfilter mit Kopieraktion und CSV-Kappungsparität; Directory-Auditkategorien und RBAC-Zweige bleiben erhalten. Danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
-22. Etappe 16: zuerst kaskadengleicher `components.css`-Split und zentrale Style-Registry, dann Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
-23. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
-24. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-25. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-26. Release-Lane, Visualprojekt sowie kontrollierten Staging-DB-, langen Joblog-, Cancel-Race- und Secret-Sentinel-Drill vollständig und mit `[n/total]`-Fortschritt grün. Die AD/LDAPS-Produktivfreigabe bleibt davon getrennt und verlangt zusätzlich das vollständig grüne Ziel-AD-Protokoll.
-27. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle, AD/LDAPS-Baseline und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
-28. Der Gesamtabgleich erzeugt keinen Sammelcommit für vergessene Arbeiten. Findet er einen notwendigen Hunk, wird dessen verursachende Etappe wieder geöffnet, erneut vollständig geprüft, separat committed und gepusht; abschließend müssen alle eigenen Planänderungen in den protokollierten Upstream-Hashes enthalten sein.
+21. Etappe 14A: Netzwerk-/MAC-Pakete A bis H aus dem konsolidierten Fachplan. Alle Writer, Queue/Repo/Worker, Callbackresultat und Retry verwenden denselben VLAN-Vertrag; Remote-/Identity-Blocker haben beim Retry Vorrang. Danach Unit/Integration/Machine-API/E2E, Bestandsaudit, Help/Doku/Logs/Protokolle und Abnahmezeile.
+22. Etappe 14B: den Create-Plan als untergeordneten per-VM-Owner umsetzen. Jede materialisierte VM erhält ein gebundenes `create.vm.<position>`-Remotehandle, JID und Identitätsbeweis; `ExitType=cgroup` wird real bewiesen; Recovery bleibt am Quelljob. Create und Full erst nach vollständiger Fault-/EZT-Abnahme aktivieren.
+23. Etappe 14C: PID-1-Supervisor, getrennte Supervisor-/Kindheartbeats, TERM/KILL/waitpid, Cooldown und Compose-Health. Abnahme beweist einen geheilten Kind-Hang ohne zweite Unit/JID/VM; erst danach Freigabe.
+24. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie strukturierte Audit-/exakte Korrelationsfilter mit Kopieraktion und CSV-Kappungsparität; Remote-/Resolutionevents, Directory-Auditkategorien und RBAC-Zweige bleiben erhalten. Danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+25. Etappe 16: zuerst kaskadengleicher `components.css`-Split und zentrale Style-Registry, dann Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
+26. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
+27. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+28. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+29. Release-Lane, Visualprojekt sowie kontrollierten Remote-Fault-, Restore-, langen EZT/Create-, Netzwerk-/MAC-, Staging-DB-, langen Joblog-, Cancel-Race- und Secret-Sentinel-Drill vollständig und mit `[n/total]`-Fortschritt grün. Die AD/LDAPS-Produktivfreigabe bleibt davon getrennt und verlangt zusätzlich das vollständig grüne Ziel-AD-Protokoll.
+30. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle, AD/LDAPS-Baseline, konsolidierten Fachplan und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
+31. Der Gesamtabgleich erzeugt keinen Sammelcommit für vergessene Arbeiten. Findet er einen notwendigen Hunk, wird dessen verursachende Etappe wieder geöffnet, erneut vollständig geprüft, separat committed und gepusht; abschließend müssen alle eigenen Planänderungen in den protokollierten Upstream-Hashes enthalten sein.
 
 ---
 
@@ -1234,7 +1255,7 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 - Änderung von `VIRTUSPHERE_RUN_ERROR_*` oder MECM-Laufberichten.
 - Änderung der Machine-API-Wire-Contracts.
 - Rückwirkender, spekulativer Backfill alter Fehlercodes.
-- Behauptung, ein Ansible-Prozess laufe nach SSH-Disconnect sicher weiter. Gesichert ist nur, dass vor dem Timeout bereits externe Änderungen erfolgt sein können.
+- Unbelegte Behauptung, ein beliebiger Ansible-Prozess laufe nach SSH-Disconnect sicher weiter. Vor 8R ist nur gesichert, dass bereits externe Änderungen erfolgt sein können; nach 8R darf Fortlauf ausschließlich aus passender aktiver systemd-Cgroup beziehungsweise dauerhaften Started-/Result-/JID-Beweisen abgeleitet werden.
 - Historischer Snapshot des Missionsnamens; die Anzeige benennt bewusst den aktuellen Missionsdatensatz.
 - Behauptung eines tatsächlich realisierten Festplattentyps ohne Rücklese-Evidenz von ESXi.
 - Generischer Dashboard-„Nächster Schritt“, Help-Inhaltsverzeichnisse und noch nicht gegen den finalen Blockervertrag spezifizierte Cadence-Zeilen.
