@@ -76,6 +76,10 @@ function portal_error_message(Throwable $exception): string
         // repo_save_vm rejects the second save. Reachable by construction, so it
         // must speak the operator's language, not raw English.
         'VM was changed by another user. Reload before saving.' => 'vm_edit.err_conflict',
+        // The mission import refuses a blocked payload server-side even though
+        // the confirm button is disabled: a preview that went stale between the
+        // render and the click posts straight into this guard.
+        'Import is blocked; resolve the reported issues first.' => 'missions.import_err_blocked',
     ];
     if (isset($operatorReachableErrors[$message])) {
         return __t($operatorReachableErrors[$message]);

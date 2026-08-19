@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/format.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
+require_once __DIR__ . '/../lib/missions_import_panel.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 
@@ -200,11 +201,32 @@ if ($importToken !== '' && !$isTemplateView && can('missions.write', $user)) {
             $importPreview = [
                 'token' => $importToken,
                 'suggested_name' => $suggestedName,
+                'exported_at' => (string) ($state['payload']['exported_at'] ?? ''),
                 'report' => $report,
             ];
         } catch (Throwable $previewError) {
+            // A dry run that cannot produce a report at all (an unreadable
+            // document, a database failure) drops the hand-off, and it must say
+            // so: this catch used to be the unset alone, so the page fell back to
+            // the empty upload form with no flash and no log entry, which is
+            // exactly the "nothing happens on Preview" the operator reported.
             unset($_SESSION['mission_import']);
+            flash_set('error', portal_error_message($previewError));
         }
+    } elseif (is_array($state) && hash_equals((string) ($state['token'] ?? ''), $importToken)) {
+        // This link's own hand-off is still in the session and only its TTL has
+        // run out: "expired" is an established fact here, so it may be said.
+        unset($_SESSION['mission_import']);
+        flash_set('error', __t('missions.import_err_expired'));
+    } else {
+        // No hand-off at all, or one belonging to a different upload. Reached
+        // after Cancel, after a SUCCESSFUL import followed by the Back button,
+        // and from a stale link out of another session. Which of those it was is
+        // not knowable here, so the message states only what is established:
+        // there is no preview behind this link any more. Claiming "expired"
+        // would assert a cause this path never checked.
+        unset($_SESSION['mission_import']);
+        flash_set('error', __t('missions.import_err_gone'));
     }
 }
 
@@ -225,63 +247,10 @@ layout_header($title, $user, $active, 'missions');
 
     <?php if (!$isTemplateView && can('missions.write', $user)) { ?>
         <?php if ($importPreview !== null) {
-            $report = $importPreview['report'];
-            $structuralBlock = $report['missing_vlans'] !== [] || $report['vm_name_conflicts'] !== [];
-        ?>
-            <section class="panel">
-                <h2><?php echo h(__t('missions.import_preview_heading')); ?></h2>
-                <p class="muted"><?php echo h(__t('missions.import_mac_note')); ?></p>
-                <div class="table-wrap" tabindex="0"><table>
-                    <tbody>
-                        <tr><th><?php echo h(__t('common.vms')); ?></th><td><?php echo h((string) $report['counts']['vms']); ?></td></tr>
-                        <tr><th><?php echo h(__t('missions.import_count_interfaces')); ?></th><td><?php echo h((string) $report['counts']['interfaces']); ?></td></tr>
-                        <tr><th><?php echo h(__t('missions.import_count_disks')); ?></th><td><?php echo h((string) $report['counts']['disks']); ?></td></tr>
-                        <tr><th><?php echo h(__t('missions.import_count_packages')); ?></th><td><?php echo h((string) $report['counts']['packages']); ?></td></tr>
-                    </tbody>
-                </table></div>
-
-                <?php // Both catalog findings tell the operator to create something; the
-                      // catalog is a different page and a different permission, so the
-                      // link is gated like the page that owns the fix. ?>
-                <?php if ($report['missing_vlans'] !== []) { ?>
-                    <div class="alert alert-error"><strong><?php echo h(__t('missions.import_missing_vlans')); ?></strong> <?php echo h(implode(', ', $report['missing_vlans'])); ?><?php if (can('catalog.write', $user)) { ?> <a href="vlans.php"><?php echo h(__t('missions.import_vlans_link')); ?></a><?php } ?></div>
-                <?php } ?>
-                <?php if ($report['vm_name_conflicts'] !== []) { ?>
-                    <div class="alert alert-error"><strong><?php echo h(__t('missions.import_vm_conflicts')); ?></strong> <?php echo h(implode(', ', $report['vm_name_conflicts'])); ?></div>
-                <?php } ?>
-                <?php if ($report['missing_packages'] !== []) { ?>
-                    <div class="alert alert-warning"><strong><?php echo h(__t('missions.import_missing_packages')); ?></strong> <?php echo h(implode(', ', $report['missing_packages'])); ?><?php if (can('catalog.write', $user)) { ?> <a href="packages.php"><?php echo h(__t('missions.import_packages_link')); ?></a><?php } ?></div>
-                <?php } ?>
-
-                <form class="form-grid" method="post" action="missions.php?type=missions">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="import_confirm">
-                    <input type="hidden" name="import_token" value="<?php echo h($importPreview['token']); ?>">
-                    <label><?php echo h(__t('missions.import_new_name_label')); ?>
-                        <input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h((string) $importPreview['suggested_name']); ?>" required>
-                        <?php if ($report['name_conflict']) { ?><span class="field-error"><?php echo h(__t('missions.import_name_conflict')); ?></span><?php } ?>
-                    </label>
-                    <div class="actions">
-                        <button class="button" type="submit" <?php echo $structuralBlock ? 'disabled' : ''; ?>><?php echo h(__t('missions.import_confirm_btn')); ?></button>
-                        <a class="button button-secondary" href="missions.php?type=missions"><?php echo h(__t('common.cancel')); ?></a>
-                    </div>
-                    <?php if ($structuralBlock) { ?><p class="muted"><?php echo h(__t('missions.import_blocked_note')); ?></p><?php } ?>
-                </form>
-            </section>
-        <?php } else { ?>
-            <section class="panel">
-                <h2><?php echo h(__t('missions.import_heading')); ?></h2>
-                <p class="muted"><?php echo h(__t('missions.import_hint')); ?></p>
-                <form class="form-grid" method="post" action="missions.php?type=missions" enctype="multipart/form-data">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="import_preview">
-                    <label><?php echo h(__t('missions.import_file_label')); ?>
-                        <input type="file" name="import_file" accept="application/json,.json" required>
-                    </label>
-                    <div class="actions"><button class="button button-secondary" type="submit"><?php echo h(__t('missions.import_preview_btn')); ?></button></div>
-                </form>
-            </section>
-        <?php } ?>
+            missions_render_import_preview($importPreview, $user);
+        } else {
+            missions_render_import_upload();
+        } ?>
     <?php } ?>
 
     <section class="panel">

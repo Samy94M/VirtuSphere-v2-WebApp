@@ -133,5 +133,7 @@ Kurzfassung auch im Hilfe-Panel `stack`; hier die ausführlichen Maßnahmen.
 | Banner/Karte `disk_low` (<10 %) | Backup-Volume voll | Ältere Läufe/`KEEP` prüfen, Volume vergrößern |
 | Karte zeigt `unknown` nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sh scripts/backup.sh` laufen lassen |
 | Import bricht ab | Fehlende VLANs, falsche Version, kein JSON | Fehlliste in der Vorschau lesen; VLANs zuerst anlegen; Datei aus passender Version exportieren |
-| Import-Vorschau abgelaufen | Zwischenstand älter als 10 Minuten | Datei erneut hochladen |
+| Vorschau zeigt Befunde, Bestätigen ist grau | Blockierend sind: fehlende VLANs, global vergebene VM-Namen, VM-Namen doppelt in derselben Datei, ungültige Angaben zur Mission oder zu VMs, ungültiger oder bereits vergebener Zielname | Namensprobleme im Feld der Vorschau selbst korrigieren; alle übrigen Befunde in der Exportdatei beheben und neu hochladen. Fehlende Pakete blockieren nicht, sie werden übersprungen |
+| „Die Vorschau ist abgelaufen" | Der Zwischenstand dieses Links lebt noch, seine Frist ist aber abgelaufen | Datei erneut hochladen |
+| „Zu diesem Link gibt es keine Vorschau mehr" | Hinter dem Link liegt kein Zwischenstand: nach Abbrechen, nach einem erfolgreich bestätigten Import mit Browser-Zurück oder bei einem Link aus einer fremden Sitzung. Welcher Fall es war, steht nicht fest, deshalb sagt die Meldung es auch nicht | Nur wenn der Import wirklich noch aussteht: Datei erneut hochladen |
 | CSV in Excel einspaltig | Alt-Datei mit Komma statt Semikolon | Aktuellen Export nutzen (Semikolon-Trennung, UTF-8-BOM); Symptom tritt mit dem aktuellen Export nicht auf |

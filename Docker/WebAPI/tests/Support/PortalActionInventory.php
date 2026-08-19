@@ -61,23 +61,21 @@ final class PortalActionInventory
             $pages['portal/' . basename($path)] = (string) file_get_contents($path);
         }
 
-        // system_status.php is deliberately a controller; its forms live in the
-        // focused renderers but still post to system_status.php and therefore
-        // belong to that page's closed action inventory. Every lib module the
-        // page renders through is globbed rather than listed, so splitting a
-        // renderer for the ADR-0006 line budget cannot quietly drop its forms
-        // out of the confirm and post-guard contracts (it did: the ESXi refresh
-        // and the VLAN reassign vanished from the inventory the moment they
-        // moved into a second module).
-        foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/system_status_*panels.php') ?: [] as $renderer) {
-            $pages['portal/system_status.php'] .= (string) file_get_contents($renderer);
-        }
-
-        // users.php follows the same controller/renderer split for account and
-        // directory administration. Keep its forms inside the one closed action
-        // inventory even when another focused renderer is added later.
-        foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/users_*_panels.php') ?: [] as $renderer) {
-            $pages['portal/users.php'] .= (string) file_get_contents($renderer);
+        // A page that outgrew the ADR-0006 line budget keeps its forms in
+        // lib/<page>_*.php renderers, and those forms still post to the page, so
+        // they belong to its one closed action inventory. The rule is DERIVED
+        // from the page names, never a list of renderers: a per-page glob written
+        // by hand is the same defect one level up, and it had already bitten
+        // twice - the ESXi refresh and the VLAN reassign vanished the moment they
+        // moved into a second system_status module, and the mission import
+        // vanished the moment its panel moved out of missions.php. A new split
+        // now needs no edit here; a renderer named after no page is not a page
+        // renderer and stays out.
+        foreach (array_keys($pages) as $page) {
+            $prefix = basename($page, '.php');
+            foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/' . $prefix . '_*.php') ?: [] as $renderer) {
+                $pages[$page] .= "\n" . (string) file_get_contents($renderer);
+            }
         }
 
         return $pages;
