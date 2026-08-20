@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/repo/vm_location.php';
-
+require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1167,8 +1167,8 @@ SQL;
 
         migrator_out('0041: deploy job log sources extended (ansible, worker_error)');
     },
+    '0042_remote_execution_foundation' => migrate_0042_remote_execution_foundation(...),
 ];
-
 try {
     $db = db();
     $checkOnly = in_array('--check', $argv ?? [], true);

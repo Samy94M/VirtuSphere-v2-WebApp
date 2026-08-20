@@ -32,6 +32,15 @@ Legacy-Kette. Linger, User-Bus, cgroup-Enforcement, Kapazitätsgrenzen, reale
 Faults und Rückbau bleiben am echten Air-Gap-/Ansible-/ESXi-Ziel nachzuweisen.
 `create` und `full` sind zusätzlich bis Etappe 14B ausgeschlossen.
 
+Migration 0042 bereitet dafür nur persistente Identität und Fencing vor. Die
+Runtime-Generation wird einmal zufällig erzeugt; Lease, Epoch, Jobtoken,
+Ausführungsvertrag, Remotehandle und Recoveryzustände besitzen getrennte
+Felder. Die globale Claim-Pause und jede Credential-/Moduszeile starten
+fail-closed. In 8R-O-2 liest der aktive Worker diese Grundlage noch nicht und
+läuft deshalb verhaltensgleich auf dem bisherigen Pfad; das Umschalten von
+Claim, Reaper und Recovery ist ein gemeinsames späteres 8R-S-Fenster und darf
+nicht stückweise erfolgen.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.

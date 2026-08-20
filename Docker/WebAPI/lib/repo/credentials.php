@@ -7,6 +7,7 @@ require_once __DIR__ . '/../crypto.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/deploy_remote_mode_activation.php';
 
 function credential_normalize_type(string $type): string
 {
@@ -190,11 +191,14 @@ function repo_create_credential(mysqli $db, array $data, string $secret, int $cr
     $ciphertext = crypto_encrypt_secret($secret);
     $trustMode = VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW;
 
-    $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->bind_param('sssisssssi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustMode, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $createdBy);
-    $stmt->execute();
-
-    return (int) $db->insert_id;
+    return repo_transaction($db, static function () use ($db, $values, $ciphertext, $trustMode, $createdBy): int {
+        $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('sssisssssi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustMode, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $createdBy);
+        $stmt->execute();
+        $credentialId = (int) $db->insert_id;
+        repo_sync_disabled_remote_activations($db, $credentialId, $values['type']);
+        return $credentialId;
+    });
 }
 
 function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null): bool
@@ -233,12 +237,14 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
         $stmt->bind_param('sssisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     }
 
-    $stmt->execute();
-    if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
-        throw new RuntimeException('Credential not found.');
-    }
-
-    return true;
+    return repo_transaction($db, static function () use ($db, $stmt, $id, $values): bool {
+        $stmt->execute();
+        if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
+            throw new RuntimeException('Credential not found.');
+        }
+        repo_sync_disabled_remote_activations($db, $id, $values['type']);
+        return true;
+    });
 }
 
 function credential_assert_strict_esxi_https(array $values, string $trustMode): void

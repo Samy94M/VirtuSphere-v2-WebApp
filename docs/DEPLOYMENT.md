@@ -161,6 +161,14 @@ Mindestfreiplatz hat absichtlich keinen Default: Ohne einen autorisierten
 8R-S-Lauf auf dem echten Ziel und den späteren Evidenzimport bleiben alle neuen
 Remote-Modi `disabled`; der bestehende SSH-Pfad ändert sich dadurch nicht.
 
+Migration `0042_remote_execution_foundation` ist dieselbe fail-closed Grenze in
+der Datenbank: Sie erzeugt die Runtime-Generation genau einmal, speichert die
+globale Claim-Pause und legt Aktivierungszeilen ausschließlich als `disabled`
+ohne Vertrag an. Die neuen Job-, Lease-, Handle- und Recoveryspalten sind
+additiv; bestehende Claims, Reaper und SSH-Schritte lesen sie in 8R-O-2 noch
+nicht. Vor einer späteren Verdrahtung bleiben Backup, Claim-Pause/Drain,
+einheitliche Revision und 8R-S-Standortevidenz zwingend.
+
 Use the migration checker before deployments or after changing `.env`:
 
 ```bash

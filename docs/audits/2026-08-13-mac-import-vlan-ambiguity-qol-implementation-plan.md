@@ -1367,6 +1367,18 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
    Installation, Linger/User-Bus/cgroup-, Ressourcen-, Fault-, Mess-,
    Beobachtungs- und Rückbaunachweise am Ziel; sie bleiben vollständig 8R-S.
 3. **8R-O-2 Additives Schema und Fencinggrundlage:** Migration/Fresh-Schema, Remote-Repositories, Runtime-Identität, globale Lease/Epoch, Jobtoken, Claim-Pause, explizite deaktivierte Moduszeilen und report-only Snapshot lokal beweisen. Keine Aktivierung und kein Rollout auf das unbekannte Ziel.
+
+   **Umgesetzt 2026-08-20 (offline):** Migration 0042 und Frischschema
+   enthalten nullable Job-Fencingfelder, die einmalige zufällige
+   Runtime-Generation, Supervisorvertrag, globale Lease/Epoch mit persistierter
+   Claim-Pause, deaktivierte Credential-/Moduszeilen, Remote-Handles und
+   append-only Recovery-Resolutionen. Bestehende Ansible-Zugänge werden durch
+   die Migration, neue Zugänge atomar bei Erstellung ausschließlich mit
+   `disabled`/`NULL` materialisiert. PHP-Registries, Datenbank-Checks und der
+   Quellenvertrag halten Zustände, Modusmenge, Fresh-/Migrationsschema,
+   Einmal-Generation und report-only Grenze zusammen. Claim, Reaper und
+   SSH-Ausführung bleiben absichtlich unverdrahtet: Lease-/Heartbeat-/Grace-
+   Werte und die atomare Aktivierung gehören weiterhin 8R-S.
 4. **8R-O-3 Deaktivierter Inventarconsumer:** Prepare/Launch/Poll/Reattach/Result/Logoffset/Cleanup und Recoverypfade implementieren; lokale Protokoll-/DB-/Prozess-Faulttests beweisen fail-closed Verhalten. Der Consumer bleibt bis 8R-S unerreichbar.
 5. **8R-O-4 Reaper/Recoverygrundlage:** vollständige persistierte Reaper-/Recoverymatrix, VM-Sweep, Legacyfälle, Callbackraces und manuelle Resolution lokal beweisen. Altes Reaperverhalten ändert sich erst atomar mit einer standortfreigegebenen Modusaktivierung.
 6. **8R-O-5 Mutierende Policies ohne Aktivierung:** Export, Start, Autostart und Powercycle erhalten getrennte Policy-/Aktivierungs- und Reconciliationowner sowie lokale Faulttests. Alle Zustände bleiben `disabled`; Create/Full bleiben gesperrt.
