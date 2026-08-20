@@ -70,6 +70,8 @@ const FILE_SIZE_ALLOWANCES = [
     // lib/ansible_command.php (523) left this table in Etappe 8: shell quoting,
     // mode/marker planning and the preflight/probe domain are now separate
     // modules behind a facade.
+    // lib/layout.php (706) left this table with the Etappe-8 rest findings:
+    // response/flash and status presenters are now separate from page chrome.
     'Docker/WebAPI/portal/deploy.php' => [
         'lines' => 667,
         'why' => 'POST dispatch, view model, queue form and job list; grows further with the live blocker model',
@@ -79,11 +81,6 @@ const FILE_SIZE_ALLOWANCES = [
         'lines' => 952,
         'why' => 'eleven POST actions, five tabs, view model and large renderers',
         'stage' => 'Etappe 12/14',
-    ],
-    'Docker/WebAPI/lib/layout.php' => [
-        'lines' => 666,
-        'why' => 'chrome, flash, auth, formatting, badges, status labels and catalog filter are not one display domain',
-        'stage' => 'Etappe 13',
     ],
     'Docker/WebAPI/lib/system_status_panels.php' => [
         'lines' => 464,
