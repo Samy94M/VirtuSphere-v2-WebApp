@@ -25,6 +25,12 @@ final class EsxiTrustModeIntegrationTest extends TestCase
 
     protected function tearDown(): void
     {
+        // db() throws when the database is unreachable, and PHPUnit runs
+        // tearDown after a failed setUp: without this guard the real cause is
+        // buried under an uninitialised-property error.
+        if (!isset($this->db)) {
+            return;
+        }
         foreach ($this->credentialIds as $id) {
             $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE credential_esxi_id = ? OR credential_ansible_id = ?');
             $stmt->bind_param('ii', $id, $id);

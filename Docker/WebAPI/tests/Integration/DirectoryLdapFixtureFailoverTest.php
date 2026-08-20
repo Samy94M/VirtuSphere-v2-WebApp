@@ -41,6 +41,13 @@ final class DirectoryLdapFixtureFailoverTest extends TestCase
 
     protected function tearDown(): void
     {
+        // setUp() skips before it opens the connection when the fixture
+        // hostnames do not resolve, and PHPUnit runs tearDown anyway: without
+        // this guard the intended skip is reported as an uninitialised-property
+        // error instead.
+        if (!isset($this->db)) {
+            return;
+        }
         DirectoryLdapFixture::cleanup($this->db);
     }
 
