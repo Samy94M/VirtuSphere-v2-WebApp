@@ -59,6 +59,18 @@ verboten. Diese Module sind weder im Deploy-Reaper noch im Maintenance-Worker
 required. Reaper, Recoveryconsumer und VM-Sweep dürfen erst gemeinsam im
 8R-S-Fenster wechseln; bis dahin gilt unverändert der bestehende Legacy-Reaper.
 
+8R-O-5 beschreibt zusätzlich die späteren Stepgrenzen für Export, Start,
+Autostart und Powercycle in `lib/remote_step_policy.php`. Die Registry übernimmt
+die Reihenfolge aus `ansible_playbooks_for_mode()`: Powercycle bleibt deshalb
+zwei getrennte Steps aus Powercycle und Export. Export reconciliert über den
+jobgebundenen MAC-Import und notfalls eine read-only Live-Inventarisierung;
+Start über UUID/MOID, Powerstate und aktive Task; Autostart über materialisierte
+Soll- und Livepolicy samt HA-/Lizenzgate. Powercycle darf nur an einer belegten
+per-VM-Phase fortsetzen, nie die gesamte Gruppe wiederholen. Runtimebudgets
+bleiben mit `site_acceptance_required` markiert und werden nicht lokal geraten.
+Die Datei besitzt keinen Aktivierungswriter und keinen Aufrufer im Worker. Auch
+diese Grundlage ändert daher den unten beschriebenen Legacy-Produktpfad nicht.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.

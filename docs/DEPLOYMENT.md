@@ -177,6 +177,16 @@ Aktivierungen bleiben `disabled`, Claim-Pause bleibt gesetzt und kein Worker
 lädt den Consumer. Das ist die beabsichtigte Installationslage bis zum
 autorisierten 8R-S-Lauf; lokale Tests sind keine Aktivierungsevidenz.
 
+Dasselbe gilt für die in 8R-O-5 ergänzte Step-Policy für Export, Start,
+Autostart und Powercycle: Sie hält ausschließlich die geschlossenen
+Reconciliationanforderungen fest und wird von keinem Produktpfad geladen. Sie
+enthält keinen Setter für `deploy_remote_mode_activations`; Runtimebudgets sind
+ausdrücklich `site_acceptance_required`. Ein Deployment dieser Revision
+aktiviert daher keinen Remote-Modus. Create und Full bleiben unabhängig davon
+bis 14B gesperrt. Falls niemals eine autorisierte 8R-S-Abnahme stattfindet,
+bleiben alle Aktivierungen dauerhaft `disabled` und die Etappe wird nicht als
+Standortfreigabe ausgewiesen.
+
 Use the migration checker before deployments or after changing `.env`:
 
 ```bash

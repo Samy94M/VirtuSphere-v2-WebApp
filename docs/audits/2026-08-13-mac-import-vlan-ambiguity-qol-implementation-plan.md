@@ -1409,6 +1409,21 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
    Reapers bleiben 8R-S beziehungsweise 13R; der heutige Reaper ist bewusst
    unverändert.
 6. **8R-O-5 Mutierende Policies ohne Aktivierung:** Export, Start, Autostart und Powercycle erhalten getrennte Policy-/Aktivierungs- und Reconciliationowner sowie lokale Faulttests. Alle Zustände bleiben `disabled`; Create/Full bleiben gesperrt.
+
+   **Umgesetzt 2026-08-20 (offline, ohne Aktivierung):** Die geschlossene
+   Registry `lib/remote_step_policy.php` bildet Inventory, Export, Start,
+   Autostart und Powercycle direkt gegen die Reihenfolge aus
+   `ansible_playbooks_for_mode()` beziehungsweise die Systemplaybook-SSoT ab.
+   Pro Step sind Mutation, Reconciliationowner, Callback, Recoveryevidenz und
+   `site_acceptance_required` als Runtimebudgetquelle festgelegt. Export fordert
+   jobgebundenen Callback oder Live-Inventar, Start UUID/MOID, Powerstate und
+   Taskprüfung, Autostart Soll-/Livepolicy plus HA-/Lizenzgate und Powercycle
+   die fünf geschlossenen per-VM-Phasen; ein Gruppen-Blindretry ist nicht
+   vorgesehen. Disabled, Legacy und Rollback liefern keinen Remotevertrag,
+   Create/Full bleiben ohne Policy. Static-Verträge halten Aktivierungsschreiber
+   und Produktcaller fern. Daher gibt es bewusst keine vier Aktivierungscommits:
+   Diese entstehen erst nach vier getrennten realen 8R-S-Abnahmen. Sämtliche
+   Datenbankzeilen bleiben bis dahin `disabled`.
 7. **8R-S Standortabnahme und Aktivierung:** 8R-S-0 übernimmt die echten Host-/Messwerte. Danach werden Inventory, Export, Start, Autostart und Powercycle streng einzeln mit realer Faultmatrix, Beobachtungsfenster und Rückbau freigegeben. Jede Freigabe erhält einen eigenen Commit beziehungsweise ein revisionsgebundenes Standortprotokoll; ohne Repositoryzugriff am Standort wird der importierte Nachweis im nächsten Repositorycommit festgehalten.
 8. **13R Portalintegration:** Drei-Achsen-Snapshot, Queue-/Recovery-/Pauseanzeige, Systemstatus, Dashboard, Actions, vollständiger Tail und Barrierefreiheit auf Masterplan 10A bis 13.
 9. **14A Netzwerk/MAC:** Pakete A bis H aus Abschnitt 10 unverändert in Reihenfolge, ergänzt um die Remote-/Retry-Präzedenz aus Abschnitt 20.

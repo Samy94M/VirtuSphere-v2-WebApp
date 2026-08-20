@@ -102,6 +102,20 @@ dass die Anforderung idempotent ist und dass der heutige Reaper die neue
 Grundlage nicht lädt. Das reale gemeinsame Umschalten von Reaper, Consumer und
 VM-Sweep bleibt ein 8R-S-Nachweis.
 
+Die O5-Step-Policy wird ohne Produktverdrahtung gemeinsam mit ihrem statischen
+Unerreichbarkeitsvertrag geprüft:
+
+```powershell
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Unit/RemoteStepPolicyTest.php tests/Static/RemoteStepPolicyContractTest.php
+```
+
+Die Matrix folgt für Inventory, Export, Start, Autostart und Powercycle der
+Playbook-SSoT. Negative Fälle beweisen, dass Disabled, Legacy und Rollback nie
+`remote_v1` wählen, Create und Full keine O5-Policy besitzen, inkonsistente
+Aktivierungen blockieren und weder Aktivierungsschreiber noch Produktcaller
+hinzukommen. Das prüft lokale Policylogik, aber keine Laufzeit, externe Wirkung,
+HA-/Lizenzlage oder Powercyclephase auf dem Air-Gap-Ziel.
+
 Run the migration preflight without mutating the database:
 
 ```powershell
