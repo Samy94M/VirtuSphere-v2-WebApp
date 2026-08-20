@@ -706,7 +706,7 @@ Add-Gate -Name 'python-client-tests' -Lanes $allLanes -Kind 'container' -Body {
         if ($NoNetwork) { return New-InfraResult ('Tool-Image {0} fehlt lokal (NoNetwork: kein Pull)' -f $toolImages.python) }
     }
     $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', $toolImages.python, 'python', '-m', 'unittest', 'discover', '-s', 'Ansible/tests')
-    Format-ToolResult $r 'upload_mac_list-Client-Tests gruen' 'Python-Client-Tests rot'
+    Format-ToolResult $r 'Ansible-Python-Tests gruen' 'Ansible-Python-Tests rot'
 }
 
 # --- Integration-Lane ---------------------------------------------------------

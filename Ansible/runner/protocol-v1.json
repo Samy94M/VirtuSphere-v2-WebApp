@@ -1,0 +1,119 @@
+{
+  "protocol": 1,
+  "schemas": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "protocol", "instance_id", "generation_id", "run_token",
+        "job_id", "attempt", "step", "unit_name", "remote_dir",
+        "runtime_max_seconds", "heartbeat_interval_seconds", "output_max_bytes",
+        "playbook", "playbook_sha256", "artifacts", "redaction_file",
+        "correlation_id"
+      ],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.manifest/v1"},
+        "protocol": {"const": 1},
+        "instance_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "generation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "run_token": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "job_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "attempt": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "step": {"type": "string", "enum": ["inventory", "export", "start", "autostart", "powercycle"]},
+        "unit_name": {"type": "string", "pattern": "^virtusphere-j[1-9][0-9]*-a[1-9][0-9]*-(inventory|export|start|autostart|powercycle)-[a-f0-9]{12}\\.service$"},
+        "remote_dir": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "runtime_max_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
+        "heartbeat_interval_seconds": {"type": "integer", "minimum": 5, "maximum": 300},
+        "output_max_bytes": {"type": "integer", "minimum": 4096, "maximum": 268435456},
+        "playbook": {"type": "string", "minLength": 1, "maxLength": 255},
+        "playbook_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "artifacts": {
+          "type": "array", "minItems": 2, "maxItems": 128,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["path", "sha256", "size", "kind"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$"},
+              "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "size": {"type": "integer", "minimum": 0, "maximum": 1073741824},
+              "kind": {"type": "string", "enum": ["input", "playbook", "secret", "redaction"]}
+            }
+          }
+        },
+        "redaction_file": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$"},
+        "correlation_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,128}$"}
+      }
+    },
+    "started": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "run_token", "unit_name", "state", "pid", "written_at"],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.started/v1"},
+        "run_token": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "unit_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "state": {"type": "string", "enum": ["prepared", "running"]},
+        "pid": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "written_at": {"type": "string", "minLength": 20, "maxLength": 40}
+      }
+    },
+    "heartbeat": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "run_token", "pid", "written_at"],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.heartbeat/v1"},
+        "run_token": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "written_at": {"type": "string", "minLength": 20, "maxLength": 40}
+      }
+    },
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "run_token", "unit_name", "outcome", "exit_code", "output_truncated", "started_at", "finished_at"],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.result/v1"},
+        "run_token": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "unit_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "outcome": {"type": "string", "enum": ["completed", "failed", "runner_error"]},
+        "exit_code": {"type": "integer", "minimum": -1, "maximum": 255},
+        "output_truncated": {"type": "boolean"},
+        "started_at": {"type": "string", "minLength": 20, "maxLength": 40},
+        "finished_at": {"type": "string", "minLength": 20, "maxLength": 40}
+      }
+    },
+    "launch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "run_token", "unit_name", "decision", "written_at"],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.launch/v1"},
+        "run_token": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "unit_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "decision": {"type": "string", "enum": ["launched", "already_running", "already_finished", "recovery_required"]},
+        "written_at": {"type": "string", "minLength": 20, "maxLength": 40}
+      }
+    },
+    "preflight": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "written_at", "host_fingerprint", "required_free_bytes", "ready", "checks", "scope"],
+      "properties": {
+        "schema": {"const": "virtusphere.remote.preflight/v1"},
+        "written_at": {"type": "string", "minLength": 20, "maxLength": 40},
+        "host_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "required_free_bytes": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "ready": {"type": "boolean"},
+        "checks": {
+          "type": "array", "minItems": 1, "maxItems": 32,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "ok", "detail"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z0-9:-]{1,64}$"},
+              "ok": {"type": "boolean"},
+              "detail": {"type": "string", "minLength": 1, "maxLength": 500}
+            }
+          }
+        },
+        "scope": {"const": "site-evidence-only; does-not-activate-remote-execution"}
+      }
+    }
+  }
+}

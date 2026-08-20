@@ -35,7 +35,7 @@ Ausführungsformen: **nativ** (Host-Tools), **containerisiert** (läuft über Do
 | `ansible-powercycle-selection` | Die Auswahl-Ketten des Power-Cycle-Playbooks (wen darf der Lauf schalten) laufen zeichengleich gegen Fixtures: an/aus/suspendiert, fehlendes `needs_mac`, leere Eingaben, kaputte Modulantworten | containerisiert | Auswahl weicht vom Vertrag ab oder Fixture-Datei driftet vom Playbook (`PowercyclePlaybookContractTest` pinnt beide) |
 | `yaml-roundtrip` | Golden-Mission rendert durch die Produktions-Generatoren und PyYAML liest sie semantisch identisch (Anhang-C-Nachfolger) | containerisiert | Generator-Änderung ohne nachgezogenen `expected`-Block; genau dieses Gespräch ist gewollt |
 | `shellcheck` / `hadolint` | Shell-Skripte und Dockerfiles | containerisiert | Echte Findings; Ausnahmen nur inline mit Grund |
-| `python-client-tests` | `upload_mac_list.py` (stdlib-only) inkl. Exitcode-Vertrag 0/20-24 | containerisiert | Rückkanal-Contract verletzt (ADR-0030) |
+| `python-client-tests` | `upload_mac_list.py` (stdlib-only) inkl. Exitcode-Vertrag 0/20-24 sowie geschlossener 8R-O-Runner-Vertrag, Redaction, Atomizität und read-only Preflight | containerisiert | Rückkanal-Contract (ADR-0030) oder Durable-Runner-Protokoll (ADR-0040) verletzt |
 
 ## Integration-Lane (Merge, Nightly, Release-Kandidaten)
 

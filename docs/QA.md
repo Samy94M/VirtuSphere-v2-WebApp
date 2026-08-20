@@ -36,7 +36,7 @@ The `compose-hardening` gate (all lanes) runs `scripts/check-compose-hardening.p
 
 The Release lane adds the supply-chain gates. `sbom` writes an SPDX SBOM per runtime image; `image-cve` scans each image with the digest-pinned trivy from `scripts/tool-lock.json`. Its documented policy: the full report (including unfixable findings) goes to the QA artifacts, but the gate only **blocks** on Critical/High findings that have a fix available (`--ignore-unfixed`) — a gate that is permanently red on Debian `will_not_fix` entries guards nothing. Exceptions live in `.trivyignore.yaml` and are only valid with CVE ID, justification, owner and an `expired_at` date; trivy re-reports expired entries automatically, so an expired exception breaks the build exactly like a missing one. `npm-audit` is the composer-audit counterpart for the dev-host e2e tooling (`tests/e2e`), blocking at `high`.
 
-`offline-bundle` (Release lane) runs `scripts/build-offline-bundle.sh`: it saves the runtime images, builds `vendor.tar.gz` (`composer install --no-dev` inside the PHP image), downloads the Ansible collections for the air-gapped control node, produces SBOMs and CVE reports, snapshots the source (`git archive`), writes `provenance.json`, `INSTALL.md` and a `SHA256SUMS` manifest, and then verifies itself with the bundled `verify.sh` — which needs only `sha256sum` and no network, matching how the target system verifies it offline.
+`offline-bundle` (Release lane) runs `scripts/build-offline-bundle.sh`: it saves the runtime images, builds `vendor.tar.gz` (`composer install --no-dev` inside the PHP image), downloads the Ansible collections for the air-gapped control node, adds the closed 8R-O durable-runner payload after verifying its own `runner/SHA256SUMS`, produces SBOMs and CVE reports, snapshots the source (`git archive`), writes `provenance.json`, `INSTALL.md` and a bundle-wide `SHA256SUMS` manifest, and then verifies itself with the bundled `verify.sh` — which needs only `sha256sum` and no network, matching how the target system verifies it offline. The runner installer and read-only preflight do not activate a product mode or change linger; their target-host output is still an open 8R-S artifact.
 
 ### Integration lane and the QA stack
 
@@ -60,7 +60,7 @@ Run PHPStan (level 5, baseline ratchet per ADR-0015) inside the PHP container:
 docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html run stan
 ```
 
-Run the stdlib-only MAC upload client tests in an isolated Python container:
+Run the stdlib-only Ansible client and durable-runner protocol tests in an isolated Python container. The runner cases cover closed golden vectors, unknown fields, token/hash/path/symlink rejection, atomic result files, bounded redacted output, no duplicate launch decision and a read-only preflight:
 
 ```powershell
 docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo:ro -w /repo python:3.13-alpine python -m unittest discover -s Ansible/tests -v

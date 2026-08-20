@@ -1353,6 +1353,19 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
 
 1. **8R-O-0 Planharmonisierung und Offline-Charakterisierung:** Master-/Create-Widersprüche markieren, vorhandene lokale Revision, Migration, Jobs, Worker, Fixtures und Offline-Artefakte erheben. Nicht erreichbare Host-/Laufzeitwerte werden als 8R-S-Nachweis registriert, nicht geraten. Keine Verhaltensänderung.
 2. **8R-O-1 ADR, Protokoll, Runner und Offline-Bundle:** Remote-Protokoll, Launcher/Runner, Golden Vectors, Checksummen, Statepfad und read-only Hostpreflight implementieren. Der Preflight ist am Ziel ausführbar, aber ohne importierten Standortnachweis nutzt ihn kein Produktivjob.
+
+   **Umgesetzt 2026-08-20 (offline):** Der geschlossene v1-Vertrag liegt unter
+   `Ansible/runner/` und erlaubt nur die einzeln zugeordneten Schritte
+   Inventory, Export, Start, Autostart und Powercycle. Launcher und Runner
+   prüfen Identität, abgeleiteten Pfad/Unitnamen, Eigentum, Modi, Symlinks,
+   Artefaktgrößen und SHA-256; freie Shell-/Argumentlisten gibt es nicht.
+   Marker werden atomar geschrieben, Ausgabe ist vereinigt, begrenzt und gegen
+   das zwingende Redaction-Artefakt gefiltert. Installer und Preflight sind im
+   Offline-Bundle; der Preflight ist read-only, braucht einen expliziten
+   standortfreigegebenen Mindestfreiplatz und kann keinen Modus aktivieren.
+   Lokale Golden-/Negativtests sind grün. Nicht umgesetzt und nicht ersetzt:
+   Installation, Linger/User-Bus/cgroup-, Ressourcen-, Fault-, Mess-,
+   Beobachtungs- und Rückbaunachweise am Ziel; sie bleiben vollständig 8R-S.
 3. **8R-O-2 Additives Schema und Fencinggrundlage:** Migration/Fresh-Schema, Remote-Repositories, Runtime-Identität, globale Lease/Epoch, Jobtoken, Claim-Pause, explizite deaktivierte Moduszeilen und report-only Snapshot lokal beweisen. Keine Aktivierung und kein Rollout auf das unbekannte Ziel.
 4. **8R-O-3 Deaktivierter Inventarconsumer:** Prepare/Launch/Poll/Reattach/Result/Logoffset/Cleanup und Recoverypfade implementieren; lokale Protokoll-/DB-/Prozess-Faulttests beweisen fail-closed Verhalten. Der Consumer bleibt bis 8R-S unerreichbar.
 5. **8R-O-4 Reaper/Recoverygrundlage:** vollständige persistierte Reaper-/Recoverymatrix, VM-Sweep, Legacyfälle, Callbackraces und manuelle Resolution lokal beweisen. Altes Reaperverhalten ändert sich erst atomar mit einer standortfreigegebenen Modusaktivierung.

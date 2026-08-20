@@ -152,6 +152,15 @@ The legacy machine API remains wire-compatible during migration, but the WP1 hot
 
 ## Operational preflight
 
+Etappe 8R-O enthält außerdem den rein lesenden Standortpreflight
+`Ansible/runner/virtusphere_remote_preflight.py`. Er prüft Python/Ansible,
+systemd-User-Manager, Linger, cgroup v2, Besitzer/Modi, freien Speicher und die
+Runner-Prüfsummen und gibt nur redigiertes JSON mit gehashtem Hostfingerprint
+aus. Er verändert den Host nicht und aktiviert keinen Produktpfad. Sein
+Mindestfreiplatz hat absichtlich keinen Default: Ohne einen autorisierten
+8R-S-Lauf auf dem echten Ziel und den späteren Evidenzimport bleiben alle neuen
+Remote-Modi `disabled`; der bestehende SSH-Pfad ändert sich dadurch nicht.
+
 Use the migration checker before deployments or after changing `.env`:
 
 ```bash

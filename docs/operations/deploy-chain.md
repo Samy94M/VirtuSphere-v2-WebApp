@@ -15,6 +15,23 @@ Dieses Runbook beschreibt jeden Sprung eines vollständigen Deploys: Wer löst i
 | MECM → PXE-VM | Collection/Task Sequence ist bereit und VM startet | MECM-Status plus Portalstufe 4/5 | Windows-Client meldet Phasen an `mecm_report.php` | Verteilung noch nicht erfolgreich, falsche Task Sequence, PXE-/Netzproblem |
 | Windows-Client → Portal | Clientphasen melden `started`, `finished` oder `failed` anhand der MAC | **VM bearbeiten → Client-Phasen** mit Zeit, Ergebnis und Detail | Report-Endpoint speichert ausschließlich Telemetrie; keine Lifecycle-Schreibabkürzung | API nicht erreichbar, Zertifikatswechsel/Pin, kein passender Adapter oder Datenträger |
 
+## Aktiver Transport und vorbereiteter Durable Runner
+
+Der aktive Produktpfad ist weiterhin die in der Tabelle beschriebene direkte
+SSH-/SFTP-Kette. Etappe 8R-O liefert zusätzlich ein offline installierbares,
+geschlossenes Protokoll unter `Ansible/runner/`: genau ein erlaubter
+Playbook-Schritt, eine aus Job/Attempt/Step/Run-Token abgeleitete systemd-Unit,
+gehashte Artefakte und atomare `started.json`-, `heartbeat.json`- und
+`result.json`-Marker. Freie Shell-Kommandos und unbekannte Felder werden
+abgewiesen; ein begonnener oder fertiger Handle wird nie erneut gestartet.
+
+Diese Basis ist nicht mit einer Aktivierung gleichzusetzen. Ohne importierte,
+passende 8R-S-Standortevidenz ist kein Produktivjob an den neuen Launcher
+verdrahtet und es gibt keinen stillen Fallback von einem Remote-Modus auf die
+Legacy-Kette. Linger, User-Bus, cgroup-Enforcement, Kapazitätsgrenzen, reale
+Faults und Rückbau bleiben am echten Air-Gap-/Ansible-/ESXi-Ziel nachzuweisen.
+`create` und `full` sind zusätzlich bis Etappe 14B ausgeschlossen.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.

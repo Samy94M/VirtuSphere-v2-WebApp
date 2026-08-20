@@ -87,7 +87,36 @@ Vor dem Wheelhouse hieß „BEFORE the network is air-gapped" in
 `Ansible/requirements.yml` faktisch „vorher im Netz installieren“; für einen
 frisch aufzusetzenden Air-Gap-Host war das ein Widerspruch in sich.
 
-## Schritt 4: `.env` anlegen
+## Schritt 4: deaktivierten Durable Runner installieren und prüfen
+
+Das Bundle enthält unter `runner/` den in Etappe 8R-O entwickelten Runner. Der
+Installer prüft dessen eigenes `SHA256SUMS`, kopiert den geschlossenen Dateisatz
+nach `~/.local/libexec/virtusphere` und legt den Zustands-Root mit Modus `0700`
+an. Er überschreibt keine bestehende Installation, ändert keine Privilegien und
+aktiviert insbesondere kein Linger:
+
+```bash
+python3 runner/virtusphere_remote_install.py runner
+```
+
+Der anschließende Preflight ist rein lesend. `<standortfreigabe-bytes>` ist
+kein Produktdefault: Der Wert muss aus der freigegebenen Kapazitätsmessung des
+echten Hosts stammen.
+
+```bash
+python3 ~/.local/libexec/virtusphere/virtusphere_remote_preflight.py \
+  --required-free-bytes <standortfreigabe-bytes> > 8r-site-preflight.json
+```
+
+Ein Exitcode ungleich null oder `"ready": false` ist ein Abbruch der
+Standortabnahme. Das JSON enthält einen gehashten Hostfingerprint und keine
+Credentials. Es aktiviert aus sich selbst keinen Modus; ohne den noch offenen,
+revisions- und bundlegebundenen 8R-S-Import bleibt jeder neue Remote-Modus
+`disabled`. Auf Entwicklungs- oder Ersatzhosts erzeugte Ergebnisse sind keine
+Standortevidenz. `create` und `full` bleiben unabhängig davon bis Etappe 14B
+gesperrt.
+
+## Schritt 5: `.env` anlegen
 
 Vorlage ist `virtusphere/.env.example`:
 
@@ -111,7 +140,7 @@ falls nicht, die Werte auf der Build-Maschine erzeugen und mit übertragen.
 
 `Docker/scripts/setup.sh` wird hier **nicht** ausgeführt: es baut.
 
-## Schritt 5: Log-Verzeichnisse und Host-Eigenheiten
+## Schritt 6: Log-Verzeichnisse und Host-Eigenheiten
 
 Vor dem ersten Start (siehe `docs/operations/go-live.md`, Schritt 1a, dort mit
 Begründung):
@@ -128,7 +157,7 @@ Sobald sie einmal existiert, nimmt `scripts/backup.sh` sie ins Config-Archiv auf
 und der Restore-Drill prüft, dass der archivierte Compose-Satz auflösbar ist. Beim
 **ersten** Aufbau eines Hosts gibt es sie noch nicht, also hier von Hand anlegen.
 
-## Schritt 6: Stack starten und Migrationen
+## Schritt 7: Stack starten und Migrationen
 
 ```bash
 cd virtusphere
@@ -139,9 +168,9 @@ docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php
 ```
 
 `--wait` kehrt erst zurück, wenn jeder Healthcheck grün ist. Kommt der Stack
-nicht hoch, zuerst Schritt 5 prüfen.
+nicht hoch, zuerst Schritt 6 prüfen.
 
-## Schritt 7: Weiter im Go-Live-Runbook
+## Schritt 8: Weiter im Go-Live-Runbook
 
 Ab hier ist nichts mehr offline-spezifisch. `docs/operations/go-live.md` führt
 weiter: Backup einrichten (Schritt 3), **erstes Admin-Konto anlegen und das
@@ -150,8 +179,15 @@ anbinden.
 
 ## Releases nachziehen
 
-Ein Update ist derselbe Weg ohne Schritt 4 und 5: neues Bundle prüfen, Images
+Ein Update ist derselbe Weg ohne die erstmalige Runner-, `.env`- und
+Hosteinrichtung aus Schritt 4 bis 6: neues Bundle prüfen, Images
 laden, Quellcode über den bestehenden Baum entpacken (die `.env` und die
 Override-Datei liegen außerhalb des Archivs und bleiben), dann
 `docker compose up -d --wait` und die Migrationen. Vorher ein Backup
 (`sh scripts/backup.sh`), denn Migrationen laufen nur vorwärts.
+
+Der Runner-Installer ist bewusst kein In-place-Updater. Solange 8R-S offen ist,
+nutzt kein Produktivjob diese Installation. Ein späterer Runnerwechsel gehört
+in dasselbe kontrollierte, revisionsgebundene 8R-S-Fenster wie Claim-Pause,
+Drain, Backup, Austausch und Rückbauprobe; dieses Runbook löscht oder
+überschreibt dafür keinen laufzeitrelevanten Bestand auf Verdacht.

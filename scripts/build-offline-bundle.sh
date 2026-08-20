@@ -6,6 +6,7 @@
 #   images.txt      Ref -> Tag -> Image-ID -> RepoDigest je gespeichertem Image
 #   deps/           vendor.tar.gz (composer install --no-dev, im PHP-Image)
 #   collections/    ansible-galaxy collection download (Air-Gap-Ansible-Host)
+#   runner/         geschlossener 8R-O-Runner samt eigenem Pruefmanifest
 #   sbom/           SPDX-SBOM je Image (trivy, Digest-Pin aus tool-lock.json)
 #   reports/        CVE-Bericht je Image; offene Critical/High brechen den
 #                   Build (.trivyignore.yaml ist der befristete Ausnahme-Vertrag)
@@ -94,7 +95,7 @@ fi
 # Zielnamen, und kein Altbestand kann ins Manifest wandern.
 STAGE="$OUT_PARENT/.$(basename "$OUT").stage-$$"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/images" "$STAGE/deps" "$STAGE/collections" "$STAGE/sbom" "$STAGE/reports"
+mkdir -p "$STAGE/images" "$STAGE/deps" "$STAGE/collections" "$STAGE/runner" "$STAGE/sbom" "$STAGE/reports"
 cleanup_stage() { rm -rf "$STAGE"; }
 trap cleanup_stage EXIT INT TERM
 ROOT_M=$(docker_path "$ROOT")
@@ -204,6 +205,20 @@ dkr run --rm \
     -v "$OUT_M/collections:/bundle-out" \
     "$ANSIBLE_IMAGE" \
     ansible-galaxy collection download -r /tmp/requirements.yml -p /bundle-out
+
+# --- 3a) Durable Runner: offline und mit eigenem geschlossenem Manifest -------
+#
+# Das globale Bundle-Manifest beweist den Transport. Das Runner-Manifest wird
+# zusaetzlich vor dem Kopieren geprueft und vom Offline-Installer erneut
+# geprueft; dadurch kann der kleine privilegienarme Installationssatz unabhaengig
+# vom restlichen Bundle verifiziert werden. Keine Standortwerte und keine
+# Aktivierung werden hier erzeugt.
+echo "==> Durable-Runner-Payload pruefen und aufnehmen"
+(
+    cd "$ROOT/Ansible/runner"
+    sha256sum -c SHA256SUMS
+)
+cp "$ROOT/Ansible/runner/"* "$STAGE/runner/"
 
 # --- 3b) Python-Wheels fuer den Air-Gap-Ansible-Host ---------------------------
 #
@@ -316,7 +331,13 @@ Alle Schritte laufen ohne Internetzugang.
    `python3 -m pip install --no-index --find-links deps/wheels -r deps/requirements-ansible-host.txt`
    Danach die Ansible-Collections:
    `ansible-galaxy collection install collections/*.tar.gz` (offline).
-6. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
+6. Den noch deaktivierten Durable Runner offline installieren:
+   `python3 runner/virtusphere_remote_install.py runner`. Der Installer prueft
+   `runner/SHA256SUMS`, aendert kein Linger und aktiviert keinen Produktpfad.
+   Der anschliessende lesende Preflight braucht den am Standort freigegebenen
+   Mindestwert: `python3 ~/.local/libexec/virtusphere/virtusphere_remote_preflight.py --required-free-bytes <standortfreigabe>`.
+   Sein JSON ist Evidenz fuer 8R-S, keine Freigabe aus sich selbst.
+7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. phpMyAdmin ist optional:
    `docker compose --profile tools up -d phpmyadmin`.
