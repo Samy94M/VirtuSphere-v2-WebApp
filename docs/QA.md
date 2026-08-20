@@ -87,6 +87,21 @@ genau einmaligen Logoffset, Lücken- und Protokollfehler, Resultat-SHA,
 Secret-Sentinel und Cleanup-Barriere. Sie ersetzen ausdrücklich keine echten
 8R-S-Faults an SSH, User-Bus, Linger, cgroup, Hostrestart oder Ressourcenlimits.
 
+Die unverdrahtete O4-Recoverygrundlage besitzt zusätzlich Unit-, Static- und
+MySQL-Verträge:
+
+```powershell
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Unit/RemoteRecoveryPolicyTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Static/RemoteRecoveryFoundationContractTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Integration/RemoteRecoveryFoundationTest.php
+```
+
+Sie beweisen die geschlossene Entscheidungsmatrix, dass nur ein beweisbarer
+Nichtstart terminalisierbar wäre, dass Recovery keinen aktiven Job beendet,
+dass die Anforderung idempotent ist und dass der heutige Reaper die neue
+Grundlage nicht lädt. Das reale gemeinsame Umschalten von Reaper, Consumer und
+VM-Sweep bleibt ein 8R-S-Nachweis.
+
 Run the migration preflight without mutating the database:
 
 ```powershell

@@ -1395,6 +1395,19 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
    Protokoll-/DB-Faults prüfbar, aber SSH-/Logout-/User-Bus-/Hostrestart- und
    Ressourcenfaults sowie jede Aktivierung bleiben vollständig 8R-S.
 5. **8R-O-4 Reaper/Recoverygrundlage:** vollständige persistierte Reaper-/Recoverymatrix, VM-Sweep, Legacyfälle, Callbackraces und manuelle Resolution lokal beweisen. Altes Reaperverhalten ändert sich erst atomar mit einer standortfreigegebenen Modusaktivierung.
+
+   **Umgesetzt 2026-08-20 (offline, ohne Umschaltung):** Geschlossene Policy
+   und Repositorygrundlage klassifizieren Legacy/NULL, fremde Generation,
+   bewiesenen Nichtstart, Prepared/Active/Lost, terminales Resultat sowie
+   Protokoll-/Manualfälle. Recoveryanforderungen lösen Fence/Lease, lassen den
+   Job aktiv, sind idempotent und setzen einen passenden Handle nur nach
+   `pending`. Die read-only Ersatzabfrage des VM-Sweeps schützt aktive Jobs,
+   `recovery_requested_at` und `pending|running|manual_required`. Static-
+   Verträge beweisen, dass Deploy-Reaper und Maintenance-Worker keines dieser
+   Module laden. Callbackraces, append-only manuelle Resolution, echte
+   Prozess-/Hostrestart-Recovery und das atomare Umschalten des schreibenden
+   Reapers bleiben 8R-S beziehungsweise 13R; der heutige Reaper ist bewusst
+   unverändert.
 6. **8R-O-5 Mutierende Policies ohne Aktivierung:** Export, Start, Autostart und Powercycle erhalten getrennte Policy-/Aktivierungs- und Reconciliationowner sowie lokale Faulttests. Alle Zustände bleiben `disabled`; Create/Full bleiben gesperrt.
 7. **8R-S Standortabnahme und Aktivierung:** 8R-S-0 übernimmt die echten Host-/Messwerte. Danach werden Inventory, Export, Start, Autostart und Powercycle streng einzeln mit realer Faultmatrix, Beobachtungsfenster und Rückbau freigegeben. Jede Freigabe erhält einen eigenen Commit beziehungsweise ein revisionsgebundenes Standortprotokoll; ohne Repositoryzugriff am Standort wird der importierte Nachweis im nächsten Repositorycommit festgehalten.
 8. **13R Portalintegration:** Drei-Achsen-Snapshot, Queue-/Recovery-/Pauseanzeige, Systemstatus, Dashboard, Actions, vollständiger Tail und Barrierefreiheit auf Masterplan 10A bis 13.

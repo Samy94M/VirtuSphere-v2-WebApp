@@ -51,6 +51,14 @@ Cleanup bleibt bis zu terminalem Controller und belegter Reconciliation
 gesperrt. Diese Bibliothek ist im aktiven Worker nicht required und daher kein
 neuer Transportpfad.
 
+8R-O-4 ergänzt daneben nur die spätere Recoveryentscheidung. Sie klassifiziert
+stale Remoteevidenz, kann eine idempotente Recoveryanforderung speichern und
+liefert eine remote-sichere Kandidatenabfrage für den späteren VM-Sweep. Aktive,
+verlorene, fremde oder manuell zu prüfende Läufe bleiben aktiv und Cleanup ist
+verboten. Diese Module sind weder im Deploy-Reaper noch im Maintenance-Worker
+required. Reaper, Recoveryconsumer und VM-Sweep dürfen erst gemeinsam im
+8R-S-Fenster wechseln; bis dahin gilt unverändert der bestehende Legacy-Reaper.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.
