@@ -2,7 +2,7 @@
 
 Stand: 13.08.2026
 
-Status: entscheidungsreifer, auf Widersprüche geprüfter Gesamtplan, noch nicht umgesetzt
+Status: entscheidungsreifer Gesamtplan; seit 2026-08-20 in Offline-Implementierung (8R-O) und Standortabnahme (8R-S) getrennt
 
 Zusammengeführt aus: VLAN-/MAC-Review und Codex-Session `019ffafd-2893-7ed1-94f1-d069b6e88174`
 
@@ -41,6 +41,16 @@ Die verbindliche Reihenfolge lautet:
 Jede Teilfreigabe wird pro Ansible-Zugang und Modus persistiert. Ein globaler Schalter, der alle Modi gleichzeitig aktiviert, ist verboten. Fehlt eine Voraussetzung, bleibt der betreffende Modus sichtbar blockiert; es gibt keinen stillen Legacy-Fallback.
 
 Wenn eine der Voraussetzungen noch nicht umgesetzt ist, wird nicht improvisiert. Die betreffende Voraussetzung wird zuerst gemäß ihrem Owner-Plan abgeschlossen.
+
+### 0.1 Verbindliche Trennung 8R-O/8R-S bei nicht erreichbarem Air-Gap-Ziel
+
+Das Ausführungsteam besitzt dauerhaft keinen direkten Zugang zum produktionsgleichen Air-Gap-/Ansible-/ESXi-Ziel. Diese Infrastrukturgrenze ändert nicht die Sicherheitsanforderung, sondern trennt Implementierung von Aktivierung:
+
+1. **8R-O (Offline-Implementierung)** darf ADR, geschlossene Protokolle, Runner/Launcher, Offline-Bundle, additive Migration/Fresh-Schema, Runtime-Identität, Lease/Epoch, Job-Fencing, Claim-Pause, Repositories, deaktivierte Consumer sowie lokale positive/negative/Zero-Match- und Faulttests implementieren. Alle neuen Moduszeilen starten `disabled`; ein lokaler Testfingerprint ist niemals ein Standortfingerprint.
+2. **8R-S (Standortabnahme)** wird ausschließlich von einem autorisierten Betreiber am Ziel mit dem versionierten, checksum-geprüften Bundle ausgeführt. Es erhebt systemd-/Ansible-/User-Bus-/Linger-/cgroup-/Freiplatz-/Ressourcenwerte, reale Faultmatrizen, mindestens die Messreihen aus 24.2, Beobachtungsfenster und Rückbau. Das Bundle exportiert nur redigierte Evidenz und niemals Credentials.
+3. Der Import einer 8R-S-Evidenz ist fail-closed: Repositoryrevision, Bundlehash, Protokollversion, Credential-/Hostidentität, Modus, Messmatrix und Ablaufzeit müssen passen. Fehlend, unbekannt, abgelaufen oder widersprüchlich bedeutet `disabled`, niemals Legacy oder Pilot.
+4. `pilot_remote` und `remote_enabled` sind ohne grünen 8R-S-Nachweis technisch unerreichbar. 8R-O darf deshalb als Codepaket grün sein, während 8R-S und sämtliche Modusfreigaben offen bleiben. Dokumentation nennt diese zwei Ergebnisse getrennt.
+5. Gibt es dauerhaft keinen autorisierten Standortlauf, bleibt die Remote-Architektur installiert aber unaktiviert. Der bestehende explizite `legacy_v1`-Vertrag darf bis zu einer eigenen Betriebsentscheidung weiterlaufen; kein Fehlerpfad wählt ihn als Fallback. Create/Full bleiben zusätzlich bis 14B gesperrt.
 
 Die früher als P1 bis P8 bezeichneten Empfehlungen sind hiermit übernommen: Queue bleibt speicherbar, kein Blindretry, systemd-User-Services als Remote-Owner, kein unsicherer Fallback, bestehende Jobstatuswerte bleiben kompatibel, Abbruch wirkt an sicherer Grenze, Portalpause ersetzt Containerstop und automatische Heilung behauptet nur beweisbare Fälle. Es gibt dafür keine offene Produktfrage mehr. Messwerte für Ressourcen und Retention sind keine freie Entscheidung: Abschnitt 24 definiert, wie sie reproduzierbar erhoben und freigegeben werden.
 
@@ -1341,17 +1351,18 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
 
 ### 24.1 Globale Paketreihenfolge
 
-1. **8R-0 Planharmonisierung und Charakterisierung:** Master-/Create-Widersprüche markieren, Produktionsfixture, Versionen, User-Bus/Linger/cgroup, Laufzeit-/Speicher-/Task-/Logspitzen und aktuelle Migrationsnummer erheben. Keine Verhaltensänderung.
-2. **8R-1 ADR, Runner und Offline-Hostvorbereitung:** Remote-Protokoll, Launcher/Runner, Golden Vectors, Offline-Bundle, Checksumme, Linger/Statepfad und read-only Hostpreflight. Noch kein Produktivjob nutzt es.
-3. **8R-2 Schema und Fencing:** additive Migration/Fresh-Schema, Remote-Repo, globale Lease/Epoch, Jobtoken, Claim-Pause und Report-only Snapshot. Alle Workerwrites erhalten CAS, bevor ein Modus aktiviert wird.
-4. **8R-3 Inventarpilot:** Prepare/Launch/Poll/Reattach/Result/Logoffset/Cleanup für read-only Inventar; Worker-/SSH-/Logout-/DB-Faulttests.
-5. **8R-4 Reaper/Recovery:** Reaper-Matrix, Recovery-vor-Queue, VM-Sweep, Legacyfälle, Callbackraces und manuelle Resolution. Kein aktiver Remotejob wird mehr terminalisiert.
-6. **8R-5 Mutierende Modi:** Export, Start, Autostart und Powercycle einzeln. Jede Freigabe benötigt eigene Live-Reconciliation und Faulttests; Create/Full bleiben gesperrt.
-7. **13R Portalintegration:** Drei-Achsen-Snapshot, Queue-/Recovery-/Pauseanzeige, Systemstatus, Dashboard, Actions, vollständiger Tail und Barrierefreiheit auf Masterplan 10A bis 13.
-8. **14A Netzwerk/MAC:** Pakete A bis H aus Abschnitt 10 unverändert in Reihenfolge, ergänzt um die Remote-/Retry-Präzedenz aus Abschnitt 20.
-9. **14B Create:** Create-Plan per VM, JID und Identität umsetzen; Remotehandle um Create-Einheit erweitern; Create/Full-Faultmatrix einschließlich 90-Minuten-EZT-Staginglauf.
-10. **14C Supervisor:** erst jetzt PID-1-Supervisor, getrennte Heartbeats, Cooldown und Compose-Health aktivieren.
-11. **15 bis 17:** Logfilter/Korrelation, Design/Visuals und Release gemäß Masterplan; Remote-Eventcodes und Resolutionen sind vollständig integriert.
+1. **8R-O-0 Planharmonisierung und Offline-Charakterisierung:** Master-/Create-Widersprüche markieren, vorhandene lokale Revision, Migration, Jobs, Worker, Fixtures und Offline-Artefakte erheben. Nicht erreichbare Host-/Laufzeitwerte werden als 8R-S-Nachweis registriert, nicht geraten. Keine Verhaltensänderung.
+2. **8R-O-1 ADR, Protokoll, Runner und Offline-Bundle:** Remote-Protokoll, Launcher/Runner, Golden Vectors, Checksummen, Statepfad und read-only Hostpreflight implementieren. Der Preflight ist am Ziel ausführbar, aber ohne importierten Standortnachweis nutzt ihn kein Produktivjob.
+3. **8R-O-2 Additives Schema und Fencinggrundlage:** Migration/Fresh-Schema, Remote-Repositories, Runtime-Identität, globale Lease/Epoch, Jobtoken, Claim-Pause, explizite deaktivierte Moduszeilen und report-only Snapshot lokal beweisen. Keine Aktivierung und kein Rollout auf das unbekannte Ziel.
+4. **8R-O-3 Deaktivierter Inventarconsumer:** Prepare/Launch/Poll/Reattach/Result/Logoffset/Cleanup und Recoverypfade implementieren; lokale Protokoll-/DB-/Prozess-Faulttests beweisen fail-closed Verhalten. Der Consumer bleibt bis 8R-S unerreichbar.
+5. **8R-O-4 Reaper/Recoverygrundlage:** vollständige persistierte Reaper-/Recoverymatrix, VM-Sweep, Legacyfälle, Callbackraces und manuelle Resolution lokal beweisen. Altes Reaperverhalten ändert sich erst atomar mit einer standortfreigegebenen Modusaktivierung.
+6. **8R-O-5 Mutierende Policies ohne Aktivierung:** Export, Start, Autostart und Powercycle erhalten getrennte Policy-/Aktivierungs- und Reconciliationowner sowie lokale Faulttests. Alle Zustände bleiben `disabled`; Create/Full bleiben gesperrt.
+7. **8R-S Standortabnahme und Aktivierung:** 8R-S-0 übernimmt die echten Host-/Messwerte. Danach werden Inventory, Export, Start, Autostart und Powercycle streng einzeln mit realer Faultmatrix, Beobachtungsfenster und Rückbau freigegeben. Jede Freigabe erhält einen eigenen Commit beziehungsweise ein revisionsgebundenes Standortprotokoll; ohne Repositoryzugriff am Standort wird der importierte Nachweis im nächsten Repositorycommit festgehalten.
+8. **13R Portalintegration:** Drei-Achsen-Snapshot, Queue-/Recovery-/Pauseanzeige, Systemstatus, Dashboard, Actions, vollständiger Tail und Barrierefreiheit auf Masterplan 10A bis 13.
+9. **14A Netzwerk/MAC:** Pakete A bis H aus Abschnitt 10 unverändert in Reihenfolge, ergänzt um die Remote-/Retry-Präzedenz aus Abschnitt 20.
+10. **14B Create:** Create-Plan per VM, JID und Identität umsetzen; Remotehandle um Create-Einheit erweitern; Create/Full-Faultmatrix einschließlich 90-Minuten-EZT-Staginglauf.
+11. **14C Supervisor:** erst jetzt PID-1-Supervisor, getrennte Heartbeats, Cooldown und Compose-Health aktivieren.
+12. **15 bis 17:** Logfilter/Korrelation, Design/Visuals und Release gemäß Masterplan; Remote-Eventcodes und Resolutionen sind vollständig integriert.
 
 Jedes Paket endet mit Code, Migration/Fresh-Schema soweit betroffen, gezielten positiven/negativen/Zero-Match-Tests, Help/Doku/Logs/Protokolle, vollständigem Diffreview, kanonischen Gates und dem Masterplan-Commit-/Push-Abschluss. Ein Paket wird nicht teilweise als grün markiert.
 
@@ -1367,6 +1378,8 @@ Jedes Paket endet mit Code, Migration/Fresh-Schema soweit betroffen, gezielten p
 - Retention für redigierte Remote-Evidenz wird erst nach gemessenem Maximalvolumen festgelegt, muss aber länger als das längste Job-/Recoverybudget plus Betriebsdiagnosefenster sein. Secretinputs folgen dieser Retention ausdrücklich nicht.
 
 Messprotokoll, Formel, Rohwerte, gewählter Wert, Headroom und Gegenprobe werden als QA-Artefakt dokumentiert. Hilfe liest jeden sichtbaren Grenzwert aus Constants/Defaults; keine Zahl wird dupliziert.
+
+8R-O setzt für standortabhängige Werte keinen Ersatzwert. Bis 8R-S fehlen bleiben produktive Runtime-/Heartbeat-/Claim-Grace-/Freiplatz-/Retentionfreigaben und `MemoryMax`/`TasksMax` deaktiviert. Lokale Grenztests dürfen Implementierungsfehler finden, gelten aber nicht als Messreihe aus diesem Abschnitt.
 
 ### 24.3 Ergänzte Datei-/Modulowner
 
@@ -1400,10 +1413,10 @@ Falsche Sätze werden explizit gesucht und entfernt: `unhealthy startet neu`, `T
 
 ### 24.5 Gesamtrollout
 
-1. Read-only Bestands-/Versions-/Migrationsaudit und produktionsgleiches Air-Gap-Staging.
-2. Schema/lesende Anzeige, Hostpreflight und Runnerinstallation ohne Aktivierung.
-3. Inventarpilot pro Credential; danach Reaper-Recovery nur für Inventar.
-4. Export, Start, Autostart, Powercycle einzeln mit Beobachtungsfenster und Rückbauprobe.
+1. 8R-O führt das read-only lokale Bestands-/Migrationsaudit aus und baut das checksum-geprüfte Standortbundle; fehlende Zielwerte bleiben offen.
+2. 8R-O liefert Schema, lesende Anzeige, Hostpreflight, Runner und sämtliche Moduszeilen `disabled`, ohne Zielinstallation oder Aktivierung zu behaupten.
+3. 8R-S führt Bestands-/Versionsaudit, produktionsgleiches Air-Gap-Staging, Runnerinstallation und Inventarpilot pro Credential aus; danach Reaper-Recovery nur für Inventar.
+4. 8R-S aktiviert Export, Start, Autostart und Powercycle einzeln mit Beobachtungsfenster und Rückbauprobe.
 5. Portal 13R und Claim-Pause freigeben.
 6. Netzwerk/MAC-14A mit Bestandsaudit und Duplicate-Negativcanary.
 7. Create/Full-14B erst nach per-VM-, Remote-, Netzwerk- und 90-Minuten-EZT-Faultgate.
