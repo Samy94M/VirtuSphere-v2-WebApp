@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/credentials.php';
+require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/ansible_command_shell.php';
 
 /**
@@ -154,11 +156,11 @@ function ansible_mode_expects_mac_result(string $mode): bool
     return in_array(VIRTUSPHERE_PLAYBOOKS['export'], ansible_playbooks_for_mode($mode), true);
 }
 
-// Step markers (AP6): every playbook of a sequence is bracketed by a begin and
-// an end line on stdout. Because the sequence is one && chain, a failure stops
-// the chain right after the failing playbook - the last begin without its end
-// IS the failed phase, and the worker names it in the job's error message
-// instead of reporting only the exit code of a five-playbook pipeline.
+// Step markers (AP6): every per-playbook remote command is bracketed by a begin
+// and an end line on stdout. The worker controls and names the step from its
+// descriptor; the persisted markers are the technical display evidence. The
+// short chain inside one command still omits the end marker when its playbook
+// fails, so the later presenter can identify an incomplete phase honestly.
 const VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX = '::virtusphere-step::';
 
 const VIRTUSPHERE_ANSIBLE_STEP_BEGIN = 'begin';
@@ -177,8 +179,9 @@ function ansible_step_marker_line(string $event, string $playbook): string
  * is strictly better evidence than a marker that may not have arrived yet. The
  * markers stay the technical SSoT for the DISPLAY - phase headings and "current
  * phase" are derived from them rather than from a second hand-kept playbook
- * order - and that reader is built in the portal stage. Removing this as dead
- * code would force that stage to write the parser again, differently.
+ * order. That reader belongs to Etappe 13, together with the 10A cursor/drain
+ * contract and the 10B terminal presenter. Removing this as dead code would
+ * force that stage to write the parser again, differently.
  *
  * @return array{event: string, playbook: string}|null Null for any line that
  *         is not a well-formed step marker.

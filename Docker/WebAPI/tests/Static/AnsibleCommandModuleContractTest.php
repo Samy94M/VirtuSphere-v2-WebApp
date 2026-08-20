@@ -109,6 +109,39 @@ final class AnsibleCommandModuleContractTest extends TestCase
         self::assertSame(['lib/ansible_command_shell.php'], $definitions);
     }
 
+    public function testStepMarkerParserStaysAtTheStage13PresentationBoundary(): void
+    {
+        // The parser is retained and unit-tested now, but consuming it in the
+        // current start-first job-log reader would pre-empt only one fragment of
+        // Etappe 13. That stage integrates it with the 10A cursor/drain contract,
+        // 10B terminal presenter, phase filters and Follow mode. Replace this
+        // assertion with the presenter contract when that complete reader lands.
+        $root = dirname(__DIR__, 2);
+        $references = [];
+        foreach (['lib', 'portal'] as $productionDir) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($root . '/' . $productionDir, FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if (!$file->isFile() || $file->getExtension() !== 'php') {
+                    continue;
+                }
+                $source = (string) file_get_contents($file->getPathname());
+                $count = preg_match_all('/\bansible_step_marker_parse\s*\(/', $source);
+                if ($count > 0) {
+                    $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
+                    $references[$relative] = $count;
+                }
+            }
+        }
+
+        self::assertSame(
+            ['lib/ansible_command_modes.php' => 1],
+            $references,
+            'Before Etappe 13 the parser must have its definition, but no partial production reader.'
+        );
+    }
+
     /** @param array<int, string> $values @return array<int, string> */
     private function sorted(array $values): array
     {

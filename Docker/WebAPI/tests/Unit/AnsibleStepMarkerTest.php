@@ -8,9 +8,9 @@ require_once dirname(__DIR__, 2) . '/lib/ansible_command.php';
 
 /**
  * Step markers (AP6): every playbook of a remote sequence is bracketed by
- * begin/end lines, and the worker derives the failed phase from the last
- * begin without its end. These tests pin the marker grammar and its
- * placement in the && chain.
+ * begin/end lines. The worker owns execution state through its descriptor;
+ * the markers remain the display evidence for Etappe 13. These tests pin the
+ * grammar and its placement inside each per-playbook command.
  */
 final class AnsibleStepMarkerTest extends TestCase
 {
