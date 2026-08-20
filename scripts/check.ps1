@@ -767,17 +767,40 @@ Add-Gate -Name 'migrate-check' -Lanes $intRel -Kind 'container' -Body {
 Add-Gate -Name 'phpunit-full' -Lanes $intRel -Kind 'container' -Body {
     if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
     if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+    # Die Suite erzeugt absichtlich queued/running/stale Jobs und loescht ihre
+    # Fixtures wieder. Ein gleichzeitig claimender Deploy-Worker oder reapender
+    # Maintenance-Worker macht daraus keine Integrationspruefung, sondern zwei
+    # konkurrierende Besitzer derselben Wegwerfzeilen (BulkVmActionsTest traf so
+    # einen echten MySQL-Deadlock). Beide Worker werden deshalb NUR fuer dieses
+    # Gate quiesziert. Produktionslocking bleibt unveraendert; das finally stellt
+    # sie auch nach einem roten/werfenden PHPUnit-Lauf wieder health-geprueft her.
+    $qaTestWorkers = @('deploy-worker', 'maintenance-worker')
+    $stopped = Invoke-QaCompose (@('stop', '--timeout', '30') + $qaTestWorkers)
+    if ($stopped.ExitCode -ne 0) {
+        return New-InfraResult 'QA-Worker vor phpunit-full nicht quieszierbar' $stopped.Output
+    }
+
     # docker run mit Repo-Mount im QA-Netz statt exec in den App-Container:
     # die Repo-Level-Contract-Tests sehen ihre Dateien, die Integrationstests
     # erreichen mysql und webserver:8080 des QA-Projekts, und --fail-on-skipped
     # macht jeden dynamischen Skip rot (ADR-0015-Ergaenzung: in dieser Lane
     # ist ein Skip nie legitim).
-    $r = Invoke-Tool 'docker' @('run', '--rm',
-        '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
-        '--network', $qaNetwork,
-        '--env-file', $qaEnvFile,
-        '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
-        $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped')
+    $r = $null
+    $restarted = $null
+    try {
+        $r = Invoke-Tool 'docker' @('run', '--rm',
+            '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+            '--network', $qaNetwork,
+            '--env-file', $qaEnvFile,
+            '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
+            $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped')
+    } finally {
+        $restarted = Invoke-QaCompose (@('up', '-d', '--wait') + $qaTestWorkers)
+    }
+    if ($null -eq $restarted -or $restarted.ExitCode -ne 0) {
+        $restartOutput = if ($null -eq $restarted) { @('worker restart did not return a result') } else { @($restarted.Output) }
+        return New-InfraResult 'QA-Worker nach phpunit-full nicht wieder healthy' (@($r.Output) + $restartOutput)
+    }
     Format-ToolResult $r 'vollstaendige PHPUnit-Suite gruen (ohne Skips)' 'PHPUnit-Suite rot oder geskippt'
 }
 
