@@ -113,4 +113,20 @@ final class DirectoryModuleContractTest extends TestCase
         self::assertStringContainsString('directory_deadline_now() + VIRTUSPHERE_DIRECTORY_TOTAL_TIMEOUT_SECONDS', $service);
         self::assertStringContainsString('$operation($connection, $runtime, $controller, $deadline)', $service);
     }
+
+    public function testQaPinsTheDirectoryCaCacheToTheFpmUser(): void
+    {
+        $repoRoot = dirname(__DIR__, 4);
+        $qaCompose = $repoRoot . '/Docker/qa/docker-compose.qa.yml';
+        if (!is_file($qaCompose)) {
+            self::markTestSkipped('QA Compose override is outside this partial WebAPI mount.');
+        }
+        $source = (string) file_get_contents($qaCompose);
+
+        self::assertStringContainsString(
+            '/tmp/virtusphere-directory:uid=33,gid=33,mode=0700',
+            $source,
+            'The QA PHP container must pre-own the strict CA cache as www-data; a root docker exec must not create it first.'
+        );
+    }
 }

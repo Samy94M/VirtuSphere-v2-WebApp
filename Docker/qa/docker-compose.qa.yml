@@ -34,6 +34,13 @@ services:
     volumes:
       - qa-ssl:/etc/nginx/ssl
       - qa-conf:/etc/nginx/virtusphere-conf.d
+    # directory_ca_file() requires the CA cache directory to belong to the
+    # calling uid with mode 0700. E2E portal requests run as www-data, while a
+    # diagnostic docker exec defaults to root; sharing one ordinary /tmp child
+    # made the suite order-dependent. A nested tmpfs pins the FPM ownership
+    # before either caller runs, and root cannot replace the mountpoint.
+    tmpfs:
+      - /tmp/virtusphere-directory:uid=33,gid=33,mode=0700
     restart: "no"
 
   deploy-worker:
