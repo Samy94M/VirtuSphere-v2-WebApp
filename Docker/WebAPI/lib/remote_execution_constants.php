@@ -53,8 +53,12 @@ const VIRTUSPHERE_REMOTE_CONTROLLER_STATES = [
     'prepared', 'active', 'exited_0', 'exited_nonzero', 'exited_signal',
     'lost_after_start', 'never_started', 'protocol_error',
 ];
-const VIRTUSPHERE_REMOTE_EFFECT_STATES = ['not_started', 'read_only', 'mutation_possible', 'mutation_confirmed', 'unknown'];
-const VIRTUSPHERE_REMOTE_RECONCILIATION_STATES = ['not_required', 'pending', 'running', 'resolved', 'manual_required'];
-const VIRTUSPHERE_REMOTE_CLEANUP_STATES = ['not_eligible', 'eligible', 'running', 'complete', 'failed', 'retained_for_evidence'];
+const VIRTUSPHERE_REMOTE_EFFECT_STATES = ['not_started', 'active_or_possible', 'goal_verified', 'divergence_verified', 'unknown'];
+const VIRTUSPHERE_REMOTE_RECONCILIATION_STATES = ['not_required', 'pending', 'running', 'resolved_success', 'resolved_failure', 'manual_required'];
+const VIRTUSPHERE_REMOTE_CLEANUP_STATES = ['pending', 'eligible', 'running', 'cleaned', 'failed'];
+
+const VIRTUSPHERE_REMOTE_PROTOCOL_DOCUMENT_MAX_BYTES = 65536;
+const VIRTUSPHERE_REMOTE_OUTPUT_CHUNK_MAX_BYTES = 1048576;
+const VIRTUSPHERE_REMOTE_OBSERVATION_MAX_BYTES = 1468000;
 
 const VIRTUSPHERE_DEPLOY_WORKER_LEASE_NAME = 'deploy-worker';

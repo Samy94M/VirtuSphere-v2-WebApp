@@ -169,6 +169,14 @@ additiv; bestehende Claims, Reaper und SSH-Schritte lesen sie in 8R-O-2 noch
 nicht. Vor einer späteren Verdrahtung bleiben Backup, Claim-Pause/Drain,
 einheitliche Revision und 8R-S-Standortevidenz zwingend.
 
+Der 8R-O-3-Inventarconsumer liegt als unverdrahtete Bibliothek vor. Selbst ein
+direkter Aufruf benötigt eine `pilot_remote`- oder `remote_enabled`-Zeile mit
+`remote_v1`, aktuelle Generation sowie übereinstimmende Worker-ID, Lock-Token
+und Lease-Epoch. Der ausgelieferte Zustand erfüllt diese Bedingungen nicht:
+Aktivierungen bleiben `disabled`, Claim-Pause bleibt gesetzt und kein Worker
+lädt den Consumer. Das ist die beabsichtigte Installationslage bis zum
+autorisierten 8R-S-Lauf; lokale Tests sind keine Aktivierungsevidenz.
+
 Use the migration checker before deployments or after changing `.env`:
 
 ```bash

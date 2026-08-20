@@ -60,7 +60,7 @@ Run PHPStan (level 5, baseline ratchet per ADR-0015) inside the PHP container:
 docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html run stan
 ```
 
-Run the stdlib-only Ansible client and durable-runner protocol tests in an isolated Python container. The runner cases cover closed golden vectors, unknown fields, token/hash/path/symlink rejection, atomic result files, bounded redacted output, no duplicate launch decision and a read-only preflight:
+Run the stdlib-only Ansible client and durable-runner protocol tests in an isolated Python container. The runner cases cover closed golden vectors, unknown fields, token/hash/path/symlink rejection, atomic result files, bounded redacted output, no duplicate launch decision, exact observer offsets/rotation rejection and a read-only preflight:
 
 ```powershell
 docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo:ro -w /repo python:3.13-alpine python -m unittest discover -s Ansible/tests -v
@@ -71,6 +71,21 @@ Run the language catalog parity audit from the project image:
 ```powershell
 docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-v2-webapp-php php scripts/lang-audit.php --ci
 ```
+
+Der deaktivierte 8R-O-3-Inventarconsumer wird gezielt in drei Schichten geprüft:
+
+```powershell
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Unit/RemoteExecutionProtocolTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Static/RemoteInventoryConsumerContractTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Integration/RemoteInventoryConsumerTest.php
+```
+
+Die Tests beweisen die direkte JSON-Schema-SSoT, geschlossene Übergänge,
+Unerreichbarkeit aus dem Produktworker, `disabled` als Prepare-Blocker,
+Epoch-/Token-/Generationsfencing, Reattach nach verlorenem Zwischenwrite,
+genau einmaligen Logoffset, Lücken- und Protokollfehler, Resultat-SHA,
+Secret-Sentinel und Cleanup-Barriere. Sie ersetzen ausdrücklich keine echten
+8R-S-Faults an SSH, User-Bus, Linger, cgroup, Hostrestart oder Ressourcenlimits.
 
 Run the migration preflight without mutating the database:
 

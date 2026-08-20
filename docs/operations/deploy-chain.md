@@ -41,6 +41,16 @@ läuft deshalb verhaltensgleich auf dem bisherigen Pfad; das Umschalten von
 Claim, Reaper und Recovery ist ein gemeinsames späteres 8R-S-Fenster und darf
 nicht stückweise erfolgen.
 
+Der vorbereitete Inventarconsumer besitzt bereits die vollständige lokale
+Zustandsgrenze: Prepare, persistente Identität, Launchbeobachtung, Reattach,
+Resultat-SHA, transaktionaler Logoffset, Reconciliation und Cleanup. Jeder
+Write prüft Worker-ID, Lock-Token, Lease-Epoch und Runtime-Generation. Ein
+veralteter Fence, fremdes Protokolldokument oder übersprungener Logoffset wird
+`manual_required`; daraus entsteht weder Erfolg noch ein zweiter Launch.
+Cleanup bleibt bis zu terminalem Controller und belegter Reconciliation
+gesperrt. Diese Bibliothek ist im aktiven Worker nicht required und daher kein
+neuer Transportpfad.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.

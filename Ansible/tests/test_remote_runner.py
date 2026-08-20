@@ -15,6 +15,7 @@ sys.path.insert(0, str(RUNNER_DIR))
 
 import virtusphere_remote_common as common  # noqa: E402
 import virtusphere_remote_launcher as launcher  # noqa: E402
+import virtusphere_remote_observer as observer  # noqa: E402
 import virtusphere_remote_preflight as preflight  # noqa: E402
 import virtusphere_remote_runner as runner  # noqa: E402
 
@@ -182,6 +183,33 @@ class ExecutionTest(unittest.TestCase):
             result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
             self.assertEqual("runner_error", result["outcome"])
             self.assertEqual(-1, result["exit_code"])
+
+    def test_observer_reads_from_exact_offset_and_rejects_rotation_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = copy.deepcopy(json.loads((RUNNER_DIR / "golden-vectors.json").read_text())["valid"])
+            manifest.update(remote_dir=str(directory))
+            manifest_path = directory / "manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            (directory / "output.log").write_bytes(b"before\nafter\n")
+            os.chmod(directory / "output.log", 0o600)
+            launch = {
+                "schema": "virtusphere.remote.launch/v1", "run_token": manifest["run_token"],
+                "unit_name": manifest["unit_name"], "decision": "already_running",
+                "written_at": "2026-01-01T00:00:00Z",
+            }
+            (directory / "launch.json").write_text(json.dumps(launch), encoding="utf-8")
+            os.chmod(directory / "launch.json", 0o600)
+            with mock.patch.object(observer, "validate_manifest", return_value=manifest), mock.patch.object(
+                observer, "unit_state", return_value="active"
+            ):
+                result = observer.observe(manifest_path, manifest["run_token"], 7)
+                self.assertEqual(7, result["offset"])
+                self.assertEqual(b"after\n", __import__("base64").b64decode(result["output_b64"]))
+                self.assertEqual(len(b"before\nafter\n"), result["next_offset"])
+                self.assertIn("launch_json", result)
+                with self.assertRaisesRegex(common.ProtocolError, "rotation or truncation"):
+                    observer.observe(manifest_path, manifest["run_token"], 99)
 
 
 @unittest.skipUnless(os.name == "posix", "remote runner targets Linux/systemd")

@@ -19,6 +19,7 @@ RUNNER_FILES = (
     "protocol-v1.json",
     "virtusphere_remote_common.py",
     "virtusphere_remote_launcher.py",
+    "virtusphere_remote_observer.py",
     "virtusphere_remote_runner.py",
     "virtusphere_remote_preflight.py",
 )

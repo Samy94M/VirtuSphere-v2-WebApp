@@ -15,6 +15,13 @@ Start. Der Runner schreibt `started.json`, `heartbeat.json` und `result.json`
 atomar, begrenzt `output.log` und entfernt die im zwingenden Redaction-Artefakt
 benannten Werte auch ueber Chunk-Grenzen hinweg.
 
+`virtusphere_remote_observer.py` ist der rein lesende Poll-/Reattach-Endpunkt.
+Er validiert dieselbe Manifestidentitaet, liefert Unitzustand und vorhandene
+Marker als geschlossenes Observation-Dokument und liest `output.log` ab genau
+dem angeforderten Rohbyte-Offset in einem begrenzten Chunk. Ein Offset hinter
+dem aktuellen Dateiende gilt als Rotation/Truncation und wird abgewiesen; der
+Observer startet, stoppt und loescht keine Unit und keine Datei.
+
 `virtusphere_remote_preflight.py` ist rein lesend. Sein JSON ist nur ein
 Evidenzartefakt fuer 8R-S; es aktiviert weder Linger noch den Produktpfad. Der
 erforderliche freie Speicher wird bewusst ohne Default uebergeben, weil dieser
