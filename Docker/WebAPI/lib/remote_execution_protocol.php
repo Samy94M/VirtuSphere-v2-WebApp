@@ -8,7 +8,7 @@ function remote_protocol_schema_path(?string $override = null): string
 {
     $candidates = array_values(array_filter([
         $override,
-        dirname(__DIR__, 2) . '/Ansible/runner/protocol-v1.json',
+        dirname(__DIR__, 3) . '/Ansible/runner/protocol-v1.json',
         '/var/www/ansible-src/runner/protocol-v1.json',
     ], static fn (mixed $path): bool => is_string($path) && $path !== ''));
     foreach ($candidates as $path) {

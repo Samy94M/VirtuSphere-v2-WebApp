@@ -34,6 +34,7 @@ final class RemoteInventoryConsumerContractTest extends TestCase
     public function testProtocolSchemaRemainsTheOnlyWireDefinition(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/remote_execution_protocol.php');
+        self::assertStringContainsString("dirname(__DIR__, 3) . '/Ansible/runner/protocol-v1.json'", $source);
         self::assertStringContainsString('/Ansible/runner/protocol-v1.json', $source);
         self::assertStringContainsString('/var/www/ansible-src/runner/protocol-v1.json', $source);
         self::assertStringNotContainsString('virtusphere.remote.launch/v1', $source);
