@@ -40,12 +40,24 @@ function credentials_test_is_portal_probe_failure(array $result): bool
 /**
  * Credentials page: turns a connection-test result into the sentence the flash
  * shows. Lives here rather than in lib/credentials_status.php, which stays free
- * of the SSH stack: the result vocabulary (`VIRTUSPHERE_CREDENTIAL_TEST_*`) is
- * owned by lib/ssh.php, and requiring that would drag the transport layer and
- * its database dependencies into a module whose unit test needs neither.
+ * of the SSH stack: requiring that would drag the transport layer and its
+ * database dependencies into a module whose unit test needs neither.
+ *
+ * A result code is the UNION of two sets, not the first one alone. The few
+ * test-only codes (`VIRTUSPHERE_CREDENTIAL_TEST_*`, owned by lib/ssh.php) name
+ * a step that exists only during a manual test; every other failure carries the
+ * same VIRTUSPHERE_INVENTORY_ERROR_* code an inventory pull would have stored,
+ * because credential_test_ssh_failure() classifies through the shared
+ * ansible_connection_error_category(). The earlier note claimed the first set
+ * owned the whole vocabulary, which is why the fallthrough below looks like an
+ * afterthought and is in fact the common case.
+ *
+ * connection_error_message() therefore stays the one SSoT for that second set;
+ * this function must not grow a second mapping table beside it.
  *
  * The raw transport text never becomes the message: it travels in
- * $result['detail'] and is rendered behind the alert's details element.
+ * $result['detail'] and is rendered behind the alert's details element. It is
+ * shown right there, because a manual test writes no job log to link to.
  *
  * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>} $result
  */

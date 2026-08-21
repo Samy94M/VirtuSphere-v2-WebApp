@@ -242,6 +242,7 @@ return [
     'inv_open_failed_job_log' => 'Open the failed attempt\'s job log',
     'inv_open_last_job_log' => 'Open latest job log',
     'inv_job_log_unavailable' => 'No job log is available for this older result. Start a new inventory pull.',
+    'inv_open_ansible_status' => 'Open Ansible status',
     'inv_open_card' => 'View ESXi status',
     'inv_configure_credentials' => 'Add ESXi credential',
     'inv_kind_empty' => 'No entries exist for this inventory kind.',

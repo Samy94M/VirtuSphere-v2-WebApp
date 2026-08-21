@@ -254,13 +254,34 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                       // different reason, and each needs a different fix. ?>
                 <small class="status-cadence"><?php echo h(credential_cadence_esxi($intervalHours, $state, $ansibleSelected, $deployWorkerAlive)); ?></small>
                 <?php $lastJobId = $state !== null ? (int) ($state['last_job_id'] ?? 0) : 0; ?>
-                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && !empty($state['last_error_category'])) { ?>
+                <?php $failedCategory = $state !== null ? (string) ($state['last_error_category'] ?? '') : ''; ?>
+                <?php // An ansible_* code names a fault on the Ansible host, and this card can
+                      // only offer the ESXi credential: the sentence said what broke and left
+                      // the operator to find the section that shows it. The target is a section
+                      // of this same already authorized page, so the link needs no permission of
+                      // its own; the full test and the credential action stay gated where they
+                      // live. Built with the anchor SSoT, never as a hand-written fragment.
+                      //
+                      // Both follow-ups go into the shared .alert-actions row rather than after
+                      // the sentence: two underlined links separated by one space read as a
+                      // single long link, and until this branch existed there was never more
+                      // than one of them. The row is only opened when something fills it, and
+                      // the two links keep the middle dot this file already separates facts
+                      // with, because the row's 6px gap alone was written for buttons. ?>
+                <?php
+                $showAnsibleLink = inventory_error_is_ansible($failedCategory);
+                $showJobLog = $lastJobId > 0 && can('deploy.run', $user);
+                $showJobLogGap = $lastJobId <= 0 && can('deploy.run', $user);
+                ?>
+                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && $failedCategory !== '') { ?>
                     <div class="alert alert-error">
-                        <?php echo h(connection_error_message((string) $state['last_error_category'], ['host' => (string) $credential['host']])); ?>
-                        <?php if ($lastJobId > 0 && can('deploy.run', $user)) { ?>
-                            <a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?></a>
-                        <?php } elseif (can('deploy.run', $user)) { ?>
-                            <?php echo h(__t('system_status.inv_job_log_unavailable')); ?>
+                        <?php echo h(connection_error_message($failedCategory, ['host' => (string) $credential['host']])); ?>
+                        <?php if ($showAnsibleLink || $showJobLog || $showJobLogGap) { ?>
+                            <div class="alert-actions">
+                                <?php if ($showAnsibleLink) { ?><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('system_status.inv_open_ansible_status')); ?></a><?php } ?>
+                                <?php if ($showAnsibleLink && $showJobLog) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
+                                <?php if ($showJobLog) { ?><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?></a><?php } elseif ($showJobLogGap) { ?><span><?php echo h(__t('system_status.inv_job_log_unavailable')); ?></span><?php } ?>
+                            </div>
                         <?php } ?>
                     </div>
                 <?php } ?>

@@ -32,8 +32,12 @@ final class SystemStatusPanelBranchTest extends TestCase
         }
     }
 
-    /** @param array<string,mixed> $state @param array<string,mixed>|null $pending */
-    private function renderEsxi(array $state, ?array $pending = null): string
+    /**
+     * @param array<string,mixed> $state
+     * @param array<string,mixed>|null $pending
+     * @param array<string,mixed>|null $user
+     */
+    private function renderEsxi(array $state, ?array $pending = null, ?array $user = null): string
     {
         $snapshot = ['esxi' => [
             'interval_hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT,
@@ -48,19 +52,19 @@ final class SystemStatusPanelBranchTest extends TestCase
             ]],
         ]];
         ob_start();
-        system_status_render_esxi($snapshot, ['id' => 1, 'role' => 'admin'], 0, null);
+        system_status_render_esxi($snapshot, $user ?? ['id' => 1, 'role' => 'admin'], 0, null);
 
         return (string) ob_get_clean();
     }
 
     /** @return array<string,mixed> */
-    private function inventoryState(string $status, ?int $jobId): array
+    private function inventoryState(string $status, ?int $jobId, ?string $category = null): array
     {
         return [
             'last_status' => $status,
             'last_attempt_at' => '2026-07-26 11:23:57',
             'last_success_at' => $status === 'ok' ? '2026-07-26 11:23:57' : null,
-            'last_error_category' => $status === 'failed' ? VIRTUSPHERE_INVENTORY_ERROR_PARSE : null,
+            'last_error_category' => $status === 'failed' ? ($category ?? VIRTUSPHERE_INVENTORY_ERROR_PARSE) : null,
             'last_job_id' => $jobId,
             'failure_streak' => $status === 'failed' ? 1 : 0,
             'paused_until_credential_change' => 0,
@@ -103,6 +107,155 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString('href="deploy_log.php?id=9719"', $html);
         self::assertStringContainsString(h(__t('system_status.inv_open_failed_job_log')), $html);
         self::assertStringContainsString(h(__t('system_status.inv_open_job_log')), $html);
+    }
+
+    /**
+     * Etappe 9, section 8.3: an ansible_* code names a fault on a machine this
+     * card cannot show. The sentence alone left the operator to find the
+     * Ansible host section by hand, so the card carries the way there.
+     *
+     * The anchor is built from the SSoT constant, never as a hand-written
+     * fragment: a fragment naming a section the page does not render silently
+     * lands on the top of the page instead.
+     */
+    public function testAnAnsibleFailureCarriesTheWayToTheAnsibleSection(): void
+    {
+        $html = $this->renderEsxi(
+            $this->inventoryState('failed', 9720, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH)
+        );
+
+        self::assertStringContainsString(
+            'href="' . h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)) . '"',
+            $html
+        );
+        self::assertStringContainsString(h(__t('system_status.inv_open_ansible_status')), $html);
+        // Found in the browser, not by a test: side by side and both underlined,
+        // the two links read as one long link. They are separated, and only
+        // when both are actually there.
+        self::assertStringContainsString('&middot;', $html);
+        self::assertStringContainsString('class="alert-actions"', $html);
+    }
+
+    public function testASingleFollowUpGetsNoSeparator(): void
+    {
+        // ESXi origin plus a job: only the job log renders, so a separator
+        // would sit at the start of the row with nothing on its left.
+        $esxi = $this->renderEsxi($this->inventoryState('failed', 9724, VIRTUSPHERE_INVENTORY_ERROR_AUTH));
+        self::assertStringContainsString('href="deploy_log.php?id=9724"', $esxi);
+        self::assertStringNotContainsString('&middot;', $esxi);
+
+        // Ansible origin, no retained job: the repair link stands next to the
+        // retention sentence, which is prose and not a second link.
+        $ansible = $this->renderEsxi($this->inventoryState('failed', null, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH));
+        self::assertStringContainsString(h(__t('system_status.inv_open_ansible_status')), $ansible);
+        self::assertStringContainsString(h(__t('system_status.inv_job_log_unavailable')), $ansible);
+        self::assertStringNotContainsString('&middot;', $ansible);
+    }
+
+    /**
+     * The ESXi half of the same branch. A dns/auth/parse failure IS about this
+     * credential's host, so pointing at the Ansible section would send the
+     * operator to a page section that has nothing to do with the failure.
+     */
+    public function testAnEsxiFailureDoesNotPointAtTheAnsibleSection(): void
+    {
+        foreach ([
+            VIRTUSPHERE_INVENTORY_ERROR_AUTH,
+            VIRTUSPHERE_INVENTORY_ERROR_PARSE,
+            VIRTUSPHERE_INVENTORY_ERROR_SSH,
+        ] as $category) {
+            $html = $this->renderEsxi($this->inventoryState('failed', 9721, $category));
+
+            self::assertStringNotContainsString(
+                h(__t('system_status.inv_open_ansible_status')),
+                $html,
+                $category
+            );
+        }
+    }
+
+    /**
+     * The two links answer different questions and are gated differently. The
+     * repair section is part of this same already authorized page, so it stays
+     * visible; the job log carries the original technical text and keeps its
+     * own deploy.run gate.
+     *
+     * The role here is deliberately one the registry does not define: both
+     * shipped roles currently hold deploy.run, so this is the only way to
+     * render the ungated half on its own, and the point of the test is that
+     * the Ansible link does not inherit the job log's condition.
+     */
+    public function testTheAnsibleLinkDoesNotInheritTheJobLogPermission(): void
+    {
+        $html = $this->renderEsxi(
+            $this->inventoryState('failed', 9722, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP),
+            null,
+            ['id' => 7, 'role' => 'without-deploy-run']
+        );
+
+        self::assertFalse(can('deploy.run', ['id' => 7, 'role' => 'without-deploy-run']));
+        self::assertStringContainsString(h(__t('system_status.inv_open_ansible_status')), $html);
+        self::assertStringNotContainsString('deploy_log.php?id=', $html);
+        self::assertStringNotContainsString(h(__t('system_status.inv_job_log_unavailable')), $html);
+        // The cause itself is never gated: hiding it would leave a warning
+        // badge with no stated reason.
+        self::assertStringContainsString(
+            h(connection_error_message(VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP, ['host' => 'esxi-23.example.test'])),
+            $html
+        );
+    }
+
+    /**
+     * The whole visible vocabulary, in both permission states, because the
+     * stage acceptance is about what an operator can see and not about the
+     * three categories a hand-picked example happens to use.
+     *
+     * Three things are decided per category and they are decided separately:
+     * the sentence is never gated, the repair link follows the ORIGIN, and the
+     * job log follows the PERMISSION. Folding any two of them together is how
+     * the card ended up naming the ESXi host for a fault on the Ansible one.
+     *
+     * The ESXi host is passed into every category, as the page does, so a
+     * sentence that interpolated :host would print it as the machine that
+     * failed. ConnectionErrorTest pins the catalog, this pins the render.
+     */
+    public function testEveryCategoryDecidesSentenceOriginAndPermissionSeparately(): void
+    {
+        self::assertNotSame([], VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES, 'the walk would prove nothing');
+        $ansibleLink = h(__t('system_status.inv_open_ansible_status'));
+
+        foreach ([
+            'with deploy.run' => ['id' => 1, 'role' => 'admin'],
+            'without deploy.run' => ['id' => 7, 'role' => 'without-deploy-run'],
+        ] as $label => $user) {
+            $mayReadLogs = can('deploy.run', $user);
+
+            foreach (VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES as $category) {
+                $html = $this->renderEsxi($this->inventoryState('failed', 9723, $category), null, $user);
+                $alert = substr($html, (int) strpos($html, '<div class="alert alert-error">'));
+                $alert = substr($alert, 0, (int) strpos($alert, '</div>'));
+                $where = $label . '/' . $category;
+
+                self::assertStringContainsString(
+                    h(connection_error_message($category, ['host' => 'esxi-23.example.test'])),
+                    $alert,
+                    $where
+                );
+
+                if (inventory_error_is_ansible($category)) {
+                    self::assertStringContainsString($ansibleLink, $alert, $where);
+                    self::assertStringNotContainsString('esxi-23.example.test', $alert, $where);
+                } else {
+                    self::assertStringNotContainsString($ansibleLink, $alert, $where);
+                }
+
+                if ($mayReadLogs) {
+                    self::assertStringContainsString('href="deploy_log.php?id=9723"', $alert, $where);
+                } else {
+                    self::assertStringNotContainsString('deploy_log.php?id=', $alert, $where);
+                }
+            }
+        }
     }
 
     /** @param array<int,array<string,mixed>> $deviations */

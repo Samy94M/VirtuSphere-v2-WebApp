@@ -254,6 +254,35 @@ echo 'FAILED';
   await expect(page.getByRole('link', { name: /Zurück|Back/ })).toHaveAttribute('href', origin);
   await page.getByRole('link', { name: /Zurück|Back/ }).click();
   await expect(page).toHaveURL(new RegExp(`inventory=${seed.esxi}#credential-${seed.esxi}$`));
+
+  // Etappe 9: the same durable failure, but with an origin this card cannot
+  // show. The sentence names the Ansible host, so the card carries the way to
+  // the section that does, and the two follow-ups must stay two.
+  runPhp(`
+$db = db();
+repo_esxi_inventory_record_failure($db, ${Number(seed.esxi)}, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH, ${Number(seed.job)});
+echo 'FAILED';
+`, ['lib/repo/esxi_inventory.php']);
+
+  await page.goto(`system_status.php#credential-${seed.esxi}`);
+  const alert = page.locator(`#credential-${seed.esxi} .alert-error`);
+  const repair = alert.getByRole('link', { name: /Ansible-Status öffnen|Open Ansible status/ });
+  const jobLog = alert.locator(`a[href="deploy_log.php?id=${seed.job}"]`);
+  await expect(repair, 'an ansible_* failure carries the way to the Ansible section').toBeVisible();
+  await expect(jobLog, 'the job log stays its own separate link').toBeVisible();
+
+  // The defect this branch introduced was purely visual: side by side with one
+  // space between them, two underlined links read as a single long link. The
+  // geometry is the assertion, not the markup.
+  const gap = await alert.evaluate((node) => {
+    const links = [...node.querySelectorAll('a')].map((a) => a.getBoundingClientRect());
+    return links.length === 2 ? links[1].left - links[0].right : -1;
+  });
+  expect(gap, 'the repair link and the job log stay visibly separate').toBeGreaterThanOrEqual(10);
+
+  await repair.click();
+  await expect(page).toHaveURL(/system_status\.php#ansible$/);
+  await expect(page.locator('#ansible'), 'the anchor names a section this page really renders').toBeVisible();
 });
 
 test('unknown Systemstatus POST action is rejected with HTTP 400', async ({ browser }) => {

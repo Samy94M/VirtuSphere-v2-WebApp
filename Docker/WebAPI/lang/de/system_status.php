@@ -242,6 +242,7 @@ return [
     'inv_open_failed_job_log' => 'Jobprotokoll des Fehlversuchs öffnen',
     'inv_open_last_job_log' => 'Letztes Jobprotokoll öffnen',
     'inv_job_log_unavailable' => 'Für diesen älteren Befund ist kein Jobprotokoll mehr verfügbar. Starten Sie einen neuen Abruf.',
+    'inv_open_ansible_status' => 'Ansible-Status öffnen',
     'inv_open_card' => 'ESXi-Status ansehen',
     'inv_configure_credentials' => 'ESXi-Zugang anlegen',
     'inv_kind_empty' => 'Für diese Inventarart liegen keine Einträge vor.',

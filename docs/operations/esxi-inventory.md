@@ -62,6 +62,17 @@ Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES` in `
 
 Ein Datenbankfehler, den der Worker-DB-Kanal nicht mehr auffangen kann, trägt seit Etappe 8 auch dann `worker`, wenn er den Worker mitten in einer Transportphase trifft; der technische Text im Jobprotokoll zeigt die `mysqli`-Meldung, und das Containerlog des Workers trägt zusätzlich seine Zustandszeile zum Ausfall.
 
+Seit Etappe 9 trägt der Fehlerhinweis der Inventarkarte bis zu zwei Links, und die beiden sind bewusst verschieden gebunden:
+
+| Link | Erscheint bei | Bedingung |
+|---|---|---|
+| „Ansible-Status öffnen" | jeder Kategorie, die `inventory_error_is_ansible()` erfüllt | keine zusätzliche Berechtigung; das Ziel ist der Abschnitt `#ansible` derselben, bereits autorisierten Seite und wird über `system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)` gebaut, nie als handgeschriebenes Fragment |
+| „Jobprotokoll des Fehlversuchs öffnen" | jeder Kategorie | `deploy.run` **und** ein noch aufbewahrter Auftrag; sonst der Hinweis, einen neuen Abruf zu starten |
+
+Beide stehen in der gemeinsamen `.alert-actions`-Zeile unter dem Satz und sind, wenn beide erscheinen, durch einen Mittelpunkt getrennt: nebeneinander und beide unterstrichen liest man sie sonst als einen einzigen langen Link.
+
+Der Grund dafür: Ein `ansible_*`-Code benennt eine Störung auf einer Maschine, die diese Karte gar nicht zeigt, während Volltest und Zugangsdaten-Aktion im Abschnitt „Ansible-Host" weiterhin an `credentials.manage` hängen. Der erklärende Satz selbst bleibt für jeden Betrachter sichtbar; ihn zu verstecken hinterließe ein Warn-Badge ohne genannten Grund. Der synchrone Zugangstest auf der Seite Zugangsdaten liefert dieselben `ansible_*`-Kategorien, zeigt sein redigiertes technisches Detail aber direkt im Flash: Ein manueller Test schreibt kein Jobprotokoll, auf das er verweisen könnte.
+
 Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` bei fehlgeschlagenem letzten Abruf, noch nie erfolgreichem Zugangsdatum oder veraltetem Erfolg (älter als `VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR` x Intervall, aktuell 2x); `danger` bei Fehlerserie ab `VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER` (aktuell 3) oder Auth-Pause. Bei Intervall 0 (Automatik aus) entfällt die Veraltet-Warnung; das Alter beweist dann nichts. Die Hilfe interpoliert dieselben Konstanten in ihrer Erklärung, Text und Verhalten können nicht auseinanderlaufen.
 
 Dieselbe Ampel erscheint an drei Stellen und wird aus demselben Health-Snapshot berechnet: auf der ESXi-Karte im Systemstatus, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor". Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.

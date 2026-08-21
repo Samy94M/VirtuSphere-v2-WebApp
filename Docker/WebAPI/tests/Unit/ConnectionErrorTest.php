@@ -260,6 +260,56 @@ final class ConnectionErrorTest extends TestCase
         );
     }
 
+    /**
+     * Etappe 9, section 8.1: no ansible_* sentence may print the ESXi host.
+     *
+     * Every renderer of these sentences passes the ESXi credential's host as
+     * :host, because that is the row the message belongs to. A sentence about
+     * the Ansible host that interpolated it would name the wrong machine as
+     * the thing that failed, which is the exact defect the origin split
+     * exists to remove - and it would do so without any classifier being
+     * wrong, so no other test would notice.
+     *
+     * Walked per locale: one catalog can grow a placeholder the other does
+     * not have, and the parity audit compares keys, not wording.
+     */
+    public function testNoAnsibleSentenceInterpolatesTheEsxiHost(): void
+    {
+        $ansible = array_values(array_filter(
+            VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES,
+            static fn (string $category): bool => inventory_error_is_ansible($category)
+        ));
+        self::assertNotSame([], $ansible, 'No ansible_* category found; the walk would prove nothing.');
+
+        $previous = Lang::locale();
+        try {
+            foreach (Lang::LOCALES as $locale) {
+                Lang::load($locale);
+                foreach ($ansible as $category) {
+                    $sentence = connection_error_message($category, ['host' => 'esxi-should-not-appear']);
+                    $where = $locale . '/' . $category;
+
+                    self::assertStringNotContainsString('esxi-should-not-appear', $sentence, $where);
+                    self::assertStringNotContainsString(':host', $sentence, $where);
+                    // A missing key returns the key itself and contains no host
+                    // either, so the walk would pass on a catalog gap.
+                    self::assertStringNotContainsString('common.conn_', $sentence, $where);
+                }
+
+                // Negative direction: an ESXi category DOES name its host, so
+                // the assertions above test a real distinction rather than a
+                // context key that nothing reads.
+                self::assertStringContainsString(
+                    'esxi-should-not-appear',
+                    connection_error_message(VIRTUSPHERE_INVENTORY_ERROR_DNS, ['host' => 'esxi-should-not-appear']),
+                    $locale
+                );
+            }
+        } finally {
+            Lang::load($previous);
+        }
+    }
+
     public function testFailureResultsNeverCarryAReadyMadeMessage(): void
     {
         // portal.md: the portal localizes 'code'; raw text stays in 'detail'.
