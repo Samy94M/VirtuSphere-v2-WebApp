@@ -116,6 +116,54 @@ Aktivierungen blockieren und weder Aktivierungsschreiber noch Produktcaller
 hinzukommen. Das prüft lokale Policylogik, aber keine Laufzeit, externe Wirkung,
 HA-/Lizenzlage oder Powercyclephase auf dem Air-Gap-Ziel.
 
+Der Mission-Import wird in vier Schichten geprüft. Die Unit- und Static-Fälle
+brauchen keine Datenbank, der Grenzvertrag muss das ganze Repo sehen (er liest
+`Docker/php/conf.d` und `Docker/nginx`):
+
+```powershell
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Unit/MissionTransferDocumentTest.php tests/Unit/MissionImportPortalTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Static/MissionImportPreviewErrorContractTest.php
+docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Integration/MissionTransferRoundTripTest.php tests/Integration/MissionImportShapeContractTest.php
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-v2-webapp-php php vendor/bin/phpunit --fail-on-skipped tests/Static/MissionImportUploadLimitContractTest.php
+```
+
+Sie beweisen die gemeinsame Dokumentkanonisierung (kaputte Listen zählen nicht
+mehr als ein Element, ein fremder MAC blockiert nicht und wird nicht
+geschrieben, unbekannte Felder bleiben wirkungslos), die geschlossenen
+Handoff-Status samt Token-Isolation, die Uploadcode-Klassifikation, genau eine
+sichere Serverdiagnose ohne Payload/Token/Dateiname sowie die Ordnung
+`App-Limit < upload_max_filesize < post_max_size < client_max_body_size`.
+
+Zwei Fälle der Import-Abnahmematrix besitzen bewusst keinen funktionalen Test,
+weil ein solcher Test die Aussage nicht stärker machen würde:
+
+- **Bestätigen mit dem Token des vorherigen Uploads.** Die Vorschauseite des
+  älteren Uploads existiert nicht mehr, sein Bestätigen-Formular also auch
+  nicht; ein Nachweis bräuchte einen von Hand gebauten POST samt CSRF-Token und
+  würde am Ende dieselbe Verzweigung prüfen. Bewiesen wird sie stattdessen
+  zweifach: `MissionImportPortalTest` pinnt den Status `mismatch` und dass die
+  reine Funktion nichts verändert, `MissionImportPreviewErrorContractTest` pinnt,
+  dass genau dieser Zweig kein `unset($_SESSION['mission_import'])` enthält.
+- **Datenbankausfall während Vorschau oder Bestätigen.** Der Ausfall lässt sich
+  in der Suite nicht gefahrlos erzeugen, ohne den Stack für alle anderen Gates
+  mitzureißen. Bewiesen wird die Antwort darauf: der Static-Vertrag trennt den
+  erwarteten Dokumentfehler vom unerwarteten `catch (Throwable)` und verlangt für
+  letzteren Diagnose plus Referenzmeldung, `MissionImportPortalTest` beweist die
+  Logzeile selbst samt Sentinel-Prüfung auf Payload und Dateiname.
+
+Die Ini-Grenzen liegen im Image, nicht im Mount. Nach einer Änderung an
+`Docker/php/conf.d/zz-virtusphere.ini` müssen die drei darauf basierenden
+Dienste neu gebaut und ersetzt werden, danach wird der laufende Stand belegt:
+
+```powershell
+docker compose build php deploy-worker maintenance-worker
+docker compose up -d php deploy-worker maintenance-worker
+docker exec virtusphere-v2-webapp-php-1 php -r "echo ini_get('upload_max_filesize'), ' ', ini_get('post_max_size'), PHP_EOL;"
+```
+
+Erwartet wird die Ausgabe `4M 6M`. Ein blosses `docker compose restart` genügt
+nicht: es startet den alten Image-Stand mit den alten Grenzen.
+
 Run the migration preflight without mutating the database:
 
 ```powershell
@@ -352,6 +400,7 @@ The `setup` project seeds an `e2e_user` account through the PHP container and ca
 - `field-roundtrip.spec.js` — a hostile-value matrix (XSS payload, attribute breakout, HTML/SQL metachars, umlauts, 4-byte emoji) through the real form: byte-exact in MySQL with no entity in storage, escaped in every render context, and a dialog handler fails the test if a script ever executes.
 - `crud-mission.spec.js` / `crud-negative.spec.js` — the entity lifecycle verified through state, plus the reference guard (deleting a credential an active job holds must refuse in the operator's language, without a 500 and without a partial cascade).
 - `accessibility.spec.js` — axe-core, WCAG 2.1/2.2 A+AA, every page in both themes.
+- `mission-transfer.spec.js` — export, upload, preview, confirm, plus the cases only a browser can settle: a template export re-imported under a corrected name (prefix error at the field, confirm still enabled), an oversize file and one above `upload_max_filesize` mapped to the localized size sentence instead of "no file selected", a scalar `interfaces`/`disks` producing a positioned finding with canonical counts and a disabled confirm, two uploads in one session where the older link must not destroy the newer preview, Cancel plus browser Back showing the same preview inside the TTL, and exactly one `missions` audit row for a successful import against none for an expected failure. The size boundaries are read from the PHP constants through the test helper, never spelled out in the spec.
 - `system-status-ampel.spec.js` — the statements the status page makes about its own traffic lights: the legend explains every state the page can render and lists **the same** heartbeat states as the help panel (compared across the two rendered pages, which is the only place that drift is visible), an action hint appears on a broken row and not on a healthy one, an unconnected MECM names the setup step once instead of repeating repair hints, and Dashboard and System status render the two separated MECM badges (Integration, MECM-Site) from the same health snapshot, a provider fault shown grey and never labelled site-critical. Drives result and site-health states through seeded rows and hands the table back intact.
 
 Two traps worth knowing before writing a spec: the layout header carries a logout form whose submit is the **first** on every page, so a `.first()` submit selector logs you out instead of saving; and the real deploy worker polls the same database, so a fixture job seeded as `queued` gets claimed and finished mid-test (seed it `running` with a fresh heartbeat when a test depends on it staying active).

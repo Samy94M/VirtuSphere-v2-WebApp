@@ -88,6 +88,10 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.transfer_p2')); ?></p>
             <p><?php echo h(__t('help_missions.transfer_p3', ['minutes' => intdiv(VIRTUSPHERE_MISSION_IMPORT_TTL_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help_missions.transfer_p4', ['max' => virtusphere_human_bytes(VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES)])); ?></p>
+            <p><?php echo h(__t('help_missions.transfer_scope')); ?></p>
+            <p><?php echo h(__t('help_missions.transfer_session')); ?></p>
+            <?php // The CSV note stays last: it answers "why can I not import the
+                  // other download", which only comes up after the rest. ?>
             <p><?php echo h(__t('help_missions.transfer_p5')); ?></p>
         </section>
 

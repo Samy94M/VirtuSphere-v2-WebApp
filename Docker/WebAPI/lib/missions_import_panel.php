@@ -96,8 +96,10 @@ function missions_render_import_preview(array $importPreview, array $user): void
         <?php // One submit button and the action in a hidden input, per the
               // core.js busy-button contract: the busy handler disables the
               // button, which would drop a button-borne name/value from the POST.
-              // Cancel therefore stays a link; the hand-off it leaves behind ages
-              // out with the preview TTL, exactly as it does for a closed tab. ?>
+              // Cancel therefore stays a link and does NOT delete the hand-off:
+              // it leaves the view, the state ages out with the preview TTL (or
+              // is replaced by the next upload), and Back within that window
+              // shows this same preview again. ?>
         <form class="form-grid" method="post" action="missions.php?type=missions">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="import_confirm">
@@ -131,6 +133,12 @@ function missions_render_import_upload(): void
         <form class="form-grid" method="post" action="missions.php?type=missions" enctype="multipart/form-data">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="import_preview">
+            <?php // MAX_FILE_SIZE must precede the file input, or PHP ignores it.
+                  // It is the early-detection hint only (PHP answers an oversize
+                  // upload with UPLOAD_ERR_FORM_SIZE instead of buffering it), and
+                  // never a boundary: a client can change or drop it, so the
+                  // server compares $_FILES['size'] against the same constant. ?>
+            <input type="hidden" name="MAX_FILE_SIZE" value="<?php echo h((string) VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES); ?>">
             <label><?php echo h(__t('missions.import_file_label')); ?>
                 <input type="file" name="import_file" accept="application/json,.json" required>
             </label>

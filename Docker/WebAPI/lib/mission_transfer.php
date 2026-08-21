@@ -58,5 +58,30 @@ const VIRTUSPHERE_MISSION_TRANSFER_INTERFACE_FIELDS = [
     'ip', 'subnet', 'gateway', 'dns1', 'dns2', 'vlan', 'mode', 'type',
 ];
 
+/**
+ * Disk columns carried by the transfer format.
+ *
+ * A list, like the two above, and read by BOTH directions: the export writes
+ * exactly these keys and the import projects exactly these keys. Before this
+ * constant existed the two sides each spelled the three names out, which is how
+ * a `disks: "oops"` could be counted as one disk by the report and written as
+ * zero disks by the repo.
+ */
+const VIRTUSPHERE_MISSION_TRANSFER_DISK_FIELDS = ['disk_name', 'disk_size', 'disk_type'];
+
+/**
+ * Package reference keys, mapped to the catalog columns they are resolved
+ * against: transfer key => `deploy_packages` column. The transfer format names
+ * them `name`/`version` because a reference is not a row.
+ */
+const VIRTUSPHERE_MISSION_TRANSFER_PACKAGE_FIELDS = [
+    'name' => 'package_name',
+    'version' => 'package_version',
+];
+
+// The canonical reading of an uploaded document, shared by the preview report
+// and the write. Loaded after the field lists it projects.
+require_once __DIR__ . '/mission_transfer_document.php';
+require_once __DIR__ . '/mission_transfer_field_errors.php';
 require_once __DIR__ . '/mission_transfer_export.php';
 require_once __DIR__ . '/mission_transfer_import.php';

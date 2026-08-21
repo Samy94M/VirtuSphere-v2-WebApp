@@ -35,21 +35,26 @@ function mission_export_payload(mysqli $db, int $missionId): array
             $interfaces[] = $row; // MAC intentionally omitted.
         }
 
+        // Both loops walk the transfer field-list SSoTs rather than repeating the
+        // key names, so the import projects exactly the keys the export writes.
         $disks = [];
         foreach ($vm['disks'] as $disk) {
-            $disks[] = [
-                'disk_name' => (string) ($disk['disk_name'] ?? ''),
-                'disk_size' => (int) ($disk['disk_size'] ?? 0),
-                'disk_type' => (string) ($disk['disk_type'] ?? ''),
-            ];
+            $row = [];
+            foreach (VIRTUSPHERE_MISSION_TRANSFER_DISK_FIELDS as $field) {
+                $row[$field] = $field === 'disk_size'
+                    ? (int) ($disk[$field] ?? 0)
+                    : (string) ($disk[$field] ?? '');
+            }
+            $disks[] = $row;
         }
 
         $packages = [];
         foreach ($vm['packages'] as $package) {
-            $packages[] = [
-                'name' => (string) ($package['package_name'] ?? ''),
-                'version' => (string) ($package['package_version'] ?? ''),
-            ];
+            $row = [];
+            foreach (VIRTUSPHERE_MISSION_TRANSFER_PACKAGE_FIELDS as $field => $column) {
+                $row[$field] = (string) ($package[$column] ?? '');
+            }
+            $packages[] = $row;
         }
 
         $vmOut['interfaces'] = $interfaces;

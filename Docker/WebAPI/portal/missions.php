@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/format.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
+require_once __DIR__ . '/../lib/mission_import_portal.php';
 require_once __DIR__ . '/../lib/missions_import_panel.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
@@ -58,51 +59,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'deleted mission id ' . $missionId, (int) $user['id']);
             flash_set('success', $isTemplateView ? __t('missions.flash_deleted_template') : __t('missions.flash_deleted_mission'));
         } elseif ($action === 'import_preview') {
-            $file = $_FILES['import_file'] ?? null;
-            if (!is_array($file) || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-                throw new RuntimeException(__t('missions.import_err_no_file'));
-            }
-            $size = (int) ($file['size'] ?? 0);
-            if ($size <= 0 || $size > VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES) {
-                throw new RuntimeException(__t('missions.import_err_too_large', [
-                    'max' => virtusphere_human_bytes(VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES),
+            // Every expected outcome below answers with flash + redirect (both
+            // end the request), so whatever reaches this catch is a fault, not
+            // operator input: it gets a reference and exactly one server-log
+            // line, never a raw PHP sentence.
+            try {
+                $upload = mission_import_read_upload($_FILES['import_file'] ?? null);
+                if ($upload['rejection'] !== null) {
+                    flash_set('error', $upload['rejection']);
+                    redirect_to('missions.php?type=missions');
+                }
+                // The ORIGINAL decoded payload, never its canonical projection:
+                // the preview and the confirm re-derive the analysis from it, so
+                // the shape findings survive the round trip and the rule stays in
+                // one place. Exactly one active import per session by decision; a
+                // new upload replaces the previous one.
+                $token = bin2hex(random_bytes(16));
+                $_SESSION['mission_import'] = [
+                    'token' => $token,
+                    'created' => time(),
+                    'payload' => $upload['payload'],
+                    'suggested_name' => $upload['suggested_name'],
+                ];
+                redirect_to('missions.php?type=missions&import=' . $token);
+            } catch (Throwable $uploadFault) {
+                flash_set('error', __t('missions.import_err_unexpected', [
+                    'reference' => mission_import_diagnose('upload', $uploadFault),
                 ]));
             }
-            $raw = file_get_contents((string) $file['tmp_name']);
-            if ($raw === false || $raw === '') {
-                throw new RuntimeException(__t('missions.import_err_read'));
-            }
-            $payload = json_decode($raw, true, VIRTUSPHERE_MISSION_IMPORT_JSON_DEPTH);
-            if (!is_array($payload)) {
-                throw new RuntimeException(__t('missions.import_err_json'));
-            }
-            if ((int) ($payload['format_version'] ?? 0) !== VIRTUSPHERE_MISSION_EXPORT_VERSION) {
-                throw new RuntimeException(__t('missions.import_err_version'));
-            }
-            $token = bin2hex(random_bytes(16));
-            $_SESSION['mission_import'] = [
-                'token' => $token,
-                'created' => time(),
-                'payload' => $payload,
-                'suggested_name' => trim((string) ($payload['mission']['mission_name'] ?? '')),
-            ];
-            redirect_to('missions.php?type=missions&import=' . $token);
         } elseif ($action === 'import_confirm') {
             $token = request_string($_POST, 'import_token');
             $state = $_SESSION['mission_import'] ?? null;
-            if (!is_array($state) || $token === '' || !hash_equals((string) ($state['token'] ?? ''), $token)
-                || time() - (int) ($state['created'] ?? 0) > VIRTUSPHERE_MISSION_IMPORT_TTL_SECONDS) {
-                unset($_SESSION['mission_import']);
-                flash_set('error', __t('missions.import_err_expired'));
+            $status = mission_import_handoff_status($state, $token, time());
+            if ($status !== 'valid') {
+                // Same rule as the GET preview: only a hand-off this link OWNS
+                // may be removed. A mismatch is about a different upload, and
+                // deleting it here destroyed the newer preview of the same
+                // session.
+                if ($status === 'expired' || $status === 'invalid') {
+                    unset($_SESSION['mission_import']);
+                }
+                flash_set('error', match ($status) {
+                    'expired' => __t('missions.import_err_expired'),
+                    'invalid' => __t('missions.import_err_state_invalid'),
+                    default => __t('missions.import_err_gone'),
+                });
                 redirect_to('missions.php?type=missions');
             }
             $name = request_trimmed($_POST, 'mission_name');
+            // Before the import, so every failing redirect carries the name the
+            // operator just typed instead of resetting the field to the file's
+            // suggestion together with a finding about a name they no longer see.
+            $_SESSION['mission_import']['suggested_name'] = $name;
             try {
+                // The cast narrows a type, it decides no shape: the status above
+                // already established that the stored payload is an array, and
+                // everything inside it is canonicalized by the analysis.
                 $report = mission_import($connection, (array) $state['payload'], $name, false, (int) $user['id']);
-            } catch (Throwable $importError) {
-                // Keep the session hand-off alive so the admin can correct the
+            } catch (MissionTransferDocumentException $documentError) {
+                // The stored document cannot be read at all any more; there is
+                // nothing left to retry against.
+                unset($_SESSION['mission_import']);
+                flash_set('error', portal_error_message($documentError));
+                redirect_to('missions.php?type=missions');
+            } catch (MissionTransferBlockedException|ValidationException $expectedError) {
+                // Expected refusals (a blocked report, a value a validator
+                // rejects). The hand-off stays alive so the admin can correct the
                 // name and retry without re-uploading.
-                flash_set('error', portal_error_message($importError));
+                flash_set('error', portal_error_message($expectedError));
+                redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
+            } catch (Throwable $importFault) {
+                // The unique index is the last race guard behind the live
+                // re-check: a name taken between preview and confirm is a plain
+                // conflict, not a fault worth an error reference.
+                $isNameRace = $importFault instanceof mysqli_sql_exception && (int) $importFault->getCode() === 1062;
+                flash_set('error', $isNameRace ? __t('missions.import_name_conflict') : __t('missions.import_err_unexpected', [
+                    'reference' => mission_import_diagnose('confirm', $importFault),
+                ]));
                 redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
             }
             unset($_SESSION['mission_import']);
@@ -190,42 +223,68 @@ $deviatingMissions = $isTemplateView ? [] : esxi_inventory_deviating_mission_ids
 // session, recompute the report against the live DB and render the confirm step.
 $importPreview = null;
 $importToken = request_string($_GET, 'import');
+// A hand-off that is provably dead (expired, or structurally unusable) is swept
+// on any render of this page, with or without a token: an operator who keeps
+// working should not carry a dead payload around until the session GC runs.
+if ($importToken === '' && mission_import_handoff_is_disposable($_SESSION['mission_import'] ?? null, time())) {
+    unset($_SESSION['mission_import']);
+}
 if ($importToken !== '' && !$isTemplateView && can('missions.write', $user)) {
     $state = $_SESSION['mission_import'] ?? null;
-    if (is_array($state)
-        && hash_equals((string) ($state['token'] ?? ''), $importToken)
-        && time() - (int) ($state['created'] ?? 0) <= VIRTUSPHERE_MISSION_IMPORT_TTL_SECONDS) {
+    // One closed status, shared with the confirm POST. The condition used to be
+    // spelled out twice, and this copy answered a token MISMATCH by deleting the
+    // session state, so opening the stale link of upload A destroyed the still
+    // valid preview of the newer upload B.
+    $status = mission_import_handoff_status($state, $importToken, time());
+    if ($status === 'valid') {
         $suggestedName = (string) ($state['suggested_name'] ?? '');
         try {
+            // Type narrowing only; the status above established the array shape.
             $report = mission_import($connection, (array) $state['payload'], $suggestedName, true);
             $importPreview = [
                 'token' => $importToken,
                 'suggested_name' => $suggestedName,
-                'exported_at' => (string) ($state['payload']['exported_at'] ?? ''),
+                // From the analysis, not from the raw file: an unparseable value
+                // would otherwise be rendered back as a timestamp.
+                'exported_at' => (string) $report['exported_at'],
                 'report' => $report,
             ];
-        } catch (Throwable $previewError) {
-            // A dry run that cannot produce a report at all (an unreadable
-            // document, a database failure) drops the hand-off, and it must say
-            // so: this catch used to be the unset alone, so the page fell back to
-            // the empty upload form with no flash and no log entry, which is
-            // exactly the "nothing happens on Preview" the operator reported.
+        } catch (MissionTransferDocumentException $documentError) {
+            // The stored document cannot be read at all. Its own hand-off goes,
+            // and the localized reason is said: this catch used to be the unset
+            // alone, so the page fell back to the empty upload form with no flash
+            // and no log entry, which is exactly the "nothing happens on Preview"
+            // the operator reported.
             unset($_SESSION['mission_import']);
-            flash_set('error', portal_error_message($previewError));
+            flash_set('error', portal_error_message($documentError));
+        } catch (Throwable $previewFault) {
+            // Unexpected (a database failure, a coding error). Only this link's
+            // own broken hand-off is dropped, the fault is recorded once, safely,
+            // and the operator gets a reference rather than PHP prose.
+            unset($_SESSION['mission_import']);
+            flash_set('error', __t('missions.import_err_unexpected', [
+                'reference' => mission_import_diagnose('preview', $previewFault),
+            ]));
         }
-    } elseif (is_array($state) && hash_equals((string) ($state['token'] ?? ''), $importToken)) {
+    } elseif ($status === 'expired') {
         // This link's own hand-off is still in the session and only its TTL has
         // run out: "expired" is an established fact here, so it may be said.
         unset($_SESSION['mission_import']);
         flash_set('error', __t('missions.import_err_expired'));
-    } else {
-        // No hand-off at all, or one belonging to a different upload. Reached
-        // after Cancel, after a SUCCESSFUL import followed by the Back button,
-        // and from a stale link out of another session. Which of those it was is
-        // not knowable here, so the message states only what is established:
-        // there is no preview behind this link any more. Claiming "expired"
-        // would assert a cause this path never checked.
+    } elseif ($status === 'invalid') {
+        // A structurally unusable state; nothing can be reported about the file,
+        // so the message says only that this preview has to be redone.
         unset($_SESSION['mission_import']);
+        flash_set('error', __t('missions.import_err_state_invalid'));
+    } else {
+        // missing or mismatch. Reached after Cancel, after a SUCCESSFUL import
+        // followed by the Back button, from a stale link out of another session,
+        // and from the older link of a session that has since uploaded again.
+        // Which of those it was is not knowable here, so the message states only
+        // what is established: there is no preview behind THIS link any more.
+        // Claiming "expired" would assert a cause this path never checked, and
+        // nothing is deleted, because whatever is in the session belongs to a
+        // different upload.
         flash_set('error', __t('missions.import_err_gone'));
     }
 }
