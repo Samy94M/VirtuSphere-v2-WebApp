@@ -148,6 +148,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 (string) $job['reaped_to']
             );
             $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation . $suffix;
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
             if ($wasCancelling) {
                 $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
                 $stmt->bind_param('ssis', $cancelled, $message, $jobId, $cancelling);
@@ -157,7 +158,6 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
-                repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
                 $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
                 if (!$wasCancelling
                     && ($job['mission_id'] ?? null) === null
@@ -177,6 +177,8 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                         $jobId
                     );
                 }
+            } else {
+                throw new RuntimeException('Stale-job reaper lost its locked job row.');
             }
         }
         unset($job);

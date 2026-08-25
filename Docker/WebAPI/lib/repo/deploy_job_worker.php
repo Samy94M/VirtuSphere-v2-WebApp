@@ -76,11 +76,36 @@ function repo_finish_deploy_job(mysqli $db, int $jobId, string $workerId, string
         throw new InvalidArgumentException('Deploy job finish status must be terminal.');
     }
 
-    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-    $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
-    $stmt->bind_param('ssiss', $status, $lastError, $jobId, $workerId, $running);
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError): bool {
+        $stmt = $db->prepare('SELECT status, locked_by FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if (!$row
+            || (string) $row['status'] !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING
+            || (string) ($row['locked_by'] ?? '') !== $workerId
+        ) {
+            return false;
+        }
 
-    return $stmt->execute() && $stmt->affected_rows === 1;
+        $terminalLines = [
+            VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => 'Deploy job succeeded.',
+            VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'Deploy job finished partially.' . ($lastError !== null && $lastError !== '' ? ' ' . $lastError : ''),
+            VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'Deploy job failed.',
+            VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'Deploy job cancelled.',
+        ];
+        // PHPStan derives $status from VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES;
+        // adding a terminal state without extending this map is a static error.
+        $terminalLine = $terminalLines[$status];
+        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $terminalLine);
+
+        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt->bind_param('ssiss', $status, $lastError, $jobId, $workerId, $running);
+        $stmt->execute();
+
+        return $stmt->affected_rows === 1;
+    });
 }
 
 function repo_append_deploy_job_log(mysqli $db, int $jobId, string $stream, string $line): int
@@ -92,6 +117,21 @@ function repo_insert_deploy_job_log_unlocked(mysqli $db, int $jobId, string $str
 {
     if (!in_array($stream, VIRTUSPHERE_DEPLOY_LOG_STREAMS, true)) {
         throw new InvalidArgumentException('Invalid deploy log stream.');
+    }
+
+    // Serialize every append with the parent row. Terminal transitions append
+    // their final SYSTEM line while that row is still active and change the
+    // status in the same transaction; a later normal writer therefore observes
+    // the terminal state and cannot create evidence after the declared end.
+    $stmt = $db->prepare('SELECT status FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
+    $stmt->bind_param('i', $jobId);
+    $stmt->execute();
+    $job = $stmt->get_result()->fetch_assoc();
+    if (!$job) {
+        throw new RuntimeException('Deploy job not found for log append.');
+    }
+    if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
+        throw new RuntimeException('Cannot append to a terminal deploy job.');
     }
 
     // The last thing before the row exists, and therefore the place where

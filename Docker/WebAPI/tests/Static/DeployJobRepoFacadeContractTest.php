@@ -47,6 +47,16 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'repo_deploy_jobs',
         'repo_deploy_job',
         'repo_deploy_job_logs',
+        // Etappe 10A: three cursor directions plus a bounded raw snapshot. The
+        // page/bounds/limit helpers are public PHP functions as well and stay
+        // in the facade inventory so a later repo split cannot strand them.
+        'repo_deploy_job_log_initial_tail',
+        'repo_deploy_job_log_forward',
+        'repo_deploy_job_log_older',
+        'repo_deploy_job_log_raw_batches',
+        'deploy_job_log_read_limit',
+        'deploy_job_log_bounds',
+        'deploy_job_log_page',
         'repo_deploy_filter_mission_vm_ids',
         'repo_deploy_group_vm_list',
         'repo_purge_deploy_job_logs',

@@ -96,7 +96,7 @@ final class PortalConfirmContractTest extends TestCase
 
     /**
      * The portal client scripts, concatenated. app.js was split into
-     * core.js/forms.js/deploy.js; the confirm logic lives in core.js, but
+     * the focused portal assets; the confirm logic lives in core.js, but
      * scanning all of them keeps this contract insensitive to which file holds
      * what.
      */

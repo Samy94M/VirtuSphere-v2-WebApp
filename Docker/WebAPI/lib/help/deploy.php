@@ -25,6 +25,12 @@ declare(strict_types=1);
                 'line_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES,
                 'job_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_JOB_MAX_BYTES,
             ])); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_log_window_p1', [
+                'limit' => VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW,
+            ])); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_log_window_p2', [
+                'days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
+            ])); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_powercycle_wait_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_start_wait_heading')); ?></h3>

@@ -4,6 +4,67 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 
+/** @param array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} $page */
+function deploy_job_log_format_page(array $page): array
+{
+    foreach ($page['logs'] as &$entry) {
+        $entry['seq'] = (int) $entry['seq'];
+        $entry['created_at'] = portal_format_timestamp($entry['created_at'] ?? null);
+        $entry['stream_label'] = deploy_job_log_source_label((string) ($entry['stream'] ?? ''));
+    }
+    unset($entry);
+
+    return $page;
+}
+
+function deploy_job_log_cursor(string $name, bool $positive): ?int
+{
+    if (!array_key_exists($name, $_GET)) {
+        return null;
+    }
+    $raw = $_GET[$name];
+    if (!is_string($raw) || preg_match('/^\d+$/D', $raw) !== 1) {
+        throw new InvalidArgumentException($name . ' must be an integer cursor.');
+    }
+    $value = (int) $raw;
+    if (($positive && $value <= 0) || (!$positive && $value < 0)) {
+        throw new InvalidArgumentException($name . ' is outside the cursor range.');
+    }
+
+    return $value;
+}
+
+function deploy_job_logs_are_pruned(array $job, array $logs): bool
+{
+    return $logs === []
+        && in_array((string) ($job['status'] ?? ''), VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)
+        && (int) strtotime((string) ($job['updated_at'] ?? '') . ' UTC') < time() - VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS * 86400;
+}
+
+function deploy_job_log_empty_state(array $job, array $logs): string
+{
+    return deploy_job_logs_are_pruned($job, $logs) ? 'pruned' : 'empty';
+}
+
+function deploy_job_log_empty_message(string $state): string
+{
+    return $state === 'pruned'
+        ? __t('deploy.output_pruned', ['days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS])
+        : __t('deploy.no_output');
+}
+
+function deploy_job_log_raw_utc(?string $value): string
+{
+    if ($value === null || trim($value) === '') {
+        return '';
+    }
+    try {
+        return (new DateTimeImmutable($value, new DateTimeZone('UTC')))->format('Y-m-d\TH:i:s\Z');
+    } catch (Throwable) {
+        return $value;
+    }
+}
+
 /**
  * How a stored job-log line's source is shown (Etappe 8).
  *

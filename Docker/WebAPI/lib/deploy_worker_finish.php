@@ -60,11 +60,9 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
         $failedCount = count($macResult['failed_vm_ids']);
         $summary = 'MAC import partial: ' . $failedCount . ' of ' . ($failedCount + count($macResult['successful_vm_ids'])) . ' VMs failed.';
         deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' mac import partial', $vmIds, $macResult['successful_vm_ids']);
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job finished partially. ' . $summary);
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary);
         deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary);
     } else {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job succeeded.');
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
         deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     }
@@ -112,8 +110,14 @@ function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds, st
  */
 function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): bool
 {
-    if (repo_deploy_job($db, $jobId) === null) {
+    $job = repo_deploy_job($db, $jobId);
+    if ($job === null) {
         error_log('[deploy-worker] job ' . $jobId . ' is gone; ' . $line);
+
+        return false;
+    }
+    if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
+        error_log('[deploy-worker] job ' . $jobId . ' is terminal; ' . $line);
 
         return false;
     }
@@ -184,26 +188,22 @@ function deploy_worker_finish_job(mysqli $db, int $jobId, string $workerId, stri
     $lockedBy = (string) ($job['locked_by'] ?? '');
     if ($observed === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING
         && $lockedBy === $workerId
-        && repo_confirm_deploy_job_cancelled($db, $jobId, $workerId)
-    ) {
-        repo_append_deploy_job_log(
+        && repo_confirm_deploy_job_cancelled(
             $db,
             $jobId,
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Terminal status ' . $status . ' was not written: a cancel request had already been accepted for this job. '
-            . 'The remote step that was running at that moment ran to its end, so its changes on ESXi are in place; no further step was started.'
-        );
-
+            $workerId,
+            'Cancelled after operator request; the remote step that was already running ran to its end, '
+            . 'so its changes on ESXi are in place; no further step was started.'
+        )
+    ) {
         return;
     }
 
-    repo_append_deploy_job_log(
-        $db,
-        $jobId,
-        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-        'Terminal status ' . $status . ' was not written: the job is no longer running under this worker (status ' . $observed
-        . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . ').'
-    );
+    // A terminal or foreign-owned row is immutable evidence. This diagnostic
+    // cannot be appended to it without lying about the terminal boundary.
+    error_log('[deploy-worker] job ' . $jobId . ': terminal status ' . $status
+        . ' was not written; observed status ' . $observed
+        . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . '.');
 }
 
 /**

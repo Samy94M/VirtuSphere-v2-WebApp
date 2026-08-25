@@ -45,6 +45,13 @@ the portal therefore showed a terminal job whose sequence was still executing:
   terminal swap won first, a later cancel POST cannot change the finished job.
   So there is neither "succeeded despite an accepted cancellation" nor a
   `cancelled` job whose next playbook is still running.
+- **A terminal state and its final SYSTEM line are one database fact**
+  (amendment 2026-08-25). Every success, partial, failure, queued cancellation,
+  confirmed cancellation and reap path appends its closing line and changes the
+  job status in the same transaction. Normal job-log writers lock the parent
+  row and reject every append after a terminal status. The portal therefore
+  drains by sequence cursor until both the terminal status and `caught_up` are
+  true; seeing a terminal status alone never permits the reader to stop.
 - **cancelled_at names the end state only.** The wish carries its own
   timestamp and actor; a `cancelling` job has `cancelled_at IS NULL`.
 - **Active means queued, running or cancelling** (one SSoT constant). Deleting

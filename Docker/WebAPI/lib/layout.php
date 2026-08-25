@@ -43,13 +43,13 @@ function layout_asset_url(string $path): string
 
 /**
  * The portal's client scripts, in load order: core (theme, modals, tabs,
- * session) then forms then deploy. Each is an independent IIFE; `defer`
+ * session), forms, the deploy-log reader, then the deploy form. Each is an independent IIFE; `defer`
  * preserves this order. Emitted from one place so the head of layout.php and
  * login.php cannot drift apart. Every tag carries the CSP nonce.
  */
 function layout_app_scripts(string $nonce): void
 {
-    foreach (['assets/core.js', 'assets/forms.js', 'assets/deploy.js'] as $script) {
+    foreach (['assets/core.js', 'assets/forms.js', 'assets/deploy_log.js', 'assets/deploy.js'] as $script) {
         echo '<script defer nonce="' . h($nonce) . '" src="' . h(layout_asset_url($script)) . '"></script>' . "\n";
     }
 }

@@ -20,6 +20,11 @@ function deploy_job_log_url(int $jobId): string
     return sprintf('deploy_log.php?id=%d', $jobId);
 }
 
+function deploy_job_raw_log_url(int $jobId): string
+{
+    return deploy_job_log_url($jobId) . '&format=raw';
+}
+
 /**
  * The page one job belongs to. Mission jobs return to their filtered deploy
  * list; mission-less inventory jobs return to the exact ESXi card that opened

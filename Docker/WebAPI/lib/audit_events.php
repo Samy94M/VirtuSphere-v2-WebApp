@@ -36,10 +36,11 @@ function audit_auth(mysqli $db, string $message, ?int $userId = null): bool
  * for one account are the signature of a stolen session or someone probing for
  * rights, which is invisible while every page merely exits.
  *
- * Keeps the previous response byte-for-byte: 403 plus the localized plain-text
- * body, no layout.
+ * HTML callers keep the previous 403 plain-text body. Polling endpoints may
+ * request the equivalent JSON envelope so an authorization loss never turns
+ * into a parser retry loop; both paths write the same audit event once.
  */
-function portal_forbid(mysqli $db, ?array $user, string $permission): never
+function portal_forbid(mysqli $db, ?array $user, string $permission, bool $json = false): never
 {
     $userId = isset($user['id']) ? (int) $user['id'] : null;
     $name = trim((string) ($user['name'] ?? ''));
@@ -51,6 +52,11 @@ function portal_forbid(mysqli $db, ?array $user, string $permission): never
     );
 
     http_response_code(403);
+    if ($json) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => false, 'message' => __t('portal.forbidden')], JSON_THROW_ON_ERROR);
+        exit;
+    }
     exit(__t('portal.forbidden'));
 }
 

@@ -1,96 +1,12 @@
-// Portal deploy page: live job-log polling, the per-host/capability credential
-// warnings, the schedule/stagger/power-cycle locks, the ESXi capacity bars and
-// the live storage-requirement table. Independent of core.js and forms.js.
+// Portal deploy page: per-host/capability credential warnings, the
+// schedule/stagger/power-cycle locks, ESXi capacity bars and the live storage
+// requirement table. Job-log behaviour lives in deploy_log.js.
 //
 // Load order matters within this file: the mission-nav / select-all change
 // listener is registered at load, before initDeployStorage() registers its own,
 // so the checkboxes select-all flips are already in their new state when the
 // storage table recomputes.
 (function () {
-    function appendDeployLogRow(body, entry) {
-        var empty = body.querySelector('[data-empty-log]');
-        if (empty) {
-            empty.remove();
-        }
-
-        var row = document.createElement('tr');
-        row.setAttribute('data-log-seq', String(entry.seq));
-
-        var seq = document.createElement('td');
-        seq.textContent = String(entry.seq);
-        row.appendChild(seq);
-
-        var time = document.createElement('td');
-        time.textContent = entry.created_at || '';
-        row.appendChild(time);
-
-        var stream = document.createElement('td');
-        // The label is built server-side: it is translated, and what the stored
-        // source means is a statement about the transport with one author.
-        stream.textContent = entry.stream_label || entry.stream || '';
-        row.appendChild(stream);
-
-        var lineCell = document.createElement('td');
-        var code = document.createElement('code');
-        code.className = 'log-line';
-        code.textContent = entry.line || '';
-        lineCell.appendChild(code);
-        row.appendChild(lineCell);
-
-        body.appendChild(row);
-    }
-
-    function initDeployLogPolling() {
-        var root = document.querySelector('[data-deploy-log]');
-        if (!root || root.getAttribute('data-terminal') === '1') {
-            return;
-        }
-
-        var jobId = root.getAttribute('data-job-id');
-        var afterSeq = parseInt(root.getAttribute('data-after-seq') || '0', 10);
-        var body = document.querySelector('[data-deploy-log-body]');
-        var status = document.querySelector('[data-deploy-status]');
-        if (!jobId || !body) {
-            return;
-        }
-
-        function poll() {
-            fetch('deploy_log.php?id=' + encodeURIComponent(jobId) + '&format=json&after_seq=' + encodeURIComponent(String(afterSeq)), {
-                headers: {Accept: 'application/json'},
-                credentials: 'same-origin'
-            }).then(function (response) {
-                if (!response.ok) {
-                    throw new Error('deploy log request failed');
-                }
-                return response.json();
-            }).then(function (payload) {
-                if (!payload.ok) {
-                    return;
-                }
-                if (payload.job && status) {
-                    status.textContent = payload.job.status || '';
-                    status.className = 'badge badge-' + (payload.job.badge || 'neutral');
-                }
-                if (Array.isArray(payload.logs)) {
-                    payload.logs.forEach(function (entry) {
-                        appendDeployLogRow(body, entry);
-                        afterSeq = Math.max(afterSeq, parseInt(entry.seq || '0', 10));
-                    });
-                    root.setAttribute('data-after-seq', String(afterSeq));
-                }
-                if (payload.job && payload.job.terminal) {
-                    root.setAttribute('data-terminal', '1');
-                    return;
-                }
-                window.setTimeout(poll, 2000);
-            }).catch(function () {
-                window.setTimeout(poll, 5000);
-            });
-        }
-
-        window.setTimeout(poll, 2000);
-    }
-
     // The queue form's own values as a query string, so changing the mission can
     // stay a full page load (the VM list, the storage table and the per-host
     // warnings only exist server-side, per mission) without emptying the form the
@@ -433,7 +349,6 @@
         update();
     }
 
-    initDeployLogPolling();
     initDeployJobFilter();
     initDeployHostWarning();
     initDeploySchedule();

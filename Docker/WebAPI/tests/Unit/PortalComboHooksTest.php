@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
  * while the RAM markup in vm_edit.php kept the old names, which silently killed
  * the RAM preset picker. This test pins the contract as text.
  *
- * app.js was split into core.js/forms.js/deploy.js; the client side is the three
+ * app.js was split into focused assets; the client side is every asset
  * concatenated (assetsJs), the markup side is the PHP pages.
  */
 final class PortalComboHooksTest extends TestCase

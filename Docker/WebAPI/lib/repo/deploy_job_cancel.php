@@ -40,11 +40,12 @@ function repo_cancel_deploy_group(mysqli $db, string $groupId, int $userId): int
         $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
         $message = 'Cancelled with group ' . $groupId . ' by user id ' . $userId;
         foreach ($ids as $jobId) {
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
             $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ? AND status = ?');
             $stmt->bind_param('ssis', $cancelled, $message, $jobId, $queued);
             $stmt->execute();
-            if ($stmt->affected_rows === 1) {
-                repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+            if ($stmt->affected_rows !== 1) {
+                throw new RuntimeException('Queued group cancellation lost its locked job row.');
             }
         }
 
@@ -97,10 +98,10 @@ function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): string
         if ($current === VIRTUSPHERE_DEPLOY_STATUS_QUEUED) {
             $message = 'Cancelled by user id ' . $userId;
             $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
             $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), cancel_requested_at = NOW(), cancel_requested_by = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ?');
             $stmt->bind_param('sisi', $status, $userId, $message, $jobId);
             $stmt->execute();
-            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
 
             return $status;
         }
@@ -121,24 +122,34 @@ function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): string
  * the worker that holds the lock may conclude its own job, exactly like the
  * finish path. True when this call performed the transition.
  */
-function repo_confirm_deploy_job_cancelled(mysqli $db, int $jobId, string $workerId): bool
+function repo_confirm_deploy_job_cancelled(mysqli $db, int $jobId, string $workerId, ?string $terminalMessage = null): bool
 {
     $workerId = trim($workerId);
     if ($jobId <= 0 || $workerId === '') {
         throw new InvalidArgumentException('Job and worker are required.');
     }
 
-    return repo_transaction($db, static function () use ($db, $jobId, $workerId): bool {
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $terminalMessage): bool {
         $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
         $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
-        $message = 'Cancelled after operator request; confirmed by the worker at a step boundary.';
+        $stmt = $db->prepare('SELECT status, locked_by FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if (!$row
+            || (string) $row['status'] !== $cancelling
+            || (string) ($row['locked_by'] ?? '') !== $workerId
+        ) {
+            return false;
+        }
+        $message = $terminalMessage ?? 'Cancelled after operator request; confirmed by the worker at a step boundary.';
+        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
         $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
         $stmt->bind_param('ssiss', $cancelled, $message, $jobId, $workerId, $cancelling);
         $stmt->execute();
         if ($stmt->affected_rows !== 1) {
-            return false;
+            throw new RuntimeException('Cancel confirmation lost its prelocked job row.');
         }
-        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
 
         return true;
     });

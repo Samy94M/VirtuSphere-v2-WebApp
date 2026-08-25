@@ -214,12 +214,8 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, (string) $this->job($jobId)['status']);
     }
 
-    /**
-     * A job somebody else concluded is not ours to describe. The message states
-     * what the row shows and claims no cause: the old wording said the lock was
-     * lost even when the status alone had moved on.
-     */
-    public function testAForeignTerminalStateIsReportedWithoutOverwritingIt(): void
+    /** A job somebody else concluded is immutable, including its final log. */
+    public function testAForeignTerminalStateIsNotOverwrittenOrAppendedTo(): void
     {
         $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'phpunit:other');
 
@@ -228,8 +224,8 @@ final class DeployCancellationStateMachineTest extends TestCase
         $job = $this->job($jobId);
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $job['status']);
         $log = $this->logText($jobId);
-        self::assertStringContainsString('status ' . VIRTUSPHERE_DEPLOY_STATUS_FAILED, $log);
-        self::assertStringContainsString('phpunit:other', $log);
+        self::assertSame('', $log, 'a losing worker must not append after the foreign terminal boundary');
+        self::assertStringNotContainsString('ours', $log);
     }
 
     /**
