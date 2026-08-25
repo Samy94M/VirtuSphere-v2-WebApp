@@ -88,6 +88,51 @@ final class InventoryErrorVocabularyContractTest extends TestCase
         }
     }
 
+    public function testTheRunbookStatesOriginRetentionAndLegacyLimitsHonestly(): void
+    {
+        self::assertSame([], $this->validateOperationsSemantics($this->operationsDocSource()));
+    }
+
+    public function testTheRunbookSemanticsRejectMutationsAndAnEmptyScan(): void
+    {
+        $source = $this->operationsDocSource();
+        $fixtures = [
+            'zero match' => '',
+            'old heading' => str_replace(
+                '## Fehlerbilder: Cache bleibt erhalten; nur ESXi-Auth pausiert die Automatik',
+                '## Fehlerbilder (nie blockierend, Cache bleibt immer)',
+                $source
+            ),
+            'timeout folded into unreachable' => str_replace(
+                'Host aus oder nicht erreichbar',
+                'Host aus oder nicht erreichbar, Timeout',
+                $source
+            ),
+            'second error-log copy promised' => str_replace(
+                'keine zweite Kopie dieses Inventarfehlers',
+                'zusätzlich eine zweite Kopie dieses Inventarfehlers',
+                $source
+            ),
+            'legacy backfill boundary removed' => str_replace(
+                'keinen sicheren Backfill',
+                'einen sicheren Backfill',
+                $source
+            ),
+            'detail shadow boundary removed' => str_replace(
+                'Es gibt bewusst keine zweite Detailkopie in `last_error_detail`',
+                'Es gibt eine zweite Detailkopie in `last_error_detail`',
+                $source
+            ),
+        ];
+
+        foreach ($fixtures as $name => $fixture) {
+            if ($source !== '' && $fixture !== '') {
+                self::assertNotSame($source, $fixture, $name . ' fixture did not mutate the source.');
+            }
+            self::assertNotSame([], $this->validateOperationsSemantics($fixture), $name . ' fixture unexpectedly passed.');
+        }
+    }
+
     /**
      * @param array<int, string> $categories
      * @param array<int, string> $messageCodes
@@ -159,16 +204,58 @@ final class InventoryErrorVocabularyContractTest extends TestCase
     /** @return array<int, string> */
     private function operationsDocCodes(): array
     {
-        $path = dirname(__DIR__, 4) . '/docs/operations/esxi-inventory.md';
-        if (!is_file($path)) {
-            return [];
-        }
-        $source = (string) file_get_contents($path);
+        $source = $this->operationsDocSource();
         self::assertSame(1, preg_match('/^## Fehlerbilder.*?$(.*?)(?=^## |\z)/ms', $source, $section));
         preg_match_all('/^\|\s*`([a-z][a-z0-9_]*)`\s*\|/m', $section[1], $matches);
         self::assertNotEmpty($matches[1], 'The first-column operations table scan matched no codes.');
 
         return $matches[1];
+    }
+
+    private function operationsDocSource(): string
+    {
+        $path = dirname(__DIR__, 4) . '/docs/operations/esxi-inventory.md';
+
+        return is_file($path) ? (string) file_get_contents($path) : '';
+    }
+
+    /** @return array<int, string> */
+    private function validateOperationsSemantics(string $source): array
+    {
+        $errors = [];
+        $required = [
+            '## Fehlerbilder: Cache bleibt erhalten; nur ESXi-Auth pausiert die Automatik',
+            'Das technische Original steht ausschließlich in `deploy_job_logs`',
+            'keine zweite Kopie dieses Inventarfehlers',
+            'an `deploy.run` und die Aufbewahrung des Auftrags gebunden',
+            'keinen sicheren Backfill',
+            'Ein gezielter erfolgreicher Einzelabruf',
+            'erneute Speichern des ESXi-Zugangsdatums',
+            '`ON DELETE SET NULL`',
+            'Es gibt bewusst keine zweite Detailkopie in `last_error_detail`',
+        ];
+        foreach ($required as $needle) {
+            if (!str_contains($source, $needle)) {
+                $errors[] = 'operations contract is missing: ' . $needle;
+            }
+        }
+
+        if (preg_match('/^\|\s*`unreachable`\s*\|([^|]*)\|/m', $source, $row) !== 1) {
+            $errors[] = 'unreachable operations row is missing';
+        } elseif (stripos($row[1], 'timeout') !== false) {
+            $errors[] = 'unreachable still claims a timeout';
+        }
+        if (str_contains($source, 'zusätzlich eine zweite Kopie dieses Inventarfehlers')) {
+            $errors[] = 'operations contract promises a second error-log copy';
+        }
+        if (str_contains($source, 'gibt es einen sicheren Backfill')) {
+            $errors[] = 'operations contract promises a speculative legacy backfill';
+        }
+        if (str_contains($source, 'Es gibt eine zweite Detailkopie in `last_error_detail`')) {
+            $errors[] = 'operations contract promises a detail shadow copy';
+        }
+
+        return $errors;
     }
 
     /** @return array{0:?int,1:int} */
