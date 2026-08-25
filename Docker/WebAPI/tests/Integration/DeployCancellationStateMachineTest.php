@@ -76,6 +76,9 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertNotNull($job['cancelled_at'], 'a queued job never started; the wish IS the end state');
         self::assertNotNull($job['cancel_requested_at']);
         self::assertSame(42, (int) $job['cancel_requested_by']);
+        self::assertNull($job['last_error']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED, (string) $job['terminal_reason_code']);
+        self::assertSame(1, $this->cancelLogCount($jobId));
     }
 
     public function testARunningCancelBecomesCancellingAndKeepsLockAndHeartbeat(): void
@@ -93,6 +96,9 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertNull($job['cancelled_at']);
         self::assertNotNull($job['cancel_requested_at']);
         self::assertSame(42, (int) $job['cancel_requested_by']);
+        self::assertNull($job['last_error']);
+        self::assertNull($job['terminal_reason_code']);
+        self::assertSame(1, $this->cancelLogCount($jobId));
     }
 
     public function testASecondCancelOfACancellingJobIsIdempotent(): void
@@ -106,6 +112,7 @@ final class DeployCancellationStateMachineTest extends TestCase
         $job = $this->job($jobId);
         self::assertSame($firstRequestAt, (string) $job['cancel_requested_at'], 'the first wish keeps its timestamp');
         self::assertSame(42, (int) $job['cancel_requested_by'], 'and its actor');
+        self::assertSame(1, $this->cancelLogCount($jobId), 'a repeated request writes no second cancellation line');
     }
 
     public function testATerminalJobCannotBeCancelled(): void
@@ -114,6 +121,33 @@ final class DeployCancellationStateMachineTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         repo_cancel_deploy_job($this->db, $jobId, 42);
+    }
+
+    public function testGroupCancelUsesTheSameMetadataAndLeavesRunningSlotAlone(): void
+    {
+        $groupId = 'grp' . substr(bin2hex(random_bytes(5)), 0, 9);
+        $queuedA = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, null);
+        $queuedB = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, null);
+        $running = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        foreach ([$queuedA, $queuedB, $running] as $jobId) {
+            $stmt = $this->db->prepare('UPDATE deploy_jobs SET group_id = ? WHERE id = ?');
+            $stmt->bind_param('si', $groupId, $jobId);
+            $stmt->execute();
+        }
+
+        self::assertSame(2, repo_cancel_deploy_group($this->db, $groupId, 42));
+        foreach ([$queuedA, $queuedB] as $jobId) {
+            $job = $this->job($jobId);
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
+            self::assertSame(42, (int) $job['cancel_requested_by']);
+            self::assertNotNull($job['cancel_requested_at']);
+            self::assertNotNull($job['cancelled_at']);
+            self::assertNull($job['last_error']);
+            self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED, (string) $job['terminal_reason_code']);
+            self::assertSame(1, $this->cancelLogCount($jobId));
+        }
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, (string) $this->job($running)['status']);
+        self::assertNull($this->job($running)['cancel_requested_at']);
     }
 
     // --- the worker side ----------------------------------------------------
@@ -132,7 +166,8 @@ final class DeployCancellationStateMachineTest extends TestCase
 
     public function testTheWorkerConfirmsCancellingViaOwnershipCas(): void
     {
-        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER);
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
 
         // The wrong worker cannot confirm somebody else's stop.
         self::assertFalse(repo_confirm_deploy_job_cancelled($this->db, $jobId, 'phpunit:other'));
@@ -176,7 +211,8 @@ final class DeployCancellationStateMachineTest extends TestCase
      */
     public function testACancelThatWinsTheRaceIsConfirmedInsteadOfTheSuccess(): void
     {
-        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER);
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
 
         deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
 
@@ -184,13 +220,14 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
         self::assertNotNull($job['cancelled_at']);
         self::assertNull($job['locked_by']);
+        self::assertNull($job['last_error']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED, (string) $job['terminal_reason_code']);
 
-        // And the operator learns the one thing "cancelled" alone would hide:
-        // the step that was already running did its work on ESXi.
-        $log = $this->logText($jobId);
-        self::assertStringContainsString('ran to its end', $log);
-        self::assertStringContainsString('no further step was started', $log);
-        self::assertStringNotContainsString('no longer running under this worker', $log);
+        // The accepted request is the one immutable cancel SYSTEM line. The
+        // race detail belongs to bounded terminal metadata, not a second action.
+        self::assertSame(1, $this->cancelLogCount($jobId));
+        self::assertStringContainsString('ran to its end', (string) $job['terminal_reason_detail']);
+        self::assertStringContainsString('no further step was started', (string) $job['terminal_reason_detail']);
     }
 
     /**
@@ -261,11 +298,21 @@ final class DeployCancellationStateMachineTest extends TestCase
         return implode("\n", $lines);
     }
 
+    private function cancelLogCount(int $jobId): int
+    {
+        $stmt = $this->db->prepare("SELECT COUNT(*) AS c FROM deploy_job_logs WHERE job_id = ? AND stream = 'system' AND (line LIKE 'Cancel%' OR line LIKE 'Cancelled%')");
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+
+        return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    }
+
     // --- reaper convergence -------------------------------------------------
 
     public function testTheReaperConvergesAStaleCancellingJobToCancelledNotFailed(): void
     {
-        $cancellingId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER, staleHeartbeat: true);
+        $cancellingId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER, staleHeartbeat: true);
+        repo_cancel_deploy_job($this->db, $cancellingId, 42);
         $runningId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER, staleHeartbeat: true);
 
         // The reaper only trusts an observer that has been connected longer than
@@ -279,8 +326,12 @@ final class DeployCancellationStateMachineTest extends TestCase
         // that wish as a failure...
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $this->job($cancellingId)['status']);
         self::assertNotNull($this->job($cancellingId)['cancelled_at']);
+        self::assertNull($this->job($cancellingId)['last_error']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED, (string) $this->job($cancellingId)['terminal_reason_code']);
+        self::assertSame(1, $this->cancelLogCount($cancellingId));
         // ...while a stale plain running job keeps its failed verdict.
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $this->job($runningId)['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $this->job($runningId)['terminal_reason_code']);
     }
 
     // --- protective effects stay while cancelling ----------------------------

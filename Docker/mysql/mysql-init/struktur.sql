@@ -384,6 +384,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     last_error TEXT NULL,
     payload_json JSON NULL,
     result_json JSON NULL,
+    -- Etappe 10B: status is still the workflow truth. These bounded fields
+    -- explain a terminal transition; NULL denotes an unmigrated legacy row.
+    terminal_reason_code VARCHAR(32) NULL,
+    terminal_reason_detail VARCHAR(1024) NULL,
     credential_esxi_id INT NULL,
     credential_ansible_id INT NULL,
     -- cancelled_at names the CONFIRMED end state only; the wish carries its
@@ -415,7 +419,14 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     CONSTRAINT fk_deploy_jobs_esxi_credential FOREIGN KEY (credential_esxi_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL,
     CONSTRAINT fk_deploy_jobs_ansible_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL,
     CONSTRAINT deploy_jobs_execution_contract_check CHECK (execution_contract IS NULL OR execution_contract IN (_ascii'legacy_v1',_ascii'remote_v1')),
-    CONSTRAINT deploy_jobs_recovery_reason_check CHECK (recovery_reason IS NULL OR recovery_reason IN (_utf8mb4'remote_observation',_utf8mb4'legacy_uncertain',_utf8mb4'foreign_generation'))
+    CONSTRAINT deploy_jobs_recovery_reason_check CHECK (recovery_reason IS NULL OR recovery_reason IN (_utf8mb4'remote_observation',_utf8mb4'legacy_uncertain',_utf8mb4'foreign_generation')),
+    CONSTRAINT deploy_jobs_terminal_reason_check CHECK (
+        (terminal_reason_code IS NULL AND terminal_reason_detail IS NULL) OR
+        (status = _utf8mb4'succeeded' AND terminal_reason_code = _utf8mb4'completed') OR
+        (status = _utf8mb4'partial' AND terminal_reason_code = _utf8mb4'partial_result') OR
+        (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost')) OR
+        (status = _utf8mb4'cancelled' AND terminal_reason_code IN (_utf8mb4'operator_cancelled',_utf8mb4'cancel_converged'))
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_job_logs (

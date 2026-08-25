@@ -198,7 +198,14 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // Same redaction as the inventory path: a transport error can echo the
         // command line it ran, and accounts.yml values have no business in a
         // job error an operator copies into a ticket.
-        deploy_worker_handle_failure($channel->connection(), $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]));
+        deploy_worker_handle_failure(
+            $channel->connection(),
+            $job,
+            $workerId,
+            $vmIds,
+            deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]),
+            deploy_terminal_reason_for_exception($exception)
+        );
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a
         // database that is still gone must not turn a handled outcome into an

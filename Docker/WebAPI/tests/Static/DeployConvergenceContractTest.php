@@ -28,7 +28,12 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('deploy_worker_job_mac_result($db, $jobId)', $outcome);
         self::assertStringContainsString('no usable MAC import result was recorded', $outcome);
         self::assertStringContainsString('MAC import failed for every VM of this job.', $outcome);
-        self::assertStringContainsString('deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary)', $outcome);
+        self::assertStringContainsString('deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);', $outcome);
+        self::assertStringNotContainsString(
+            'deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary)',
+            $outcome,
+            'partial result belongs in result_json, not last_error'
+        );
 
         $command = $this->commandSource();
         self::assertStringContainsString('function ansible_mode_expects_mac_result', $command);
@@ -61,7 +66,11 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringNotContainsString('function deploy_worker_assert_job_is_ours', $this->source('lib/deploy_worker.php'));
         // Since B6 the message leaves through the secret redactor first; the
         // handler call itself stays in the entrypoint's catch.
-        self::assertStringContainsString('deploy_worker_handle_failure($channel->connection(), $job, $workerId, $vmIds, deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]))', $worker);
+        self::assertStringContainsString('deploy_worker_handle_failure(', $worker);
+        self::assertStringContainsString('deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret])', $worker);
+        // A timeout is semantic because of its exception type, never because a
+        // translated or remote string happened to contain the word.
+        self::assertStringContainsString('deploy_terminal_reason_for_exception($exception)', $worker);
         // The partial verdict belongs to the outcome layer; neither the CLI
         // shell nor either job processor may decide it on its own.
         foreach (['lib/deploy_worker.php', 'lib/deploy_worker_loop.php', 'lib/deploy_worker_mission.php', 'lib/deploy_worker_inventory.php'] as $entry) {

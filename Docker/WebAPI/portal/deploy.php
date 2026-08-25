@@ -115,11 +115,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'cancel') {
             $jobId = request_int($_POST, 'job_id');
             $job = repo_deploy_job($connection, $jobId);
-            if ($job !== null && ($job['mission_id'] ?? null) === null) {
-                // Inventory logs originate on System status and never appear in
-                // the mission-job list. Keep success and error redirects on the
-                // page that owns the job, including a failed cancel attempt.
-                $redirectBase = deploy_job_origin_url($job);
+            if ($job !== null) {
+                // The token is a closed route name, not a caller-provided URL.
+                // A cancellation from the detail page therefore returns to the
+                // same live log; every other caller returns to the owning list.
+                $redirectBase = deploy_job_cancel_redirect_url($job, request_string($_POST, 'origin'));
             }
             $cancelOutcome = repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
             // The answer follows the machine (ADR-0033): a queued job IS

@@ -60,7 +60,7 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
         $failedCount = count($macResult['failed_vm_ids']);
         $summary = 'MAC import partial: ' . $failedCount . ' of ' . ($failedCount + count($macResult['successful_vm_ids'])) . ' VMs failed.';
         deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' mac import partial', $vmIds, $macResult['successful_vm_ids']);
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary);
+        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);
         deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary);
     } else {
         deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
@@ -136,7 +136,14 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
  *
  * @param int[] $vmIds
  */
-function deploy_worker_handle_failure(mysqli $db, array $job, string $workerId, array $vmIds, string $message): void
+function deploy_worker_handle_failure(
+    mysqli $db,
+    array $job,
+    string $workerId,
+    array $vmIds,
+    string $message,
+    string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED
+): void
 {
     $jobId = (int) $job['id'];
     repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
@@ -146,7 +153,7 @@ function deploy_worker_handle_failure(mysqli $db, array $job, string $workerId, 
     if ($keepVmIds !== []) {
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a committed MAC import keep their deployed state.');
     }
-    deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
+    deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
     deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
 }
 
@@ -168,9 +175,17 @@ function deploy_worker_handle_failure(mysqli $db, array $job, string $workerId, 
  * and the log says what the operator otherwise could not know: the work of the
  * step that was already running did happen.
  */
-function deploy_worker_finish_job(mysqli $db, int $jobId, string $workerId, string $status, ?string $lastError = null): void
+function deploy_worker_finish_job(
+    mysqli $db,
+    int $jobId,
+    string $workerId,
+    string $status,
+    ?string $lastError = null,
+    ?string $reasonCode = null,
+    ?string $reasonDetail = null
+): void
 {
-    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError)) {
+    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail)) {
         return;
     }
 
@@ -204,6 +219,13 @@ function deploy_worker_finish_job(mysqli $db, int $jobId, string $workerId, stri
     error_log('[deploy-worker] job ' . $jobId . ': terminal status ' . $status
         . ' was not written; observed status ' . $observed
         . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . '.');
+}
+
+function deploy_terminal_reason_for_exception(Throwable $exception): string
+{
+    return $exception instanceof SshTransportBudgetExceeded
+        ? VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT
+        : VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED;
 }
 
 /**

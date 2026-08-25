@@ -48,6 +48,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_log_if_job_exists',
         'deploy_worker_handle_failure',
         'deploy_worker_finish_job',
+        'deploy_terminal_reason_for_exception',
         'deploy_worker_audit_outcome',
         'deploy_worker_refresh_inventory_after_deploy',
         'deploy_worker_mark_vms_deploying',

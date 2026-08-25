@@ -1,0 +1,45 @@
+<?php
+
+declare(strict_types=1);
+
+// Durable terminal-reason vocabulary (Etappe 10B). `status` remains the
+// workflow SSoT; these codes explain only why a terminal transition happened.
+// NULL stays valid for historical rows, which are never guessed/backfilled.
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_COMPLETED = 'completed';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT = 'partial_result';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED = 'execution_failed';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT = 'timeout';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT = 'stale_heartbeat';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OWNERSHIP_LOST = 'ownership_lost';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED = 'operator_cancelled';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED = 'cancel_converged';
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_DETAIL_MAX_LENGTH = 1024;
+
+const VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES = [
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_COMPLETED => [VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT => [VIRTUSPHERE_DEPLOY_STATUS_PARTIAL],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED => [VIRTUSPHERE_DEPLOY_STATUS_FAILED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT => [VIRTUSPHERE_DEPLOY_STATUS_FAILED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT => [VIRTUSPHERE_DEPLOY_STATUS_FAILED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OWNERSHIP_LOST => [VIRTUSPHERE_DEPLOY_STATUS_FAILED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED => [VIRTUSPHERE_DEPLOY_STATUS_CANCELLED],
+    VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED => [VIRTUSPHERE_DEPLOY_STATUS_CANCELLED],
+];
+
+function deploy_terminal_reason_assert(string $status, string $code): void
+{
+    if (!isset(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES[$code])
+        || !in_array($status, VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES[$code], true)
+    ) {
+        throw new InvalidArgumentException('Terminal reason is not valid for deploy status.');
+    }
+}
+
+function deploy_terminal_reason_detail(?string $detail): ?string
+{
+    if ($detail === null || trim($detail) === '') {
+        return null;
+    }
+
+    return mb_substr(trim($detail), 0, VIRTUSPHERE_DEPLOY_TERMINAL_REASON_DETAIL_MAX_LENGTH, 'UTF-8');
+}

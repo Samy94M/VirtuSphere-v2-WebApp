@@ -34,6 +34,7 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_remote_steps',
         'ansible_remote_cleanup_command',
         'ansible_preflight_checks',
+        'ansible_collection_probe_command',
         'ansible_preflight_command',
         'ansible_probe_opener_source',
         'ansible_allowlist_probe_source',

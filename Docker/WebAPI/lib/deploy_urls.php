@@ -25,6 +25,24 @@ function deploy_job_raw_log_url(int $jobId): string
     return deploy_job_log_url($jobId) . '&format=raw';
 }
 
+const VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG = 'job_log';
+
+/**
+ * Closed origin token for cancel POSTs. It is a route name, never a URL, so a
+ * crafted form cannot turn the post-handler into an open redirect.
+ */
+function deploy_job_cancel_redirect_url(array $job, string $originToken): string
+{
+    if ($originToken === '') {
+        return deploy_job_origin_url($job);
+    }
+    if ($originToken === VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG) {
+        return deploy_job_log_url((int) ($job['id'] ?? 0));
+    }
+
+    throw new InvalidArgumentException('Invalid deploy job origin token.');
+}
+
 /**
  * The page one job belongs to. Mission jobs return to their filtered deploy
  * list; mission-less inventory jobs return to the exact ESXi card that opened

@@ -62,10 +62,11 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
     $limit = max(1, min(500, $limit));
     if ($missionId !== null && $missionId > 0) {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.terminal_reason_code, j.terminal_reason_detail, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.cancel_requested_at, j.cancel_requested_by, cu.name AS cancel_requested_by_name, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
+             LEFT JOIN deploy_users cu ON cu.id = j.cancel_requested_by
              LEFT JOIN deploy_credentials e ON e.id = j.credential_esxi_id
              LEFT JOIN deploy_credentials a ON a.id = j.credential_ansible_id
              WHERE j.mission_id = ?
@@ -75,10 +76,11 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
         $stmt->bind_param('ii', $missionId, $limit);
     } else {
         $stmt = $db->prepare(
-            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
+            'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.terminal_reason_code, j.terminal_reason_detail, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.cancel_requested_at, j.cancel_requested_by, cu.name AS cancel_requested_by_name, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
              FROM deploy_jobs j
              INNER JOIN deploy_missions m ON m.id = j.mission_id
              LEFT JOIN deploy_users u ON u.id = j.user_id
+             LEFT JOIN deploy_users cu ON cu.id = j.cancel_requested_by
              LEFT JOIN deploy_credentials e ON e.id = j.credential_esxi_id
              LEFT JOIN deploy_credentials a ON a.id = j.credential_ansible_id
              ORDER BY j.id DESC
@@ -95,10 +97,11 @@ function repo_deploy_job(mysqli $db, int $jobId): ?array
 {
     return repo_fetch_one(
         $db,
-        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
+        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.terminal_reason_code, j.terminal_reason_detail, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.cancel_requested_at, j.cancel_requested_by, cu.name AS cancel_requested_by_name, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
          FROM deploy_jobs j
          LEFT JOIN deploy_missions m ON m.id = j.mission_id
          LEFT JOIN deploy_users u ON u.id = j.user_id
+         LEFT JOIN deploy_users cu ON cu.id = j.cancel_requested_by
          LEFT JOIN deploy_credentials e ON e.id = j.credential_esxi_id
          LEFT JOIN deploy_credentials a ON a.id = j.credential_ansible_id
          WHERE j.id = ?

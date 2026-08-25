@@ -39,4 +39,14 @@ final class DeployUrlsTest extends TestCase
             deploy_job_origin_url(['mission_id' => null, 'credential_esxi_id' => null])
         );
     }
+
+    public function testCancelOriginTokenReturnsToTheSameLogWithoutAcceptingUrls(): void
+    {
+        $job = ['id' => 42, 'mission_id' => 17];
+        self::assertSame('deploy_log.php?id=42', deploy_job_cancel_redirect_url($job, VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG));
+        self::assertSame('deploy.php?mission_id=17', deploy_job_cancel_redirect_url($job, ''));
+
+        $this->expectException(InvalidArgumentException::class);
+        deploy_job_cancel_redirect_url($job, 'https://example.invalid/redirect');
+    }
 }

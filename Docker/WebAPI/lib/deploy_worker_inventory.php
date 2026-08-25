@@ -212,7 +212,15 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
         $message = '[' . $category . '] ' . deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
+        deploy_worker_finish_job(
+            $db,
+            $jobId,
+            $workerId,
+            VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            $message,
+            deploy_terminal_reason_for_exception($exception),
+            $message
+        );
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a
         // database that is still gone must not turn a handled outcome into an

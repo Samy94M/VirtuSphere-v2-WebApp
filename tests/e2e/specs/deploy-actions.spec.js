@@ -315,7 +315,7 @@ echo 'JSON' . json_encode(['id' => (int) $db->insert_id]) . 'JSON';
 
 // e2e-covers: deploy_log.php:cancel
 // e2e-covers-cancel: deploy_log.php:cancel
-test('deploy_log cancel: Cancel keeps the job, Confirm cancels it from the log page', async ({ page }) => {
+test('deploy_log cancel: Cancel keeps the job, Confirm cancels it and stays on the log page', async ({ page }) => {
   const seed = seedBase();
   const jobId = seedScheduledJob(seed);
 
@@ -332,8 +332,11 @@ test('deploy_log cancel: Cancel keeps the job, Confirm cancels it from the log p
   await cancelButton.click();
   await expect(dialog).toBeVisible();
   await Promise.all([
-    page.waitForURL(/deploy\.php/),
+    page.waitForResponse((response) => response.request().resourceType() === 'document'
+      && new URL(response.url()).pathname.endsWith('/deploy_log.php')),
     dialog.locator('[data-confirm-accept]').click(),
   ]);
+  await expect(page).toHaveURL(new RegExp(`deploy_log\\.php\\?id=${jobId}$`));
   expect(jobRow(jobId).status, 'the job is cancelled').toBe('cancelled');
+  await expect(cancelButton, 'a terminal job no longer offers cancellation').toHaveCount(0);
 });

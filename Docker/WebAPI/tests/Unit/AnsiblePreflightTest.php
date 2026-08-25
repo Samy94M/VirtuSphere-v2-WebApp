@@ -68,6 +68,17 @@ final class AnsiblePreflightTest extends TestCase
         self::assertStringContainsString('community.vmware.vmware_host_auto_start', $strict);
     }
 
+    public function testCollectionProbeIsSilentOnSuccessAndRejectsAnUnknownModule(): void
+    {
+        $probe = ansible_collection_probe_command('community.vmware.vmware_guest');
+
+        self::assertStringContainsString('ansible-doc', $probe);
+        self::assertStringContainsString('--json', $probe);
+        self::assertStringContainsString('module not in documents', $probe);
+        self::assertStringContainsString('capture_output=True', $probe);
+        self::assertStringNotContainsString('ansible-doc -t module community.vmware.vmware_guest 2>&1', $probe);
+    }
+
     public function testPortalProbeIsAppendedOnlyWithAnApiBaseUrl(): void
     {
         self::assertStringNotContainsString('health.php', ansible_preflight_command(''));

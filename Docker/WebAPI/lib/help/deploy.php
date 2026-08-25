@@ -31,6 +31,10 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_log_window_p2', [
                 'days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
             ])); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_preflight_output_p1')); ?></p>
+            <h3><?php echo h(__t('help_deploy.deploy_terminal_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy.deploy_terminal_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_terminal_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_powercycle_wait_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_start_wait_heading')); ?></h3>
@@ -70,6 +74,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1b')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_cancel_p3')); ?></p>
         </section>
 
         <section class="panel">

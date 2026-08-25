@@ -46,6 +46,8 @@ const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
 ];
 
+require_once __DIR__ . '/deploy_terminal_constants.php';
+
 // Where a stored job-log line came from.
 //
 // `stdout`/`stderr` are legacy values and stay readable (Etappe 8). They were

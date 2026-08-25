@@ -72,7 +72,8 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $this->jobStatus($jobId));
-        self::assertStringContainsString('MAC import partial: 1 of 2', (string) $this->job($jobId)['last_error']);
+        self::assertNull($this->job($jobId)['last_error']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT, (string) $this->job($jobId)['terminal_reason_code']);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($bad));
     }

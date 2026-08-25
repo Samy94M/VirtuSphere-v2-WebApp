@@ -39,10 +39,11 @@ function repo_cancel_deploy_group(mysqli $db, string $groupId, int $userId): int
 
         $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
         $message = 'Cancelled with group ' . $groupId . ' by user id ' . $userId;
+        $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED;
         foreach ($ids as $jobId) {
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
-            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ? AND status = ?');
-            $stmt->bind_param('ssis', $cancelled, $message, $jobId, $queued);
+            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), cancel_requested_at = NOW(), cancel_requested_by = ?, terminal_reason_code = ?, terminal_reason_detail = NULL, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+            $stmt->bind_param('sisis', $cancelled, $userId, $reasonCode, $jobId, $queued);
             $stmt->execute();
             if ($stmt->affected_rows !== 1) {
                 throw new RuntimeException('Queued group cancellation lost its locked job row.');
@@ -98,9 +99,10 @@ function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): string
         if ($current === VIRTUSPHERE_DEPLOY_STATUS_QUEUED) {
             $message = 'Cancelled by user id ' . $userId;
             $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+            $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED;
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
-            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), cancel_requested_at = NOW(), cancel_requested_by = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ?');
-            $stmt->bind_param('sisi', $status, $userId, $message, $jobId);
+            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), cancel_requested_at = NOW(), cancel_requested_by = ?, terminal_reason_code = ?, terminal_reason_detail = NULL, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = NULL, updated_at = NOW() WHERE id = ?');
+            $stmt->bind_param('sisi', $status, $userId, $reasonCode, $jobId);
             $stmt->execute();
 
             return $status;
@@ -108,8 +110,8 @@ function repo_cancel_deploy_job(mysqli $db, int $jobId, int $userId): string
 
         $message = 'Cancel requested by user id ' . $userId . '; the worker stops at the next step boundary.';
         $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancel_requested_at = NOW(), cancel_requested_by = ?, last_error = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sisi', $status, $userId, $message, $jobId);
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancel_requested_at = NOW(), cancel_requested_by = ?, last_error = NULL, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sii', $status, $userId, $jobId);
         $stmt->execute();
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
 
@@ -142,10 +144,13 @@ function repo_confirm_deploy_job_cancelled(mysqli $db, int $jobId, string $worke
         ) {
             return false;
         }
-        $message = $terminalMessage ?? 'Cancelled after operator request; confirmed by the worker at a step boundary.';
-        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = ?, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
-        $stmt->bind_param('ssiss', $cancelled, $message, $jobId, $workerId, $cancelling);
+        $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED;
+        $reasonDetail = deploy_terminal_reason_detail($terminalMessage);
+        // The accepted request already wrote the immutable cancellation SYSTEM
+        // line. Confirmation updates metadata only, so one request can never
+        // look like two operator actions in the technical protocol.
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, last_error = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt->bind_param('sssiss', $cancelled, $reasonCode, $reasonDetail, $jobId, $workerId, $cancelling);
         $stmt->execute();
         if ($stmt->affected_rows !== 1) {
             throw new RuntimeException('Cancel confirmation lost its prelocked job row.');

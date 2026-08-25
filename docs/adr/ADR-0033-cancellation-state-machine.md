@@ -40,20 +40,32 @@ the portal therefore showed a terminal job whose sequence was still executing:
 - **The last-step race is decided by competing swaps, never by a status read
   before it.** Success, partial and failure may only finalise from `running`
   under this worker's lock. If the cancel committed first, the terminal swap
-  finds zero rows, reloads the row and confirms `cancelled` itself, with a log
-  line saying that the step that was running did complete its work; if the
+  finds zero rows, reloads the row and confirms `cancelled` itself, with bounded
+  terminal metadata saying that the step that was running did complete its work;
+  if the
   terminal swap won first, a later cancel POST cannot change the finished job.
   So there is neither "succeeded despite an accepted cancellation" nor a
   `cancelled` job whose next playbook is still running.
-- **A terminal state and its final SYSTEM line are one database fact**
-  (amendment 2026-08-25). Every success, partial, failure, queued cancellation,
-  confirmed cancellation and reap path appends its closing line and changes the
-  job status in the same transaction. Normal job-log writers lock the parent
-  row and reject every append after a terminal status. The portal therefore
-  drains by sequence cursor until both the terminal status and `caught_up` are
-  true; seeing a terminal status alone never permits the reader to stop.
+- **A terminal state and its terminal evidence are one database fact**
+  (amendments 2026-08-25). Success, partial and failure append their closing
+  SYSTEM line and change status in the same transaction. Cancellation is the
+  deliberate exception: `queued -> cancelled` writes its single cancellation
+  line in that transaction; `running -> cancelling` writes the single accepted
+  request line, while the later confirmation changes only `cancelled_at` and
+  bounded terminal metadata. It never manufactures a second operator action.
+  Normal job-log writers lock the parent row and reject every append after a
+  terminal status. The portal drains by sequence cursor until both terminal
+  status and `caught_up` are true.
 - **cancelled_at names the end state only.** The wish carries its own
   timestamp and actor; a `cancelling` job has `cancelled_at IS NULL`.
+- **Cancellation metadata is not an error** (amendment 2026-08-25).
+  `cancel_requested_at` and `cancel_requested_by` retain the first request and
+  are never overwritten by a repeated POST. `terminal_reason_code` explains
+  operator confirmation versus reaper convergence; `terminal_reason_detail`
+  is bounded. A normal cancellation, group cancellation and partial result keep
+  `last_error` NULL. Historical cancelled rows may still contain old prose in
+  that column, but the presenter suppresses it by status instead of guessing
+  from the string. A deleted requester is displayed by its retained numeric id.
 - **Active means queued, running or cancelling** (one SSoT constant). Deleting
   the mission, enqueueing a second job and enqueueing a second system pull for
   the same credential stay blocked until the cancellation is confirmed.
@@ -119,6 +131,9 @@ the portal therefore showed a terminal job whose sequence was still executing:
   0031 adds it plus cancel_requested_at/cancel_requested_by (plain INT,
   historical actor, deliberately no FK: the log line names the user anyway and
   a deleted account must not erase who asked).
+- Migration 0043 adds nullable `terminal_reason_code` and bounded
+  `terminal_reason_detail` without backfilling historical rows. The status/code
+  combinations are checked in PHP and in both database schema paths.
 - The heartbeat UPDATE covers running and cancelling, so a cancelling job's
   current step keeps proving liveness.
 - deploy_job_retry_plan/deploy_job_is_retryable unchanged: cancelled keeps its

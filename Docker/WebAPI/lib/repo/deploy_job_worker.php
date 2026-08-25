@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_job_output.php';
+require_once __DIR__ . '/../deploy_job_result.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_queries.php';
 
@@ -70,14 +71,32 @@ function repo_touch_deploy_job_heartbeat(mysqli $db, int $jobId, string $workerI
     return $stmt->execute() && $stmt->affected_rows === 1;
 }
 
-function repo_finish_deploy_job(mysqli $db, int $jobId, string $workerId, string $status, ?string $lastError = null): bool
+function repo_finish_deploy_job(
+    mysqli $db,
+    int $jobId,
+    string $workerId,
+    string $status,
+    ?string $lastError = null,
+    ?string $reasonCode = null,
+    ?string $reasonDetail = null
+): bool
 {
     if (!in_array($status, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
         throw new InvalidArgumentException('Deploy job finish status must be terminal.');
     }
 
-    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError): bool {
-        $stmt = $db->prepare('SELECT status, locked_by FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
+    $reasonCode ??= match ($status) {
+        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_COMPLETED,
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT,
+        VIRTUSPHERE_DEPLOY_STATUS_FAILED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED,
+    };
+    deploy_terminal_reason_assert($status, $reasonCode);
+    $lastError = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null;
+    $reasonDetail = deploy_terminal_reason_detail($reasonDetail ?? ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null));
+
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail): bool {
+        $stmt = $db->prepare('SELECT status, locked_by, result_json FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $jobId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
@@ -90,7 +109,7 @@ function repo_finish_deploy_job(mysqli $db, int $jobId, string $workerId, string
 
         $terminalLines = [
             VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => 'Deploy job succeeded.',
-            VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'Deploy job finished partially.' . ($lastError !== null && $lastError !== '' ? ' ' . $lastError : ''),
+            VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'Deploy job finished partially.',
             VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'Deploy job failed.',
             VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'Deploy job cancelled.',
         ];
@@ -98,10 +117,14 @@ function repo_finish_deploy_job(mysqli $db, int $jobId, string $workerId, string
         // adding a terminal state without extending this map is a static error.
         $terminalLine = $terminalLines[$status];
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $terminalLine);
+        $resultJson = deploy_job_terminal_result_json(
+            $row['result_json'] !== null ? (string) $row['result_json'] : null,
+            $status
+        );
 
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
-        $stmt->bind_param('ssiss', $status, $lastError, $jobId, $workerId, $running);
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt->bind_param('sssssiss', $status, $lastError, $resultJson, $reasonCode, $reasonDetail, $jobId, $workerId, $running);
         $stmt->execute();
 
         return $stmt->affected_rows === 1;

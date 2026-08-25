@@ -124,6 +124,8 @@ test('terminal response with more than 500 pending lines drains to the atomic fi
   appendAndFinish(job, 6, 605, worker);
 
   await expect(page.locator('[data-deploy-status]')).toHaveText('succeeded', { timeout: 12000 });
+  await expect(page.locator('[data-deploy-terminal-blocks] code')).toContainText('completed');
+  await expect(page.locator('[data-deploy-cancel-form]')).toHaveCount(0);
   const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
   await expect(rows).toHaveCount(606);
   await expect(rows.last()).toHaveAttribute('data-log-seq', '606');

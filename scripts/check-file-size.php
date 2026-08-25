@@ -106,7 +106,7 @@ const FILE_SIZE_ALLOWANCES = [
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1218,
+        'lines' => 1220,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
+require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -86,6 +87,10 @@ if ($format === 'json') {
         'caught_up' => $page['caught_up'],
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
+        'terminal_html' => deploy_terminal_blocks_html($job),
+        'actions' => [
+            'can_cancel' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true),
+        ],
     ], JSON_THROW_ON_ERROR);
     exit;
 }
@@ -167,10 +172,11 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
             <?php // Cancellable, not active: a cancelling job's wish is recorded
                   // and the button would promise a no-op (ADR-0033). ?>
             <?php if (in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true)) { ?>
-                <form class="inline-form" method="post" action="deploy.php<?php echo (int) $job['mission_id'] > 0 ? '?mission_id=' . h((string) $job['mission_id']) : ''; ?>">
+                <form class="inline-form" method="post" action="deploy.php<?php echo (int) $job['mission_id'] > 0 ? '?mission_id=' . h((string) $job['mission_id']) : ''; ?>" data-deploy-cancel-form>
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="cancel">
                     <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
+                    <input type="hidden" name="origin" value="<?php echo h(VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG); ?>">
                     <?php // A system job (ESXi inventory) has no mission, so it names itself. ?>
                     <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('deploy.confirm_cancel', ['name' => (int) ($job['mission_id'] ?? 0) > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')])); ?>" data-confirm-action="<?php echo h(__t('deploy.cancel_job')); ?>"><?php echo h(__t('common.cancel')); ?></button>
                 </form>
@@ -184,6 +190,8 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_summary($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
     </section>
+
+    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job); ?></div>
 
     <section class="panel">
         <h2><?php echo h(__t('deploy.output')); ?></h2>
@@ -209,12 +217,6 @@ layout_header(__t('deploy.log_title'), $user, 'deploy');
         </table></div>
     </section>
 
-    <?php if (!empty($job['last_error'])) { ?>
-        <section class="panel">
-            <h2><?php echo h(__t('deploy.last_error')); ?></h2>
-            <code class="log-line"><?php echo h($job['last_error']); ?></code>
-        </section>
-    <?php } ?>
 </div>
 <script type="application/json" data-i18n-deploy-log nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode([
     'session_expired' => __t('deploy.poll_session_expired'),

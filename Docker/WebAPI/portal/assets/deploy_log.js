@@ -10,6 +10,8 @@
     var status = root.querySelector('[data-deploy-status]');
     var olderButton = root.querySelector('[data-deploy-log-older]');
     var feedback = root.querySelector('[data-deploy-log-feedback]');
+    var terminalBlocks = root.querySelector('[data-deploy-terminal-blocks]');
+    var cancelForm = root.querySelector('[data-deploy-cancel-form]');
     var scroller = body ? body.closest('.table-wrap') : null;
     var island = document.querySelector('[data-i18n-deploy-log]');
     var i18n = {};
@@ -153,6 +155,13 @@
             if (payload.job && status) {
                 status.textContent = payload.job.status || '';
                 status.className = 'badge badge-' + (payload.job.badge || 'neutral');
+            }
+            if (typeof payload.terminal_html === 'string' && terminalBlocks) {
+                terminalBlocks.innerHTML = payload.terminal_html;
+            }
+            if (payload.actions && payload.actions.can_cancel === false && cancelForm) {
+                cancelForm.remove();
+                cancelForm = null;
             }
             if (Array.isArray(payload.logs)) { append(payload.logs); }
             if (payload.has_older && olderButton) { olderButton.hidden = false; }

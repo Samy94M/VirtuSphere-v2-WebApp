@@ -73,8 +73,36 @@ function ansible_preflight_checks(bool $strict = false): array
         // the pyvmomi line on purpose - two importable libraries in two
         // interpreters are not a working host.
         'requests' => 'python3 -c ' . ansible_sh_quote('import requests') . ' 2>&1',
-        'community.vmware' => 'ansible-doc -t module ' . $collectionModule . ' 2>&1',
+        // ansible-doc prints the complete module manual on success (more than
+        // 1,300 lines for vmware_guest) and even exits 0 for an unknown module.
+        // The JSON probe therefore verifies the exact key and stays silent on
+        // success; only its bounded failure diagnostics reach the job log.
+        'community.vmware' => ansible_collection_probe_command($collectionModule),
     ];
+}
+
+function ansible_collection_probe_command(string $module): string
+{
+    $source = <<<'PY'
+import json, subprocess, sys
+module = sys.argv[1]
+result = subprocess.run(
+    ["ansible-doc", "-t", "module", "--json", module],
+    capture_output=True,
+    text=True,
+)
+try:
+    documents = json.loads(result.stdout)
+except (TypeError, ValueError):
+    documents = {}
+if result.returncode != 0 or not isinstance(documents, dict) or module not in documents:
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    raise SystemExit(result.returncode or 1)
+PY;
+
+    return 'command -v ansible-doc >/dev/null 2>&1 && python3 -c '
+        . ansible_sh_quote($source) . ' ' . ansible_sh_quote($module) . ' 2>&1';
 }
 
 /**

@@ -148,13 +148,19 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 (string) $job['reaped_to']
             );
             $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation . $suffix;
-            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
             if ($wasCancelling) {
-                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
-                $stmt->bind_param('ssis', $cancelled, $message, $jobId, $cancelling);
+                // The accepted request already is the single immutable cancel
+                // SYSTEM line. The reaper supplies only the terminal metadata.
+                $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED;
+                $reasonDetail = deploy_terminal_reason_detail($message);
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, last_error = NULL, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt->bind_param('sssis', $cancelled, $reasonCode, $reasonDetail, $jobId, $cancelling);
             } else {
-                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
-                $stmt->bind_param('ssis', $failed, $message, $jobId, $running);
+                repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+                $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT;
+                $reasonDetail = deploy_terminal_reason_detail($message);
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt->bind_param('ssssis', $failed, $message, $reasonCode, $reasonDetail, $jobId, $running);
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
