@@ -1,8 +1,8 @@
 # Masterplan: Deploy-Zuverlässigkeit, Fehlerherkunft und Portal-UX
 
-Stand: 2026-08-13, zusammengeführte ausführbare Fassung nach Repository-Review, Online-Faktenprüfung, Integration des Joblog-/Abbruch-/Protokollreviews, Übernahme der AD/LDAPS-Baseline sowie Einordnung der Remote-Recovery-, Create- und Netzwerk/MAC-Erweiterungen.
+Stand: 2026-08-20, zusammengeführte ausführbare Fassung nach Repository-Review, Online-Faktenprüfung, Integration des Joblog-/Abbruch-/Protokollreviews, Übernahme der AD/LDAPS-Baseline sowie Einordnung der Remote-Recovery-, Create-, Netzwerk/MAC- und MECM-Rolloutnamen-Erweiterungen.
 
-Dieser Masterplan verbindet fünf bisher getrennte Arbeitsstränge. Die ursprüngliche Fassung führte zunächst diese drei zusammen:
+Dieser Masterplan verbindet sechs bisher getrennte Arbeitsstränge. Die ursprüngliche Fassung führte zunächst diese drei zusammen:
 
 1. die Korrektur der im Review gefundenen Lücken an Reaper/DB-Ausfall, Ansible-Aktivitätsnachweis, CLI-SSoT, Festplattentexten, Doku und Fast-Gate;
 2. die bereits detailliert geplante eindeutige Fehlerherkunft des ESXi-Inventar-Abrufs;
@@ -16,9 +16,13 @@ Mit der Konsolidierung vom 2026-08-13 kommt als fünfter Arbeitsstrang hinzu:
 
 5. dauerhafte Remote-Ausführung mit Worker-Fencing/Recovery, anschließend eindeutige VM-Netzwerke und MAC-Retry, die per-VM-Create-Reparatur und zuletzt lokales Supervisor-Self-Healing. Die vollständige Fachspezifikation liegt in `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md`; der Create-Einzelplan bleibt dessen untergeordneter Owner für JID, Identität und Create-Ergebnis.
 
-Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Nach Etappe 7 führt 8R den dauerhaften Remote-Owner ein; die übrige Etappe 8 darf für aktivierte Modi keinen langlebigen direkten SSH-Step mehr verwenden. Nach Etappe 10 schließen 10A–10D die Terminal-, Joblog- und Protokollverträge. Etappe 13 integriert 13R, nach Etappe 14 folgen 14A Netzwerk/MAC, 14B Create und 14C Supervisor, erst danach 15–17. So kaschiert die UX weder einen unvollständig gelesenen Logtail noch einen Abbruch, den der Worker technisch noch nicht einhalten kann, und ein Supervisor startet keinen noch nicht wiederanbindbaren Create-Lauf neu. Diese Datei bleibt die globale Reihenfolge-SSoT; Detailpläne dürfen sie nicht umsortieren.
+Mit der Erweiterung vom 2026-08-20 kommt als sechster Arbeitsstrang hinzu:
 
-Die Erweiterung ändert den bereits ausgeführten Verlauf nicht: Etappe 1 bleibt mit ihrer vorhandenen grünen Abnahme abgeschlossen. Etappe 2 war am 2026-08-12 bereits begonnen und behält ihren DB-/Reaper-Umfang; die neuen Playbook-Abbruchgrenzen gehören in die noch ausstehende Etappe 8, die neuen Portal-/Protokollverträge in 10A–10D. Bereits grün nachgewiesene Hunks werden weder wiederholt noch umnummeriert.
+6. die Trennung von ESXi-/Portalidentität (`vm_name`) und Windows-/MECM-Rolloutname (`vm_hostname`) ohne Task-Sequence-Umbau. Ein interner, revisionsgebundener Rollout-Snapshot verhindert, dass eine spätere Portaländerung ein bereits übergebenes Gerät still umbenennt; der vorhandene explizite MECM-ID-Reset aktiviert den neuen Sollnamen für den nächsten Rollout. Etappe 14D in dieser Datei ist dafür die ausführende SSoT; es gibt keinen zweiten, parallelen Implementierungsplan.
+
+Die Reihenfolge ist verbindlich: Zuerst wird der bereits veränderte Bestand stabil und ehrlich beobachtbar gemacht, danach baut die Inventar-Fehlertaxonomie auf diesem Worker-/Logvertrag auf. Nach Etappe 7 führt 8R den dauerhaften Remote-Owner ein; die übrige Etappe 8 darf für aktivierte Modi keinen langlebigen direkten SSH-Step mehr verwenden. Nach Etappe 10 schließen 10A–10D die Terminal-, Joblog- und Protokollverträge. Etappe 13 integriert 13R, nach Etappe 14 folgen 14A Netzwerk/MAC, 14B Create, 14C Supervisor und 14D MECM-Rolloutname, erst danach 15–17. So kaschiert die UX weder einen unvollständig gelesenen Logtail noch einen Abbruch, den der Worker technisch noch nicht einhalten kann, und ein Supervisor startet keinen noch nicht wiederanbindbaren Create-Lauf neu. 14D baut bewusst auf dem gesplitteten VM-Repository, der eindeutigen PXE-MAC und dem belastbaren Neu-Rollout aus 14A/14B auf. Diese Datei bleibt die globale Reihenfolge-SSoT; Detailpläne dürfen sie nicht umsortieren.
+
+Die Erweiterung ändert den bereits ausgeführten Verlauf nicht: Etappen 1 bis 8 (Kern) bleiben mit ihren vorhandenen Abnahmen abgeschlossen und werden durch 14D nicht wieder geöffnet. 8R-O ist als deaktivierte Grundlage getrennt protokolliert; die reale 8R-S-Standortabnahme bleibt ihr eigener Freigabegate. Die noch offenen Portal-/Protokollverträge bleiben in 10A–10D und den späteren Etappen. Bereits grün nachgewiesene Hunks werden weder wiederholt noch umnummeriert.
 
 ---
 
@@ -26,7 +30,7 @@ Die Erweiterung ändert den bereits ausgeführten Verlauf nicht: Etappe 1 bleibt
 
 Diese Datei liegt bewusst im Repository. Eine ausführende Sitzung liest zuerst `CLAUDE.md`, `AGENTS.md`, `GROK.md` sowie die berührten Regeln unter `.claude/rules/` und führt das Abnahmeprotokoll am Ende dieser Datei fort.
 
-Der Arbeitsbaum ist parallel verändert. Vor jeder Etappe gilt deshalb:
+Der Arbeitsbaum war beim Planabgleich vom 2026-08-20 sauber und `main` mit `origin/main` synchron. Dieser Befund ist keine Zusage für eine spätere Ausführung; vor jeder Etappe gilt weiterhin:
 
 1. `git status --short` lesen.
 2. Den ungestageten Diff jeder betroffenen Datei und besonders der betroffenen Funktion lesen.
@@ -34,7 +38,7 @@ Der Arbeitsbaum ist parallel verändert. Vor jeder Etappe gilt deshalb:
 4. Nur eigene, der aktuellen Etappe eindeutig zugeordnete Hunks stagen. Der Commit/Push-Abschluss nach grün abgenommener Etappe ist für die ausführende Sitzung verpflichtend.
 5. `git add -A`, `git reset --hard` und ein pauschales Checkout veränderter Dateien sind ausgeschlossen.
 
-Aktuell überlappen unter anderem `lib/deploy_constants.php`, `lib/deploy_worker.php`, `lib/deploy_worker_outcome.php`, die DE/EN-Dateien für `help_deploy`, `help_system_status` und `system_status`, `SshStreamHardeningTest.php`, `SystemStatusPanelBranchTest.php`, `docs/CHANGELOG.md` und `docs/operations/esxi-inventory.md`. Auch die nur gelesenen Breitenquellen `struktur.sql` und `lib/migrate.php` sind bereits verändert. Diese Liste ist nur ein Startpunkt; maßgeblich ist immer der dann aktuelle Diff.
+Die frühere Liste parallel überlappender Dateien ist historisch und wird nicht als aktueller Arbeitsbaumzustand weitergeführt. Maßgeblich sind ausschließlich `git status`, der vollständige Diff und die Eigentumsprüfung unmittelbar vor der jeweiligen Etappe.
 
 Es gibt keine akzeptierten roten Tests und keine feste Testanzahl. Der kanonische Runner ist `scripts/check.ps1`. Die Fast-Lane führt Unit/Static bereits mit vollem Repo-Mount und `--fail-on-skipped` aus; ein zweiter identischer Repo-Root-Lauf ist kein zusätzlicher Nachweis.
 
@@ -98,13 +102,14 @@ Der interne Code-Nachweis der Baseline ist grün. Als ausdrücklicher externer R
 
 ### Verbindliche Remote-/Netzwerk-/Create-Erweiterung
 
-Der konsolidierte Fachplan `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md` wird über fünf feste Einhängepunkte ausgeführt:
+Der konsolidierte Fachplan `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md` und die hier vollständig spezifizierte Rolloutnamen-Erweiterung werden über sechs feste Einhängepunkte ausgeführt:
 
 1. **8R nach Etappe 7 und innerhalb der technischen Etappe 8:** 8R wird seit dem Infrastrukturentscheid vom 2026-08-20 in **8R-O** (offline implementierbare, standardmäßig deaktivierte Produktbasis) und **8R-S** (Standortabnahme und Aktivierung) getrennt. 8R-O umfasst Planharmonisierung, Protokoll, Runner/Launcher, additive Schema-/Fencinggrundlage, fail-closed Aktivierungszustände sowie lokal und in isolierten Linux-Fixtures beweisbare Recoverylogik. 8R-S besitzt ausschließlich die nicht ersetzbaren Nachweise auf dem echten Air-Gap-/Ansible-/ESXi-Ziel: systemd-User-Bus/Linger/cgroup, Remotegrenzen, Faultmatrix, Beobachtungsfenster, Rückbau und jede Modusfreigabe. Ein abgeschlossener 8R-O-Commit ist ausdrücklich keine Produktionsfreigabe. Reaperverhalten und Modusaktivierung wechseln weiterhin immer gemeinsam; ohne importierten grünen Standortnachweis bleibt der Modus `disabled` und fällt nicht still auf die alte SSH-Kette zurück.
 2. **13R gemeinsam mit Etappe 13:** gemeinsamer drei-achsiger Deploy-Dienstsnapshot für Verfügbarkeit, Claim-Freigabe und Recovery-Aufmerksamkeit, dazu Queue-/Pause-/Recoverydarstellung und sichere DB-Aktionen. Der vollständige Logtail bleibt in 10A/13, strukturierte Remote-Events in 10C.
 3. **14A nach Etappe 14:** ein Netzwerk-/MAC-Vertrag für alle Writer, Queue, Worker, Callbackresultat und Retry. Create, Full, Powercycle und Export blockieren leere/doppelte VLAN-Zuordnung vor Remote-Arbeit; Start/Autostart warnen.
 4. **14B unmittelbar danach:** der Create-Einzelplan wird unter dem Remote-Owner umgesetzt. Laufende JIDs bleiben am Quelljob; der Reaper löst nur die Lease; Retry ist bis zum bewiesenen Ausgang gesperrt. Pro VM gilt ein `create.vm.<position>`-Handle mit `ExitType=cgroup`-Stagingbeweis.
-5. **14C zuletzt:** PID-1-Supervisor und Kindrestart werden erst aktiviert, wenn alle produktiv freigegebenen Modi reattach-fähig sind. Danach folgen 15 bis 17.
+5. **14C nach Create:** PID-1-Supervisor und Kindrestart werden erst aktiviert, wenn alle produktiv freigegebenen Modi reattach-fähig sind.
+6. **14D zuletzt vor der restlichen UX:** der MECM-Import verwendet den revisionsgebundenen Windows-Rolloutnamen statt des ESXi-Namens. Diese Etappe beginnt erst nach 14A bis 14C, damit MAC-, Recreate-, Recovery- und VM-Repo-Verträge nicht gleichzeitig neu erfunden werden. Danach folgen 15 bis 17.
 
 Der frühere Self-Healing-Einzelplan ist Reviewspur, kein paralleler Ausführungsplan. Bei Detailkonflikten gilt die Vorrangsmatrix in Abschnitt 0 des konsolidierten Fachplans. Jede Teilaktivierung ist pro Credential/Modus persistiert, fault-getestet und rückbaubar; ein globaler Big-Bang-Schalter ist verboten.
 
@@ -749,7 +754,7 @@ Gezielte Abnahme:
 
 ## C. UX-Etappen 11–17
 
-Für alle folgenden Etappen bleiben Machine-API-Wire-Verträge, die fünf Legacy-Statusstrings, technische DB-/Workerwerte, persistente Joblogs, RBAC, CSRF, CSP und Runtime-Air-Gap unverändert, soweit eine Etappe nicht ausdrücklich einen additiven Portal-JSON-Vertrag nennt. Technische MECM-/Ansible-Begriffe werden nicht übersetzt, wenn sie echte Schnittstellenwerte sind. Sichtbare geschlossene Zustandsmengen werden dagegen auf der Portalebene lokalisiert.
+Für alle folgenden Etappen bleiben Machine-API-Wire-Verträge, die fünf Legacy-Statusstrings, technische DB-/Workerwerte, persistente Joblogs, RBAC, CSRF, CSP und Runtime-Air-Gap unverändert, soweit eine Etappe nicht ausdrücklich eine additive oder semantisch präzisierte Schnittstelle spezifiziert. Etappe 14D ist die einzige hier geplante Ausnahme für den revisionsgebundenen MECM-/Client-Wire-Vertrag; sie erhält ihren eigenen ADR-, Kompatibilitäts- und Cutover-Nachweis. Technische MECM-/Ansible-Begriffe werden nicht übersetzt, wenn sie echte Schnittstellenwerte sind. Sichtbare geschlossene Zustandsmengen werden dagegen auf der Portalebene lokalisiert.
 
 ### Etappe 11: Kollisionssichere UX-Basis und deterministischer Visual-Harness
 
@@ -850,6 +855,106 @@ Etappenabschluss:
 - VM-Repo, VM-Editor und Settings-Partials erfüllen ADR-0006; Legacy-Require-/Wire-, Transaktions-, POST-/Confirm- und Owner-Glob-Negativtests sind grün.
 - `docs/QA.md`, Formular-/Portalhilfe, DE/EN-Texte, Changelog und dauerhafte Formularregeln sind synchron.
 - Audit-, Job-, Container- und Wire-Verträge werden geprüft und, sofern wirklich unberührt, begründet als nicht betroffen protokolliert.
+
+### Etappe 14D: Windows-Rolloutname statt ESXi-Name in MECM
+
+Diese Etappe folgt vollständig auf 14A bis 14C. Sie ändert weder die Task Sequence noch deren Reihenfolge und führt im Portal kein zweites editierbares Hostnamenfeld, keinen Deploymodus und keinen zusätzlichen Operator-Button ein. `vm_name` bleibt die ESXi-/Portalidentität, zum Beispiel `VM-12345`. Das einzige editierbare Feld `vm_hostname` bleibt der gewünschte Windowsname, zum Beispiel `Backup-12345`. MECM importiert künftig den für den konkreten Rollout eingefrorenen Windowsnamen. Eine spätere Änderung am Portal-Sollwert verändert weder den laufenden Windowsrechner noch den bereits gebundenen MECM-Datensatz. Für einen neuen Rollout aktiviert ausschließlich die vorhandene, bestätigte Aktion „MECM-ID zurücksetzen“ den aktuellen Sollwert; das alte Gerät löscht der Administrator weiterhin selbst in MECM.
+
+Die Microsoft-Verträge hinter dieser Entscheidung sind ausdrücklich begrenzt: `Import-CMComputerInformation` beziehungsweise `SMS_Site.ImportMachineEntry` nehmen NetBIOS-Name und PXE-MAC für den initialen Datensatz entgegen. Spätere Discovery Data Records können den Anzeigenamen eines bestehenden ResourceID-Datensatzes aus dem Windows-NetBIOS-Namen aktualisieren. VirtuSphere schreibt deshalb niemals direkt in die MECM-Datenbank, versucht keinen erfundenen Rename-Befehl und bewertet eine spätere, durch Windows/Discovery entstandene Namensabweichung bei gleicher ResourceID und MAC nicht als Fehler.
+
+#### 14D.1 Eine fachliche SSoT und drei interne Schutzfelder
+
+1. `deploy_vms.vm_hostname` bleibt die einzige fachliche Soll-SSoT und das einzige editierbare Portal-Feld. Der Wert wird weiterhin zentral als NetBIOS-Hostname validiert; neue oder geänderte Werte sind höchstens 15 Zeichen lang, ohne Punkt und ohne führenden oder abschließenden Bindestrich. Ein unveränderter ungültiger Altwert darf andere Bearbeitungen weiterhin nicht blockieren, darf aber nicht für einen neuen MECM-Rollout aktiviert werden.
+2. Die zum Ausführungszeitpunkt nächste freie Migration mit dem Suffix `_mecm_rollout_hostname` ergänzt ausschließlich interne Laufzeitfelder: `mecm_rollout_hostname VARCHAR(255) NULL`, `mecm_rollout_revision BIGINT UNSIGNED NULL` und `mecm_previous_id VARCHAR(255) NULL`. `0043` ist am Planstand 2026-08-20 nur der nächste freie Kandidat und darf nicht reserviert werden, weil frühere Etappen weitere Migrationen anlegen können; die geordnete Registry ist bei Beginn von 14D die Nummern-SSoT. Die drei Spaltennamen sind verbindlich; kein zweiter „effective hostname“-Helper oder jobgebundener Snapshot entsteht daneben.
+3. `mecm_rollout_hostname` bedeutet ausschließlich „der Name, den VirtuSphere diesem Rollout an MECM und den PXE-Client liefert“. Er ist kein behaupteter Live-Hostname von Windows und kein Rücklesewert aus MECM. `mecm_rollout_revision` ist der monotone Fence aller mutierenden Rückmeldungen dieses Rollouts. `mecm_previous_id` ist ein Lösch-Tombstone: Nach Reset verhindert er die stille Wiederadoption des alten, vom Administrator noch nicht gelöschten MECM-Geräts.
+4. Eine zentrale, dependency-arme Normalisierung, beispielsweise `mecm_hostname_key()`, definiert trim- und ASCII-case-insensitive NetBIOS-Gleichheit für Validierung, Claims, Repository und Pester-Vektoren. Sie kürzt oder „repariert“ nie. Ein reiner Wechsel der Schreibweise ist keine neue Identität, löst keinen Resetbedarf aus und erzeugt keine zweite Claim-Zeile.
+5. Globale Eindeutigkeit des wirksamen MECM-Namens wird transaktionssicher in `deploy_vm_hostname_claims` erzwungen, nicht nur per vorherigem `SELECT`: `hostname_key` ist der case-insensitive Primärschlüssel, `vm_id` ein Cascade-Fremdschlüssel und `desired_claim`/`rollout_claim` sind boolesche Spalten, von denen mindestens eine wahr sein muss. Ein normalisierter Name gehört damit genau einer Nicht-Template-VM. Dieselbe VM darf gleichzeitig ihren alten Rolloutnamen und ihren neuen Sollnamen halten. Eine andere VM darf den alten Namen erst beanspruchen, nachdem ein Reset den Snapshot auf den neuen Namen verschoben und den alten Claim atomar freigegeben hat.
+6. Template-VMs besitzen keine Runtime-Claims, keine Rolloutrevision und keinen MECM-Tombstone. Beim Erzeugen einer echten Mission aus einem Template werden Snapshot und Revision frisch aus deren gewünschtem `vm_hostname` initialisiert. Beim Speichern einer Mission als Template sowie beim JSON-Export/Import werden nur fachliche Konfigurationen übertragen; Snapshot, Revision, vorherige/aktuelle MECM-ID, MAC, Status- und Jobdaten werden nie transportiert.
+7. Das bestehende globale `vm_name`-Verhalten wird in 14D nicht gelockert. Hilfe und Kommentare dürfen es aber nicht länger mit „MECM-Gerätenamen müssen global eindeutig sein“ begründen: MECM erhält danach `mecm_rollout_hostname`. Eine Änderung der separaten ESXi-/Portal-Namenspolitik wäre eine eigene Entscheidung.
+
+Vor der DDL prüft die Migration alle Nicht-Template-VMs case-insensitiv auf kollidierende gültige `vm_hostname`-Werte und meldet jede betroffene VM/Mission begrenzt und handlungsfähig. Sie benennt auch leere oder für einen künftigen Rollout ungültige Altwerte, korrigiert sie aber nicht spekulativ. Kollisionen gültiger Namen blockieren die Migration; ungültige Altwerte dürfen als Bestand migrieren, erhalten bis zur Korrektur aber keinen Claim und bleiben vom nächsten Reset/Erstimport ausgeschlossen. Für normale Bestands-VMs wird `mecm_rollout_hostname = vm_hostname`, Revision 1 und `mecm_previous_id = NULL` gesetzt. Templates erhalten Snapshot, Revision und Tombstone `NULL`. `struktur.sql`, geordnete Migrationsregistry, Schema-Konvergenz, Backup-/Restore-Drill und Rollbackhinweis bleiben synchron.
+
+#### 14D.2 Zustandsübergänge ohne Bedienmodus
+
+| Ereignis | Sollname `vm_hostname` | Rollout-Snapshot | Revision/IDs | Lifecycle/MECM |
+|---|---|---|---|---|
+| neue normale VM, Template-Instanziierung oder Missionsimport | Eingabewert | derselbe Wert | Revision 1, beide IDs leer | unveränderte heutige Initialwerte |
+| normale Bearbeitung, solange `mecm_id IS NULL` | neuer Wert | folgt demselben Wert atomar | Revision steigt nur bei geänderter normalisierter Identität | Status, `updated` und MAC unverändert |
+| erfolgreiche, revisionsgleiche ResourceID-Rückmeldung | unverändert | wird nicht neu geschrieben | `mecm_id` wird einmalig gebunden; Tombstone wird erst nach erfolgreicher neuer Bindung gelöscht | bestehender Forward-only-Übergang nach `registered` |
+| normale Bearbeitung mit vorhandener `mecm_id` | neuer Wert | bleibt eingefroren | Revision und IDs unverändert | keine Queue- oder Statusänderung |
+| expliziter MECM-ID-Reset mit vorhandener `mecm_id` | unverändert | wird aus dem aktuellen Sollnamen übernommen | alte ID wird Tombstone, Revision steigt, `mecm_id` wird leer | atomar wie heute `deployed/pending`, `updated=1` |
+| erneuter Reset, während dieselbe Revision bereits ohne `mecm_id` wartet | unverändert | folgt bereits automatisch | idempotenter No-op ohne zweite Status-/Auditzeile | bleibt pending |
+| Windowsname wird später außerhalb des Portals geändert | unverändert | unverändert | ResourceID bleibt Identität | MECM darf den Anzeigenamen per Discovery aktualisieren |
+
+Der VM-Repository-Owner sperrt bei Edit und Reset zuerst die Mission nach der etablierten Deploy-Lockreihenfolge und danach die VM-/Claimzeilen. Single- und Bulk-Reset verwenden denselben Repository-Guard. Templates, fehlende importierte PXE-MAC, ungültiger zu aktivierender Hostname und jeder aktive Deploy-Job blockieren den Reset mit geschlossenem, lokalisiertem Grund. Solange ein Deploy-Job der Mission aktiv ist, blockiert derselbe Repo-Guard außerdem nur eine identitätsändernde `vm_hostname`-Bearbeitung; andere heute erlaubte VM-Änderungen werden dadurch nicht pauschal neu gesperrt. Ein normaler Edit löscht weiterhin niemals `mecm_id`, `updated`, MAC oder maschinenbesessene Zustände. Die Rennen Edit gegen `updateDevice`, Reset gegen `updateDevice` und Bulk gegen Single werden durch Row-Lock plus Revision deterministisch; ein verspäteter Callback einer älteren Revision kann die neue Warteschlange nicht wieder schließen.
+
+Der unterstützte Neu-Rollout bleibt bewusst der heutige Betriebsweg:
+
+1. gewünschten `vm_hostname` im Portal korrigieren;
+2. altes Gerät in MECM manuell löschen;
+3. bei vollständig neu erzeugter VM zuerst die neue PXE-MAC jobgebunden importieren und den Job terminal werden lassen;
+4. „MECM-ID zurücksetzen“ ausführen; bei vertauschter Reihenfolge hält `mecm_previous_id` die Übergabe so lange fail-closed, bis der alte ResourceID-Datensatz wirklich fehlt;
+5. der normale Device-Sync importiert den Snapshot und der unveränderte Task-Sequence-Ablauf startet.
+
+VirtuSphere löscht weder bei VM-Löschung noch bei Reset ein MECM-Gerät. Das Löschen einer Portal-VM gibt ihre lokalen Claims per Cascade frei, beweist aber keine externe Löschung: Eine neu angelegte VM mit demselben Hostnamen bleibt am vorhandenen MECM-Objekt fail-closed, bis der Administrator es dort entfernt. Für dieselbe Portal-VM mit neuer ESXi-Identität darf kein alter MAC-Wert als neuer Beweis verwendet werden; 14A/14B bleiben Owner für jobgebundenen MAC-/Identitätsimport. Eine vollständige Portal-VM-Löschung und Neuanlage startet wie heute mit leeren Runtimefeldern. Ein reiner `start`-, `export`- oder anderer Deployjob ist kein Hostnamenmodus und aktiviert keinen Snapshot.
+
+#### 14D.3 Identität und MECM-Reconciliation
+
+1. `mecm_new-device-sync.ps1` baut pro Scan Multimaps nach ResourceID, normalisiertem Namen und jeder normalisierten MAC. Ein Hash mit `Name` als Einzelschlüssel ist verboten, weil er Duplikate still nach „last wins“ auflöst. Leere, mehrdeutige oder mehrfach widersprüchliche Providerwerte bleiben Fehler, niemals Auswahlheuristik.
+2. Bei vorhandener `mecm_id` wird ausschließlich diese ResourceID zuerst aufgelöst. Genau eine passende ResourceID mit passender PXE-MAC ist das Gerät, auch wenn MECM es nach einer Windows-/DDR-Umbenennung anders anzeigt. Ein Namensunterschied löst weder Reimport noch Rename noch eine Warnung alle zehn Sekunden aus. Fehlende ResourceID oder fremde MAC blockieren bis zum expliziten Reset; VirtuSphere adoptiert keinen ähnlich benannten Ersatzdatensatz.
+3. Ohne `mecm_id` blockiert ein noch vorhandener `mecm_previous_id` den Neuimport mit der klaren Maßnahme „altes MECM-Gerät löschen“. Im ersten Rollout darf genau ein Objekt nur dann übernommen werden, wenn Snapshotname und MAC gemeinsam eindeutig passen; das deckt den Import-/Cache-Race idempotent ab. Name mit fremder MAC, MAC mit fremdem Namen, mehrere Treffer oder mehrere ResourceIDs sind Konflikte und bleiben in der Warteschlange.
+4. Nur wenn Name, MAC, vorherige ResourceID und Mehrdeutigkeitsprüfungen keinen Besitzer finden, ruft der Sync `Import-CMComputerInformation -ComputerName <mecm_rollout_hostname> -MacAddress <PXE-MAC>` auf. Nach Import wird nicht nach Fehlertext geraten, sondern Name plus MAC erneut eindeutig gelesen. `-MergeIfExist`, ein direkter SQL-Write oder ein Name-only-Fallback sind keine Konfliktlösung.
+5. Collection-Reconciliation bleibt ResourceID-basiert und folgt ADR-0034: gewünschte, eigene und vorhandene Regeln bestimmen Add/Remove; fremde Regeln bleiben unberührt. Ein Identitätsfehler tritt vor jeder Membership-Mutation ein. `reportMembership` und `updateDevice` tragen dieselbe Rolloutrevision, damit eine alte Scaniteration nach Reset weder Provenienz noch ResourceID des neuen Rollouts schreiben kann.
+6. Der Windows-Client erhält über `getDeviceInfos` denselben Snapshot als `vm_hostname`; `client_hostname.ps1` bleibt unverändert als idempotentes Sicherheitsnetz. Wenn Import/Task Sequence den Namen bereits korrekt angewandt haben, endet es ohne Rename-Reboot. Ob die reale Standort-Task-Sequence den Importnamen unverändert übernimmt, wird vor Freigabe mit einer VM im MECM-Lab belegt; ein abweichender TS-Override blockiert 14D und wird nicht durch implizite Task-Sequence-Änderungen umgangen.
+
+#### 14D.4 Revisionsgebundener Machine-Wire-Vertrag
+
+1. `getDeviceList` verliert sein `SELECT *`. Eine explizite, in `MachineApiWireTest` gepinnte Projektion verhindert das Durchreichen interner Spalten. Alle unmittelbar vor 14D dokumentierten und tatsächlich ausgelieferten Keys bleiben mit Namen und Semantik erhalten, mit genau einer bewusst entschiedenen Ausnahme: `vm_name` bleibt der ESXi-Name, während das bestehende Wire-Feld `vm_hostname` aus `mecm_rollout_hostname` aliasiert wird. Additiv kommen `rollout_revision` und der ausschließlich für den Server-Sync benötigte Wire-Key `previous_resource_id` hinzu; der interne DB-Spaltenname wird nicht versehentlich durchgereicht. Der aktuelle, noch nicht aktivierte Portal-Sollwert wird nicht an MECM exportiert.
+2. Das bisher exakt minimale `getDeviceInfos` liefert weiterhin die fünf bestehenden Basisfelder und Interfaces, aliasiert `vm_hostname` ebenfalls auf den Snapshot und ergänzt genau `rollout_revision`. `client_getinfo.ps1` whitelisted und speichert die Revision neben den Nutzdaten; `Confirm-VsClientReady` sendet sie im ACK zurück. Task-Sequence-Reihenfolge und Detection-Marker bleiben unverändert.
+3. `mecm_updateid.php?action=updateDevice`, `reportMembership` und `mecm_client_ack.php` prüfen die erwartete Revision unter demselben VM-Lock wie ihren Write. Gleiche Revision plus gleiche bereits gespeicherte ResourceID/ACK ist idempotent 200. Fehlende, veraltete oder zukünftige Revision sowie der Versuch, eine andere ResourceID über eine vorhandene Bindung zu schreiben, antworten ohne Seiteneffekt mit 409. 404 bleibt dem unbekannten VM-/MAC-Fall vorbehalten, 400 einem syntaktisch ungültigen Body.
+4. Rückwärtskompatibilität bleibt fail-closed und messbar: Ein fehlendes Revisionsfeld darf vor dem MECM-Skript-/Clientpaket-Cutover ausschließlich für Revision 1 ohne Tombstone akzeptiert werden. Sobald ein pending Snapshot geändert oder ein Reset ausgeführt wurde, ist Revision größer 1 und ein Legacy-Callback erhält 409. Jede Legacyannahme beziehungsweise Revisionsablehnung wird begrenzt und gedrosselt protokolliert. Nach belegtem Cutover wäre das Entfernen dieses Kompatibilitätszweigs eine eigene E3-/ADR-Entscheidung.
+5. `db_importMAC.php` behält Request, Response und jobgebundene `(mission_id, vm_name)`-Zuordnung unverändert. Es schreibt weder Snapshot noch Revision oder MECM-Tombstone. `mecm_packages.php`, Task-Sequence-/Paketkatalog, `mecm_report.php`-Top-Level-Envelopes und die fünf Legacy-Statusstrings bleiben unverändert. ADR-0019 wird wegen des additiven Client-Revisionsfelds amendiert; ein neuer ADR mit der bei Ausführung nächsten freien Nummer hält Snapshot-, Claim-, Reset-, Tombstone- und Fencingentscheidung, ADR-0034 wird nur quellenrichtig querverwiesen. `ADR-0041` ist am Planstand lediglich der nächste freie Kandidat und keine Reservierung.
+
+Die betriebliche Ausrollreihenfolge ist Teil des Protokolls: zuerst Web/API mit Revision-1-Kompatibilität, dann MECM-Server-Skripte und Client-Content atomar über ihre Installer-/Packagingpfade aktualisieren, anschließend Versions-/Pester-/Labnachweis und erst danach Hostnamenänderung/Reset für Revision größer 1 freigeben. Ein teilweise aktualisierter Standort bleibt sicher in der Warteschlange statt einen falschen Datensatz zu registrieren.
+
+#### 14D.5 Portal, Help und QoL
+
+1. Es bleibt bei einem editierbaren Feld „Windows-Hostname“. `vm_name` wird verständlich als „VM-Name in ESXi“ bezeichnet. Kein verstecktes zweites Formularfeld darf den Snapshot zurückposten.
+2. Solange Soll und Snapshot normalisiert gleich sind, genügt der heutige kompakte Zustand. Weichen sie nach MECM-Übergabe ab, zeigt der VM-Editor einen read-only Hinweis „Aktueller Rolloutname“ und „Nächster Rolloutname“ sowie die vorhandene Resetaktion. Das ist Darstellung, kein zweiter Sollwert. Die VM-Liste erhält nur dann eine kompakte Abweichungsmarkierung, wenn sie ohne neue Spalten-/Mobile-Drift verständlich bleibt.
+3. Reset-Bestätigung und Erfolgstext nennen den tatsächlich aktivierten nächsten Namen und die unveränderte Betreiberpflicht: Das alte MECM-Gerät wird nicht automatisch gelöscht. Fehlende MAC, aktiver Job, Template, ungültiger Altwert, bereits wartender Rollout und noch vorhandene vorherige ResourceID erhalten je einen konkreten, lokalisierten Grund und, wo möglich, einen Link zur vorhandenen Reparaturstelle.
+4. Bulk-Reset verwendet dieselben Gründe und aggregiert begrenzt; er darf keine VM teilweise umstellen. Normale Hostnamenbearbeitung bestätigt nicht destruktiv, setzt aber bei eingefrorenem Snapshot einen klaren Hinweis, dass die Änderung erst nach manuellem MECM-Löschen und Reset für den nächsten Rollout gilt.
+5. `help_missions` erklärt die beiden Namen, Snapshot/Reset, Template-/Importverhalten und die manuelle MECM-Löschung. `help_stack` erklärt die SSoT-Kette Portal-Sollwert → Rollout-Snapshot → MECM-Import → Windows → DDR-Anzeigename. `help_system_status` ordnet die neuen geschlossenen Ursachen konkreten Maßnahmen zu. `help_deploy` bestätigt ausdrücklich, dass Deploymodus und reiner Start/Export keinen Hostnamen aktivieren.
+
+Alle neuen sichtbaren Texte laufen über `__t()` mit DE/EN-Parität, echten deutschen Umlauten und ohne fest verdrahtete Bounds. Bestehende falsche Aussagen, `vm_name` sei wegen MECM global eindeutig, werden in Portalhilfe, Kommentaren, Glossar und Doku entfernt. Aktualisiert werden mindestens `docs/operations/mecm-integration.md`, `docs/operations/deploy-chain.md`, `docs/operations/troubleshooting.md`, `docs/DEPLOYMENT.md`, `docs/GLOSSARY.md`, `Powershell-MECM/README.md`, `Powershell-MECM/clients/README.md`, `README.md`, `docs/QA.md`, `docs/TESTPLAN.md`, `docs/CHANGELOG.md`, `PRE-SHIP-CHECKLIST.md`, ADR-Index sowie die dauerhaften Regeln in `AGENTS.md`, `GROK.md` und `.claude/rules/{machine-api,powershell,database}.md`.
+
+#### 14D.6 Logs, Protokolle und geschlossene Ursachen
+
+1. Strukturierte VM-Audits aus 10C protokollieren einen Sollnamenwechsel mit altem/neuem gewünschten Namen, der Wirkung `current_pending` oder `next_rollout`, VM-/Missions-ID und Revision. Der Reset protokolliert genau einmal alte ResourceID, alten/neuen Snapshot, Revisionswechsel, Akteur und Ergebnis. Bulk protokolliert einen begrenzten Aggregatkontext; keine vollständige Formpayload und kein freier Exceptiontext werden gespeichert.
+2. Der Device-Sync loggt pro relevanter Entscheidung ESXi-Name, Rolloutname, normalisierte PXE-MAC, ResourceID und Revision in den bestehenden redigierten Tageslog. Ein erwarteter Name-Mismatch bei gültiger ResourceID/MAC bleibt Debug beziehungsweise still; Poll- und Heartbeatzyklen erzeugen keine `deploy_logs`-Zeile.
+3. Die geschlossene PowerShell-Ursachensprache behält die vorhandenen Codes `mac_missing`, `mac_conflict`, `device_import_failed`, `resource_id_pending` und `resource_update_failed` und ergänzt exakt `device_name_invalid`, `device_identity_ambiguous`, `previous_resource_present`, `resource_id_missing`, `resource_mac_conflict` und `stale_rollout_revision`. `mac_conflict` bleibt der eine Code für einen Snapshotnamen mit fremder MAC oder eine MAC mit fremdem Namen; es entsteht kein synonymes `device_name_conflict`. Es gibt eine Liste in `VirtuSphere-Common.ps1`, einen spiegelgleichen `ValidateSet`, DE/EN-Hilfe und bidirektionale Pester-Parität, keine zweite PHP-Liste derselben Detailcodes.
+4. `reportRun` bleibt bei `partial_failure` plus begrenztem `detail`; die neuen Ursachen sind Diagnoseinhalt, keine neuen Top-Level-Enums. `mecm_report.php` bleibt display-only. Revisions-409, unbekannte ResourceID und Legacyannahme laufen über die vorhandene gedrosselte Machine-API-/MECM-Auditquelle; Retention, Kategorien und Reporttoken ändern sich nicht.
+5. Client-Phasen berichten weiterhin gewünschtes/angewandtes Ergebnis aus dem empfangenen Snapshot. Die Rolloutrevision darf als begrenzter Korrelationswert mitgeführt werden, ändert aber weder Arrival-order-Wahrheit noch Lifecycle-Ownership des ACK. Technische Logs dürfen Hostnamen und IDs, aber keine Token, Credentials, vollständigen API-Bodies oder unredigierten Providerfehler enthalten.
+
+#### 14D.7 Edge-Case- und Abnahmematrix
+
+Mindestens folgende positiven, negativen und Race-Nachweise sind Pflicht:
+
+- Migration/Fresh-Schema/Restore: leerer Bestand, registrierter und pending Altbestand, Templates, ungültiger grandfathered Hostname, case-insensitive Kollision, DDL-Abbruch ohne Teilzustand, Schema-Konvergenz und Wiederherstellung.
+- Claims: gewünschter und eingefrorener Name derselben VM, Kollision desired↔desired, desired↔rollout und rollout↔rollout, Freigabe des alten Namens erst im Resetcommit, Case-only-Edit, parallele Creates/Edits/Importe sowie Cascade beim Löschen.
+- Repository: Create, normale Editierung vor/nach `mecm_id`, Optimistic-Lock, Reset mit/ohne MAC, Template, aktiver Job, ungültigem Namen und wiederholtem Klick; Single/Bulk identisch; Edit gegen ResourceID-Callback und Reset gegen alten Callback in beiden Commitreihenfolgen.
+- Missionen: Capture entfernt Runtime, Template-Klon initialisiert sie neu, JSON-Roundtrip transportiert nur `vm_hostname`, Dry-run meldet alle Claims, Legacy-/Importpfade können interne Felder weder setzen noch fälschen.
+- Machine-Wire: explizite Projektion ohne Spaltenleck, `vm_name` bleibt ESXi, `vm_hostname` ist Snapshot, exakt additive Revision, Revision-1-Legacyzweig, fehlende/veraltete/zukünftige Revision, gleiche/andere ResourceID, unbekannte VM/MAC, reportMembership-/ACK-CAS und keinerlei GET-Seiteneffekt.
+- Pester: Multiindex statt last-wins, ResourceID-vor-Name, gültige ID+MAC mit anderem Discovery-Namen, fehlende ID, fremde MAC, noch vorhandener Tombstone, eindeutiger Erstimport, Import-Race, Duplikate nach Name/MAC/ID, vollständige Membership vor ResourceID, Cause-/ValidateSet-Parität und idempotenter zweiter Scan.
+- Portal/E2E: genau ein editierbares Hostnamenfeld, bedingte Aktuell/Nächster-Anzeige, lokalisierte Resetgründe/-bestätigung, manueller MECM-Löschhinweis, RBAC/CSRF/Confirm, Bulkgrenze, 320-Pixel-/Wrap-Geometrie und DE/EN-Hilfe ohne falsche Sofortwirkung.
+- Reales MECM-Lab: `VM-12345` wird als `Backup-12345` importiert und Windows erhält denselben Namen; eine spätere Portaländerung mutiert den bestehenden ResourceID-Datensatz nicht; eine spätere echte Windows-Umbenennung darf denselben MECM-Datensatz per Discovery umbenennen; manuelles Löschen plus Reset importiert den neuen Snapshot; Tippfehlerkorrektur im pending Zustand folgt automatisch; alter Callback und altes nicht gelöschtes Gerät werden abgewiesen; Paket-Resync nach Discovery-Rename bleibt am selben ResourceID-Datensatz.
+
+Etappenabschluss:
+
+- Die bei Ausführung korrekt nummerierte Rolloutnamen-Migration, Fresh-Schema, Claim-/Revision-/Tombstone-SSoT und alle Writer sind vollständig, transaktional und driftgeprüft; keine interne Spalte gelangt durch `SELECT *` auf die Machine API.
+- Unit/Static/Integration/Pester/Packaging/E2E sowie Fast und Integration sind grün. Release bleibt bis zum dokumentierten realen MECM-Lab und koordinierten Skript-/Client-Cutover gesperrt.
+- Portaltexte, DE/EN-Hilfe, neuer Rolloutnamen-ADR/ADR-0019-Amendment, Runbooks, Glossar, README/Deployment/QA/Testplan/Changelog/PRE-SHIP und Agentregeln sind synchron.
+- Audit-, PowerShell-, Client-, Machine-API- und Reportprotokolle sind revisionssicher, begrenzt und redigiert; unveränderte Status-, Retention-, Auth- und Task-Sequence-Verträge sind ausdrücklich belegt.
+- Es bleibt keine offene fachliche Entscheidung: Der Reset ist der einzige Aktivierungspunkt, die MECM-Löschung bleibt manuell, und ein Deploymodus ist für den Hostnamen irrelevant.
 
 ### Etappe 15: Navigation, Tabellen, Statusübersicht und Operatorfilter
 
@@ -961,6 +1066,7 @@ Bewusst nachgelagert und nicht durch diesen Masterplan freigegeben bleiben: ein 
 | Legacy-Tokenpfad | `addLog()` Zero-Caller und entfernt; Guard findet Tokenparameter/-werte in Audit-/Log-Sinks mit positiven, negativen und Zero-Match-Fixtures |
 | CSV-Kappung | 0/1/9.999/10.000/10.001; Tabelle/Filter/CSV gleich; sichtbarer Hinweis, Responseheader und genau ein strukturiertes Export-Audit |
 | PowerShell-Logvertrag | Server-/Clientformat, Dateiname, Korrelation, Bounds, 29/30/31-Tage-Retention, parallele Prozesse, Sinkausfall-Drosselung/Recovery, Installer und Packaging |
+| MECM-Rolloutidentität | Snapshot/Revision/Tombstone, ResourceID-/Name-/MAC-Multimaps, keine last-wins-Auswahl, eindeutiger Import/Adoption, stale Callback 409, Cause-/Help-Parität und kein Task-Sequence-Umbau |
 
 ### Unit/Static
 
@@ -1014,6 +1120,7 @@ Mindestens diese Klassifikationsfälle sind verpflichtend:
 | Passwort/Dauer/`updated` | Autocomplete/Label/Minlength-SSoT; Singulargrenzen; kontextbezogene Flagdarstellung ohne Wireänderung |
 | Statusanzeige/Joblog | Konstanten-Walk DE/EN und Unknown; sieben Jobzustände; additives `label`; Rohfelder unverändert; Poll-Single-Flight und Sessionende; Follow/Scrollpause/Neue-Zeilen-Zähler, Visibility-Catch-up, Live/Offline/Letzte Aktualisierung, Filter/Wrap, Phasen, Cancelaktionen und Terminalblöcke |
 | Formulare | vollständige Migrationsmatrix; keine toten `aria-describedby`; keine doppelten IDs; Fehler-/Erfolgszustand; dynamische Zeilen; axe/Keyboard |
+| VM-/MECM-Namen | genau ein editierbarer Windows-Hostname; ESXi-/Soll-/Rollout-/Discoveryname klar getrennt; Aktuell/Nächster nur bei echter normalisierter Abweichung; Reset-/Bulkgründe, manuelle Löschgrenze, RBAC/Confirm und Mobile/Wrap |
 | Navigation/Tabellen | Seitennavigation mit `aria-current`, kein falsches Tabwidget; Sticky-/Wrap-/Scroll-/Mobile-Geometrie; fünf Statuskarten |
 | Katalog/Logs | echte vs. gefilterte Leere; Sortierzustand; DST/Invalid-Input; keine Query bei Fehler; strukturierte Auditfilter; CSV/Pagination/Kappung; exakte kopierbare bounded Korrelation und RBAC |
 | Schema/Performance | Migration/Fresh-Schema synchron; repräsentatives `EXPLAIN` vor/nach Korrelationsindizes; keine unbegrenzte Jobliste |
@@ -1052,6 +1159,7 @@ Für Etappen 11 bis 17 beweist die echte QA-Schicht zusätzlich:
 - Polling liefert auch bei Sessionablauf/Berechtigungsfehler ausschließlich den vereinbarten JSON-Vertrag; Follow-/Visibility-Zustände erzeugen weder Parallelrequests noch Auditspam;
 - kombinierte strukturierte Logfilter, lokale DST-Grenzen, CSV-State/-Kappung und exakte Korrelationsnavigation arbeiten gegen echte Repositoryabfragen;
 - Korrelationsmigration konvergiert aus Alt- und Frischschema und die Ergebnisliste bleibt begrenzt;
+- Etappe 14D hält Hostname-Claims, Edit/Reset, Revision und Tombstone unter parallelen Repository- und Machine-API-Transaktionen atomar; explizite Projektionen liefern keine internen DB-Spalten und Missionstransfer/Templateklon tragen keine Runtime mit;
 - Visualprojekt läuft ausschließlich gegen den synthetischen QA-Stack und stellt Workerzustand zuverlässig wieder her.
 
 Da die wichtigsten Nebenwirkungen nur gegen die Datenbank beweisbar sind, sind grüne Integrationstests verpflichtend. Ist der QA-Stack nicht verfügbar, ist die Umsetzung nicht vollständig abgenommen; die Sitzung meldet den Infrastrukturblocker statt die Tests optional zu nennen. Ein kontrollierter realer MySQL-Neustart mit laufendem Test-SSH-Stream gehört in die Release-/Staging-Abnahme, nicht in einen Unit-Test und nicht gegen produktive Jobs.
@@ -1121,14 +1229,15 @@ Jede nachfolgende Etappe endet zwingend mit dem vollständigen Commit-/Push-Absc
 21. Etappe 14A: Netzwerk-/MAC-Pakete A bis H aus dem konsolidierten Fachplan. Alle Writer, Queue/Repo/Worker, Callbackresultat und Retry verwenden denselben VLAN-Vertrag; Remote-/Identity-Blocker haben beim Retry Vorrang. Danach Unit/Integration/Machine-API/E2E, Bestandsaudit, Help/Doku/Logs/Protokolle und Abnahmezeile.
 22. Etappe 14B: den Create-Plan als untergeordneten per-VM-Owner umsetzen. Jede materialisierte VM erhält ein gebundenes `create.vm.<position>`-Remotehandle, JID und Identitätsbeweis; `ExitType=cgroup` wird real bewiesen; Recovery bleibt am Quelljob. Create und Full erst nach vollständiger Fault-/EZT-Abnahme aktivieren.
 23. Etappe 14C: PID-1-Supervisor, getrennte Supervisor-/Kindheartbeats, TERM/KILL/waitpid, Cooldown und Compose-Health. Abnahme beweist einen geheilten Kind-Hang ohne zweite Unit/JID/VM; erst danach Freigabe.
-24. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie strukturierte Audit-/exakte Korrelationsfilter mit Kopieraktion und CSV-Kappungsparität; Remote-/Resolutionevents, Directory-Auditkategorien und RBAC-Zweige bleiben erhalten. Danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
-25. Etappe 16: zuerst kaskadengleicher `components.css`-Split und zentrale Style-Registry, dann Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
-26. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
-27. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-28. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
-29. Release-Lane, Visualprojekt sowie kontrollierten Remote-Fault-, Restore-, langen EZT/Create-, Netzwerk-/MAC-, Staging-DB-, langen Joblog-, Cancel-Race- und Secret-Sentinel-Drill vollständig und mit `[n/total]`-Fortschritt grün. Die AD/LDAPS-Produktivfreigabe bleibt davon getrennt und verlangt zusätzlich das vollständig grüne Ziel-AD-Protokoll.
-30. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle, AD/LDAPS-Baseline, konsolidierten Fachplan und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
-31. Der Gesamtabgleich erzeugt keinen Sammelcommit für vergessene Arbeiten. Findet er einen notwendigen Hunk, wird dessen verursachende Etappe wieder geöffnet, erneut vollständig geprüft, separat committed und gepusht; abschließend müssen alle eigenen Planänderungen in den protokollierten Upstream-Hashes enthalten sein.
+24. Etappe 14D: Migration/Claim-Backfill und explizite Machine-Projektionen zuerst; danach zentrale Edit-/Reset-/Revisions-Transaktionen, ResourceID-/MAC-Multimap-Reconciliation, revisionsgebundene Server-/Clientcallbacks und Portal-QoL exakt nach Abschnitt 14D. Der Web/API-Kompatibilitätszweig wird vor MECM-Server-Skript und Client-Content verteilt; Reset/Hostnameänderung für Revision größer 1 bleibt bis zum Versions- und realen Labnachweis gesperrt. Danach Schema/Unit/Integration/Pester/Packaging/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+25. Etappe 15: Navigation, Sticky-Tabelle, Statusübersicht, Kataloge sowie strukturierte Audit-/exakte Korrelationsfilter mit Kopieraktion und CSV-Kappungsparität; Remote-/Resolutionevents, Directory-Auditkategorien und RBAC-Zweige bleiben erhalten. Danach Schema/EXPLAIN, Unit/Integration/E2E, Help/Doku/Logs/Protokolle und Abnahmezeile.
+26. Etappe 16: zuerst kaskadengleicher `components.css`-Split und zentrale Style-Registry, dann Slate-/Indigo-Tokenumbau, Glas, parserbasierter Farbguard und zusammengesetzter Kontrast; danach Mutation/Forced-Colors/Visual, Help/Doku/Logs/Protokolle und Abnahmezeile.
+27. Etappe 17: reviewte Visual-Sollbaselines und Release-Gate; danach PRE-SHIP, Help/Doku/Logs/Protokolle und Abnahmezeile.
+28. Fast-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+29. Integration-Lane vollständig und mit `[n/total]`-Fortschritt grün.
+30. Release-Lane, Visualprojekt sowie kontrollierten Remote-Fault-, Restore-, langen EZT/Create-, Netzwerk-/MAC-, MECM-Rolloutnamen-/Revisions-, Staging-DB-, langen Joblog-, Cancel-Race- und Secret-Sentinel-Drill vollständig und mit `[n/total]`-Fortschritt grün. Die AD/LDAPS-Produktivfreigabe bleibt davon getrennt und verlangt zusätzlich das vollständig grüne Ziel-AD-Protokoll.
+31. Unabhängiger Gesamtabgleich über Befunde, Etappenprotokolle, AD/LDAPS-Baseline, konsolidierten Fachplan und lebende Dateiliste. Gefundene Lücken öffnen die verursachende Etappe erneut; anschließend deren gezielte Tests und betroffene Lanes wiederholen.
+32. Der Gesamtabgleich erzeugt keinen Sammelcommit für vergessene Arbeiten. Findet er einen notwendigen Hunk, wird dessen verursachende Etappe wieder geöffnet, erneut vollständig geprüft, separat committed und gepusht; abschließend müssen alle eigenen Planänderungen in den protokollierten Upstream-Hashes enthalten sein.
 
 ---
 
@@ -1160,6 +1269,7 @@ Voraussichtlich betroffen:
 | `Docker/WebAPI/lib/system_status_panels.php` und neue source-spezifische Panelmodule | unter 400 Zeilen; vorsichtige Ansible-Aktivitätsanzeige und bestehender Log-Deep-Link |
 | `Docker/WebAPI/lib/help/deploy.php` | sichtbarer Disktyp über `disk_type_label()` |
 | `Docker/WebAPI/lib/help/missions.php` | Defaultlabel und belastbare Disk-Erklärung |
+| `Docker/WebAPI/lib/help/{missions,stack,system_status,deploy}.php` und zugehörige DE/EN-Kataloge | Etappe 14D: Namens-SSoT, Snapshot/Reset, Konfliktmaßnahmen, manuelle Löschgrenze und unveränderte Deploymodus-/Task-Sequence-Grenze |
 | `Docker/WebAPI/portal/credentials.php` plus Credentials-Actions/-Renderer | Seite unter 400 Zeilen; Ansible-Aktivitätsnachweis ohne Statuskopie; POST-/Auditvertrag unverändert |
 | `Docker/WebAPI/lib/credentials_test_message.php` | Vokabular-Ownership im Docblock richtigstellen; Mapping bleibt zentral |
 | `Docker/WebAPI/lang/{de,en}/common.php` | neun neue Basissätze, Legacy-Text |
@@ -1187,6 +1297,7 @@ Voraussichtlich betroffen:
 | `Docker/WebAPI/tests/Unit/SystemStatusPanelBranchTest.php` | Text-/RBAC-Linkzweige |
 | `Docker/WebAPI/tests/Integration/EsxiInventoryCacheTest.php` | Pause-/Erfolgsmatrix |
 | `Docker/WebAPI/tests/Integration/AnsibleActivityTest.php` | `attempts > 0`, Terminal-/Credential-Auswahl |
+| `Docker/WebAPI/tests/{Unit,Static,Integration}` Rolloutnamen-Tests sowie `MachineApiWireTest`, `MecmProvenanceWireTest`, `BulkVmActionsTest`, `MissionTransferRoundTripTest` und VM-Race-Tests | Etappe 14D: Normalisierung/Claims, Migration, Edit/Reset, Template/Transfer, explizite Wire-Projektion und revisionsgebundene Callbacks positiv/negativ/Zero-Match |
 | Reaper-/Outcome-Integrationstests | DB-Reconnect, Ownership, belegbarer Reapertext und Finalisierung |
 | `tests/e2e/specs/system-status.spec.js` | Aktivitätsanzeige, Loglink und Geometrie |
 | `tests/e2e/shot.tmp.js` | temporäres Artefakt entfernen, nicht committen |
@@ -1210,7 +1321,12 @@ Voraussichtlich betroffen:
 | `Docker/WebAPI/lib/audit_events.php`, `lib/repo/log.php` und neue Audit-Registry/Presenterhelper | strukturierte Event-/Objekt-/Ergebnis-/Kontext-SSoT, Legacyfallback, Kontextbounds/Redigierung; totes tokenfähiges `addLog()` entfernen |
 | `Docker/WebAPI/lib/forms.php` | gemeinsame IDs, Controlattribute und Fehlerausgabe für Hint-/Error-Zuordnung |
 | `Docker/WebAPI/lib/repo/vms.php` und neue `vm_{validation,persistence,operations}.php`/Legacy-Domäne | Repo-Fassade unter Budget; Validierung, Transaktionen, Recovery und Machine-Verträge getrennt |
+| VM-Hostname-/Claimmodule aus Etappe 14D | eine Normalisierungs-SSoT, transaktionssichere desired-/rollout-Claims, Snapshot-/Revision-/Tombstone-Übergänge und gemeinsame Single-/Bulk-Resetgründe; Namen nach dem in Etappe 14 entstandenen Modulbestand festlegen und in dessen Owner-Registry aufnehmen |
 | `Docker/WebAPI/portal/vm_edit.php` und `Docker/WebAPI/lib/vm_edit_*.php` | Seite/Module unter Budget; Diagnostik, Gruppenrenderer und Aktionen getrennt |
+| `Docker/WebAPI/portal/vms.php`, VM-Editor-Renderer und `lang/{de,en}/{portal,vms,vm_edit}.php` | genau ein editierbarer Windows-Hostname, bedingte Aktuell/Nächster-Darstellung sowie konkrete Reset-/Bulkgründe und manuelle MECM-Löschgrenze |
+| `Docker/WebAPI/mecm-api.php` | explizite DeviceList-/Clientprojektionen; `vm_hostname` aus Rollout-Snapshot, additive Revision, kein interner Spaltenleck |
+| `Docker/WebAPI/mecm_updateid.php`, `mecm_client_ack.php` und `lib/repo/status_events.php` beziehungsweise neuer fokussierter MECM-Callback-Owner | revisionsgebundene, idempotente CAS-Übergänge; andere ResourceID und stale Callback 409 ohne Write |
+| `Docker/WebAPI/db_importMAC.php`, `mecm_packages.php`, `mecm_report.php` und `mecm_client_ack.php` | vollständiger Gegencheck: MAC-Import schreibt keine Rolloutfelder, Package-/Report-Top-Level bleibt unverändert, ACK trägt nur die additive Revision |
 | betroffene Portalformulare und JS-Zeilentemplates | vollständige Formular-Migrationsmatrix, eindeutige IDs und dynamisches `aria-describedby` |
 | `Docker/WebAPI/portal/{missions,os,packages,vlans,logs}.php` | Seitennavigation, Katalogleerzustände/-filter, Zeitzone, strukturierte Auditfilter, exakte kopierbare Korrelation und sichtbare CSV-Kappung |
 | `Docker/WebAPI/lib/system_status_panels.php` | fünfte Übersichtskarte mit gemeinsamem Abweichungs-Count und SSoT-Link |
@@ -1221,18 +1337,23 @@ Voraussichtlich betroffen:
 | UX-Unit-/Static-Tests unter `Docker/WebAPI/tests/` | Blocker-, Help-, Status-, Form-, Filter-, CSS-Farb- und Kontrastverträge mit positiven/negativen/Zero-Match-Fällen |
 | UX-E2E-Specs unter `tests/e2e/specs/` | Live-Blocker, Poller, Navigation, Form-DOM, Sticky/Wrap, Logfilter/RBAC, axe/Forced Colors und Visuals |
 | Joblog-/Audit-Unit-, Static-, Integration- und E2E-Tests unter `Docker/WebAPI/tests/`/`tests/e2e/specs/` | Playbook-/Cancel-Races, Outputbounds/Sentinel/Cleanup, Tail/Drain/Download, Terminalpresenter, Auditregistry/Token-Guard, CSV-Kappung sowie Follow/ARIA/Visibility/Filter |
-| `Docker/mysql/mysql-init/struktur.sql` | Aktivitätsindex aus Etappe 3, Fehlerkategoriebreite aus Etappe 5, Terminalgrund/Auditfelder aus 10B/10C und belegte Korrelationsindizes aus Etappe 15 als Frischschema-SSoT |
-| `Docker/WebAPI/lib/migrate.php` | Migration 0039 gegen Query-Plan prüfen/anpassen; Fehlerkategoriebreite, additive Terminalgrund-/Auditfelder sowie begründete Korrelationsindizes spiegeln |
+| `Docker/mysql/mysql-init/struktur.sql` | Aktivitätsindex aus Etappe 3, Fehlerkategoriebreite aus Etappe 5, Terminalgrund/Auditfelder aus 10B/10C, Rollout-Snapshot/-Revision/-Tombstone und Hostname-Claimtabelle aus 14D sowie belegte Korrelationsindizes aus Etappe 15 als Frischschema-SSoT |
+| `Docker/WebAPI/lib/migrate.php` und `lib/migrations/<nächste-freie-nummer>_mecm_rollout_hostname.php` | bestehende Migrationen unverändert; Nummer bei Beginn von 14D aus der geordneten Registry ableiten, dann Preflight/Backfill/Claims idempotent und order-exakt gegen das Frischschema spiegeln |
 | `Powershell-MECM/mecm/VirtuSphere-Common.ps1` und lokales Server-Loggingmodul | Loggingdomäne unter Paritätsnachweis extrahieren; einheitliches Schema, Retention, Korrelation und gedrosselter Sinkstatus |
+| `Powershell-MECM/mecm/mecm_new-device-sync.ps1` | Import über Rolloutnamen; ResourceID-/Name-/MAC-Multimaps, Tombstone-/Konfliktmatrix, Revision an Membership-/ResourceID-Callbacks und ursachengerechte Logs |
 | `Powershell-MECM/clients/VirtuSphere-Client-Common.ps1` und lokales Client-Loggingmodul | getrennte ADR-0029-Implementation mit statisch gleichem Schema/Bounds/Retention und gedrosseltem Sinkstatus |
+| `Powershell-MECM/clients/client_getinfo.ps1` | additive Rolloutrevision whitelisten/speichern und zusammen mit der empfangenen Snapshotkonfiguration im Client-Ready-ACK spiegeln; übrige Task-Sequence-Kette unverändert |
 | `Powershell-MECM/install-VirtuSphere-{MECM,Clients}.ps1`, ClientPackaging und Paketdateilisten | Loggingmodule bei Neuinstallation, Upgrade und Clientpaket atomar kopieren und Version/Vollständigkeit sichtbar prüfen |
-| `tests/powershell/VirtuSphere.*.Tests.ps1` | Server-/Client-Logparität, Dot-Source-/Funktionsinventar, Installer/Packaging, Sinkausfall/Recovery und unveränderte Report-/Heartbeatverträge |
-| `Powershell-MECM/{README.md,clients/README.md}` | Format, Pfad, Retention, Korrelation, Sinkstörung und getrennte Runtimepakete dokumentieren |
+| `tests/powershell/VirtuSphere.*.Tests.ps1` | Server-/Client-Logparität, Dot-Source-/Funktionsinventar, Installer/Packaging, Sinkausfall/Recovery, Hostname-/Identitätsmatrix, Cause-Parität, Revision und unveränderte Report-/Heartbeatverträge |
+| `Powershell-MECM/{README.md,clients/README.md}` | Format, Pfad, Retention, Korrelation, Sinkstörung, getrennte Runtimepakete sowie Rolloutname/Revision/Cutover ohne Task-Sequence-Umbau dokumentieren |
 | `docs/operations/esxi-inventory.md` | Tabelle, Heading, Logging, RBAC, Altbestand, Detailgrenze |
 | `docs/operations/deploy-chain.md` | aktiver DB-Kanal, Observergrenze, einzelne Playbook-/Abbruchgrenzen, Terminal-/Joblogvertrag und belegbare Reaperdiagnose |
 | `docs/operations/troubleshooting.md` | Containerlogpfad, Reaperbeobachtung, Tail/Drain/Retention, Cancelgrenze, Korrelation erst nach Etappe 15 und Wiederanlauf |
+| `docs/operations/mecm-integration.md` | gewünschter Name, Snapshot, ResourceID-/MAC-Identität, manuelle Löschung, Revision/Cutover, Discovery-Rename und Konfliktmaßnahmen |
 | `docs/DEPLOYMENT.md` | Worker-, Fehlerherkunfts-, Schritt-/Cancel-, Joblog-/Download-/Terminal- und unveränderten Wire-Vertrag abgleichen |
+| `docs/GLOSSARY.md`, `README.md`, `PRE-SHIP-CHECKLIST.md` | VM-/Windows-/Rollout-/MECM-Anzeigename sauber trennen und realen MECM-Lab-/Cutover-Gate sichtbar machen |
 | `docs/QA.md` | neue Contract-/Integrationsnachweise und etappenweise Abnahme |
+| `docs/TESTPLAN.md` | 14D-Migrations-, Claim-, Race-, Wire-, Pester-, Client- und reales MECM-Szenario als reproduzierbare Matrix |
 | `docs/adr/ADR-0006-file-size-discipline.md` | Guard, Kompatibilitätsfassaden, Owner-Glob und begründete Ausnahme-/Abbaupolitik |
 | `docs/adr/ADR-0013-frontend-design-baseline.md` | Slate/Indigo, Token-/Glas-/Forced-Colors-/Kontrastvertrag und unveränderte Danger-Semantik |
 | `docs/adr/ADR-0028-playwright-dev-e2e-layer.md` | Visualrunner, Browserresolver, Baseline-Metadaten und bewusster Updateworkflow |
@@ -1241,8 +1362,10 @@ Voraussichtlich betroffen:
 | `docs/adr/ADR-0026-log-retention-windows.md` | Joblog-/Rohdownload-/Audit-/CSV-/PowerShell-Retention und Kappung |
 | `docs/adr/ADR-0032-correlation-id.md` | Portal-Korrelationssuche/-kopie/-export, RBAC/Retention, Begrenzung und belegte Indexannahmen |
 | `docs/adr/ADR-0033-cancellation-state-machine.md` | einzelne Playbookgrenzen, Cancel-/Terminal-CAS, Observer/Reaper/Ownership, Metadaten und keine harte Standardtötung |
+| neuer ADR `<nächste-freie-Nummer>-mecm-rollout-hostname-and-revision`, `docs/adr/ADR-0019-e3-machine-api-retirement-candidates.md`, `docs/adr/ADR-0034-mecm-provenance-and-reconciliation.md` und ADR-Index | Nummer bei Beginn von 14D aus dem ADR-Index ableiten; neue Snapshot-/Claim-/Reset-/Fencingentscheidung sowie additive Clientrevision und ResourceID-basierte Reconciliation quellenrichtig amendieren/querverweisen |
 | `.claude/rules/webapi.md` | vollständiger CLI-Vertrag und ehrliche Reaperregel |
 | `.claude/rules/portal.md`, `AGENTS.md`, `GROK.md` | Blocker-/Help-/Status-/Form-/Farbverträge unmittelbar mit ihren Etappen |
+| `.claude/rules/{machine-api,powershell,database}.md`, `AGENTS.md`, `GROK.md` | Etappe 14D: Snapshot-/Claim-/Revision-/Tombstone-SSoT, explizite Projektion, Callback-Fencing, Cause-Parität und unveränderte manuelle MECM-Löschung dauerhaft festhalten |
 | `docs/CHANGELOG.md` | sichtbare Verhaltensänderung und Altbestand |
 | diese Datei | Abnahmeprotokoll |
 
@@ -1254,8 +1377,8 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 
 - Änderung der numerischen SSH-/SFTP-Budgets selbst.
 - Persistenz von `last_error_detail` am Statusdatensatz.
-- Änderung von `VIRTUSPHERE_RUN_ERROR_*` oder MECM-Laufberichten.
-- Änderung der Machine-API-Wire-Contracts.
+- Änderung von `VIRTUSPHERE_RUN_ERROR_*` oder den Top-Level-Envelopes der MECM-Laufberichte. Etappe 14D ergänzt ausschließlich geschlossene Detailursachen unter dem bestehenden `partial_failure`.
+- Änderung der Machine-API-Wire-Contracts, außer der in Etappe 14D vollständig spezifizierten Alias-/Revisionsänderung mit ADR-, Wire-Test-, Legacy- und Cutoververtrag.
 - Rückwirkender, spekulativer Backfill alter Fehlercodes.
 - Unbelegte Behauptung, ein beliebiger Ansible-Prozess laufe nach SSH-Disconnect sicher weiter. Vor 8R ist nur gesichert, dass bereits externe Änderungen erfolgt sein können; nach 8R darf Fortlauf ausschließlich aus passender aktiver systemd-Cgroup beziehungsweise dauerhaften Started-/Result-/JID-Beweisen abgeleitet werden.
 - Historischer Snapshot des Missionsnamens; die Anzeige benennt bewusst den aktuellen Missionsdatensatz.
@@ -1267,6 +1390,7 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 - Breiter fachfremder Split von `Powershell-MECM/mecm/VirtuSphere-Common.ps1` sowie Größenzerlegung von `VirtuSphere.ErrorPaths.Tests.ps1` und `VirtuSphere.RunReport.Tests.ps1`. Etappe 10D darf ausschließlich die tatsächlich geänderte Logging-/Retention-Domäne unter vollständigem Pester-/Dot-Source-/Installer-/Packaging-Paritätsnachweis extrahieren; übrige Wire-/MECM-/Installerdomänen bleiben unberührt.
 - Hartes Beenden des laufenden Ansible-Prozesses als normaler Cancelpfad. Es bleibt bei „aktuellen Schritt auslaufen lassen, keinen nächsten starten“; ein späterer Notfall-Kill bräuchte eine eigene Remote-Prozessgruppen-, Cleanup- und Operatorrisiko-Spezifikation.
 - Zerlegung linearer SSoT-Registries wie `lib/migrate.php` oder `lib/constants.php` allein aufgrund der Zeilenzahl. Neue fachlich eigenständige Helper dürfen weiterhin extrahiert werden, ohne die geordnete Registry zu verteilen.
+- Automatisches Löschen oder direktes Umbenennen eines MECM-Geräts, Rückschreiben eines per Discovery beobachteten Windowsnamens in `vm_hostname`, automatische Hostnamenaktivierung durch `start`/`export`/`full` oder eine Änderung der Task Sequence. Etappe 14D ändert nur Import, Identitätsabgleich, revisionsgebundene Callbacks und die vorhandene Resetaktion.
 
 ---
 
@@ -1291,6 +1415,10 @@ Die Tabelle ist eine lebende Vollständigkeitsliste, keine Schranke. Weitere Dat
 - Ansible warnt, dass gespeicherte Ausgabe Geheimnisse enthalten kann und `no_log` Debugausgabe nicht schützt; die CLI beschreibt `-vvv` als erhöhte Diagnoseausgabe und `-vvvv` als mögliche Verbindungsdiagnose, nicht als garantierte Variablenanzeige: <https://docs.ansible.com/projects/ansible/latest/reference_appendices/logging.html> und <https://docs.ansible.com/projects/ansible-core/devel/cli/ansible-playbook.html>
 - MDN dokumentiert die Rundungsdifferenz von `scrollTop` gegenüber `scrollHeight`/`clientHeight` und empfiehlt eine Bottom-Toleranz; die Page Visibility API liefert `visibilitychange` für Pause und Catch-up eines Hintergrundtabs: <https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollHeight#determine_if_an_element_has_been_totally_scrolled> und <https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API>
 - WAI-ARIA 1.2 definiert `role="log"` als geordnete Live-Region mit implizitem `aria-live="polite"`; der Plan verwendet deshalb keine aggressive `assertive`-Ansage: <https://www.w3.org/TR/wai-aria-1.2/#log>
+- Microsoft dokumentiert, dass `Import-CMComputerInformation` einen Computer mit `-ComputerName` und `-MacAddress` in Configuration Manager importiert; die zugrunde liegende `SMS_Site.ImportMachineEntry`-Methode nennt diese Werte ausdrücklich NetBIOS-Name und PXE-fähige MAC: <https://learn.microsoft.com/en-us/powershell/module/configurationmanager/import-cmcomputerinformation?view=sccm-ps> und <https://learn.microsoft.com/en-us/intune/configmgr/develop/reference/core/servers/configure/importmachineentry-method-in-class-sms_site>
+- Microsoft beschreibt für Systemressourcen NetBIOS-Name und MAC als DDR-Schlüssel, die Client-GUID als eindeutige Identität und das Aktualisieren eines bestehenden statt Erzeugen eines neuen Datensatzes bei passender Identität: <https://learn.microsoft.com/en-ca/mem/configmgr/develop/core/servers/configure/about-updating-an-existing-resource-instance>
+- Microsoft beschreibt den von Data Discovery Manager erzeugten `Name` als Anzeigenamen und nennt für Systemressourcen den NetBIOS-Namen als erste Namensquelle. Deshalb ist ein späterer Discovery-Name bei gleicher ResourceID kein Importfehler und kein Anlass für einen direkten Datenbankwrite: <https://learn.microsoft.com/hr-hr/intune/configmgr/develop/core/servers/configure/about-ddr-properties>
+- Microsoft beschreibt Discovery Data Records als den Weg, der neue Ressourcen anlegt oder bestehende Ressourcendaten aktualisiert: <https://learn.microsoft.com/en-us/intune/configmgr/core/servers/deploy/configure/run-discovery>
 
 Die externen Primärquellen und offiziellen Dokumentationen stützen Standards, Werkzeugverhalten, Taxonomie und Textgestaltung. Die konkrete VirtuSphere-Wirkung wird ausschließlich durch Repository-Code, Schema, Tests und Etappenprotokolle bewiesen.
 
@@ -1399,6 +1527,16 @@ Die ausführende Sitzung ergänzt je Etappe eine Zeile, bevor die nächste Etapp
 | Polling kann Login-HTML als JSON behandeln, Session locken oder bei `401`/`403` endlos weiterlaufen | 13 | |
 | sichtbare geschlossene Statuswerte sind roh, persistente Logs dürfen aber nicht übersetzt werden | 13 | |
 | Hint-Anzahl beweist keine eindeutige Label-/`aria-describedby`-Zuordnung | 14 | |
+| Device-Sync importiert heute `vm_name` und koppelt damit MECM-Anzeigename an die ESXi-Identität statt an `vm_hostname` | 14D | |
+| Ein live editierbares `vm_hostname` ohne Rollout-Snapshot würde ein bereits übergebenes Gerät beim nächsten Resync still umdeuten | 14D | |
+| Ein Reset kann ohne Rolloutrevision durch verspätetes `updateDevice`, `reportMembership` oder Client-ACK wieder mit dem alten Lauf abgeschlossen werden | 14D | |
+| `getDeviceList` verwendet `SELECT *`; neue interne Snapshot-/Revision-/Tombstone-Spalten würden ungeprüft Machine-Wire werden | 14D | |
+| Der MECM-Devicecache ist name-keyed und löst Duplikate per last-wins auf; nach Discovery-Rename kann derselbe MAC erneut importiert werden | 14D | |
+| Globale `vm_hostname`-Prüfung fehlt und ein reines Preflight-`SELECT` wäre bei parallelen Missionen racy | 14D | |
+| Der heutige Single-/Bulk-MECM-ID-Reset besitzt keine gemeinsame aktive-Job-, Revision-, Claim- und Tombstone-Transaktion | 14D | |
+| Template-Klon und Missions-JSON könnten interne Rolloutdaten mitschleppen oder beim Instanziieren keinen frischen Snapshot anlegen | 14D | |
+| Hilfe und Kommentare begründen globale `vm_name`-Eindeutigkeit fälschlich mit dem MECM-Gerätenamen und erklären die manuelle Löschgrenze nicht | 14D | |
+| PowerShell-Cause-Liste, `ValidateSet`, DE/EN-Maßnahmen und Run-Detail können bei neuen Identitätsfehlern auseinanderlaufen | 14D | |
 | Seitennavigation könnte fälschlich als ARIA-Tabwidget umgesetzt werden | 15 | |
 | Datumsfilter könnte DST mit `+86400` verfehlen oder ungültige Werte abfragen | 15 | |
 | Korrelationssuche wäre unbeschränkt, ohne RBAC-/Retentionerklärung oder ungeprüft indexiert | 15 | |
