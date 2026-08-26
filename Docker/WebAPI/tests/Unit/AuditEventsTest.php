@@ -89,10 +89,43 @@ final class AuditEventsTest extends TestCase
         self::assertMatchesRegularExpression('/\+\d+ more field\(s\)$/', $summary, 'a truncated summary must admit it is incomplete');
     }
 
-    public function testChangeNoteDistinguishesNoOpFromAChange(): void
+    /**
+     * The no-op note moved into the presenter with Etappe 10C, because it is a
+     * statement about the rendered description and not about the diff: the
+     * structured row says `action=updated` with no `changes` key, which is the
+     * same fact without a sentence. An update that changed nothing must still
+     * say so, since under optimistic locking a no-op save is a real event.
+     */
+    public function testDescriptionOfAnUpdateThatChangedNothingSaysSo(): void
     {
-        self::assertSame(' (no field changes)', audit_change_note(''));
-        self::assertSame(' (datastore: "a" -> "b")', audit_change_note('datastore: "a" -> "b"'));
+        $unchanged = audit_event_description(
+            VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED,
+            'vm',
+            '7',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            ['action' => 'updated', 'mission_id' => 3]
+        );
+        self::assertStringEndsWith('(no field changes)', $unchanged);
+
+        $changed = audit_event_description(
+            VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED,
+            'vm',
+            '7',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            ['action' => 'updated', 'mission_id' => 3, 'changes' => 'datastore: "a" -> "b"']
+        );
+        self::assertStringEndsWith('(datastore: "a" -> "b")', $changed);
+
+        // A create has no previous value to diff against, so it must not claim
+        // that nothing changed.
+        $created = audit_event_description(
+            VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED,
+            'vm',
+            '7',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            ['action' => 'created', 'mission_id' => 3]
+        );
+        self::assertStringNotContainsString('no field changes', $created);
     }
 
     public function testSnippetLeavesShortValuesIntact(): void

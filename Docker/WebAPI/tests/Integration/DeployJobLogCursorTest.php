@@ -131,7 +131,7 @@ final class DeployJobLogCursorTest extends TestCase
                 $lines[] = (string) $row['line'];
             }
         }
-        self::assertSame(['fatal: password=***'], $lines);
+        self::assertSame(['fatal: password=[redacted]'], $lines);
         self::assertStringNotContainsString($sentinel, implode("\n", $lines));
     }
 

@@ -24,7 +24,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // consequence of a page left open, and the user is sent back to a fresh
         // form rather than a 400. Still worth a line, because a flood of these
         // without any matching sign-in is not a user leaving a tab open.
-        audit_auth($connection, 'csrf token rejected on login.php');
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_CSRF_REJECTED, 'request', 'login.php', VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'page' => 'login.php',
+        ]);
         flash_set('error', __t('login.session_expired'));
         redirect_to('login.php');
     }

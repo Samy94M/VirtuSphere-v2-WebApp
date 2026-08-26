@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $apiBaseUrl = ansible_normalize_api_base_url(request_string($_POST, 'api_base_url'));
             repo_set_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL, $apiBaseUrl);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated deploy api_base_url setting', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated'], (int) $user['id']);
             flash_set('success', __t('settings.saved'));
         } catch (InvalidArgumentException $exception) {
             $message = __t('settings.api_base_url_invalid');
@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'clear_api') {
         try {
             repo_delete_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'cleared deploy api_base_url setting', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
             flash_set('success', __t('settings.api_base_url_reset_done'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -85,7 +85,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_PORTAL_TIMEZONE, $timezone);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated portal timezone to ' . $timezone, (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'portal_timezone', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'new_value' => $timezone,
+                ], (int) $user['id']);
                 flash_set('success', __t('settings.timezone_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -123,9 +126,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     repo_delete_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
                     $selection = 0;
                 }
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated esxi inventory interval to ' . $hours . 'h', (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_interval_hours', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'new_value' => (string) $hours,
+                ], (int) $user['id']);
                 if ($oldSelection !== $selection) {
-                    audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated esxi inventory ansible credential ' . $oldSelection . ' -> ' . $selection, (int) $user['id']);
+                    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_ansible_credential', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'updated',
+                        'old_value' => (string) $oldSelection,
+                        'new_value' => (string) $selection,
+                    ], (int) $user['id']);
                 }
                 flash_set('success', __t('settings.esxi_saved'));
             } catch (Throwable $exception) {
@@ -141,7 +151,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_SESSION_LIFETIME_MINUTES, (string) $minutes);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated session lifetime to ' . $minutes . ' minutes', (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'session_lifetime_minutes', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'new_value' => (string) $minutes,
+                ], (int) $user['id']);
                 flash_set('success', __t('settings.session_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -156,7 +169,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_PASSWORD_MIN_LENGTH, (string) $minLength);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated password min length to ' . $minLength, (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'password_min_length', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'new_value' => (string) $minLength,
+                ], (int) $user['id']);
                 flash_set('success', __t('settings.password_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -189,7 +205,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // renewal goes live on the watcher's next pass.
             https_apply_state($connection);
             $meta = https_cert_metadata($material['cert_pem']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'installed https certificate (CN=' . $meta['subject'] . ', expires ' . gmdate('Y-m-d', $meta['valid_to']) . ' UTC)', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED, 'setting', 'https_certificate', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'subject' => (string) $meta['subject'],
+                'valid_to' => gmdate('Y-m-d', (int) $meta['valid_to']),
+            ], (int) $user['id']);
             flash_set('success', __t('settings.https_uploaded'));
         } catch (ValidationException $exception) {
             form_remember('https_upload', $_POST, $exception->errors());
@@ -219,7 +238,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             });
             https_apply_state($connection);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, $enable ? 'enabled https' : 'disabled https' . ($redirectWasOn ? ' (redirect auto-disabled)' : ''), (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'https', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'enabled_state_changed',
+                'enabled' => $enable,
+                'redirect_disabled' => $redirectWasOn,
+            ], (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_enabled_on') : (!$redirectWasOn ? __t('settings.https_enabled_off') : __t('settings.https_enabled_off_redirect')));
         } catch (ValidationException $exception) {
             flash_set('error', portal_error_message($exception));
@@ -241,7 +264,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, $enable ? '1' : '0');
             });
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, ($enable ? 'enabled' : 'disabled') . ' http to https redirect', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'http_to_https_redirect', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'enabled_state_changed',
+                'enabled' => $enable,
+            ], (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_redirect_on') : __t('settings.https_redirect_off'));
         } catch (ValidationException $exception) {
             flash_set('error', portal_error_message($exception));
@@ -252,7 +278,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $enable = ($_POST['https_hsts_enabled'] ?? '') === '1';
         try {
             repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_HSTS_ENABLED, $enable ? '1' : '0');
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, ($enable ? 'enabled' : 'disabled') . ' hsts', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'hsts', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'enabled_state_changed',
+                'enabled' => $enable,
+            ], (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_hsts_on') : __t('settings.https_hsts_off'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -263,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $token = bin2hex(random_bytes(16));
             repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, hash('sha256', $token));
             $_SESSION['machine_report_token_once'] = $token;
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'generated machine report token', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'generated'], (int) $user['id']);
             flash_set('success', __t('settings.report_token_generated'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -271,7 +300,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'clear_token') {
         try {
             repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, '');
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'cleared machine report token', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
             flash_set('success', __t('settings.report_token_cleared'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -294,7 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 repo_api_access_add($connection, $ip, $description);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'allowlisted machine API ip ' . $ip, (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', $ip, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'allowlisted'], (int) $user['id']);
                 flash_set('success', __t('settings.allowlist_added'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -312,7 +341,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) $threshold);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'updated package retire threshold to ' . $threshold . '%', (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'package_retire_threshold_percent', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'new_value' => (string) $threshold,
+                ], (int) $user['id']);
                 flash_set('success', __t('settings.retire_threshold_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -324,7 +356,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($entry === null) {
                 flash_set('error', __t('settings.allowlist_not_found'));
             } else {
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_SETTINGS, 'removed machine API ip ' . (string) $entry['ipAddress'], (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'removed'], (int) $user['id']);
                 flash_set('success', __t('settings.allowlist_removed'));
             }
         } catch (Throwable $exception) {

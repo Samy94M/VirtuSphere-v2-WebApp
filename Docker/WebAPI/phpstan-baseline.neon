@@ -75,12 +75,6 @@ parameters:
 		-
 			message: '#^Variable \$connection might not be defined\.$#'
 			identifier: variable.undefined
-			count: 6
-			path: portal/logs.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
 			count: 15
 			path: portal/mission_details.php
 

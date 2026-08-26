@@ -6,14 +6,12 @@ require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/csrf.php';
 
 /**
- * Audit events that are not a plain "someone saved a record": the security
- * channel (sign-in, refusal), and the field-level diff that turns
- * "updated mission id 5" into an entry that answers *what* was changed.
+ * Portal security guards and field-level diff helpers. Persisted events route
+ * through audit_event(), whose registry owns category, object, result and the
+ * typed context schema.
  *
- * Log messages are operator diagnostics and stay English, like every other
- * audit() message (see .claude/rules/webapi.md). They are rendered through h()
- * on the logs page, so user-controlled fragments (a typed user name, a datastore
- * name) are escaped there; this module only bounds their length.
+ * Compatibility descriptions stay English and are escaped at display. This
+ * module bounds diff fragments before the registry redacts and persists them.
  */
 
 /** Longest single value rendered into a diff before it is cut. */
@@ -21,15 +19,6 @@ const VIRTUSPHERE_AUDIT_VALUE_MAX = 48;
 
 /** Longest whole diff summary; the rest is reported as a count. */
 const VIRTUSPHERE_AUDIT_SUMMARY_MAX = 480;
-
-/**
- * One security event. Anonymous requests (a failed sign-in, a refused CSRF token
- * on the login form) pass $userId = null and are still attributable by IP.
- */
-function audit_auth(mysqli $db, string $message, ?int $userId = null): bool
-{
-    return audit($db, VIRTUSPHERE_LOG_CATEGORY_AUTH, $message, $userId);
-}
 
 /**
  * Refuses a request that lacks the permission, and records it. Repeated refusals
@@ -43,11 +32,13 @@ function audit_auth(mysqli $db, string $message, ?int $userId = null): bool
 function portal_forbid(mysqli $db, ?array $user, string $permission, bool $json = false): never
 {
     $userId = isset($user['id']) ? (int) $user['id'] : null;
-    $name = trim((string) ($user['name'] ?? ''));
-    audit_auth(
+    audit_event(
         $db,
-        'access denied: ' . audit_snippet($permission) . ' required'
-            . ($name !== '' ? ' (user "' . audit_snippet($name) . '")' : ''),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCESS_DENIED,
+        'request',
+        'portal',
+        VIRTUSPHERE_AUDIT_RESULT_DENIED,
+        ['permission' => audit_snippet($permission, 128)],
         $userId
     );
 
@@ -72,7 +63,16 @@ function portal_forbid(mysqli $db, ?array $user, string $permission, bool $json 
 function portal_reject_csrf(mysqli $db, ?array $user, string $context, ?string $body = null): never
 {
     $userId = isset($user['id']) ? (int) $user['id'] : null;
-    audit_auth($db, 'csrf token rejected on ' . audit_snippet($context), $userId);
+    $page = audit_snippet($context, 64);
+    audit_event(
+        $db,
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_CSRF_REJECTED,
+        'request',
+        $page,
+        VIRTUSPHERE_AUDIT_RESULT_DENIED,
+        ['page' => $page],
+        $userId
+    );
 
     http_response_code(400);
     exit($body ?? __t('portal.invalid_csrf'));
@@ -166,14 +166,4 @@ function audit_join_summary(array $parts): string
     }
 
     return $summary;
-}
-
-/**
- * Renders a diff summary as the suffix of an audit message. An update that
- * changed nothing says so rather than looking like an unexplained write: with
- * optimistic locking a no-op save is a real, recorded event.
- */
-function audit_change_note(string $summary): string
-{
-    return $summary === '' ? ' (no field changes)' : ' (' . $summary . ')';
 }

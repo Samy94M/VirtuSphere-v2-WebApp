@@ -15,6 +15,13 @@ header('Content-Type: application/json; charset=utf-8');
 
 final class MacImportConflictException extends RuntimeException
 {
+    public function __construct(public readonly string $reasonCode)
+    {
+        parent::__construct(match ($reasonCode) {
+            'job_became_terminal' => 'Deploy job became terminal before the callback was locked.',
+            default => 'Deploy job does not accept MAC imports for this mission.',
+        });
+    }
 }
 
 $clientIp = machine_api_client_ip();
@@ -43,7 +50,6 @@ $transactionStarted = false;
 try {
     [$missionId, $jobId, $results, $legacyPayload] = mac_import_normalize_payload($payload);
     if ($missionId <= 0) {
-        machine_api_log_warning('db_importMAC', 'Rejected MAC import without mission_id from ' . $clientIp . '.');
         machine_api_json([
             'error' => 'mission_id is required for MAC import payload',
             'legacy_payload' => $legacyPayload,
@@ -56,7 +62,6 @@ try {
         // ADR-0035: the job_id-less callback fell with the desktop client. An
         // unscoped import could rewrite rows no running deploy owns, which is
         // exactly the surface the E3 retirement removed.
-        machine_api_log_warning('db_importMAC', 'Rejected MAC import without job_id from ' . $clientIp . '.');
         machine_api_json([
             'error' => 'job_id is required for MAC import payload',
             'legacy_payload' => $legacyPayload,
@@ -77,7 +82,8 @@ try {
             $correlationId = $rawCorrelation;
             virtusphere_correlation_adopt($correlationId);
         } else {
-            machine_api_log_warning('db_importMAC', 'Ignored invalid correlation_id from ' . $clientIp . '.');
+            // Diagnostic-only input: invalid values are ignored and never logged,
+            // because the supplied value may itself be sensitive data.
         }
     }
 
@@ -91,7 +97,7 @@ try {
     if (!is_array($job)
         || (int) ($job['mission_id'] ?? 0) !== $missionId
         || !in_array((string) ($job['status'] ?? ''), [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)) {
-        throw new MacImportConflictException('Deploy job does not accept MAC imports for this mission.');
+        throw new MacImportConflictException('job_scope_or_state_conflict');
     }
     $jobScopeIds = mac_import_job_scope_ids($job);
 
@@ -109,7 +115,7 @@ try {
     $stmt->bind_param('iiss', $jobId, $missionId, $running, $cancelling);
     $stmt->execute();
     if (!$stmt->get_result()->fetch_assoc()) {
-        throw new MacImportConflictException('Deploy job became terminal before the callback was locked.');
+        throw new MacImportConflictException('job_became_terminal');
     }
 
     $plan = mac_import_build_plan($connection, $missionId, $results, true, $jobScopeIds);
@@ -203,7 +209,7 @@ try {
     if ($transactionStarted) {
         $connection->rollback();
     }
-    machine_api_log_warning('db_importMAC', 'Rejected callback conflict: ' . $exception->getMessage());
+    machine_api_log_warning('db_importMAC', 'Rejected callback conflict (' . $exception->reasonCode . ').');
     // The rejection must be findable where the operator looks (ADR-0033): one
     // line in the job log the caller named, one throttled portal audit row.
     // Raw prepared statement on purpose (this file's transaction rule) and
@@ -213,8 +219,8 @@ try {
     if (isset($jobId, $job) && is_array($job)) {
         try {
             $stream = 'system';
-            $line = 'Rejected a MAC callback: ' . $exception->getMessage()
-                . ' (job status ' . (string) ($job['status'] ?? '?') . ', caller ' . $clientIp . ')';
+            $line = 'Rejected a MAC callback (' . $exception->reasonCode
+                . ', job status ' . (string) ($job['status'] ?? '?') . ').';
             $stmt = $connection->prepare(
                 'INSERT INTO deploy_job_logs (job_id, seq, stream, line)
                  SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ? FROM deploy_job_logs WHERE job_id = ?'
@@ -222,14 +228,16 @@ try {
             $stmt->bind_param('issi', $jobId, $stream, $line, $jobId);
             $stmt->execute();
         } catch (Throwable $traceError) {
-            error_log('[db_importMAC] conflict trace failed: ' . $traceError->getMessage());
+            machine_api_log_warning('db_importMAC', 'Conflict trace failed (' . $traceError::class . ').');
         }
         machine_api_audit_warning(
             $connection,
-            'db_importMAC',
-            'MAC callback rejected for job id ' . $jobId . ': ' . $exception->getMessage(),
+            VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED,
+            'deploy_job',
+            $jobId,
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            ['reason_code' => $exception->reasonCode],
             $clientIp,
-            VIRTUSPHERE_LOG_CATEGORY_MACHINE_API,
             'job-' . $jobId
         );
     }
@@ -238,6 +246,14 @@ try {
     if ($transactionStarted) {
         $connection->rollback();
     }
-    machine_api_log_warning('db_importMAC', $exception::class . ': ' . $exception->getMessage());
+    machine_api_audit_warning(
+        $connection,
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE,
+        'machine_endpoint',
+        'db_importMAC.php',
+        VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+        ['error_class' => $exception::class],
+        $clientIp
+    );
     machine_api_json(['error' => 'Interner Serverfehler'], 500);
 }

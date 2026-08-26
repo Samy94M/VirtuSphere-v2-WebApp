@@ -47,7 +47,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new ValidationException(['mission_name' => __t('missions.err_prefix_reserved')]);
             }
             $newMissionId = repo_create_mission($connection, ['mission_name' => $name], false, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'created mission ' . $name, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $newMissionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'created',
+                'name' => $name,
+            ], (int) $user['id']);
             flash_set('success', $isTemplateView ? __t('missions.flash_created_template') : __t('missions.flash_created_mission'));
             redirect_to('mission_details.php?id=' . $newMissionId);
         } elseif ($action === 'delete') {
@@ -56,7 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException(__t('missions.err_mission_id_required'));
             }
             deleteMission($missionId, $connection);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'deleted mission id ' . $missionId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'deleted',
+            ], (int) $user['id']);
             flash_set('success', $isTemplateView ? __t('missions.flash_deleted_template') : __t('missions.flash_deleted_mission'));
         } elseif ($action === 'import_preview') {
             // Every expected outcome below answers with flash + redirect (both
@@ -139,7 +144,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
             }
             unset($_SESSION['mission_import']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'imported mission ' . $name . ' (' . (int) $report['counts']['vms'] . ' vms)', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', (int) $report['mission_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'imported',
+                'name' => $name,
+                'vm_count' => (int) $report['counts']['vms'],
+            ], (int) $user['id']);
             flash_set('success', __t('missions.import_flash_done', ['count' => (int) $report['counts']['vms']]));
             redirect_to('mission_details.php?id=' . (int) $report['mission_id']);
         }
@@ -201,7 +210,9 @@ if (($_GET['export'] ?? '') === 'csv') {
     }
     // A read-only list download, allowed for any signed-in user; logged as data
     // egress like the full-mission JSON export, minus the per-record detail.
-    audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'exported ' . ($isTemplateView ? 'template' : 'mission') . ' list as CSV (' . count($csvRows) . ' row(s))', (int) $user['id']);
+    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED, 'mission_list', $isTemplateView ? 'templates' : 'missions', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+        'row_count' => count($csvRows),
+    ], (int) $user['id']);
     portal_send_csv($isTemplateView ? 'vorlagen' : 'missionen', $header, $csvRows);
 }
 

@@ -8,6 +8,8 @@ declare(strict_types=1);
 // must not change without an E3 retirement decision.
 
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/audit_registry.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/mac.php';
 require_once __DIR__ . '/request.php';
 
@@ -66,25 +68,56 @@ function machine_api_mac_allowed(mysqli $db, string $mac): bool
  * The wire response is unchanged, byte for byte: the German sentence and the
  * echoed IP are the frozen contract that the Ansible preflight probe parses.
  */
+/**
+ * The endpoint name as the audit trail may store it.
+ *
+ * A value outside the closed surface becomes the sentinel instead of being
+ * passed through: the object id of a security row is a filter key, and a
+ * renamed or newly added file must not quietly open a second bucket. The
+ * refusal itself is never dropped for that reason, and the raw name still
+ * reaches the container log, where it can be read without being indexed.
+ */
+function machine_api_endpoint_name(string $endpoint): string
+{
+    if (in_array($endpoint, VIRTUSPHERE_MACHINE_API_ENDPOINTS, true)) {
+        return $endpoint;
+    }
+    machine_api_log_warning('machine_api.endpoint_unknown', 'Machine endpoint outside the audited surface: ' . $endpoint);
+
+    return VIRTUSPHERE_MACHINE_API_ENDPOINT_UNKNOWN;
+}
+
 function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint = ''): void
 {
-    $tag = 'machine_api_denied';
-    $where = $endpoint !== '' ? $endpoint : basename((string) ($_SERVER['SCRIPT_NAME'] ?? 'machine-api'));
+    $where = machine_api_endpoint_name($endpoint !== ''
+        ? $endpoint
+        : basename((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
     // request_string, not a raw cast: this line runs BEFORE the IP gate is
     // passed, so `?action[]=x` from any host would turn a refusal into a 500 plus
     // an unauthenticated system audit row - one per request (lib/request.php).
     $action = request_string($_GET, 'action');
-    $message = 'Refused ' . $where . ($action !== '' ? '?action=' . $action : '') . ' from ' . ($ip !== '' ? $ip : 'an unknown IP')
-        . ': not on the machine API IP allowlist (and no known MAC presented).';
+    $context = [];
+    if ($action !== '' && strlen($action) <= 128 && preg_match('/^[A-Za-z0-9_.:+\/-]+$/', $action) === 1) {
+        $context['action'] = $action;
+    }
 
     if ($db instanceof mysqli) {
-        // Throttled per (category, tag, IP): a task that polls every ten seconds
+        // Throttled per (category, event code, IP): a task that polls every ten seconds
         // must not flood the log, and another host's first refusal must still get
         // through. The category is the security one, because that is the question
         // this answers.
-        machine_api_audit_warning($db, $tag, $message, $ip, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, $ip);
+        machine_api_audit_warning(
+            $db,
+            VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED,
+            'machine_endpoint',
+            $where,
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            $context,
+            $ip,
+            $ip
+        );
     } else {
-        machine_api_log_warning($tag, $message);
+        machine_api_log_warning('machine_api.access_denied', 'Machine API access denied for endpoint ' . $where . '.');
     }
 
     machine_api_json(['error' => 'Zugriff verweigert. Ihre IP: ' . $ip], 403);
@@ -104,7 +137,8 @@ function machine_api_prepared_result(mysqli $db, string $sql, string $types = ''
 
 function machine_api_log_warning(string $tag, string $message): void
 {
-    error_log('[' . $tag . '] ' . $message);
+    $safeTag = preg_replace('/[^A-Za-z0-9_.:-]+/', '_', $tag);
+    error_log('[' . ($safeTag !== '' ? $safeTag : 'machine_api') . '] ' . virtusphere_redact_log_text($message));
 }
 
 // Optional shared-token gate for mecm_report.php only (ADR-0018). The setting
@@ -126,7 +160,7 @@ function machine_api_report_token_ok(mysqli $db, ?string $presented): bool
 
 /**
  * Writes to error_log always, and to the portal audit log at most once per
- * throttle window per (category, tag, scope), so a misbehaving sync loop cannot
+ * throttle window per (category, event code, scope), so a misbehaving sync loop cannot
  * flood the log while another client's first occurrence still gets through.
  * Never throws into the wire path.
  *
@@ -149,29 +183,44 @@ function machine_api_report_token_ok(mysqli $db, ?string $presented): bool
  *  - two concurrent requests both passed the check and both wrote. The decision
  *    is a locking read inside one transaction now.
  *
- * $scope defaults to the client IP when one is passed, because "who" is the
- * dimension that must not be collapsed. Pass '' deliberately for a global event.
+ * Category and compatibility text are resolved by the registry. There is no
+ * parameter through which a caller can persist a free tag, message or category.
  */
-function machine_api_audit_warning(mysqli $db, string $tag, string $message, ?string $ip = null, string $category = VIRTUSPHERE_LOG_CATEGORY_MECM, ?string $scope = null): void
+function machine_api_audit_warning(
+    mysqli $db,
+    string $eventCode,
+    string $objectType,
+    string|int|null $objectId,
+    string $result,
+    array $context = [],
+    ?string $ip = null,
+    ?string $scope = null
+): void
 {
-    machine_api_log_warning($tag, $message);
-
     try {
         require_once __DIR__ . '/repo/log.php';
-        $verdict = machine_api_throttle_allows($db, $category, $tag, $scope ?? (string) $ip);
+        $normalizedObjectId = audit_object_id($objectId, audit_event_object_id_kind($eventCode));
+        $definition = audit_event_definition($eventCode, $objectType, $normalizedObjectId, $result);
+        audit_context_normalize($context, $definition, $result);
+        $throttleScope = $scope ?? ($ip !== null && $ip !== '' ? $ip : ($normalizedObjectId ?? 'global'));
+        if ($throttleScope === '' || strlen($throttleScope) > 191) {
+            throw new InvalidArgumentException('Machine audit throttle scope is invalid');
+        }
+        $verdict = machine_api_throttle_allows($db, $definition['category'], $eventCode, $throttleScope);
         if (!$verdict['allowed']) {
             return;
         }
 
-        // The suppressed count travels with the line that breaks the silence:
-        // otherwise the operator reads one warning and cannot tell it apart from
-        // a thousand.
-        $suffix = $verdict['suppressed'] > 0
-            ? ' (' . $verdict['suppressed'] . ' further occurrence(s) suppressed in the last ' . VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS . ' s)'
-            : '';
-        audit($db, $category, '[' . $tag . '] ' . $message . $suffix, null, $ip);
+        $context['suppressed_count'] = $verdict['suppressed'];
+        $context['throttle_seconds'] = VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS;
+        $normalizedContext = audit_context_normalize($context, $definition, $result);
+        machine_api_log_warning(
+            $eventCode,
+            audit_event_description($eventCode, $objectType, $normalizedObjectId, $result, $normalizedContext)
+        );
+        audit_event($db, $eventCode, $objectType, $normalizedObjectId, $result, $context, null, $ip);
     } catch (Throwable $exception) {
-        error_log('[machine_api_audit_warning] audit write failed: ' . $exception->getMessage());
+        machine_api_log_warning('machine_api_audit_warning', 'Structured audit write failed (' . $exception::class . ').');
     }
 }
 
@@ -186,16 +235,16 @@ function machine_api_audit_warning(mysqli $db, string $tag, string $message, ?st
  *
  * @return array{allowed: bool, suppressed: int}
  */
-function machine_api_throttle_allows(mysqli $db, string $category, string $tag, string $scope): array
+function machine_api_throttle_allows(mysqli $db, string $category, string $eventCode, string $scope): array
 {
     require_once __DIR__ . '/repo/helpers.php';
 
-    return repo_transaction($db, static function () use ($db, $category, $tag, $scope): array {
+    return repo_transaction($db, static function () use ($db, $category, $eventCode, $scope): array {
         $row = repo_fetch_one(
             $db,
             'SELECT UNIX_TIMESTAMP(last_written_at) AS written_at, suppressed FROM deploy_audit_throttle WHERE category = ? AND tag = ? AND scope = ? FOR UPDATE',
             'sss',
-            [$category, $tag, $scope]
+            [$category, $eventCode, $scope]
         );
 
         if ($row === null) {
@@ -203,7 +252,7 @@ function machine_api_throttle_allows(mysqli $db, string $category, string $tag, 
                 $db,
                 'INSERT INTO deploy_audit_throttle (category, tag, scope, last_written_at, suppressed) VALUES (?, ?, ?, NOW(), 0)',
                 'sss',
-                [$category, $tag, $scope]
+                [$category, $eventCode, $scope]
             );
 
             return ['allowed' => true, 'suppressed' => 0];
@@ -215,7 +264,7 @@ function machine_api_throttle_allows(mysqli $db, string $category, string $tag, 
                 $db,
                 'UPDATE deploy_audit_throttle SET suppressed = suppressed + 1 WHERE category = ? AND tag = ? AND scope = ?',
                 'sss',
-                [$category, $tag, $scope]
+                [$category, $eventCode, $scope]
             );
 
             return ['allowed' => false, 'suppressed' => (int) $row['suppressed'] + 1];
@@ -225,7 +274,7 @@ function machine_api_throttle_allows(mysqli $db, string $category, string $tag, 
             $db,
             'UPDATE deploy_audit_throttle SET last_written_at = NOW(), suppressed = 0 WHERE category = ? AND tag = ? AND scope = ?',
             'sss',
-            [$category, $tag, $scope]
+            [$category, $eventCode, $scope]
         );
 
         return ['allowed' => true, 'suppressed' => (int) $row['suppressed']];

@@ -114,7 +114,10 @@ final class DeployConvergenceContractTest extends TestCase
         $maintenance = $this->source('lib/maintenance_tasks.php');
         self::assertStringContainsString("maintenance_worker_due(\$state, 'deploy-vm-sweep', VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS", $maintenance);
         self::assertStringContainsString('repo_sweep_orphaned_deploying_vms($db)', $maintenance);
-        self::assertStringContainsString('VIRTUSPHERE_LOG_CATEGORY_DEPLOY', $maintenance);
+        // Etappe 10C: the sweep names its event, and the registry derives the
+        // category. Pinning the category here again would be a second opinion
+        // on something only the registry gets to decide.
+        self::assertStringContainsString('VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE', $maintenance);
 
         $repo = $this->deployJobRepoSource();
         self::assertStringContainsString('function repo_sweep_orphaned_deploying_vms', $repo);

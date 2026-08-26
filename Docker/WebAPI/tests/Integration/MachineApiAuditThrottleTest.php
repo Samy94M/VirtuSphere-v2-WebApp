@@ -122,23 +122,105 @@ final class MachineApiAuditThrottleTest extends TestCase
      */
     public function testTheAuditWriterProducesOneRowPerWindowAndNamesTheSuppressed(): void
     {
-        machine_api_audit_warning($this->db, self::TAG, 'first occurrence', self::IP_A, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API);
-        machine_api_audit_warning($this->db, self::TAG, 'second occurrence', self::IP_A, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API);
+        $this->writeDenial();
+        $this->writeDenial();
 
         self::assertSame(1, $this->logRows(), 'the second occurrence must not produce a second row');
 
-        $this->ageThrottleRow(VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS + 60);
-        machine_api_audit_warning($this->db, self::TAG, 'third occurrence', self::IP_A, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API);
+        $this->ageThrottleRow(VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS + 60, $this->throttleTag());
+        $this->writeDenial();
 
         self::assertSame(2, $this->logRows());
-        $latest = (string) repo_scalar(
+        $latest = $this->latestDenialRow();
+        self::assertStringContainsString('suppressed', (string) $latest['log_message'], 'the line that breaks the silence must say what it stood for');
+
+        // Etappe 10C: the count is not only in the sentence. A reader that has
+        // to parse prose to learn how many events a line stands for is back at
+        // the free-text audit this replaced.
+        $context = json_decode((string) $latest['context_json'], true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $context['suppressed_count']);
+        self::assertSame(VIRTUSPHERE_MECM_AUDIT_THROTTLE_SECONDS, $context['throttle_seconds']);
+        self::assertSame(VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED, (string) $latest['event_code']);
+        self::assertSame(VIRTUSPHERE_AUDIT_RESULT_DENIED, (string) $latest['result']);
+    }
+
+    /**
+     * A rejected MAC callback is not an IP-allowlist refusal, and the System
+     * status must not count it as one. Both live in the `machine_api` category,
+     * which is exactly why the count moved to the event code: an operator whose
+     * Ansible callback raced a cancelled job was told to add the host to an
+     * allowlist it was already on.
+     */
+    public function testACallbackRejectionIsNotCountedAsAnAllowlistDenial(): void
+    {
+        machine_api_audit_warning(
             $this->db,
-            'SELECT log_message FROM deploy_logs WHERE category = ? AND log_message LIKE ? ORDER BY id DESC LIMIT 1',
-            'ss',
-            [VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, '%' . self::TAG . '%']
+            VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED,
+            'deploy_job',
+            424242,
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            ['reason_code' => 'job_became_terminal'],
+            self::IP_A,
+            self::TAG . '-callback'
         );
-        self::assertStringContainsString('third occurrence', $latest);
-        self::assertStringContainsString('suppressed', $latest, 'the line that breaks the silence must say what it stood for');
+
+        $rows = (int) repo_scalar(
+            $this->db,
+            'SELECT COUNT(*) FROM deploy_logs WHERE event_code = ? AND ip = ?',
+            'ss',
+            [VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED, self::IP_A]
+        );
+        self::assertSame(1, $rows, 'the rejection itself must still be recorded');
+
+        $denials = repo_recent_machine_api_denials($this->db, 3600, 50);
+        $ips = array_column($denials, 'ip');
+        self::assertNotContains(self::IP_A, $ips, 'a callback conflict must not appear as an IP-allowlist refusal');
+    }
+
+    /** ... and a real allowlist refusal still does appear there. */
+    public function testAnAllowlistDenialIsCounted(): void
+    {
+        $this->writeDenial();
+
+        $denials = repo_recent_machine_api_denials($this->db, 3600, 50);
+        $match = array_values(array_filter($denials, static fn (array $row): bool => $row['ip'] === self::IP_A));
+
+        self::assertCount(1, $match);
+        self::assertSame(1, $match[0]['hits']);
+    }
+
+    private function writeDenial(): void
+    {
+        machine_api_audit_warning(
+            $this->db,
+            VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED,
+            'machine_endpoint',
+            'mecm-api.php',
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            ['action' => 'getDeviceList'],
+            self::IP_A,
+            self::IP_A
+        );
+    }
+
+    private function throttleTag(): string
+    {
+        return VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
+    }
+
+    /** @return array<string, mixed> */
+    private function latestDenialRow(): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT log_message, context_json, event_code, result FROM deploy_logs
+             WHERE event_code = ? AND ip = ? ORDER BY id DESC LIMIT 1'
+        );
+        $eventCode = VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
+        $ip = self::IP_A;
+        $stmt->bind_param('ss', $eventCode, $ip);
+        $stmt->execute();
+
+        return (array) $stmt->get_result()->fetch_assoc();
     }
 
     /**
@@ -155,13 +237,13 @@ final class MachineApiAuditThrottleTest extends TestCase
         self::assertStringContainsString('FOR UPDATE', $source, 'defect 5: the decision has to be a locking read');
     }
 
-    private function ageThrottleRow(int $seconds): void
+    private function ageThrottleRow(int $seconds, string $tag = self::TAG): void
     {
         repo_execute(
             $this->db,
             'UPDATE deploy_audit_throttle SET last_written_at = DATE_SUB(NOW(), INTERVAL ? SECOND) WHERE tag = ?',
             'is',
-            [$seconds, self::TAG]
+            [$seconds, $tag]
         );
     }
 
@@ -169,15 +251,22 @@ final class MachineApiAuditThrottleTest extends TestCase
     {
         return (int) repo_scalar(
             $this->db,
-            'SELECT COUNT(*) FROM deploy_logs WHERE category = ? AND log_message LIKE ?',
+            'SELECT COUNT(*) FROM deploy_logs WHERE event_code = ? AND ip = ?',
             'ss',
-            [VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, '%' . self::TAG . '%']
+            [VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED, self::IP_A]
         );
     }
 
     private function cleanup(): void
     {
-        repo_execute($this->db, 'DELETE FROM deploy_audit_throttle WHERE tag = ?', 's', [self::TAG]);
+        repo_execute($this->db, 'DELETE FROM deploy_audit_throttle WHERE tag LIKE ?', 's', [self::TAG . '%']);
+        repo_execute(
+            $this->db,
+            'DELETE FROM deploy_audit_throttle WHERE tag IN (?, ?)',
+            'ss',
+            [VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED, VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED]
+        );
         repo_execute($this->db, 'DELETE FROM deploy_logs WHERE log_message LIKE ?', 's', ['%' . self::TAG . '%']);
+        repo_execute($this->db, 'DELETE FROM deploy_logs WHERE ip IN (?, ?)', 'ss', [self::IP_A, self::IP_B]);
     }
 }

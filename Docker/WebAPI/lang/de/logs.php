@@ -41,6 +41,7 @@ return [
     'th_ip' => 'IP',
     'th_message' => 'Nachricht',
     'retention_note' => 'Einträge in diesem Bereich werden :days Tage aufbewahrt und danach automatisch gelöscht.',
+    'export_truncated_note' => 'Der CSV-Export enthält die ersten :limit von :total Treffern. Grenzen Sie den Filter weiter ein, um die übrigen Zeilen zu erhalten.',
     'empty_filtered' => 'Keine Protokolle passen zum aktuellen Filter.',
     'empty' => 'Keine Protokolle gefunden.',
     'page_prev' => 'Zurück',

@@ -65,13 +65,20 @@ function packages_retire_guard(mysqli $db, string $table, string $nameColumn, st
     $threshold = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT);
     $threshold = max(5, min(90, $threshold));
     if ($wouldRetire * 100 > $active * $threshold) {
-        machine_api_audit_warning($db, 'mecm_packages_guard', sprintf(
-            'Catalog sync rejected for %s: payload would retire %d of %d active entries (threshold %d%%).',
-            $table,
-            $wouldRetire,
-            $active,
-            $threshold
-        ), $clientIp);
+        $catalog = match ($table) {
+            'deploy_packages' => 'packages',
+            'deploy_os' => 'task_sequences',
+            default => throw new InvalidArgumentException('Unknown MECM catalog owner'),
+        };
+        machine_api_audit_warning(
+            $db,
+            VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED,
+            'catalog',
+            $catalog,
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            ['retire_count' => $wouldRetire, 'active_count' => $active, 'threshold_percent' => $threshold],
+            $clientIp
+        );
         machine_api_json(['error' => 'Katalog-Sync abgelehnt: zu viele Eintraege wuerden zurueckgezogen'], 409);
     }
 }
@@ -160,16 +167,22 @@ function packages_relink_upgrades(mysqli $db, array $retiredRows, array $newPack
 
     try {
         if ($summary !== []) {
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[mecm_packages] package relink: ' . implode('; ', $summary), null, $clientIp);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'items' => $summary,
+                'item_count' => count($summary),
+            ], null, $clientIp);
         }
         if ($skipped !== []) {
             // Said out loud, because "nothing happened" is the new behaviour and
             // an operator who expected a relink needs to see that it was a
             // decision and not a failure.
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_MECM, '[mecm_packages] retired without relink (no newer version in this payload): ' . implode(', ', $skipped), null, $clientIp);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+                'items' => $skipped,
+                'item_count' => count($skipped),
+            ], null, $clientIp);
         }
     } catch (Throwable $exception) {
-        machine_api_log_warning('mecm_packages', 'relink audit failed: ' . $exception->getMessage());
+        machine_api_log_warning('mecm_packages', 'Relink audit failed (' . $exception::class . ').');
     }
 
     return $relinked;
@@ -228,7 +241,6 @@ try {
         machine_api_json(['error' => 'Keine Daten empfangen'], 400);
     }
     if ($data === []) {
-        machine_api_log_warning('mecm_packages', 'Rejected empty payload from ' . $clientIp . '; refusing to delete deploy package catalog.');
         machine_api_json(['error' => 'Leerer Payload wird abgelehnt; Katalog wurde nicht geaendert'], 400);
     }
 
@@ -329,6 +341,6 @@ try {
     machine_api_json(['error' => 'Ungueltiger JSON-Body'], 400);
 } catch (Throwable $exception) {
     $connection->rollback();
-    machine_api_log_warning('mecm_packages', $exception::class . ': ' . $exception->getMessage());
+    machine_api_audit_warning($connection, VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE, 'machine_endpoint', 'mecm_packages.php', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['error_class' => $exception::class], $clientIp);
     machine_api_json(['error' => 'Interner Serverfehler'], 500);
 }

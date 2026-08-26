@@ -44,7 +44,15 @@ try {
     $tokenGatedAction = $action === 'heartbeat' || $action === 'reportRun';
     if ($tokenGatedAction
         && !machine_api_report_token_ok($connection, $_SERVER['HTTP_X_VIRTUSPHERE_TOKEN'] ?? null)) {
-        machine_api_audit_warning($connection, 'mecm_report_token', 'Rejected ' . $action . ' with invalid token from ' . $clientIp, $clientIp);
+        machine_api_audit_warning(
+            $connection,
+            VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED,
+            'machine_endpoint',
+            'mecm_report.php',
+            VIRTUSPHERE_AUDIT_RESULT_DENIED,
+            ['action' => $action],
+            $clientIp
+        );
         machine_api_json(['error' => 'Invalid token'], 401);
     }
 
@@ -97,7 +105,21 @@ try {
         }
 
         if (repo_client_event_count_recent($connection, $vmId, 86400) >= VIRTUSPHERE_CLIENT_EVENT_MAX_PER_DAY) {
-            machine_api_audit_warning($connection, 'mecm_report_flood', 'Daily client event cap reached for vm ' . $vmId . ' (mac ' . $mac . ')', $clientIp);
+            // Scoped to the VM, not to the client IP: a VM that hits its cap
+            // must not silence the first cap of a different VM that happens to
+            // report from the same address. The MAC is deliberately not carried;
+            // the VM id identifies the row without duplicating an identifier
+            // that appears nowhere else in this category.
+            machine_api_audit_warning(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP,
+                'vm',
+                $vmId,
+                VIRTUSPHERE_AUDIT_RESULT_WARNING,
+                [],
+                $clientIp,
+                'vm-' . $vmId
+            );
             machine_api_json(['error' => 'Too many events'], 429);
         }
 
@@ -149,9 +171,13 @@ try {
         if (!empty($result['legacy_to_v2'])) {
             machine_api_audit_warning(
                 $connection,
-                'mecm_report_v2:' . $report['source'],
-                'reporter ' . $report['source'] . ' switched from legacy heartbeats to V2 result reports',
-                $clientIp
+                VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED,
+                'integration_source',
+                (string) $report['source'],
+                VIRTUSPHERE_AUDIT_RESULT_RECOVERED,
+                ['report_version' => VIRTUSPHERE_REPORT_CHANNEL_VERSION],
+                $clientIp,
+                (string) $report['source']
             );
         }
 

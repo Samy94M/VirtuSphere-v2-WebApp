@@ -23,7 +23,10 @@ if (!csrf_verify($_POST['_csrf'] ?? null)) {
 }
 
 // Audit before logout(): it wipes the session this entry is attributed to.
-audit_auth($connection, 'logout', (int) ($_SESSION['user_id'] ?? 0) ?: null);
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT, 'user', $userId > 0 ? $userId : null, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+    'source' => (string) ($_SESSION['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL),
+], $userId > 0 ? $userId : null);
 logout();
 header('Location: login.php');
 exit;

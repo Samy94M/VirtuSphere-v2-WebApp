@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/log_redaction.php';
+
 function virtusphere_install_error_handlers(): void
 {
     static $installed = false;
@@ -244,7 +246,7 @@ function virtusphere_render_error_json(Throwable $exception, string $refId): voi
     ];
     if (virtusphere_debug_enabled()) {
         $payload['class'] = $exception::class;
-        $payload['message'] = $exception->getMessage();
+        $payload['message'] = virtusphere_redact_log_text($exception->getMessage());
         $payload['file'] = $exception->getFile() . ':' . $exception->getLine();
     }
 
@@ -258,7 +260,10 @@ function virtusphere_error_context(Throwable $exception, string $refId, bool $fr
         : trim((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . (string) ($_SERVER['REQUEST_URI'] ?? ''));
     $userId = session_status() === PHP_SESSION_ACTIVE ? (string) ($_SESSION['user_id'] ?? 'none') : 'none';
 
-    return sprintf(
+    // The request URI, the CLI argv, the exception message and the frame
+    // arguments in the trace all carry whatever was passed in. Redact the whole
+    // assembled line rather than each part: a value can straddle two of them.
+    return virtusphere_redact_log_text(sprintf(
         "[%s] ref=%s source=%s class=%s message=%s file=%s:%d request=%s remote_addr=%s user_id=%s\n%s\n",
         date(DATE_ATOM),
         $refId,
@@ -271,7 +276,7 @@ function virtusphere_error_context(Throwable $exception, string $refId, bool $fr
         (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli'),
         $userId,
         $exception->getTraceAsString()
-    );
+    ));
 }
 
 function virtusphere_write_error_log(string $context): void
@@ -292,21 +297,29 @@ function virtusphere_audit_uncaught_error(Throwable $exception, string $refId): 
 
         $db = db();
         $userId = session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
-        audit(
+        // Class and reference only. The message is the one field an attacker
+        // can steer, and the audit trail is readable by every `users.manage`
+        // holder; the full redacted line stays in the error log file instead.
+        audit_event(
             $db,
-            VIRTUSPHERE_LOG_CATEGORY_SYSTEM,
-            sprintf('error [%s] %s: %s', $refId, $exception::class, $exception->getMessage()),
+            VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR,
+            'error',
+            $refId,
+            VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+            ['error_class' => $exception::class],
             $userId,
             (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli')
         );
     } catch (Throwable $auditException) {
-        virtusphere_fallback_error_log('Audit write failed for error ref ' . $refId . ': ' . $auditException->getMessage());
+        virtusphere_fallback_error_log('Audit write failed for error ref ' . $refId . ' (' . $auditException::class . ').');
     }
 }
 
 function virtusphere_cli_error_text(Throwable $exception, string $refId): string
 {
-    return sprintf(
+    // STDERR of a worker is the container log, so this is a log sink like any
+    // other and gets the same redaction as the file and the audit row.
+    return virtusphere_redact_log_text(sprintf(
         "VirtuSphere error [%s]\n%s: %s\n%s:%d\n%s\n",
         $refId,
         $exception::class,
@@ -314,7 +327,7 @@ function virtusphere_cli_error_text(Throwable $exception, string $refId): string
         $exception->getFile(),
         $exception->getLine(),
         $exception->getTraceAsString()
-    );
+    ));
 }
 
 function virtusphere_render_error_page(Throwable $exception, string $refId): void
@@ -333,9 +346,9 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
     if ($debug) {
         $details += [
             'Class' => $exception::class,
-            'Message' => $exception->getMessage(),
+            'Message' => virtusphere_redact_log_text($exception->getMessage()),
             'File' => $exception->getFile() . ':' . $exception->getLine(),
-            'Request' => PHP_SAPI === 'cli' ? 'cli' : trim((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . (string) ($_SERVER['REQUEST_URI'] ?? '')),
+            'Request' => PHP_SAPI === 'cli' ? 'cli' : virtusphere_redact_log_text(trim((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . (string) ($_SERVER['REQUEST_URI'] ?? ''))),
         ];
     }
 
@@ -357,7 +370,7 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
     echo '</dl>';
     if ($debug) {
         echo '<h2>Stacktrace</h2><pre>';
-        echo htmlspecialchars($exception->getTraceAsString(), ENT_QUOTES, 'UTF-8');
+        echo htmlspecialchars(virtusphere_redact_log_text($exception->getTraceAsString()), ENT_QUOTES, 'UTF-8');
         echo '</pre>';
     }
     echo "</main></body></html>\n";
@@ -390,6 +403,9 @@ function virtusphere_error_nonce(): string
 
 function virtusphere_fallback_error_log(string $message): void
 {
+    // Still a container-log sink, and one caller hands it the whole assembled
+    // error context, so it redacts here instead of trusting every caller.
+    $message = virtusphere_redact_log_text($message);
     error_log('[virtusphere:error-handler] ' . $message);
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, '[virtusphere:error-handler] ' . $message . PHP_EOL);

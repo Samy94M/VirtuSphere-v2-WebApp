@@ -7,6 +7,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/log_rotation.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
@@ -159,7 +160,7 @@ function maintenance_worker_job(string $name, array &$failures, callable $work):
         $work();
     } catch (Throwable $exception) {
         $failures[] = $name;
-        fwrite(STDERR, '[maintenance-worker] job ' . $name . ' failed: ' . $exception->getMessage() . "\n");
+        fwrite(STDERR, '[maintenance-worker] job ' . $name . ' failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
     }
 }
 
@@ -200,9 +201,13 @@ function maintenance_worker_sweep_deploying_vms(mysqli $db): void
     }
     foreach ($byMission as $missionId => $vmIds) {
         try {
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, '[maintenance-worker] convergence sweep marked ' . count($vmIds) . ' VM(s) of mission id ' . $missionId . ' as failed: stuck in deploying without an active deploy job', null, 'cli');
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+                'vm_count' => count($vmIds),
+                'vm_ids' => array_slice($vmIds, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+                'reason' => 'stuck in deploying without an active deploy job',
+            ], null, 'cli');
         } catch (Throwable $exception) {
-            fwrite(STDERR, '[maintenance-worker] sweep audit failed: ' . $exception->getMessage() . "\n");
+            fwrite(STDERR, '[maintenance-worker] sweep audit failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
         }
     }
     fwrite(STDOUT, '[maintenance-worker] convergence sweep marked ' . count($swept) . " deploying VM(s) as failed\n");
@@ -232,12 +237,18 @@ function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
         }
 
         try {
-            $category = $source === VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE
-                ? VIRTUSPHERE_LOG_CATEGORY_SYSTEM
-                : VIRTUSPHERE_LOG_CATEGORY_MECM;
-            audit($db, $category, '[maintenance-worker] integration ' . $source . ' state ' . $oldState . ' -> ' . $newState, null, 'cli');
+            // The category comes from the registry's closed source map, not
+            // from "maintenance or else MECM". That fallback filed every future
+            // non-MECM source under `mecm`, so a deploy-worker outage would
+            // have arrived in the tab an operator opens to read MECM sync.
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE, 'integration_source', $source, in_array($newState, $benign, true)
+                ? VIRTUSPHERE_AUDIT_RESULT_RECOVERED
+                : VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+                    'old_state' => $oldState,
+                    'new_state' => $newState,
+                ], null, 'cli');
         } catch (Throwable $exception) {
-            fwrite(STDERR, '[maintenance-worker] transition audit failed: ' . $exception->getMessage() . "\n");
+            fwrite(STDERR, '[maintenance-worker] transition audit failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
         }
     }
 }

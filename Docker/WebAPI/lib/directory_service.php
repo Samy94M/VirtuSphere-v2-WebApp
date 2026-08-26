@@ -62,10 +62,13 @@ function directory_observe_controller(mysqli $db, array $controller, int $revisi
         $certificate
     );
     if ($changed) {
-        audit(
+        audit_event(
             $db,
-            VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
-            'directory controller ' . (int) $controller['id'] . ' state changed to ' . $outcome
+            VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE,
+            'directory_controller',
+            (int) $controller['id'],
+            $outcome === VIRTUSPHERE_DIRECTORY_OUTCOME_OK ? VIRTUSPHERE_AUDIT_RESULT_RECOVERED : VIRTUSPHERE_AUDIT_RESULT_WARNING,
+            ['outcome' => $outcome]
         );
     }
 }
@@ -91,20 +94,26 @@ function directory_test_saved_controller(mysqli $db, int $controllerId, int $act
             return ['ok' => false, 'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_UNAVAILABLE];
         }
         directory_observe_controller($db, $controller, $revision, VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $result['certificate']);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'tested directory controller ' . $controllerId . ': ok', $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_OK,
+        ], $actorId);
 
         return ['ok' => true, 'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_OK];
     } catch (DirectoryLdapException $exception) {
         repo_directory_clear_controller_validation($db, $controllerId, $revision, $actorId);
         directory_observe_controller($db, $controller, $revision, $exception);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'tested directory controller ' . $controllerId . ': ' . $exception->outcome, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_FAILURE, [
+            'outcome' => $exception->outcome,
+        ], $actorId);
 
         return ['ok' => false, 'outcome' => $exception->outcome];
     } catch (Throwable) {
         repo_directory_clear_controller_validation($db, $controllerId, $revision, $actorId);
         $exception = new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_INVALID_RESPONSE);
         directory_observe_controller($db, $controller, $revision, $exception);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'tested directory controller ' . $controllerId . ': ' . $exception->outcome, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_FAILURE, [
+            'outcome' => $exception->outcome,
+        ], $actorId);
 
         return ['ok' => false, 'outcome' => $exception->outcome];
     }
@@ -159,7 +168,9 @@ function directory_open_service_connection(mysqli $db, array $storedConfig, arra
         directory_observe_controller($db, $controller, $revision, $exception);
         if ($exception->outcome === VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED) {
             repo_directory_pause_controllers_for_bind_rejection($db, $revision);
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'directory search account bind rejected; automatic attempts paused');
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+                'action' => 'automatic_attempts_paused',
+            ]);
         }
         throw $exception;
     }
@@ -372,7 +383,7 @@ function directory_import_candidate(mysqli $db, string $token, string $role, int
         throw new ValidationException(['import_token' => __t('directory.err_import_name_conflict')]);
     }
     if ($result['created']) {
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'imported Active Directory user id ' . $result['user_id'], $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED, 'user', (int) $result['user_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
     }
 
     return $result;

@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (request_string($_POST, 'action') === 'delete') {
             deleteVLAN(request_int($_POST, 'vlan_id'), $connection);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VLANS, 'deleted retired vlan id ' . request_int($_POST, 'vlan_id'), (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'vlan', request_int($_POST, 'vlan_id'), VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
             flash_set('success', __t('vlans.flash_deleted'));
         }
     } catch (Throwable $exception) {

@@ -122,15 +122,26 @@ async function expectAlertSays(page, key) {
   ).toBe(true);
 }
 
+// Etappe 10C: the import is found by its structured columns, not by matching
+// its prose. The prose is now RENDERED from these columns, so a LIKE over it
+// would be asserting the presenter's wording while claiming to assert that the
+// import was audited; those are two different things, and only one of them is
+// what this spec is about.
 function importAuditCount(name) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_logs WHERE category = 'missions' AND log_message LIKE ?");
-$like = 'imported mission ${name}%';
-$stmt->bind_param('s', $like);
+$stmt = $db->prepare(
+    "SELECT COUNT(*) AS c FROM deploy_logs
+     WHERE event_code = ?
+       AND JSON_UNQUOTE(JSON_EXTRACT(context_json, '$.action')) = 'imported'
+       AND JSON_UNQUOTE(JSON_EXTRACT(context_json, '$.name')) = ?"
+);
+$event = VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED;
+$name = '${name}';
+$stmt->bind_param('ss', $event, $name);
 $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
-`).c;
+`, ['lib/repo/log.php']).c;
 }
 
 /** A readable export document, so a spec can post a deliberately broken shape. */

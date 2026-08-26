@@ -111,6 +111,10 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_system_status.logs_p1')); ?></p>
             <p><?php echo h(__t('help_system_status.logs_p2')); ?></p>
             <p><?php echo h(__t('help_system_status.logs_p2b')); ?></p>
+            <?php // The export cap is a constant, so the sentence interpolates it. ?>
+            <p><?php echo h(__t('help_system_status.logs_export', [
+                'limit' => VIRTUSPHERE_LOG_EXPORT_MAX_ROWS,
+            ])); ?></p>
             <?php // Interpolates the constants the prune uses, so text and behaviour cannot drift. ?>
             <p><?php echo h(__t('help_system_status.logs_p3', [
                 'security_days' => VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS,

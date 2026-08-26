@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/log_redaction.php';
 // For VIRTUSPHERE_CONNECTION_REDACT_MIN, the one minimum length below which a
 // secret is too short to replace without shredding the message around it.
 require_once __DIR__ . '/connection_errors.php';
@@ -159,9 +160,7 @@ final class DeployJobOutputGate
     public function accept(string $stream, string $line): array
     {
         $line = deploy_job_output_normalize_line($line);
-        if ($this->secrets !== []) {
-            $line = deploy_worker_redact_secrets($line, $this->secrets);
-        }
+        $line = deploy_worker_redact_secrets($line, $this->secrets);
 
         if ($this->totalBytes >= VIRTUSPHERE_DEPLOY_OUTPUT_JOB_MAX_BYTES) {
             // Silent from here on: the notice below was written exactly once,
@@ -210,5 +209,5 @@ function deploy_worker_redact_secrets(string $message, array $secrets): string
         }
     }
 
-    return $message;
+    return virtusphere_redact_log_text($message);
 }

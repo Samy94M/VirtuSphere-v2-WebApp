@@ -27,12 +27,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('error', __t('account.err_confirm_mismatch'));
     } elseif (!change_own_password($connection, (int) $user['id'], $currentPassword, $newPassword)) {
         // A wrong current password is a failed authentication, not a form typo.
-        audit_auth($connection, 'own password change rejected: current password is wrong', (int) $user['id']);
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'scope' => 'own',
+            'reason' => 'current password is wrong',
+        ], (int) $user['id']);
         flash_set('error', __t('account.err_current_wrong'));
     } else {
         // Admin resets are already logged under `users`; this closes the other
         // half, so "every account change is recorded" finally holds.
-        audit_auth($connection, 'changed own password', (int) $user['id']);
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'scope' => 'own',
+        ], (int) $user['id']);
         $_SESSION['must_change_password'] = false;
         flash_set('success', __t('account.flash_changed'));
         redirect_to('dashboard.php');

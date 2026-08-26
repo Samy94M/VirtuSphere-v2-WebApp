@@ -242,10 +242,23 @@ CREATE TABLE IF NOT EXISTS deploy_logs (
     user_id INT NULL,
     -- ADR-0032: request correlation, diagnostic only.
     correlation_id VARCHAR(32) NULL,
+    -- Etappe 10C: new rows are registry-owned and structured. Historical rows
+    -- keep every field NULL and retain log_message as their unchanged fallback.
+    event_code VARCHAR(96) NULL,
+    object_type VARCHAR(64) NULL,
+    object_id VARCHAR(191) NULL,
+    result VARCHAR(16) NULL,
+    context_json LONGTEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX deploy_logs_category_lookup (category),
-    CONSTRAINT fk_deploy_logs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL
+    INDEX deploy_logs_event_object_time (event_code, object_type, object_id, created_at),
+    CONSTRAINT fk_deploy_logs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT deploy_logs_structured_audit_check CHECK (
+        (event_code IS NULL AND object_type IS NULL AND object_id IS NULL AND result IS NULL AND context_json IS NULL) OR
+        (event_code IS NOT NULL AND object_type IS NOT NULL AND result IS NOT NULL AND
+            (context_json IS NULL OR (JSON_VALID(context_json) = 1 AND JSON_TYPE(context_json) = _utf8mb4'OBJECT' AND OCTET_LENGTH(context_json) <= 4096)))
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_os (

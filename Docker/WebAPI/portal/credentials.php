@@ -1,7 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/credentials.php';
@@ -12,6 +11,7 @@ require_once __DIR__ . '/../lib/esxi_capabilities.php';
 require_once __DIR__ . '/../lib/repo/ansible_preflight.php';
 require_once __DIR__ . '/../lib/credentials_status.php';
 require_once __DIR__ . '/../lib/credentials_test_message.php';
+require_once __DIR__ . '/../lib/log_redaction.php';
 require_once __DIR__ . '/../lib/ssh.php';
 require_once __DIR__ . '/../lib/system_status.php';
 // The cadence line needs to know whether the deploy worker is alive; that answer
@@ -73,11 +73,14 @@ function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId
         if ($wasPaused) {
             // The pause is what stopped every future pull; its end deserves the
             // same line in the log its start got.
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'esxi inventory auto-pull resumed for credential id ' . $credentialId . ' after the credential was saved', $userId);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_RECOVERED, [
+                'action' => 'resumed',
+                'reason' => 'credential saved',
+            ], $userId);
         }
         esxi_inventory_enqueue_for_credential($db, $credentialId, $userId);
     } catch (Throwable $exception) {
-        error_log('[credentials] ESXi inventory pull enqueue failed: ' . $exception->getMessage());
+        error_log('[credentials] ESXi inventory pull enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
 }
 
@@ -112,7 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'create') {
             $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'created credential id ' . $createdId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'created',
+            ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_created'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $createdId, (int) $user['id']);
         } elseif ($action === 'update') {
@@ -124,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // still bulk configuration data that must not flood the audit log.
             $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
             if ($secret !== '') {
-                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'secret: changed']));
+                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'credential material: changed']));
             }
             // The stored preflight result proved the OLD host/account; an edit
             // invalidates it. ESXi gets a fresh pull below, Ansible honestly
@@ -140,23 +145,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ) {
                 $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'inventory ansible selection: cleared']));
             }
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'updated credential id ' . $id . audit_change_note($credentialDiff), (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'updated',
+                'changes' => $credentialDiff === '' ? 'no field changes' : $credentialDiff,
+            ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_updated'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
         } elseif ($action === 'activate_strict') {
             repo_activate_esxi_strict_trust($connection, $id);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'activated strict ESXi certificate verification for credential id ' . $id, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'trust_mode_changed',
+                'trust_mode' => 'strict',
+            ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_strict_activated'));
         } elseif ($action === 'use_legacy') {
             repo_activate_esxi_legacy_trust($connection, $id);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'activated legacy insecure ESXi certificate mode for credential id ' . $id, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'trust_mode_changed',
+                'trust_mode' => 'legacy_insecure',
+            ], (int) $user['id']);
             flash_set('warning', __t('credentials.flash_legacy_activated'));
         } elseif ($action === 'delete') {
             $before = repo_credential($connection, $id) ?? [];
             repo_delete_credential($connection, $id);
             $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
                 && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'deleted credential id ' . $id . ($selectionCleared ? '; inventory ansible selection cleared' : ''), (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'deleted',
+                'selection_cleared' => $selectionCleared,
+            ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_deleted'));
         } elseif ($action === 'test') {
             $credential = repo_credential($connection, $id, true);
@@ -167,7 +184,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Asynchronous by nature: the pull is a queued job on the Ansible
                 // host, so the outcome lands in the traffic light, not in a flash.
                 [$flashType, $flashMessage, $enqueue] = credentials_test_esxi($connection, $id, (int) $user['id']);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested ESXi inventory pull for credential id ' . $id . ' (' . ($enqueue['reason'] ?? 'queued') . ')' . (isset($enqueue['job_id']) ? '; job id ' . $enqueue['job_id'] : ''), (int) $user['id']);
+                $inventoryContext = ['reason' => (string) ($enqueue['reason'] ?? 'queued')];
+                if (isset($enqueue['job_id'])) {
+                    $inventoryContext['job_id'] = (int) $enqueue['job_id'];
+                }
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $inventoryContext, (int) $user['id']);
                 $actionUrl = in_array(($enqueue['reason'] ?? ''), ['ambiguous_ansible_credential', 'invalid_ansible_credential', 'no_ansible_credential'], true)
                     ? settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)
                     : system_status_url('credential-' . $id, ['inventory' => $id]);
@@ -228,12 +249,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $auditOutcome = 'failed (' . $result['code'] . ($failedComponent !== '' && $failedComponent !== $result['code'] ? ': ' . $failedComponent : '') . ')';
                 }
-                audit(
-                    $connection,
-                    VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
-                    'tested credential id ' . $id . ': ' . $auditOutcome,
-                    (int) $user['id']
-                );
+                $testContext = [
+                    'outcome' => (string) ($result['code'] ?? ($result['ok'] ? 'ok' : 'failed')),
+                ];
+                if ($failedComponent !== '') {
+                    $testContext['component'] = $failedComponent;
+                }
+                if ($warnedIp !== '') {
+                    $testContext['ip'] = $warnedIp;
+                }
+                $testResult = $result['ok']
+                    ? ($isAllowlistWarning ? VIRTUSPHERE_AUDIT_RESULT_WARNING : VIRTUSPHERE_AUDIT_RESULT_SUCCESS)
+                    : VIRTUSPHERE_AUDIT_RESULT_FAILURE;
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED, 'credential', $id, $testResult, $testContext, (int) $user['id']);
                 $flashType = 'error';
                 if ($result['ok']) {
                     $flashType = $isAllowlistWarning ? 'warning' : 'success';

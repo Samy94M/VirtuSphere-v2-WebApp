@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../log_redaction.php';
+
 function repo_fetch_all(mysqli_result $result): array
 {
     return $result->fetch_all(MYSQLI_ASSOC);
@@ -158,6 +160,7 @@ function repo_allowed_columns(object|array $source, array $allowed): array
 
 function repo_log_failure(string $message): void
 {
+    $message = virtusphere_redact_log_text($message);
     $log = dirname(__DIR__, 2) . '/logs/fail.log';
     $dir = dirname($log);
     if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {

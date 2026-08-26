@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/envboot.php';
 require_once __DIR__ . '/../lib/headers.php';
 require_once __DIR__ . '/../lib/db.php';
 require_once __DIR__ . '/../lib/deploy_constants.php';
+require_once __DIR__ . '/../lib/log_redaction.php';
 
 virtusphere_send_security_headers();
 header('Content-Type: application/json; charset=utf-8');
@@ -84,7 +85,7 @@ try {
         'php' => HEALTH_PHP_VERSION,
     ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
-    error_log('[health] ' . $exception::class . ': ' . $exception->getMessage());
+    error_log('[health] ' . $exception::class . ': ' . virtusphere_redact_log_text($exception->getMessage()));
     http_response_code(503);
     echo json_encode([
         'status' => 'error',

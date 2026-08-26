@@ -67,7 +67,22 @@ function system_status_handle_post(mysqli $connection, array $user): void
                 $failed++;
             }
         }
-        audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested ESXi inventory refresh targets [' . implode(',', $targets) . '] jobs [' . implode(',', $jobIds) . '] (' . $enqueued . ' queued, ' . $alreadyPending . ' open, ' . $skippedPaused . ' paused, ' . $failed . ' failed)', (int) $user['id']);
+        audit_event(
+            $connection,
+            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REFRESH,
+            'system',
+            'esxi_inventory',
+            $resolverFailure !== '' || $failed > 0 ? VIRTUSPHERE_AUDIT_RESULT_WARNING : VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            [
+                'target_ids' => array_slice(array_map('intval', $targets), 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+                'job_ids' => array_slice($jobIds, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+                'queued_count' => $enqueued,
+                'open_count' => $alreadyPending,
+                'paused_count' => $skippedPaused,
+                'failed_count' => $failed,
+            ],
+            (int) $user['id']
+        );
         if ($resolverFailure !== '') {
             $message = match ($resolverFailure) {
                 'ambiguous_ansible_credential' => __t('system_status.inv_refresh_ambiguous_ansible'),
@@ -124,7 +139,22 @@ function system_status_handle_post(mysqli $connection, array $user): void
         }
         try {
             $result = repo_reassign_vlan($connection, $vlanFrom, $vlanTo);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'reassigned vlan ' . $vlanFrom . ' to ' . $vlanTo . ' (' . $result['missions'] . ' missions, ' . $result['interfaces'] . ' interfaces)', (int) $user['id']);
+            // A reassign that matched nothing is a warning, not a success: the
+            // "from" side is free text, so zero matches usually means a typo,
+            // and the flash below already says so to the operator.
+            audit_event(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED,
+                'vlan',
+                $vlanFrom,
+                $result['missions'] + $result['interfaces'] === 0 ? VIRTUSPHERE_AUDIT_RESULT_WARNING : VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                [
+                    'target_vlan' => $vlanTo,
+                    'mission_count' => (int) $result['missions'],
+                    'interface_count' => (int) $result['interfaces'],
+                ],
+                (int) $user['id']
+            );
             // "From" is free text, so a typo is the likely reason for zero matches.
             // Reporting success with two zeros reads like the rename went through.
             if ($result['missions'] + $result['interfaces'] === 0) {

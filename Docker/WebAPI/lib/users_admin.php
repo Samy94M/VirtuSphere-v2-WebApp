@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/auth_schema.php';
 require_once __DIR__ . '/password_policy.php';
@@ -86,7 +87,11 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt->bind_param('ssssii', $name, $hash, $email, $role, $active, $mustChange);
         }
         $stmt->execute();
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'created local user ' . audit_snippet($name), (int) $actor['id']);
+        $createdId = (int) $stmt->insert_id;
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_CREATED, 'user', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'name' => audit_snippet($name, 191),
+            'source' => VIRTUSPHERE_AUTH_SOURCE_LOCAL,
+        ], (int) $actor['id']);
         flash_set('success', __t('users.flash_created'));
 
         return true;
@@ -120,7 +125,9 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt = $db->prepare('UPDATE deploy_users SET is_active = ?, updated_at = NOW() WHERE id = ?');
             $stmt->bind_param('ii', $active, $targetId);
             $stmt->execute();
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'changed active state for user id ' . $targetId, (int) $actor['id']);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'enabled' => $active === 1,
+            ], (int) $actor['id']);
 
             return 'ok';
         });
@@ -151,7 +158,9 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt = $db->prepare('UPDATE deploy_users SET role = ?, updated_at = NOW() WHERE id = ?');
             $stmt->bind_param('si', $role, $targetId);
             $stmt->execute();
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'changed role for user id ' . $targetId, (int) $actor['id']);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'role' => $role,
+            ], (int) $actor['id']);
 
             return 'ok';
         });
@@ -183,7 +192,9 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt->bind_param('sii', $hash, $mustChange, $targetId);
         }
         $stmt->execute();
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'reset password for local user id ' . $targetId, (int) $actor['id']);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'reset_password',
+        ], (int) $actor['id']);
         flash_set('success', __t('users.flash_password_reset'));
     } else {
         if (auth_user_source_schema_available($db)) {
@@ -195,7 +206,9 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt->bind_param('i', $targetId);
         }
         $stmt->execute();
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'cleared login lock for local user id ' . $targetId, (int) $actor['id']);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'cleared_login_lock',
+        ], (int) $actor['id']);
         flash_set('success', __t('users.flash_lock_cleared'));
     }
 

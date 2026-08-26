@@ -471,6 +471,15 @@ Add-Gate -Name 'file-size' -Lanes $allLanes -Kind 'native' -Body {
     Format-ToolResult $r 'ADR-0006-Budget eingehalten' 'PHP-Datei ueber Budget oder Ausnahme veraltet'
 }
 
+# Etappe 10C: persistierte Ereignisse haben genau einen Owner. Der Guard findet
+# freie Producer, unbekannte Codes, Registry-Umgehungen, verbotene Kontextfelder,
+# wiedereingefuehrte Freitextsinks und Token-faehige Logsignaturen.
+Add-Gate -Name 'audit-contract' -Lanes $allLanes -Kind 'native' -Body {
+    $r = Invoke-CheckPhp 'check-audit-contract.php' @('--ci')
+    if ($null -eq $r) { return New-InfraResult 'weder Host-PHP noch Projekt-Image verfuegbar' }
+    Format-ToolResult $r 'Audit-SSoT eingehalten' 'Auditproducer ausserhalb der Registry'
+}
+
 Add-Gate -Name 'doc-hygiene' -Lanes $allLanes -Kind 'native' -Body {
     $r = Invoke-CheckShell 'check-doc-hygiene.sh' @('--ci')
     if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }

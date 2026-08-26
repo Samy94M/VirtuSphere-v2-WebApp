@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = request_string($_POST, 'action');
         if ($action === 'delete') {
             deleteOS(request_int($_POST, 'os_id'), $connection);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_OS, 'deleted os id ' . request_int($_POST, 'os_id'), (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'operating_system', request_int($_POST, 'os_id'), VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
             flash_set('success', __t('os.flash_deleted'));
         }
     } catch (Throwable $exception) {

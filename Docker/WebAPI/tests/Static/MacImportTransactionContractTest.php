@@ -24,8 +24,17 @@ final class MacImportTransactionContractTest extends TestCase
         self::assertStringContainsString("], 409)", $source);
         // The rejection leaves a job-log line and a throttled portal audit row
         // (raw prepared statement, after rollback, never able to 500).
-        self::assertStringContainsString('Rejected a MAC callback:', $source);
+        self::assertStringContainsString('Rejected a MAC callback', $source);
+        // Etappe 10C: the audit row is the structured callback-rejection event
+        // carrying the closed reason code, not a sentence. The distinction is
+        // load-bearing: the System status counts IP-allowlist refusals by event
+        // code now, and a callback conflict filed under the same category used
+        // to be counted as one, which sent the operator to fix an allowlist the
+        // host was already on.
         self::assertStringContainsString('machine_api_audit_warning(', $source);
+        self::assertStringContainsString('VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED', $source);
+        self::assertStringContainsString("'reason_code' => \$exception->reasonCode", $source);
+        self::assertStringNotContainsString('VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED', $source);
     }
 
     public function testPlanningFinishesBeforeAnyPhaseTwoWrite(): void

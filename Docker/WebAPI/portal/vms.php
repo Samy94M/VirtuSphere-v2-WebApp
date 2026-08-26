@@ -41,7 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
             }
             repo_reset_vm_mecm_id($connection, $missionId, $vmId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'reset mecm id for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'reset_mecm_id',
+                'mission_id' => $missionId,
+            ], (int) $user['id']);
             flash_set('success', __t('portal.vm_mecm_reset_success'));
         } elseif ($action === 'transfer_mecm') {
             if ($isTemplate) {
@@ -56,20 +59,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException(__t('portal.vm_mecm_transfer_stale'));
             }
             repo_mark_vm_for_mecm_resync($connection, $missionId, $vmId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'queued mecm assignment transfer for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'queued_mecm_transfer',
+                'mission_id' => $missionId,
+            ], (int) $user['id']);
             flash_set('success', __t('portal.vm_mecm_transfer_success'));
         } elseif ($action === 'restart_progress_watch') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('vms.progress_template_blocked'));
             }
             $kind = repo_restart_vm_progress_watch($connection, $missionId, $vmId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'restarted ' . $kind . ' observation for vm id ' . $vmId . ' in mission id ' . $missionId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'restarted_progress_watch',
+                'mission_id' => $missionId,
+                'progress_kind' => $kind,
+            ], (int) $user['id']);
             flash_set('success', __t($kind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
                 ? 'vms.progress_flash_pending'
                 : 'vms.progress_flash_installing'));
         } elseif ($action === 'delete') {
             repo_delete_vm_by_id($connection, $missionId, $vmId);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'deleted vm id ' . $vmId . ' from mission id ' . $missionId, (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'deleted',
+                'mission_id' => $missionId,
+            ], (int) $user['id']);
             flash_set('success', __t('vms.flash_deleted'));
         } elseif ($action === 'bulk_delete' || $action === 'bulk_reset_mecm_id') {
             $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['vm_ids'] ?? [])), static fn (int $id): bool => $id > 0)));
@@ -87,14 +100,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'bulk_delete') {
                 $result = repo_bulk_delete_vms($connection, $missionId, $ids);
                 $done = (int) $result['deleted'];
-                $verb = 'bulk deleted';
+                $verb = 'bulk_deleted';
             } else {
                 $result = repo_bulk_reset_mecm_ids($connection, $missionId, $ids, (int) $user['id']);
                 $done = (int) $result['done'];
-                $verb = 'bulk reset mecm id for';
+                $verb = 'bulk_reset_mecm_id';
             }
 
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, $verb . ' ' . $done . ' vm(s) in mission id ' . $missionId . ' [' . implode(',', $ids) . ']', (int) $user['id']);
+            // The selection, not the outcome: VIRTUSPHERE_VM_BULK_CAP already
+            // bounds it well below the context list limit, and the id list is
+            // what makes a partially skipped bulk reconstructable afterwards.
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => $verb,
+                'affected_count' => $done,
+                'vm_ids' => array_slice($ids, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+            ], (int) $user['id']);
 
             $skippedReasons = [];
             foreach ($result['skipped'] as $skip) {
@@ -172,7 +192,9 @@ if (($_GET['export'] ?? '') === 'csv') {
             (string) count($vm['packages'] ?? []),
         ];
     }
-    audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, 'exported vm list of mission id ' . $missionId . ' as CSV (' . count($csvRows) . ' row(s))', (int) $user['id']);
+    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+        'row_count' => count($csvRows),
+    ], (int) $user['id']);
     portal_send_csv('vms-' . (string) $mission['mission_name'], $header, $csvRows);
 }
 

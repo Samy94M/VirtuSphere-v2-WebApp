@@ -79,13 +79,23 @@ final class AuthAuditTest extends TestCase
 
     private function lastAuthMessageForName(): ?string
     {
+        $row = $this->lastAuthRowForName();
+
+        return $row === [] ? null : (string) $row['log_message'];
+    }
+
+    /** @return array<string, mixed> */
+    private function lastAuthRowForName(): array
+    {
         $like = '%' . $this->userName . '%';
-        $stmt = $this->db->prepare("SELECT log_message FROM deploy_logs WHERE category = 'auth' AND log_message LIKE ? ORDER BY id DESC LIMIT 1");
+        $stmt = $this->db->prepare(
+            "SELECT log_message, event_code, result, context_json FROM deploy_logs
+             WHERE category = 'auth' AND log_message LIKE ? ORDER BY id DESC LIMIT 1"
+        );
         $stmt->bind_param('s', $like);
         $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
 
-        return $row === null ? null : (string) $row['log_message'];
+        return (array) $stmt->get_result()->fetch_assoc();
     }
 
     public function testASuccessfulLoginIsAudited(): void
@@ -104,8 +114,22 @@ final class AuthAuditTest extends TestCase
 
         $message = $this->lastAuthMessageForName();
         self::assertNotNull($message);
-        self::assertStringContainsString('login failed', $message);
+        // Etappe 10C renders this from `auth.login` + result `denied`, which is
+        // what the row now stores; the wording follows the structure instead of
+        // the structure following an older sentence.
+        self::assertStringContainsString('login rejected', $message);
         self::assertStringContainsString($this->userName, $message);
+
+        // The typed name is what makes this row useful, and it is the one field
+        // an anonymous caller controls, so it must be bounded and stored as a
+        // context field rather than only spliced into prose.
+        $row = $this->lastAuthRowForName();
+        self::assertSame(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, (string) $row['event_code']);
+        self::assertSame(VIRTUSPHERE_AUDIT_RESULT_DENIED, (string) $row['result']);
+        $context = json_decode((string) $row['context_json'], true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame($this->userName, $context['username']);
+        self::assertArrayHasKey('reason', $context, 'a refusal that does not say why is not evidence');
+        self::assertArrayNotHasKey('password', $context);
     }
 
     public function testTheLockoutItselfIsAudited(): void
@@ -128,11 +152,30 @@ final class AuthAuditTest extends TestCase
         // replaying what account.php does on success.
         $ok = change_own_password($this->db, $this->userId, $this->password, 'a-brand-new-passphrase-1234');
         self::assertTrue($ok);
-        // account.php writes the audit line; simulate its call so the row exists.
-        audit_auth($this->db, 'changed own password', $this->userId);
+        // account.php writes the audit line; replay its call so the row exists.
+        // The code is deliberately neutral (`_attempt`) and the outcome is the
+        // result, because the same event has to be able to record a REJECTED
+        // change; a code named `auth.password_changed` would claim a change
+        // happened on the path where it did not.
+        audit_event(
+            $this->db,
+            VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT,
+            'user',
+            $this->userId,
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            ['scope' => 'own'],
+            $this->userId
+        );
 
-        $messages = array_column($this->authLogsForUser(), 'log_message');
+        $rows = $this->authLogsForUser();
+        $messages = array_column($rows, 'log_message');
         self::assertContains('changed own password', $messages);
+        self::assertNotContains('rejected own password change', $messages);
+
+        // The password itself appears nowhere in the row it produced.
+        $whole = implode(' ', array_map('strval', array_merge(...array_map('array_values', $rows))));
+        self::assertStringNotContainsString('a-brand-new-passphrase-1234', $whole);
+        self::assertStringNotContainsString($this->password, $whole);
     }
 
     public function testTheIpRateLimitIsAuditedOnceAtOnsetNotPerAttempt(): void

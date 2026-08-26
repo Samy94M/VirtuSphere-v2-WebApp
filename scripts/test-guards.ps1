@@ -235,7 +235,23 @@ $docSemFixtureFiles = @(
     # Regel 15 no-ssot und faerbt jeden anderen Fall mit.
     'Ansible/createVMs-ESXi_playbook.yml'
 )
-$boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang')
+# struktur.sql gehoert seit Etappe 10C dazu: bounds-sync prueft dort den
+# gespiegelten Audit-Kontext-Bytewert gegen die PHP-Konstante und bricht ohne
+# die Datei mit audit-context-zero-match ab. Jeder andere Fall waere dann rot
+# aus einem anderen Grund als seiner eigenen Mutation, also unproven.
+$boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang', 'Docker/mysql/mysql-init/struktur.sql')
+# check-audit-contract scannt jede first-party PHP-Datei unter Docker/WebAPI und
+# liest die Registry als SSoT. Die Wurzeldateien gehoeren dazu, weil die
+# Machine-API-Endpunkte eigene Producer sind; ohne sie waere jeder Negativfall
+# aus einem anderen Grund rot als aus seiner Mutation.
+$auditFixtureFiles = @(
+    'Docker/WebAPI/lib', 'Docker/WebAPI/portal',
+    'Docker/WebAPI/db_importMAC.php', 'Docker/WebAPI/mecm-api.php',
+    'Docker/WebAPI/mecm_client_ack.php', 'Docker/WebAPI/mecm_packages.php',
+    'Docker/WebAPI/mecm_report.php', 'Docker/WebAPI/mecm_updateid.php',
+    'Docker/WebAPI/function.php', 'Docker/WebAPI/index.php',
+    'Docker/WebAPI/intern.php', 'Docker/WebAPI/mysql.php'
+)
 # Muss dem AKTUELLEN Spiegel folgen (ADR-0016): 'cancelling' kam mit
 # Migration 0031, und ein Anker auf einem Literal, das es nicht mehr gibt,
 # faerbt beide Mutationsfaelle infra statt proven.
@@ -460,6 +476,157 @@ $cases = @(
         $fx = New-Fixture $boundsFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/validate.php' "'netbios_hostname'" "'zz_renamed_netbios'"
         Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.stale-exempt\].*netbios_hostname'
+    } }
+
+    # --- Etappe 10C: Audit-SSoT ---------------------------------------------
+    # Der Guard beweist, dass persistierte Ereignisse genau einen Owner haben.
+    # Jeder Negativfall mutiert genau eine Regel; der Zero-Match-Fall ist der
+    # wichtigste, weil jede andere Regel eine Suche nach etwas Schlechtem ist
+    # und eine Suche ohne Treffer wie ein sauberes Repository aussieht.
+    @{ Name = 'audit-contract.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'audit-contract.free-producer'; Body = {
+        # Die alte Freitextform: Kategorie plus Satz statt Ereigniscode.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_producer.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_producer(mysqli $db): void
+{
+    audit($db, VIRTUSPHERE_LOG_CATEGORY_SYSTEM, 'something happened', null, 'cli');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.free-producer\].*zz_guard_producer'
+    } }
+    @{ Name = 'audit-contract.unknown-event'; Body = {
+        # Eine Konstante, die aussieht wie ein Ereignis, aber keines ist.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_unknown.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_unknown(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_ZZ_NOT_REGISTERED, 'user', 1, 'success', []);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unknown-event\].*ZZ_NOT_REGISTERED'
+    } }
+    @{ Name = 'audit-contract.registry-bypass'; Body = {
+        # Ein zweiter Schreibpfad in die Audittabelle erzeugt Zeilen, die keine
+        # Registry validiert hat, und jeder Leser zaehlt sie trotzdem mit.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/migrate.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_bypass(mysqli $db): void
+{
+    $db->query("INSERT INTO deploy_logs (ip, category, log_message) VALUES ('1.2.3.4', 'system', 'direct')");
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.registry-bypass\].*migrate\.php'
+    } }
+    @{ Name = 'audit-contract.forbidden-field'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_field.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_field(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', 1, 'success', ['role' => 'admin', 'password' => 'hunter2']);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.forbidden-field\].*password'
+    } }
+    @{ Name = 'audit-contract.dead-sink'; Body = {
+        # addLog() war nie aufgerufen und einen Aufruf davon entfernt, einen
+        # Auth-Token in eine Tabelle mit 365-Tage-Fenster zu schreiben.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_sink.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_sink(mysqli $db): void
+{
+    addLog($db, 'system', 'back again');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.dead-sink\].*addLog'
+    } }
+    @{ Name = 'audit-contract.token-sink'; Body = {
+        # Die Signatur ist die Grenze, nicht die Aufrufstellen: solange der
+        # Parameter existiert, ist "kein Aufrufer uebergibt einen Token" eine
+        # Aussage ueber heute.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_token.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_audit_line(mysqli $db, string $token, string $message): void
+{
+    error_log($message);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.token-sink\].*zz_guard_audit_line'
+    } }
+    @{ Name = 'audit-contract.unredacted-sink'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_unredacted.php' "<?php`ndeclare(strict_types=1);`nfunction zz_guard_unredacted(Throwable `$exception): void`n{`n    error_log('provider failed: ' . `$exception->getMessage());`n}`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unredacted-sink\].*zz_guard_unredacted'
+    } }
+    @{ Name = 'audit-contract.sentinel'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_sentinel.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_sentinel(): void
+{
+    error_log('probe Authorization: Bearer eyJhbGciOiJIUzI1NiJ9zzGuardSentinel');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.sentinel\].*zz_guard_sentinel'
+    } }
+    @{ Name = 'audit-contract.unused-event'; Body = {
+        # Ein Code, den kein Producer schreibt, ist ein Wert, den ein Filter
+        # anbietet und den keine Zeile je traegt.
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_ORPHAN = 'zz.guard_orphan';"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unused-event\].*ZZ_GUARD_ORPHAN'
+    } }
+    @{ Name = 'audit-contract.zero-match-registry'; Body = {
+        # Eine leere Registry darf nie als "alle Producer sind sauber" gelten.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/audit_event_definitions.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.zero-match-producers'; Body = {
+        # Registry vorhanden, aber kein einziger Producer: die Aufrufform wurde
+        # umgeschrieben und der Scan sieht nichts mehr.
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/audit_event_definitions.php' "<?php`ndeclare(strict_types=1);`nconst VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`n"
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_empty.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.zero-match-files'; Body = {
+        # Leerer Scope: kein Producer gefunden heisst nicht, dass keiner falsch ist.
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'README.md' "placeholder`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.new-module-allowed'; Body = {
+        # Positivrichtung: ein neues Modul mit einem korrekten Producer bleibt
+        # still. Ein Guard, der nur je feuert, ist einer, neben den niemand
+        # eine Datei legen kann.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_ok.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_ok(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', 1, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['role' => 'admin']);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
     } }
 
     @{ Name = 'file-size.green'; Body = {

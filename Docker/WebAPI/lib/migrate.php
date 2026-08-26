@@ -1,11 +1,12 @@
 <?php
 
 declare(strict_types=1);
-
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/vm_location.php';
 require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
+require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -56,7 +57,7 @@ function migrator_release_schema_lock(mysqli $db): void
     try {
         $row = migrator_query_row($db, "SELECT RELEASE_LOCK('virtusphere_schema_migration') AS released", 'schema migration lock release');
     } catch (Throwable $exception) {
-        error_log('[migrate] Could not release schema migration lock: ' . $exception->getMessage());
+        error_log('[migrate] Could not release schema migration lock: ' . virtusphere_redact_log_text($exception->getMessage()));
         return;
     }
 
@@ -1170,6 +1171,7 @@ SQL;
     },
     '0042_remote_execution_foundation' => migrate_0042_remote_execution_foundation(...),
     '0043_deploy_terminal_metadata' => migrate_0043_deploy_terminal_metadata(...),
+    '0044_structured_audit_events' => migrate_0044_structured_audit_events(...),
 ];
 try {
     $db = db();
@@ -1207,14 +1209,14 @@ try {
             migrator_release_schema_lock($db);
         }
     }
-
     migrator_out('migrations: ok');
 } catch (Throwable $exception) {
     if (PHP_SAPI === 'cli') {
-        fwrite(STDERR, 'migrations: failed: ' . $exception->getMessage() . PHP_EOL);
+        fwrite(STDERR, 'migrations: failed: ' . virtusphere_redact_log_text($exception->getMessage()) . PHP_EOL);
     } else {
         http_response_code(500);
-        echo htmlspecialchars('migrations: failed: ' . $exception->getMessage(), ENT_QUOTES, 'UTF-8');
+        error_log('[migrate] migrations failed: ' . virtusphere_redact_log_text($exception->getMessage()));
+        echo htmlspecialchars('migrations: failed; see server log', ENT_QUOTES, 'UTF-8');
     }
     exit(1);
 }

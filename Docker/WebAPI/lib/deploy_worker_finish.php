@@ -7,6 +7,7 @@ require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/mac_import.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_vm_state.php';
@@ -110,6 +111,7 @@ function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds, st
  */
 function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): bool
 {
+    $line = virtusphere_redact_log_text($line);
     $job = repo_deploy_job($db, $jobId);
     if ($job === null) {
         error_log('[deploy-worker] job ' . $jobId . ' is gone; ' . $line);
@@ -248,15 +250,46 @@ function deploy_worker_audit_outcome(mysqli $db, array $job, string $status, ?st
     try {
         $userId = isset($job['user_id']) ? (int) $job['user_id'] : null;
         $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-        $message = 'deploy job id ' . (int) $job['id'] . ' (mission id ' . (int) $job['mission_id']
-            . ', mode ' . audit_snippet($mode, 24) . ') ' . $status;
+        $context = [
+            'mission_id' => (int) $job['mission_id'],
+            'mode' => audit_snippet($mode, 24),
+            'status' => $status,
+        ];
         if (in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true) && $error !== null && $error !== '') {
-            $message .= ': ' . audit_snippet($error, 120);
+            $reason = audit_snippet($error, 120);
+            if ($reason !== '') {
+                $context['reason'] = $reason;
+            }
         }
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, $message, $userId, 'cli');
+        audit_event(
+            $db,
+            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME,
+            'deploy_job',
+            (int) $job['id'],
+            deploy_worker_outcome_audit_result($status),
+            $context,
+            $userId,
+            'cli'
+        );
     } catch (Throwable $exception) {
-        error_log('[deploy-worker] outcome audit failed: ' . $exception->getMessage());
+        error_log('[deploy-worker] outcome audit failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
+}
+
+/**
+ * The closed audit result of a terminal deploy status. A partial run is a
+ * warning, not a failure: the mission did change, just not completely, and
+ * flattening the two would hide that difference from whoever reads the log.
+ * Unknown statuses cannot slip through as "success": the default is failure,
+ * and the registry refuses a result it does not know.
+ */
+function deploy_worker_outcome_audit_result(string $status): string
+{
+    return match ($status) {
+        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => VIRTUSPHERE_AUDIT_RESULT_WARNING,
+        default => VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+    };
 }
 
 /**
@@ -276,6 +309,6 @@ function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): v
     try {
         esxi_inventory_enqueue_for_credential($db, $credentialId);
     } catch (Throwable $exception) {
-        error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . $exception->getMessage());
+        error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
 }

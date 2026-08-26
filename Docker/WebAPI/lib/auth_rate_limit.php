@@ -175,11 +175,11 @@ function auth_record_failed_login(mysqli $db, string $username, string $source =
     $before = auth_failed_ip_attempt_count($db);
     auth_record_login_attempt($db, $username, false, $source);
     if ($before < VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT && auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT) {
-        audit_auth($db, sprintf(
-            'ip rate limited for %d minutes after %d failed sign-ins',
-            VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
-            VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT
-        ));
+        $clientIp = auth_client_ip();
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'client_ip', $clientIp, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'duration_minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
+            'failure_count' => VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT,
+        ], null, $clientIp);
     }
 }
 
@@ -198,17 +198,17 @@ function auth_finish_failed_login(mysqli $db, int $attemptId, string $username, 
                 $atThreshold = auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT;
                 auth_finish_login_attempt($db, $attemptId, VIRTUSPHERE_LOGIN_RESULT_CREDENTIAL_FAILURE);
                 $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
-                $message = 'ip rate limited%';
-                $auditStmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_logs WHERE category = 'auth' AND log_message LIKE ? AND created_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)");
-                $auditStmt->bind_param('si', $message, $window);
+                $eventCode = VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED;
+                $clientIp = auth_client_ip();
+                $auditStmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = ? AND object_type = \'client_ip\' AND object_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)');
+                $auditStmt->bind_param('ssi', $eventCode, $clientIp, $window);
                 $auditStmt->execute();
                 $alreadyAudited = (int) ($auditStmt->get_result()->fetch_assoc()['c'] ?? 0) > 0;
                 if ($atThreshold && !$alreadyAudited) {
-                    audit_auth($db, sprintf(
-                        'ip rate limited for %d minutes after %d failed sign-ins',
-                        VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
-                        VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT
-                    ));
+                    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'client_ip', $clientIp, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+                        'duration_minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
+                        'failure_count' => VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT,
+                    ], null, $clientIp);
                 }
             } finally {
                 auth_release_login_locks($db, $locks);

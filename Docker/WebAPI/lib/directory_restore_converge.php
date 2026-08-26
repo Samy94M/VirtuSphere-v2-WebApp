@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/directory.php';
 
 /**
@@ -41,7 +42,7 @@ if (PHP_SAPI === 'cli' && realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? ''))
         fwrite(STDOUT, '[1/1] PASS directory restore convergence (' . ($changed ? 'disabled; controller validation invalidated' : 'not configured') . ")\n");
         exit(0);
     } catch (Throwable $exception) {
-        fwrite(STDERR, '[1/1] FAIL directory restore convergence: ' . $exception->getMessage() . "\n");
+        fwrite(STDERR, '[1/1] FAIL directory restore convergence: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
         exit(1);
     }
 }

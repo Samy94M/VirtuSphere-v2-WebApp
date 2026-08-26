@@ -26,11 +26,31 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('Package payload absent; leaving deploy_packages untouched.', $packages);
         self::assertStringContainsString('TaskSequence payload absent; leaving deploy_os untouched.', $packages);
 
+        // Every endpoint answers a caught fault with the same generic wire body
+        // and leaves exactly one safe server-side line. Since Etappe 10C an
+        // endpoint may reach that line through either entry point:
+        // machine_api_log_warning() writes it directly, and
+        // machine_api_audit_warning() writes it plus the structured audit row.
+        // Requiring the direct call by name would have forced mecm_updateid.php
+        // to keep a second, redundant line next to its structured one.
         foreach (['mecm-api.php', 'mecm_updateid.php', 'mecm_packages.php', 'mecm_report.php', 'mecm_client_ack.php', 'db_importMAC.php'] as $file) {
             $source = $this->source($file);
-            self::assertStringContainsString('machine_api_log_warning', $source, $file);
+            self::assertMatchesRegularExpression(
+                '/machine_api_(log|audit)_warning/',
+                $source,
+                $file . ' answers a caught fault without any safe server-side line'
+            );
             self::assertStringContainsString("'Interner Serverfehler'", $source, $file);
         }
+
+        // ... and the indirect route really does write one, so the alternation
+        // above cannot be satisfied by a call that logs nothing.
+        $machineApi = $this->source('lib/machine_api.php');
+        self::assertMatchesRegularExpression(
+            '/function machine_api_audit_warning.*machine_api_log_warning\(/s',
+            $machineApi,
+            'machine_api_audit_warning() must still write the server-side line'
+        );
     }
 
     public function testReportChannelStaysDisplayOnlyAndTokenIsHashed(): void

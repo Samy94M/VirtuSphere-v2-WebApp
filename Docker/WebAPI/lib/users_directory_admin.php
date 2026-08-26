@@ -46,7 +46,10 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
                 directory_observe_controller($db, $controller, $revision, VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $certificate);
             }
         }
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'saved directory configuration revision ' . $revision, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'saved',
+            'revision' => $revision,
+        ], $actorId);
         flash_set('success', __t('directory.flash_config_saved'));
 
         return true;
@@ -68,7 +71,11 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
             throw new ValidationException($errors);
         }
         $controllerId = repo_directory_add_controller($db, $host, $port, $actorId);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'added directory controller ' . $controllerId . ' (' . $host . ':' . $port . ')', $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'added',
+            'host' => $host,
+            'port' => $port,
+        ], $actorId);
         flash_set('success', __t('directory.flash_controller_added'));
 
         return true;
@@ -95,7 +102,10 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         if ($result === 'last_controller') {
             throw new ValidationException(['controller_id' => __t('directory.err_last_controller')]);
         }
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, ($enable ? 'enabled' : 'disabled') . ' directory controller ' . $controllerId, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'enabled_state_changed',
+            'enabled' => $enable,
+        ], $actorId);
         flash_set('success', $enable ? __t('directory.flash_controller_enabled') : __t('directory.flash_controller_disabled'));
 
         return true;
@@ -104,7 +114,9 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         $controllerId = request_int($_POST, 'controller_id');
         $direction = request_string($_POST, 'direction') === 'up' ? -1 : 1;
         repo_directory_move_controller($db, $controllerId, $direction, $actorId);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'changed priority of directory controller ' . $controllerId, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'priority_changed',
+        ], $actorId);
         flash_set('success', __t('directory.flash_controller_moved'));
 
         return true;
@@ -118,7 +130,9 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         if ($result === 'last_controller') {
             throw new ValidationException(['controller_id' => __t('directory.err_last_controller')]);
         }
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'deleted directory controller ' . $controllerId, $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'deleted',
+        ], $actorId);
         flash_set('success', __t('directory.flash_controller_deleted'));
 
         return true;
@@ -134,7 +148,9 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
                 }
             }
             repo_directory_set_config_enabled($db, $enable, $actorId);
-            audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, ($enable ? 'enabled' : 'disabled') . ' Active Directory login', $actorId);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_LOGIN_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'enabled' => $enable,
+            ], $actorId);
         });
         flash_set('success', $enable ? __t('directory.flash_enabled') : __t('directory.flash_disabled'));
 
@@ -143,7 +159,9 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
     if ($action === 'directory_delete_config') {
         repo_directory_delete_config($db);
         unset($_SESSION['directory_import_candidates'], $_SESSION['directory_search_display']);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_DIRECTORY, 'deleted directory configuration', $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => 'deleted',
+        ], $actorId);
         flash_set('success', __t('directory.flash_config_deleted'));
 
         return true;
@@ -181,7 +199,7 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         }
         $entry = directory_find_user_by_guid($db, (string) $target['ad_object_guid']);
         repo_directory_update_user_cache($db, (int) $target['id'], $entry);
-        audit($db, VIRTUSPHERE_LOG_CATEGORY_USERS, 'synchronized Active Directory user id ' . (int) $target['id'], $actorId);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED, 'user', (int) $target['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
         flash_set('success', __t('directory.flash_user_synced'));
 
         return true;

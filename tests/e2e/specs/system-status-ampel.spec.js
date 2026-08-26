@@ -269,7 +269,16 @@ test('a refused MECM says so instead of claiming it is probably not set up yet',
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('${WIRE_SOURCES.join("','")}', 'mecm-site-health')");
 $db->query("DELETE FROM deploy_logs WHERE category = '" . VIRTUSPHERE_LOG_CATEGORY_MACHINE_API . "'");
-audit($db, VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, '[forbidden] e2e denial', null, '10.99.0.42');
+audit_event(
+    $db,
+    VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED,
+    'machine_endpoint',
+    'mecm-api.php',
+    VIRTUSPHERE_AUDIT_RESULT_DENIED,
+    ['action' => 'getDeviceList'],
+    null,
+    '10.99.0.42'
+);
 echo 'SEEDED';
 `, ['lib/repo/log.php']);
 

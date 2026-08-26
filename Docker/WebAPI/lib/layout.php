@@ -10,6 +10,7 @@ require_once __DIR__ . '/backup_status.php';
 require_once __DIR__ . '/portal_sort.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/layout_modals.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/settings_page.php';
 
 // A double submit must not stack the same alert twice, and a queue that is
@@ -194,7 +195,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
                         }
                     }
                 } catch (Throwable $backupBannerError) {
-                    error_log('[backup-banner] ' . $backupBannerError::class . ': ' . $backupBannerError->getMessage());
+                    error_log('[backup-banner] ' . $backupBannerError::class . ': ' . virtusphere_redact_log_text($backupBannerError->getMessage()));
                 }
             }
             ?>

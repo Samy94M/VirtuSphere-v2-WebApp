@@ -66,6 +66,11 @@ final class CorrelationTraceTest extends TestCase
         $like = '%' . $this->prefix . '%';
         $stmt->bind_param('s', $like);
         $stmt->execute();
+        // The structured probe is addressed by its object, so its cleanup is too.
+        $stmt = $this->db->prepare('DELETE FROM deploy_logs WHERE object_id = ?');
+        $probe = 'feedface00000014';
+        $stmt->bind_param('s', $probe);
+        $stmt->execute();
         $stmt = $this->db->prepare('DELETE FROM deploy_users WHERE id = ?');
         $stmt->bind_param('i', $this->userId);
         $stmt->execute();
@@ -120,11 +125,26 @@ final class CorrelationTraceTest extends TestCase
     public function testAuditRowsCarryTheCurrentTrace(): void
     {
         virtusphere_correlation_adopt('feedface00000014');
-        audit($this->db, VIRTUSPHERE_LOG_CATEGORY_SYSTEM, 'correlation probe ' . $this->prefix, $this->userId);
+        // Etappe 10C: the probe is a registered event, so the row it produces
+        // is found by its object rather than by a message this test made up.
+        // The correlation claim is unchanged: every audit row carries the id of
+        // the execution that wrote it (ADR-0032).
+        audit_event(
+            $this->db,
+            VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR,
+            'error',
+            'feedface00000014',
+            VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+            ['error_class' => 'CorrelationTraceProbe'],
+            $this->userId
+        );
 
-        $stmt = $this->db->prepare('SELECT correlation_id FROM deploy_logs WHERE log_message = ? ORDER BY id DESC LIMIT 1');
-        $message = 'correlation probe ' . $this->prefix;
-        $stmt->bind_param('s', $message);
+        $stmt = $this->db->prepare(
+            'SELECT correlation_id FROM deploy_logs WHERE event_code = ? AND object_id = ? ORDER BY id DESC LIMIT 1'
+        );
+        $event = VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR;
+        $objectId = 'feedface00000014';
+        $stmt->bind_param('ss', $event, $objectId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         self::assertSame('feedface00000014', (string) ($row['correlation_id'] ?? ''));

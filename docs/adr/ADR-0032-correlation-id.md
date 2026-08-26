@@ -93,3 +93,40 @@ Weitergabe an ESXi/vCenter (deren APIs kennen das Konzept nicht).
 - Die Fehler-Referenz auf Fehlerseiten wird informativer (Request- statt
   Zufalls-ID); Operatoren-Doku (`docs/QA.md` Fehlersuche) wird im
   Umsetzungscommit nachgezogen.
+
+## Amendment (2026-08-26, Etappe 10C): the id is not yet a search path
+
+The correlation id still travels the same way: every audit row carries the id of
+the execution that wrote it, an error page shows it as its reference, and the
+job, the job log and the machine-API callback of the same run share it. Two
+things changed and one thing did not.
+
+**Changed: the row it lands on is structured.** Migration 0044 added
+`event_code`, `object_type`, `object_id`, `result` and `context_json` next to
+`correlation_id` (ADR-0026 amendment). Correlating an execution across rows no
+longer means reading sentences: the event code says what happened, the object
+says to what, and the correlation id says which run. `CorrelationTraceTest` now
+writes its probe as a registered event and finds it by its object rather than by
+a message it made up, which is the same claim proven without a string match.
+
+**Changed: the id survives the redaction.** Every log sink now runs through
+`virtusphere_redact_log_text()`. The correlation id is deliberately not a secret
+and is deliberately not redacted; the same pass removes auth headers of any
+scheme, token-bearing query parameters and JSON/form credential pairs from the
+error log, the container log, the debug render and the audit context. An error
+row itself stores only the class and the reference: the exception MESSAGE is the
+one field an attacker can steer, and the audit trail is readable by every
+`users.manage` holder. The full redacted line with message and trace stays in
+`logs/error.log`, which is a filesystem artefact behind a different boundary.
+
+**Unchanged, and stated because a runbook claimed otherwise: the portal cannot
+search by correlation id.** `logs.php` filters by tab, category, free text over
+the message and user name, and IP. The id is stored on the database row, but the
+portal neither displays nor exports it: there is no exact-match field, no
+display column, no copy action and no export scoped to one id.
+`docs/operations/troubleshooting.md` once recommended a correlation search as
+an operating step; that step did not exist, so it now tells the operator to
+narrow by time, user and category and to keep the id only as evidence for a
+separately authorized database or file diagnosis. Etappe 15 implements the
+exact search, the display, the copy action and the scoped export, and may
+document the id as an operating path again only once those are green.

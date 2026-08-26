@@ -36,7 +36,10 @@ function auth_login_directory(mysqli $db, string $username, string $password, in
             } else {
                 auth_record_login_attempt($db, $username, true, $source);
             }
-            audit_auth($db, 'login succeeded (Active Directory, controller ' . (int) $result['controller_id'] . ')', (int) $user['id']);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'source' => VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY,
+                'controller_id' => (int) $result['controller_id'],
+            ], (int) $user['id']);
             auth_mark_login_seen($db, (int) $user['id']);
 
             return $user;
@@ -60,7 +63,11 @@ function auth_login_directory(mysqli $db, string $username, string $password, in
             return ['ok' => false, 'reason' => 'directory_unavailable'];
         }
         auth_finish_failed_login($db, $attemptId, $username, $source);
-        audit_auth($db, 'Active Directory login failed for user "' . audit_snippet($username) . '"');
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'source' => VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY,
+            'reason' => 'invalid credentials',
+            'username' => audit_snippet($username, 191),
+        ]);
 
         return ['ok' => false, 'reason' => 'invalid'];
     } catch (Throwable) {

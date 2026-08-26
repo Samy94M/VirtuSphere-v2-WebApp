@@ -156,7 +156,7 @@ function deploy_worker_report_alive(mysqli $db, bool $ok = true, ?string $failur
     } catch (Throwable $exception) {
         // The report is never allowed to break the worker: a job in flight matters
         // more than its own status row.
-        fwrite(STDERR, '[deploy-worker] status report failed: ' . $exception->getMessage() . "\n");
+        fwrite(STDERR, '[deploy-worker] status report failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
     }
 }
 

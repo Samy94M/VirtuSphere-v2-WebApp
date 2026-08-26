@@ -159,8 +159,12 @@ const VIRTUSPHERE_HTTPS_SSL_DIR = '/etc/nginx/ssl';
 const VIRTUSPHERE_HTTPS_CONF_DIR = '/etc/nginx/virtusphere-conf.d';
 
 // Log categories (deploy_logs.category, a VARCHAR - no ENUM mirror to keep in
-// sync). Every audit()/addLog() call site must pass one of these so the portal
-// logs page can filter/group by category.
+// sync), so the portal logs page can filter and group by category. Since
+// Etappe 10C no call site picks one: the event registry
+// (`lib/audit_event_definitions.php`) maps each event code to exactly one of
+// these, which is what stopped a caller from filing an integration outage under
+// `mecm` because that was the only alternative to `system` in an inline
+// ternary.
 //
 // `auth` is the security channel: who signed in, who was refused, who changed
 // their own password. It is kept apart from `users` on purpose. `users` records
@@ -332,6 +336,33 @@ const VIRTUSPHERE_INTEGRATION_RUN_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER,
     VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH,
 ];
+
+// The machine API surface, as the audit trail names it. Closed on purpose: the
+// object id of a machine_api/mecm audit row is what an operator filters on, and
+// a free basename would silently create a second, near-identical bucket that
+// nothing lists (`db_importMAC.php` keeps its stored capitalisation).
+//
+// machine_api_forbidden() derives its endpoint from the running script, so an
+// endpoint added without touching this list maps to the sentinel below rather
+// than dropping the row. A refused machine access is a security event, and
+// losing one because a file was renamed would be a worse outcome than an
+// unspecific object id: the sentinel keeps the refusal, the IP and the time.
+const VIRTUSPHERE_MACHINE_API_ENDPOINT_UNKNOWN = 'machine-api-unknown';
+const VIRTUSPHERE_MACHINE_API_ENDPOINTS = [
+    'db_importMAC.php',
+    'mecm-api.php',
+    'mecm_client_ack.php',
+    'mecm_packages.php',
+    'mecm_report.php',
+    'mecm_updateid.php',
+    VIRTUSPHERE_MACHINE_API_ENDPOINT_UNKNOWN,
+];
+
+// Generation of the report channel a source speaks. 1 is the legacy heartbeat
+// loop, 2 the per-run result report (ADR-0018). The one-time ratchet from 1 to
+// 2 is the only per-source event that writes an audit line, and it names this
+// number rather than spelling it into the sentence.
+const VIRTUSPHERE_REPORT_CHANNEL_VERSION = 2;
 
 // Fachliche Gruppen fuer Systemstatus und Dashboard. Die Gruppen sind
 // absichtlich getrennt: ein kritischer MECM-Site-Zustand ist kein Beweis fuer

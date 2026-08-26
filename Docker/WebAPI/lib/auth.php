@@ -150,7 +150,11 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
 
     if ($user && !empty($user['locked_until']) && strtotime((string) $user['locked_until']) > time()) {
         auth_finish_failed_login($db, $attemptId, $username, $source);
-        audit_auth($db, 'login rejected: account is locked', (int) $user['id']);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'source' => $source,
+            'reason' => 'account is locked',
+            'username' => audit_snippet($username, 191),
+        ], (int) $user['id']);
         return ['ok' => false, 'reason' => 'locked'];
     }
 
@@ -179,18 +183,19 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
                 $lockStmt->bind_param('ii', $lockMinutes, $userId);
             }
             $lockStmt->execute();
-            audit_auth($db, sprintf(
-                'account locked for %d minutes after %d failed sign-ins',
-                VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES,
-                VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT
-            ), $userId);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+                'duration_minutes' => VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES,
+                'failure_count' => VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT,
+            ], $userId);
             return ['ok' => false, 'reason' => 'locked'];
         }
 
-        $reason = $user && (int) $user['is_active'] !== 1
-            ? 'login rejected: account is deactivated'
-            : 'login failed for user "' . audit_snippet($username) . '"';
-        audit_auth($db, $reason, $user ? (int) $user['id'] : null);
+        $reason = $user && (int) $user['is_active'] !== 1 ? 'account is deactivated' : 'invalid credentials';
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', $user ? (int) $user['id'] : null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'source' => $source,
+            'reason' => $reason,
+            'username' => audit_snippet($username, 191),
+        ], $user ? (int) $user['id'] : null);
 
         return ['ok' => false, 'reason' => 'invalid'];
     }
@@ -201,7 +206,9 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         } else {
             auth_record_login_attempt($db, $username, true, $source);
         }
-        audit_auth($db, 'login succeeded (local)', (int) $user['id']);
+        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'source' => VIRTUSPHERE_AUTH_SOURCE_LOCAL,
+        ], (int) $user['id']);
         auth_rehash_password_if_needed($db, (int) $user['id'], $password, (string) $user['password']);
         auth_mark_login_seen($db, (int) $user['id']);
     });
@@ -283,7 +290,10 @@ function current_user(?mysqli $db = null): ?array
     } elseif (time() >= $expiresAt) {
         // Audit before logout(): it wipes the session this entry is attributed to.
         // Recorded once, because the branch runs once per session.
-        audit_auth($db ?? db(), 'session expired after ' . session_lifetime_seconds($db) . ' seconds', $userId);
+        audit_event($db ?? db(), VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'reason' => 'expired',
+            'duration_seconds' => session_lifetime_seconds($db),
+        ], $userId);
         logout();
         return null;
     }
@@ -303,7 +313,9 @@ function current_user(?mysqli $db = null): ?array
     if ((string) $user['auth_source'] === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) {
         $verifiedAt = (int) ($_SESSION['directory_verified_at'] ?? 0);
         if (!directory_is_enabled($db)) {
-            audit_auth($db, 'Active Directory session ended: directory integration disabled', $userId);
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+                'reason' => 'directory integration disabled',
+            ], $userId);
             logout();
             return null;
         }
@@ -324,7 +336,7 @@ function current_user(?mysqli $db = null): ?array
                 $remainingGrace = VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS - (time() - $verifiedAt);
                 $_SESSION['directory_retry_at'] = time() + min(60, max(1, $remainingGrace));
             } else {
-                audit_auth($db, 'Active Directory session ended: ' . audit_snippet($check['reason']), $userId);
+                audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, ['reason' => audit_snippet($check['reason'], 256)], $userId);
                 logout();
                 return null;
             }

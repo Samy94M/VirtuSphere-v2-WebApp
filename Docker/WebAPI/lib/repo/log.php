@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../constants.php';
+require_once __DIR__ . '/../audit_registry.php';
+require_once __DIR__ . '/../audit_presenter.php';
 require_once __DIR__ . '/helpers.php';
 // log_category_labels()/log_tab_labels() call __t(). Every portal caller has the
 // bootstrap, but this module is also reachable from a CLI entrypoint that has
@@ -11,27 +13,68 @@ require_once __DIR__ . '/helpers.php';
 // so closing the closure here costs nothing.
 require_once __DIR__ . '/../lang.php';
 
-function addLog($ip, string $category, $request, $authToken, $connection)
+/**
+ * Structured audit entry point. Event/category/object/result/context are
+ * validated by the central registry before a row can reach the repository.
+ * The English description remains the compatibility display for existing
+ * operators; unlike a legacy row, it is rendered from the same structured data.
+ *
+ * @param array<string,mixed> $context
+ */
+function audit_event(
+    mysqli $connection,
+    string $eventCode,
+    string $objectType,
+    string|int|null $objectId,
+    string $result,
+    array $context = [],
+    ?int $userId = null,
+    ?string $ip = null
+): bool
 {
-    $logMessage = 'Request: ' . (string) $request . ' | Auth-Token: ' . (string) $authToken;
-    $userId = $_SESSION['user_id'] ?? null;
-
-    $stmt = $connection->prepare('INSERT INTO deploy_logs (ip, category, log_message, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())');
-    $stmt->bind_param('sssi', $ip, $category, $logMessage, $userId);
-
-    return $stmt->execute();
-}
-
-function audit(mysqli $connection, string $category, string $message, ?int $userId = null, ?string $ip = null): bool
-{
+    $objectId = audit_object_id($objectId, audit_event_object_id_kind($eventCode));
+    $definition = audit_event_definition($eventCode, $objectType, $objectId, $result);
+    $context = audit_context_normalize($context, $definition, $result);
+    $message = audit_event_description($eventCode, $objectType, $objectId, $result, $context);
+    $contextJson = audit_context_json($context);
     $ip = $ip ?? (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
     // ADR-0032: every audit row carries the correlation id of the execution
     // that wrote it (request id, or the adopted job id inside the worker).
     $correlationId = virtusphere_correlation_id();
-    $stmt = $connection->prepare('INSERT INTO deploy_logs (ip, category, log_message, user_id, correlation_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())');
-    $stmt->bind_param('sssis', $ip, $category, $message, $userId, $correlationId);
+    $category = $definition['category'];
+    $stmt = $connection->prepare(
+        'INSERT INTO deploy_logs (ip, category, log_message, user_id, correlation_id, event_code, object_type, object_id, result, context_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+    );
+    $stmt->bind_param(
+        'sssissssss',
+        $ip,
+        $category,
+        $message,
+        $userId,
+        $correlationId,
+        $eventCode,
+        $objectType,
+        $objectId,
+        $result,
+        $contextJson
+    );
 
     return $stmt->execute();
+}
+
+/** @param array<string,mixed> $context */
+function audit(
+    mysqli $connection,
+    string $eventCode,
+    string $objectType,
+    string|int|null $objectId,
+    string $result,
+    array $context = [],
+    ?int $userId = null,
+    ?string $ip = null
+): bool {
+    return audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId, $ip);
 }
 
 function log_category_label(string $category): string
@@ -228,21 +271,30 @@ function repo_count_logs(mysqli $db, string $search = '', string $ip = '', array
  * positive evidence that somebody is knocking, so it is the one signal that
  * distinguishes them.
  *
+ * It matches the EVENT CODE, not the category. The `machine_api` category also
+ * holds `machine_api.callback_rejected` (a MAC callback whose job scope no
+ * longer matched) and `machine_api.internal_failure`, and neither says anything
+ * about the IP allowlist. Counting the category told an operator whose Ansible
+ * callback had raced a cancelled job to add that host to the allowlist it was
+ * already on, and left the real cause unexamined. Rows written before Etappe
+ * 10C carry no event code and are deliberately not guessed at from their text:
+ * a stale legacy row cannot claim a refusal happened in the last day.
+ *
  * @return list<array{ip: string, last_at: string, hits: int}>
  */
 function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400, int $limit = 5): array
 {
     $limit = max(1, min(50, $limit));
-    $category = VIRTUSPHERE_LOG_CATEGORY_MACHINE_API;
+    $eventCode = VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
     $stmt = $db->prepare(
         'SELECT ip, MAX(created_at) AS last_at, COUNT(*) AS hits
          FROM deploy_logs
-         WHERE category = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'
+         WHERE event_code = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'
          GROUP BY ip
          ORDER BY last_at DESC
          LIMIT ' . $limit
     );
-    $stmt->bind_param('si', $category, $withinSeconds);
+    $stmt->bind_param('si', $eventCode, $withinSeconds);
     $stmt->execute();
 
     $rows = [];

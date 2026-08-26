@@ -40,7 +40,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             // A full-mission download (VMs, NICs, disks, packages), allowed for any
             // signed-in user and therefore worth a record of who took a copy.
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'exported mission id ' . $missionId . ' ("' . audit_snippet($mission['mission_name']) . '") as JSON', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'exported',
+                'name' => (string) $mission['mission_name'],
+            ], (int) $user['id']);
             header('Content-Type: application/json; charset=utf-8');
             header('Content-Disposition: attachment; filename="mission-' . $safeName . '-' . date('Ymd-His') . '.json"');
             header('Content-Length: ' . strlen($json));
@@ -88,19 +91,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // that answers "who moved the mission to the wrong datastore". Notes are
             // opaque (value withheld, "changed" only).
             $missionDiff = audit_change_summary($mission, $missionChanges, ['mission_notes']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'updated mission id ' . $missionId . audit_change_note($missionDiff), (int) $user['id']);
+            $auditContext = ['action' => 'updated'];
+            if ($missionDiff !== '') {
+                $auditContext['changes'] = $missionDiff;
+            }
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
             flash_set('success', __t('mission_details.flash_saved'));
             redirect_to('mission_details.php?id=' . $missionId);
         }
         if ($action === 'clone_template') {
             $result = repo_clone_template_to_new_mission($connection, $missionId, request_string($_POST, 'target_mission_name'), (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'cloned template mission id ' . $missionId . ' to mission id ' . $result['target_mission_id'], (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'cloned_template',
+                'target_mission_id' => (int) $result['target_mission_id'],
+            ], (int) $user['id']);
             flash_set('success', __t('mission_details.flash_cloned', ['count' => (int) $result['created']]));
             redirect_to('mission_details.php?id=' . $result['target_mission_id']);
         }
         if ($action === 'save_as_template') {
             $result = repo_save_mission_as_template($connection, $missionId, request_string($_POST, 'target_template_name'), (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_MISSIONS, 'saved mission id ' . $missionId . ' as template mission id ' . $result['target_mission_id'], (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'saved_as_template',
+                'target_mission_id' => (int) $result['target_mission_id'],
+            ], (int) $user['id']);
             flash_set('success', __t('mission_details.flash_saved_as_template', ['count' => (int) $result['created']]));
             redirect_to('mission_details.php?id=' . $result['target_mission_id']);
         }

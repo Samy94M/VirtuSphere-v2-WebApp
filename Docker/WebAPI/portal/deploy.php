@@ -82,12 +82,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
             } elseif ($schedule['stagger'] !== null) {
                 $result = repo_enqueue_deploy_group($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc'], $schedule['stagger']);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'queued deploy group ' . $result['group_id'] . ' (' . $result['count'] . ' jobs)', (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_group', (string) $result['group_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'mission_id' => $missionIdPost,
+                    'job_count' => (int) $result['count'],
+                    'scheduled' => $schedule['base_utc'] !== null,
+                ], (int) $user['id']);
                 flash_set('success', __t('deploy.flash_group_queued', ['count' => $result['count']]));
                 redirect_to($redirectBase);
             } else {
                 $jobId = repo_create_deploy_job($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc']);
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'queued deploy job id ' . $jobId . ($schedule['base_utc'] !== null ? ' (scheduled)' : ''), (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'mission_id' => $missionIdPost,
+                    'scheduled' => $schedule['base_utc'] !== null,
+                ], (int) $user['id']);
                 if ($schedule['base_utc'] !== null) {
                     flash_set('success', __t('deploy.flash_scheduled'));
                     redirect_to($redirectBase);
@@ -103,11 +110,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $esxiId = request_int($_POST, 'credential_esxi_id');
             $vmId = request_int($_POST, 'vm_id');
             $adopted = repo_adopt_vm_identity($connection, $missionIdPost, $vmId, $esxiId);
-            audit(
+            audit_event(
                 $connection,
-                VIRTUSPHERE_LOG_CATEGORY_VMS,
-                'adopted ESXi identity for vm id ' . $vmId . ' from credential id ' . $esxiId
-                    . ' (moid ' . $adopted['vm_moid'] . ', instance uuid ' . $adopted['vm_instance_uuid'] . ')',
+                VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED,
+                'vm',
+                $vmId,
+                VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                [
+                    'credential_id' => $esxiId,
+                    'mission_id' => $missionIdPost,
+                    'moid' => (string) $adopted['vm_moid'],
+                    'instance_uuid' => (string) $adopted['vm_instance_uuid'],
+                ],
                 (int) $user['id']
             );
             flash_set('success', __t('deploy.identity_adopted', ['name' => $adopted['vm_name']]));
@@ -127,23 +141,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // still finishes the current step. One flash for each, because
             // "abgebrochen" for a playbook that is still executing is a lie.
             if ($cancelOutcome === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'requested cancel of deploy job id ' . $jobId, (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
                 flash_set('success', __t('deploy.flash_cancel_requested'));
             } else {
-                audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'cancelled deploy job id ' . $jobId, (int) $user['id']);
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'cancelled',
+                ], (int) $user['id']);
                 flash_set('success', __t('deploy.flash_cancelled'));
             }
             redirect_to($redirectBase);
         } elseif ($action === 'cancel_group') {
             $groupId = request_string($_POST, 'group_id');
             $count = repo_cancel_deploy_group($connection, $groupId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'cancelled deploy group ' . $groupId . ' (' . $count . ' jobs)', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_group', $groupId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'cancelled',
+                'job_count' => $count,
+            ], (int) $user['id']);
             flash_set('success', __t('deploy.flash_group_cancelled', ['count' => $count]));
             redirect_to($redirectBase);
         } elseif ($action === 'retry') {
             $jobId = request_int($_POST, 'job_id');
             $newJobId = repo_retry_deploy_job($connection, $jobId, (int) $user['id']);
-            audit($connection, VIRTUSPHERE_LOG_CATEGORY_DEPLOY, 'queued deploy job id ' . $newJobId . ' (retry of job id ' . $jobId . ')', (int) $user['id']);
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED, 'deploy_job', $newJobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'retry_of_job_id' => $jobId,
+            ], (int) $user['id']);
             flash_set('success', __t('deploy.flash_retried'));
             redirect_to(deploy_job_log_url($newJobId));
         } else {

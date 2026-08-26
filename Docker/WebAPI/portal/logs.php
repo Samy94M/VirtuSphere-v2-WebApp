@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/log_filter.php';
+require_once __DIR__ . '/../lib/logs_export.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
 if (!can('users.manage', $user)) {
@@ -15,106 +19,46 @@ if (!can('users.manage', $user)) {
 const LOGS_PER_PAGE = 50;
 
 $tabKeys = array_keys(VIRTUSPHERE_LOG_TABS);
-$tab = request_string($_GET, 'tab');
-if (!in_array($tab, $tabKeys, true)) {
-    $tab = $tabKeys[0];
-}
+// One validated struct for this request. The table below and the CSV export
+// both read their arguments out of it, so the download always answers the same
+// question as the screen it was started from (lib/log_filter.php).
+$filter = log_filter_from_query($_GET);
+$tab = $filter['tab'];
+$search = $filter['search'];
+$ip = $filter['ip'];
+$category = $filter['category'];
 $tabCategories = VIRTUSPHERE_LOG_TABS[$tab];
 $retentionDays = log_retention_days_for_tab($tab);
-
-$search = request_trimmed($_GET, 'q');
-$ip = request_trimmed($_GET, 'ip');
-// The category sub-filter is scoped to the active tab; anything outside it
-// (or the "all" placeholder) means "every category in this tab".
-$category = request_trimmed($_GET, 'category');
-if (!in_array($category, $tabCategories, true)) {
-    $category = '';
-}
-$activeCategories = $category !== '' ? [$category] : $tabCategories;
 
 // CSV list export: read-only GET download of the current tab + filters,
 // streams and exits before layout. Ignores pagination on purpose (the export
 // is "everything the filter matches", capped) and fetches its rows before the
 // audit insert so the download never contains its own audit row.
 if (($_GET['export'] ?? '') === 'csv') {
-    $csvRows = [];
-    for ($exportOffset = 0; $exportOffset < VIRTUSPHERE_LOG_EXPORT_MAX_ROWS; $exportOffset += 500) {
-        $chunk = repo_recent_logs($connection, 500, $exportOffset, $search, $ip, $activeCategories);
-        foreach ($chunk as $row) {
-            if (count($csvRows) >= VIRTUSPHERE_LOG_EXPORT_MAX_ROWS) {
-                break 2;
-            }
-            $csvRows[] = [
-                (string) ($row['id'] ?? ''),
-                portal_format_timestamp((string) ($row['created_at'] ?? '')),
-                log_category_label((string) ($row['category'] ?? '')),
-                (string) ($row['user_name'] ?? ($row['user_id'] ?? '')),
-                (string) ($row['ip'] ?? ''),
-                (string) ($row['log_message'] ?? ''),
-            ];
-        }
-        if (count($chunk) < 500) {
-            break;
-        }
-    }
-    $header = [
-        __t('logs.th_id'), __t('logs.th_time'), __t('logs.th_category'),
-        __t('logs.th_user'), __t('logs.th_ip'), __t('logs.th_message'),
-    ];
-    audit($connection, VIRTUSPHERE_LOG_CATEGORY_SYSTEM, 'exported logs tab ' . $tab . ' as CSV (' . count($csvRows) . ' row(s))', (int) $user['id']);
-    portal_send_csv('logs-' . $tab, $header, $csvRows);
+    logs_export_send_csv($connection, $filter, (int) $user['id']);
 }
 
 $page = max(1, request_int($_GET, 'page', 1));
-$total = repo_count_logs($connection, $search, $ip, $activeCategories);
+$total = repo_count_logs($connection, ...log_filter_repo_args($filter));
+$exportBounds = log_filter_export_bounds($total);
 $totalPages = max(1, (int) ceil($total / LOGS_PER_PAGE));
 $page = min($page, $totalPages);
 $offset = ($page - 1) * LOGS_PER_PAGE;
-$rows = repo_recent_logs($connection, LOGS_PER_PAGE, $offset, $search, $ip, $activeCategories);
+$rows = repo_recent_logs($connection, LOGS_PER_PAGE, $offset, ...log_filter_repo_args($filter));
 
-$pageUrl = static function (int $targetPage) use ($tab, $search, $ip, $category): string {
-    $query = ['tab' => $tab, 'page' => $targetPage];
-    if ($search !== '') {
-        $query['q'] = $search;
-    }
-    if ($ip !== '') {
-        $query['ip'] = $ip;
-    }
-    if ($category !== '') {
-        $query['category'] = $category;
-    }
-    return 'logs.php?' . http_build_query($query);
-};
+$pageUrl = static fn (int $targetPage): string => log_filter_url($filter, ['page' => $targetPage]);
 
 // Same filter set as $pageUrl, but no page: the export always starts at the
 // newest matching row.
-$exportUrl = static function () use ($tab, $search, $ip, $category): string {
-    $query = ['tab' => $tab];
-    if ($search !== '') {
-        $query['q'] = $search;
-    }
-    if ($ip !== '') {
-        $query['ip'] = $ip;
-    }
-    if ($category !== '') {
-        $query['category'] = $category;
-    }
-    $query['export'] = 'csv';
-    return 'logs.php?' . http_build_query($query);
-};
+$exportUrl = static fn (): string => log_filter_url($filter, ['export' => 'csv']);
 
 // Switching tabs keeps the free-text/IP filters but drops the tab-scoped
 // category and resets pagination.
-$tabUrl = static function (string $targetTab) use ($search, $ip): string {
-    $query = ['tab' => $targetTab];
-    if ($search !== '') {
-        $query['q'] = $search;
-    }
-    if ($ip !== '') {
-        $query['ip'] = $ip;
-    }
-    return 'logs.php?' . http_build_query($query);
-};
+$tabUrl = static fn (string $targetTab): string => log_filter_url(
+    [...$filter, 'tab' => $targetTab],
+    [],
+    false
+);
 
 layout_header(__t('logs.title'), $user, 'logs');
 ?>
@@ -143,6 +87,12 @@ layout_header(__t('logs.title'), $user, 'logs');
                 <?php if ($rows !== []) { ?><a class="button button-secondary" href="<?php echo h($exportUrl()); ?>"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
             </div>
         </form>
+        <?php if ($rows !== [] && $exportBounds['truncated']) { ?>
+            <p class="muted" data-export-truncated="1"><?php echo h(__t('logs.export_truncated_note', [
+                'limit' => $exportBounds['limit'],
+                'total' => $total,
+            ])); ?></p>
+        <?php } ?>
     </section>
     <section class="panel">
         <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?></p>

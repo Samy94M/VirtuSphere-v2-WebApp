@@ -200,3 +200,58 @@ Provider, Site-Code und Berichtsintervall (`MECM_ProviderMachine`,
 `SiteHealthIntervalSeconds`) sind Registry-owned in
 `HKLM:\SOFTWARE\VirtuSphere\MECM`, keine Portal-Settings. Keine Machine-API- oder
 PowerShell-Wire-Form der Bestandsendpunkte ändert sich.
+
+## Amendment (2026-08-26, Etappe 10C): the no-spam rule survives the audit rewrite
+
+Point 6 above introduced the `mecm` category and, with it, the rule that a
+heartbeat is telemetry and never an audit row. Etappe 10C restructured every
+audit producer in the product, which is exactly the kind of change that quietly
+converts a rule into a former rule, so it is restated here with the mechanism
+that now carries it.
+
+**No wire change.** `heartbeat`, `reportPhase` and `reportRun` keep their
+payloads, their status codes, their token gate and their display-only semantics.
+Nothing in this amendment touches the endpoints' contract with the PowerShell
+scripts.
+
+**Still no audit row per report.** A successful `heartbeat` and a successful
+`reportRun` write nothing to `deploy_logs`. The three sync tasks report on an
+interval, so one line per report would bury every real event under thousands of
+routine ones. The two branches are read directly by
+`AuditProducerContractTest::testNormalHeartbeatsAndRunReportsProduceNoAuditRow`,
+which fails the build the moment either grows a producer. `reportRun` may audit
+exactly one thing, and only under its own ratchet: the one-time switch from
+legacy heartbeats to V2 result reports (`mecm.reporter_upgraded`, result
+`recovered`), which fires at most once per source.
+
+**The throttle is structured now.** `machine_api_audit_warning()` no longer
+accepts a tag, a message or a category; it takes an event code, an object, a
+result, a typed context and a throttle scope, and resolves category and
+description through the registry. The throttle key is
+(category, event code, scope), the scope is normally the client IP, and the
+count of what was swallowed travels in the context as `suppressed_count`
+alongside `throttle_seconds` rather than only inside a sentence. A reader that
+has to parse prose to learn how many events a line stands for is back at the
+free-text audit this replaced.
+
+Two scopes are deliberately not the IP. The client-event cap
+(`mecm.client_event_cap_reached`) is scoped per VM, because deploy VMs can
+share an address and one VM at its cap must not silence the first cap of
+another. The MAC callback rejection is scoped per job for the same reason.
+
+**A refusal is counted by its event, not by its category.** `machine_api` also
+holds `machine_api.callback_rejected` and `machine_api.internal_failure`, and
+neither says anything about the IP allowlist.
+`repo_recent_machine_api_denials()` now matches `machine_api.access_denied`
+exactly. Before that, an Ansible callback that raced a cancelled job appeared on
+the System status as a refused machine access, and the operator was told to add
+a host to an allowlist it was already on. Historical rows carry no event code
+and are deliberately not guessed at from their text: a stale legacy row must not
+be able to claim a refusal happened in the last day.
+
+**A recovery is announced once per incident window, at most.** The maintenance
+worker audits an integration transition only when the state actually changes,
+and the benign ok/legacy flutter of a script rollout stays unlogged. Its
+category now comes from the registry's closed source map instead of from
+"maintenance, or else `mecm`": the first non-MECM source added under the old
+rule would have filed its outage in the tab an operator opens to read MECM sync.

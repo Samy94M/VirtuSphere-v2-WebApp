@@ -47,6 +47,37 @@ foreach (array_slice(array_values((array) ($_SERVER['argv'] ?? [])), 1) as $arg)
 $envRoot = getenv('VIRTUSPHERE_CHECK_ROOT');
 $root = is_string($envRoot) && $envRoot !== '' ? $envRoot : dirname(__DIR__);
 
+// The audit context cap crosses the application/database boundary. Both SQL
+// sources must carry literals because MySQL cannot read PHP constants and GROK
+// forbids interpolated query strings. Prove that both mirrors are readable and
+// equal the application SSoT.
+$auditRegistryPath = $root . '/Docker/WebAPI/lib/audit_registry.php';
+$auditMigrationPath = $root . '/Docker/WebAPI/lib/migrations/0044_structured_audit_events.php';
+$freshSchemaPath = $root . '/Docker/mysql/mysql-init/struktur.sql';
+$auditRegistrySource = is_file($auditRegistryPath) ? (string) file_get_contents($auditRegistryPath) : '';
+$auditMigrationSource = is_file($auditMigrationPath) ? (string) file_get_contents($auditMigrationPath) : '';
+$freshSchemaSource = is_file($freshSchemaPath) ? (string) file_get_contents($freshSchemaPath) : '';
+
+if (!preg_match('/^const\s+VIRTUSPHERE_AUDIT_CONTEXT_MAX_BYTES\s*=\s*([0-9]+)\s*;/m', $auditRegistrySource, $auditContextConstant)
+    || !preg_match('/OCTET_LENGTH\(context_json\)\s*<=\s*([0-9]+)/', $auditMigrationSource, $auditContextMigration)) {
+    echo "check-bounds-sync: audit context SSoT or migration mirror is unreadable.\n";
+    echo "  [bounds-sync.audit-context-unreadable] registry/migration must expose the canonical context byte cap.\n";
+    exit(1);
+}
+if (!preg_match('/OCTET_LENGTH\(context_json\)\s*<=\s*([0-9]+)/', $freshSchemaSource, $auditContextSchema)) {
+    echo "check-bounds-sync: fresh schema has no readable audit context cap.\n";
+    echo "  [bounds-sync.audit-context-zero-match] struktur.sql must mirror VIRTUSPHERE_AUDIT_CONTEXT_MAX_BYTES.\n";
+    exit(1);
+}
+if ((int) $auditContextConstant[1] !== (int) $auditContextMigration[1]
+    || (int) $auditContextConstant[1] !== (int) $auditContextSchema[1]) {
+    echo "check-bounds-sync: audit context byte caps diverge.\n";
+    echo '  [bounds-sync.audit-context-drift] application=' . (int) $auditContextConstant[1]
+        . ' migration=' . (int) $auditContextMigration[1]
+        . ' fresh-schema=' . (int) $auditContextSchema[1] . "\n";
+    exit(1);
+}
+
 // Constants are not all in constants.php: the mission import TTL lives next to
 // the importer, the SSH timeouts next to the SSH client. Parse every lib file
 // that declares one, rather than loading a hand-picked few, so a constant in a

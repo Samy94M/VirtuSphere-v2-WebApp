@@ -152,7 +152,7 @@ final class DeployJobOutputLimitsTest extends TestCase
         }
         // The rest of the evidence survives: redaction must not shred the line
         // the operator needs in order to see WHAT was rejected.
-        self::assertStringContainsString('fatal: password=*** rejected', $ops->logs[0]['line']);
+        self::assertStringContainsString('fatal: password=[redacted] rejected', $ops->logs[0]['line']);
     }
 
     /**

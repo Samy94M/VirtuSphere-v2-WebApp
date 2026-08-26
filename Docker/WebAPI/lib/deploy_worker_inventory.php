@@ -9,6 +9,7 @@ require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_capabilities.php';
+require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
@@ -205,10 +206,13 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             );
             repo_esxi_inventory_record_failure($db, $credentialId, $category, $jobId);
             if ($isOnset) {
-                audit($db, VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, 'esxi inventory auto-pull paused for credential id ' . $credentialId . ' after an authentication failure; save the credential to resume', null, 'cli');
+                audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+                    'action' => 'paused',
+                    'reason' => 'authentication failure; save the credential to resume',
+                ], null, 'cli');
             }
         } catch (Throwable $stateError) {
-            error_log('[inventory] state update failed: ' . $stateError->getMessage());
+            error_log('[inventory] state update failed: ' . virtusphere_redact_log_text($stateError->getMessage()));
         }
         $message = '[' . $category . '] ' . deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);

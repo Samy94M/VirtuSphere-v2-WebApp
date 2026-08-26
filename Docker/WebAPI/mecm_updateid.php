@@ -58,10 +58,12 @@ if ($action === 'reportMembership') {
         if (!$vmExists) {
             machine_api_audit_warning(
                 $connection,
-                'mecm_updateid',
-                'Membership report for unknown VM id ' . $vmId,
-                $clientIp,
-                VIRTUSPHERE_LOG_CATEGORY_MECM
+                VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM,
+                'vm',
+                $vmId,
+                VIRTUSPHERE_AUDIT_RESULT_WARNING,
+                ['report_type' => 'membership'],
+                $clientIp
             );
             machine_api_json(['error' => 'Unknown VM id'], 404);
         }
@@ -71,7 +73,7 @@ if ($action === 'reportMembership') {
     } catch (JsonException) {
         machine_api_json(['error' => 'Invalid JSON body'], 400);
     } catch (Throwable $exception) {
-        machine_api_log_warning('mecm_updateid', $exception::class . ': ' . $exception->getMessage());
+        machine_api_audit_warning($connection, VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE, 'machine_endpoint', 'mecm_updateid.php', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['error_class' => $exception::class], $clientIp);
         machine_api_json(['error' => 'Interner Serverfehler'], 500);
     }
 }
@@ -97,10 +99,12 @@ try {
     if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId)) {
         machine_api_audit_warning(
             $connection,
-            'mecm_updateid',
-            'ResourceID ' . $mecmId . ' reported for unknown VM id ' . $vmId,
-            $clientIp,
-            VIRTUSPHERE_LOG_CATEGORY_MECM
+            VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM,
+            'vm',
+            $vmId,
+            VIRTUSPHERE_AUDIT_RESULT_WARNING,
+            ['report_type' => 'resource_id', 'resource_id' => $mecmId],
+            $clientIp
         );
         machine_api_json(['error' => 'Unknown VM id'], 404);
     }
@@ -109,6 +113,6 @@ try {
 } catch (JsonException) {
     machine_api_json(['error' => 'Invalid JSON body'], 400);
 } catch (Throwable $exception) {
-    machine_api_log_warning('mecm_updateid', $exception::class . ': ' . $exception->getMessage());
+    machine_api_audit_warning($connection, VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE, 'machine_endpoint', 'mecm_updateid.php', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['error_class' => $exception::class], $clientIp);
     machine_api_json(['error' => 'Interner Serverfehler'], 500);
 }

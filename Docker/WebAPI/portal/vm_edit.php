@@ -91,13 +91,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // must never claim a change that was not persisted. The legacy vm_disk
         // summary and the free-text notes are withheld; interfaces, disks and
         // packages are child rows and out of this scalar diff.
-        $vmNote = '';
+        $auditContext = ['action' => $vmId > 0 ? 'updated' : 'created', 'mission_id' => $missionId];
         if ($vmId > 0) {
             $savedVm = repo_get_vm_bundle($connection, $savedVmId) ?? [];
             $auditColumns = array_diff_key($vmData, array_flip(['vm_disk', 'vm_notes']));
-            $vmNote = audit_change_note(audit_change_summary((array) $vm, array_intersect_key($savedVm, $auditColumns)));
+            $changes = audit_change_summary((array) $vm, array_intersect_key($savedVm, $auditColumns));
+            // An edit that changed nothing still gets a row (with optimistic
+            // locking a no-op save is a real event), it just carries no diff:
+            // an empty `changes` string is not a value the registry accepts.
+            if ($changes !== '') {
+                $auditContext['changes'] = $changes;
+            }
         }
-        audit($connection, VIRTUSPHERE_LOG_CATEGORY_VMS, ($vmId > 0 ? 'updated' : 'created') . ' vm id ' . $savedVmId . ' in mission id ' . $missionId . $vmNote, (int) $user['id']);
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
         flash_set('success', __t('vm_edit.flash_saved'));
         // A registered VM is one MECM already holds, and the device-sync only
         // looks at VMs it does not. So a package or OS change made here is stored

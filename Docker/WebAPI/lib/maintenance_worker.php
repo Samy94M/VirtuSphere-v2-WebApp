@@ -56,7 +56,7 @@ function maintenance_worker_main(array $argv): int
             if ($options['once']) {
                 throw $exception;
             }
-            fwrite(STDERR, '[maintenance-worker] Database error, reconnecting: ' . $exception->getMessage() . "\n");
+            fwrite(STDERR, '[maintenance-worker] Database error, reconnecting: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
             $db = maintenance_worker_connect_db($options);
             // Sleep before retrying: `continue` skipped it, so a PERMANENT SQL
             // error turned this loop into a hot spin that reconnected and failed
@@ -92,7 +92,7 @@ function maintenance_worker_connect_db(array $options): mysqli
             if ($maxAttempts > 0 && $attempt >= $maxAttempts) {
                 throw $exception;
             }
-            fwrite(STDERR, '[maintenance-worker] Database not reachable (attempt ' . $attempt . '): ' . $exception->getMessage() . "\n");
+            fwrite(STDERR, '[maintenance-worker] Database not reachable (attempt ' . $attempt . '): ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
             // Waiting out a DB restart is a healthy worker state (AP8).
             worker_heartbeat_touch();
             sleep(min(30, 2 * $attempt));

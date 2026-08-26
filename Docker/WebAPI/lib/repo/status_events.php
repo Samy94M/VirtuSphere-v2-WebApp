@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../status.php';
+require_once __DIR__ . '/../log_redaction.php';
 
 /**
  * Records one state transition. The insert is best-effort by design: the state
@@ -31,7 +32,7 @@ function repo_record_vm_status_event(mysqli $db, int $vmId, string $lifecycleSta
         }
 
         $refId = function_exists('virtusphere_error_reference') ? virtusphere_error_reference() : 'no-ref';
-        error_log(sprintf(
+        error_log(virtusphere_redact_log_text(sprintf(
             '[status_events] ref=%s skipped vm_id=%d lifecycle=%s mecm=%s legacy=%s: %s',
             $refId,
             $vmId,
@@ -39,7 +40,7 @@ function repo_record_vm_status_event(mysqli $db, int $vmId, string $lifecycleSta
             $mecmSyncState,
             $legacyStatus,
             $exception->getMessage()
-        ));
+        )));
     }
 }
 

@@ -50,6 +50,10 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_finish_job',
         'deploy_terminal_reason_for_exception',
         'deploy_worker_audit_outcome',
+        // Etappe 10C: the terminal status maps to a closed audit result here
+        // rather than inside the audit call, so the mapping is testable without
+        // a database and a new status cannot silently become "success".
+        'deploy_worker_outcome_audit_result',
         'deploy_worker_refresh_inventory_after_deploy',
         'deploy_worker_mark_vms_deploying',
         'deploy_worker_restore_deploying_vms',
