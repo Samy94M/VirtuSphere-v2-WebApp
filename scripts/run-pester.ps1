@@ -131,8 +131,10 @@ if (-not $SkipTests) {
     }
     $coveragePaths = @(
         (Join-Path (Join-Path $scriptRoot 'mecm') 'VirtuSphere-Common.ps1'),
+        (Join-Path (Join-Path $scriptRoot 'mecm') 'VirtuSphere-Logging.ps1'),
         (Join-Path (Join-Path $scriptRoot 'mecm') 'VirtuSphere-ClientPackaging.ps1'),
-        (Join-Path (Join-Path $scriptRoot 'clients') 'VirtuSphere-Client-Common.ps1')
+        (Join-Path (Join-Path $scriptRoot 'clients') 'VirtuSphere-Client-Common.ps1'),
+        (Join-Path (Join-Path $scriptRoot 'clients') 'VirtuSphere-Client-Logging.ps1')
     )
     if ($null -ne $coverageFloor) {
         $config.CodeCoverage.Enabled = $true

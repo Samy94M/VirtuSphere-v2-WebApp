@@ -46,49 +46,20 @@ $script:VsDefaultScheme = 'http'
 $script:VsAllowSelfSignedTls = $false
 
 $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
-# Aus der Umgebung, nicht hart verdrahtet: auf einem System mit verschobenem
-# oder anders benanntem Programmverzeichnis (lokalisiertes Windows, umgezogenes
-# ProgramFiles) legte der Client sein Log sonst neben das, was alle anderen
-# Teile benutzen. Derselbe Fallback wie auf der Serverseite.
-$script:VsLogDir = if ($env:ProgramFiles) {
-    Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
-} else {
-    Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs'
-}
-$script:VsLogComponent = 'client'
 $script:VsResolvedApi = $null
 
-function Initialize-VsClientLog {
-    param([Parameter(Mandatory)][string]$Component)
-    $script:VsLogComponent = $Component
-    if (-not (Test-Path $script:VsLogDir)) {
-        New-Item -ItemType Directory -Path $script:VsLogDir -Force | Out-Null
-    }
+# Die Client-Loggingdomaene wird gemeinsam mit jeder Phase paketiert. Common
+# bleibt der oeffentliche Dot-Source-Pfad, verweigert aber einen unvollstaendigen
+# oder versionsgemischten Paketordner sichtbar vor der ersten Phasenaktion.
+$script:VsExpectedClientLoggingContractVersion = 1
+$clientLoggingModule = Join-Path $PSScriptRoot 'VirtuSphere-Client-Logging.ps1'
+if (-not (Test-Path $clientLoggingModule)) {
+    throw ('VirtuSphere-Client-Logging-Modul fehlt: {0}. Clientpaket neu verteilen.' -f $clientLoggingModule)
 }
-
-function Write-VsClientLog {
-    param(
-        [Parameter(Mandatory)][string]$Message,
-        [ValidateSet('INFO', 'WARN', 'ERROR')][string]$Level = 'INFO'
-    )
-    $line = '{0} | {1,-5} | {2} | {3}' -f (Get-Date -Format 'o'), $Level, $script:VsLogComponent, $Message
-    Write-Output $line
-    try {
-        $file = Join-Path $script:VsLogDir ('{0}_{1}.log' -f (Get-Date -Format 'yyyyMMdd'), $script:VsLogComponent)
-        Add-Content -Path $file -Value $line -Encoding UTF8
-        Invoke-VsClientLogRetention
-    } catch { Write-Debug $_ }
-}
-
-function Invoke-VsClientLogRetention {
-    $marker = Join-Path $script:VsLogDir ('.cleanup_{0}' -f $script:VsLogComponent)
-    if ((Test-Path $marker) -and ((Get-Date) - (Get-Item $marker).LastWriteTime).TotalDays -lt 1) { return }
-    try {
-        $cutoff = (Get-Date).AddDays(-30)
-        Get-ChildItem -Path $script:VsLogDir -Filter '*.log' -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt $cutoff } | Remove-Item -Force -ErrorAction SilentlyContinue
-        Set-Content -Path $marker -Value (Get-Date -Format 'o') -Encoding UTF8
-    } catch { Write-Debug $_ }
+. $clientLoggingModule
+$clientLoggingVersion = Get-VsClientLoggingContractVersion
+if ($clientLoggingVersion -ne $script:VsExpectedClientLoggingContractVersion) {
+    throw ('VirtuSphere-Client-Logging-Modul hat Version {0}, erwartet wird {1}. Clientpaket vollstaendig aktualisieren.' -f $clientLoggingVersion, $script:VsExpectedClientLoggingContractVersion)
 }
 
 # --- WebAPI-Adresse aufloesen (Fallback-Kette) ------------------------------
@@ -131,6 +102,12 @@ function Get-VsApiUrl {
         [Parameter(Mandatory)][string]$Path     # z.B. /mecm-api.php?action=...
     )
     return ('{0}://{1}{2}' -f (Get-VsApiScheme), $Api, $Path)
+}
+
+# Additiver Diagnoseheader (ADR-0032). Er aendert kein JSON-Feld und keine
+# Authentisierung: der Client bleibt ueber seine bekannte MAC autorisiert.
+function Get-VsClientApiHeaders {
+    return @{ 'X-VirtuSphere-Correlation' = (Get-VsClientCorrelationId) }
 }
 
 # TLS-Vorbereitung fuer PS 5.1: das Framework spricht per Default noch SSL3/TLS1,
@@ -266,7 +243,7 @@ function Confirm-VsClientReady {
 
     $body = @{ mac = $Mac } | ConvertTo-Json
     $response = Invoke-RestMethod -Uri (Get-VsApiUrl -Api $Api -Path '/mecm_client_ack.php') -Method Post `
-        -ContentType 'application/json' -Body $body -TimeoutSec 10
+        -ContentType 'application/json' -Body $body -Headers (Get-VsClientApiHeaders) -TimeoutSec 10
     if (-not $response -or -not $response.success) {
         throw 'Client-Ready-ACK wurde von der WebApp nicht bestaetigt.'
     }
@@ -292,13 +269,14 @@ function Send-VsPhase {
         $body = @{ mac = $Mac; phase = $Phase; event = $PhaseEvent }
         if ($Detail) { $body['detail'] = $Detail }
         Invoke-RestMethod -Uri (Get-VsApiUrl -Api $api -Path '/mecm_report.php?action=reportPhase') -Method Post `
-            -ContentType 'application/json' -Body ($body | ConvertTo-Json) -TimeoutSec 5 | Out-Null
+            -ContentType 'application/json' -Body ($body | ConvertTo-Json) -Headers (Get-VsClientApiHeaders) -TimeoutSec 5 | Out-Null
     } catch {
         # Rueckkanal ist best effort - Client kann durch VLAN-Wechsel offline sein.
         # Trotzdem ins Dateilog, sonst ist ein dauerhaft stiller Rueckkanal
         # (falscher Token, IP nicht freigegeben, Portal auf HTTPS umgestellt)
         # auf dem Client nicht diagnostizierbar.
-        Write-VsClientLog -Level WARN ("reportPhase '{0}/{1}' nicht zugestellt: {2}" -f $Phase, $PhaseEvent, (Get-VsErrorDetail -ErrorRecord $_))
+        Write-VsClientLog -Level WARN -Context ("{0}/{1}" -f $Phase, $PhaseEvent) `
+            -Message ("reportPhase nicht zugestellt: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
     }
 }
 

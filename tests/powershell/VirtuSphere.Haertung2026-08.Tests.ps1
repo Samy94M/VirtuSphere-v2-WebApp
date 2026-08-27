@@ -29,10 +29,12 @@ BeforeAll {
     $script:ClientsDir = Join-Path $script:PsRoot 'clients'
 
     $script:MecmCommon    = Join-Path $script:MecmDir 'VirtuSphere-Common.ps1'
+    $script:MecmLogging   = Join-Path $script:MecmDir 'VirtuSphere-Logging.ps1'
     $script:DeviceSync    = Join-Path $script:MecmDir 'mecm_new-device-sync.ps1'
     $script:PackagesSync  = Join-Path $script:MecmDir 'mecm_Packages-TaskSeq-sync.ps1'
     $script:Autoimporter  = Join-Path $script:MecmDir 'mecm_autoimporter.ps1'
     $script:ClientCommon  = Join-Path $script:ClientsDir 'VirtuSphere-Client-Common.ps1'
+    $script:ClientLogging = Join-Path $script:ClientsDir 'VirtuSphere-Client-Logging.ps1'
     $script:GetInfo       = Join-Path $script:ClientsDir 'client_getinfo.ps1'
     $script:Hostname      = Join-Path $script:ClientsDir 'client_hostname.ps1'
     $script:StaticIp      = Join-Path $script:ClientsDir 'client_staticip.ps1'
@@ -486,7 +488,7 @@ Describe 'E11 - Sammeletappe' -Tag 'Haertung' {
         # tut sie ueber $script:VsLogRoot ohnehin, und der Test war gruen, ohne
         # etwas zu pruefen. Die Frage ist, ob Write-VsLog sie bei JEDER Zeile
         # ruft.
-        $ast = Get-PsAst -Path $script:MecmCommon
+        $ast = Get-PsAst -Path $script:MecmLogging
         $fn = Find-Ast -Ast $ast `
             -Type ([System.Management.Automation.Language.FunctionDefinitionAst]) `
             -Where { $_.Name -eq 'Invoke-VsLogRetention' }
@@ -574,7 +576,7 @@ Describe 'E11 - Sammeletappe' -Tag 'Haertung' {
     It 'E11.9 - der Client-Logpfad kommt aus der Umgebung' {
         # Hart auf C:\Program Files verdrahtet, waehrend die Serverseite
         # $env:ProgramFiles benutzt.
-        Get-PsCodeText -Path $script:ClientCommon | Should -Match '\$env:ProgramFiles'
+        Get-PsCodeText -Path $script:ClientLogging | Should -Match '\$env:ProgramFiles'
     }
 
     It 'E11.10 - ein RAW-Datentraeger ohne Groesse wird benannt statt mitgezaehlt' {

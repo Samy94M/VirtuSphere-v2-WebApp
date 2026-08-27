@@ -104,6 +104,11 @@ declare(strict_types=1);
             </ul>
             <p><?php echo h(__t('help_system_status.clientphases_p2', ['minutes' => intdiv(VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help_system_status.clientphases_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.clientphases_p4', [
+                'message_bytes' => VIRTUSPHERE_POWERSHELL_LOG_MESSAGE_MAX_BYTES,
+                'line_bytes' => VIRTUSPHERE_POWERSHELL_LOG_LINE_MAX_BYTES,
+                'days' => VIRTUSPHERE_POWERSHELL_LOG_RETENTION_DAYS,
+            ])); ?></p>
         </section>
 
         <section class="panel">

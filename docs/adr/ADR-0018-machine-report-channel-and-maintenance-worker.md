@@ -255,3 +255,21 @@ and the benign ok/legacy flutter of a script rollout stays unlogged. Its
 category now comes from the registry's closed source map instead of from
 "maintenance, or else `mecm`": the first non-MECM source added under the old
 rule would have filed its outage in the tab an operator opens to read MECM sync.
+
+## Amendment (2026-08-27, Etappe 10D): local log-sink health stays local
+
+The PowerShell server and client packages now make a temporarily unavailable
+file sink visible with one local `Write-Warning` per outage and one local
+recovery message. That state is intentionally not another report-channel event:
+it does not call `heartbeat`, `reportPhase` or `reportRun`, and the WebAPI does
+not create an audit row for it. Otherwise a broken disk or ACL would multiply
+network traffic and audit volume at exactly the point where local diagnostics
+are already degraded.
+
+The existing report payloads, authentication, status codes, deduplication and
+display-only lifecycle boundary are unchanged. A per-process correlation ID is
+only an additive `X-VirtuSphere-Correlation` request header on paths that already
+send a request. It is diagnostic metadata, not authentication, and it never
+causes a request of its own. Pester pins the legacy heartbeat JSON and the
+client phase/ready-ACK JSON independently from that header; the audit contract
+continues to pin that routine heartbeat and `reportRun` traffic is audit-free.

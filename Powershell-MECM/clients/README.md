@@ -2,7 +2,8 @@
 
 Diese Skripte laufen auf den per PXE frisch installierten Windows-Clients und
 werden über das MECM-Software-Center als Anwendungen verteilt. Sie teilen sich
-`VirtuSphere-Client-Common.ps1` (Adressfindung, Logging, Rückkanal).
+`VirtuSphere-Client-Common.ps1` (Adressfindung und Rückkanal) sowie das lokal
+mitgelieferte, versionierte `VirtuSphere-Client-Logging.ps1`.
 
 ## Reihenfolge (über MECM-Anwendungsabhängigkeiten)
 
@@ -86,9 +87,12 @@ den Rückgabecode **1641** als „Erfolg mit Neustart" konfigurieren.
 `install-VirtuSphere-Clients.ps1` (im `Powershell-MECM`-Wurzelordner) legt diese
 vier Applikationen im Konsolen-Ordner `VirtuSphere_Core` an, **falls sie fehlen**
 (Self-Healing; bestehende Apps bleiben unangetastet), stellt je Ordner das
-Client-Skript **plus** `VirtuSphere-Client-Common.ps1` bereit (ersetzt bestehende
-Dateien) und verteilt den Content an eine DP-Gruppe. Es legt **kein** Deployment
-an eine Collection an — das entscheidet der Admin.
+Client-Skript **plus** `VirtuSphere-Client-Common.ps1` **plus**
+`VirtuSphere-Client-Logging.ps1` bereit, ersetzt diese drei Dateien beim Upgrade
+als einen SHA-256-geprüften Paketsatz per atomarem Verzeichnis-Swap und rollt bei
+einem Aktivierungsfehler den vollständigen Altstand zurück. Danach verteilt es
+den Content an eine DP-Gruppe.
+Es legt **kein** Deployment an eine Collection an — das entscheidet der Admin.
 
 ```powershell
 .\install-VirtuSphere-Clients.ps1 -ContentShare \\MECM-SERVER\VirtuSphere\Base\Packages
@@ -102,8 +106,14 @@ WebAPI-Name wird **nicht** vom Installer in die Common-ps1 gestempelt; die zuvor
 geprüfte Common-Datei wird unverändert als Content übernommen und verwendet ihre
 Registry-/DNS-/IP-Fallback-Kette.
 
-**Logs:** `C:\Program Files\VirtuSphere\Logs\<datum>_<phase>.log` (30 Tage
-Aufbewahrung).
+**Logs:** `C:\Program Files\VirtuSphere\Logs\yyyy-MM-dd_<phase>.log` mit
+`ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID`. Dieser
+Vertrag, seine UTF-8-sicheren Grenzen, Secret-Redigierung, Level und 30 Tage
+Aufbewahrung sind gespiegelt zum Servermodul und durch Pester gepinnt. Eine
+Korrelations-ID gilt pro Prozess und reist bei Phasenmeldung und Client-Ready-ACK
+nur als additiver Diagnoseheader; der JSON-Body bleibt unverändert. Ein defekter
+Dateisink stoppt die Phase nicht und meldet lokal höchstens einmal die Störung
+sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
 
 ## Wichtige Verhaltensdetails
 

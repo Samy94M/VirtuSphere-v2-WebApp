@@ -84,9 +84,9 @@ const FILE_SIZE_ALLOWANCES = [
     // instead of gaining an entry, because a file that has never had one should
     // not acquire one for four extra lines.
     // Raised: deploy.php 667->688, settings.php 952->984, credentials.php
-    // 451->479, vm_edit.php 514->520, constants.php 603->634 (the audit event
-    // registry's endpoint list and report-channel version), migrate.php
-    // 1220->1222 (migration 0044).
+    // 451->479, vm_edit.php 514->520, constants.php 603->641 (the audit event
+    // registry's endpoint list/report-channel version plus the Etappe-10D
+    // PowerShell log help mirrors), migrate.php 1220->1222 (migration 0044).
     'Docker/WebAPI/portal/deploy.php' => [
         'lines' => 688,
         'why' => 'POST dispatch, view model, queue form and job list; grows further with the live blocker model',
@@ -126,7 +126,7 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 634,
+        'lines' => 641,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],

@@ -55,6 +55,34 @@ production. Three additions close that gap:
   scripts stay unmeasured by design — an endless loop cannot be loaded by a
   test, which is why their logic lives in the Common files (see Decision).
 
+## Amendment 2 (2026-08-27, Etappe 10D): mirrored logging, separate runtime packages
+
+Server and client still cannot share a runtime file: the server package lives on
+the MECM host while each client application is distributed independently to a
+new VM. Their logging implementations therefore move out of the two Common
+facades into `mecm/VirtuSphere-Logging.ps1` and
+`clients/VirtuSphere-Client-Logging.ps1`, but expose a mirrored, explicitly
+versioned contract. Pester compares version, levels, six-field schema, daily
+filename, UTF-8 byte bounds, redaction and retention settings as one object.
+
+Each Common facade hard-fails before runtime work when its adjacent module is
+missing or has another contract version. The server installer stages every
+server script, verifies SHA-256 and reads the staged literal contract versions
+through the PowerShell AST without executing stateful staged files. It then
+disables all existing triggers and stops running tasks fail-closed before moving
+the logging module ahead of the Common facade. Client packaging stages and
+hashes the phase script, Common facade and logging module as a sibling directory,
+then activates the complete set through a same-volume directory swap for fresh
+installs and upgrades; an activation error rolls the previous directory back.
+This is package completeness, not a new cross-machine shared dependency.
+
+File-sink errors remain non-fatal to the business action and are throttled to
+one local outage warning and one recovery message. Cleanup is due once per 24
+hours, retains the exact 30-day boundary and uses a shared marker plus an
+exclusive lock across parallel processes. The coverage ratchet now includes the
+two logging modules in addition to the Common and Packaging files. Wire JSON is
+unchanged; the per-process correlation ID is an additive diagnostic header only.
+
 ## Alternatives considered
 
 - **Merge the two PowerShell MAC twins into one shared file.** Rejected: the MECM scripts are installed to `%ProgramFiles%\VirtuSphere\mecm` on the SCCM server, the client scripts are packaged into MECM applications and shipped to the VMs. They have no common deployment root. The vector table plus a textual twin-check gives the same guarantee without inventing a shared deployment path.

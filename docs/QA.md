@@ -444,7 +444,31 @@ Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
 
 Windows ships Pester **3.4** in the box, whose syntax is incompatible; the script refuses to run against it and says so. If `Install-Module` fails with a NuGet provider error, force TLS 1.2 first (`[Net.ServicePointManager]::SecurityProtocol = 'Tls12'`) — Windows PowerShell 5.1 still negotiates TLS 1.0 by default and the gallery no longer accepts it.
 
-This one **does run in CI**, twice (AP5): under `pwsh` on `ubuntu-latest` in the Fast lane, and under real `powershell.exe` 5.1 in the `windows-powershell-51` job — the engine the scripts run on in production. Only the Windows job executes the registry-backed error-path tests (`VirtuSphere.ErrorPaths.Tests.ps1`: lost/broken registry values, address chain, scheme override) and enforces the coverage ratchet over the Common/Packaging files (`pesterCoverageFloorPercent` in `scripts/tool-lock.json`; the floor only ever rises). PSScriptAnalyzer additionally runs the compatibility rules (syntax 5.1+7.0, commands/types against the Server-2019/5.1 profile), so a cmdlet or .NET type that 5.1 does not know fails the build instead of failing at night as SYSTEM. Still manual by design (Release lane / staging, rollout step 10): SYSTEM smoke in a throwaway Windows VM, the installer lifecycle on a real host, and an MECM staging acceptance.
+This one **does run in CI**, twice (AP5): under `pwsh` on `ubuntu-latest` in the Fast lane, and under real `powershell.exe` 5.1 in the `windows-powershell-51` job — the engine the scripts run on in production. Only the Windows job executes the registry-backed error-path tests (`VirtuSphere.ErrorPaths.Tests.ps1`: lost/broken registry values, address chain, scheme override) and enforces the coverage ratchet over the Common, Server/Client Logging and Packaging files (`pesterCoverageFloorPercent` in `scripts/tool-lock.json`; the floor only ever rises). PSScriptAnalyzer additionally runs the compatibility rules (syntax 5.1+7.0, commands/types against the Server-2019/5.1 profile), so a cmdlet or .NET type that 5.1 does not know fails the build instead of failing at night as SYSTEM. Still manual by design (Release lane / staging, rollout step 10): SYSTEM smoke in a throwaway Windows VM, the installer lifecycle on a real host, and an MECM staging acceptance.
+
+### The PowerShell log schema is a mirrored package contract
+
+`VirtuSphere.Logging.Tests.ps1` loads the server and client logging modules in
+isolated scopes and compares their version, levels, six-field schema, daily
+filename, byte bounds, retention interval and redaction behavior. It exercises
+UTF-8 boundaries, the exact 29/30/31-day edge, the shared 24-hour marker,
+parallel cleanup locking, recovery from a corrupt cleanup marker and the
+once-per-outage plus once-per-recovery warning against a deliberately broken
+sink. The redaction matrix includes quoted values, cookies, private keys and
+the complete mirrored secret vocabulary. Packaging tests cover fresh copy and
+upgrade replacement of phase, Common facade and logging module, including
+SHA-256 equality, AST-only version checks that preserve the current logging
+state, a complete rollback after simulated activation failure and hard failure
+for missing or version-mismatched modules. Static installer checks additionally
+pin trigger disable before stop and live move.
+
+The same suite proves that client phase/ready-ACK and server heartbeat JSON stay
+unchanged while the process correlation ID is only an additive header. Routine
+heartbeat and `reportRun` traffic therefore does not grow just because the
+local log sink is unavailable; the WebAPI audit-free side is pinned separately
+by the ADR-0018 audit contract. The real-host staging acceptance still checks
+the SYSTEM ACL, a live log rotation boundary and an installer re-run while the
+four scheduled tasks are active.
 
 ### The MAC canonicalization is a cross-language contract
 

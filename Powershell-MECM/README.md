@@ -84,8 +84,9 @@ Wiederholung. Mit dem Systemstart allein war eine Aufgabe nach ihren drei
 Neustartversuchen bis zum nächsten Reboot tot, und ein MECM-Server bootet
 selten: der Ausfall sah aus wie eine stille Integration. `IgnoreNew` sorgt
 dafür, dass der stündliche Trigger nichts tut, solange die Aufgabe läuft. Der
-Installer beendet laufende Aufgaben, bevor er die Skripte ersetzt, und startet
-sie danach neu.
+Installer deaktiviert ihre Trigger, beendet laufende Aufgaben, bevor er die
+Skripte ersetzt, und registriert und startet sie danach neu. Ein Fehler beim
+Deaktivieren oder Stoppen bricht den Austausch sichtbar und fail-closed ab.
 
 Die Intervalle sind Registry-owned (Installerparameter, Spalte oben = Standard)
 und je Aufgabe auf 5/10/30/60 s bis 3600 s begrenzt; die Spanne steht in
@@ -104,13 +105,20 @@ sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt". `Send-VsHeartb
 bleibt für Rückwärtskompatibilität erhalten, wird von den aktuellen Skripten aber
 nicht mehr genutzt.
 
-**Logs:** `%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`
-(einheitliches Format, 30 Tage Aufbewahrung; Site Health:
-`<datum>_site-health.log`).
+**Logs:** `%ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<komponente>.log`.
+Server und Clients verwenden denselben versionierten Sechs-Feld-Vertrag:
+`ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID`, die
+Level `DEBUG`/`INFO`/`WARN`/`ERROR`, UTF-8-sichere Grenzen, Redigierung benannter
+Secrets und 30 Tage Aufbewahrung. Eine Korrelations-ID gilt für genau einen
+PowerShell-Prozess und wird als reiner Diagnoseheader an die WebApp gegeben. Ein
+nicht schreibbarer Log-Sink stoppt die Aufgabe nicht: lokal erscheint höchstens
+eine Warnung pro Störung und eine Meldung bei Erholung. Das erzeugt weder einen
+zusätzlichen Heartbeat noch einen Auditeintrag. Site Health schreibt
+`yyyy-MM-dd_site-health.log`.
 
 ## Architektur und Funktionsweise
 
-### VirtuSphere-Common.ps1 – die gemeinsame Bibliothek
+### Common-Fassade und versioniertes Loggingmodul
 
 `VirtuSphere-Common.ps1` läuft **nie selbst** und hat keine eigene geplante
 Aufgabe. Es ist eine reine Funktionsbibliothek, die jedes Sync-Skript in der
@@ -126,12 +134,21 @@ Modell: Jede der vier Aufgaben ist ein **eigener PowerShell-Prozess** mit
 einer **eigenen Kopie** von Common; die Prozesse teilen zur Laufzeit keinen
 Zustand (jeder hat z. B. seine eigene Log-Komponente und Korrelations-ID).
 
+Die Loggingdomäne liegt getrennt in `mecm\VirtuSphere-Logging.ps1`; Common lädt
+dieses lokale Modul und verlangt exakt dessen Vertragsversion. Fehlt die Datei
+oder passt ihre Version nicht, bricht das Serverpaket vor dem ersten Sync hart
+und verständlich ab. Der Installer staged und prüft alle Serverdateien per
+SHA-256 und liest die deklarierten Vertragsversionen per AST, ohne die
+zustandsbehafteten Stagingdateien auszuführen. Erst danach deaktiviert und
+beendet er die laufenden Aufgaben und tauscht Loggingmodul, Laufzeitskripte und
+Common-Fassade als einen Paketsatz aus.
+
 Common stellt bereit:
 
 | Funktion | Zweck |
 |---|---|
 | `Get-VsConfig` | liest die komplette Konfiguration aus `HKLM:\SOFTWARE\VirtuSphere\MECM`; liefert `$null`, wenn sie fehlt |
-| `Initialize-VsLog` / `Write-VsLog` | Tageslogdateien im Format `ISO-8601 \| LEVEL \| Komponente \| Kontext \| Nachricht \| Korrelations-ID`; Aufräumen nach 30 Tagen; Log-Fehler stoppen nie den Hauptprozess |
+| `Initialize-VsLog` / `Write-VsLog` | von `VirtuSphere-Logging.ps1` bereitgestellter Tageslogvertrag; tägliche, pro gemeinsamem Marker gesperrte Aufräumprüfung nach 30 Tagen; Log-Fehler stoppen nie den Hauptprozess |
 | `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel). Der Body geht über `ConvertTo-Json -InputObject`, damit eine Liste **immer** ein JSON-Array bleibt: über die Pipeline packt PS 5.1 eine einelementige Liste aus, und `mecm_packages.php` beantwortet das dauerhaft mit 400 |
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
 | `Resolve-VsInterval` | löst das konfigurierte Intervall **einmal** auf, für den Sleep und den Report: Untergrenze je Aufgabe aus `$script:VsIntervalBounds`, Obergrenze aus dem Wire-Contract, und eine WARN-Zeile, wenn geklemmt wurde. Die Statusseite färbt die Zeile nach dem *gemeldeten* Takt, also darf keine Aufgabe in einem anderen laufen |

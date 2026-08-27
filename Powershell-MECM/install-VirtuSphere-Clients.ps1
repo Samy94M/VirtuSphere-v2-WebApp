@@ -7,9 +7,8 @@
 
 .DESCRIPTION
     Fuer jede der vier Client-Phasen (getinfo -> hostname -> staticip -> disks):
-      1. stellt den Content bereit: das Client-Skript UND
-         VirtuSphere-Client-Common.ps1 in <PackagesBase>\<Ordner> (ersetzt
-         bestehende Dateien),
+      1. stellt den Content bereit: Client-Skript, Common-Fassade UND lokales
+         Loggingmodul in <PackagesBase>\<Ordner> (ersetzt bestehende Dateien),
       2. legt die MECM-Application im Ordner <AppFolder> an, WENN sie fehlt
          (Self-Healing; bestehende Apps werden nicht angetastet),
       3. verdrahtet die Abhaengigkeitskette,
@@ -92,12 +91,17 @@ Initialize-VsLog -Component 'client-packaging' -LogRoot $logRoot
 
 $ContentShare = $ContentShare.TrimEnd('\')
 $specs = Get-VsClientAppSpecs
+$serverLoggingVersion = Get-VsLoggingContractVersion
+$clientLoggingVersion = Get-VsClientLoggingPackageVersion -SourceDir $SourceDir
+if ($clientLoggingVersion -ne $serverLoggingVersion) {
+    throw ('Logging-Vertrag weicht ab: Servermodul Version {0}, Clientmodul Version {1}. Vollstaendiges Paket verwenden.' -f $serverLoggingVersion, $clientLoggingVersion)
+}
 
 # --- Content bereitstellen (kein CM noetig, hier scharf pruefbar) -----------
-Write-Step 'Stelle Client-Content bereit (Skript + Common je Ordner)'
+Write-Step 'Stelle Client-Content bereit (Skript + Common + Loggingmodul je Ordner)'
 foreach ($spec in $specs) {
     $dest = Copy-VsClientContent -Spec $spec -SourceDir $SourceDir -PackagesBase $PackagesBase
-    Write-Ok ("{0}: {1} + Common.ps1 -> {2}" -f $spec.AppName, $spec.Script, $dest)
+    Write-Ok ("{0}: {1} + Common.ps1 + Logging.ps1 -> {2}" -f $spec.AppName, $spec.Script, $dest)
 }
 
 # ContentShare MUSS die Freigabe von PackagesBase sein: gestaged wird lokal nach

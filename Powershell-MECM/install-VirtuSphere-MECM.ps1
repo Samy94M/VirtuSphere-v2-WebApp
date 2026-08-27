@@ -5,8 +5,8 @@
     Erstinstallation der VirtuSphere-MECM-Integration auf dem MECM-Server.
 
 .DESCRIPTION
-    Schreibt die Konfiguration in die Registry, legt Verzeichnisse an, beendet
-    laufende Aufgaben, kopiert die Sync-Skripte nach
+    Schreibt die Konfiguration in die Registry, legt Verzeichnisse an,
+    deaktiviert und beendet laufende Aufgaben, kopiert die Sync-Skripte nach
     %ProgramFiles%\VirtuSphere\mecm, registriert die vier geplanten Aufgaben
     (SYSTEM, hoechste Rechte, ohne Profil, beim Systemstart UND stuendlich,
     ohne Laufzeitlimit) und verifiziert die Erstinstallation.
@@ -135,6 +135,45 @@ function Write-Hint {
 
 # Vor der ersten Warnung, damit auch sie im Tageslog landet.
 Initialize-VsLog -Component 'setup' -LogRoot $logRoot
+
+# Vertragsversionen fremder Staging- und Live-Dateien nur lesen, nie ausfuehren.
+# Dot-Sourcing wuerde deren $script:-Zustand in den laufenden Installer tragen
+# und damit unter anderem Komponente, Korrelation und Sinkstatus zuruecksetzen.
+function Get-VsDeclaredScriptInteger {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$VariableName
+    )
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        (Resolve-Path -Path $Path -ErrorAction Stop).Path,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    if (@($parseErrors).Count -gt 0) {
+        throw ('PowerShell-Vertragsdatei ist syntaktisch ungueltig: {0}' -f $Path)
+    }
+    $needle = '$script:' + $VariableName
+    $assignments = @($ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left.Extent.Text -eq $needle
+    }, $true))
+    $literal = if ($assignments.Count -eq 1 -and
+        $assignments[0].Right -is [System.Management.Automation.Language.CommandExpressionAst]) {
+        $assignments[0].Right.Expression
+    } elseif ($assignments.Count -eq 1) {
+        $assignments[0].Right
+    } else {
+        $null
+    }
+    if ($literal -isnot [System.Management.Automation.Language.ConstantExpressionAst] -or
+        $literal.Value -isnot [int]) {
+        throw ('Vertragskonstante {0} muss in {1} genau einmal als ganzzahliges Literal deklariert sein.' -f $needle, $Path)
+    }
+    return [int]$literal.Value
+}
 
 # --- WebApi normalisieren (host:port, kein Schema/Pfad) ---------------------
 $WebApi = Convert-VsWebApi $WebApi
@@ -429,7 +468,39 @@ $tasks = @(
     @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
 )
 
-# --- Laufende Aufgaben VOR dem Kopieren beenden -----------------------------
+# Den vollstaendigen Satz VOR dem Stoppen der laufenden Aufgaben in ein lokales
+# Stagingverzeichnis kopieren und bytegenau pruefen. So beendet ein fehlendes
+# oder versionsfalsches Loggingmodul die Installation sichtbar, ohne zuerst die
+# funktionierende Altinstallation anzuhalten.
+$sourceDir = Join-Path $PSScriptRoot 'mecm'
+$requiredServerFiles = @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1') + @($tasks | ForEach-Object { $_.Script })
+foreach ($name in $requiredServerFiles) {
+    $requiredPath = Join-Path $sourceDir $name
+    if (-not (Test-Path $requiredPath)) { throw ('MECM-Serverpaket unvollstaendig: {0} fehlt.' -f $requiredPath) }
+}
+$installStage = Join-Path $installDir ('.virtusphere-stage-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $installStage -Force -ErrorAction Stop | Out-Null
+try {
+    $serverSources = @(Get-ChildItem -Path $sourceDir -Filter '*.ps1' -File -ErrorAction Stop)
+    foreach ($source in $serverSources) {
+        Copy-Item -Path $source.FullName -Destination $installStage -Force -ErrorAction Stop
+        $staged = Join-Path $installStage $source.Name
+        if ((Get-FileHash -Algorithm SHA256 -Path $source.FullName).Hash -ne (Get-FileHash -Algorithm SHA256 -Path $staged).Hash) {
+            throw ('MECM-Serverpaket-Pruefsumme weicht ab: {0}' -f $source.Name)
+        }
+    }
+    $stagedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
+    $stagedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
+    $installerVersion = Get-VsLoggingContractVersion
+    if ($stagedVersion -ne $stagedExpectedVersion -or $stagedVersion -ne $installerVersion) {
+        throw ('Logging-Vertrag des Stagings hat Version {0}, Common erwartet {1}, der Installer erwartet {2}.' -f $stagedVersion, $stagedExpectedVersion, $installerVersion)
+    }
+} catch {
+    Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue
+    throw
+}
+
+# --- Aufgaben VOR dem Kopieren deaktivieren und beenden ---------------------
 #
 # Die Skripte sind Endlosschleifen und dot-sourcen VirtuSphere-Common.ps1 nur
 # einmal beim Start. Ein Re-Run, der die Dateien unter einer laufenden Instanz
@@ -439,20 +510,26 @@ $tasks = @(
 # die Systemstatus-Seite zeigt einen frisch installierten Stand, der nicht
 # laeuft. Ausserdem haelt eine laufende Instanz die .ps1 nicht offen, aber die
 # Logdatei: Copy-Item scheitert nicht, das Ergebnis ist nur unbestimmt.
-# Stoppen ist hier immer richtig, weil unten jede Aufgabe neu gestartet wird.
-Write-Step 'Beende laufende Aufgaben'
+# Die stuendlichen Trigger werden zuerst deaktiviert. Andernfalls kann zwischen
+# Stop und Live-Move eine neue Instanz anlaufen. Jeder Fehler bricht fail-closed
+# ab; ein gemischter Satz darf niemals unter einer weiterlaufenden Aufgabe
+# sichtbar werden. Unten werden alle Aufgaben vollstaendig neu registriert.
+Write-Step 'Deaktiviere und beende laufende Aufgaben'
 foreach ($task in $tasks) {
     $existing = Get-ScheduledTask -TaskName $task.Name -ErrorAction SilentlyContinue
     if (-not $existing) { continue }
-    if ($existing.State -eq 'Running') {
-        try {
+    try {
+        Disable-ScheduledTask -TaskName $task.Name -ErrorAction Stop | Out-Null
+        Write-Ok ("Aufgabe deaktiviert: {0}" -f $task.Name)
+        # Nach dem Disable erneut lesen, damit eine gerade angelaufene Instanz
+        # ebenfalls sicher gestoppt wird.
+        $existing = Get-ScheduledTask -TaskName $task.Name -ErrorAction Stop
+        if ($existing.State -eq 'Running') {
             Stop-ScheduledTask -TaskName $task.Name -ErrorAction Stop
             Write-Ok ("Aufgabe beendet: {0}" -f $task.Name)
-        } catch {
-            # Kein Abbruch: der Neustart unten setzt die Aufgabe ohnehin neu auf.
-            # Die Warnung sagt aber, dass die alte Instanz kurz weiterlaufen kann.
-            Write-Hint ("Aufgabe '{0}' liess sich nicht beenden: {1}" -f $task.Name, $_.Exception.Message)
         }
+    } catch {
+        throw ("Aufgabe '{0}' konnte vor dem sicheren Skriptaustausch nicht deaktiviert und beendet werden: {1}" -f $task.Name, $_.Exception.Message)
     }
 }
 # Der Scheduler meldet 'Ready' bevor der powershell.exe-Prozess weg ist. Ohne
@@ -460,9 +537,28 @@ foreach ($task in $tasks) {
 # gerade geschlossen haben.
 Start-Sleep -Seconds 2
 
-$sourceDir = Join-Path $PSScriptRoot 'mecm'
-Copy-Item -Path (Join-Path $sourceDir '*.ps1') -Destination $installDir -Force
-Write-Ok "Skripte nach $installDir kopiert"
+# Das Loggingmodul kommt zuerst, Common als versionspruefende Fassade zuletzt.
+# Die Tasks sind gestoppt und werden erst nach der Live-Verifikation gestartet;
+# ein Abbruch mitten im Satz fuehrt daher beim naechsten Laden fail-closed statt
+# zu einer gemischten, weiterlaufenden Version.
+try {
+    $orderedNames = @($serverSources.Name | Sort-Object @{ Expression = {
+        if ($_ -eq 'VirtuSphere-Logging.ps1') { 0 }
+        elseif ($_ -eq 'VirtuSphere-Common.ps1') { 2 }
+        else { 1 }
+    } }, @{ Expression = { $_ } })
+    foreach ($name in $orderedNames) {
+        Move-Item -Path (Join-Path $installStage $name) -Destination (Join-Path $installDir $name) -Force -ErrorAction Stop
+    }
+} finally {
+    if (Test-Path $installStage) { Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$installedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
+$installedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
+if ($installedVersion -ne $installedExpectedVersion -or $installedVersion -ne $installerVersion) {
+    throw ('Installiertes Loggingmodul hat Version {0}, Common erwartet {1}, der Installer erwartet {2}. Aufgaben bleiben deaktiviert.' -f $installedVersion, $installedExpectedVersion, $installerVersion)
+}
+Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
 
 # Package-Vorlage (Standard-install.ps1 + config.json-Blaupause) bereitstellen.
 # Der Autoimporter kopiert Package_Vorlage\install.ps1 per Self-Healing ueber die

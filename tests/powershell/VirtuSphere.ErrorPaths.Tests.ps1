@@ -1274,9 +1274,9 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Hart auf C:\Program Files verdrahtet, waehrend die Serverseite
         # $env:ProgramFiles benutzt: auf einem System mit verschobenem
         # Programmverzeichnis schrieb der Client neben alles andere.
-        $text = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
-        $text | Should -Match '\$script:VsLogDir\s*=\s*if \(\$env:ProgramFiles\)'
-        $text | Should -Not -Match "VsLogDir\s*=\s*'C:\\Program Files"
+        $text = Get-ClientText -Name 'VirtuSphere-Client-Logging.ps1'
+        $text | Should -Match '\$script:VsClientLogRoot\s*=\s*if \(\$env:ProgramFiles\)'
+        $text | Should -Not -Match "VsClientLogRoot\s*=\s*'C:\\Program Files"
     }
 
     It 'client_hostname meldet je Lauf hoechstens ein terminales Phasenereignis' {

@@ -187,6 +187,14 @@ Sync, Package Import und Site Health nach ihren jeweiligen Intervallen sichtbar
 werden. Ein 403 bedeutet fast immer, dass die MECM-Server-IP noch nicht in der
 Machine-API-Freigabe steht.
 
+Jede Zeile der vier Dateien hat sechs Felder:
+`ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID`. Fehlt
+`VirtuSphere-Logging.ps1` im Installationsverzeichnis oder passt seine
+Vertragsversion nicht zu `VirtuSphere-Common.ps1`, ist das kein stiller
+Loggingausfall: Installer beziehungsweise Aufgabe brechen mit einem konkreten
+Paketfehler ab. Der fachliche Lauf bleibt dagegen aktiv, wenn ausschließlich das
+Zielverzeichnis vorübergehend nicht schreibbar ist.
+
 **Das muss man nicht mehr erraten.** Jede abgewiesene Maschinenanfrage schreibt
 eine Zeile in die Logkategorie `machine_api` (Protokolle → Sicherheit), gedrosselt
 pro IP, mit der abgewiesenen IP und dem Endpunkt. Steht dort etwas, während die
@@ -592,9 +600,18 @@ Wichtige Härtungen gegenüber den Altskripten:
 - **`-NoProfile`.** Die Aufgaben laufen als SYSTEM, und ein Profilskript unter
   SYSTEM ist Fremdcode im Sync-Prozess (Kodierung, `PSModulePath`,
   `$ErrorActionPreference`).
-- **Der Installer beendet laufende Aufgaben, bevor er die Skripte ersetzt.**
+- **Der Installer deaktiviert Trigger und beendet laufende Aufgaben, bevor er
+  die Skripte ersetzt.**
   Sonst lief die alte Instanz mit dem beim Start dot-gesourcten Common weiter,
-  während die neue Registry-Konfiguration schon da war.
+  während die neue Registry-Konfiguration schon da war. Das Disable schließt
+  zusätzlich einen neuen Stundenlauf im Stop/Move-Fenster aus; ein Fehler
+  bricht den Austausch fail-closed ab.
+- **Serverpaket als geprüfter Satz.** Der Installer staged alle `.ps1`-Dateien,
+  vergleicht ihre SHA-256-Hashes und liest die deklarierten Vertragsversionen
+  von Common und `VirtuSphere-Logging.ps1` per AST, ohne die Stagingdateien
+  auszuführen. Erst danach deaktiviert und stoppt er Aufgaben und ersetzt das
+  Loggingmodul vor der Common-Fassade. Fehlende oder versionsfalsche Module
+  werden dadurch vor dem nächsten Sync sichtbar.
 - **Sende-Guard im Paket-Sync:** Fehlt der Applications-Ordner oder liefert
   WMI nichts, wird **nichts** gesendet (ein leerer Payload würde serverseitig
   den Katalog zurückziehen). Zusätzlich Change-Detection per Payload-Hash.
@@ -649,8 +666,14 @@ Remote Activation. Ein fehlendes Recht meldet das Portal als
 `provider_access_denied` (grau), nicht als „MECM kritisch".
 
 Lokale Tageslogs aller vier Aufgaben liegen unter
-`%ProgramFiles%\VirtuSphere\Logs\<Datum>_<Komponente>.log` (Site Health:
-`<Datum>_site-health.log`), einheitliches Format, 30 Tage Aufbewahrung.
+`%ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<Komponente>.log` (Site Health:
+`yyyy-MM-dd_site-health.log`). Server und Clients verwenden denselben
+versionierten Vertrag mit den Leveln `DEBUG`, `INFO`, `WARN`, `ERROR`, sechs
+durch ` | ` getrennten Feldern, UTF-8-sicherer Begrenzung, Redigierung benannter
+Secrets und 30 Tagen Aufbewahrung. Die tägliche Bereinigung verwendet einen
+gemeinsamen Marker und einen exklusiven Lock, damit parallele Aufgaben nicht
+gegeneinander löschen. Die Korrelations-ID entsteht einmal pro Prozess und wird
+als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
 
 ## Client-Anwendungen (Etappe 5)
 
@@ -674,7 +697,13 @@ Kernpunkte:
   wiederholt werden.
 - **Idempotenz (staticip):** Re-Run überschreibt sauber und meldet echten
   Erfolg/Fehlschlag statt pauschal „installed".
-- Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30 Tage).
+- Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30
+  Tage). Jede Application enthält Phase, `VirtuSphere-Client-Common.ps1` und
+  `VirtuSphere-Client-Logging.ps1`; Packaging staged und hashprüft alle drei als
+  Geschwisterverzeichnis und aktiviert sie mit einem atomaren Verzeichnis-Swap.
+  Scheitert die Aktivierung, wird der vollständige Altstand zurückgerollt. Fehlt
+  das Loggingmodul oder ist seine Vertragsversion falsch, beginnt die
+  Clientphase nicht mit einem halben Paket.
 
 ## Edge Cases der Server-Skripte (Referenz)
 
@@ -690,7 +719,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | WebApp/MECM-Fehler im Durchlauf | Backoff 30 s; ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung | ERROR je Versuch |
 | Berichts-Zustellung scheitert | Lauf läuft weiter (der Bericht bricht ihn nie ab); lokal gedrosselt protokolliert | gedrosselt (WARN); Portal-Ampel wird stale/rot |
 | Registry-Änderung zur Laufzeit | greift erst nach Task-Neustart (Konfig wird beim Start gelesen; Installer-Re-Run startet die Tasks neu) | — |
-| Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess) | Konsole only |
+| Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess); derselbe Fehler warnt pro Prozess und Störung höchstens einmal, eine Erholung genau einmal | lokale PowerShell-Warnung `Log-Sink gestört` / `Log-Sink wieder verfügbar`; kein zusätzlicher Heartbeat, `reportRun` oder Auditeintrag |
 
 **Device-Sync**
 

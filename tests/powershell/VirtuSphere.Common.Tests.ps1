@@ -535,7 +535,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             if (Test-Path $script:StageRoot) { Remove-Item -Path $script:StageRoot -Recurse -Force -ErrorAction SilentlyContinue }
         }
 
-        It 'legt Skript UND Common.ps1 in den App-Ordner (ersetzt)' {
+        It 'legt Skript, Common und Loggingmodul in den App-Ordner (ersetzt)' {
             $result = Invoke-InFileScope -Path $script:Packaging -Arguments @($script:ClientsDir, $script:StageRoot) -Body {
                 param($srcDir, $base)
                 $spec = (Get-VsClientAppSpecs | Where-Object AppName -eq 'client_getInfos')
@@ -543,6 +543,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             }
             Test-Path (Join-Path $result 'client_getinfo.ps1')               | Should -BeTrue
             Test-Path (Join-Path $result 'VirtuSphere-Client-Common.ps1')    | Should -BeTrue
+            Test-Path (Join-Path $result 'VirtuSphere-Client-Logging.ps1')   | Should -BeTrue
             (Split-Path $result -Leaf) | Should -Be 'client_getInfos'
         }
 

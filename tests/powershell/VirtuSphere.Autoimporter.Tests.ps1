@@ -282,17 +282,24 @@ Describe 'Installer: die vier Aufgaben ueberleben ihren eigenen Neustartzaehler'
         $script:InstallerText | Should -Match '-MultipleInstances IgnoreNew'
     }
 
-    It 'die laufenden Aufgaben werden vor dem Kopieren beendet' {
+    It 'Trigger werden deaktiviert und laufende Aufgaben vor dem Live-Austausch beendet' {
         # Ein Re-Run, der die .ps1 unter einer laufenden Instanz austauscht, laesst
         # diese mit dem alten dot-gesourcten Common weiterlaufen, waehrend die
-        # neue Registry-Konfiguration schon da ist.
+        # neue Registry-Konfiguration schon da ist. Der stuendliche Trigger muss
+        # vor dem Stop deaktiviert sein, damit im Stop/Move-Fenster kein neuer
+        # Lauf startet. Das vorbereitende Staging darf vorher stattfinden; erst
+        # der Move ins Live-Verzeichnis muss nach Disable und Stop kommen.
         $lines = Get-Content -Path $script:Installer
+        $disableLine = ($lines | Select-String -Pattern 'Disable-ScheduledTask' | Select-Object -First 1).LineNumber
         $stopLine = ($lines | Select-String -Pattern 'Stop-ScheduledTask' | Select-Object -First 1).LineNumber
-        $copyLine = ($lines | Select-String -Pattern "Copy-Item -Path \(Join-Path \`$sourceDir" | Select-Object -First 1).LineNumber
+        $moveLine = ($lines | Select-String -Pattern 'Move-Item -Path \(Join-Path \$installStage' | Select-Object -First 1).LineNumber
 
+        $disableLine | Should -Not -BeNullOrEmpty
         $stopLine | Should -Not -BeNullOrEmpty
-        $copyLine | Should -Not -BeNullOrEmpty
-        $stopLine | Should -BeLessThan $copyLine
+        $moveLine | Should -Not -BeNullOrEmpty
+        $disableLine | Should -BeLessThan $stopLine
+        $stopLine | Should -BeLessThan $moveLine
+        ($lines -join "`n") | Should -Match 'konnte vor dem sicheren Skriptaustausch nicht deaktiviert und beendet werden'
     }
 }
 

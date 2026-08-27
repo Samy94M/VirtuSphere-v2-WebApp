@@ -36,6 +36,13 @@ const VIRTUSPHERE_LOGIN_ATTEMPT_RETENTION_DAYS = 7;
 // produce an unbounded stream. A truncated export is by design, not an error.
 const VIRTUSPHERE_LOG_EXPORT_MAX_ROWS = 10000;
 
+// Local PowerShell day logs on the MECM server and deploy clients (Etappe
+// 10D). The two shipped packages mirror these values in their local logging
+// modules; Pester compares all three copies because no runtime file is shared.
+const VIRTUSPHERE_POWERSHELL_LOG_RETENTION_DAYS = 30;
+const VIRTUSPHERE_POWERSHELL_LOG_MESSAGE_MAX_BYTES = 3072;
+const VIRTUSPHERE_POWERSHELL_LOG_LINE_MAX_BYTES = 4096;
+
 // Streamed Ansible output of a FINISHED deploy job. Longer than the audit log,
 // because a failed deploy is investigated for days, and shorter than forever:
 // the interval inventory pull writes a job every few hours and each one keeps

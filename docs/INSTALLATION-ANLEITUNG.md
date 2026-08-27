@@ -160,7 +160,18 @@ Docker/WebAPI/logs/php-error.log
 Docker/WebAPI/logs/fail.log
 Docker/logs/nginx/access.log
 Docker/logs/nginx/error.log
+MECM-Server: %ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<komponente>.log
+Windows-Client: C:\Program Files\VirtuSphere\Logs\yyyy-MM-dd_<phase>.log
 ```
+
+Die beiden PowerShell-Pakete schreiben denselben Sechs-Feld-Vertrag
+`ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID` und
+bewahren Tagesdateien 30 Tage auf. Server- und Client-Installer liefern ihr
+jeweiliges Loggingmodul immer zusammen mit Common-Fassade und Laufzeitskript aus;
+eine fehlende oder versionsfalsche Datei ist ein Installationsfehler. Ein lokaler
+Sinkausfall unterbricht den fachlichen Lauf nicht und erzeugt keine zusätzlichen
+Heartbeats oder Auditeinträge; die PowerShell-Konsole warnt einmal pro Störung
+und einmal bei Erholung.
 
 Bei einer Fehlerseite die angezeigte Referenz-ID kopieren und suchen:
 

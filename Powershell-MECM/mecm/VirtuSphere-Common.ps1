@@ -108,118 +108,26 @@ function Get-VsConfig {
 }
 
 # ---------------------------------------------------------------------------
-# Logging - einheitliches Format (Plan-Spezifikation):
-#   ISO-8601 | LEVEL | Komponente | Kontext (Mission/VM/MAC/Phase) | Nachricht | Korrelations-ID
-# Tagesdateien unter <LogRoot>\yyyy-MM-dd_<komponente>.log, Aufraeumen nach 30 Tagen.
+# Logging-Fassade
 # ---------------------------------------------------------------------------
-$script:VsLogComponent = 'virtusphere'
-# $env:ProgramFiles existiert nur auf Windows. Diese Zeile laeuft beim
-# Dot-Sourcen, und die Pester-Suite sourct die Datei auch unter pwsh auf
-# Linux (CI): ein Join-Path mit $null wirft dort und riss 44 Tests mit
-# (CI-Lauf 2026-07-16). Auf dem echten Ziel (MECM-Server) unveraendert;
-# anderswo zaehlt nur, dass der Dot-Source nicht wirft, denn jedes Skript
-# setzt sein LogRoot ohnehin per Initialize-VsLog.
-$script:VsLogRoot = if ($env:ProgramFiles) {
-    Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
-} else {
-    Join-Path ([System.IO.Path]::GetTempPath()) 'VirtuSphere-Logs'
+# Die Logging-/Retention-Domaene ist seit Etappe 10D ein lokales, mit dem
+# Serverpaket installiertes Modul. Common bleibt der oeffentliche Dot-Source-
+# Pfad. Fehlende oder unpassende Dateien muessen hier sichtbar scheitern, bevor
+# eine geplante Aufgabe ohne Diagnosekanal in ihre Endlosschleife geht.
+$script:VsExpectedLoggingContractVersion = 1
+$loggingModule = Join-Path $PSScriptRoot 'VirtuSphere-Logging.ps1'
+if (-not (Test-Path $loggingModule)) {
+    throw ('VirtuSphere-Logging-Modul fehlt: {0}. Installer erneut ausfuehren.' -f $loggingModule)
 }
-# Korrelations-ID pro Prozesslauf (ADR-0032): 16 Hex aus einer GUID, EINMAL
-# beim Laden gemintet, damit schon die erste Logzeile sie traegt (B11: eine
-# spaetere $null-Re-Deklaration liess jede Zeile vor dem ersten API-Aufruf
-# ID-los). Bewusst KEIN Registry-Wert: ein Neustart des Skripts ist eine neue
-# Spur. Rein diagnostisch, kein Secret und kein Token; die Redaction laesst
-# sie deshalb sichtbar.
-$script:VsCorrelationId = ([guid]::NewGuid().ToString('N')).Substring(0, 16).ToLowerInvariant()
-
-function Initialize-VsLog {
-    param(
-        [Parameter(Mandatory)][string]$Component,
-        [string]$LogRoot
-    )
-    $script:VsLogComponent = $Component
-    if ($LogRoot) { $script:VsLogRoot = $LogRoot }
-    if (-not (Test-Path $script:VsLogRoot)) {
-        New-Item -ItemType Directory -Path $script:VsLogRoot -Force | Out-Null
-    }
-}
-
-function Write-VsLog {
-    param(
-        [Parameter(Mandatory)][string]$Message,
-        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR')][string]$Level = 'INFO',
-        [string]$Context = '-',
-        [string]$Color
-    )
-
-    if (-not $Color) {
-        $Color = switch ($Level) { 'ERROR' { 'Red' } 'WARN' { 'Yellow' } 'DEBUG' { 'DarkGray' } default { 'Gray' } }
-    }
-    Write-Host $Message -ForegroundColor $Color
-
-    try {
-        $line = '{0} | {1,-5} | {2} | {3} | {4} | {5}' -f (Get-Date -Format 'o'), $Level, $script:VsLogComponent, $Context, $Message, $script:VsCorrelationId
-        $file = Join-Path $script:VsLogRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), $script:VsLogComponent)
-        Add-Content -Path $file -Value $line -Encoding UTF8
-        # Nicht bei jeder Zeile: der Device-Sync schreibt im 10-Sekunden-Takt,
-        # und die Retention machte je Zeile ein Test-Path plus ein Get-Content
-        # auf der Markerdatei. Das Faelligkeitsdatum steht deshalb in einer
-        # Skriptvariablen, die Markerdatei bleibt die prozessuebergreifende
-        # Wahrheit fuer den ersten Lauf des Tages.
-        if ($null -eq $script:VsLogRetentionNextCheck -or (Get-Date) -ge $script:VsLogRetentionNextCheck) {
-            Invoke-VsLogRetention
-        }
-    } catch {
-        # Logging darf den Hauptprozess nie stoppen. Der verschluckte Fehler ist
-        # per -Debug sichtbar; ohne diese Zeile waere ein dauerhaft nicht
-        # schreibbares Logverzeichnis von aussen gar nicht erkennbar.
-        Write-Debug ('Logschreiben fehlgeschlagen: {0}' -f $_)
-    }
-}
-
-# Naechster Zeitpunkt, zu dem Write-VsLog die Retention ueberhaupt anfassen
-# muss. $null heisst "noch nie geprueft" und faellt in den ersten Aufruf.
-$script:VsLogRetentionNextCheck = $null
-
-function Invoke-VsLogRetention {
-    $marker = Join-Path $script:VsLogRoot 'last_cleanup.txt'
-    $due = $true
-    if (Test-Path $marker) {
-        try {
-            $last = [datetime](Get-Content $marker -ErrorAction Stop | Select-Object -First 1)
-            if (((Get-Date) - $last).TotalDays -lt 1) {
-                $due = $false
-                # Bis dahin muss auch der Prozess nicht mehr nachsehen: ein
-                # anderer Prozess hat heute schon aufgeraeumt.
-                $script:VsLogRetentionNextCheck = $last.AddDays(1)
-            }
-        } catch { Write-Debug $_ }
-    }
-    if (-not $due) { return }
-    $script:VsLogRetentionNextCheck = (Get-Date).AddDays(1)
-
-    try {
-        $cutoff = (Get-Date).AddDays(-30)
-        Get-ChildItem -Path $script:VsLogRoot -Filter '*.log' -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt $cutoff } |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-Date -Format 'o' | Set-Content -Path $marker -Encoding UTF8
-    } catch { Write-Debug $_ }
+. $loggingModule
+$loggingVersion = Get-VsLoggingContractVersion
+if ($loggingVersion -ne $script:VsExpectedLoggingContractVersion) {
+    throw ('VirtuSphere-Logging-Modul hat Version {0}, erwartet wird {1}. Serverpaket vollstaendig aktualisieren.' -f $loggingVersion, $script:VsExpectedLoggingContractVersion)
 }
 
 # ---------------------------------------------------------------------------
 # WebAPI-Aufrufe (inkl. optionalem Token-Header)
 # ---------------------------------------------------------------------------
-# Accessor fuer die beim Laden geminteten Korrelations-ID (Deklaration beim
-# Logging-Block oben). Der Guard bleibt als Gurt: sollte die Variable je
-# geleert werden, ist eine frische ID besser als ein leerer Header.
-function Get-VsCorrelationId {
-    if (-not $script:VsCorrelationId) {
-        $script:VsCorrelationId = ([guid]::NewGuid().ToString('N')).Substring(0, 16).ToLowerInvariant()
-    }
-    $script:VsCorrelationId
-}
-
 function Get-VsApiHeaders {
     param([Parameter(Mandatory)]$Config)
     $headers = @{}
