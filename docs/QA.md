@@ -6,6 +6,8 @@ This page is the operating manual for the VirtuSphere QA battery: how to run eac
 
 `scripts/check.ps1` is the executable SSoT of all quality gates (ADR-0031). It runs under Windows PowerShell 5.1 and PowerShell 7 and replaces "run these commands in order" lists; the commands below stay documented for targeted debugging of a single gate.
 
+The public entry point is deliberately small. It dot-sources focused modules from `scripts/lib/check/` for runtime helpers and the Fast, Integration and Release registries; importing a module defines functions only and neither emits output nor changes environment/current directory. Gate names, order, lane membership, exit codes, progress lines and JSON schema remain contracts of `check.ps1`, not separate module APIs. `VirtuSphere.CheckRunner.Tests.ps1` holds the pre-split golden catalog, help/invalid-call behavior, Fast selection and JSON shape, including negative mutants.
+
 ```powershell
 powershell -NoProfile -File scripts\check.ps1 -List                 # Gates der Fast-Lane anzeigen
 powershell -NoProfile -File scripts\check.ps1                       # Fast-Lane (jeder PR / lokaler Vorabcheck)
@@ -44,7 +46,7 @@ The QA PHP service mounts `/tmp/virtusphere-directory` as a nested tmpfs owned b
 
 The Integration lane provisions its own throwaway stack as its first gate (`qa-stack`): a separate Compose project `virtusphere-qa` built from `docker-compose.yml` plus `Docker/qa/docker-compose.qa.yml` with `Docker/qa/qa.env` (committed throwaway values, no secrets). The database lives in a project-scoped volume seeded fresh from `struktur.sql`, `ssl/` and `conf.d/` are project volumes, and the web port is `127.0.0.1:8031`; nothing in the lane ever touches the dev stack or the dev database. The gate then applies migrations, seeds the QA admin from `qa.env` and waits for portal health. `check.ps1` tears the stack down (`down -v`) when the run ends; `-KeepArtifacts` leaves it up for debugging.
 
-Against that stack the lane runs `migrate-check`, the **full** PHPUnit suite with `--fail-on-skipped` (a dynamic skip is never legitimate here; tests that need an allowlisted or non-allowlisted client IP arrange it themselves via `tests/Integration/ClientIpAllowlist.php` and restore the previous state), `schema-convergence`, the health/exposure contract, the guard harness, and `e2e-portal`: the Playwright Chromium suite from `tests/e2e/` (ADR-0028 revision). The browser resolves from `PLAYWRIGHT_CHROMIUM`, the local dev default, or the Playwright cache (`npx playwright install chromium`); `npm ci` runs automatically when `tests/e2e/node_modules` is missing.
+Against that stack the lane runs `migrate-check`, the **full** PHPUnit suite with `--fail-on-skipped` (a dynamic skip is never legitimate here; tests that need an allowlisted or non-allowlisted client IP arrange it themselves via `tests/Integration/ClientIpAllowlist.php` and restore the previous state), `schema-convergence`, the health/exposure contract, the guard harness, and `e2e-portal`: the functional Playwright Chromium suite plus the deterministic visual proof from `tests/e2e/` (ADR-0028 revisions). Runner and Playwright call the same resolver: `PLAYWRIGHT_CHROMIUM` when explicitly set, otherwise the exact executable belonging to the lockfile-installed `playwright-core`; there is no local-user fallback or highest-revision scan. `npm ci` runs automatically when `tests/e2e/node_modules` is missing.
 
 ## Test Commands
 
@@ -414,6 +416,20 @@ npm test                                          # all specs
 npx playwright test accessibility                 # one spec
 npm run report                                    # last HTML report
 ```
+
+### Deterministic visual proof
+
+The `visual` project is not a dev-stack screenshot command. It runs only as part of the canonical Integration `e2e-portal` gate after `qa-stack`, because its seed and worker pause guards require the exact `virtusphere-qa` identity:
+
+```powershell
+powershell -NoProfile -File scripts\check.ps1 -Lane Integration -Gate qa-stack,e2e-portal -Json qa-artifacts/qa-visual.json
+```
+
+The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, desktop/mobile viewports, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation and hidden caret. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS` and `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` are refused. Etappe 11 has no committed target PNGs and no update command: reviewed release baselines belong to Etappe 17.
+
+The runner proves exact QA Compose labels and zero queued/running/cancelling jobs before pausing workers. It restores only those that were originally running in `finally`; shared/dev/production labels fail before `stop`. The seed is namespaced `visuale11fixture`, cleans only its own rows and is guarded by the exact QA URL, containers and DB. Four screenshots per theme (mission list/deploy, desktop/mobile) are rendered twice. The harness decodes PNG pixels rather than comparing encoded bytes, writes metadata/comparison evidence and both runs below ignored `qa-artifacts/visual-etappe11-*`, and requires zero pixel drift. No status badge is masked; this stage uses no masks at all.
+
+This harness touches no portal-visible string or product PHP/JS/CSS. Portal help, audit/event persistence, deploy-job/job-log semantics, shipped container configuration and machine endpoints/wire fields are therefore outside its write set. Their existing contract suites remain part of the unchanged Fast/Integration lanes and are explicitly re-run for acceptance.
 
 The `setup` project seeds an `e2e_user` account through the PHP container and caches a `storageState` per role; specs reuse those sessions. Fixtures are prefixed (`e2e*`) and cleaned in setup/teardown, the same discipline the PHPUnit integration suite follows. What it covers:
 

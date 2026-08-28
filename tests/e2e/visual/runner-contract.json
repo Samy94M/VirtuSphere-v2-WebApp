@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
+  "platform": "win32",
+  "arch": "x64",
+  "osRelease": "10.0.26200",
+  "browser": {
+    "engine": "chromium",
+    "revision": "1228",
+    "version": "149.0.7827.55"
+  },
+  "playwrightVersion": "1.61.1",
+  "fonts": [
+    {
+      "file": "segoeui.ttf",
+      "sha256": "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd"
+    },
+    {
+      "file": "seguisb.ttf",
+      "sha256": "2d9b22d71f72de2823fee5d9c8bc1b0fc32b2577c4c27b9ec6abdbb8df0e1731"
+    },
+    {
+      "file": "segoeuib.ttf",
+      "sha256": "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e"
+    }
+  ],
+  "locale": "de-DE",
+  "timezoneId": "Europe/Berlin",
+  "viewports": [
+    { "name": "desktop", "width": 1440, "height": 1000 },
+    { "name": "mobile", "width": 390, "height": 844 }
+  ],
+  "deviceScaleFactor": 1,
+  "screenshotScale": "css",
+  "clock": "2026-08-27T08:15:00.000Z",
+  "randomSeed": 110011,
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "animations": "disabled",
+  "caret": "hide",
+  "sessionRemainingSeconds": 2700,
+  "pixelComparison": {
+    "channelThreshold": 0,
+    "maxDiffPixelRatio": 0
+  }
+}

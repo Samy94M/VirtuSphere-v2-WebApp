@@ -1,7 +1,7 @@
 # ADR-0028: Playwright as a Dev-only E2E Layer
 
 Date: 2026-07-12
-Status: Accepted; revised 2026-07-16 (E2E additionally gates the Integration/Release lanes, see below)
+Status: Accepted; revised 2026-07-16 and 2026-08-27 (lane gates and deterministic visual harness, see below)
 
 ## Context
 
@@ -15,7 +15,7 @@ Add a Playwright end-to-end layer as a **dev-only** tier, extending ADR-0015 rat
 
 - **Location.** The suite lives in `tests/e2e/` at the **repository root**, not under `Docker/WebAPI`. The PHP container mounts `Docker/WebAPI` as the webroot, so anything under `tests/e2e/` is structurally incapable of reaching the delivery artifact. This mirrors the reasoning already applied to `scripts/` (not mounted into the container).
 - **Not vendored.** `tests/e2e/node_modules` is git-ignored. `@playwright/test` and `@axe-core/playwright` are dev-host tooling, installed with `npm ci` on the machine that runs the E2E pass, exactly as PHPUnit's `vendor/` is vendored but Playwright's browsers are not. The air-gap rule governs the **runtime** artifact; it does not govern the dev host, which already runs Docker, Composer and Node. The committed `package.json` + `package-lock.json` pin the versions for a reproducible install; a locked-down dev host mirrors them into its own registry the same way it already mirrors Composer and Docker images.
-- **Browser from the environment.** `executablePath` comes from `PLAYWRIGHT_CHROMIUM`, otherwise from the highest `chromium-<rev>` in the local Playwright cache that actually carries an executable, launched `--no-sandbox`. Playwright does **not** download a browser (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`), so the install is offline-friendly against an existing browser. The revision is resolved rather than pinned, because `npx playwright install` prunes the previous revision directory: a hardcoded path silently stops existing, the config falls through to a browser that is not installed either, and the whole suite fails to launch instead of failing a test. That happened once with `chromium-1223`.
+- **Browser from one resolver.** `tests/e2e/lib/browser-resolver.js` is consumed by both `scripts/check.ps1` and `playwright.config.js`. An explicit `PLAYWRIGHT_CHROMIUM` wins; otherwise the lockfile-installed `playwright-core` supplies its exact executable and revision. Neither consumer scans for the highest cache directory and neither carries a user or revision literal. Playwright does **not** download a browser at runtime; `npm ci` and the documented one-time browser provisioning remain dev-/CI-host setup and can use an offline mirror.
 - **Out of CI.** The suite does not run in `.github/workflows/ci.yml`. CI provisions no MySQL and no browser, and the shipped baseline stays the PHPUnit + static + drift set. E2E is a pre-release / on-demand gate on the dev host against the running Docker stack, documented in `docs/QA.md`.
 - **Known gotchas are codified, not rediscovered.** Base URL `http://127.0.0.1:8021/portal/` with the trailing slash (the no-slash redirect fails in this Chromium); theme via `localStorage['virtusphere.theme']`; auth as a setup project that logs in once per role and reuses `storageState`; DB assertions through `docker exec` into the MySQL container (its port is deliberately not published to the host, so a shelled-out `mysql` client is the honest path and needs no compose change that would expose the DB on the LAN); web-first assertions only (`await expect(locator)`), no `waitForTimeout`; `getByRole`/`getByLabel` preferred so accessibility is exercised in passing.
 
@@ -39,3 +39,13 @@ The "Out of CI" decision above described the minimal CI of ADR-0015. With the ca
 - **Scope follows the coverage contract (E6).** The lane-gated suite proves each portal POST action, upload/download flow and CRUD round-trip once in a real browser, including the confirm-cancel branch; exhaustive field matrices stay in PHPUnit. The E2E layer gates a lane only for what a browser alone can prove.
 
 An Integration-lane run without a usable browser or QA stack is `infrastructure_error`, never a skip and never a pass (ADR-0015 amendment, ADR-0031).
+
+## Revision 2026-08-27: Deterministic Visual Project
+
+The existing configuration gains exactly one pixel-owning Chromium project, `visual`. Firefox, WebKit and Edge remain functional release projects and never share its pixel expectations. The visual project reuses the existing base URL, setup authentication and reporters, but it may run only against the synthetic `virtusphere-qa` throwaway Compose project. Its seed guard requires the exact loopback URL, QA container names, database name and an explicit allowance set by the canonical runner.
+
+The committed runner contract fixes Windows build and architecture, Playwright version, Chromium revision/version, Segoe UI font files and SHA-256 hashes, locale, portal timezone, both viewports, device scale and CSS screenshot scale, fixed clock and pseudo-random seed, light/dark themes, reduced motion, disabled animations and hidden caret. The harness validates these values before taking an image. A mismatch exits as `infrastructure_error`; it never updates an expectation. Etappe 11 intentionally commits no approved screenshot baseline. Each theme is rendered twice, PNGs are decoded and compared pixel by pixel with the committed zero-drift tolerance, and the ignored evidence plus actual metadata is written below `qa-artifacts/` for review. Baseline review and release gating remain owned by Etappe 17.
+
+Before the four visual runs, the runner proves the exact Compose project/service labels and that the QA database has no queued, running or cancelling jobs. It stops only workers that were running and restores precisely that state in `finally`, even after a failed visual run. A shared, dev or production stack therefore cannot be paused by this path. Visual fixtures use only the `visuale11fixture` namespace, are deleted idempotently before seeding and cleaned afterward; no screenshot may contain ambient or real data.
+
+This revision changes QA tooling only. Portal help and runtime rendering code, audit/event writers, deploy-job persistence, container runtime configuration and every machine-API wire shape remain untouched.

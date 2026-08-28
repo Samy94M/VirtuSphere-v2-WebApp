@@ -1,0 +1,34 @@
+{
+  "parameters": ["Lane", "Gate", "List", "Json", "KeepArtifacts", "FailFast", "NoNetwork"],
+  "lanes": {
+    "Fast": [
+      "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
+      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "yaml-roundtrip",
+      "shellcheck", "hadolint", "python-client-tests"
+    ],
+    "Integration": [
+      "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
+      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "yaml-roundtrip",
+      "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",
+      "health-contract", "e2e-portal", "guard-harness"
+    ],
+    "Release": [
+      "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
+      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "yaml-roundtrip",
+      "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",
+      "health-contract", "e2e-portal", "guard-harness", "e2e-browser-matrix", "e2e-msedge", "restore-drill", "secret-scan",
+      "sbom", "image-cve", "offline-bundle", "npm-audit"
+    ]
+  },
+  "invalidLane": "check.ps1: unbekannte Lane 'Bogus' (gueltig: Fast, Integration, Release)",
+  "invalidGate": "check.ps1: unbekanntes Gate 'does-not-exist' (siehe -List)",
+  "jsonTopLevel": ["commit", "durationSeconds", "exitCode", "lane", "noNetwork", "results", "started", "summary", "version"],
+  "jsonResult": ["class", "detail", "durationSeconds", "kind", "name", "network"],
+  "jsonSummary": ["fail", "infrastructure_error", "not_applicable", "pass", "skip"]
+}

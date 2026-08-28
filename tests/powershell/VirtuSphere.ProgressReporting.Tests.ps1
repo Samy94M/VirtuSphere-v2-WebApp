@@ -10,6 +10,7 @@ BeforeAll {
     $script:QaGuide = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QA.md') -Raw
     $script:CheckRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
+    $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
 }
 
 Describe 'Visible progress reporting contract' {
@@ -34,5 +35,12 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match '\$caseTotal\s*=\s*\$selected\.Count'
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] proven\s+\{2\}'"
+    }
+
+    It 'reports every deterministic visual run before and after Playwright' {
+        $script:VisualRunner | Should -Match 'const total = contract\.themes\.length \* 2'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] RUN visual-'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] pass visual-'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] fail visual-'
     }
 }

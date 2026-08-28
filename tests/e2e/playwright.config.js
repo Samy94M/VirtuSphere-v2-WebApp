@@ -2,36 +2,17 @@
 // running Docker stack AND as the e2e-portal gate of the Integration lane
 // against the throwaway QA stack. Never part of the shipped artifact.
 const { defineConfig, devices } = require('@playwright/test');
-const path = require('node:path');
-const fs = require('node:fs');
+const { resolveBrowser } = require('./lib/browser-resolver');
+const visualContract = require('./visual/runner-contract.json');
 
-// Browser resolution, in order: explicit env path; the known-good local
-// Chromium (portal-screenshot-setup) when it exists; otherwise undefined so
-// Playwright uses its own installed browser (npx playwright install chromium,
-// the CI path). Dev hosts keep PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 offline
-// installs working because the local path resolves first.
-// The revision is resolved, never pinned: `npx playwright install` prunes the
-// old revision directory, so a hardcoded one silently stops existing and the
-// whole suite falls through to a browser that is not installed either. Pick the
-// highest chromium-<rev> that actually carries an executable.
-function localChromium() {
-  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH
-    || path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
-  let entries;
-  try {
-    entries = fs.readdirSync(cache);
-  } catch {
-    return undefined;
-  }
-
-  return entries
-    .filter((name) => /^chromium-\d+$/.test(name))
-    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
-    .map((name) => path.join(cache, name, 'chrome-win64', 'chrome.exe'))
-    .find((exe) => fs.existsSync(exe));
+// One resolver owns both the runner preflight and Playwright launch path. It
+// asks the installed, lockfile-pinned playwright-core for its exact revision;
+// no user/revision literal and no competing "highest cache revision" scan.
+const CHROMIUM_RESOLUTION = resolveBrowser('chromium');
+if (!CHROMIUM_RESOLUTION.exists) {
+  throw new Error(`Playwright Chromium missing: ${CHROMIUM_RESOLUTION.executablePath}`);
 }
-
-const CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM || localChromium();
+const CHROMIUM = CHROMIUM_RESOLUTION.executablePath;
 
 // Trailing slash is load-bearing: the no-slash form triggers an nginx redirect
 // that this Chromium fails with ERR_CONNECTION_REFUSED (portal-screenshot-setup).
@@ -82,7 +63,26 @@ module.exports = defineConfig({
       // Spread instead of `executablePath: undefined`: Playwright treats the
       // present-but-undefined key as "no browser" instead of falling back to
       // its own registry install.
+      testIgnore: /[\\/]visual[\\/]/,
       use: { ...devices['Desktop Chrome'], channel: undefined, launchOptions: CHROMIUM_LAUNCH },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'visual',
+      testMatch: /[\\/]visual[\\/].*\.spec\.js/,
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: undefined,
+        launchOptions: CHROMIUM_LAUNCH,
+        locale: visualContract.locale,
+        timezoneId: visualContract.timezoneId,
+        viewport: {
+          width: visualContract.viewports[0].width,
+          height: visualContract.viewports[0].height,
+        },
+        deviceScaleFactor: visualContract.deviceScaleFactor,
+        reducedMotion: visualContract.reducedMotion,
+      },
       dependencies: ['setup'],
     },
     // Release-lane browser matrix (ADR-0028 revision): Integration stays
@@ -91,16 +91,19 @@ module.exports = defineConfig({
     // Firefox/WebKit come from the Playwright cache (npx playwright install).
     {
       name: 'firefox',
+      testIgnore: /[\\/]visual[\\/]/,
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['setup'],
     },
     {
       name: 'webkit',
+      testIgnore: /[\\/]visual[\\/]/,
       use: { ...devices['Desktop Safari'] },
       dependencies: ['setup'],
     },
     {
       name: 'msedge',
+      testIgnore: /[\\/]visual[\\/]/,
       use: { ...devices['Desktop Edge'], channel: 'msedge', launchOptions: { args: ['--no-sandbox'] } },
       dependencies: ['setup'],
     },
