@@ -4,6 +4,16 @@ Stand: 13.08.2026
 
 Status: entscheidungsreifer Gesamtplan; seit 2026-08-20 in Offline-Implementierung (8R-O) und Standortabnahme (8R-S) getrennt
 
+Korrigierender Teilplan: `docs/audits/2026-08-26-esxi-exact-names-wds-preflight-implementation-plan.md`
+ist seit 26.08.2026 die Fach-SSoT für operative ESXi-Namensgleichheit,
+case-sensitive Inventarhaltung, Datastore-/Portgruppen-Schreibweisen,
+WDS/PXE-Bereitschaft sowie deren Queue-, Staffel-, Worker- und
+MAC-Callbackvertrag. Er ersetzt ausdrücklich die normalisierte Namensidentität
+aus den Abschnitten 3.1, 4.2 und 4.3, die alte `ambiguous_vlan`-Auslegung für
+Case-Varianten, Abschnitt 3.5 Punkt 5 zur teilweisen Staffel sowie die geplanten
+netzwerkspezifischen Bounds. Der vorliegende Plan bleibt Owner seiner übrigen
+Remote-Recovery-, allgemeinen Netzwerk-/MAC- und Retryverträge.
+
 Zusammengeführt aus: VLAN-/MAC-Review und Codex-Session `019ffafd-2893-7ed1-94f1-d069b6e88174`
 
 Änderungsumfang dieses Arbeitslaufs: ausschließlich Plan-, SSoT- und Querverweisdokumentation; kein Produktivcode, kein Schema und kein Laufzeitverhalten
@@ -20,9 +30,15 @@ Der globale Ausführungsplan `docs/audits/2026-08-11-deploy-reliability-master-p
 Bei Widersprüchen gilt ohne Interpretationsspielraum:
 
 1. Der Masterplan bestimmt Reihenfolge, Etappenabschluss, Commit/Push und globale Qualitätsgates.
-2. Diese Datei bestimmt Remote-Handle, Lease/Fencing, Reaper/Recovery, Deploy-Dienstzustand, Netzwerkvertrag, MAC-Retry und die Wechselwirkung dieser Bereiche.
+2. Diese Datei bestimmt Remote-Handle, Lease/Fencing, Reaper/Recovery,
+   Deploy-Dienstzustand, den übrigen Netzwerkvertrag, MAC-Retry und die
+   Wechselwirkung dieser Bereiche.
 3. `docs/audits/2026-08-13-create-flow-reliability-implementation-plan.md` bestimmt per-VM-Create-Zustände, Ansible-Async-JID, Create-Identität und Create-Zeitbudgets, soweit diese Datei nicht ausdrücklich den Remote-/Recovery-Vertrag korrigiert.
-4. Der frühere Self-Healing-Einzelplan und ältere, abweichende Passagen bleiben historische Befunde, nicht ausführbare Anforderungen.
+4. `docs/audits/2026-08-26-esxi-exact-names-wds-preflight-implementation-plan.md`
+   bestimmt innerhalb von 14A exakte ESXi-Namen, kindweise Inventarsemantik,
+   WDS/PXE, Staffelung und Callbackvertrag und ersetzt dort jede abweichende
+   Passage dieser Datei.
+5. Der frühere Self-Healing-Einzelplan und ältere, abweichende Passagen bleiben historische Befunde, nicht ausführbare Anforderungen.
 
 Die verbindliche Reihenfolge lautet:
 
@@ -33,7 +49,7 @@ Die verbindliche Reihenfolge lautet:
 5. Masterplan-Etappen 11 und 12 folgen. Etappe 12 liefert `deploy_queue_blockers()` samt identischem Repository-Recheck.
 6. **Etappe 13R** wird gemeinsam mit Masterplan-Etappe 13 umgesetzt: ein gemeinsamer Deploy-Dienstsnapshot, Recovery-/Pause-/Queueanzeige, vollständiger Logpoller und Portalaktionen, aber noch kein lokaler Supervisor-Neustart.
 7. Masterplan-Etappe 14 liefert die gemeinsame Formular-/Fehler-API.
-8. **Etappe 14A** setzt die Arbeitspakete A bis H aus Abschnitt 10 für Netzwerk und MAC um. Create und Full erhalten dabei den Netzwerkblocker, laufen aber produktiv erst nach 14B über die neue Create-Ausführung.
+8. **Etappe 14A** setzt die Arbeitspakete A bis H aus Abschnitt 10 für Netzwerk und MAC um und integriert die korrigierenden Pakete A bis I des Plans vom 26.08.2026. Bei Überschneidung besitzt dessen genauer Teilbereich Vorrang. Create und Full erhalten dabei den Netzwerkblocker, laufen aber produktiv erst nach 14B über die neue Create-Ausführung.
 9. **Etappe 14B** setzt den Create-Plan um, bindet jede per-VM-JID in das Remote-Handle ein und aktiviert Create sowie Full erst nach den kombinierten Fault-Gates. Die dortigen alten Reaper-/Retry-/Cleanup-Passagen werden durch Abschnitt 16 bis 24 dieser Datei ersetzt.
 10. **Etappe 14C** aktiviert den lokalen PID-1-Supervisor erst, wenn alle produktiv zugelassenen Modi durable und reattach-fähig sind. Vorher wäre ein automatischer Kindneustart ein Doppelstart-Risiko.
 11. Erst danach folgen Masterplan-Etappen 15 bis 17.
@@ -115,28 +131,41 @@ Folgendes wird nicht nebenbei implementiert:
 - Lokalisierung oder Umbenennung technischer Machine-API-Felder und Fehlercodes;
 - ein zweiter Joblog-Speicher, ein zweiter Terminalstatus oder ein zweiter Retry-Mechanismus;
 - eine DB-Migration, die Produktionsdaten selbstständig repariert;
-- eine Unique-Constraint auf `(vm_id, vlan)`. Sie würde die fachliche Normalisierung nicht exakt ausdrücken, bei Altbestand den Rollout blockieren und unverständliche DB-Fehler statt handlungsfähiger Portalfehler erzeugen.
+- eine Unique-Constraint auf `(vm_id, vlan)`. Sie würde Portaltrimmung und exakte
+  operative Gleichheit nicht zuverlässig ausdrücken, bei Altbestand den Rollout
+  blockieren und unverständliche DB-Fehler statt handlungsfähiger Portalfehler
+  erzeugen.
 
 ## 3. Fest entschiedener Fachvertrag
 
 ### 3.1 Identität einer Netzwerkkarte im aktuellen Produkt
 
-Der aktuelle MAC-Workflow kennt keine stabile ESXi-Geräte-ID je Portal-Interface. Seine einzige fachliche Zuordnung ist:
+Der aktuelle MAC-Workflow kennt keine stabile ESXi-Geräte-ID je Portal-Interface.
+Nach dem Amendment vom 26.08.2026 ist seine einzige operative Zuordnung:
 
 ```text
-Portal-VM + normalisierter VLAN-/Portgroup-Name -> genau ein Portal-Interface
+Portal-VM + exakt gleicher gespeicherter Portgruppenname -> genau ein Portal-Interface
 ```
 
 Deshalb gilt für jede VM, die durch Create oder MAC-Export berührt werden kann:
 
 1. Jede persistierte Interface-Zeile benötigt einen nicht leeren VLAN-/Portgroup-Namen.
-2. Nach `trim` und Unicode-Kleinschreibung muss jeder VLAN-Name innerhalb derselben VM eindeutig sein.
+2. Nach der vorhandenen Portal-Eingabetrimmung muss jeder gespeicherte
+   Portgruppenname innerhalb derselben VM mit `===` eindeutig sein.
 3. Dasselbe VLAN darf selbstverständlich bei beliebig vielen unterschiedlichen VMs vorkommen.
-4. Groß-/Kleinschreibung und führende oder folgende Leerzeichen erzeugen keine künstliche Eindeutigkeit. `vm_srv_depl`, ` VM_SRV_DEPL ` und `Vm_Srv_Depl` sind für diesen Vertrag derselbe Name.
+4. Groß-/Kleinschreibung ist operative Identität: `Prod` und `prod` sind zwei
+   verschiedene VMware-Ziele und dürfen gemeinsam vorkommen. Manuelle
+   Portaleingaben werden weiterhin zentral getrimmt; ESXi-Inventar-Rohnamen
+   werden dagegen niemals getrimmt oder zusammengelegt. Ein ESXi-Name mit
+   Randwhitespace ist bis zu einer späteren Modellerweiterung sichtbar
+   `unsupported_name`, nicht automatisch der getrimmte Portalwert.
 5. VLAN `0` beziehungsweise der Text `"0"` ist nicht leer und darf nicht durch einen Truthiness-Test verworfen werden.
 6. Ein retired oder im Cache aktuell nicht sichtbares VLAN ist eine getrennte Inventarabweichung. Es wird durch diesen Vertrag nicht automatisch einem leeren VLAN gleichgesetzt und nicht allein deshalb als MAC-Mehrdeutigkeit behandelt.
 
-Die bestehende Funktion `esxi_inventory_name_key()` bleibt die einzige SSoT für diese Namensgleichheit. Es wird kein zweiter `strtolower(trim(...))`-Helper angelegt. Ihr PHP-Ergebnis, nicht die zufällige MySQL-Collation einer einzelnen Query, entscheidet die Produktsemantik.
+`esxi_inventory_name_key()` ist für diese operative Gleichheit verworfen. Der
+Objektname-Helper des Korrekturplans besitzt exakte Gleichheit und einen
+getrennten Case-Diagnosekey. Der Diagnosekey darf weder Duplikat, Präsenz,
+Kapazität, Deployfähigkeit noch MAC-Erfolg beweisen.
 
 ### 3.2 Warum nicht nach NIC-Reihenfolge zugeordnet wird
 
@@ -185,7 +214,10 @@ Wenn sich die Playbook-Sequenz später ändert, ändert sich die Antwort automat
 2. Ein leeres `vm_ids` bedeutet wie heute die vollständige Mission. Es bedeutet niemals „keine Prüfung“.
 3. Doppelte oder ungültige IDs werden zuerst durch den bestehenden Payload-Normalizer behandelt. Der Netzwerkprüfer erhält nur den bereits validierten Scope.
 4. Ein partieller Retry prüft ausschließlich `failed_vm_ids` aus dem vertrauenswürdigen Resultat. Fällt der bestehende Retry-Vertrag auf `original_selection` zurück, wird exakt diese Auswahl geprüft.
-5. Staffel-/Gruppenjobs werden je tatsächlich entstehendem Job und dessen VM-Scope geprüft. Eine fehlerhafte VM blockiert nicht einen getrennten Staffelslot, der sie nicht enthält.
+5. Korrektur vom 26.08.2026: Staffelung ist all-or-nothing. Vor irgendeinem
+   Gruppen-/Jobinsert wird der vollständige angeforderte Gesamtscope geprüft.
+   Ein Blocker verhindert jede Staffelzeile. Erst nach grüner Gesamtprüfung wird
+   jeder entstehende Einzelscope in derselben Transaktion erneut geprüft.
 6. Eine Konfigurationsänderung zwischen Planung und Ausführung ist zulässig, solange der Job noch `queued` ist. Der Worker prüft beim Übergang zu `running` den dann aktuellen Stand.
 7. Während `running` oder `cancelling` sind Interface-Bundle-Schreibvorgänge für VMs im Scope des aktiven Missionsjobs serverseitig gesperrt. Leere Job-`vm_ids` sperren alle VMs der Mission; eine explizite Liste sperrt nur deren IDs. Eine nicht ausgewählte VM bleibt editierbar. Dadurch kann das Portal nicht nach Artefakterzeugung die Zuordnungsgrundlage einer tatsächlich laufenden VM austauschen.
 8. Für denselben aktiven Scope sind zusätzlich VM-Umbenennung, Löschen und Missionswechsel gesperrt. Das ist zwingend, weil der unveränderte Machine-API-Vertrag MAC-Ergebnisse über `(mission_id, vm_name)` zuordnet. Eine Änderung vor dem Claim ist zulässig und wird vom Worker-Recheck/Manifest übernommen; nach dem Claim bleiben der materialisierte Name und die Mission bis zum fachlichen Jobterminal unveränderlich. Andere unabhängige VM-Felder folgen weiterhin der Fingerprint-/Snapshotregel und werden nicht pauschal gesperrt.
@@ -212,7 +244,10 @@ Bestehende Owner bleiben bestehen:
 - `deploy_queue_blockers()` bleibt einzige Queue-Blocker-SSoT.
 - der zentrale Presenter aus Masterplan 10B/13 bleibt Owner der Job-Ergebnisanzeige.
 - Masterplan 10A/13 bleibt alleiniger Owner des Joblog-Cursors, Pollers, Filters und Rohdownloads.
-- `esxi_inventory_name_key()` bleibt einzige Namens-Key-SSoT.
+- Der Objektname-Helper aus dem Korrekturplan vom 26.08.2026 bleibt einzige SSoT
+  für getrennte Portaltrimmung, exakte operative Gleichheit und reine
+  Case-Ähnlichkeitsdiagnose. Der alte `esxi_inventory_name_key()` ist keine
+  operative SSoT mehr.
 - `ansible_playbooks_for_mode()` bleibt einzige Sequenz-SSoT.
 - Die Remote-Execution-Registry aus Abschnitt 18 bleibt alleiniger Owner von Remotezustand, Reconciliation und Cleanup. Der Netzwerkvertrag schreibt dort keinen zweiten Ausführungszustand.
 - Der Deploy-Dienstsnapshot aus Abschnitt 21 bleibt alleiniger Owner der Verfügbarkeitsachse `ready`, `busy`, `degraded`, `cooldown`, `offline`, der Claim-Achse `accepting`, `pause_after_current`, `paused` und der Recoveryachse `none`, `recovering`, `manual_review`.
@@ -237,10 +272,14 @@ Jede Prüfung liefert eine sortierte Liste technischer Objekte mit exakt diesen 
 Regeln:
 
 - `interface_vlan_empty`: `vlan` ist `''`, genau die leeren Zeilen stehen in `interface_ids`/`row_indexes`.
-- `interface_vlan_ambiguous`: `vlan` ist der erste getrimmte sichtbare Originalwert der Gruppe; alle logisch gleichen Zeilen stehen in den ID-/Indexlisten.
+- `interface_vlan_ambiguous`: `vlan` ist der exakte gespeicherte Portalwert;
+  ausschließlich mit `===` gleiche Zeilen stehen in den ID-/Indexlisten.
+  Case-Varianten erzeugen diesen Code nicht.
 - Nicht persistierte Zeilen haben keine positive ID und erscheinen nur in `row_indexes`.
 - `occurrences` entspricht der Listenlänge der betroffenen Zeilen und wird nicht separat geraten.
-- Sortierung: `vm_name` natürlich/case-insensitive, danach `vm_id`, dann Issue-Code, dann normalisierter VLAN-Key, dann kleinste Interface-ID beziehungsweise Zeilenindex.
+- Sortierung: `vm_name` natürlich/case-insensitive, danach binär exakt,
+  `vm_id`, Issue-Code, binär exakter Portgruppenwert und kleinste Interface-ID
+  beziehungsweise Zeilenindex.
 - Das Domainobjekt enthält weder übersetzten Text noch HTML noch Berechtigungsentscheidungen.
 
 Die pure Signatur lautet `vm_network_issues_for_interfaces(array $interfaces, int $missionId, int $vmId, string $vmName): array`. Für eine noch nicht persistierte VM ist `$vmId = 0` zulässig. `row_indexes` sind intern nullbasiert; der Presenter zeigt sie immer als „Netzwerkkarte N“ mit `N = index + 1`. `interface_ids` enthält ausschließlich positive persistierte IDs. `repo_vm_network_issues_for_scope()` liest alle benötigten Interfaces in einer gebündelten Query, ruft ausschließlich diese pure Funktion auf und erzeugt kein N+1.
@@ -252,7 +291,7 @@ Die pure Signatur lautet `vm_network_issues_for_interfaces(array $interfaces, in
 - Ordinalzahl;
 - Interface-ID oder `0` für neu;
 - getrimmten VLAN-Originalwert;
-- VLAN-Key aus `esxi_inventory_name_key()`;
+- exakter gespeicherter Portgruppenwert; kein Case-Folding-Key;
 - Modus;
 - Typ;
 - IP, Subnet, Gateway, DNS1, DNS2;
@@ -294,8 +333,11 @@ Vorgaben:
 
 Für `ambiguous_vlan` wird additiv das optionale Fehlerfeld `ambiguity_source` mit `portal`, `esxi` oder `both` erzeugt:
 
-- `portal`: mehrere Portal-Interfaces besitzen denselben VLAN-Key;
-- `esxi`: mehrere ausgelesene ESXi-NICs besitzen denselben VLAN-Key, während das Portal genau eine passende Zeile besitzt;
+- `portal`: mehrere Portal-Interfaces besitzen nach der zentralen
+  Eingabetrimmung denselben mit `===` verglichenen Portgruppennamen;
+- `esxi`: mehrere ausgelesene ESXi-NICs besitzen denselben unveränderten, mit
+  `===` verglichenen Portgruppen-Rohnamen, während das Portal genau eine exakte
+  passende Zeile besitzt;
 - `both`: beide Seiten sind mehrfach;
 - Feld fehlt: historisches Ergebnis, Quelle unbekannt.
 
@@ -358,9 +400,18 @@ Regeln:
 | VLAN-Massen-Reassign | betroffene `from`- und bereits vorhandene `to`-Interfaces per ID lesen, Zielzustand in Memory simulieren, alle Konflikte nennen, gesamte Aktion ohne Teilupdate abbrechen |
 | direkte MAC-Schreibvorgänge | unverändert ausschließlich durch `db_importMAC.php`; Eindeutigkeitsguard bleibt letzte Verteidigung |
 
-Für den Massen-Reassign wird nicht mehr `UPDATE ... WHERE vlan = ?` als alleinige Auswahl verwendet. Wegen Collation- und Whitespace-Unterschieden werden Kandidaten gelesen, über `esxi_inventory_name_key()` ausgewählt und anschließend nur die explizit geprüften Interface-IDs aktualisiert. Missions-WDS-VLANs werden im selben Transaktionsvertrag behandelt. Bei irgendeinem Konflikt werden weder Missionen noch Interfaces geändert.
+Für den Massen-Reassign wird nicht mehr `UPDATE ... WHERE vlan = ?` als alleinige
+Auswahl verwendet. Wegen der DB-Collation werden Kandidaten gelesen, nach der
+zentralen Portal-Eingabetrimmung ausschließlich mit `===` ausgewählt und
+anschließend nur die explizit geprüften Interface-IDs aktualisiert.
+Missions-WDS-Portgruppen werden im selben Transaktionsvertrag behandelt. Bei
+irgendeinem Konflikt werden weder Missionen noch Interfaces geändert.
 
-Sind Quell- und Zielname nach `esxi_inventory_name_key()` gleich, wird die Aktion vor der Transaktion als wirkungsloser Selbst-Reassign abgelehnt. Unterschiedliche Schreibweise oder Leerzeichen dürfen keine scheinbare Änderung und kein Collation-Breitupdate auslösen.
+Sind getrimmter Quell- und Zielname mit `===` gleich, wird die Aktion vor der
+Transaktion als wirkungsloser Selbst-Reassign abgelehnt. Ein reiner Case-Wechsel
+ist dagegen eine reale VMware-Zieländerung und darf nach vollständiger Prüfung
+ausgeführt werden. Randwhitespace in manuellen Eingaben wird vor dem Vergleich
+entfernt; die SQL-Collation darf niemals zusätzliche Zeilen in das Update ziehen.
 
 Die Fehleransicht des Massen-Reassign nennt höchstens die ersten 20 VMs und zusätzlich „N weitere“. Ein Download oder eine technische Auditkontextliste bleibt bounded. Es gibt niemals „14 geändert, 1 übersprungen“: Erfolg ist vollständig, Konflikt ist vollständig ohne Write.
 
@@ -470,7 +521,12 @@ Verbindliches Verhalten:
 1. Labels und Controls besitzen eindeutige IDs aus Form, Feld und Zeilenkennung gemäß Masterplan 14.
 2. Beide kollidierenden VLAN-Selects erhalten `aria-invalid="true"` und jeweils eine eigene Fehler-ID in `aria-describedby`.
 3. Die Fehlerzusammenfassung oberhalb des Formulars enthält Links zu allen betroffenen VLAN-Controls und fokussiert nach Serverfehler das erste Control.
-4. Die Live-Prüfung läuft beim Laden, bei VLAN-Änderung, Hinzufügen, Entfernen und Undo. Sie verwendet im Browser `trim()` plus `toLowerCase()` als schnelle Annäherung an den PHP-Key. Unicode-Versionen von Browser und PHP können bei exotischen Zeichen abweichen; deshalb darf der Clienthinweis nur früher warnen, niemals einen Serverfehler löschen oder eine Freigabe entscheiden. Der Serverguard über `esxi_inventory_name_key()` bleibt allein maßgeblich.
+4. Die Live-Prüfung läuft beim Laden, bei Portgruppenänderung, Hinzufügen,
+   Entfernen und Undo. Für Duplikate verwendet sie nach `trim()` ausschließlich
+   exakte Stringgleichheit; `toLowerCase()` darf nur einen getrennten
+   Case-Ähnlichkeitshinweis erzeugen und niemals `aria-invalid`, einen Blocker
+   oder eine Freigabe. Der Serverguard über den Objektname-Helper des
+   Korrekturplans bleibt allein maßgeblich.
 5. Ohne JavaScript bleibt der Serverpfad vollständig verständlich: Eingaben bleiben erhalten, Fehler stehen zusammengefasst und inline.
 6. „Keine“ wird aus dem VLAN-Select persistierbarer Interface-Zeilen entfernt. Ein vorhandener leerer Altwert wird als eigene ungültige Legacy-Option „Kein VLAN zugeordnet, muss korrigiert werden“ angezeigt, damit der Browser nicht still das erste gültige VLAN auswählt.
 7. Die Hilfe direkt an der Gruppe sagt: „Jede gespeicherte Netzwerkkarte wird auf ESXi angelegt und benötigt ein VLAN. Wenn keine weitere Karte benötigt wird, entfernen Sie die Zeile.“
@@ -511,7 +567,13 @@ Vorgaben:
 
 - Anzahl, Liste, Disabled-Zustand und Aktionen stammen aus derselben Blocker-Union.
 - Eine VM mit zwei verschiedenen Konfliktgruppen erscheint einmal als VM-Gruppe und darunter mit beiden VLANs.
-- Die Anzeigegrenzen liegen als `VIRTUSPHERE_VM_NETWORK_BLOCKER_INITIAL_LIMIT = 10` und `VIRTUSPHERE_VM_NETWORK_BLOCKER_DETAIL_LIMIT = 50` in der zentralen Bounds-SSoT. Bis 50 betroffene VMs sind zunächst zehn sichtbar und „Alle N anzeigen“ erweitert clientseitig die vollständig gelieferte Liste. Oberhalb von 50 liefert der Endpunkt `total`, die ersten 50 nach der festgelegten Sortierung und `omitted_count`; die UI sagt „Weitere N in der VM-Liste“ und verlinkt dorthin. Der Backendguard prüft unabhängig davon immer den vollständigen Scope. Der Submit bleibt unabhängig vom Einklappen blockiert.
+- Die allgemeine Bounds-SSoT aus Abschnitt 16.4 des Korrekturplans gilt:
+  `VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT = 10`,
+  `VIRTUSPHERE_DEPLOY_PREFLIGHT_DETAIL_LIMIT = 50`, Kandidatenlimit 5 und
+  JSON-Insel 65536 Bytes. Die beiden früher geplanten
+  `VIRTUSPHERE_VM_NETWORK_BLOCKER_*`-Konstanten werden nicht implementiert.
+  `total`/`omitted_count` bleiben vollständig; der Backendguard prüft immer den
+  Gesamtscope.
 - Der Live-Endpunkt verwirft stale Responses. Ein schneller Wechsel von `start` zu `create` darf niemals den Start-Warnzustand als Create-Freigabe stehen lassen.
 - Sessionende, 403 oder Netzfehler führen zu „Prüfung nicht möglich“ und einem nicht freigegebenen Submit für harte Modi. Für Start/Autostart bleiben die bestehenden serverseitigen Regeln maßgeblich; der Client erfindet keine globale Sperre.
 - Bei Start/Autostart lautet der Block „Hinweis“ und erklärt, dass der aktuelle Modus keine MAC-Zuordnung ausführt. Der Button bleibt aktiv.
@@ -570,15 +632,15 @@ Die neue Darstellung verwendet bestehende Theme-Tokens, `.button`-Verträge, `:f
 | genau ein Interface, gültiges VLAN | kein Befund |
 | zwei Interfaces, verschiedene VLANs | kein Befund |
 | dasselbe VLAN auf verschiedenen VMs | zulässig |
-| `vm_srv_depl` und `VM_SRV_DEPL` in einer VM | Ambiguous-Befund |
+| `vm_srv_depl` und `VM_SRV_DEPL` in einer VM | zwei gültige VMware-Ziele; höchstens Case-Diagnosehinweis |
 | führende/folgende Leerzeichen | werden für Gleichheit ignoriert; sichtbarer Wert getrimmt gespeichert |
 | VLAN-Wert `"0"` | gültiger nicht leerer Name |
 | leerer String, Whitespace oder NULL | `interface_vlan_empty` |
 | zwei leere Zeilen | ein Empty-Befund mit beiden Zeilen, nicht Ambiguous plus Empty doppelt |
 | dreimal dasselbe VLAN | ein Ambiguous-Befund mit drei IDs/Indizes |
 | zwei unterschiedliche doppelte VLAN-Gruppen | zwei Befunde, eine gruppierte VM-Anzeige |
-| Unicode-Groß-/Kleinschreibung | Gleichheit ausschließlich über `esxi_inventory_name_key()` |
-| MySQL-Collation hält zwei andere Namen für gleich | Produktlogik bleibt beim PHP-Key; Reassign aktualisiert geprüfte IDs, nicht Collation-Breitmatch |
+| Unicode-Groß-/Kleinschreibung | operative Gleichheit ausschließlich per `===`; Case-Folding nur Diagnose |
+| MySQL-Collation hält zwei andere Namen für gleich | Produktlogik bleibt bei exakter PHP-Gleichheit; Reassign aktualisiert geprüfte IDs, nicht Collation-Breitmatch |
 | retired VLAN | getrennte Inventarwarnung; nicht automatisch Empty/Ambiguous |
 | VLAN fehlt im aktuellen ESXi-Cache | bestehende Inventarabweichung; dieser Vertrag erfindet keinen harten Mappingfehler |
 | ESXi hat zwei NICs im selben VLAN, Portal nur eine | Callback `ambiguous_vlan`, `ambiguity_source=esxi`; ESXi-Prüfanweisung |
@@ -632,7 +694,9 @@ Abnahme A: Tests schlagen ausschließlich wegen der noch fehlenden neuen Verträ
 ### Paket B: pure Netzwerk-SSoT und Repositoryleser
 
 1. `vm_network_contract.php` mit Issuecodes, purem Gruppierer, Modusableitung und Fingerprint implementieren.
-2. Bestehenden `esxi_inventory_name_key()` verwenden und Include-/Bootstrapreihenfolge statisch absichern.
+2. Den Objektname-Helper des Korrekturplans für Portaltrimmung und exakte
+   Gleichheit verwenden und Include-/Bootstrapreihenfolge statisch absichern;
+   der Case-Diagnosekey darf nicht in den Gruppierer gelangen.
 3. `repo/vm_network.php` mit gebündelten Scope-Abfragen implementieren.
 4. Missionweite VM-Liste, ausgewählter Scope, Retry-Scope und einzelne VM ohne N+1 abdecken.
 5. Unknown Mode und malformed rows fail closed behandeln.
@@ -664,7 +728,9 @@ Abnahme D: In jedem Hard-Block-Fall existieren null Uploads, null SSH-Kommandos 
 
 ### Paket E: MAC-Resultat, Ursache und Retry
 
-1. MAC-Lookup pro VM gebündelt lesen und über `esxi_inventory_name_key()` gruppieren, statt je NIC eine Collation-abhängige Query auszuführen.
+1. MAC-Lookup pro VM gebündelt lesen und Portal-/ESXi-NICs ausschließlich über
+   exakte PHP-Stringgleichheit gruppieren, statt je NIC eine
+   Collation-abhängige Query auszuführen.
 2. Portal- und ESXi-Mehrfachheit getrennt zählen und `ambiguity_source` additiv setzen.
 3. `vm_results` mit `vm_id` additiv persistieren.
 4. Altresultate fail-soft lesen.
@@ -730,7 +796,8 @@ Abnahme H: Abschnitt 13 ist vollständig belegt; keine offene Frage und kein „
 
 ### 11.3 Static/Contract
 
-- genau eine VLAN-Key-SSoT;
+- genau ein Objektname-Owner für Portaltrimmung, exakte operative Gleichheit und
+  getrennte Case-Diagnose; kein operativer normalisierter VLAN-Key;
 - kein direktes `deploy_interfaces.vlan`-Update außerhalb erlaubter Owner;
 - kein handgeschriebener VM-Netzwerk-Deep-Link;
 - alle MAC-Fehlercodes in Registry und Presenter;
@@ -958,7 +1025,7 @@ Diese Korrekturen sind Teil des Zielvertrags und keine optionalen Verbesserungsv
 | externer Effekt | `deploy_remote_executions.effect_state` | ob VMware-/Callbackwirkung ausgeschlossen, möglich, live bestätigt oder abweichend ist |
 | Reconciliation | `deploy_remote_executions.reconciliation_state` plus append-only Resolution | ob derselbe Lauf beobachtet, automatisch versöhnt oder manuell geklärt werden muss |
 | Create-Einheit | `deploy_create_vm_results` aus dem Create-Plan | per-VM-JID, Ziel-ID, UUID/MOID und Create-Ergebnis |
-| Netzwerkvertrag | `vm_network_contract.php` | leere beziehungsweise doppelte normalisierte VLAN-Zuordnung |
+| Netzwerkvertrag | `vm_network_contract.php` | leere beziehungsweise nach Portaltrimmung exakt doppelte Portgruppenzuordnung |
 | MAC-Ergebnis | versioniertes `result_json.vm_results` | Callbackresultat pro VM, einschließlich `ambiguous_vlan` |
 | Dienstverfügbarkeit | `deploy_service_health_snapshot().availability` | ready/busy/degraded/cooldown/offline |
 | Claim-Freigabe | `deploy_service_health_snapshot().claim_state` | accepting/pause_after_current/paused |
@@ -1140,6 +1207,15 @@ job_id + aktiver Jobstatus + locked_by + lock_token + worker_epoch + execution_g
 Das gilt für Heartbeat, Logappend, Stepstart, Reconciliationwrite und Finish. Der Worker liest Generation und Epoch beim Leaseerwerb; jede Repository-CAS vergleicht beide mit den aktuellen Singletonwerten. Ein alter Worker darf nach Epoch- oder Generationswechsel weder einen neuen Schritt starten noch Job-/Remotezustand schreiben.
 
 Deploy-Callbacks, die Job-/VM-Ergebnisse mutieren, behalten ihren bestehenden Job-/Mission-/Scope-/Idempotenzvertrag und benötigen kein Worker-Token oder neues Wire-Feld. Für `db_importMAC.php` verlangt das Repository vor dem Write zunächst `job.execution_generation_id = runtime.current_generation_id`. Bei `execution_contract=remote_v1` löst es zusätzlich den erwarteten Export-Callback-Step über den bereits verpflichtenden `job_id` auf und verlangt dieselbe Generation am Remote-Handle; bei `legacy_v1` ist kein Handle erfunden. NULL-Vertrag/-Generation, fremde Generation oder fehlendes Remote-v1-Handle antwortet mit dem bestehenden JSON-Fehlerrahmen und HTTP 409, schreibt keine Lifecycle-/MAC-Daten und auditiert `callback_generation_mismatch` gedrosselt. Eine Recovery derselben aktuellen Generation bleibt zulässig, solange der fachliche Job aktiv ist. Nach Terminalisierung bleiben späte Callbacks ebenfalls abgelehnt und gedrosselt auditiert. Ein nach Restore abgewiesener fremder Callback wird ausschließlich durch Live-Reconciliation ersetzt, nie durch Payloadraten. MECM-Report-/Client-ACK-Endpunkte sind von diesem Deploy-Generationgate ausdrücklich unberührt.
+
+Der Korrekturplan vom 26.08.2026 präzisiert diesen Callbackvertrag verbindlich:
+Unter der festen Reihenfolge `Mission -> Job -> Runtime-Identität -> bei
+remote_v1 aktuelles Export-Handle -> VM -> Interfaces` müssen der normalisierte
+Payloadmodus, `ansible_mode_expects_mac_result()`, der Export-Step mit
+`callback_expectation=db_import_mac`, der aktuelle Attempt und alle vorhandenen
+Generationen zusammenpassen. Nicht exporthaltige oder unbekannte Modi sowie
+jede Abweichung antworten `409` ohne Writes. Für `legacy_v1` wird weiterhin kein
+Remote-Handle erfunden.
 
 Bei DB-Ausfall gilt fail closed: Ein Worker darf eine bereits gestartete Remote-Unit weiter beobachten beziehungsweise den Kanal verlieren lassen, aber ohne erfolgreiche Lease-/Epochprüfung keinen weiteren mutierenden Schritt starten. Remoteoutput bleibt bounded auf dem Ansible-Host und wird nach DB-Rückkehr ab dem persistierten Offset importiert.
 
@@ -1330,7 +1406,8 @@ Jeder tatsächliche Versuch erhöht `cleanup_attempts` und `cleanup_auto_attempt
 | VM/Mission umbenannt | vor Claim zulässig und vom Recheck neu materialisiert; im aktiven Scope bis Terminal gesperrt; Handles korrelieren über IDs und historische Anzeigen verwenden den gespeicherten Namenssnapshot |
 | VM gelöscht während aktiv | FK/aktive Guards verweigern Löschung |
 | zwei NICs gleiches VLAN im Portal | Save/Queue/Worker/Retry gemäß Abschnitt 3 bis 6 blockiert, keine geratenen MACs |
-| gleiche VLAN-Schreibweise mit Case/Whitespace | `esxi_inventory_name_key()` entscheidet; kein Collation-Breitupdate |
+| Quell-/Zielname nur case-verschieden | reale VMware-Zieländerung; exakte ID-Auswahl, kein Collation-Breitupdate |
+| Quell-/Zielname nur durch Randwhitespace der Eingabe verschieden | Portaltrimmung ergibt Self-Reassign; Aktion ohne Writes ablehnen |
 | VLAN `"0"` | gültiger nicht leerer Wert; kein Truthinessfehler |
 | alle VLANs leer | keine WDS-Fallback-Abweichung für neue/geänderte VM; verständlicher Blocker |
 | Reassign kollidiert nur bei einer von vielen VMs | gesamte Aktion ohne Teilwrite abweisen, bounded Fehlerliste |
@@ -1426,7 +1503,7 @@ Die Fault-Injection-Suite führt mindestens die 17 Remote-Crashpunkte des frühe
    Datenbankzeilen bleiben bis dahin `disabled`.
 7. **8R-S Standortabnahme und Aktivierung:** 8R-S-0 übernimmt die echten Host-/Messwerte. Danach werden Inventory, Export, Start, Autostart und Powercycle streng einzeln mit realer Faultmatrix, Beobachtungsfenster und Rückbau freigegeben. Jede Freigabe erhält einen eigenen Commit beziehungsweise ein revisionsgebundenes Standortprotokoll; ohne Repositoryzugriff am Standort wird der importierte Nachweis im nächsten Repositorycommit festgehalten.
 8. **13R Portalintegration:** Drei-Achsen-Snapshot, Queue-/Recovery-/Pauseanzeige, Systemstatus, Dashboard, Actions, vollständiger Tail und Barrierefreiheit auf Masterplan 10A bis 13.
-9. **14A Netzwerk/MAC:** Pakete A bis H aus Abschnitt 10 unverändert in Reihenfolge, ergänzt um die Remote-/Retry-Präzedenz aus Abschnitt 20.
+9. **14A Netzwerk/MAC:** Pakete A bis H aus Abschnitt 10 in ihrer übrigen Reihenfolge, amendiert und ergänzt durch Pakete A bis I des Korrekturplans vom 26.08.2026 sowie die Remote-/Retry-Präzedenz aus Abschnitt 20.
 10. **14B Create:** Create-Plan per VM, JID und Identität umsetzen; Remotehandle um Create-Einheit erweitern; Create/Full-Faultmatrix einschließlich 90-Minuten-EZT-Staginglauf.
 11. **14C Supervisor:** erst jetzt PID-1-Supervisor, getrennte Heartbeats, Cooldown und Compose-Health aktivieren.
 12. **15 bis 17:** Logfilter/Korrelation, Design/Visuals und Release gemäß Masterplan; Remote-Eventcodes und Resolutionen sind vollständig integriert.
