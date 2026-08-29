@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/system_status_service_actions.php';
+
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/repo/credentials.php';
@@ -21,6 +23,12 @@ function system_status_handle_post(mysqli $connection, array $user): void
 {
     $inventoryAction = request_string($_POST, 'action');
     $redirect = 'system_status.php';
+    // The deploy-service actions own their permission and their audit line, so
+    // they are dispatched on the module's own list rather than on a second
+    // hand-written condition here.
+    if (in_array($inventoryAction, VIRTUSPHERE_DEPLOY_SERVICE_ACTIONS, true)) {
+        system_status_handle_service_action($connection, $user, $inventoryAction);
+    }
     if ($inventoryAction === 'refresh_inventory') {
         if (!can('deploy.run', $user)) {
             portal_forbid($connection, $user, 'deploy.run');

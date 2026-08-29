@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/envboot.php';
 require_once __DIR__ . '/../lib/headers.php';
 require_once __DIR__ . '/../lib/db.php';
 require_once __DIR__ . '/../lib/deploy_constants.php';
+require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/log_redaction.php';
 
 virtusphere_send_security_headers();
@@ -41,24 +42,35 @@ function health_logs_ok(): bool
 }
 
 /**
- * Whether a running deploy job has stopped reporting. "Stale" means the same
- * thing here as it does to the reaper, and it reads the reaper's own constant to
- * say so: the hardcoded 2 MINUTE called jobs stale that the reaper still
- * considered alive, so this endpoint reported `degraded` for a healthy deploy
- * whose playbook simply had not printed for three minutes.
+ * Whether the deploy service is healthy, read from the ONE snapshot every
+ * other surface reads (Etappe 13R).
+ *
+ * It used to derive its own answer from a stale-heartbeat query. That made this
+ * endpoint a fifth opinion, and it was the opinion nobody could see: a deploy
+ * service the System status page called paused on purpose was reported here as
+ * degraded, because a query about heartbeats cannot tell a deliberate pause
+ * from a fault. The axis knows the difference, so the axis decides.
+ *
+ * A snapshot that cannot be computed is `degraded`, never a 503. The database
+ * already answered, so this service CAN serve requests; turning an internal
+ * derivation fault into an address-probe failure would stop every client script
+ * in the deploy VLAN over a portal detail none of them read.
  */
 function health_workers_ok(mysqli $db): bool
 {
-    $status = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-    $stale = VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS;
-    $row = health_statement_row(
-        $db,
-        'SELECT SUM(CASE WHEN heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND) THEN 1 ELSE 0 END) AS stale_running_jobs FROM deploy_jobs WHERE status = ?',
-        'is',
-        [$stale, $status]
-    );
+    try {
+        $availability = deploy_service_health_snapshot($db)['availability'];
+    } catch (Throwable $exception) {
+        error_log('[health] deploy snapshot unavailable: ' . $exception::class);
 
-    return (int) ($row['stale_running_jobs'] ?? 0) === 0;
+        return false;
+    }
+
+    return !in_array(
+        $availability,
+        [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE],
+        true
+    );
 }
 
 try {

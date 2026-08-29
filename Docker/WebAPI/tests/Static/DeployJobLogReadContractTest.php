@@ -32,6 +32,7 @@ final class DeployJobLogReadContractTest extends TestCase
         $root = dirname(__DIR__, 2);
         $files = [
             'lib/deploy_constants.php',
+            'lib/deploy_log_constants.php',
             'lib/audit_events.php',
             'lib/repo/deploy_job_queries.php',
             'lib/repo/deploy_job_worker.php',
@@ -51,12 +52,20 @@ final class DeployJobLogReadContractTest extends TestCase
     private function needles(): array
     {
         return [
-            'lib/deploy_constants.php' => [
+            // The read windows moved out of lib/deploy_constants.php in Etappe
+            // 13, when that file reached the ADR-0006 budget: "what may be
+            // stored" and "how much may be read at once" are different domains.
+            'lib/deploy_log_constants.php' => [
                 'VIRTUSPHERE_DEPLOY_LOG_INITIAL_TAIL_LIMIT',
                 'VIRTUSPHERE_DEPLOY_LOG_FORWARD_LIMIT',
                 'VIRTUSPHERE_DEPLOY_LOG_OLDER_LIMIT',
                 'VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW',
                 'VIRTUSPHERE_DEPLOY_LOG_RAW_BATCH_SIZE',
+                // The bottom tolerance is not a comfort margin: scrollTop is
+                // fractional while scrollHeight and clientHeight are rounded,
+                // so without it follow mode pauses itself at the actual bottom.
+                'VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX',
+                'VIRTUSPHERE_DEPLOY_LOG_STATUS_THROTTLE_MS',
             ],
             'lib/repo/deploy_job_queries.php' => [
                 'function repo_deploy_job_log_initial_tail(',
@@ -88,6 +97,31 @@ final class DeployJobLogReadContractTest extends TestCase
                 'Content-Disposition: attachment; filename=',
                 'virtusphere-deploy-job-',
                 'data-deploy-log-older',
+                // The poll is a read, and it must not hold the session lock
+                // while it runs: at a two-second cadence with an unpaused drain
+                // the rest of the portal would queue behind one open job log.
+                // Identity, permission and locale are resolved before this.
+                "if (\$format === 'json' && session_status() === PHP_SESSION_ACTIVE) {",
+                'session_write_close();',
+                // Additive only. `status` and `badge` are the existing wire
+                // fields and stay; `label` is what the browser prints.
+                "'status' => (string) \$job['status'],",
+                "'badge' => deploy_job_status_badge_class((string) \$job['status']),",
+                "'label' => deploy_job_status_label((string) \$job['status']),",
+                // The log region is announced as a log but does not speak per
+                // line; the throttled status region does the speaking instead.
+                'role="log" aria-live="off"',
+                'data-deploy-log-scroller',
+                // Both numbers come from lib/deploy_log_constants.php through an
+                // attribute, so the browser cannot carry a second copy.
+                'data-bottom-tolerance="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX); ?>"',
+                'data-status-throttle="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_STATUS_THROTTLE_MS); ?>"',
+                // Both switches carry a visible label, not a tooltip.
+                "data-deploy-log-follow checked> <?php echo h(__t('deploy.follow_label'))",
+                "data-deploy-log-wrap checked> <?php echo h(__t('deploy.wrap_label'))",
+                'data-deploy-log-jump',
+                'data-deploy-log-retry',
+                'data-deploy-log-connection role="status" aria-atomic="true"',
             ],
             'lib/audit_events.php' => [
                 'if ($json)',
@@ -105,6 +139,33 @@ final class DeployJobLogReadContractTest extends TestCase
                 'trimOldest();',
                 'trimNewest();',
                 "setFeedback(i18n.history_mode || '')",
+                // The visible status text comes from `label` alone. A fallback
+                // to `status` would put the raw token back in front of a person
+                // on exactly the day the server sends something the catalog
+                // does not know.
+                'status.textContent = payload.job.label',
+                // Follow is a state the reader owns: it pauses itself when they
+                // scroll up and only a deliberate return clears the counter.
+                // The initial position belongs to the same rule and is checked
+                // structurally below, because a following reader who is left at
+                // the TOP of the newest window never reaches the bottom test at
+                // all: every batch counts as unseen and nothing ever moves.
+                'if (followEnabled) {',
+                'function atBottom()',
+                'bottomTolerance',
+                'scroller.addEventListener(\'scroll\'',
+                'scrollPaused = true;',
+                'unseenLines',
+                'virtusphere.deploy_log.follow',
+                // A background tab stops asking and comes back with exactly one
+                // catch-up, not with the polls it missed.
+                "document.addEventListener('visibilitychange'",
+                'if (document.hidden) { return; }',
+                // One DOM mutation per batch, so nothing observes the
+                // intermediate states of a five-hundred-line drain.
+                'document.createDocumentFragment()',
+                // A login page answering 200 is not this endpoint.
+                "indexOf('application/json') === -1",
             ],
             'lib/layout.php' => [
                 "'assets/deploy_log.js'",
@@ -126,6 +187,16 @@ final class DeployJobLogReadContractTest extends TestCase
         $deployJs = $sources['portal/assets/deploy_log.js'] ?? '';
         if (substr_count($deployJs, 'function poll()') !== 1) {
             $errors[] = 'the log client must own exactly one poll loop';
+        }
+        // The last thing the module does on a live view is put a following
+        // reader at the end. Text presence alone cannot say this: the file can
+        // carry every follow-mode line and still open at scrollTop 0, where
+        // atBottom() is false, the first batch is counted as unseen and the
+        // switch labelled "live" moves nothing. Only a browser sees that, so it
+        // is pinned here as a shape and in tests/e2e/specs/deploy-log.spec.js as
+        // geometry.
+        if (preg_match('#renderConnection\(\);\s*(?://[^\n]*\n\s*)*if \(followEnabled\) \{\s*scrollToEnd\(\);#', $deployJs) !== 1) {
+            $errors[] = 'the initial render must place a following reader at the end';
         }
 
         return $errors;

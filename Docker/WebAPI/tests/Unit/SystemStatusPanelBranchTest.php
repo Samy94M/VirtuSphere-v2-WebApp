@@ -397,8 +397,15 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.ansible_job_identity', ['id' => 812, 'mission' => 'MISSION-ALPHA']), $html);
         self::assertStringContainsString('href="deploy_log.php?id=812"', $html);
         // A start job proves less than a full run, and the help says so; the row
-        // has to name which one it was or that sentence cannot be acted on.
-        self::assertStringContainsString(__t('system_status.ansible_job_mode', ['mode' => 'start']), $html);
+        // has to name which one it was or that sentence cannot be acted on. It
+        // names it the way the portal names a mode everywhere else, not with the
+        // payload token: the reader of this row and the reader of the job list
+        // must not have to learn two vocabularies for one thing.
+        self::assertStringContainsString(
+            __t('system_status.ansible_job_mode', ['mode' => deploy_mode_label('start')]),
+            $html
+        );
+        self::assertStringNotContainsString('Modus start', $html);
     }
 
     public function testARegularOperatorCanInspectTheJobButCannotStartTheCredentialTest(): void

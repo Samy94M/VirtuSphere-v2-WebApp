@@ -8,6 +8,9 @@ declare(strict_types=1);
 // cut through one catalog. Keys are reached as __t('help_system_status.<key>').
 
 return [
+    'service_card_heading' => 'The deploy service card',
+    'service_card_p1' => 'The card shows three facts side by side: whether work is being executed, whether new jobs are being taken, and whether a case is still open. They hold independently, so none of them stands in for the others. The buttons appear only with the system settings permission; the explanation stays visible for everyone.',
+    'service_card_link' => 'States and actions of the deploy service in detail',
     'system_status_roles_heading' => 'Settings, credentials and system status',
     'system_status_roles_p1' => 'Settings control global behaviour, Credentials stores encrypted Ansible and ESXi accounts, and System status shows observed results plus authorised diagnostic and repair actions.',
     'system_status_single_site' => 'VirtuSphere connects exactly one MECM site. Several IP allowlist entries let several network addresses reach the same machine API; they do not create multi-MECM.',

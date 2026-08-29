@@ -397,6 +397,10 @@ const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE = 'ansible';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI = 'esxi';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL = 'internal-services';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS = 'deviations';
+// The deploy service card (Etappe 13R). It is the target of every link that
+// says "the deploy service is paused" or "a case is waiting for you", so it
+// needs the same stable fragment the other sections have.
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE = 'deploy-service';
 
 // The same idea one page over: settings.php spreads its forms over tabs, and a
 // link that names the page without its panel lands on the first tab, which is

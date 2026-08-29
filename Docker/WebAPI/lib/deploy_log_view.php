@@ -3,6 +3,74 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_log_filter.php';
+require_once __DIR__ . '/deploy_log_phases.php';
+require_once __DIR__ . '/repo/deploy_jobs.php';
+
+/**
+ * Everything the HTML view of one job log needs, resolved once (Etappe 13).
+ *
+ * The two readings of a log are deliberately exclusive. Unfiltered, the page is
+ * the live tail of 10A and the poller owns it. Filtered, the page is a bounded
+ * search over everything still retained, live updates are off, and it says so:
+ * a filtered view that kept following would let a reader watch a subset while
+ * believing they were watching the run, and switching back would mark full-log
+ * lines they never saw as read.
+ *
+ * @param array<string,mixed> $job
+ * @param array<string,mixed> $query typically $_GET
+ * @return array{
+ *     timeline: array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>,current:?string},
+ *     phase_names: list<string>,
+ *     filter: array{q:string,source:string,phase:string,active:bool},
+ *     page: array<string,mixed>,
+ *     logs: list<array<string,mixed>>,
+ *     match_capped: bool
+ * }
+ */
+function deploy_log_view_model(mysqli $db, array $job, array $query): array
+{
+    $jobId = (int) $job['id'];
+    $timeline = deploy_log_phase_timeline(repo_deploy_job_log_step_markers($db, $jobId));
+    $phaseNames = deploy_log_phase_names($timeline);
+    $filter = deploy_log_filter_from_query($query, $phaseNames);
+
+    if (!$filter['active']) {
+        $page = repo_deploy_job_log_initial_tail($db, $jobId);
+
+        return [
+            'timeline' => $timeline,
+            'phase_names' => $phaseNames,
+            'filter' => $filter,
+            'page' => $page,
+            'logs' => $page['logs'],
+            'match_capped' => false,
+        ];
+    }
+
+    $args = deploy_log_filter_repo_args($filter, $timeline);
+    $result = repo_deploy_job_log_search($db, $jobId, $args['needle'], $args['streams'], $args['from_seq'], $args['to_seq']);
+
+    // A filtered page carries no cursor. Handing the poller an `after_seq` that
+    // came from a filtered read is precisely how a follow ends up treating
+    // skipped lines as seen, so the filtered view reports itself as a finished,
+    // caught-up window with nothing older to fetch.
+    return [
+        'timeline' => $timeline,
+        'phase_names' => $phaseNames,
+        'filter' => $filter,
+        'page' => [
+            'logs' => $result['logs'],
+            'oldest_seq' => 0,
+            'newest_seq' => 0,
+            'has_older' => false,
+            'has_more' => false,
+            'caught_up' => true,
+        ],
+        'logs' => $result['logs'],
+        'match_capped' => $result['has_more'],
+    ];
+}
 
 /** @param array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} $page */
 function deploy_job_log_format_page(array $page): array

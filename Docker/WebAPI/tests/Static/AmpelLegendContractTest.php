@@ -26,10 +26,46 @@ final class AmpelLegendContractTest extends TestCase
         'ansible' => [VIRTUSPHERE_ANSIBLE_AMPEL_STATES, 'ansible_legend_'],
     ];
 
-    private const RENDERERS = [
-        'lib/system_status_panels.php',
-        'lib/help/system_status.php',
-    ];
+    /**
+     * The two renderers that must each explain every Ampel they show. The page
+     * half is the whole panel owner set, never one file: the legend moved out of
+     * lib/system_status_panels.php when Etappe 13 split that file per data
+     * source, and a test naming the facade would have kept asserting against a
+     * file that no longer holds a legend, which reads exactly like a contract
+     * that still passes.
+     *
+     * @return array<string,string> label => source
+     */
+    private function renderers(): array
+    {
+        return [
+            'the System status panels' => $this->panelSource(),
+            'lib/help/system_status.php' => $this->source('lib/help/system_status.php'),
+        ];
+    }
+
+    /** Every System status panel module, concatenated. */
+    private function panelSource(): string
+    {
+        $source = '';
+        foreach ($this->panelModules() as $path) {
+            $source .= $this->source($path) . "\n";
+        }
+
+        return $source;
+    }
+
+    /** @return list<string> */
+    private function panelModules(): array
+    {
+        $paths = array_map(
+            static fn (string $p): string => 'lib/' . basename($p),
+            glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/system_status_*panels.php') ?: []
+        );
+        self::assertGreaterThan(1, count($paths), 'no System status panel modules were found');
+
+        return $paths;
+    }
 
     private function source(string $path): string
     {
@@ -90,12 +126,8 @@ final class AmpelLegendContractTest extends TestCase
         // Every panel module, not just the two that host a legend today: a state
         // list inlined into the module that owns the ESXi cards would drift just
         // as quietly as the one that started this.
-        $paths = array_map(
-            static fn (string $p): string => 'lib/' . basename($p),
-            glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/system_status_*panels.php') ?: []
-        );
+        $paths = $this->panelModules();
         $paths[] = 'lib/help/system_status.php';
-        self::assertGreaterThan(1, count($paths), 'no panel modules found');
 
         foreach ($paths as $path) {
             $source = $this->source($path);
@@ -109,11 +141,11 @@ final class AmpelLegendContractTest extends TestCase
 
     public function testBothLegendsUseTheSharedRenderer(): void
     {
-        foreach (self::RENDERERS as $path) {
+        foreach ($this->renderers() as $label => $source) {
             self::assertStringContainsString(
                 'system_status_legend_items(',
-                $this->source($path),
-                $path . ' must render its legend through the shared renderer'
+                $source,
+                $label . ' must render its legend through the shared renderer'
             );
         }
     }
@@ -122,7 +154,7 @@ final class AmpelLegendContractTest extends TestCase
     {
         // The page shows three vocabularies; explaining one of them and calling
         // it "the legend" is how the heartbeat/ESXi wording confusion started.
-        $source = $this->source('lib/system_status_panels.php');
+        $source = $this->panelSource();
         foreach (array_keys(self::AMPELN) as $kind) {
             self::assertStringContainsString(
                 "system_status_legend_items('" . $kind . "')",
@@ -136,11 +168,11 @@ final class AmpelLegendContractTest extends TestCase
     {
         // Belt and braces for the original defect: both files must reach the
         // heartbeat legend, and neither may pass a narrowed state set.
-        foreach (self::RENDERERS as $path) {
+        foreach ($this->renderers() as $label => $source) {
             self::assertStringContainsString(
                 "system_status_legend_items('heartbeat')",
-                $this->source($path),
-                $path . ' must explain the heartbeat Ampel'
+                $source,
+                $label . ' must explain the heartbeat Ampel'
             );
         }
         self::assertContains('missing', VIRTUSPHERE_HEARTBEAT_STATES);

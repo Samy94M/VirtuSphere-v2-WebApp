@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/deploy_display.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/deploy_log_panels.php';
+require_once __DIR__ . '/../lib/deploy_log_recovery.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -37,6 +40,20 @@ if ($format === 'json') {
 }
 if (!can('deploy.run', $user)) {
     portal_forbid($connection, $user, 'deploy.run', $format === 'json');
+}
+
+// Everything that needs the session is decided: identity, permission and the
+// locale the catalog was loaded with. From here the poll is a read, so the
+// session file is closed before the first query.
+//
+// PHP holds an exclusive lock on the session for the whole request. A job log
+// polls every two seconds and drains without pause while `has_more` is set, so
+// keeping that lock means the rest of the portal queues behind this one tab:
+// opening a second page in the same session stalls until a poll finishes. The
+// close is deliberately NOT applied to the HTML and raw formats, which still
+// write flashes and audit rows.
+if ($format === 'json' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
 }
 
 $jobId = request_int($_GET, 'id');
@@ -74,8 +91,14 @@ if ($format === 'json') {
         'ok' => true,
         'job' => [
             'id' => (int) $job['id'],
+            // `status` and `badge` are the existing wire fields and stay exactly
+            // as they were, so an older client keeps working. `label` is
+            // additive and is the ONLY field the browser is allowed to print:
+            // the raw token stays available for machine-side decisions, and the
+            // reader never sees it again.
             'status' => (string) $job['status'],
             'badge' => deploy_job_status_badge_class((string) $job['status']),
+            'label' => deploy_job_status_label((string) $job['status']),
             'updated_at' => portal_format_timestamp((string) $job['updated_at']),
             'terminal' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true),
         ],
@@ -145,8 +168,11 @@ if ($job === null) {
     redirect_to('deploy.php');
 }
 
-$page = repo_deploy_job_log_initial_tail($connection, (int) $job['id']);
-$logs = $page['logs'];
+$view = deploy_log_view_model($connection, $job, $_GET);
+$page = $view['page'];
+$logs = $view['logs'];
+$timeline = $view['timeline'];
+$logFilter = $view['filter'];
 $oldestSeq = $page['oldest_seq'] ?? 0;
 $lastSeq = $page['newest_seq'] ?? 0;
 $isTerminal = in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
@@ -159,7 +185,7 @@ $emptyState = deploy_job_log_empty_state($job, $logs);
 
 layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 ?>
-<div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-before-seq="<?php echo h((string) $oldestSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>" data-caught-up="<?php echo $page['caught_up'] ? '1' : '0'; ?>" data-dom-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW); ?>">
+<div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-before-seq="<?php echo h((string) $oldestSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>" data-caught-up="<?php echo $page['caught_up'] ? '1' : '0'; ?>" data-dom-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW); ?>" data-bottom-tolerance="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX); ?>" data-status-throttle="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_STATUS_THROTTLE_MS); ?>" data-filtered="<?php echo $logFilter['active'] ? '1' : '0'; ?>">
     <section class="panel">
         <div class="actions">
             <a class="button button-secondary" href="<?php echo h($originUrl); ?>"><?php echo h(__t('common.back')); ?></a>
@@ -186,12 +212,16 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 
     <section class="grid" aria-label="<?php echo h(__t('deploy.log_title')); ?>">
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.kpi_job')); ?></span><span class="value"><?php echo h((string) $job['id']); ?></span></article>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h($job['status'] ?? ''); ?></span></span></article>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_summary($job['payload_json'] ?? null)); ?></span></article>
+        <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
+        <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
     </section>
 
     <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job); ?></div>
+
+    <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
+    <?php deploy_log_render_phases($timeline); ?>
+    <?php deploy_log_render_filter((int) $job['id'], $logFilter, $view['phase_names'], count($logs), $view['match_capped']); ?>
 
     <section class="panel">
         <h2><?php echo h(__t('deploy.output')); ?></h2>
@@ -199,9 +229,35 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <p class="muted" data-deploy-log-window-note><?php echo h(__t('deploy.window_notice', ['limit' => VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW])); ?></p>
         <div class="actions">
             <button class="button button-secondary" type="button" data-deploy-log-older<?php echo $page['has_older'] ? '' : ' hidden'; ?>><?php echo h(__t('deploy.load_older')); ?></button>
-            <span class="muted" data-deploy-log-feedback aria-live="polite"></span>
+            <?php // Both switches carry a real visible label, not a title or an
+                  // icon: they change what the view does, and a control whose
+                  // meaning is only in a tooltip has no meaning on a keyboard. ?>
+            <?php // Follow, the jump target and the retry belong to the live
+                  // reading. A filtered view has no cursor to follow, so the
+                  // controls are absent rather than present and inert. ?>
+            <?php if (!$logFilter['active']) { ?>
+            <label class="inline-check"><input type="checkbox" data-deploy-log-follow checked> <?php echo h(__t('deploy.follow_label')); ?></label>
+            <?php } ?>
+            <label class="inline-check"><input type="checkbox" data-deploy-log-wrap checked> <?php echo h(__t('deploy.wrap_label')); ?></label>
+            <?php if (!$logFilter['active']) { ?>
+            <button class="button button-secondary" type="button" data-deploy-log-jump hidden></button>
+            <button class="button button-secondary" type="button" data-deploy-log-retry hidden><?php echo h(__t('deploy.poll_retry')); ?></button>
+            <?php } ?>
         </div>
-        <div class="table-wrap" tabindex="0"><table>
+        <?php if (!$logFilter['active']) { ?><p class="muted"><?php echo h(__t('deploy.follow_hint')); ?></p><?php } ?>
+        <?php // The connection state and the feedback line are the only regions
+              // that speak. They are role="status" (polite, atomic), so a state
+              // CHANGE is announced once as a whole sentence. ?>
+        <p class="muted" data-deploy-log-connection role="status" aria-atomic="true"></p>
+        <p class="muted" data-deploy-log-feedback role="status" aria-atomic="true"></p>
+        <?php // role="log" identifies the region for assistive technology, but
+              // aria-live is explicitly off: an Ansible run emits thousands of
+              // lines, and a polite live region would queue every one of them
+              // and read log output for minutes without a way to stop. The
+              // announcing is done by the throttled status line above, which
+              // summarises a batch in one sentence. The batch itself is appended
+              // in a single DOM mutation for the same reason. ?>
+        <div class="table-wrap" tabindex="0" role="log" aria-live="off" aria-label="<?php echo h(__t('deploy.output')); ?>" data-deploy-log-scroller><table>
             <thead><tr><th><?php echo h(__t('deploy.th_seq')); ?></th><th><?php echo h(__t('deploy.th_time')); ?></th><th><?php echo h(__t('deploy.th_stream')); ?></th><th><?php echo h(__t('deploy.th_line')); ?></th></tr></thead>
             <tbody data-deploy-log-body>
             <?php foreach ($logs as $log) { ?>
@@ -224,5 +280,15 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     'failed' => __t('deploy.poll_failed'),
     'loading' => __t('deploy.loading_older'),
     'history_mode' => __t('deploy.history_mode'),
+    'follow_paused' => __t('deploy.follow_paused'),
+    'jump_to_end' => __t('deploy.jump_to_end'),
+    'new_lines_one' => __t('deploy.new_lines_one'),
+    'new_lines_many' => __t('deploy.new_lines_many'),
+    'live' => __t('deploy.live_state_live'),
+    'live_paused' => __t('deploy.live_state_paused'),
+    'live_interrupted' => __t('deploy.live_state_interrupted'),
+    'live_updated' => __t('deploy.live_state_updated'),
+    'live_finished' => __t('deploy.live_state_finished'),
+    'live_off' => __t('deploy.live_state_off'),
 ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
 <?php layout_footer(); ?>

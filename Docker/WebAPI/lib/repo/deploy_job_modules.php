@@ -21,7 +21,10 @@ declare(strict_types=1);
 const VIRTUSPHERE_DEPLOY_JOB_REPO_MODULES = [
     'lib/repo/deploy_jobs.php',
     'lib/repo/deploy_job_input.php',
+    'lib/repo/deploy_job_service_state.php',
     'lib/repo/deploy_job_queries.php',
+    'lib/repo/deploy_job_recovery_actions.php',
+    'lib/repo/deploy_job_log_search.php',
     'lib/repo/deploy_job_guards.php',
     'lib/repo/deploy_job_worker.php',
     'lib/repo/deploy_job_queue.php',

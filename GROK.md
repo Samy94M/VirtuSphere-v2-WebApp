@@ -36,6 +36,13 @@
 - `FormData`, a hardcoded control list or per-field fallback for live deploy blockers. The client walks `form.elements` so disabled-but-filled wait values and an intentionally unchecked checkbox keep their meaning.
 - Hand-written `help.php#...` links. `help_url()` validates panels and sections against `VIRTUSPHERE_HELP_PANELS`/`VIRTUSPHERE_HELP_SECTIONS`, whose partials and rendered IDs are checked in both directions.
 - An unregistered portal JavaScript file or deploy module order outside `layout_app_scripts()`. The asset registry is bidirectional and owns the one order: form state before warnings, blockers and storage.
+- Printing a raw lifecycle, MECM, job-status or deploy-mode token where a person reads it. The stored value stays technical; `lib/portal_status_display.php` and `lib/deploy_display.php` own the visible names, and an unknown value gets a neutral localized sentence, never its token.
+- A JSON poller that queries before `session_write_close()`. It holds the session lock for the whole request and makes every other page of that session queue behind one open job log.
+- A second cursor derived from a filtered log read, or a follow mode active in a filtered view. That is what marks unseen full-log lines as read.
+- A live region over an Ansible log. `role="log"` with `aria-live="off"` plus one throttled `role="status"` summary; anything polite reads thousands of lines out loud.
+- A second derivation of "is the deploy service alright". `deploy_service_health_snapshot()` is the only source for dashboard, deploy page, System status and the anonymous health endpoint, and its three axes are never folded into one word in a detail view.
+- A claim-state write that is not a compare-and-swap, or a claim gate outside `repo_claim_next_deploy_job()`. An operator, a second tab and the worker all write that row.
+- A deploy-service action that reaches the Ansible host. All five are database-only; the situation they exist for is the one where that host cannot be reached.
 
 ## 2. Architecture
 

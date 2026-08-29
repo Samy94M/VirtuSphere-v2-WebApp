@@ -32,7 +32,10 @@ require_once __DIR__ . '/status_events.php';
  *
  * Ownership map:
  * - deploy_job_input.php       payload normalization, retry decision, schedule
+ * - deploy_job_service_state.php  the claim axis and the service snapshot reads
  * - deploy_job_queries.php     list/detail/log reads, mission VM resolution
+ * - deploy_job_recovery_actions.php  the three operator recovery actions
+ * - deploy_job_log_search.php  the filtered log reads: step markers and search
  * - deploy_job_guards.php      locking preconditions for every write
  * - deploy_job_queue.php       create, retry, staggered group, system job
  * - deploy_job_cancel.php      the ADR-0033 cancellation transitions
@@ -42,7 +45,10 @@ require_once __DIR__ . '/status_events.php';
 
 require_once __DIR__ . '/deploy_job_modules.php';
 require_once __DIR__ . '/deploy_job_input.php';
+require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
+require_once __DIR__ . '/deploy_job_recovery_actions.php';
+require_once __DIR__ . '/deploy_job_log_search.php';
 require_once __DIR__ . '/deploy_job_guards.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/deploy_job_queue.php';

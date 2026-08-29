@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/deploy_actions.php';
+require_once __DIR__ . '/../lib/deploy_display.php';
 require_once __DIR__ . '/../lib/deploy_form_state.php';
 require_once __DIR__ . '/../lib/deploy_storage.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';

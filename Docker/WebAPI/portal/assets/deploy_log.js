@@ -1,5 +1,15 @@
 // Bounded deploy-job log window: initial tail comes from PHP; this module owns
-// forward drain, stable older-page prepends, terminal catch-up and fetch faults.
+// forward drain, stable older-page prepends, terminal catch-up and fetch faults,
+// plus the pausable follow mode, the visibility catch-up and the connection
+// state (Etappe 13).
+//
+// Two rules run through the whole file. Nothing scrolls the reader against
+// their will: following happens only while they are already at the end, and the
+// moment they scroll up the view stops moving and tells them how much they have
+// not seen. And nothing speaks per line: the log region is role="log" but with
+// aria-live off, and one throttled status sentence summarises a batch, because
+// an Ansible run emits thousands of lines and a polite live region would read
+// all of them out loud.
 (function () {
     var root = document.querySelector('[data-deploy-log]');
     if (!root) {
@@ -10,9 +20,14 @@
     var status = root.querySelector('[data-deploy-status]');
     var olderButton = root.querySelector('[data-deploy-log-older]');
     var feedback = root.querySelector('[data-deploy-log-feedback]');
+    var connection = root.querySelector('[data-deploy-log-connection]');
+    var followToggle = root.querySelector('[data-deploy-log-follow]');
+    var wrapToggle = root.querySelector('[data-deploy-log-wrap]');
+    var jumpButton = root.querySelector('[data-deploy-log-jump]');
+    var retryButton = root.querySelector('[data-deploy-log-retry]');
     var terminalBlocks = root.querySelector('[data-deploy-terminal-blocks]');
     var cancelForm = root.querySelector('[data-deploy-cancel-form]');
-    var scroller = body ? body.closest('.table-wrap') : null;
+    var scroller = root.querySelector('[data-deploy-log-scroller]');
     var island = document.querySelector('[data-i18n-deploy-log]');
     var i18n = {};
     if (island) {
@@ -23,16 +38,135 @@
     var afterSeq = parseInt(root.getAttribute('data-after-seq') || '0', 10);
     var beforeSeq = parseInt(root.getAttribute('data-before-seq') || '0', 10);
     var domLimit = Math.max(1, parseInt(root.getAttribute('data-dom-limit') || '1500', 10));
+    // Both numbers belong to lib/deploy_constants.php; reading them from the
+    // attribute keeps the browser from carrying a second copy that can drift.
+    var bottomTolerance = Math.max(0, parseInt(root.getAttribute('data-bottom-tolerance') || '4', 10));
+    var statusThrottle = Math.max(0, parseInt(root.getAttribute('data-status-throttle') || '4000', 10));
+    var followStorageKey = 'virtusphere.deploy_log.follow';
     var busy = false;
     var stopped = false;
     var historyMode = false;
     var retryDelay = 2000;
+    var timer = null;
+    var unseenLines = 0;
+    var lastSpokenAt = 0;
+    var lastUpdatedAt = '';
+    var scrollPaused = false;
     if (!jobId || !body) {
         return;
     }
 
+    // Only this one UI preference is remembered, and only in this browser. A
+    // private window or blocked site data must not break the page, so every
+    // access is guarded and an unreadable store simply means the default.
+    function readFollowPreference() {
+        try {
+            var stored = window.localStorage.getItem(followStorageKey);
+            return stored === null ? true : stored === '1';
+        } catch (error) {
+            return true;
+        }
+    }
+
+    function writeFollowPreference(enabled) {
+        try {
+            window.localStorage.setItem(followStorageKey, enabled ? '1' : '0');
+        } catch (error) {
+            // A viewer who blocked site data keeps the switch for this visit.
+        }
+    }
+
+    // A filtered view has no cursor, so there is nothing to follow and nothing
+    // to drain: the rows on screen are matches, not the next lines of the run.
+    // Polling here would append full-log lines under a filtered list and, worse,
+    // would advance a cursor the reader never saw. Only the wrap switch stays.
+    var filtered = root.getAttribute('data-filtered') === '1';
+    if (filtered) {
+        if (wrapToggle) {
+            wrapToggle.addEventListener('change', function () {
+                root.classList.toggle('log-nowrap', !wrapToggle.checked);
+            });
+        }
+        return;
+    }
+
+    var followEnabled = readFollowPreference();
+    if (followToggle) {
+        followToggle.checked = followEnabled;
+    }
+
     function setFeedback(text) {
         if (feedback) { feedback.textContent = text || ''; }
+    }
+
+    function setConnection(text) {
+        if (connection) { connection.textContent = text || ''; }
+    }
+
+    function translate(key, replacements) {
+        var text = i18n[key] || '';
+        if (!replacements) { return text; }
+        Object.keys(replacements).forEach(function (name) {
+            text = text.split(':' + name).join(String(replacements[name]));
+        });
+        return text;
+    }
+
+    // The connection sentence answers one question: is what I am looking at
+    // current, and if not, why not. The states are distinguishable on purpose;
+    // a session that ended and a network hiccup need different reactions.
+    function renderConnection() {
+        if (stopped) { return; }
+        if (historyMode) { return; }
+        if (root.getAttribute('data-terminal') === '1' && root.getAttribute('data-caught-up') === '1') {
+            setConnection(translate('live_finished'));
+            return;
+        }
+        if (!followEnabled) {
+            setConnection(translate('live_off'));
+            return;
+        }
+        if (document.hidden) {
+            setConnection(translate('live_paused'));
+            return;
+        }
+        setConnection(translate('live'));
+    }
+
+    function atBottom() {
+        if (!scroller) { return true; }
+        return (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) <= bottomTolerance;
+    }
+
+    function scrollToEnd() {
+        if (!scroller) { return; }
+        // No smooth scroll: a log that keeps arriving would animate forever and
+        // the reader could never catch a line.
+        scroller.scrollTop = scroller.scrollHeight;
+    }
+
+    function renderUnseen() {
+        if (!jumpButton) { return; }
+        if (unseenLines <= 0) {
+            jumpButton.hidden = true;
+            jumpButton.textContent = '';
+            return;
+        }
+        var counted = translate(unseenLines === 1 ? 'new_lines_one' : 'new_lines_many', {count: unseenLines});
+        jumpButton.hidden = false;
+        // The middle dot is the separator the status renderers already use for
+        // two adjacent facts.
+        jumpButton.textContent = counted + ' · ' + translate('jump_to_end');
+    }
+
+    // The throttled summary: a screen reader hears one sentence per window, not
+    // one per Ansible line.
+    function speakBatch(count) {
+        if (count <= 0) { return; }
+        var now = Date.now();
+        if (now - lastSpokenAt < statusThrottle) { return; }
+        lastSpokenAt = now;
+        setFeedback(translate(count === 1 ? 'new_lines_one' : 'new_lines_many', {count: count}));
     }
 
     function rowFor(entry) {
@@ -85,13 +219,38 @@
 
     function append(entries) {
         removeEmpty();
+        // Whether the reader was at the end is decided BEFORE the rows land:
+        // afterwards the scroll height has already grown and every position
+        // reads as "scrolled up".
+        var wasAtBottom = atBottom();
+        // One DOM mutation for the whole batch. Appending row by row would let
+        // assistive technology and the layout engine observe every intermediate
+        // state of a five-hundred-line drain.
+        var fragment = document.createDocumentFragment();
+        var added = 0;
         entries.forEach(function (entry) {
             var row = rowFor(entry);
-            if (row) { body.appendChild(row); }
+            if (row) {
+                fragment.appendChild(row);
+                added += 1;
+            }
             afterSeq = Math.max(afterSeq, parseInt(entry.seq || '0', 10));
         });
+        if (added > 0) {
+            body.appendChild(fragment);
+        }
         root.setAttribute('data-after-seq', String(afterSeq));
         trimOldest();
+
+        if (added === 0) { return; }
+        if (followEnabled && wasAtBottom && !scrollPaused) {
+            scrollToEnd();
+            unseenLines = 0;
+        } else {
+            unseenLines += added;
+        }
+        renderUnseen();
+        speakBatch(added);
     }
 
     function prepend(entries) {
@@ -99,10 +258,12 @@
         var oldHeight = scroller ? scroller.scrollHeight : 0;
         var oldTop = scroller ? scroller.scrollTop : 0;
         var marker = body.firstChild;
+        var fragment = document.createDocumentFragment();
         entries.forEach(function (entry) {
             var row = rowFor(entry);
-            if (row) { body.insertBefore(row, marker); }
+            if (row) { fragment.appendChild(row); }
         });
+        body.insertBefore(fragment, marker);
         trimNewest();
         var first = body.querySelector('[data-log-seq]');
         if (first) {
@@ -121,28 +282,41 @@
         }).then(function (response) {
             if (response.status === 401) {
                 stopped = true;
-                setFeedback(i18n.session_expired || '');
+                setConnection(i18n.session_expired || '');
                 return null;
             }
             if (response.status === 403) {
                 stopped = true;
-                setFeedback(i18n.forbidden || '');
+                setConnection(i18n.forbidden || '');
                 return null;
             }
             if (!response.ok) {
                 throw new Error('deploy log request failed');
+            }
+            // A login page answering 200 is not this endpoint; treating it as
+            // JSON would fail parsing and retry forever.
+            var type = response.headers.get('Content-Type') || '';
+            if (type.indexOf('application/json') === -1) {
+                throw new Error('deploy log answered a non-JSON body');
             }
             return response.json();
         });
     }
 
     function schedule(delay) {
-        if (!stopped && !historyMode) {
-            window.setTimeout(poll, delay);
+        if (stopped || historyMode) { return; }
+        if (timer !== null) {
+            window.clearTimeout(timer);
+            timer = null;
         }
+        // A background tab keeps its cursor but stops asking. The catch-up on
+        // return is a single run, not a burst of the polls it missed.
+        if (document.hidden) { return; }
+        timer = window.setTimeout(poll, delay);
     }
 
     function poll() {
+        timer = null;
         if (busy || stopped || historyMode) { return; }
         busy = true;
         var url = 'deploy_log.php?id=' + encodeURIComponent(jobId)
@@ -151,14 +325,22 @@
             busy = false;
             if (!payload || !payload.ok) { return; }
             retryDelay = 2000;
-            setFeedback('');
+            if (retryButton) { retryButton.hidden = true; }
             if (payload.job && status) {
-                status.textContent = payload.job.status || '';
+                // Only `label`. `status` is still in the payload because the
+                // wire field is older than this view and other readers use it,
+                // but printing it would put a raw token back in front of a
+                // person, and a fallback to it would do the same on exactly the
+                // day the server sends something new.
+                status.textContent = payload.job.label || '';
                 status.className = 'badge badge-' + (payload.job.badge || 'neutral');
+                lastUpdatedAt = payload.job.updated_at || lastUpdatedAt;
             }
             if (typeof payload.terminal_html === 'string' && terminalBlocks) {
                 terminalBlocks.innerHTML = payload.terminal_html;
             }
+            // A second tab that cancelled this job must be able to take the
+            // button away here, on the same poll that brought the new status.
             if (payload.actions && payload.actions.can_cancel === false && cancelForm) {
                 cancelForm.remove();
                 cancelForm = null;
@@ -169,14 +351,21 @@
             if (payload.job && payload.job.terminal) {
                 root.setAttribute('data-terminal', '1');
             }
+            renderConnection();
             if (payload.job && payload.job.terminal && payload.caught_up) {
                 stopped = true;
+                setConnection(translate('live_finished'));
                 return;
             }
             schedule(payload.has_more ? 0 : 2000);
         }).catch(function () {
             busy = false;
-            setFeedback(i18n.failed || '');
+            // A pure network fault: say what is on screen is no longer current,
+            // offer the manual retry and keep backing off in the meantime.
+            setConnection(lastUpdatedAt
+                ? translate('live_interrupted', {time: lastUpdatedAt})
+                : (i18n.failed || ''));
+            if (retryButton) { retryButton.hidden = false; }
             retryDelay = Math.min(5000, retryDelay * 2);
             schedule(retryDelay);
         });
@@ -195,6 +384,7 @@
             if (Array.isArray(payload.logs)) { prepend(payload.logs); }
             if (olderButton) { olderButton.hidden = !payload.has_older; }
             setFeedback(i18n.history_mode || '');
+            setConnection(i18n.history_mode || '');
         }).catch(function () {
             busy = false;
             setFeedback(i18n.failed || '');
@@ -203,6 +393,95 @@
     }
 
     if (olderButton) { olderButton.addEventListener('click', loadOlder); }
+
+    if (followToggle) {
+        followToggle.addEventListener('change', function () {
+            followEnabled = followToggle.checked;
+            writeFollowPreference(followEnabled);
+            if (followEnabled) {
+                scrollPaused = false;
+                scrollToEnd();
+                unseenLines = 0;
+                renderUnseen();
+                setFeedback('');
+            }
+            renderConnection();
+        });
+    }
+
+    if (wrapToggle) {
+        wrapToggle.addEventListener('change', function () {
+            root.classList.toggle('log-nowrap', !wrapToggle.checked);
+        });
+    }
+
+    if (jumpButton) {
+        jumpButton.addEventListener('click', function () {
+            scrollPaused = false;
+            scrollToEnd();
+            unseenLines = 0;
+            renderUnseen();
+            setFeedback('');
+            renderConnection();
+        });
+    }
+
+    if (retryButton) {
+        retryButton.addEventListener('click', function () {
+            retryButton.hidden = true;
+            retryDelay = 2000;
+            schedule(0);
+        });
+    }
+
+    if (scroller) {
+        scroller.addEventListener('scroll', function () {
+            if (atBottom()) {
+                // Returning to the end is the only thing that clears the
+                // counter: a batch that arrived while the reader was up there
+                // stays counted until they have actually come back.
+                if (scrollPaused) {
+                    scrollPaused = false;
+                    setFeedback('');
+                }
+                if (unseenLines > 0) {
+                    unseenLines = 0;
+                    renderUnseen();
+                }
+                return;
+            }
+            if (followEnabled && !scrollPaused) {
+                scrollPaused = true;
+                setFeedback(translate('follow_paused'));
+            }
+        });
+    }
+
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            if (timer !== null) {
+                window.clearTimeout(timer);
+                timer = null;
+            }
+            renderConnection();
+            return;
+        }
+        renderConnection();
+        // Exactly one immediate catch-up. The cursor and the single-flight flag
+        // are what keep this from producing parallel requests or duplicate rows.
+        schedule(0);
+    });
+
+    renderConnection();
+    // The initial tail is the NEWEST lines, and the reader is looking at its
+    // first row. Without this the follow switch is on and yet nothing follows:
+    // atBottom() is false at scrollTop 0, so the very first batch is counted as
+    // unseen and the view never moves, which reads as a broken live mode rather
+    // than as a deliberately paused one. A reader who turned following off keeps
+    // the top, because then the start of the window is where they asked to be.
+    if (followEnabled) {
+        scrollToEnd();
+    }
     if (!(root.getAttribute('data-terminal') === '1' && root.getAttribute('data-caught-up') === '1')) {
         schedule(2000);
     }

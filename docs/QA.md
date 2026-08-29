@@ -435,6 +435,48 @@ npx playwright test accessibility                 # one spec
 npm run report                                    # last HTML report
 ```
 
+### Deploy service and the job log view (Etappe 13/13R)
+
+`deploy_service_health_snapshot()` (`lib/deploy_service_health.php`) is the one
+source the dashboard, the deploy page, the System status card and the anonymous
+`health.php` read. Its three axes are independent: `availability` (ready, busy,
+degraded, cooldown, offline), `claim_state` (accepting, pause_after_current,
+paused) and `recovery_attention` (none, recovering, manual_review). The
+derivations are pure functions over a fact struct and are exercised without a
+database by `DeployServiceHealthTest`, including the corners an operator only
+meets on a bad day.
+
+The claim axis is persisted by migration 0045 on the singleton runtime row.
+Every transition is a compare-and-swap and the gate sits inside
+`repo_claim_next_deploy_job()`. To exercise a pause locally:
+
+```powershell
+docker exec virtusphere-qa-mysql-1 mysql -uroot deploymentcenter -e "UPDATE deploy_runtime_identity SET claim_state='paused' WHERE id=1"
+```
+
+A paused service is not degraded and `health.php` keeps answering `200` with
+`status=ok`; only `degraded` and `offline` make it report `status=degraded`. A
+snapshot that cannot be computed is `degraded`, never `503`.
+
+The job log view is proven in the browser by `deploy-log.spec.js` and
+`deploy-recovery.spec.js`. Follow mode is measured there as geometry rather than
+asserted as source text, because the two are not the same question: the file can
+carry every follow line, pass its static contract and still open a live log at
+the top of the newest window, where `atBottom()` is false, every batch counts as
+unseen and the switch labelled live moves nothing. That was the actual state
+until the spec existed. It now checks that a running job opens at the newest
+line, that twenty lines arriving under a scrolled-up reader move them zero
+pixels while the counter appears, that only a deliberate return clears it, that
+turning following off keeps the reader where they are across a reload, that the
+region is `role="log"` with `aria-live="off"` beside two `role="status"`
+summaries, and that a hidden tab issues no request and returns with exactly one.
+The recovery block renders only for a job with a
+durable remote execution, which the remote path being disabled means no job has
+on its own; the spec seeds the row directly and proves the three things that do
+not depend on the remote path: the stored state is rendered, a cleanup retry is
+refused when the evidence hash moved between rendering and clicking, and a
+documented external check is appended rather than replacing an earlier entry.
+
 ### Deterministic visual proof
 
 The `visual` project is not a dev-stack screenshot command. It runs only as part of the canonical Integration `e2e-portal` gate after `qa-stack`, because its seed and worker pause guards require the exact `virtusphere-qa` identity:

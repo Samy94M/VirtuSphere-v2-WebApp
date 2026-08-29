@@ -91,11 +91,22 @@ final class HealthEndpointStatusTest extends TestCase
     public function testOnlyTheCatchBranchSets503(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 2) . '/portal/health.php');
-        $catchAt = strpos($source, 'catch (Throwable');
-        self::assertIsInt($catchAt, 'health.php must keep its catch branch');
-        $catchBranch = substr($source, $catchAt);
 
         self::assertSame(1, substr_count($source, 'http_response_code(503)'), 'exactly one 503 in the whole file');
+        $errorAt = strpos($source, 'http_response_code(503)');
+        self::assertIsInt($errorAt);
+
+        // Anchored on the 503 itself, not on the FIRST `catch` in the file. The
+        // file gained a second catch above this one when the deploy snapshot
+        // moved in: a snapshot that cannot be computed is degraded, never a 503,
+        // because the database already answered. Anchoring on the first catch
+        // made this contract read the whole rest of the file and fail over the
+        // `'degraded'` of the normal branch, which is exactly the answer it is
+        // supposed to protect.
+        $catchAt = strrpos(substr($source, 0, $errorAt), 'catch (Throwable');
+        self::assertIsInt($catchAt, 'the 503 must live inside a catch branch');
+        $catchBranch = substr($source, $catchAt);
+
         self::assertStringContainsString('http_response_code(503)', $catchBranch, 'and it belongs to the catch branch');
         self::assertStringNotContainsString("'degraded'", $catchBranch, 'the catch branch reports error, never degraded');
     }

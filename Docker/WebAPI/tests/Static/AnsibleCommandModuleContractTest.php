@@ -110,13 +110,15 @@ final class AnsibleCommandModuleContractTest extends TestCase
         self::assertSame(['lib/ansible_command_shell.php'], $definitions);
     }
 
-    public function testStepMarkerParserStaysAtTheStage13PresentationBoundary(): void
+    public function testStepMarkerParserHasExactlyOnePresentationConsumer(): void
     {
-        // The parser is retained and unit-tested now, but consuming it in the
-        // current start-first job-log reader would pre-empt only one fragment of
-        // Etappe 13. That stage integrates it with the 10A cursor/drain contract,
-        // 10B terminal presenter, phase filters and Follow mode. Replace this
-        // assertion with the presenter contract when that complete reader lands.
+        // Etappe 13 landed the complete reader this assertion was waiting for,
+        // so it now pins the shape that reader has to keep: the parser is
+        // DEFINED once and CONSUMED once, by the phase timeline. Two consumers
+        // would be two opinions about what a phase is, and the second one would
+        // be written by whoever needed a heading in a hurry; that is exactly how
+        // a hand-kept playbook order drifts away from the sequence the worker
+        // actually ran. The definition site counts once for the function itself.
         $root = dirname(__DIR__, 2);
         $references = [];
         foreach (['lib', 'portal'] as $productionDir) {
@@ -137,9 +139,16 @@ final class AnsibleCommandModuleContractTest extends TestCase
         }
 
         self::assertSame(
-            ['lib/ansible_command_modes.php' => 1],
+            [
+                // The definition itself.
+                'lib/ansible_command_modes.php' => 1,
+                // The one reader: deploy_log_phase_timeline() calls it once per
+                // stored line and decides from the event which way the phase
+                // goes. One call site is one opinion about what a phase is.
+                'lib/deploy_log_phases.php' => 1,
+            ],
             $references,
-            'Before Etappe 13 the parser must have its definition, but no partial production reader.'
+            'The step-marker parser must have exactly one definition and exactly one presentation consumer.'
         );
     }
 

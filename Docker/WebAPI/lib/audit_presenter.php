@@ -63,6 +63,19 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REFRESH => audit_inventory_refresh_description($context),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED => 'reassigned vlan ' . $id . ' to ' . ($context['target_vlan'] ?? '') . ' (' . ($context['mission_count'] ?? 0) . ' missions, ' . ($context['interface_count'] ?? 0) . ' interfaces)',
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE => '[maintenance-worker] convergence sweep marked ' . ($context['vm_count'] ?? 0) . ' VM(s) of mission id ' . $id . ' as failed' . audit_description_reason($context),
+        // The compatibility description names the state that was REACHED, not
+        // the button that was pressed: a pause requested while a job runs lands
+        // on pause_after_current, and a trail saying "paused" there would be
+        // wrong for as long as that job kept running.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED => 'deploy job intake set to ' . ($context['new_state'] ?? 'paused')
+            . (isset($context['job_id']) ? ' while job id ' . $context['job_id'] . ' was active' : ''),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED => 'deploy job intake resumed',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS ? 'queued' : 'refused')
+            . ' remote cleanup retry for deploy job id ' . $id . ' (execution ' . ($context['execution_id'] ?? 0) . ')',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => 'documented external check for deploy job id ' . $id
+            . ': ' . ($context['resolution_code'] ?? 'inconclusive') . ' (resolution ' . ($context['resolution_id'] ?? 0) . ')',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => 'recovery review over ' . ($context['reviewed_count'] ?? 0)
+            . ' stale job(s): ' . ($context['requested_count'] ?? 0) . ' requested, ' . ($context['manual_count'] ?? 0) . ' left for manual review',
         VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
         VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR => 'error [' . $id . '] ' . ($context['error_class'] ?? 'Throwable'),
         VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_logs_export_description($id, $context),

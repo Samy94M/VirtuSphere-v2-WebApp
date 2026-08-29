@@ -3,6 +3,11 @@
 declare(strict_types=1);
 
 return [
+    // Nur wenn etwas zu tun ist (Etappe 13R). Alle drei Achsen stehen im Satz,
+    // weil 'arbeitet' und 'pausiert nach dem aktuellen Auftrag' gleichzeitig
+    // gelten koennen und der Hinweis sonst die falsche Haelfte zeigt.
+    'service_attention' => 'Bereitstellungsdienst: :availability. Auftragsannahme: :claim. Klärung: :attention.',
+    'service_attention_link' => 'Bereitstellungsdienst im Systemstatus öffnen',
     'title' => 'Dashboard',
     'key_metrics' => 'Kennzahlen',
     'kpi_missions' => 'Missionen',

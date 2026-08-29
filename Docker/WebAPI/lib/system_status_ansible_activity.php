@@ -9,6 +9,7 @@ declare(strict_types=1);
 // that file sits at its ADR-0006 ceiling; Etappe 13 splits the rest along the
 // same seam.
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_display.php';
 require_once __DIR__ . '/deploy_urls.php';
 // deploy_job_payload_summary(): the same mode summary the deploy list and the
 // job log behind the link show, rather than a second reading of payload_json.
@@ -56,7 +57,7 @@ function system_status_ansible_job_fact(?array $job, bool $canOpenLog): string
     // What a processed job proves depends on the mode it ran, and the help says
     // exactly that; without naming the mode here the operator cannot act on it.
     $mode = __t('system_status.ansible_job_mode', [
-        'mode' => deploy_job_payload_summary(isset($job['payload_json']) ? (string) $job['payload_json'] : null),
+        'mode' => deploy_job_payload_display(isset($job['payload_json']) ? (string) $job['payload_json'] : null),
     ]);
 
     return system_status_ansible_job_badge((string) ($job['status'] ?? ''))

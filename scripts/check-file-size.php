@@ -72,6 +72,14 @@ const FILE_SIZE_ALLOWANCES = [
     // modules behind a facade.
     // lib/layout.php (706) left this table with the Etappe-8 rest findings:
     // response/flash and status presenters are now separate from page chrome.
+    // lib/system_status_panels.php (464) left this table in Etappe 13: the
+    // facade keeps only the overview strip, which is the one presenter reading
+    // all four sources, and MECM/site, Ansible and the internal services each
+    // own the module of their own data source.
+    // portal/credentials.php (479) left this table in the same stage: the page
+    // is auth, RBAC and the request shell, the POST dispatch and the two ESXi
+    // side effects live in lib/credentials_actions.php, and the view model plus
+    // both panels in lib/credentials_panels.php.
     //
     // Six ceilings were raised once, in Etappe 10C, and the reason is recorded
     // here rather than six times below: a structured audit call is longer than
@@ -83,20 +91,16 @@ const FILE_SIZE_ALLOWANCES = [
     // otherwise unchanged, and lib/auth.php was compacted back under the budget
     // instead of gaining an entry, because a file that has never had one should
     // not acquire one for four extra lines.
+    // Etappe 13R raised two more, both registries whose growth IS the change:
+    // constants.php 641->645 (the deploy service card anchor) and migrate.php
+    // 1222->1248 (migration 0045 plus migrator_foreign_key_exists(), which the
+    // registry needed because migrator_check_exists() only ever matched CHECK
+    // constraints and therefore silently passed a duplicate foreign key on a
+    // fresh schema). Neither may be split for the reason each records below.
     // Raised: credentials.php 451->479, vm_edit.php 514->520, constants.php
     // 603->641 (the audit event
     // registry's endpoint list/report-channel version plus the Etappe-10D
     // PowerShell log help mirrors), migrate.php 1220->1222 (migration 0044).
-    'Docker/WebAPI/lib/system_status_panels.php' => [
-        'lines' => 464,
-        'why' => 'MECM, site and internal panels read separate sources; the Ansible mission-activity presenter already left for lib/system_status_ansible_activity.php (Etappe 3)',
-        'stage' => 'Etappe 13',
-    ],
-    'Docker/WebAPI/portal/credentials.php' => [
-        'lines' => 479,
-        'why' => 'POST dispatch, connection tests and list renderers in one page',
-        'stage' => 'Etappe 13',
-    ],
     'Docker/WebAPI/lib/repo/vms.php' => [
         'lines' => 888,
         'why' => 'legacy facade, validation, bundle persistence, identity and bulk/recovery actions',
@@ -111,12 +115,12 @@ const FILE_SIZE_ALLOWANCES = [
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1222,
+        'lines' => 1248,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 641,
+        'lines' => 645,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],

@@ -3,6 +3,35 @@
 declare(strict_types=1);
 
 return [
+    'service_expect_ready' => 'The deploy service is ready: the job starts right away.',
+    'service_expect_busy' => 'The deploy service is working: the job is saved and waits.',
+    'service_expect_paused' => 'Job intake is paused: the job is saved and waits until somebody resumes it.',
+    'service_expect_degraded' => 'The deploy service is degraded: the job is saved, but an immediate start is not promised.',
+    'service_expect_offline' => 'The deploy service is unreachable: the job is saved and starts once the service is running again.',
+    'service_expect_recovering' => 'A recovery is in progress: the job is saved and waits until the service is free again.',
+    // Per-job recovery diagnostics (Etappe 13R). Rendered only when a durable
+    // remote execution exists: a block that says 'nothing here' on every job
+    // is a block people scroll past.
+    'recovery_heading' => 'Recovery',
+    'recovery_hint' => 'The stored state of the remote execution belonging to this job. Both actions change data in this application only; neither reaches the Ansible host.',
+    'recovery_fact_controller' => 'Controller',
+    'recovery_fact_effect' => 'Effect',
+    'recovery_fact_reconciliation' => 'Reconciliation',
+    'recovery_fact_cleanup' => 'Cleanup',
+    'recovery_fact_attempts' => 'Cleanup attempts',
+    'recovery_cleanup_retry' => 'Retry cleanup',
+    'recovery_flash_cleanup_queued' => 'Cleanup is queued again. The worker picks it up on its next pass.',
+    'recovery_flash_cleanup_refused' => 'Cleanup was not queued again: the state or the evidence changed since you looked. Reload the page and check again.',
+    'recovery_document_heading' => 'Document an external check',
+    'recovery_document_hint' => 'Record what you established outside this application. The entry is appended and replaces no earlier one.',
+    'recovery_label_code' => 'Result',
+    'recovery_label_reason' => 'What you established',
+    'recovery_label_reference' => 'Evidence or ticket (optional)',
+    'recovery_document_submit' => 'Record the check',
+    'recovery_flash_documented' => 'The external check has been recorded.',
+    'recovery_code_confirmed_applied' => 'The change reached the target',
+    'recovery_code_confirmed_not_applied' => 'The change did not reach the target',
+    'recovery_code_inconclusive' => 'Could not be established',
     'title' => 'Deploy',
     'queue_heading' => 'Queue deploy job',
     'blocker_prefix' => 'Blocker:',
@@ -99,6 +128,49 @@ return [
     'poll_session_expired' => 'The session has expired. Live updates have stopped; please sign in again.',
     'poll_forbidden' => 'Permission to read this log is missing. Live updates have stopped.',
     'poll_failed' => 'The log could not be updated temporarily. Another attempt will follow automatically.',
+    'poll_retry' => 'Retry now',
+    // Follow mode: the view follows the end while the reader is standing there.
+    // Scrolling up pauses following on its own and the counter says how much has
+    // not been seen. None of it jumps unasked.
+    'follow_label' => 'Follow live',
+    'follow_hint' => 'The view follows the end while you are standing there. Scrolling up pauses following on its own.',
+    'follow_paused' => 'Following is paused because you scrolled up.',
+    'wrap_label' => 'Wrap long lines',
+    'jump_to_end' => 'Jump to end',
+    'new_lines_one' => ':count new line',
+    'new_lines_many' => ':count new lines',
+    // Connection state. The four states are deliberately distinguishable: a poll
+    // stopped by the session or a permission is a different thing from a fault
+    // that disappears again on its own.
+    'live_state_live' => 'Live',
+    'live_state_paused' => 'Paused while the tab is in the background.',
+    'live_state_interrupted' => 'Connection interrupted. Last update: :time',
+    'live_state_updated' => 'Last update: :time',
+    'live_state_finished' => 'The job is finished and fully loaded.',
+    'live_state_off' => 'Live updates are switched off.',
+    // Phases, read from the worker's step markers.
+    'phases_heading' => 'Sequence',
+    'phases_hint' => 'The steps of this job, read from the markers the worker writes. A step without an end did not finish.',
+    'phase_current' => 'Running now',
+    'phase_complete' => 'Completed',
+    'phase_incomplete' => 'Without an end',
+    'phase_lines' => 'Lines :from to :to',
+    'phase_lines_open' => 'From line :from',
+    'phases_empty' => 'No step is marked for this job yet.',
+    // Filters. A filtered view shows matches, not the sequence; saying so is
+    // what keeps a gap from being read as silence.
+    'filter_heading' => 'Search the log',
+    'filter_search_label' => 'Search term',
+    'filter_source_label' => 'Source',
+    'filter_phase_label' => 'Step',
+    'filter_all' => 'All',
+    'filter_apply' => 'Filter',
+    'filter_reset' => 'Clear filter',
+    'filter_active_notice' => 'Filtered view: you are seeing matches, not the complete sequence. Live updates are off while it is active.',
+    'filter_result_count_one' => ':count match.',
+    'filter_result_count_many' => ':count matches.',
+    'filter_result_capped' => 'The first :limit matches are shown. Narrow the search term or download the complete raw log.',
+    'filter_result_empty' => 'No match for this filter. The job may still contain lines.',
     'system_job' => 'System job (ESXi inventory)',
     'last_error' => 'Last error',
     'result_heading' => 'Result',

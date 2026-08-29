@@ -75,8 +75,12 @@ echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'ne
   await expect(row.locator('.status-row-head .badge')).toHaveText(/Test veraltet|Test outdated/);
   await expect(row).toContainText(/Letzter vom Worker bearbeiteter Missionsauftrag|Last mission job processed by the worker/);
   await expect(row).toContainText(/Erfolgreich|Succeeded/);
-  // Which mode ran decides how much the row proves, so it has to be readable.
-  await expect(row).toContainText(/Modus start|Mode start/);
+  // Which mode ran decides how much the row proves, so it has to be readable -
+  // and since Etappe 13 that means the portal's own name for the mode, not the
+  // payload token. Both locales are accepted because the row is the same fact
+  // in either; the raw `start` is what must no longer appear.
+  await expect(row).toContainText(/VMs starten|Start VMs/);
+  await expect(row).not.toContainText(/Modus start\b|Mode start\b/);
   await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.job)}"]`)).toBeVisible();
   // The newer never-claimed job stays out of the card entirely: neither its
   // outcome nor its log link may stand in for work that never happened.
@@ -254,4 +258,100 @@ $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `);
   expect(iface.vlan, 'the interface VLAN was reassigned').toBe('E2EVLAN-OK');
+});
+
+// Etappe 13R: the claim axis. A pause is the one action on this page that
+// changes what the installation does NEXT, so it is proven in a browser and
+// against the stored state, not only in a unit test: the button, its
+// confirmation, the persisted state, the audit row and the way back.
+//
+// e2e-covers: system_status.php:deploy_claim_pause
+// e2e-covers-cancel: system_status.php:deploy_claim_pause
+// e2e-covers: system_status.php:deploy_claim_resume
+// e2e-covers: system_status.php:deploy_recovery_review
+test('deploy claim: pausing asks first, persists, is audited and can be resumed', async ({ page }) => {
+  const reset = () => runPhp(`
+$db = db();
+$db->query("UPDATE deploy_runtime_identity SET claim_state = 'accepting', claim_changed_at = NULL, claim_changed_by = NULL WHERE id = 1");
+$db->query("DELETE FROM deploy_logs WHERE event_code IN ('deploy.claim_paused','deploy.claim_resumed')");
+echo 'RESET';
+`);
+  reset();
+
+  const card = page.locator('#deploy-service');
+  const pauseForm = card.locator('form:has(input[name="action"][value="deploy_claim_pause"])');
+
+  await page.goto('system_status.php');
+  await expect(card, 'the deploy service card is rendered').toBeVisible();
+
+  // Cancel branch: the dialog appears and dismissing it must leave the stored
+  // state alone. A confirmation that does not actually gate the POST is worse
+  // than none, because it teaches people that the prompt means something.
+  await pauseForm.locator('button').click();
+  const dialog = page.locator('dialog.modal-confirm[open]');
+  await expect(dialog, 'the pause asks before it stops intake').toBeVisible();
+  await dialog.locator('button[value="cancel"], button.button-secondary').first().click();
+  await expect(dialog).toBeHidden();
+  let stored = phpJson(`
+$db = db();
+echo 'JSON' . json_encode($db->query("SELECT claim_state FROM deploy_runtime_identity WHERE id = 1")->fetch_assoc()) . 'JSON';
+`);
+  expect(stored.claim_state, 'a dismissed confirmation changes nothing').toBe('accepting');
+
+  // Confirm branch.
+  await pauseForm.locator('button').click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    dialog.locator('button.button-danger, button[value="confirm"]').first().click(),
+  ]);
+
+  stored = phpJson(`
+$db = db();
+$row = $db->query("SELECT claim_state, claim_changed_by IS NOT NULL AS has_actor FROM deploy_runtime_identity WHERE id = 1")->fetch_assoc();
+$audit = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = 'deploy.claim_paused'")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['state' => $row['claim_state'], 'actor' => (int) $row['has_actor'], 'audit' => $audit]) . 'JSON';
+`);
+  // No job is running in this suite, so the pause takes effect immediately
+  // rather than waiting for one.
+  expect(stored.state, 'with nothing active the pause is immediate').toBe('paused');
+  expect(stored.actor, 'the pause records who decided it').toBe(1);
+  expect(stored.audit, 'exactly one audit row for one decision').toBe(1);
+
+  // The card now offers the way back, and resuming needs no confirmation.
+  await expect(card.locator('form:has(input[name="action"][value="deploy_claim_resume"]) button')).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    card.locator('form:has(input[name="action"][value="deploy_claim_resume"]) button').click(),
+  ]);
+
+  const resumed = phpJson(`
+$db = db();
+$row = $db->query("SELECT claim_state FROM deploy_runtime_identity WHERE id = 1")->fetch_assoc();
+$audit = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = 'deploy.claim_resumed'")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['state' => $row['claim_state'], 'audit' => $audit]) . 'JSON';
+`);
+  expect(resumed.state).toBe('accepting');
+  expect(resumed.audit, 'the resume is audited once').toBe(1);
+
+  // The review is on the same card and is read-only in effect: with no stale
+  // job it must report zero and still write exactly one audit row, because
+  // "nothing was wrong" is the answer an operator came for.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    card.locator('form:has(input[name="action"][value="deploy_recovery_review"]) button').click(),
+  ]);
+  const reviewed = phpJson(`
+$db = db();
+$audit = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = 'deploy.recovery_reviewed'")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['audit' => $audit]) . 'JSON';
+`);
+  expect(reviewed.audit, 'a review that found nothing is still recorded').toBe(1);
+
+  runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_logs WHERE event_code = 'deploy.recovery_reviewed'");
+echo 'CLEANED';
+`);
+  reset();
 });

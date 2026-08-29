@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/heartbeats.php';
 require_once __DIR__ . '/../lib/integration_health.php';
+require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -51,9 +52,31 @@ $stmt->bind_param('s', $prefix);
 $stmt->execute();
 $recentMissions = repo_fetch_all($stmt->get_result());
 
+// The one snapshot again (Etappe 13R). The dashboard shows a hint only when
+// something is ACTIONABLE: a service that is merely busy, or a job scheduled
+// for tonight, is normal operation and must not put a warning on the landing
+// page. A warning that appears every day is a warning nobody reads.
+$serviceSnapshot = deploy_service_health_snapshot($connection);
+$serviceNeedsAttention = in_array($serviceSnapshot['availability'], [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE], true)
+    || $serviceSnapshot['recovery_attention'] !== VIRTUSPHERE_DEPLOY_ATTENTION_NONE
+    || $serviceSnapshot['claim_state'] !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING;
+
 layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
 ?>
 <div class="stack">
+    <?php if ($serviceNeedsAttention) { ?>
+        <?php // The sentence names the state and the link leads to the card that
+              // can act on it, per the rule that a message naming a condition
+              // carries the way to it. ?>
+        <div class="alert alert-warning">
+            <p><?php echo h(__t('dashboard.service_attention', [
+                'availability' => deploy_service_availability_label((string) $serviceSnapshot['availability']),
+                'claim' => deploy_service_claim_label((string) $serviceSnapshot['claim_state']),
+                'attention' => deploy_service_attention_label((string) $serviceSnapshot['recovery_attention']),
+            ])); ?></p>
+            <p class="alert-actions"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE)); ?>"><?php echo h(__t('dashboard.service_attention_link')); ?></a></p>
+        </div>
+    <?php } ?>
     <section class="grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">
         <a class="card kpi" href="missions.php?type=missions"><span class="muted"><?php echo h(__t('dashboard.kpi_missions')); ?></span><span class="value"><?php echo h($missionCount); ?></span></a>
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
@@ -87,7 +110,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
                         <td>
                             <?php $missionStatus = trim((string) ($mission['mission_status'] ?? '')); ?>
                             <?php if ($missionStatus !== '') { ?>
-                                <?php echo portal_badge($missionStatus === VIRTUSPHERE_MISSION_STATUS_DEFAULT ? 'success' : 'neutral', $missionStatus); ?>
+                                <?php echo portal_badge($missionStatus === VIRTUSPHERE_MISSION_STATUS_DEFAULT ? 'success' : 'neutral', portal_mission_status_label($missionStatus)); ?>
                             <?php } else { ?>
                                 —
                             <?php } ?>

@@ -7,6 +7,7 @@ require_once __DIR__ . '/repo/vm_location.php';
 require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
 require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
+require_once __DIR__ . '/migrations/0045_deploy_claim_state.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -104,6 +105,30 @@ function migrator_check_exists(mysqli $db, string $table, string $constraint): b
     $stmt->bind_param('ss', $table, $constraint);
     $stmt->execute();
     return migrator_statement_count($stmt, 'check constraint exists') > 0;
+}
+
+/**
+ * Whether a FOREIGN KEY of that name already exists on the table.
+ *
+ * Its own helper because migrator_check_exists() deliberately filters on
+ * `CONSTRAINT_TYPE = "CHECK"` and can therefore never find a foreign key. Using
+ * it for one reads correct and passes every unit test, and then fails only
+ * against a FRESH schema that already carries the key: the live upgrade path
+ * adds it once and is happy, while `struktur.sql` and the migration collide
+ * with `Duplicate foreign key constraint name`. That is exactly the fresh/live
+ * convergence the database rule exists for, and it is invisible until the QA
+ * stack builds from scratch.
+ */
+function migrator_foreign_key_exists(mysqli $db, string $table, string $constraint): bool
+{
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) AS c FROM information_schema.TABLE_CONSTRAINTS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = "FOREIGN KEY"'
+    );
+    $stmt->bind_param('ss', $table, $constraint);
+    $stmt->execute();
+
+    return migrator_statement_count($stmt, 'foreign key exists') > 0;
 }
 
 // csp-allow: interpolated-sql
@@ -1172,6 +1197,7 @@ SQL;
     '0042_remote_execution_foundation' => migrate_0042_remote_execution_foundation(...),
     '0043_deploy_terminal_metadata' => migrate_0043_deploy_terminal_metadata(...),
     '0044_structured_audit_events' => migrate_0044_structured_audit_events(...),
+    '0045_deploy_claim_state' => migrate_0045_deploy_claim_state(...),
 ];
 try {
     $db = db();

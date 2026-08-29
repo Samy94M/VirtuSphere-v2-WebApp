@@ -462,13 +462,18 @@ CREATE TABLE IF NOT EXISTS deploy_runtime_identity (
     id TINYINT UNSIGNED PRIMARY KEY,
     current_generation_id BINARY(16) NOT NULL,
     supervisor_contract VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    claim_state VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'accepting',
+    claim_changed_at TIMESTAMP NULL,
+    claim_changed_by INT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     rotation_reason VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     rotated_by INT NULL,
     CONSTRAINT deploy_runtime_identity_singleton CHECK (id = 1),
     CONSTRAINT deploy_runtime_identity_supervisor_check CHECK (supervisor_contract IN ('worker_v1','supervisor_v1')),
+    CONSTRAINT deploy_runtime_identity_claim_check CHECK (claim_state IN ('accepting','pause_after_current','paused')),
     CONSTRAINT deploy_runtime_identity_reason_check CHECK (rotation_reason IN ('install','restore','clone')),
-    CONSTRAINT fk_deploy_runtime_identity_rotated_by FOREIGN KEY (rotated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+    CONSTRAINT fk_deploy_runtime_identity_rotated_by FOREIGN KEY (rotated_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_runtime_identity_claim_by FOREIGN KEY (claim_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO deploy_runtime_identity (id, current_generation_id, supervisor_contract, rotation_reason)

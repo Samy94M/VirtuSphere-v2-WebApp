@@ -66,14 +66,7 @@ const VIRTUSPHERE_DEPLOY_LOG_SYSTEM = 'system';
 const VIRTUSPHERE_DEPLOY_LOG_ANSIBLE = 'ansible';
 const VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR = 'worker_error';
 
-// Job-log read windows (Etappe 10A). Writers keep their separate byte budgets;
-// these constants only bound how retained rows reach PHP and the browser.
-const VIRTUSPHERE_DEPLOY_LOG_INITIAL_TAIL_LIMIT = 1000;
-const VIRTUSPHERE_DEPLOY_LOG_FORWARD_LIMIT = 500;
-const VIRTUSPHERE_DEPLOY_LOG_OLDER_LIMIT = 500;
-const VIRTUSPHERE_DEPLOY_LOG_QUERY_LIMIT_MAX = 1000;
-const VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW = 1500;
-const VIRTUSPHERE_DEPLOY_LOG_RAW_BATCH_SIZE = 500;
+require_once __DIR__ . '/deploy_log_constants.php';
 
 const VIRTUSPHERE_DEPLOY_LOG_STREAMS = [
     VIRTUSPHERE_DEPLOY_LOG_STDOUT,

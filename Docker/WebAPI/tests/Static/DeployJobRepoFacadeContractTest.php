@@ -54,6 +54,30 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'repo_deploy_job_log_forward',
         'repo_deploy_job_log_older',
         'repo_deploy_job_log_raw_batches',
+        // Etappe 13: the two FILTERED reads. They are a second module on
+        // purpose, because a cursor whose meaning depends on a filter is what
+        // lets a follow mark unseen lines as read; these answer "where does X
+        // appear in this job", the three above answer "what comes next".
+        'repo_deploy_job_log_step_markers',
+        'repo_deploy_job_log_search',
+        // Etappe 13R: the claim axis and the three reads the service snapshot
+        // is composed from. They live in the deploy job repository because the
+        // claim gate is a condition of the claim transaction itself, not a
+        // setting some caller consults beforehand.
+        'repo_deploy_claim_state',
+        'repo_deploy_request_claim_pause',
+        'repo_deploy_resume_claims',
+        'repo_deploy_confirm_claim_pause',
+        'deploy_claim_state_allows_new_work',
+        'repo_deploy_queue_pressure',
+        'repo_deploy_active_job_summary',
+        'repo_deploy_recovery_attention_counts',
+        // The three operator recovery actions. All database-only: they move
+        // durable state the worker reads, or record what a person established
+        // outside this system. None of them reaches the remote host.
+        'repo_deploy_review_recovery',
+        'repo_deploy_retry_remote_cleanup',
+        'repo_deploy_record_external_review',
         'deploy_job_log_read_limit',
         'deploy_job_log_bounds',
         'deploy_job_log_page',

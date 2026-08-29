@@ -1352,6 +1352,48 @@ textarea.is-invalid {
     overflow-wrap: anywhere;
 }
 
+/* The job log's wrap switch. Wrapping is the default, so the switch is on when
+   the page loads and turning it OFF is what changes something: a long Ansible
+   line then keeps its original structure and the table scrolls sideways, which
+   is what an operator comparing two runs needs. The container carries the class
+   so one toggle reaches every row without touching them individually. */
+.log-nowrap .log-line {
+    white-space: pre;
+    overflow-wrap: normal;
+}
+
+/* The phase sequence of a job. An ordered list, because the steps ran in that
+   order and the number is part of the fact; each row keeps its name, its
+   outcome badge and its line range on one baseline and wraps as a whole. */
+.phase-list {
+    margin: 0;
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.phase-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.phase-name {
+    font-family: var(--font-mono, monospace);
+    overflow-wrap: anywhere;
+}
+
+/* A checkbox and its label as one control: without this the box and its text
+   wrap apart on a narrow viewport and the label lands under a different box. */
+.inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
 @media (max-width: 1180px) {
     .form-grid,
     .interface-row,

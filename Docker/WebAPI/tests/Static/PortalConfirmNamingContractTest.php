@@ -58,6 +58,7 @@ final class PortalConfirmNamingContractTest extends TestCase
     private const NO_TARGET = [
         'deploy.confirm_cancel_group' => 'cancels a whole staggered batch; the batch is the target, not a row',
         'system_status.reassign_confirm' => 'the target field (vlan_from) is an editable input, so a name rendered server-side would state a value the operator may have changed since',
+        'system_status.service_confirm_pause' => 'a global switch on the one deploy service, not a row; naming the running job would also be wrong, because the pause applies to every job after it',
         'settings.api_base_url_reset_confirm' => 'the one stored API base URL, not a row',
         'settings.https_confirm_disable' => 'a global switch, not a row',
         'settings.https_confirm_overwrite' => 'a global switch, not a row',

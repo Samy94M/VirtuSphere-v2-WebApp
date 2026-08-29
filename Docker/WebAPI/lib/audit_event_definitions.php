@@ -47,6 +47,21 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED = 'deploy.inventory_req
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REFRESH = 'deploy.inventory_refresh_requested';
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED = 'deploy.vlan_reassigned';
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE = 'deploy.convergence_sweep';
+// The claim axis of the deploy service (Etappe 13R). Two codes, not one with
+// an action field: pausing and resuming are the two decisions an operator makes
+// about this service, and a saved search for "who stopped the deploys" must not
+// have to know a context key to find them.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED = 'deploy.claim_paused';
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED = 'deploy.claim_resumed';
+// An operator asking the recovery policy to run now. It records what the review
+// FOUND, not that a button was pressed: a review that changed nothing is the
+// most common outcome and the trail has to be able to say so.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED = 'deploy.recovery_reviewed';
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED = 'deploy.remote_cleanup_retried';
+// What a person established outside this system. The VERDICT is here; their own
+// words stay in the append-only evidence table, because a free sentence about a
+// production incident does not belong in a row every users.manage holder reads.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED = 'deploy.recovery_documented';
 const VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE = 'integration.state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR = 'system.unhandled_error';
 const VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED = 'logs.csv_exported';
@@ -132,6 +147,17 @@ function audit_event_registry(): array
         // space. See audit_event_object_id_kind().
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['vlan'], $change, ['target_vlan', 'mission_count', 'interface_count'], [], 'required', [], [], [], [], 'name'),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['mission'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['vm_count', 'vm_ids', 'reason']),
+        // Object id : the claim axis belongs to the service as a
+        // whole, not to a job or a mission, and inventing an id for it would
+        // put a row in the trail that points at nothing.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['system'], $change, ['new_state'], ['job_id'], 'nullable'),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['system'], $change, ['new_state'], [], 'nullable'),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['system'], $change, ['reviewed_count', 'requested_count'], ['manual_count'], 'nullable'),
+        // Success AND failure: a refused retry is the interesting row, because
+        // it means the evidence moved under the operator between looking and
+        // clicking.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['execution_id']),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], $success, ['resolution_code', 'resolution_id']),
         // The only event whose category depends on its object id. Its allowlist
         // is derived from the same map, so an unknown source is refused as an
         // unknown OBJECT rather than as an unresolvable category: the two would

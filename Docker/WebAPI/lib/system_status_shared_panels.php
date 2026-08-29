@@ -60,3 +60,54 @@ function system_status_fact_time(?string $timestamp): string
 
     return $value === '' ? '&mdash;' : h(portal_format_timestamp($value));
 }
+
+/** @param list<array{source:string,row:array|null,state:string}> $rows */
+function system_status_render_source_rows(array $rows, bool $suppressHints = false): void
+{
+    ?>
+    <div class="status-list">
+        <?php foreach ($rows as $entry) {
+            $row = $entry['row'];
+            $lastSeen = $row !== null && !empty($row['last_seen_at'])
+                ? portal_format_timestamp($row['last_seen_at'])
+                : __t('system_status.never_seen');
+            $lastChecked = $row !== null && !empty($row['last_checked_at'])
+                ? portal_format_timestamp($row['last_checked_at'])
+                : __t('system_status.never_seen');
+            $detail = trim((string) ($row['last_detail'] ?? ''));
+            ?>
+            <article class="status-row">
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state']); ?></div>
+                <?php
+                // Fixed fields, including the check that equals the report: a
+                // column that appears only when the two timestamps differ moved
+                // every following column one place to the left, so the same
+                // label sat under a different one in the row above.
+                echo system_status_fact_list([
+                    ['label' => __t('system_status.th_last_seen'), 'html' => h($lastSeen)],
+                    ['label' => __t('system_status.th_last_checked'), 'html' => h($lastChecked)],
+                    ['label' => __t('system_status.th_interval'), 'html' => $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'],
+                ]);
+                ?>
+                <?php
+                // The hint is a repair instruction, not a description, so it is
+                // only true while the source is not OK. Printed unconditionally
+                // it told the operator "the maintenance service is not running"
+                // directly under a green OK badge, which is the opposite of what
+                // the row means and what help promises ("a problematic state
+                // carries an action hint").
+                //
+                // $suppressHints is the caller's "this cannot be repaired yet"
+                // verdict: nothing was ever set up, so "restart the task" names a
+                // task that does not exist. The caller says so once for the whole
+                // group instead of five rows repeating a premature instruction.
+                $actionHint = !$suppressHints && $entry['state'] !== 'ok' ? integration_action_hint($entry['source']) : '';
+                if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php } ?>
+                <?php if ($detail !== '') { ?>
+                    <details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details>
+                <?php } ?>
+            </article>
+        <?php } ?>
+    </div>
+    <?php
+}

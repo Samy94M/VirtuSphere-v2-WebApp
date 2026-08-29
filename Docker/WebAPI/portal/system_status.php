@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/system_status_page.php';
+require_once __DIR__ . '/../lib/system_status_service_panel.php';
 require_once __DIR__ . '/../lib/system_status_shared_panels.php';
 require_once __DIR__ . '/../lib/system_status_panels.php';
 require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
@@ -22,6 +23,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $snapshot = integration_health_snapshot($connection);
+// One snapshot, four surfaces (Etappe 13R). This page reads the same function
+// the dashboard, the deploy page and the anonymous health endpoint read.
+$serviceSnapshot = deploy_service_health_snapshot($connection);
 
 // A detail query is accepted only for an ESXi credential already present in
 // the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
@@ -75,6 +79,10 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     </section>
 
     <?php system_status_render_overview($snapshot); ?>
+    <?php // Directly under the overview: this is the card an operator opens the
+          // page for while a deploy is in flight, and it is the only one that
+          // carries an action changing what the installation does next. ?>
+    <?php system_status_render_deploy_service($serviceSnapshot, $user); ?>
     <?php system_status_render_directory($connection, $user); ?>
     <?php system_status_render_mecm($snapshot, $user); ?>
     <?php system_status_render_ansible($snapshot, $user); ?>

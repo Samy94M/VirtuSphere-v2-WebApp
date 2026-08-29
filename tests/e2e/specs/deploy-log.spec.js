@@ -123,7 +123,13 @@ test('terminal response with more than 500 pending lines drains to the atomic fi
   await page.goto(`deploy_log.php?id=${job}`);
   appendAndFinish(job, 6, 605, worker);
 
-  await expect(page.locator('[data-deploy-status]')).toHaveText('succeeded', { timeout: 12000 });
+  // The badge shows the LABEL, never the stored token (Etappe 13,
+  // requirement 3). The browser negotiates en, so this is the EN catalog's
+  // wording; the second assertion is the one that would have caught the old
+  // behaviour, because a raw `succeeded` is exactly what must not reappear.
+  const badge = page.locator('[data-deploy-status]');
+  await expect(badge).toHaveText('Succeeded', { timeout: 12000 });
+  await expect(badge).not.toHaveText('succeeded');
   await expect(page.locator('[data-deploy-terminal-blocks] code')).toContainText('completed');
   await expect(page.locator('[data-deploy-cancel-form]')).toHaveCount(0);
   const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
@@ -148,7 +154,12 @@ for (const status of [401, 403]) {
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ ok: false }) });
     });
     await page.goto(`deploy_log.php?id=${job}`);
-    await expect(page.locator('[data-deploy-log-feedback]')).not.toHaveText('', { timeout: 7000 });
+    // The reason a poll STOPPED belongs to the connection state, not to the
+    // batch feedback line (Etappe 13, requirement 8): a session that ended and
+    // a missing permission are states of the live connection, and the feedback
+    // line now carries the throttled "N new lines" summary instead. What the
+    // contract pins is unchanged: the reader is told, and nothing polls again.
+    await expect(page.locator('[data-deploy-log-connection]')).not.toHaveText('', { timeout: 7000 });
     await page.waitForTimeout(2600);
     expect(requests).toBe(1);
   });
@@ -172,9 +183,14 @@ test('a network fault retries with bounded single-flight polling', async ({ page
     active -= 1;
   });
   await page.goto(`deploy_log.php?id=${job}`);
-  await expect(page.locator('[data-deploy-log-feedback]')).not.toHaveText('', { timeout: 7000 });
+  // Same move as the 401/403 cases: a network fault is a state of the live
+  // connection. What matters is unchanged and still asserted here: the reader
+  // is told while it is broken, the sentence goes away once it works again, and
+  // there is never more than one request in flight.
+  const connection = page.locator('[data-deploy-log-connection]');
+  await expect(connection).not.toHaveText('', { timeout: 7000 });
   await expect.poll(() => requests, { timeout: 10000 }).toBeGreaterThanOrEqual(2);
-  await expect(page.locator('[data-deploy-log-feedback]')).toHaveText('');
+  await expect(connection).not.toContainText('interrupted');
   expect(maxActive).toBe(1);
 });
 
@@ -189,4 +205,131 @@ test('an anonymous JSON poll receives 401 instead of login HTML', async ({}, tes
   expect(response.headers()['content-type']).toContain('application/json');
   expect((await response.json()).ok).toBe(false);
   await anonymous.dispose();
+});
+
+// The follow contract of Etappe 13 is geometry, and geometry is only decidable
+// in a browser: the static contract can prove that `scrollPaused = true;` is in
+// the file, and the file can still open a live log at the top of its window
+// with a switch that says it is following. It did, until this spec was written.
+function appendLines(job, first, last) {
+  runPhp(`
+$db = db();
+$job = ${Number(job)};
+$values = [];
+for ($seq = ${Number(first)}; $seq <= ${Number(last)}; $seq++) {
+    $values[] = sprintf("(%d,%d,'ansible','${MARK} line %d')", $job, $seq, $seq);
+}
+// ONE statement: a poll reads a consistent snapshot, so the batch is either
+// fully visible or not at all, which is what makes the counted assertion exact.
+$db->query('INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES ' . implode(',', $values));
+echo 'APPENDED';
+`, ['lib/repo/deploy_jobs.php']);
+}
+
+function distanceToEnd(locator) {
+  return locator.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+}
+
+test('following opens at the end, pauses when the reader scrolls up and returns only on demand', async ({ page }) => {
+  const worker = 'e2e:deploy-log-follow';
+  const job = seedJob('running', 400, worker);
+  await page.goto(`deploy_log.php?id=${job}`);
+
+  const scroller = page.locator('[data-deploy-log-scroller]');
+  // The window really scrolls; without this the rest of the test would pass on
+  // an element that can never be anywhere but at its own bottom.
+  expect(await scroller.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
+  // Opening a running job puts the reader at the newest line, because that is
+  // what the switch promises. VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX is 4.
+  await expect.poll(() => distanceToEnd(scroller), { timeout: 8000 }).toBeLessThanOrEqual(4);
+
+  await scroller.evaluate((element) => { element.scrollTop = 0; });
+  const parked = await scroller.evaluate((element) => element.scrollTop);
+  await expect(page.locator('[data-deploy-log-feedback]')).not.toHaveText('');
+
+  appendLines(job, 401, 420);
+
+  const jump = page.locator('[data-deploy-log-jump]');
+  await expect(jump).toBeVisible({ timeout: 12000 });
+  await expect(jump).toContainText('20');
+  // The point of the whole mechanism: twenty lines arrived and the reader was
+  // not moved a single pixel.
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(parked);
+  await expect(page.locator('[data-deploy-log-body] [data-log-seq]')).toHaveCount(420);
+
+  await jump.click();
+  await expect(jump).toBeHidden();
+  expect(await distanceToEnd(scroller)).toBeLessThanOrEqual(4);
+});
+
+test('turning following off keeps the reader where they are while lines keep arriving', async ({ page }) => {
+  const job = seedJob('running', 400, 'e2e:deploy-log-follow-off');
+  await page.goto(`deploy_log.php?id=${job}`);
+
+  const scroller = page.locator('[data-deploy-log-scroller]');
+  await expect.poll(() => distanceToEnd(scroller), { timeout: 8000 }).toBeLessThanOrEqual(4);
+  await page.locator('[data-deploy-log-follow]').uncheck();
+  await scroller.evaluate((element) => { element.scrollTop = 40; });
+  const parked = await scroller.evaluate((element) => element.scrollTop);
+
+  appendLines(job, 401, 410);
+  await expect(page.locator('[data-deploy-log-body] [data-log-seq]')).toHaveCount(410, { timeout: 12000 });
+
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(parked);
+  // The preference is this browser's, and it survives the next visit.
+  await page.reload();
+  await expect(page.locator('[data-deploy-log-follow]')).not.toBeChecked();
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test('the output is announced as a log without speaking per line', async ({ page }) => {
+  const job = seedJob('running', 5, 'e2e:deploy-log-aria');
+  await page.goto(`deploy_log.php?id=${job}`);
+
+  const scroller = page.locator('[data-deploy-log-scroller]');
+  await expect(scroller).toHaveAttribute('role', 'log');
+  // Not "polite": an Ansible run emits thousands of lines and a live region
+  // would queue every one of them into the screen reader.
+  await expect(scroller).toHaveAttribute('aria-live', 'off');
+  for (const summary of ['[data-deploy-log-connection]', '[data-deploy-log-feedback]']) {
+    await expect(page.locator(summary)).toHaveAttribute('role', 'status');
+    await expect(page.locator(summary)).toHaveAttribute('aria-atomic', 'true');
+  }
+});
+
+test('a background tab stops asking and returns with exactly one catch-up', async ({ page }) => {
+  const job = seedJob('running', 3, 'e2e:deploy-log-hidden');
+  let requests = 0;
+  await page.route(/deploy_log\.php\?.*format=json/, async (route) => {
+    requests += 1;
+    await route.continue();
+  });
+  await page.goto(`deploy_log.php?id=${job}`);
+  await expect.poll(() => requests, { timeout: 8000 }).toBeGreaterThanOrEqual(1);
+
+  // document.hidden is what the module reads, so overriding the property is the
+  // honest stand-in for a tab in the background.
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  const parked = requests;
+  appendLines(job, 4, 9);
+  await page.waitForTimeout(5000);
+  expect(requests).toBe(parked);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  // The cadence is 2000ms, so within this window a burst of the missed polls
+  // would be visible and a single catch-up cannot be.
+  await expect.poll(() => requests, { timeout: 1500 }).toBe(parked + 1);
+  await page.waitForTimeout(300);
+  expect(requests).toBe(parked + 1);
+
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).toHaveCount(9);
+  const seqs = await rows.evaluateAll((elements) => elements.map((row) => row.dataset.logSeq));
+  expect(new Set(seqs).size).toBe(seqs.length);
 });

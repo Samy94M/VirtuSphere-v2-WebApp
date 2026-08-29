@@ -1,7 +1,7 @@
 # ADR-0040: Durable Remote Execution separates offline implementation from site acceptance
 
 Date: 2026-08-20
-Status: Accepted
+Status: Accepted; revised 2026-08-29 (the portal reads one service snapshot, see below)
 
 ## Context
 
@@ -59,3 +59,53 @@ reports must always state both results. Create and Full remain blocked until
 fixtures cannot mint a site acceptance, that an incomplete or mismatched result
 cannot change an activation, and that no remote-enabled mode falls back to a
 legacy path. 8R-S evidence and each mode activation are separately auditable.
+
+## Revision 2026-08-29: One snapshot, three axes, one claim gate (Etappe 13R)
+
+The offline foundation of 8R-O is now visible in the portal, and the shape it is
+visible in is a decision rather than a layout. `deploy_service_health_snapshot()`
+(`lib/deploy_service_health.php`) is the ONLY source for the dashboard, the
+deploy page, the System status card and the anonymous health endpoint. Four
+surfaces deriving "is the deploy service alright" from four combinations of
+heartbeat, queue and job rows are four chances to disagree, and the health
+endpoint had already disagreed: it read a stale-heartbeat query, which cannot
+tell a deliberate pause from a fault.
+
+The snapshot carries three independent axes, because folding them into one word
+forces a choice between two facts and whichever one loses is the one somebody
+needed. `availability` (ready, busy, degraded, cooldown, offline) answers
+whether work is being executed; `claim_state` (accepting, pause_after_current,
+paused) answers whether new work is being taken; `recovery_attention` (none,
+recovering, manual_review) answers whether a person still has to look. Each has
+a fixed precedence and a pure derivation over a fact struct, so its corners are
+testable without a database. A compact badge is derived from all three for a
+table cell, but every detail view shows all three: `busy + pause_after_current`
+and `offline + manual_review` are both real at once.
+
+Three things deliberately do not make the service degraded: a claim pause, a job
+scheduled for later, and a purely historical failure. A signal that lights up in
+normal operation is a signal people stop reading.
+
+The claim axis is persisted on the singleton runtime row (migration 0045) and
+every transition is a compare-and-swap, because an operator, a second browser
+tab and the worker all write it. `pause_after_current` exists so a pause never
+interrupts work that is already changing ESXi: the worker stops taking new jobs
+immediately and converts the requested pause into a real one in the same
+transaction as its terminal write. A resume issued while that job was still
+running therefore wins. The gate sits inside the claim transaction, not in the
+worker loop, so no future second caller can bypass it.
+
+All five operator actions are database-only. None reaches the Ansible host,
+because the situation they exist for is the one where it cannot be reached: a
+recovery review requests what the policy allows and lets the worker perform it,
+a cleanup retry re-enters the queue and is refused outright when the evidence
+hash moved between looking and clicking, and an external check appends one
+evidence row and never replaces an earlier one. The recovery POLICY is not
+reimplemented for them; `remote_recovery_decision()` stays the one classifier,
+so a case it calls manual cannot be talked out of that by a button.
+
+The anonymous health endpoint stays as terse as before and still answers 200 for
+`degraded`; only its INPUT changed. A snapshot that cannot be computed is
+`degraded`, never a 503: the database already answered, and turning an internal
+derivation fault into an address-probe failure would stop every client script in
+the deploy VLAN over a portal detail none of them read.

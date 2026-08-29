@@ -196,7 +196,15 @@ final class AnsibleActivityTest extends TestCase
 
         self::assertStringContainsString(__t('system_status.ansible_th_last_mission_job'), $html);
         self::assertStringContainsString(__t('system_status.ansible_job_succeeded'), $html);
-        self::assertStringContainsString(__t('system_status.ansible_job_mode', ['mode' => 'start']), $html);
+        // The row names the mode the way the portal names it everywhere else
+        // (Etappe 13, requirement 5), not with the payload token: a reader of
+        // this card and a reader of the job list must not have to learn two
+        // vocabularies for one thing.
+        self::assertStringContainsString(
+            __t('system_status.ansible_job_mode', ['mode' => deploy_mode_label('start')]),
+            $html
+        );
+        self::assertStringNotContainsString('Mode start', $html);
         self::assertStringContainsString('deploy_log.php?id=' . $processed, $html);
         self::assertStringNotContainsString(__t('system_status.ansible_job_cancelled'), $html);
         self::assertStringNotContainsString('deploy_log.php?id=' . $neverRan, $html);

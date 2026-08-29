@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/deploy_service_health.php';
+
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/deploy_form_state.php';
 require_once __DIR__ . '/deploy_blockers.php';
@@ -25,6 +27,10 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
     $ansibleCredentials = repo_credentials_by_type($connection, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
     $jobs = repo_deploy_jobs($connection, 100, $selectedMissionId > 0 ? $selectedMissionId : null);
     $selectedMission = $selectedMissionId > 0 ? repo_get_mission($connection, $selectedMissionId) : null;
+    // The one snapshot (Etappe 13R): the sentence above the queue button and the
+    // System status card read the same function, so the page cannot promise an
+    // immediate start while the card says the service is paused.
+    $serviceSnapshot = deploy_service_health_snapshot($connection);
     $missionVms = $selectedMission !== null ? getVMs($connection, $selectedMissionId) : [];
     $selectedMissionDeviates = $selectedMissionId > 0
         && isset(esxi_inventory_deviating_mission_ids($connection)[$selectedMissionId]);
@@ -107,6 +113,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         'canQueue',
         'initialHostWarning',
         'initialCapabilityWarning',
+        'serviceSnapshot',
         'initialCapacity',
         'scheduleMinLocal',
         'groupPositions'

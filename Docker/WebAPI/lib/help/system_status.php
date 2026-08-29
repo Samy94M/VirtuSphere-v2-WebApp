@@ -2,6 +2,11 @@
 // Help panel partial, included by portal/help.php. Not directly reachable
 // (nginx denies /lib/).
 declare(strict_types=1);
+
+// Uses $user from the page scope: the cross reference to the deploy help is
+// gated on the panel that reader may actually open, so a link never leads to a
+// tab that is not rendered for them.
+/** @var array<string,mixed> $user */
 ?>
     <div class="stack" id="panel-system-status" role="tabpanel" aria-labelledby="tab-system-status" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -14,6 +19,18 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_system_status.system_status_signal_combination')); ?></li>
             </ul>
         </section>
+        <section class="panel">
+            <h2><?php echo h(__t('help_system_status.service_card_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.service_card_p1')); ?></p>
+            <?php // One text, one owner: the state machine is explained in the
+                  // deploy help, and this page links to it rather than keeping a
+                  // second copy that would drift. The link is gated on the help
+                  // panel the reader may actually open. ?>
+            <?php if (help_panel_visible('deploy', $user)) { ?>
+                <p><a href="<?php echo h(help_url('deploy', 'help-deploy-service')); ?>"><?php echo h(__t('help_system_status.service_card_link')); ?></a></p>
+            <?php } ?>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_system_status.firstaid_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.firstaid_p1')); ?></p>

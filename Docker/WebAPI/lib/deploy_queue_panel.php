@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+/** @var array<string,mixed> $serviceSnapshot */
 /** @var array<string,mixed>|null $deployPreview */
 /** @var string $redirectBase */
 /** @var list<array<string,mixed>> $deployBlockers */
@@ -61,6 +62,12 @@ if ($deployPreview !== null) { ?>
 
 <section class="panel">
     <h2><?php echo h(__t('deploy.queue_heading')); ?></h2>
+    <?php // What happens after Queue (Etappe 13R). It is deliberately NOT a
+          // blocker: a service that is offline or paused does not make the job
+          // invalid, it makes it wait, and refusing to save it would lose work
+          // an operator has already entered. The sentence says which of the two
+          // it will be. ?>
+    <p class="muted"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></p>
     <?php deploy_render_blockers($deployBlockers, $user); ?>
     <?php if ($selectedMissionDeviates) { ?>
         <div class="alert alert-warning"><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>

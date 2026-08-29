@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/deploy_recovery_actions.php';
+
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/deploy_form_state.php';
 require_once __DIR__ . '/deploy_blockers.php';
@@ -25,6 +27,12 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
     try {
         $action = request_string($_POST, 'action');
+        // The per-job recovery actions post here like the cancel form on the
+        // same page, so the job log keeps one POST target. They own their own
+        // permission and audit line.
+        if (in_array($action, VIRTUSPHERE_DEPLOY_RECOVERY_ACTIONS, true)) {
+            deploy_handle_recovery_action($connection, $user, $action);
+        }
         if ($action === 'start') {
             $queueInput = deploy_queue_normalize_input($_POST);
             $missionIdPost = $queueInput['mission_id'];

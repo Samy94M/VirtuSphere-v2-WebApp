@@ -67,6 +67,12 @@ function audit_context_field_registry(): array
         'target_mission_id' => $int, 'affected_count' => $int, 'credential_id' => $int,
         'job_id' => $int, 'job_count' => $int, 'retry_of_job_id' => $int,
         'queued_count' => $int, 'open_count' => $int, 'paused_count' => $int,
+        // Etappe 13R: what a recovery review looked at and what it moved. The
+        // counts are separate fields rather than one sentence, because "nothing
+        // changed" and "three cases still need a person" are different answers
+        // and a saved search has to be able to tell them apart.
+        'reviewed_count' => $int, 'requested_count' => $int, 'manual_count' => $int,
+        'execution_id' => $int, 'resolution_id' => $int, 'resolution_code' => $id,
         'failed_count' => $int, 'mission_count' => $int, 'interface_count' => $int,
         'rows_exported' => $int, 'total_rows' => $int, 'limit' => $int,
         'retire_count' => $int, 'active_count' => $int, 'threshold_percent' => $int,

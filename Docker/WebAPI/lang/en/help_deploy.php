@@ -3,6 +3,16 @@
 declare(strict_types=1);
 
 return [
+    // Etappe 13/13R: service state and the log view.
+    'service_heading' => 'State of the deploy service',
+    'service_p1' => 'System status shows three facts side by side because they hold independently. Availability says whether work is being executed. Job intake says whether new jobs are being taken. Open cases say whether somebody still has to look. A service can be working and at the same time be set to take no further job afterwards.',
+    'service_p2' => '"Pause after the current job" interrupts nothing that is already running on ESXi. From that moment no new job is taken; the running one is finished, and only then does intake read as paused. Choosing "Resume" in the meantime lifts the pause, and the service keeps working without interruption.',
+    'service_p3' => 'Degraded does not mean paused. Degraded means a job is waiting although the service accepts jobs, or that a running job has stopped reporting. A pause and a job scheduled for later are not faults and do not colour the display.',
+    'service_p4' => 'Every action on the card changes data in this application only. None reaches the Ansible host, none ends a process there and none deletes remote files. "Check recovery now" applies the existing rule again and marks what the worker then carries out itself; "Retry cleanup" is refused when the evidence changed since you looked; "Document an external check" appends an entry and replaces no earlier one.',
+    'log_view_heading' => 'Reading, following and searching the log',
+    'log_view_p1' => 'The view follows the end while you are standing there. As soon as you scroll up it stops and says how many lines have arrived since; the counter resets only when you deliberately return to the end. The "Follow live" switch remembers your choice in this browser. A tab in the background stops asking and catches up exactly once when you return.',
+    'log_view_p2' => 'The sequence above the output shows the steps of this job, read from the markers the worker writes. A step without an end did not finish. Search, source and step filter server-side across every retained line, show at most :limit matches and switch live updates off: you then see matches, not the sequence. A gap between two matches therefore does not mean nothing happened in between.',
+    'log_view_p3' => 'The complete raw log is untouched by the filter and contains every retained line. If you need the whole sequence, clear the filter or download the raw log.',
     'credentials_heading' => 'Credentials',
     'credentials_p1' => 'ESXi and Ansible credentials are stored encrypted and are offered as a choice when queuing a deploy job. An Ansible credential is only the SSH account for the execution host. The API base URL under Settings is the separate callback address to the portal, not an alternative credential; a deploy uses the selected SSH credential and the effective URL together. Without at least one ESXi and one Ansible credential, plus a reachable API base URL, no job can be queued.',
     'deploy_heading' => 'Deploy modes',

@@ -31,7 +31,7 @@ declare(strict_types=1);
                 <td><?php echo h((string) $job['id']); ?></td>
                 <td><?php if ((int) ($job['mission_id'] ?? 0) > 0) { ?><a href="<?php echo h(mission_details_url((int) $job['mission_id'])); ?>"><?php echo h($job['mission_name'] ?? ''); ?></a><?php } else { echo h($job['mission_name'] ?? ''); } ?></td>
                 <td>
-                    <?php echo portal_badge(deploy_job_status_badge_class((string) $job['status']), (string) ($job['status'] ?? '')); ?>
+                    <?php echo deploy_job_status_badge((string) ($job['status'] ?? '')); ?>
                     <?php if (($job['group_id'] ?? '') !== '' && isset($groupPositions[(int) $job['id']])) { [$gpos, $gtot] = $groupPositions[(int) $job['id']]; ?>
                         <?php echo portal_badge('info', __t('deploy.group_slot', ['pos' => $gpos, 'total' => $gtot])); ?>
                     <?php } ?>
@@ -39,7 +39,7 @@ declare(strict_types=1);
                         <div class="muted nowrap"><?php echo h(__t('deploy.scheduled_for', ['time' => portal_format_timestamp((string) $job['scheduled_at'])])); ?></div>
                     <?php } ?>
                 </td>
-                <td><?php echo h(deploy_job_payload_summary($job['payload_json'] ?? null)); ?></td>
+                <td><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></td>
                 <td><?php echo h(($job['esxi_credential_name'] ?? 'ESXi ?') . ' / ' . ($job['ansible_credential_name'] ?? 'Ansible ?')); ?></td>
                 <td><?php echo h($job['user_name'] ?? ($job['user_id'] ?? '')); ?></td>
                 <td><?php echo h(portal_format_timestamp($job['updated_at'] ?? '')); ?></td>

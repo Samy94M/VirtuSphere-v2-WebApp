@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// The badge variants come from the meta SSoT in lib/status.php (loaded by the
+// layout facade); the visible labels come from the portal-only display module,
+// which is required here rather than by the facade so this file's own require
+// closure stays complete.
+require_once __DIR__ . '/portal_status_display.php';
+
 // Single source for the badge markup. Callers pass a variant (the palette suffix
 // success/warning/danger/info/neutral) and the already-resolved label; both are
 // escaped here, so the label must be the raw text, not pre-escaped.
@@ -17,18 +23,22 @@ function status_badge(string $legacyStatus): string
     return portal_badge((string) $meta['badge'], $legacyStatus);
 }
 
+// Variant from the meta SSoT, visible text from the portal label helper. The
+// two halves come from different places on purpose: the colour belongs to the
+// state machine, the wording belongs to the reader, and an unknown value gets a
+// neutral badge with a neutral sentence instead of its raw token.
 function lifecycle_badge(string $lifecycleState): string
 {
     $meta = virtusphere_lifecycle_meta($lifecycleState);
 
-    return portal_badge((string) $meta['badge'], $lifecycleState);
+    return portal_badge((string) $meta['badge'], portal_lifecycle_label($lifecycleState));
 }
 
 function mecm_sync_badge(string $mecmSyncState): string
 {
     $meta = virtusphere_mecm_sync_meta($mecmSyncState);
 
-    return portal_badge((string) $meta['badge'], $mecmSyncState);
+    return portal_badge((string) $meta['badge'], portal_mecm_sync_label($mecmSyncState));
 }
 
 // Heartbeat/staleness badge (ADR-0018) with a localized, portal-authored label.

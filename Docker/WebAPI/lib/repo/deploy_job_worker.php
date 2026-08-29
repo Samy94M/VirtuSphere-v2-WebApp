@@ -7,6 +7,7 @@ require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_job_output.php';
 require_once __DIR__ . '/../deploy_job_result.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
 
 /**
@@ -26,6 +27,18 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
     }
 
     return repo_transaction($db, static function () use ($db, $workerId): ?array {
+        // The claim gate (Etappe 13R). It sits INSIDE the claim transaction, not
+        // in the worker loop, because a check in the caller is a check some
+        // future second caller will not make; a paused service that still takes
+        // a job through another path is worse than no pause at all.
+        //
+        // Only NEW work is refused. The worker's own running job keeps its
+        // heartbeat, its log and its recovery paths: a pause exists so that work
+        // may finish, not so that it is abandoned half-applied on ESXi.
+        if (!deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
+            return null;
+        }
+
         $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
         // Scheduled jobs (scheduled_at in the future) are not yet eligible.
         // The DB session is pinned to UTC (db()), so UTC_TIMESTAMP() matches the
@@ -126,8 +139,21 @@ function repo_finish_deploy_job(
         $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
         $stmt->bind_param('sssssiss', $status, $lastError, $resultJson, $reasonCode, $reasonDetail, $jobId, $workerId, $running);
         $stmt->execute();
+        $finished = $stmt->affected_rows === 1;
 
-        return $stmt->affected_rows === 1;
+        // The worker's half of a requested pause (Etappe 13R), in the same
+        // transaction as the terminal write: the job this pause was waiting for
+        // has ended, so `pause_after_current` becomes `paused`. Doing it here
+        // rather than in the loop means the pause completes exactly when the
+        // work it protected did, even if the process dies immediately after.
+        //
+        // It is a CAS on the requested state, so a resume issued while the job
+        // was still running wins and the service simply keeps working.
+        if ($finished) {
+            repo_deploy_confirm_claim_pause($db);
+        }
+
+        return $finished;
     });
 }
 

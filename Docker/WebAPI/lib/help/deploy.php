@@ -104,6 +104,21 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_warn_p3')); ?></p>
         </section>
 
+        <section class="panel" id="help-deploy-service">
+            <h2><?php echo h(__t('help_deploy.service_heading')); ?></h2>
+            <p><?php echo h(__t('help_deploy.service_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_p3')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_p4')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_deploy.log_view_heading')); ?></h2>
+            <p><?php echo h(__t('help_deploy.log_view_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.log_view_p2', ['limit' => VIRTUSPHERE_DEPLOY_LOG_SEARCH_LIMIT])); ?></p>
+            <p><?php echo h(__t('help_deploy.log_view_p3')); ?></p>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.deploy_retry_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_retry_p1')); ?></p>

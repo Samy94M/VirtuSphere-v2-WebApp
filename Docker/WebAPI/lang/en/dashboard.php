@@ -3,6 +3,11 @@
 declare(strict_types=1);
 
 return [
+    // Only when something is actionable (Etappe 13R). All three axes are in
+    // the sentence, because 'working' and 'pausing after the current job' can
+    // both hold and the hint would otherwise show the wrong half.
+    'service_attention' => 'Deploy service: :availability. Job intake: :claim. Open cases: :attention.',
+    'service_attention_link' => 'Open the deploy service on System status',
     'title' => 'Dashboard',
     'key_metrics' => 'Key metrics',
     'kpi_missions' => 'Missions',

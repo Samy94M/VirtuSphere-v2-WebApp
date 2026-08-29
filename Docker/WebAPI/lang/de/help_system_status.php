@@ -8,6 +8,9 @@ declare(strict_types=1);
 // cut through one catalog. Keys are reached as __t('help_system_status.<key>').
 
 return [
+    'service_card_heading' => 'Karte Bereitstellungsdienst',
+    'service_card_p1' => 'Die Karte zeigt drei Angaben nebeneinander: ob gerade gearbeitet wird, ob neue Aufträge angenommen werden und ob noch eine Klärung offen ist. Sie gelten unabhängig voneinander, deshalb steht keine davon für die anderen mit. Die Bedienknöpfe erscheinen nur mit der Berechtigung für Systemeinstellungen; die Erklärung bleibt für alle sichtbar.',
+    'service_card_link' => 'Zustände und Aktionen des Bereitstellungsdienstes im Detail',
     'system_status_roles_heading' => 'Einstellungen, Zugangsdaten und Systemstatus',
     'system_status_roles_p1' => 'Einstellungen steuern globales Verhalten, Zugangsdaten speichern verschlüsselte Ansible- und ESXi-Konten, und der Systemstatus zeigt beobachtete Ergebnisse sowie berechtigte Diagnose- und Reparaturaktionen.',
     'system_status_single_site' => 'VirtuSphere bindet genau eine MECM-Site an. Mehrere IP-Freigaben erlauben mehreren Netzwerkadressen den Zugriff auf dieselbe Machine-API; sie bilden kein Multi-MECM.',
