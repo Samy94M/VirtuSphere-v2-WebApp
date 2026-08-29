@@ -188,6 +188,39 @@
         });
     }
 
+    // A repeated row is a copy of the FIRST row, so every disk added below the
+    // system disk arrived carrying its name and a VM with three disks showed
+    // "System" three times. The row's position decides the proposed name; both
+    // labels come from the PHP constants through data-autoname-* attributes, so
+    // this file holds no copy of them and cannot drift from
+    // vm_disk_default_name(). A name already taken (a middle row was removed,
+    // then a new one added) is stepped over rather than duplicated: two disks
+    // with one name is the very thing this fixes.
+    function applyRowAutoName(row, target) {
+        var input = row.querySelector('[data-autoname-prefix]');
+        if (!input) {
+            return;
+        }
+
+        var first = input.getAttribute('data-autoname-first') || '';
+        var prefix = input.getAttribute('data-autoname-prefix') || '';
+        var taken = [];
+        target.querySelectorAll('[data-autoname-prefix]').forEach(function (field) {
+            if (field !== input) {
+                taken.push(field.value.trim());
+            }
+        });
+
+        var position = target.querySelectorAll('[data-repeat-row]').length;
+        var candidate = position <= 1 ? first : prefix + ' ' + position;
+        while (taken.indexOf(candidate) !== -1) {
+            position += 1;
+            candidate = prefix + ' ' + position;
+        }
+
+        input.value = candidate;
+    }
+
     document.addEventListener('click', function (event) {
         var add = event.target.closest('[data-add-row]');
         if (add) {
@@ -200,6 +233,7 @@
                 holder.innerHTML = html.trim();
                 var row = holder.firstElementChild;
                 target.appendChild(row);
+                applyRowAutoName(row, target);
                 initDynamicControls(row);
             }
             return;

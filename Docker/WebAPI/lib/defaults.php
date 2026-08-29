@@ -9,6 +9,12 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'cpu_count' => 2,
     'guest_id' => 'windows2019srv_64Guest',
     'disk_name' => 'System',
+    // The name proposed for every FURTHER disk row, numbered by its position
+    // (vm_disk_default_name()). It sits next to 'disk_name' rather than in the
+    // form module because the repo validator applies the same rule to rows
+    // arriving from the machine API and the mission import, not just to the
+    // editor's add button.
+    'disk_name_prefix' => 'Disk',
     'disk_size_gb' => 50,
     // Eager zeroed: blocks are pre-zeroed at creation, so the first write to a
     // block carries no zeroing penalty. Creation itself takes correspondingly
@@ -165,6 +171,24 @@ function disk_type_label(string $type): string
     $label = function_exists('__t') ? __t($key) : $key;
 
     return $label === $key ? $type : $label;
+}
+
+/**
+ * The proposed name for the disk at $position (1-based): the first disk is the
+ * system disk, every further one carries its own position.
+ *
+ * Every row used to be proposed as 'System', because a repeated row inherits
+ * the first row's values, so a VM with three disks showed the same name three
+ * times and nothing downstream could tell them apart. Three places apply the
+ * rule and none of them may hold its own copy: the editor's add button (through
+ * the data-autoname-* attributes on the row template), the form parser, and the
+ * repo validator that also sees machine-API and import rows.
+ */
+function vm_disk_default_name(int $position): string
+{
+    return $position <= 1
+        ? VIRTUSPHERE_VM_DEFAULTS['disk_name']
+        : VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix'] . ' ' . $position;
 }
 
 function virtusphere_guest_os_ids(): array

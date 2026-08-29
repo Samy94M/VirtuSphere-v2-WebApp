@@ -101,13 +101,19 @@ const FILE_SIZE_ALLOWANCES = [
     // 603->641 (the audit event
     // registry's endpoint list/report-channel version plus the Etappe-10D
     // PowerShell log help mirrors), migrate.php 1220->1222 (migration 0044).
+    // Raised again for the optional static gateway and the per-position disk
+    // name: vms.php 888->898 (the validator now records WHY the gateway may
+    // stay empty, because a required field the client is guaranteed to discard
+    // is the defect this removes) and vm_edit.php 520->521 (the hint line under
+    // the interface list). Both files keep Etappe 14 as the stage that ends the
+    // exception; neither grew a new responsibility.
     'Docker/WebAPI/lib/repo/vms.php' => [
-        'lines' => 888,
+        'lines' => 898,
         'why' => 'legacy facade, validation, bundle persistence, identity and bulk/recovery actions',
         'stage' => 'Etappe 14',
     ],
     'Docker/WebAPI/portal/vm_edit.php' => [
-        'lines' => 520,
+        'lines' => 521,
         'why' => 'diagnostics/progress, dynamic form groups and actions belong in vm_edit_* modules',
         'stage' => 'Etappe 14',
     ],

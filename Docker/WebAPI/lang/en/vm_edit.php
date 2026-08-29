@@ -100,6 +100,7 @@ return [
     'label_mode' => 'Mode',
     'label_type' => 'Type',
     'label_mac' => 'MAC',
+    'gateway_hint' => 'The gateway may stay empty; the adapter then gets its address and mask but no default route. That is the normal case for a segment without a router and for every further static adapter: only the first adapter carrying a gateway sets the VM default route, and the value is discarded on all others.',
     'label_size_gb' => 'Size GB',
     // The select used to carry the raw Ansible tokens (thin, thick,
     // eagerzeroedthick). The stored value stays the token, the visible text is

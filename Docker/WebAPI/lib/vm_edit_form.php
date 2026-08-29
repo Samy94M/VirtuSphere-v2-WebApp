@@ -110,7 +110,7 @@ function vm_parse_disks(array $rows): array
         if (!in_array($type, $allowed, true)) {
             throw new RuntimeException(__t('vm_edit.err_invalid_disk_type'));
         }
-        $disks[] = ['disk_name' => $name !== '' ? $name : 'System', 'disk_size' => max(1, $size), 'disk_type' => $type];
+        $disks[] = ['disk_name' => $name !== '' ? $name : vm_disk_default_name(count($disks) + 1), 'disk_size' => max(1, $size), 'disk_type' => $type];
     }
 
     return $disks !== [] ? $disks : vm_default_disks();
@@ -195,7 +195,11 @@ function render_disk_row(array $disk, int|string $index, bool $canWrite, bool $t
     $type = strtolower((string) ($disk['disk_type'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_type']));
     ?>
     <div class="form-row" data-repeat-row>
-        <label><?php echo h(__t('common.name')); ?><input name="<?php echo $prefix; ?>[disk_name]" value="<?php echo h($disk['disk_name'] ?? 'System'); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
+        <?php // Die beiden data-autoname-Werte sind die einzige Stelle, an der forms.js
+              // erfaehrt, wie eine hinzugefuegte Platte heissen soll; die Regel selbst
+              // bleibt vm_disk_default_name(). Ohne sie erbte jede neue Zeile den Wert
+              // der ersten und hiess wieder "System". ?>
+        <label><?php echo h(__t('common.name')); ?><input name="<?php echo $prefix; ?>[disk_name]" value="<?php echo h($disk['disk_name'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_name']); ?>" data-autoname-first="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name']); ?>" data-autoname-prefix="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_size_gb')); ?><input name="<?php echo $prefix; ?>[disk_size]" type="number" min="1" value="<?php echo h((string) ($disk['disk_size'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'])); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_type')); ?><select name="<?php echo $prefix; ?>[disk_type]" <?php echo $canWrite ? '' : 'disabled'; ?>>
             <?php foreach (VIRTUSPHERE_DISK_TYPES as $option) { ?>
@@ -220,6 +224,19 @@ function render_disk_type_hint(): void
     <p class="hint"><?php echo h(__t('vm_edit.disk_type_hint', [
         'default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
     ])); ?></p>
+    <?php
+}
+
+/**
+ * Der Satz unter der Schnittstellenliste. Das Gateway ist auch im Modus
+ * 'static' optional (repo_validate_interfaces), und ein leeres Feld neben IP
+ * und Maske liest sich sonst wie ein vergessener Wert. Was danach passiert,
+ * steht dabei, weil genau das die Frage am Feld ist.
+ */
+function render_interface_gateway_hint(): void
+{
+    ?>
+    <p class="hint"><?php echo h(__t('vm_edit.gateway_hint')); ?></p>
     <?php
 }
 

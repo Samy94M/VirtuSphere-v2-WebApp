@@ -481,6 +481,7 @@ layout_header($title, $user, $isTemplate ? 'templates' : 'missions', 'missions')
                 <?php foreach (array_values($interfaces) as $index => $interface) { render_interface_row($interface, $index, $vlans, $canWrite); } ?>
             </div>
             <template data-template="interfaces"><?php render_interface_row(vm_default_interfaces($mission)[0], '__INDEX__', $vlans, true, true); ?></template>
+            <?php render_interface_gateway_hint(); ?>
         </section>
 
         <section class="panel stack">

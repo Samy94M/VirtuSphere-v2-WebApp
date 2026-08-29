@@ -282,7 +282,17 @@ function repo_validate_interfaces(mixed $interfaces): array
             'id' => repo_id(repo_object_get($interface, 'id', repo_object_get($interface, 'Id'))),
             'ip' => $validator->ipv4('interfaces.' . $index . '.ip', repo_object_get($interface, 'ip', ''), validator_label('interface_ip', 'Interface IP'), $static),
             'subnet' => $validator->ipv4OrCidrMask('interfaces.' . $index . '.subnet', repo_object_get($interface, 'subnet', ''), validator_label('interface_subnet', 'Interface subnet'), $static),
-            'gateway' => $validator->ipv4('interfaces.' . $index . '.gateway', repo_object_get($interface, 'gateway', ''), validator_label('interface_gateway', 'Interface gateway'), $static),
+            // Unlike the IP and the mask, the gateway stays OPTIONAL in static
+            // mode. client_staticip.ps1 sets exactly one default route per VM
+            // (the first static adapter carrying a gateway wins, every further
+            // one is discarded there with a WARN), and a segment without a
+            // router has no gateway to name at all. Requiring it therefore
+            // forced the operator to invent a value the client is guaranteed to
+            // throw away, or to put a router address on a routerless segment,
+            // where Windows would then point its default route at something
+            // that never answers. The format is still validated; only empty is
+            // allowed through.
+            'gateway' => $validator->ipv4('interfaces.' . $index . '.gateway', repo_object_get($interface, 'gateway', ''), validator_label('interface_gateway', 'Interface gateway')),
             'dns1' => $validator->ipv4('interfaces.' . $index . '.dns1', repo_object_get($interface, 'dns1', ''), validator_label('interface_dns1', 'Interface DNS 1')),
             'dns2' => $validator->ipv4('interfaces.' . $index . '.dns2', repo_object_get($interface, 'dns2', ''), validator_label('interface_dns2', 'Interface DNS 2')),
             'vlan' => $validator->optionalString('interfaces.' . $index . '.vlan', repo_object_get($interface, 'vlan', ''), validator_label('interface_vlan', 'Interface VLAN'), 255),
@@ -318,7 +328,7 @@ function repo_validate_disks(mixed $disks): array
 
         $validator = new Validator();
         $row = [
-            'disk_name' => $validator->optionalString('disks.' . $index . '.disk_name', repo_object_get($disk, 'disk_name', VIRTUSPHERE_VM_DEFAULTS['disk_name']), validator_label('disk_name', 'Disk name'), 255),
+            'disk_name' => $validator->optionalString('disks.' . $index . '.disk_name', repo_object_get($disk, 'disk_name', vm_disk_default_name($index + 1)), validator_label('disk_name', 'Disk name'), 255),
             'disk_size' => $validator->intRange(
                 'disks.' . $index . '.disk_size',
                 repo_object_get($disk, 'disk_size', VIRTUSPHERE_VM_DEFAULTS['disk_size_gb']),
@@ -330,7 +340,7 @@ function repo_validate_disks(mixed $disks): array
             'disk_type' => $validator->enum('disks.' . $index . '.disk_type', repo_object_get($disk, 'disk_type', VIRTUSPHERE_VM_DEFAULTS['disk_type']), validator_label('disk_type', 'Disk type'), VIRTUSPHERE_DISK_TYPES, VIRTUSPHERE_VM_DEFAULTS['disk_type']),
         ];
         if ($row['disk_name'] === '') {
-            $row['disk_name'] = VIRTUSPHERE_VM_DEFAULTS['disk_name'];
+            $row['disk_name'] = vm_disk_default_name($index + 1);
         }
         $validator->throwIfInvalid();
         $validated[] = $row;
