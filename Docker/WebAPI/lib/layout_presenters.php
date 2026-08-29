@@ -153,7 +153,7 @@ function client_phase_badge(string $phaseState): string
 
 // Deploy-job status to badge variant. Lives here with the other badge helpers,
 // not in the repo layer; the deploy_log.php JSON path hands the variant to the
-// deploy.js poller, so the class must be derivable without rendering a span.
+// deploy_log.js poller, so the class must be derivable without rendering a span.
 function deploy_job_status_badge_class(string $status): string
 {
     return match ($status) {
@@ -259,13 +259,15 @@ function portal_format_duration(int $seconds): string
 {
     $seconds = max(0, $seconds);
     if ($seconds > 0 && $seconds % 3600 === 0) {
-        return __t('common.duration_hours', ['count' => intdiv($seconds, 3600)]);
+        $hours = intdiv($seconds, 3600);
+        return __t($hours === 1 ? 'common.duration_hour' : 'common.duration_hours', ['count' => $hours]);
     }
     if ($seconds >= 60 && $seconds % 60 === 0) {
-        return __t('common.duration_minutes', ['count' => intdiv($seconds, 60)]);
+        $minutes = intdiv($seconds, 60);
+        return __t($minutes === 1 ? 'common.duration_minute' : 'common.duration_minutes', ['count' => $minutes]);
     }
 
-    return __t('common.duration_seconds', ['count' => $seconds]);
+    return __t($seconds === 1 ? 'common.duration_second' : 'common.duration_seconds', ['count' => $seconds]);
 }
 
 // Sub-second run durations are reported in milliseconds; anything longer rounds
@@ -278,4 +280,9 @@ function portal_format_duration_ms(int $milliseconds): string
     }
 
     return portal_format_duration((int) round($milliseconds / 1000));
+}
+
+function mecm_updated_display(mixed $updated): string
+{
+    return (int) $updated === 1 ? __t('common.mecm_queued') : '—';
 }

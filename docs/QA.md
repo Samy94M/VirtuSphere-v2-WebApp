@@ -48,6 +48,24 @@ The Integration lane provisions its own throwaway stack as its first gate (`qa-s
 
 Against that stack the lane runs `migrate-check`, the **full** PHPUnit suite with `--fail-on-skipped` (a dynamic skip is never legitimate here; tests that need an allowlisted or non-allowlisted client IP arrange it themselves via `tests/Integration/ClientIpAllowlist.php` and restore the previous state), `schema-convergence`, the health/exposure contract, the guard harness, and `e2e-portal`: the functional Playwright Chromium suite plus the deterministic visual proof from `tests/e2e/` (ADR-0028 revisions). Runner and Playwright call the same resolver: `PLAYWRIGHT_CHROMIUM` when explicitly set, otherwise the exact executable belonging to the lockfile-installed `playwright-core`; there is no local-user fallback or highest-revision scan. `npm ci` runs automatically when `tests/e2e/node_modules` is missing.
 
+### Etappe 12 deploy and portal UX contract
+
+The deploy queue has one server-side decision surface: `deploy_queue_blockers()`.
+Targeted PHPUnit covers the complete union, its exhaustive renderer, password
+attributes, duration boundaries, MECM display text, mission/help links, the
+settings/deploy owner sets and the bidirectional portal asset registry.
+`tests/e2e/specs/etappe12-ux.spec.js` complements that with every live queue
+control, disabled-but-populated values, stale/aborted responses, non-JSON and
+`401`/`403` failure closure, DOM text injection, the immediate server recheck,
+the no-JavaScript schedule path, nested help focus and 390 px overflow.
+
+Successful blocker reads are intentionally read-only: the browser test compares
+the deploy audit-log count before and after. Machine API endpoints and fields are
+not part of this path. Run the canonical Fast and Integration lanes for final
+acceptance; Integration exercises the functional Chromium suite and the exact
+Etappe-11 deterministic light/dark visual harness. Etappe 12 does not create or
+update committed visual baselines; that remains the Etappe-17 release decision.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:
@@ -317,7 +335,7 @@ Links *into* the page have the same failure mode and used to be hand-written at 
 
 ## Messages That Name a Fix
 
-A portal message that states a prerequisite or an instruction carries the link that satisfies it, gated on the *target's* permission while the sentence stays ungated. On the deploy page the blocker list is also the queue gate (`deploy_prerequisite_notices()`, `tests/Unit/DeployPrerequisiteNoticesTest.php`), so a disabled button cannot exist without a box saying why, and the API-base-URL box is chosen by the resolver's flag rather than by its message text: an exception with an empty message would otherwise block the queue and explain nothing. Connection-test results whose fix lives on another page carry a flash action (`credentials_test_action()`, `tests/Unit/CredentialsTestActionTest.php`); results fixed on the Ansible host deliberately carry none.
+A portal message that states a prerequisite or an instruction carries the link that satisfies it, gated on the *target's* permission while the sentence stays ungated. On the deploy page `deploy_queue_blockers()` is the complete gate for one normalized form state. Server render, live JSON, schedule preview and the immediate pre-write recheck consume the same discriminated union, so a disabled button cannot exist without its matching visible reason. Structured actions carry their target permission; the reason remains visible when that action is hidden. `DeployQueueBlockersTest`, `DeployBlockerContractTest` and the Etappe-12 browser path prove both sides, including a forged enabled submit and the no-JavaScript path. Connection-test results whose fix lives on another page carry a flash action (`credentials_test_action()`, `tests/Unit/CredentialsTestActionTest.php`); results fixed on the Ansible host deliberately carry none.
 
 ## Correlation IDs (ADR-0032)
 

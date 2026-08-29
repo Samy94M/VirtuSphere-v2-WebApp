@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
 require_once __DIR__ . '/../lib/portal_export.php';
+require_once __DIR__ . '/../lib/deploy_urls.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -214,12 +215,13 @@ foreach ($rows as $vmRow) {
     }
 }
 
-layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission')) . ': ' . (string) $mission['mission_name'], $user, $isTemplate ? 'templates' : 'missions');
+layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission')) . ': ' . (string) $mission['mission_name'], $user, $isTemplate ? 'templates' : 'missions', 'missions');
 ?>
 <div class="stack">
     <section class="panel">
         <div class="actions">
-            <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vms.mission_details')); ?></a>
+            <a class="button button-secondary" href="<?php echo h(mission_details_url($missionId)); ?>"><?php echo h(__t('vms.mission_details')); ?></a>
+            <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('vms.open_deploy')); ?></a><?php } ?>
             <?php if (can('vms.write', $user)) { ?><a class="button" href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vms.add_vm')); ?></a><?php } ?>
             <?php if ($rows !== []) { ?><a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
         </div>
@@ -281,7 +283,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <?php if ($hasLocationOverride) { $override = $vmLocationOverride($vm); ?>
                             <td><?php echo $override !== '' ? h($override) : '&mdash;'; ?></td>
                         <?php } ?>
-                        <td><?php echo mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? '')); ?> <span class="muted"><?php echo h((string) ($vm['updated'] ?? 0)); ?></span></td>
+                        <td><?php echo mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? '')); ?> <span class="muted"><?php echo h(mecm_updated_display($vm['updated'] ?? 0)); ?></span></td>
                         <td><?php echo h((string) count($vm['interfaces'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['packages'] ?? [])); ?></td>

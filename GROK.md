@@ -32,6 +32,10 @@
 - Executable work, output, environment mutation or current-directory changes at import scope in `scripts/lib/check/*.ps1`. These modules define functions only; `scripts/check.ps1` is the one public entry point and owns initialization, gate registration, selection, progress, JSON and exit.
 - A second Chromium cache resolver, a highest-revision scan or a user/revision-bound fallback. Runner and Playwright both consume `tests/e2e/lib/browser-resolver.js`, which uses an explicit override or the lockfile-installed `playwright-core` executable.
 - Visual capture against a shared/dev/production stack, with active jobs, with unverified Compose labels, or after runner/font metadata drift. The visual path may pause only the exact throwaway QA workers, restores their original state in `finally`, never updates a baseline on `infrastructure_error`, never commits Etappe-11 PNGs and never captures real data.
+- A deploy queue decision derived from anything other than the complete `deploy_queue_blockers()` result for the normalized form state. Server render, live endpoint, preview and the immediate pre-write recheck consume the same discriminated union; a disabled button without its matching visible blocker is forbidden.
+- `FormData`, a hardcoded control list or per-field fallback for live deploy blockers. The client walks `form.elements` so disabled-but-filled wait values and an intentionally unchecked checkbox keep their meaning.
+- Hand-written `help.php#...` links. `help_url()` validates panels and sections against `VIRTUSPHERE_HELP_PANELS`/`VIRTUSPHERE_HELP_SECTIONS`, whose partials and rendered IDs are checked in both directions.
+- An unregistered portal JavaScript file or deploy module order outside `layout_app_scripts()`. The asset registry is bidirectional and owns the one order: form state before warnings, blockers and storage.
 
 ## 2. Architecture
 

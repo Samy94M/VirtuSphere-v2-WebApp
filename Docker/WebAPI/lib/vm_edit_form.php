@@ -277,7 +277,7 @@ function vm_edit_render_status_panel(array $vm, array $clientPhaseSummary, array
                 </div>
                 <div class="diagnostics-item">
                     <dt><?php echo h(__t('vm_edit.diagnostics_updated')); ?></dt>
-                    <dd><?php echo h((string) ($vm['updated'] ?? 0)); ?></dd>
+                    <dd><?php echo h(mecm_updated_display($vm['updated'] ?? 0)); ?></dd>
                 </div>
             </dl>
             <h3><?php echo h(__t('vm_edit.heading_client_phases')); ?></h3>

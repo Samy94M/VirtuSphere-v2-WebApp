@@ -51,7 +51,7 @@ $stmt->bind_param('s', $prefix);
 $stmt->execute();
 $recentMissions = repo_fetch_all($stmt->get_result());
 
-layout_header(__t('dashboard.title'), $user, 'dashboard');
+layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
 ?>
 <div class="stack">
     <section class="grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">

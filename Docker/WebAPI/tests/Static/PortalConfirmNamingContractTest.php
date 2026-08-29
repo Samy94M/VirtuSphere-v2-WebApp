@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../Support/PortalActionInventory.php';
+
 /**
  * A confirmation dialog for a row action has to name the row it is about.
  * `.claude/rules/portal.md` states the reason: without the name, a dialog raised
@@ -73,19 +75,7 @@ final class PortalConfirmNamingContractTest extends TestCase
     private function portalPages(): array
     {
         $root = dirname(__DIR__, 2);
-        $pages = [];
-        foreach (glob($root . '/portal/*.php') ?: [] as $file) {
-            $pages[$file] = (string) file_get_contents($file);
-        }
-        // Globbed, not listed: system_status.php renders through more than one
-        // panel module, and splitting one for the ADR-0006 budget must not drop
-        // its confirm prompts out of this contract.
-        foreach (glob($root . '/lib/system_status_*panels.php') ?: [] as $renderer) {
-            $pages[$root . '/portal/system_status.php'] .= (string) file_get_contents($renderer);
-        }
-        foreach (glob($root . '/lib/users_*_panels.php') ?: [] as $renderer) {
-            $pages[$root . '/portal/users.php'] .= (string) file_get_contents($renderer);
-        }
+        $pages = PortalActionInventory::portalPages($root);
         self::assertNotSame([], $pages, 'no portal pages found');
 
         return $pages;
@@ -129,6 +119,17 @@ final class PortalConfirmNamingContractTest extends TestCase
                     foreach ($found[1] as $key) {
                         $keys[$key] = true;
                     }
+                }
+            }
+
+            // A structured blocker carries its already localized confirm text
+            // through $action['confirm']; the same value feeds the server
+            // renderer and the live DOM renderer. When that sink exists, every
+            // `confirm => __t()` producer in the page's owner set is rendered.
+            if (str_contains($source, "\$action['confirm']")) {
+                preg_match_all('/[\'\"]confirm[\'\"]\s*=>\s*__t\(\'([a-z0-9_.]+)\'/', $source, $structured);
+                foreach ($structured[1] as $key) {
+                    $keys[$key] = true;
                 }
             }
         }

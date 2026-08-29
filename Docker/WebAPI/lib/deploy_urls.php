@@ -25,6 +25,24 @@ function deploy_job_raw_log_url(int $jobId): string
     return deploy_job_log_url($jobId) . '&format=raw';
 }
 
+function deploy_mission_url(int $missionId): string
+{
+    if ($missionId <= 0) {
+        throw new InvalidArgumentException('Mission id must be positive.');
+    }
+
+    return sprintf('deploy.php?mission_id=%d', $missionId);
+}
+
+function mission_details_url(int $missionId): string
+{
+    if ($missionId <= 0) {
+        throw new InvalidArgumentException('Mission id must be positive.');
+    }
+
+    return sprintf('mission_details.php?id=%d', $missionId);
+}
+
 const VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG = 'job_log';
 
 /**
@@ -55,7 +73,7 @@ function deploy_job_origin_url(array $job): string
 {
     $missionId = (int) ($job['mission_id'] ?? 0);
     if ($missionId > 0) {
-        return sprintf('deploy.php?mission_id=%d', $missionId);
+        return deploy_mission_url($missionId);
     }
 
     $credentialId = (int) ($job['credential_esxi_id'] ?? 0);

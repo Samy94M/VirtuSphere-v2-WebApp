@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/forms.php';
 require_once __DIR__ . '/request.php';
+require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 
 /**
  * Where the deploy queue form takes its field values from.
@@ -14,7 +16,7 @@ require_once __DIR__ . '/request.php';
  *    (form_remember()),
  *  - on the schedule preview, which answers the POST directly instead of
  *    redirecting, so the request itself is the newest truth,
- *  - after a mission change, which deploy.js turns into a GET because the VM
+ *  - after a mission change, which deploy_form.js turns into a GET because the VM
  *    list, the storage table and the per-host warnings are rendered server-side
  *    and only exist for the selected mission.
  *
@@ -49,6 +51,37 @@ const VIRTUSPHERE_DEPLOY_QUEUE_FIELDS = [
     'scheduled_at',
     'stagger_minutes',
 ];
+
+/**
+ * Canonical queue input shared by the HTML handler, the read-only live blocker
+ * endpoint and the final backend recheck.
+ *
+ * @return array{mission_id:int,credential_esxi_id:int,credential_ansible_id:int,mode:string,powercycle_wait:mixed,start_wait:mixed,start_mode:string,scheduled_at:string,stagger_minutes:mixed,verbose:bool,vm_ids:list<int>}
+ */
+function deploy_queue_normalize_input(array $input): array
+{
+    $vmIds = [];
+    $submittedVmIds = is_array($input['vm_ids'] ?? null) ? $input['vm_ids'] : [];
+    foreach ($submittedVmIds as $vmId) {
+        if (is_scalar($vmId) && (int) $vmId > 0) {
+            $vmIds[(int) $vmId] = true;
+        }
+    }
+
+    return [
+        'mission_id' => max(0, request_int($input, 'mission_id')),
+        'credential_esxi_id' => max(0, request_int($input, 'credential_esxi_id')),
+        'credential_ansible_id' => max(0, request_int($input, 'credential_ansible_id')),
+        'mode' => deploy_job_normalize_mission_mode(request_string($input, 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL)),
+        'powercycle_wait' => $input['powercycle_wait'] ?? VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT,
+        'start_wait' => $input['start_wait'] ?? VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT,
+        'start_mode' => request_string($input, 'start_mode', 'now'),
+        'scheduled_at' => request_string($input, 'scheduled_at'),
+        'stagger_minutes' => $input['stagger_minutes'] ?? '',
+        'verbose' => filter_var($input['verbose'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        'vm_ids' => array_keys($vmIds),
+    ];
+}
 
 /**
  * The one source this render reads, plus the kind it is. Memoized, so the

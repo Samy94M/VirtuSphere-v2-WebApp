@@ -24,7 +24,12 @@ final class MachineApiPanelContractTest extends TestCase
         $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/portal/settings.php';
         self::assertFileExists($path);
 
-        return (string) file_get_contents($path);
+        $source = (string) file_get_contents($path);
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/settings/*_panel.php') ?: [] as $panel) {
+            $source .= "\n" . (string) file_get_contents($panel);
+        }
+
+        return $source;
     }
 
     /** @return array<string, string> */

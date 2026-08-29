@@ -99,3 +99,19 @@ ADR.
 - Portal, repository, migration, timeout, log, i18n, CSS and link SSoTs gain
   negative tests described by the LDAPS/AD integration plan. Existing local
   login behavior remains a blocking regression surface.
+
+## Amendment (2026-08-28): settings request shell and tab owners
+
+The settings route is a thin authentication, authorization and request shell.
+Its action dispatcher and view model live in focused `lib/settings_*.php`
+modules; each rendered tab is owned by one partial under `lib/settings/`.
+This is a structural boundary only. In particular, the directory and HTTPS
+actions retain their existing transactions, revision gates, validation,
+secret handling, redirect fragments and audit behavior.
+
+Static owner scans include both direct settings modules and the nested partial
+directory. A bidirectional contract rejects either an unrequired partial or a
+require without a matching file, and the existing action/tab and rendered-id
+contracts continue to walk the complete owner set. Future form work therefore
+extends a focused tab owner without silently escaping CSRF, confirmation,
+redirect or deep-link coverage.

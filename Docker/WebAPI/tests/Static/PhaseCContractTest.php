@@ -84,7 +84,7 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH', $machineApi);
 
         // The plaintext token must never be persisted - only its hash.
-        $settings = $this->source('portal/settings.php');
+        $settings = $this->source('lib/settings_actions.php');
         self::assertStringContainsString("hash('sha256', \$token)", $settings);
     }
 

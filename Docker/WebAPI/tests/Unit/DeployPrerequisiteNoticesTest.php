@@ -39,9 +39,10 @@ final class DeployPrerequisiteNoticesTest extends TestCase
     public function testEveryNoticeCarriesATargetAndATranslatedLabel(): void
     {
         foreach (deploy_prerequisite_notices(false, false, false, false, 'no base url') as $notice) {
-            self::assertNotSame('', $notice['url']);
-            self::assertNotSame('', $notice['label']);
-            self::assertStringNotContainsString('deploy.', $notice['label'], 'untranslated key');
+            self::assertSame('link', $notice['action']['type']);
+            self::assertNotSame('', $notice['action']['url']);
+            self::assertNotSame('', $notice['action']['label']);
+            self::assertStringNotContainsString('deploy.', $notice['action']['label'], 'untranslated key');
             self::assertStringNotContainsString('deploy.', $notice['message'], 'untranslated key');
         }
     }
@@ -54,10 +55,10 @@ final class DeployPrerequisiteNoticesTest extends TestCase
     public function testPermissionsAreRealPermissions(): void
     {
         foreach (deploy_prerequisite_notices(false, false, false, false, 'no base url') as $notice) {
-            if ($notice['permission'] === '') {
+            if ($notice['action']['permission'] === '') {
                 continue;
             }
-            self::assertContains($notice['permission'], VIRTUSPHERE_PERMISSIONS, $notice['url']);
+            self::assertContains($notice['action']['permission'], VIRTUSPHERE_PERMISSIONS, $notice['action']['url']);
         }
     }
 
@@ -69,8 +70,8 @@ final class DeployPrerequisiteNoticesTest extends TestCase
     public function testSettingsLinkNamesItsTab(): void
     {
         $notices = deploy_prerequisite_notices(true, true, true, false, 'no base url');
-        self::assertSame('settings.php#panel-deploy', $notices[0]['url']);
-        self::assertSame('system.config', $notices[0]['permission']);
+        self::assertSame('settings.php#panel-deploy', $notices[0]['action']['url']);
+        self::assertSame('system.config', $notices[0]['action']['permission']);
     }
 
     /**

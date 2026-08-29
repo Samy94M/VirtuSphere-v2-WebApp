@@ -8,6 +8,9 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_deploy.deploy_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_requirements_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_requirements_p2')); ?></p>
+            <h3><?php echo h(__t('help_deploy.deploy_blockers_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy.deploy_blockers_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_blockers_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_deploy.deploy_mode_full')); ?></li>

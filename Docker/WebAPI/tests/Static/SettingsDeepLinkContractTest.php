@@ -60,6 +60,7 @@ final class SettingsDeepLinkContractTest extends TestCase
             glob($root . '/lib/*.php') ?: [],
             glob($root . '/lib/repo/*.php') ?: [],
             glob($root . '/lib/help/*.php') ?: [],
+            glob($root . '/lib/settings/*.php') ?: [],
         );
         self::assertNotSame([], $paths, 'no portal or lib sources found to scan');
 
@@ -76,12 +77,23 @@ final class SettingsDeepLinkContractTest extends TestCase
         return $sources;
     }
 
+    private function settingsOwnersSource(): string
+    {
+        $root = $this->root();
+        $source = (string) file_get_contents($root . '/' . self::PAGE);
+        foreach (glob($root . '/lib/settings/*_panel.php') ?: [] as $panel) {
+            $source .= "\n" . (string) file_get_contents($panel);
+        }
+
+        return $source;
+    }
+
     /** @return list<string> panel ids settings.php renders, tabs and inner sections alike */
     private function renderedPanels(): array
     {
         $path = $this->root() . '/' . self::PAGE;
         self::assertFileExists($path, self::PAGE . ' must exist');
-        preg_match_all('/id="panel-([a-z-]+)"/', (string) file_get_contents($path), $matches);
+        preg_match_all('/id="panel-([a-z-]+)"/', $this->settingsOwnersSource(), $matches);
         self::assertNotSame([], $matches[1], 'no panel ids found; the markup or the regex changed');
 
         return array_values(array_unique($matches[1]));
@@ -91,7 +103,7 @@ final class SettingsDeepLinkContractTest extends TestCase
     private function renderedTabs(): array
     {
         $path = $this->root() . '/' . self::PAGE;
-        preg_match_all('/id="panel-([a-z-]+)"[^>]*role="tabpanel"/', (string) file_get_contents($path), $matches);
+        preg_match_all('/id="panel-([a-z-]+)"[^>]*role="tabpanel"/', $this->settingsOwnersSource(), $matches);
         self::assertNotSame([], $matches[1], 'no tabpanels found; the markup or the regex changed');
 
         return array_values(array_unique($matches[1]));
@@ -154,6 +166,19 @@ final class SettingsDeepLinkContractTest extends TestCase
         $missing = array_diff($this->renderedTabs(), VIRTUSPHERE_SETTINGS_TABS);
         sort($missing);
         self::assertSame([], $missing, 'settings.php renders a tabpanel VIRTUSPHERE_SETTINGS_TABS does not list');
+    }
+
+    public function testEverySettingsPartialIsRequiredAndEveryRequireExists(): void
+    {
+        $root = $this->root();
+        $partials = array_map('basename', glob($root . '/lib/settings/*_panel.php') ?: []);
+        sort($partials);
+        self::assertNotSame([], $partials, 'no settings partials found (zero-match)');
+
+        preg_match_all("#\.\./lib/settings/([a-z_]+_panel\.php)#", (string) file_get_contents($root . '/' . self::PAGE), $matches);
+        $required = array_values(array_unique($matches[1]));
+        sort($required);
+        self::assertSame($partials, $required, 'settings partial directory and page requires must match in both directions');
     }
 
     public function testTheBuilderRejectsAnUnknownAnchor(): void

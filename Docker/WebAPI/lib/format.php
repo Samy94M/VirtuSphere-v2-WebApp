@@ -18,7 +18,7 @@ declare(strict_types=1);
  *
  * No thousands separator either. A value can reach 1023.9 in its unit, and the
  * deploy page renders the same number twice: once from here and once from the
- * humanBytes() mirror in deploy.js, which keeps the queue table live. "1,010.0 GB"
+ * humanBytes() mirror in deploy_storage.js, which keeps the queue table live. "1,010.0 GB"
  * next to "1010.0 GB" would be the same cell disagreeing with itself.
  */
 function virtusphere_human_bytes(?int $bytes): string

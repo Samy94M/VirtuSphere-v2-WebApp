@@ -11,7 +11,7 @@ return [
     'heading_status' => 'Status und Deploy-Fortschritt',
     'diagnostics_lifecycle' => 'Lebenszyklus',
     'diagnostics_mecm' => 'MECM',
-    'diagnostics_updated' => 'Aktualisiert',
+    'diagnostics_updated' => 'MECM-Übertragung',
     'diagnostics_mecm_id' => 'MECM-ID',
     'progress_heading' => 'Fortschritt prüfen',
     'progress_overdue_badge' => 'Prüfung fällig',

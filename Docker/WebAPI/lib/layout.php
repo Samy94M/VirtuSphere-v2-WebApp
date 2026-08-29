@@ -12,6 +12,7 @@ require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/layout_modals.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/settings_page.php';
+require_once __DIR__ . '/help_page.php';
 
 // A double submit must not stack the same alert twice, and a queue that is
 // never rendered (redirect chains) must not grow without bound.
@@ -50,7 +51,15 @@ function layout_asset_url(string $path): string
  */
 function layout_app_scripts(string $nonce): void
 {
-    foreach (['assets/core.js', 'assets/forms.js', 'assets/deploy_log.js', 'assets/deploy.js'] as $script) {
+    foreach ([
+        'assets/core.js',
+        'assets/forms.js',
+        'assets/deploy_log.js',
+        'assets/deploy_form.js',
+        'assets/deploy_warnings.js',
+        'assets/deploy_blockers.js',
+        'assets/deploy_storage.js',
+    ] as $script) {
         echo '<script defer nonce="' . h($nonce) . '" src="' . h(layout_asset_url($script)) . '"></script>' . "\n";
     }
 }
@@ -150,8 +159,8 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
                 <p class="eyebrow"><?php echo h(role_label($role)); ?></p>
                 <div class="page-title-row">
                     <h1><?php echo h($title); ?></h1>
-                    <?php if ($helpAnchor !== null) { ?>
-                        <a class="page-help-link" href="help.php#panel-<?php echo h($helpAnchor); ?>" title="<?php echo h(__t('layout.help_page_title')); ?>">
+                    <?php if ($helpAnchor !== null && help_panel_visible($helpAnchor, $user)) { ?>
+                        <a class="page-help-link" href="<?php echo h(help_url($helpAnchor)); ?>" title="<?php echo h(__t('layout.help_page_title')); ?>">
                             <span class="page-help-mark" aria-hidden="true">?</span><span><?php echo h(__t('layout.help_page_link')); ?></span>
                         </a>
                     <?php } ?>

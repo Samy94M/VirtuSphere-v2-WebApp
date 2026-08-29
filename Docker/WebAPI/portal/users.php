@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/password_policy.php';
 require_once __DIR__ . '/../lib/users_accounts_panels.php';
 require_once __DIR__ . '/../lib/users_admin.php';
 require_once __DIR__ . '/../lib/users_directory_admin.php';
@@ -40,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $rows = users_admin_rows($connection);
+$passwordMinLength = password_policy_min_length($connection);
 $searchRows = $view === VIRTUSPHERE_USERS_VIEW_DIRECTORY
     ? users_directory_take_search_results()
     : [];
@@ -54,7 +56,7 @@ layout_header(__t('users.title'), $user, 'users', 'users');
     <?php if ($view === VIRTUSPHERE_USERS_VIEW_DIRECTORY) {
         users_render_directory($connection, $user, $searchRows);
     } else {
-        users_render_accounts($rows, $user);
+        users_render_accounts($rows, $user, $passwordMinLength);
     } ?>
 </div>
 <?php layout_footer(); ?>

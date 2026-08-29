@@ -76,6 +76,9 @@ final class PortalActionInventory
             foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/' . $prefix . '_*.php') ?: [] as $renderer) {
                 $pages[$page] .= "\n" . (string) file_get_contents($renderer);
             }
+            foreach (glob(str_replace('\\', '/', $webApiRoot) . '/lib/' . $prefix . '/*.php') ?: [] as $renderer) {
+                $pages[$page] .= "\n" . (string) file_get_contents($renderer);
+            }
         }
 
         return $pages;

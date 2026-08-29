@@ -23,7 +23,7 @@ The `.claude/rules` directory contains path-scoped rules. The `.claude/hooks/lin
 - For PHPUnit: `docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html test`.
 - For portal text, validation or user-facing error changes, keep `Docker/WebAPI/lang/{de,en}` in parity and run `php scripts/lang-audit.php --ci` (host PHP) or the `docker run` form documented in `docs/QA.md` — `scripts/` is not mounted into the PHP container.
 - For PHP changes, prefer container linting when host PHP is unavailable: `docker exec virtusphere-v2-webapp-php-1 php -l /var/www/html/<path>`.
-- For JavaScript changes, run `node --check` on the changed portal script(s) under `Docker/WebAPI/portal/assets/` (`core.js`, `forms.js`, `deploy.js`).
+- For JavaScript changes, run `node --check` on the changed portal script(s) under `Docker/WebAPI/portal/assets/` (`core.js`, `forms.js`, and the registered `deploy_*.js` modules).
 - For backend, migration or deploy-path changes, run `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` when the Docker stack is available.
 - Keep `AGENTS.md`, `GROK.md` and ADRs as durable rules, not changelogs. Add history to `docs/CHANGELOG.md` only when a change needs a release note. `scripts/check-doc-hygiene.sh` enforces this plus line budgets.
 - Drift checks run quietly at session start; on a warning, run the named script (`scripts/check-enum-sync.sh`, `check-php-version-sync.sh`, `check-doc-hygiene.sh`, `check-doc-semantics.sh`, `check-bounds-sync.php`) and fix the drift at its SSoT source, not at the mirror.

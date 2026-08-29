@@ -65,7 +65,7 @@ declare(strict_types=1);
             <?php // Deep-link target of the backup card in portal/settings.php. From here
                   // the section reads in the order the link promises: Ablauf (ops_jobs_backup),
                   // Ablageort and Zurueckspielen (ops_restore_p1/p2). ?>
-            <h3 id="help-backup"><?php echo h(__t('help_stack.ops_jobs_heading')); ?></h3>
+            <h3 id="help-backup" tabindex="-1"><?php echo h(__t('help_stack.ops_jobs_heading')); ?></h3>
             <p><?php echo h(__t('help_stack.ops_jobs_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_stack.ops_jobs_backup')); ?></li>

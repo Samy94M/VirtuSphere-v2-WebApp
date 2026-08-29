@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/layout.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_storage.php';
 require_once dirname(__DIR__, 2) . '/lib/format.php';
 
 /**
- * The deploy storage table is rendered by PHP and then kept live by deploy.js,
+ * The deploy storage table is rendered by PHP and then kept live by deploy_storage.js,
  * so the same row is produced by two implementations of the same rules: the
  * verdict thresholds, the badge variant per verdict, and the byte formatting.
  *
  * `deploy_storage_verdict_badge()` calls itself "the single mapping both tables
- * and deploy.js agree on", and nothing checked that claim. A drift here is
+ * and deploy_storage.js agree on", and nothing checked that claim. A drift here is
  * invisible in every test the project has: the page renders, the numbers look
  * plausible, and the verdict is simply wrong after the first change event.
  *
@@ -28,7 +29,7 @@ final class DeployStorageMirrorContractTest extends TestCase
 
     private function deployJs(): string
     {
-        $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/portal/assets/deploy.js';
+        $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/portal/assets/deploy_storage.js';
         self::assertFileExists($path);
 
         return (string) file_get_contents($path);
@@ -47,7 +48,7 @@ final class DeployStorageMirrorContractTest extends TestCase
 
         // JS side: the literal map it builds the same badge from.
         $matched = preg_match('/var badges = \{([^}]*)\}/', $this->deployJs(), $matches);
-        self::assertSame(1, $matched, 'deploy.js no longer carries a verdict badge map; re-point this contract');
+        self::assertSame(1, $matched, 'deploy_storage.js no longer carries a verdict badge map; re-point this contract');
 
         $jsMap = [];
         preg_match_all("/(\w+):\s*'([^']+)'/", $matches[1], $pairs, PREG_SET_ORDER);
@@ -58,7 +59,7 @@ final class DeployStorageMirrorContractTest extends TestCase
         self::assertSame(
             self::VERDICTS,
             $jsMap,
-            "deploy.js and lib/deploy_storage.php disagree about the verdict badges.\n"
+            "deploy_storage.js and lib/deploy_storage.php disagree about the verdict badges.\n"
             . 'Change both, or the same row shows one colour before the first change event and another after it.'
         );
     }
@@ -75,13 +76,13 @@ final class DeployStorageMirrorContractTest extends TestCase
         self::assertStringContainsString(
             "freeBytes === null ? 'unknown' : (freeBytes >= bytes ? 'ok' : 'insufficient')",
             $this->deployJs(),
-            'deploy.js no longer mirrors deploy_storage_state(); a > instead of >= turns an exact fit into a warning'
+            'deploy_storage.js no longer mirrors deploy_storage_state(); a > instead of >= turns an exact fit into a warning'
         );
     }
 
     public function testTheByteFormatterProducesTheSameStringsOnBothSides(): void
     {
-        // humanBytes() in deploy.js is a hand-written mirror of
+        // humanBytes() in deploy_storage.js is a hand-written mirror of
         // virtusphere_human_bytes(). Pin the unit table and the one-decimal rule
         // it depends on; the PHP side is the source of truth.
         $js = $this->deployJs();

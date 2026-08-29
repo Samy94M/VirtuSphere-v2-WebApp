@@ -37,9 +37,13 @@ return [
     'unknown_action' => 'Unknown action.',
     'please_select' => 'Please select',
     'duration_ms' => ':count ms',
+    'duration_second' => ':count second',
     'duration_seconds' => ':count seconds',
+    'duration_minute' => ':count minute',
     'duration_minutes' => ':count minutes',
+    'duration_hour' => ':count hour',
     'duration_hours' => ':count hours',
+    'mecm_queued' => 'Queued for MECM',
 
     // Connection failures (VIRTUSPHERE_INVENTORY_ERROR_*): portal wording.
     'conn_dns' => 'The host ":host" could not be resolved. Check the host name.',

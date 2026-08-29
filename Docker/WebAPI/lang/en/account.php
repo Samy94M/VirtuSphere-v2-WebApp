@@ -12,6 +12,7 @@ return [
     'current_password' => 'Current password',
     'new_password' => 'New password',
     'confirm_password' => 'Confirm password',
+    'password_hint' => 'At least :min characters.',
     'change_password' => 'Change password',
     'source_directory' => 'Active Directory',
     'source_local' => 'Local account',

@@ -6,6 +6,7 @@ return [
     'title_template' => 'Vorlagen-VMs',
     'title_mission' => 'Missions-VMs',
     'mission_details' => 'Missionsdetails',
+    'open_deploy' => 'Bereitstellen',
     'add_vm' => 'VM hinzufügen',
     'th_hostname' => 'Hostname',
     'th_os' => 'OS',

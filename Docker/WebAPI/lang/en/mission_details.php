@@ -5,6 +5,7 @@ declare(strict_types=1);
 return [
     'title_template' => 'Template Details',
     'title_mission' => 'Mission Details',
+    'open_deploy' => 'Deploy',
     'label_wds_vlan' => 'WDS VLAN',
     'vlan_none' => 'None',
     'vlan_not_in_inventory' => 'not in the current inventory',

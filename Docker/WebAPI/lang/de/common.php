@@ -37,9 +37,13 @@ return [
     'unknown_action' => 'Unbekannte Aktion.',
     'please_select' => 'Bitte auswählen',
     'duration_ms' => ':count ms',
+    'duration_second' => ':count Sekunde',
     'duration_seconds' => ':count Sekunden',
+    'duration_minute' => ':count Minute',
     'duration_minutes' => ':count Minuten',
+    'duration_hour' => ':count Stunde',
     'duration_hours' => ':count Stunden',
+    'mecm_queued' => 'Für MECM vorgemerkt',
 
     // Verbindungsfehler (VIRTUSPHERE_INVENTORY_ERROR_*): Klartext für das Portal.
     'conn_dns' => 'Der Host ":host" konnte nicht aufgelöst werden. Prüfen Sie den Hostnamen.',

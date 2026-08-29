@@ -1,6 +1,6 @@
 // Portal core: theme, the shared <dialog> modals (confirm + session), tabs,
 // the session timer and clock-drift warning. Loaded first; forms.js and
-// deploy.js are independent IIFEs that follow. No cross-file calls: each file
+// the deploy modules are independent IIFEs that follow. No cross-file calls: each file
 // registers only the delegated listeners for its own concern, and several
 // document-level listeners coexist without conflict.
 (function () {
@@ -298,6 +298,9 @@
         activate(initial, false, false);
         if (scrollTarget && scrollTarget.scrollIntoView) {
             scrollTarget.scrollIntoView();
+            if (scrollTarget.focus) {
+                scrollTarget.focus({preventScroll: true});
+            }
         } else if (matchedTab && document.querySelector('[data-flash]')) {
             // A save redirect carries its tab as the fragment. The browser's
             // anchor jump to that panel parks the flash message behind the

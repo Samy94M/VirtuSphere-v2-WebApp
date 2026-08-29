@@ -4,7 +4,7 @@
 // used to carry nothing but the mission: the credential pair, the mode, the wait
 // time and the whole schedule block came back at their defaults.
 //
-// A browser is the only place this is visible at all: deploy.js reads the live
+// A browser is the only place this is visible at all: deploy_form.js reads the live
 // controls and lib/deploy_form_state.php reads them back, so every automated
 // check stays green while the form empties itself.
 

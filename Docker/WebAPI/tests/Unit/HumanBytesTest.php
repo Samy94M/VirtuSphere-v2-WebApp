@@ -8,7 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/format.php';
 
 /**
  * virtusphere_human_bytes() is rendered twice for the same cell: by PHP when the
- * deploy queue table is built, and by the humanBytes() mirror in deploy.js when the
+ * deploy queue table is built, and by the humanBytes() mirror in deploy_storage.js when the
  * VM selection changes. Anything locale- or separator-dependent would make the
  * cell disagree with itself, so the format is pinned here.
  */

@@ -21,7 +21,15 @@ final class SettingsTabRedirectContractTest extends TestCase
         $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/' . self::PAGE;
         self::assertFileExists($path, self::PAGE . ' must exist');
 
-        return (string) file_get_contents($path);
+        $source = (string) file_get_contents($path);
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/settings_*.php') ?: [] as $owner) {
+            $source .= "\n" . (string) file_get_contents($owner);
+        }
+        foreach (glob(str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/settings/*.php') ?: [] as $owner) {
+            $source .= "\n" . (string) file_get_contents($owner);
+        }
+
+        return $source;
     }
 
     /** @return array<string, string> action => tab key, parsed from the $actionTabs literal */
@@ -31,7 +39,7 @@ final class SettingsTabRedirectContractTest extends TestCase
         self::assertSame(
             1,
             preg_match('/\$actionTabs\s*=\s*\[(.*?)\];/s', $source, $match),
-            'settings.php must define the $actionTabs action-to-tab map exactly once'
+            'the settings action owner must define the $actionTabs action-to-tab map exactly once'
         );
 
         preg_match_all("/'([a-z_]+)'\s*=>\s*'([a-z-]+)'/", $match[1], $pairs, PREG_SET_ORDER);

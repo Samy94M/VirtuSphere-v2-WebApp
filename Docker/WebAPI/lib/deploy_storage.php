@@ -89,7 +89,7 @@ function deploy_datastore_capacity(mysqli $db, int $esxiCredentialId): array
 }
 
 /**
- * Everything deploy.js needs to keep the queue-form table live: the provisioned
+ * Everything deploy_storage.js needs to keep the queue-form table live: the provisioned
  * bytes of every VM (keyed by its target datastore, driven by the VM
  * checkboxes) and the free space of every ESXi credential (driven by the
  * credential select). Null when there is nothing to show. All labels are
@@ -163,7 +163,7 @@ function deploy_storage_projected_pct(int $requiredBytes, ?int $freeBytes, ?int 
     return (int) max(0, min(100, round(($capacityBytes - $freeBytes + $requiredBytes) / $capacityBytes * 100)));
 }
 
-/** Badge for one verdict; the single mapping both tables and deploy.js agree on. */
+/** Badge for one verdict; the single mapping both tables and deploy_storage.js agree on. */
 function deploy_storage_verdict_badge(string $state): string
 {
     $badge = ['ok' => 'success', 'insufficient' => 'warning', 'unknown' => 'neutral'][$state];
@@ -175,7 +175,7 @@ function deploy_storage_verdict_badge(string $state): string
 /**
  * The requirement table, shared by the queue form and the schedule preview.
  *
- * $live only says whether deploy.js keeps the table up to date; it no longer
+ * $live only says whether deploy_storage.js keeps the table up to date; it no longer
  * decides whether the numbers are rendered at all. Both modes now render the
  * free space and the verdict of whatever credential is selected at render time,
  * because the previous split meant the schedule preview answered the question
@@ -185,7 +185,7 @@ function deploy_storage_verdict_badge(string $state): string
  *
  * @param array<string, array{name:string, bytes:int, vm_count:int, per_vm:array<int,int>}> $rows
  * @param array<string, array{free:?int, capacity:?int}> $capacity what the chosen credential reports, [] when none is
- * @param bool $live whether deploy.js re-renders the cells on every change
+ * @param bool $live whether deploy_storage.js re-renders the cells on every change
  */
 function deploy_render_storage_table(array $rows, array $capacity, bool $live = false): void
 {
@@ -224,7 +224,7 @@ function deploy_render_storage_table(array $rows, array $capacity, bool $live = 
                 <?php // The bar carries its warning in colour and width alone, so without a
                       // name it is invisible to a screen reader and to anyone who cannot
                       // separate the amber from the red. role="img" plus the percentage makes
-                      // it one named node; deploy.js sets the same label when it recomputes. ?>
+                      // it one named node; deploy_storage.js sets the same label when it recomputes. ?>
                 <td class="nowrap">
                     <span <?php echo $live ? 'data-storage-free-text' : ''; ?>><?php echo $free !== null ? h(virtusphere_human_bytes($free)) : '&mdash;'; ?></span>
                     <span class="capacity-bar" role="img" <?php echo $live ? 'data-storage-bar' : ''; ?> <?php echo $pct !== null ? 'aria-label="' . h($pctLabel) . '" title="' . h($pctLabel) . '"' : 'hidden'; ?>><span class="capacity-fill" <?php echo $pct !== null ? 'data-capacity-pct="' . h((string) $pct) . '"' : ''; ?>></span></span>

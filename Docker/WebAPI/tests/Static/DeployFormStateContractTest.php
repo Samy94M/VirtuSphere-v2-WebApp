@@ -37,10 +37,16 @@ final class DeployFormStateContractTest extends TestCase
 
     private function deployPage(): string
     {
-        $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/portal/deploy.php';
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $path = $root . '/portal/deploy.php';
         self::assertFileExists($path);
 
-        return (string) file_get_contents($path);
+        $source = (string) file_get_contents($path);
+        foreach (glob($root . '/lib/deploy_*_panel.php') ?: [] as $panel) {
+            $source .= "\n" . (string) file_get_contents($panel);
+        }
+
+        return $source;
     }
 
     /**
@@ -129,5 +135,18 @@ final class DeployFormStateContractTest extends TestCase
             "deploy.php reads the sticky stash directly.\n"
             . 'Use deploy_form_value()/deploy_form_vm_selection(), or the field survives a failed validation and nothing else.'
         );
+    }
+
+    public function testEveryDeployPanelIsRequiredAndEveryRequireExists(): void
+    {
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $panels = array_map('basename', glob($root . '/lib/deploy_*_panel.php') ?: []);
+        sort($panels);
+        self::assertNotSame([], $panels, 'no deploy panel partials found (zero-match)');
+
+        preg_match_all("#\.\./lib/(deploy_[a-z_]+_panel\.php)#", (string) file_get_contents($root . '/portal/deploy.php'), $matches);
+        $required = array_values(array_unique($matches[1]));
+        sort($required);
+        self::assertSame($panels, $required, 'deploy panel directory and page requires must match in both directions');
     }
 }

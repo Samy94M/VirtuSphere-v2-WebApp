@@ -157,7 +157,7 @@ $originUrl = deploy_job_origin_url($job);
 // both run on UTC, but a date.timezone in php.ini would silently shift this.
 $emptyState = deploy_job_log_empty_state($job, $logs);
 
-layout_header(__t('deploy.log_title'), $user, 'deploy');
+layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 ?>
 <div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-before-seq="<?php echo h((string) $oldestSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>" data-caught-up="<?php echo $page['caught_up'] ? '1' : '0'; ?>" data-dom-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW); ?>">
     <section class="panel">

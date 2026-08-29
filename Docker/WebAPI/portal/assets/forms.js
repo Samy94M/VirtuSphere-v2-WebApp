@@ -1,6 +1,6 @@
 // Portal forms: repeat rows (add/remove/toggle), the subnet CIDR helper, the
 // compound RAM/combo field, the DHCP interface-mode disabling and the VM bulk
-// selection. Independent of core.js and deploy.js; registers its own delegated
+// selection. Independent of core.js and the deploy modules; registers its own delegated
 // click/input/change listeners for the form hooks only.
 (function () {
     function selectHasValue(select, value) {

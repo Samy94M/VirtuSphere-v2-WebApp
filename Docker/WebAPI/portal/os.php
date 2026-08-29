@@ -54,7 +54,7 @@ $rows = array_values(array_filter(getOS($connection, true), static function (arr
 }));
 $vmCounts = repo_os_vm_counts($connection);
 
-layout_header(__t('os.title'), $user, 'os');
+layout_header(__t('os.title'), $user, 'os', 'packages');
 ?>
 <div class="stack">
     <section class="panel">

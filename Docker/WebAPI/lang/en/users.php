@@ -28,6 +28,8 @@ return [
     'confirm_role_self' => 'Change your own role? Taking away your administrator rights locks you out of user management immediately. Only another administrator can undo it.',
     'btn_unlock' => 'Clear Lock',
     'new_password_placeholder' => 'New password',
+    'password_hint' => 'At least :min characters.',
+    'reset_password_label' => 'New password for :name',
     'err_email_invalid' => 'Email must be a valid address.',
     'err_password_min' => 'Password must be at least :min characters.',
     'err_self_deactivate' => 'You cannot deactivate your own account.',

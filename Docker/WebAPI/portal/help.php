@@ -19,29 +19,12 @@ require_once __DIR__ . '/../lib/password_policy.php';
 // The missions panel quotes how long an import preview stays valid; that bound
 // lives next to the importer, not in constants.php.
 require_once __DIR__ . '/../lib/mission_transfer.php';
+require_once __DIR__ . '/../lib/help_page.php';
 
 $user = portal_require_user($connection);
 
-$canConfig = can('system.config', $user);
+$helpTabs = help_tabs_for_user($user);
 $canUsers = can('users.manage', $user);
-
-// Reihenfolge = Arbeitsablauf: kennenlernen -> planen -> bereitstellen ->
-// Fehler suchen -> verstehen; Verwaltungsthemen (Rollen, Einstellungen) am Ende.
-// Die Panel-Inhalte liegen als Partials unter lib/help/ (nicht direkt aufrufbar,
-// nginx sperrt /lib/); help.php ist nur noch die Tab-Hülle (ADR-0006).
-$helpTabs = [
-    'overview' => __t('help.tab_overview'),
-    'missions' => __t('help.tab_missions'),
-    'packages' => __t('help.tab_packages'),
-    'deploy' => __t('help.tab_deploy'),
-    'system-status' => __t('help.tab_system_status'),
-    'stack' => __t('help.tab_stack'),
-    'users' => __t('help.tab_users'),
-];
-if ($canConfig) {
-    $helpTabs['credentials'] = __t('help.tab_credentials');
-    $helpTabs['settings'] = __t('help.tab_settings');
-}
 
 layout_header(__t('help.title'), $user, 'help');
 ?>
@@ -55,17 +38,11 @@ layout_header(__t('help.title'), $user, 'help');
     </div>
 
     <?php
-    require __DIR__ . '/../lib/help/overview.php';
-    require __DIR__ . '/../lib/help/missions.php';
-    require __DIR__ . '/../lib/help/deploy.php';
-    require __DIR__ . '/../lib/help/packages.php';
-    require __DIR__ . '/../lib/help/system_status.php';
-    require __DIR__ . '/../lib/help/users.php';
-    if ($canConfig) {
-        require __DIR__ . '/../lib/help/credentials.php';
-        require __DIR__ . '/../lib/help/settings.php';
+    foreach (VIRTUSPHERE_HELP_PANELS as $panel => $definition) {
+        if (help_panel_visible($panel, $user)) {
+            require __DIR__ . '/../lib/help/' . $definition['partial'];
+        }
     }
-    require __DIR__ . '/../lib/help/stack.php';
     ?>
 </div>
 <?php layout_footer(); ?>

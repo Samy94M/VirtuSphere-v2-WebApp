@@ -60,7 +60,7 @@ $tabUrl = static fn (string $targetTab): string => log_filter_url(
     false
 );
 
-layout_header(__t('logs.title'), $user, 'logs');
+layout_header(__t('logs.title'), $user, 'logs', 'system-status');
 ?>
 <div class="stack">
     <nav class="tab-list" aria-label="<?php echo h(__t('logs.tabs_label')); ?>">

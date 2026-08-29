@@ -11,7 +11,7 @@ return [
     'heading_status' => 'Status and deploy progress',
     'diagnostics_lifecycle' => 'Lifecycle',
     'diagnostics_mecm' => 'MECM',
-    'diagnostics_updated' => 'Updated',
+    'diagnostics_updated' => 'MECM transfer',
     'diagnostics_mecm_id' => 'MECM ID',
     'progress_heading' => 'Check progress',
     'progress_overdue_badge' => 'Check due',

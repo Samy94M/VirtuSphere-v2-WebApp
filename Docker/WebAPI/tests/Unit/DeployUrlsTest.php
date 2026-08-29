@@ -24,6 +24,21 @@ final class DeployUrlsTest extends TestCase
         );
     }
 
+    public function testMissionRoutesHaveOneValidatedBuilderEach(): void
+    {
+        self::assertSame('deploy.php?mission_id=17', deploy_mission_url(17));
+        self::assertSame('mission_details.php?id=17', mission_details_url(17));
+
+        foreach (['deploy_mission_url', 'mission_details_url'] as $builder) {
+            try {
+                $builder(0);
+                self::fail($builder . ' accepted a non-positive mission id');
+            } catch (InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testInventoryJobReturnsToItsExactSystemStatusCard(): void
     {
         self::assertSame(

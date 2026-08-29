@@ -83,20 +83,10 @@ const FILE_SIZE_ALLOWANCES = [
     // otherwise unchanged, and lib/auth.php was compacted back under the budget
     // instead of gaining an entry, because a file that has never had one should
     // not acquire one for four extra lines.
-    // Raised: deploy.php 667->688, settings.php 952->984, credentials.php
-    // 451->479, vm_edit.php 514->520, constants.php 603->641 (the audit event
+    // Raised: credentials.php 451->479, vm_edit.php 514->520, constants.php
+    // 603->641 (the audit event
     // registry's endpoint list/report-channel version plus the Etappe-10D
     // PowerShell log help mirrors), migrate.php 1220->1222 (migration 0044).
-    'Docker/WebAPI/portal/deploy.php' => [
-        'lines' => 688,
-        'why' => 'POST dispatch, view model, queue form and job list; grows further with the live blocker model',
-        'stage' => 'Etappe 12',
-    ],
-    'Docker/WebAPI/portal/settings.php' => [
-        'lines' => 984,
-        'why' => 'eleven POST actions, five tabs, view model and large renderers',
-        'stage' => 'Etappe 12/14',
-    ],
     'Docker/WebAPI/lib/system_status_panels.php' => [
         'lines' => 464,
         'why' => 'MECM, site and internal panels read separate sources; the Ansible mission-activity presenter already left for lib/system_status_ansible_activity.php (Etappe 3)',

@@ -28,6 +28,8 @@ return [
     'confirm_role_self' => 'Deine eigene Rolle ändern? Nimmst du dir die Administratorrechte, verlierst du sofort den Zugang zur Benutzerverwaltung. Nur ein anderer Administrator kann das rückgängig machen.',
     'btn_unlock' => 'Sperre aufheben',
     'new_password_placeholder' => 'Neues Passwort',
+    'password_hint' => 'Mindestens :min Zeichen.',
+    'reset_password_label' => 'Neues Passwort für :name',
     'err_email_invalid' => 'E-Mail muss eine gültige Adresse sein.',
     'err_password_min' => 'Passwort muss mindestens :min Zeichen lang sein.',
     'err_self_deactivate' => 'Du kannst dein eigenes Konto nicht deaktivieren.',

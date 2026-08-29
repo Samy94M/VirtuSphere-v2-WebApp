@@ -60,3 +60,25 @@ The confirmation rules above are enforced by `tests/Static/PortalConfirmContract
 The spacing scale is enforced by `tests/Static/StatusSpacingContractTest.php`, because no hook in this repo reads CSS at all: it fails on a raw length in any `gap`/`padding`/`margin`/`border-radius` inside `status.css`, on a token used there that `base.css` does not define, on a defined step nothing calls, and on a `<link>` order that puts `status.css` before `components.css` — several page rules are specificity-equal with the panel defaults and win only on position, so swapping the two elements restores every margin without touching a declaration.
 
 The modal axis is enforced the same way, by `tests/Static/ModalAxisContractTest.php`, because nothing else in the toolchain reads a stylesheet. It globs `portal/assets/css/*.css` in the layout's `<link>` order rather than naming one file, so moving the modal rules into another sheet cannot switch the guard off silently; it shares its parser with the spacing guard through `tests/Support/CssRules.php`. It fails when a rule other than `.modal[open]`, `.modal-box`, `.modal-msg` or `.modal-actions` aligns modal content, when one of those four stops making its decision, and when `.modal-msg` loses the `fit-content`/auto-margin sizing or its `overflow-wrap`. The rule it protects was learned rather than designed: the alignment first sat on `.modal-confirm .modal-msg`, so the session modal never inherited it and looked correct only because its one message happens to fit a line.
+
+## Amendment (2026-08-28): queue blockers are one live and server-authoritative model
+
+The deploy form presents every reason that currently prevents queuing as an
+explicit error box. Its count, singular/plural summary, jump target and disabled
+state are derived only from `deploy_queue_blockers()`. Non-blocking inventory,
+host, capability and capacity observations use notice wording that explicitly
+says the job can still be queued; colour is supporting information only.
+
+The browser may refresh the same model after a short debounce, but it is never
+the enforcement boundary. It serializes every form control including disabled
+but populated values, accepts only JSON, discards stale responses and stops on
+lost authentication or permission. Preview and the action handler run the same
+aggregator again, with the last check immediately before the repository write.
+This keeps no-JavaScript operation complete and prevents a forged enabled button
+from bypassing the queue rules.
+
+Help navigation follows the same deep-link discipline as settings, logs and
+System status. `help_url()` validates a closed panel/section registry against
+the partials and rendered ids. When `core.js` opens a fragment inside a hidden
+help panel, it activates that panel and focuses the nested target, so keyboard
+and assistive-technology users land at the content the link promised.

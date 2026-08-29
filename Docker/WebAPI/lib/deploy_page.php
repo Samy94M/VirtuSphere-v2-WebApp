@@ -7,6 +7,10 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 
+const VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE = 'prerequisite';
+const VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION = 'empty_mission';
+const VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT = 'identity_conflict';
+
 /**
  * Gates and island builders of portal/deploy.php.
  *
@@ -78,7 +82,7 @@ function deploy_assert_datacenter_resolvable(mysqli $db, int $missionId, int $es
  * the button out silently. The one deliberate exception is a selected mission
  * without VMs, which is answered at the VM field itself.
  *
- * @return list<array{message: string, url: string, label: string, permission: string}>
+ * @return list<array{kind:string,code:string,message:string,action:array{type:string,url:string,label:string,permission:string}}>
  */
 function deploy_prerequisite_notices(
     bool $hasMissions,
@@ -91,37 +95,57 @@ function deploy_prerequisite_notices(
 
     if (!$hasMissions) {
         $notices[] = [
+            'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE,
+            'code' => 'missions',
             'message' => __t('deploy.req_missions'),
             // The list the deploy form draws from, not the template view.
-            'url' => 'missions.php?type=missions',
-            'label' => __t('deploy.req_missions_link'),
-            // The page is open to everyone, but the fix on it is not: sending a
-            // reader to an empty list promises something the page will refuse.
-            'permission' => 'missions.write',
+            'action' => [
+                'type' => 'link',
+                'url' => 'missions.php?type=missions',
+                'label' => __t('deploy.req_missions_link'),
+                // The page is open to everyone, but the fix on it is not: sending a
+                // reader to an empty list promises something the page will refuse.
+                'permission' => 'missions.write',
+            ],
         ];
     }
     if (!$hasEsxiCredential) {
         $notices[] = [
+            'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE,
+            'code' => 'esxi_credential',
             'message' => __t('deploy.req_esxi'),
-            'url' => 'credentials.php',
-            'label' => __t('deploy.req_credentials_link'),
-            'permission' => 'credentials.manage',
+            'action' => [
+                'type' => 'link',
+                'url' => 'credentials.php',
+                'label' => __t('deploy.req_credentials_link'),
+                'permission' => 'credentials.manage',
+            ],
         ];
     }
     if (!$hasAnsibleCredential) {
         $notices[] = [
+            'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE,
+            'code' => 'ansible_credential',
             'message' => __t('deploy.req_ansible'),
-            'url' => 'credentials.php',
-            'label' => __t('deploy.req_credentials_link'),
-            'permission' => 'credentials.manage',
+            'action' => [
+                'type' => 'link',
+                'url' => 'credentials.php',
+                'label' => __t('deploy.req_credentials_link'),
+                'permission' => 'credentials.manage',
+            ],
         ];
     }
     if (!$apiBaseUrlReady) {
         $notices[] = [
+            'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE,
+            'code' => 'api_base_url',
             'message' => $apiBaseUrlError !== '' ? $apiBaseUrlError : __t('settings.api_base_url_missing'),
-            'url' => settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY),
-            'label' => __t('deploy.req_api_base_url_link'),
-            'permission' => 'system.config',
+            'action' => [
+                'type' => 'link',
+                'url' => settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY),
+                'label' => __t('deploy.req_api_base_url_link'),
+                'permission' => 'system.config',
+            ],
         ];
     }
 

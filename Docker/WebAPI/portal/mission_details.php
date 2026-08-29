@@ -13,6 +13,7 @@ require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
+require_once __DIR__ . '/../lib/deploy_urls.php';
 
 $user = portal_require_user($connection);
 $missionId = request_int($_GET, 'id');
@@ -189,6 +190,7 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
         <div class="actions">
             <a class="button button-secondary" href="<?php echo $isTemplate ? 'missions.php?type=templates' : 'missions.php?type=missions'; ?>"><?php echo h(__t('common.back')); ?></a>
             <a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('common.vms')); ?></a>
+            <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('mission_details.open_deploy')); ?></a><?php } ?>
             <form class="inline-form" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="export">

@@ -6,6 +6,7 @@ return [
     'title_template' => 'Template VMs',
     'title_mission' => 'Mission VMs',
     'mission_details' => 'Mission details',
+    'open_deploy' => 'Deploy',
     'add_vm' => 'Add VM',
     'th_hostname' => 'Hostname',
     'th_os' => 'OS',

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/password_policy.php';
 
 $user = portal_require_user($connection, true);
+$passwordMinLength = password_policy_min_length($connection);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
@@ -20,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $newPassword = request_string($_POST, 'new_password');
     $confirmPassword = request_string($_POST, 'confirm_password');
 
-    $policyError = password_policy_error($newPassword, password_policy_min_length($connection), 'account.err_new_password_min');
+    $policyError = password_policy_error($newPassword, $passwordMinLength, 'account.err_new_password_min');
     if ($policyError !== null) {
         flash_set('error', $policyError);
     } elseif ($newPassword !== $confirmPassword) {
@@ -45,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_to('account.php');
 }
 
-layout_header(__t('account.title'), $user, 'account');
+layout_header(__t('account.title'), $user, 'account', 'users');
 $roleLabel = role_label((string) ($user['role'] ?? VIRTUSPHERE_ROLE_USER));
 $summary = trim((string) ($user['email'] ?? '')) !== ''
     ? (string) $user['email'] . ' / ' . $roleLabel
@@ -64,8 +65,9 @@ $summary = trim((string) ($user['email'] ?? '')) !== ''
         <form class="stack narrow-form" method="post" action="account.php">
             <?php echo csrf_field(); ?>
             <label for="current_password"><?php echo h(__t('account.current_password')); ?><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></label>
-            <label for="new_password"><?php echo h(__t('account.new_password')); ?><input id="new_password" name="new_password" type="password" autocomplete="new-password" required></label>
-            <label for="confirm_password"><?php echo h(__t('account.confirm_password')); ?><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required></label>
+            <label for="new_password"><?php echo h(__t('account.new_password')); ?><input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="account-password-hint" required></label>
+            <label for="confirm_password"><?php echo h(__t('account.confirm_password')); ?><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="account-password-hint" required></label>
+            <p class="hint" id="account-password-hint"><?php echo h(__t('account.password_hint', ['min' => $passwordMinLength])); ?></p>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('account.change_password')); ?></button></div>
         </form>
         <?php } ?>

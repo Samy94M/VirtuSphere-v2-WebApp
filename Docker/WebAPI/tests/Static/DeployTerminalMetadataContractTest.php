@@ -26,7 +26,7 @@ final class DeployTerminalMetadataContractTest extends TestCase
     public function testPollResponseAndCancelFormUseTheCentralPresenterAndClosedOriginToken(): void
     {
         $portal = (string) file_get_contents(dirname(__DIR__, 2) . '/portal/deploy_log.php');
-        $handler = (string) file_get_contents(dirname(__DIR__, 2) . '/portal/deploy.php');
+        $handler = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_actions.php');
         $urls = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_urls.php');
 
         self::assertStringContainsString("'terminal_html' => deploy_terminal_blocks_html(\$job)", $portal);
