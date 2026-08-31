@@ -79,6 +79,23 @@
     // and keep mode and staggering consistent both ways (non-power modes cannot
     // stagger; a set stagger interval locks the non-staggerable mode options).
     function initDeploySchedule() {
+        var syncDescribedBy = function (control, hint, active) {
+            if (!control || !hint || !hint.id) {
+                return;
+            }
+            var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+            var position = ids.indexOf(hint.id);
+            if (active && position === -1) {
+                ids.push(hint.id);
+            } else if (!active && position !== -1) {
+                ids.splice(position, 1);
+            }
+            if (ids.length) {
+                control.setAttribute('aria-describedby', ids.join(' '));
+            } else {
+                control.removeAttribute('aria-describedby');
+            }
+        };
         var scheduleAt = document.querySelector('[data-schedule-at]');
         var modeRadios = document.querySelectorAll('[data-schedule-mode]');
         if (scheduleAt && modeRadios.length) {
@@ -108,7 +125,10 @@
                 Array.prototype.forEach.call(modeSelect.options, function (opt) {
                     if (allowed.indexOf(opt.value) === -1) { opt.disabled = lock && !opt.selected; }
                 });
-                if (staggerLock) { staggerLock.hidden = !lock; }
+                if (staggerLock) {
+                    staggerLock.hidden = !lock;
+                    syncDescribedBy(modeSelect, staggerLock, lock);
+                }
             };
             modeSelect.addEventListener('change', syncStagger);
             staggerInput.addEventListener('input', syncStagger);
@@ -129,7 +149,10 @@
             var sync = function () {
                 var modeOk = allowed.indexOf(select.value) !== -1;
                 input.disabled = !modeOk;
-                if (lock) { lock.hidden = modeOk; }
+                if (lock) {
+                    lock.hidden = modeOk;
+                    syncDescribedBy(input, lock, !modeOk);
+                }
             };
             select.addEventListener('change', sync);
             sync();

@@ -60,7 +60,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">
             <label><?php echo h(__t('credentials.label_type')); ?>
-                <select name="type" required>
+                <select name="type"<?php echo form_control_attrs('create', 'type'); ?> required>
                     <?php $createType = form_old('create', 'type', VIRTUSPHERE_CREDENTIAL_TYPE_ESXI); ?>
                     <?php foreach (VIRTUSPHERE_CREDENTIAL_LABELS as $typeValue => $typeLabel) { ?>
                         <option value="<?php echo h($typeValue); ?>" <?php echo $createType === $typeValue ? 'selected' : ''; ?>><?php echo h($typeLabel); ?></option>
@@ -68,19 +68,19 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                 </select>
                 <?php echo form_error_html('create', 'type'); ?>
             </label>
-            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old('create', 'name')); ?>"<?php echo form_input_class('create', 'name'); ?> required><?php echo form_error_html('create', 'name'); ?></label>
-            <label><?php echo h(__t('credentials.label_host')); ?><input name="host" value="<?php echo h(form_old('create', 'host')); ?>"<?php echo form_input_class('create', 'host'); ?> required placeholder="<?php echo h(__t('credentials.host_placeholder')); ?>"><?php echo form_error_html('create', 'host'); ?></label>
-            <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old('create', 'port')); ?>"<?php echo form_input_class('create', 'port'); ?> placeholder="<?php echo h(__t('credentials.port_placeholder')); ?>"><?php echo form_error_html('create', 'port'); ?></label>
-            <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old('create', 'username')); ?>"<?php echo form_input_class('create', 'username'); ?> required autocomplete="off"><?php echo form_error_html('create', 'username'); ?></label>
-            <label><?php echo h(__t('credentials.label_secret')); ?><input name="secret" type="password" required autocomplete="new-password"><?php echo form_error_html('create', 'secret'); ?></label>
+            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old('create', 'name')); ?>"<?php echo form_control_attrs('create', 'name'); ?> required><?php echo form_error_html('create', 'name'); ?></label>
+            <label><?php echo h(__t('credentials.label_host')); ?><input name="host" value="<?php echo h(form_old('create', 'host')); ?>"<?php echo form_control_attrs('create', 'host'); ?> required placeholder="<?php echo h(__t('credentials.host_placeholder')); ?>"><?php echo form_error_html('create', 'host'); ?></label>
+            <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old('create', 'port')); ?>"<?php echo form_control_attrs('create', 'port'); ?> placeholder="<?php echo h(__t('credentials.port_placeholder')); ?>"><?php echo form_error_html('create', 'port'); ?></label>
+            <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old('create', 'username')); ?>"<?php echo form_control_attrs('create', 'username'); ?> required autocomplete="off"><?php echo form_error_html('create', 'username'); ?></label>
+            <label><?php echo h(__t('credentials.label_secret')); ?><input name="secret" type="password"<?php echo form_control_attrs('create', 'secret'); ?> required autocomplete="new-password"><?php echo form_error_html('create', 'secret'); ?></label>
             <label><?php echo h(__t('credentials.label_cert_kind')); ?>
-                <select name="esxi_cert_kind">
+                <select name="esxi_cert_kind"<?php echo form_control_attrs('create', 'esxi_cert_kind'); ?>>
                     <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_CA_BUNDLE); ?>"><?php echo h(__t('credentials.cert_kind_ca')); ?></option>
                     <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_SERVER); ?>"><?php echo h(__t('credentials.cert_kind_server')); ?></option>
                 </select>
                 <?php echo form_error_html('create', 'esxi_cert_kind'); ?>
             </label>
-            <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old('create', 'esxi_certificate_pem')); ?></textarea><?php echo form_error_html('create', 'esxi_certificate_pem'); ?></label>
+            <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6"<?php echo form_control_attrs('create', 'esxi_certificate_pem'); ?> placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old('create', 'esxi_certificate_pem')); ?></textarea><?php echo form_error_html('create', 'esxi_certificate_pem'); ?></label>
             <p class="muted"><?php echo h(__t('credentials.new_strict_hint')); ?></p>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
         </form>
@@ -178,28 +178,28 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <input type="hidden" name="action" value="update">
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
                             <label><?php echo h(__t('credentials.label_type')); ?>
-                                <select name="type" required>
+                                <select name="type"<?php echo form_control_attrs($rowKey, 'type'); ?> required>
                                     <?php foreach (VIRTUSPHERE_CREDENTIAL_LABELS as $typeValue => $typeLabel) { ?>
                                         <option value="<?php echo h($typeValue); ?>" <?php echo $rowType === $typeValue ? 'selected' : ''; ?>><?php echo h($typeLabel); ?></option>
                                     <?php } ?>
                                 </select>
                                 <?php echo form_error_html($rowKey, 'type'); ?>
                             </label>
-                            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old($rowKey, 'name', (string) ($row['name'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'name'); ?> required><?php echo form_error_html($rowKey, 'name'); ?></label>
-                            <label><?php echo h(__t('credentials.label_host')); ?><input name="host" value="<?php echo h(form_old($rowKey, 'host', (string) ($row['host'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'host'); ?> required><?php echo form_error_html($rowKey, 'host'); ?></label>
-                            <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old($rowKey, 'port', (string) ($row['port'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'port'); ?>><?php echo form_error_html($rowKey, 'port'); ?></label>
-                            <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old($rowKey, 'username', (string) ($row['username'] ?? ''))); ?>"<?php echo form_input_class($rowKey, 'username'); ?> required autocomplete="off"><?php echo form_error_html($rowKey, 'username'); ?></label>
-                            <label><?php echo h(__t('credentials.label_new_secret')); ?><input name="secret" type="password" placeholder="<?php echo h(__t('credentials.secret_keep_placeholder')); ?>"<?php echo form_input_class($rowKey, 'secret'); ?> autocomplete="new-password"><?php echo form_error_html($rowKey, 'secret'); ?></label>
+                            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old($rowKey, 'name', (string) ($row['name'] ?? ''))); ?>"<?php echo form_control_attrs($rowKey, 'name'); ?> required><?php echo form_error_html($rowKey, 'name'); ?></label>
+                            <label><?php echo h(__t('credentials.label_host')); ?><input name="host" value="<?php echo h(form_old($rowKey, 'host', (string) ($row['host'] ?? ''))); ?>"<?php echo form_control_attrs($rowKey, 'host'); ?> required><?php echo form_error_html($rowKey, 'host'); ?></label>
+                            <label><?php echo h(__t('credentials.label_port')); ?><input name="port" type="number" min="1" max="65535" value="<?php echo h(form_old($rowKey, 'port', (string) ($row['port'] ?? ''))); ?>"<?php echo form_control_attrs($rowKey, 'port'); ?>><?php echo form_error_html($rowKey, 'port'); ?></label>
+                            <label><?php echo h(__t('credentials.label_username')); ?><input name="username" value="<?php echo h(form_old($rowKey, 'username', (string) ($row['username'] ?? ''))); ?>"<?php echo form_control_attrs($rowKey, 'username'); ?> required autocomplete="off"><?php echo form_error_html($rowKey, 'username'); ?></label>
+                            <label><?php echo h(__t('credentials.label_new_secret')); ?><input name="secret" type="password" placeholder="<?php echo h(__t('credentials.secret_keep_placeholder')); ?>"<?php echo form_control_attrs($rowKey, 'secret'); ?> autocomplete="new-password"><?php echo form_error_html($rowKey, 'secret'); ?></label>
                             <?php if ($isEsxi) { ?>
                                 <?php $certKind = form_old($rowKey, 'esxi_cert_kind', (string) ($row['esxi_cert_kind'] ?? VIRTUSPHERE_ESXI_CERT_CA_BUNDLE)); ?>
                                 <label><?php echo h(__t('credentials.label_cert_kind')); ?>
-                                    <select name="esxi_cert_kind">
+                                    <select name="esxi_cert_kind"<?php echo form_control_attrs($rowKey, 'esxi_cert_kind'); ?>>
                                         <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_CA_BUNDLE); ?>" <?php echo $certKind === VIRTUSPHERE_ESXI_CERT_CA_BUNDLE ? 'selected' : ''; ?>><?php echo h(__t('credentials.cert_kind_ca')); ?></option>
                                         <option value="<?php echo h(VIRTUSPHERE_ESXI_CERT_SERVER); ?>" <?php echo $certKind === VIRTUSPHERE_ESXI_CERT_SERVER ? 'selected' : ''; ?>><?php echo h(__t('credentials.cert_kind_server')); ?></option>
                                     </select>
                                     <?php echo form_error_html($rowKey, 'esxi_cert_kind'); ?>
                                 </label>
-                                <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old($rowKey, 'esxi_certificate_pem', (string) ($row['esxi_certificate_pem'] ?? ''))); ?></textarea><?php echo form_error_html($rowKey, 'esxi_certificate_pem'); ?></label>
+                                <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6"<?php echo form_control_attrs($rowKey, 'esxi_certificate_pem'); ?> placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old($rowKey, 'esxi_certificate_pem', (string) ($row['esxi_certificate_pem'] ?? ''))); ?></textarea><?php echo form_error_html($rowKey, 'esxi_certificate_pem'); ?></label>
                                 <p class="muted"><?php echo h(__t(credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE ? 'credentials.legacy_upgrade_hint' : 'credentials.strict_active_hint')); ?></p>
                             <?php } ?>
                             <div class="actions">

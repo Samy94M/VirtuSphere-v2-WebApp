@@ -17,6 +17,15 @@ Solid accent fill (`.button`) is reserved for the single highest-emphasis action
 Solid-button fill and text colors come from the per-theme `--btn-bg`/`--btn-fg` tokens in `base.css`, not from hardcoded values on `.button`. Light theme fills with `--accent-strong` on white text; dark theme fills with the brighter `--accent`/`--danger` on dark (`--btn-fg`) text. This keeps filled buttons at WCAG-AA contrast in both themes — do not hardcode `#fff` or an accent color directly on a button.
 
 Accessibility and responsiveness are part of the baseline, not add-ons:
+- Form semantics have one renderer in `lib/forms.php`. `form_control_attrs()`
+  owns the stable control ID, `aria-invalid` and the complete
+  `aria-describedby` list; `form_hint_id()`, `form_error_id()` and
+  `form_error_html()` own the referenced nodes. A field error is therefore
+  never colour-only or an unreferenced sibling. A shared explanation belongs
+  to a real `fieldset` or `role="group"`, and its ID describes that group.
+  Repeated controls include their row scope in the generated ID; a template
+  keeps `__INDEX__` in name and ID until one monotonic browser-side replacement
+  fills both. Dynamic hints add and remove their ID with their visible state.
 - A visible keyboard focus ring (`:focus-visible`, accent outline) is defined globally in `base.css`; do not remove it per-component. A wrapping control may *relocate* that ring onto itself: an option card matches `:has(input:focus-visible)` and draws the identical 2px accent outline, while the 16px box's own outline is suppressed. Relocation reuses the same tokens and is allowed; inventing a softer indicator is not, because a translucent accent halo misses the 3:1 non-text contrast floor at every alpha that still reads as soft.
 - Wide content (data tables) scrolls inside its own `.table-wrap`; grid/stack children carry `min-width: 0` so a wide table never forces the whole page to scroll horizontally. The page body must never scroll sideways on mobile.
 - Below the 860px breakpoint the left navigation collapses behind a header toggle (`[data-nav-toggle]` in `lib/layout.php`, handler in `assets/core.js`, styles in `layout.css`) so content is reachable without scrolling past the full nav. The toggle is a real button with `aria-expanded`; no inline handlers (CSP).

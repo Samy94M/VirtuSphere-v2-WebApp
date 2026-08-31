@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/vm_edit_modules.php';
+
 require_once dirname(__DIR__, 2) . '/lib/ansible.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
 
@@ -257,8 +259,10 @@ final class AutostartPolicyTest extends TestCase
      */
     public function testTheVmEditorLocksTheControlWithoutClearingIt(): void
     {
-        $source = file_get_contents(__DIR__ . '/../../portal/vm_edit.php');
-        self::assertIsString($source);
+        $source = implode("\n", array_map(
+            static fn (string $module): string => (string) file_get_contents(dirname(__DIR__, 2) . '/' . $module),
+            VIRTUSPHERE_VM_EDIT_MODULES
+        ));
 
         self::assertStringContainsString('$autostartLocked = !$canWrite || !$missionAutostartOn;', $source);
         self::assertStringContainsString('<input type="checkbox" <?php echo $autostartOn ? \'checked\' : \'\'; ?> disabled>', $source);

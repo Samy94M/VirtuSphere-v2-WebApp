@@ -5,6 +5,9 @@ declare(strict_types=1);
 return [
     'stack_heading' => 'Der ganze Stack in Fragen & Antworten',
     'stack_p1' => 'Wie MECM, Datenbank, Portal, PowerShell, Ansible, ESXi und die Maschinen-API zusammenspielen: von der Weboberfläche bis zur fertigen Windows-VM. Zum Aufklappen auf eine Frage klicken.',
+    'stack_q14' => 'Wie helfen Formulare bei Hinweisen und Eingabefehlern?',
+    'stack_a14_p1' => 'Ein Hinweis gehört technisch zu genau dem Feld oder der Feldgruppe, die er erklärt. Ein Bildschirmleser gibt ihn deshalb zusammen mit dem Namen des Bedienelements aus. Hinweise, die nur in einem bestimmten Bereitstellungsmodus gelten, werden auch nur in diesem Zustand Teil der Beschreibung.',
+    'stack_a14_p2' => 'Nach einem fehlgeschlagenen Speichern bleibt die Meldung direkt am betroffenen Feld. Das Feld wird als ungültig gemeldet und verweist zusätzlich auf seinen Fehlertext, sodass Farbe nie die einzige Kennzeichnung ist.',
     'stack_q1' => 'Aus welchen Teilen besteht das System?',
     'stack_a1_p1' => 'VirtuSphere ist kein einzelnes Programm, sondern ein Zusammenspiel mehrerer Bausteine. Jeder hat eine klar abgegrenzte Aufgabe, und keiner kennt die Interna der anderen; ausgetauscht wird nur über wenige, feste Schnittstellen:',
     'stack_a1_li1' => 'Das Portal: diese Weboberfläche, eine PHP-Anwendung. Hier wird geplant, beobachtet und verwaltet; schwere, lang laufende Arbeit führt es bewusst nicht selbst aus.',

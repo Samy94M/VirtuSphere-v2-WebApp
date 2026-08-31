@@ -5,6 +5,9 @@ declare(strict_types=1);
 return [
     'stack_heading' => 'The whole stack in questions & answers',
     'stack_p1' => 'How MECM, database, portal, PowerShell, Ansible, ESXi and the machine API work together: from the web interface to the finished Windows VM. Click a question to expand it.',
+    'stack_q14' => 'How do forms present hints and input errors?',
+    'stack_a14_p1' => 'A hint is technically associated with exactly the field or field group it explains. A screen reader therefore announces it together with the control name. Hints that only apply to a particular deployment mode become part of the description only in that state.',
+    'stack_a14_p2' => 'After an unsuccessful save, the message stays next to the affected field. The field is announced as invalid and also references its error text, so colour is never the only indicator.',
     'stack_q1' => 'What are the parts of the system?',
     'stack_a1_p1' => 'VirtuSphere is not a single program but an interplay of several building blocks. Each one has a clearly bounded job, and none knows the internals of the others; they only exchange data over a few fixed interfaces:',
     'stack_a1_li1' => 'The portal: this web interface, a PHP application. Planning, monitoring and administration happen here; heavy, long-running work is deliberately not executed by it.',

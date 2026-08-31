@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/vm_edit_modules.php';
+
 final class PermissionParityTest extends TestCase
 {
     public function testPermissionLiteralsAreDeclared(): void
@@ -48,7 +50,12 @@ final class PermissionParityTest extends TestCase
         ];
 
         foreach ($expectations as $file => $permissions) {
-            $source = (string) file_get_contents($root . '/portal/' . $file);
+            $source = $file === 'vm_edit.php'
+                ? implode("\n", array_map(
+                    static fn (string $module): string => (string) file_get_contents($root . '/' . $module),
+                    VIRTUSPHERE_VM_EDIT_MODULES
+                ))
+                : (string) file_get_contents($root . '/portal/' . $file);
             foreach ($permissions as $permission) {
                 self::assertStringContainsString("can('" . $permission . "'", $source, $file . ' guard for ' . $permission);
             }

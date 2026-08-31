@@ -64,3 +64,18 @@ file silently stops guarding the moment that file is split. Every scanner that
 covers a page or module family therefore reads an owner glob or registry rather
 than a filename, and carries a negative case proving that an unregistered new
 module makes it red.
+
+## Amendment 2026-08-31: VM repository and editor have explicit owners
+
+The Etappe-14 teardown removed the last dated allowances for
+`lib/repo/vms.php` and `portal/vm_edit.php`. The VM repository is now a small
+facade over validation, persistence, operator/recovery and isolated legacy
+modules; `VIRTUSPHERE_VM_REPO_MODULES` is the bidirectional owner registry.
+Function names, signatures and transaction placement remain compatibility
+surface, so the facade is still the only require path for callers.
+
+The VM editor is a request/layout shell over page-state, value, row, status and
+panel modules. `VIRTUSPHERE_VM_EDIT_MODULES` closes that family in both
+directions, and portal scanners consume the registry or the complete owner glob.
+Every resulting PHP file is below the budget; a later owner may not hide by
+being added next to the facade without joining the registry.

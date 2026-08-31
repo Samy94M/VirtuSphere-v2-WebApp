@@ -41,12 +41,12 @@ function users_render_directory(mysqli $db, array $actor, array $searchRows): vo
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="directory_save_config">
             <input type="hidden" name="expected_revision" value="<?php echo h((string) ($config['revision'] ?? 0)); ?>">
-            <label><?php echo h(__t('directory.field_bind_upn')); ?><input name="bind_upn" value="<?php echo h(form_old('directory', 'bind_upn', (string) ($config['bind_upn'] ?? ''))); ?>" required><?php echo form_error_html('directory', 'bind_upn'); ?></label>
-            <label><?php echo h(__t('directory.field_bind_password')); ?><input name="bind_password" type="password" autocomplete="new-password"<?php echo $config === null ? ' required' : ''; ?>><span class="muted"><?php echo h(__t('directory.password_keep')); ?></span><?php echo form_error_html('directory', 'bind_password'); ?></label>
-            <label><?php echo h(__t('directory.field_ca')); ?><textarea name="ca_certificate_pem" rows="8"<?php echo $config === null ? ' required' : ''; ?>></textarea><span class="muted"><?php echo h(__t('directory.ca_keep')); ?></span><?php echo form_error_html('directory', 'ca_certificate_pem'); ?></label>
-            <label><?php echo h(__t('directory.field_search_base')); ?><input name="user_search_base_dn" value="<?php echo h(form_old('directory', 'user_search_base_dn', (string) ($config['user_search_base_dn'] ?? ''))); ?>"><span class="muted"><?php echo h(__t('directory.search_base_hint')); ?></span><?php echo form_error_html('directory', 'user_search_base_dn'); ?></label>
+            <label><?php echo h(__t('directory.field_bind_upn')); ?><input name="bind_upn"<?php echo form_control_attrs('directory', 'bind_upn'); ?> value="<?php echo h(form_old('directory', 'bind_upn', (string) ($config['bind_upn'] ?? ''))); ?>" required><?php echo form_error_html('directory', 'bind_upn'); ?></label>
+            <label><?php echo h(__t('directory.field_bind_password')); ?><input name="bind_password" type="password"<?php echo form_control_attrs('directory', 'bind_password', null, true); ?> autocomplete="new-password"<?php echo $config === null ? ' required' : ''; ?>><span class="muted" id="<?php echo h(form_hint_id('directory', 'bind_password')); ?>"><?php echo h(__t('directory.password_keep')); ?></span><?php echo form_error_html('directory', 'bind_password'); ?></label>
+            <label><?php echo h(__t('directory.field_ca')); ?><textarea name="ca_certificate_pem" rows="8"<?php echo form_control_attrs('directory', 'ca_certificate_pem', null, true); ?><?php echo $config === null ? ' required' : ''; ?>></textarea><span class="muted" id="<?php echo h(form_hint_id('directory', 'ca_certificate_pem')); ?>"><?php echo h(__t('directory.ca_keep')); ?></span><?php echo form_error_html('directory', 'ca_certificate_pem'); ?></label>
+            <label><?php echo h(__t('directory.field_search_base')); ?><input name="user_search_base_dn"<?php echo form_control_attrs('directory', 'user_search_base_dn', null, true); ?> value="<?php echo h(form_old('directory', 'user_search_base_dn', (string) ($config['user_search_base_dn'] ?? ''))); ?>"><span class="muted" id="<?php echo h(form_hint_id('directory', 'user_search_base_dn')); ?>"><?php echo h(__t('directory.search_base_hint')); ?></span><?php echo form_error_html('directory', 'user_search_base_dn'); ?></label>
             <?php if ($enabled) { ?>
-            <label><?php echo h(__t('directory.field_test_controller')); ?><select name="controller_id" required><option value=""><?php echo h(__t('common.please_select')); ?></option><?php foreach ($controllers as $controller) { ?><option value="<?php echo h((string) $controller['id']); ?>"><?php echo h((string) $controller['host'] . ':' . (string) $controller['port']); ?></option><?php } ?></select><?php echo form_error_html('directory', 'controller_id'); ?></label>
+            <label><?php echo h(__t('directory.field_test_controller')); ?><select name="controller_id"<?php echo form_control_attrs('directory', 'controller_id'); ?> required><option value=""><?php echo h(__t('common.please_select')); ?></option><?php foreach ($controllers as $controller) { ?><option value="<?php echo h((string) $controller['id']); ?>"><?php echo h((string) $controller['host'] . ':' . (string) $controller['port']); ?></option><?php } ?></select><?php echo form_error_html('directory', 'controller_id'); ?></label>
             <?php } ?>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('directory.save_config')); ?></button></div>
         </form>
@@ -63,7 +63,6 @@ function users_render_directory(mysqli $db, array $actor, array $searchRows): vo
     <?php if ($enabled) { users_render_directory_search($searchRows, $actionUrl); } ?>
     <?php
 }
-
 /** @param list<array<string,mixed>> $controllers */
 function users_render_directory_controllers(array $controllers, int $revision, bool $directoryEnabled, string $actionUrl): void
 {

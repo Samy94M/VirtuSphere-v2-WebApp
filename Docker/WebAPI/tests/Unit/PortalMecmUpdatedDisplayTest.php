@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/layout.php';
+require_once dirname(__DIR__, 2) . '/lib/vm_edit_modules.php';
 
 final class PortalMecmUpdatedDisplayTest extends TestCase
 {
@@ -28,7 +29,10 @@ final class PortalMecmUpdatedDisplayTest extends TestCase
     {
         $root = str_replace('\\', '/', dirname(__DIR__, 2));
         $vms = (string) file_get_contents($root . '/portal/vms.php');
-        $editor = (string) file_get_contents($root . '/lib/vm_edit_form.php');
+        $editor = implode("\n", array_map(
+            static fn (string $module): string => (string) file_get_contents($root . '/' . $module),
+            VIRTUSPHERE_VM_EDIT_MODULES
+        ));
         self::assertStringContainsString('mecm_updated_display(', $vms);
         self::assertStringContainsString('mecm_updated_display(', $editor);
         self::assertStringNotContainsString("echo h((string) (\$vm['updated']", $vms . $editor);

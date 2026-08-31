@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/repo/vms_modules.php';
+
 /** Cross-layer guard for the two dedicated, non-destructive VM progress clocks. */
 final class VmProgressWatchContractTest extends TestCase
 {
@@ -57,7 +59,10 @@ final class VmProgressWatchContractTest extends TestCase
     {
         $macImport = $this->source('db_importMAC.php');
         $stateWriter = $this->source('lib/repo/status_events.php');
-        $vmRepo = $this->source('lib/repo/vms.php');
+        $vmRepo = implode("\n", array_map(
+            fn (string $module): string => $this->source($module),
+            VIRTUSPHERE_VM_REPO_MODULES
+        ));
 
         self::assertStringContainsString('mecm_pending_since = COALESCE(mecm_pending_since, NOW())', $macImport);
         self::assertStringContainsString('os_install_watch_started_at = NULL', $macImport);

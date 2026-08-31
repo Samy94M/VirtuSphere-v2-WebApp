@@ -1,0 +1,171 @@
+<?php
+
+declare(strict_types=1);
+
+/** Compatibility surface for the legacy aggregate VM API. Wire behavior is unchanged. */
+
+function getVMs($connection, $missionId)
+{
+    $missionId = repo_id($missionId);
+    $stmt = $connection->prepare('SELECT * FROM deploy_vms WHERE mission_id = ? ORDER BY vm_name');
+    $stmt->bind_param('i', $missionId);
+    $stmt->execute();
+    $vms = repo_fetch_all($stmt->get_result());
+    foreach ($vms as &$vm) {
+        $vmId = (int) $vm['id'];
+        $vm['packages'] = repo_fetch_related($connection, 'SELECT dp.* FROM deploy_packages dp INNER JOIN deploy_vm_packages dvp ON dp.id = dvp.package_id WHERE dvp.vm_id = ? ORDER BY dp.package_name', $vmId);
+        $vm['interfaces'] = repo_fetch_related($connection, 'SELECT * FROM deploy_interfaces WHERE vm_id = ? ORDER BY id', $vmId);
+        $vm['disks'] = repo_fetch_related($connection, 'SELECT * FROM deploy_disks WHERE vm_id = ? ORDER BY id', $vmId);
+        $vm['progress_watch_kind'] = virtusphere_vm_progress_watch_kind($vm);
+        $vm['progress_attention'] = virtusphere_vm_progress_attention($vm);
+    }
+
+    return $vms;
+}
+
+/**
+ * Explicitly binds one portal VM to the namesake currently reported by a
+ * selected ESXi credential. Mission lock and active-job gate prevent identity
+ * replacement while a worker may still be mutating or exporting that VM.
+ *
+ * @return array{vm_id:int, vm_name:string, vm_moid:string, vm_instance_uuid:string}
+ */
+function repo_adopt_vm_identity(mysqli $db, int $missionId, int $vmId, int $credentialId): array
+{
+    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $credentialId): array {
+        if (repo_deploy_lock_mission($db, $missionId) === null) {
+            throw new RuntimeException('Mission not found.');
+        }
+        repo_deploy_assert_mission_idle($db, $missionId);
+
+        return repo_vm_identity_adopt_locked($db, $missionId, $vmId, $credentialId);
+    });
+}
+
+function repo_fetch_related(mysqli $connection, string $sql, int $vmId): array
+{
+    $stmt = $connection->prepare($sql);
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return repo_fetch_all($stmt->get_result());
+}
+
+function repo_source_to_array(object|array $source): array
+{
+    return is_array($source) ? $source : get_object_vars($source);
+}
+
+function deleteVM($vmList, $connection)
+{
+    return vmListToDelete($vmList, $connection);
+}
+
+function vmListToCreate($missionId, $vmList, $mysqli)
+{
+    if (empty($vmList) || !is_iterable($vmList)) {
+        return 0;
+    }
+
+    // Legacy wire contract: any failure rolls the whole batch back and answers
+    // with 0, never with an exception (the desktop client checks the count).
+    try {
+        return repo_transaction($mysqli, static function () use ($mysqli, $missionId, $vmList): int {
+            $successCount = 0;
+            foreach ($vmList as $vm) {
+                $vmMissionId = repo_id(repo_object_get($vm, 'mission_id', $missionId));
+                if ($vmMissionId === 0) {
+                    throw new RuntimeException('VM create skipped: missing mission_id.');
+                }
+
+                $values = repo_validate_vm_payload($mysqli, $vmMissionId, repo_source_to_array($vm));
+                $values['mission_id'] = $vmMissionId;
+                $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
+                $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
+                $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
+                $values['updated'] = 0;
+
+                $vmId = repo_insert_from_values($mysqli, 'deploy_vms', $values);
+                repo_replace_interfaces($mysqli, $vmId, repo_object_get($vm, 'interfaces', []), false);
+                repo_replace_packages($mysqli, $vmId, repo_object_get($vm, 'packages', []));
+                repo_replace_disks($mysqli, $vmId, repo_object_get($vm, 'Disks', repo_object_get($vm, 'disks', [])));
+                repo_record_vm_status_event($mysqli, $vmId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, VIRTUSPHERE_STATUS_REGISTERED, 'created');
+                $successCount++;
+            }
+
+            return $successCount;
+        });
+    } catch (Throwable $exception) {
+        repo_log_failure('vmListToCreate rollback: ' . $exception->getMessage());
+        return 0;
+    }
+}
+
+function vmListToUpdate($vmList, $connection)
+{
+    if (empty($vmList) || !is_iterable($vmList)) {
+        return 0;
+    }
+
+    // Legacy wire contract: batch-or-nothing, failures answer 0 (see create).
+    try {
+        return repo_transaction($connection, static function () use ($connection, $vmList): int {
+            $successCount = 0;
+            foreach ($vmList as $vm) {
+                $vmId = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
+                if ($vmId === 0) {
+                    throw new RuntimeException('VM update skipped: missing Id.');
+                }
+
+                $values = repo_allowed_columns($vm, REPO_VM_COLUMNS);
+                if ($values !== []) {
+                    $currentVm = repo_fetch_one($connection, 'SELECT * FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
+                    if ($currentVm === null) {
+                        throw new RuntimeException('VM update skipped: VM not found.');
+                    }
+                    $values = repo_validate_vm_payload($connection, (int) $currentVm['mission_id'], array_merge($currentVm, $values), $vmId);
+                    repo_update_from_values($connection, 'deploy_vms', $values, 'id = ?', 'i', [$vmId]);
+                }
+                if (repo_object_has($vm, 'interfaces')) {
+                    repo_replace_interfaces($connection, $vmId, repo_object_get($vm, 'interfaces', []), true);
+                }
+                if (repo_object_has($vm, 'packages')) {
+                    repo_replace_packages($connection, $vmId, repo_object_get($vm, 'packages', []));
+                }
+                if (repo_object_has($vm, 'Disks') || repo_object_has($vm, 'disks')) {
+                    repo_replace_disks($connection, $vmId, repo_object_get($vm, 'Disks', repo_object_get($vm, 'disks', [])));
+                }
+                $successCount++;
+            }
+
+            return $successCount;
+        });
+    } catch (Throwable $exception) {
+        repo_log_failure('vmListToUpdate rollback: ' . $exception->getMessage());
+        return 0;
+    }
+}
+
+function vmListToDelete($vmList, $connection)
+{
+    if (empty($vmList) || !is_iterable($vmList)) {
+        return false;
+    }
+
+    // Legacy wire contract: batch-or-nothing, failures answer false (see create).
+    try {
+        return repo_transaction($connection, static function () use ($connection, $vmList): bool {
+            foreach ($vmList as $vm) {
+                $id = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
+                if ($id > 0) {
+                    repo_execute($connection, 'DELETE FROM deploy_vms WHERE id = ?', 'i', [$id]);
+                }
+            }
+
+            return true;
+        });
+    } catch (Throwable $exception) {
+        repo_log_failure('vmListToDelete rollback: ' . $exception->getMessage());
+        return false;
+    }
+}

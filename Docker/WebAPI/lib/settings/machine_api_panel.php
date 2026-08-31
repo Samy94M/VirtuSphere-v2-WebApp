@@ -54,11 +54,11 @@ declare(strict_types=1);
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="allow_create">
                 <label><?php echo h(__t('settings.allowlist_th_ip')); ?>
-                    <input name="ip_address" value="<?php echo h(form_old('allowlist', 'ip_address', '')); ?>"<?php echo form_input_class('allowlist', 'ip_address'); ?> placeholder="10.0.0.10" required>
+                    <input name="ip_address" value="<?php echo h(form_old('allowlist', 'ip_address', '')); ?>"<?php echo form_control_attrs('allowlist', 'ip_address'); ?> placeholder="10.0.0.10" required>
                     <?php echo form_error_html('allowlist', 'ip_address'); ?>
                 </label>
                 <label><?php echo h(__t('settings.allowlist_th_description')); ?>
-                    <input name="description" value="<?php echo h(form_old('allowlist', 'description', '')); ?>"<?php echo form_input_class('allowlist', 'description'); ?> maxlength="255" placeholder="<?php echo h(__t('settings.allowlist_description_placeholder')); ?>">
+                    <input name="description" value="<?php echo h(form_old('allowlist', 'description', '')); ?>"<?php echo form_control_attrs('allowlist', 'description'); ?> maxlength="255" placeholder="<?php echo h(__t('settings.allowlist_description_placeholder')); ?>">
                     <?php echo form_error_html('allowlist', 'description'); ?>
                 </label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('settings.allowlist_add')); ?></button></div>

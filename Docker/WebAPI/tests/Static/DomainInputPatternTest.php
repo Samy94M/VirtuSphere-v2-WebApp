@@ -30,6 +30,12 @@ final class DomainInputPatternTest extends TestCase
         foreach (glob($this->root() . '/portal/*.php') ?: [] as $path) {
             $pages['portal/' . basename($path)] = (string) file_get_contents($path);
         }
+        foreach (array_keys($pages) as $page) {
+            $prefix = basename($page, '.php');
+            foreach (glob($this->root() . '/lib/' . $prefix . '_*.php') ?: [] as $module) {
+                $pages[$page] .= "\n" . (string) file_get_contents($module);
+            }
+        }
         self::assertNotSame([], $pages, 'no portal pages were scanned');
 
         return $pages;

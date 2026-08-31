@@ -66,6 +66,32 @@ acceptance; Integration exercises the functional Chromium suite and the exact
 Etappe-11 deterministic light/dark visual harness. Etappe 12 does not create or
 update committed visual baselines; that remains the Etappe-17 release decision.
 
+### Etappe 14 form accessibility contract
+
+`lib/forms.php` owns stable control, hint and error IDs, invalid state and the
+complete `aria-describedby` list. `FormAccessibilityTest` proves the pure API;
+`FormAccessibilityContractTest` scans every migrated renderer and the repeated
+VM template. The page-wide negative check in `accessibility.spec.js` runs before
+axe on every portal page in both themes and rejects duplicate IDs, dead
+references, visible unowned generated hints/errors and an invalid control with
+no error reference.
+
+Targeted debugging commands:
+
+```powershell
+docker exec virtusphere-v2-webapp-php-1 vendor/bin/phpunit -c /var/www/html/phpunit.xml.dist --filter FormAccessibility
+Push-Location tests/e2e; npx playwright test specs/form-accessibility.spec.js --project=chromium; Pop-Location
+```
+
+The browser spec disables native validation once to obtain a real server error,
+checks the accessibility-tree description, inserts two interfaces and two disks
+with the keyboard, and changes deploy mode/stagger values in both directions.
+This is the repeatable screen-reader semantics sample: the invalid Host control
+must announce its server error through the computed accessible description, and
+the VM interface group must announce the Gateway hint. Integration remains the
+final proof because it also runs the complete axe matrix and deterministic
+light/dark visual project against the synthetic QA stack.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:

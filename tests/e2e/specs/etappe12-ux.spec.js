@@ -189,13 +189,13 @@ test('password purpose, policy hints and updated display are user-facing', async
   const ids = seed();
   await page.goto('account.php?lang=de');
   await expect(page.locator('#current_password')).toHaveAttribute('autocomplete', 'current-password');
-  await expect(page.locator('#new_password')).toHaveAttribute('autocomplete', 'new-password');
-  await expect(page.locator('#new_password')).toHaveAttribute('minlength', /\d+/);
-  await expect(page.locator('#account-password-hint')).toContainText(/Mindestens \d+ Zeichen/);
+  await expect(page.locator('#form-account-new_password')).toHaveAttribute('autocomplete', 'new-password');
+  await expect(page.locator('#form-account-new_password')).toHaveAttribute('minlength', /\d+/);
+  await expect(page.locator('#form-account-passwords-hint')).toContainText(/Mindestens \d+ Zeichen/);
 
   await page.goto('users.php');
-  await expect(page.locator('#create-password')).toHaveAttribute('autocomplete', 'new-password');
-  await expect(page.locator('#create-password')).toHaveAttribute('minlength', /\d+/);
+  await expect(page.locator('#form-create-password')).toHaveAttribute('autocomplete', 'new-password');
+  await expect(page.locator('#form-create-password')).toHaveAttribute('minlength', /\d+/);
 
   await page.goto(`vms.php?mission_id=${ids.mission}`);
   await expect(page.getByText('Für MECM vorgemerkt')).toBeVisible();

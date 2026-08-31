@@ -13,13 +13,13 @@ declare(strict_types=1);
     <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
         <section class="panel">
             <h2><?php echo h(__t('settings.deploy_settings_title')); ?></h2>
-            <p class="muted settings-url-intro"><?php echo h(__t('settings.api_base_url_intro')); ?></p>
+            <p class="muted settings-url-intro" id="<?php echo h(form_hint_id('settings', 'api_base_url')); ?>"><?php echo h(__t('settings.api_base_url_intro')); ?></p>
             <form class="settings-url-form" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_api">
-                <label for="api-base-url"><?php echo h(__t('settings.api_base_url_label')); ?></label>
+                <label for="<?php echo h(form_element_id('settings', 'api_base_url')); ?>"><?php echo h(__t('settings.api_base_url_label')); ?></label>
                 <div class="settings-url-input-row" data-settings-url-row>
-                    <input id="api-base-url" name="api_base_url" value="<?php echo h(form_old('settings', 'api_base_url', $storedApiBaseUrl)); ?>"<?php echo form_input_class('settings', 'api_base_url'); ?> placeholder="http://virtusphere.local:8021" required>
+                    <input name="api_base_url" value="<?php echo h(form_old('settings', 'api_base_url', $storedApiBaseUrl)); ?>"<?php echo form_control_attrs('settings', 'api_base_url', null, true); ?> placeholder="http://virtusphere.local:8021" required>
                     <button class="button" type="submit"><?php echo h(__t('common.save')); ?></button>
                 </div>
                 <?php echo form_error_html('settings', 'api_base_url'); ?>

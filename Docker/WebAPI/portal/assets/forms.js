@@ -3,6 +3,13 @@
 // selection. Independent of core.js and the deploy modules; registers its own delegated
 // click/input/change listeners for the form hooks only.
 (function () {
+    var lastRepeatIndex = 0;
+
+    function nextRepeatIndex() {
+        lastRepeatIndex = Math.max(Date.now(), lastRepeatIndex + 1);
+        return String(lastRepeatIndex);
+    }
+
     function selectHasValue(select, value) {
         for (var index = 0; index < select.options.length; index += 1) {
             if (select.options[index].value === value) {
@@ -228,7 +235,10 @@
             var template = document.querySelector('template[data-template="' + key + '"]');
             var target = document.querySelector('[data-repeat-target="' + key + '"]');
             if (template && target) {
-                var html = template.innerHTML.replaceAll('__INDEX__', String(Date.now()));
+                // Date.now() alone can repeat when keyboard activation or a fast
+                // test inserts two rows in the same millisecond. The monotonic
+                // index keeps both the field names and generated IDs unique.
+                var html = template.innerHTML.replaceAll('__INDEX__', nextRepeatIndex());
                 var holder = document.createElement('div');
                 holder.innerHTML = html.trim();
                 var row = holder.firstElementChild;

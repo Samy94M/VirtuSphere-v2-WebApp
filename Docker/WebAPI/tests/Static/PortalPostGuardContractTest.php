@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/vm_edit_modules.php';
+
 /**
  * The CSRF check that opens every POST handler is shared in
  * portal_guard_post() (lib/audit_events.php) so a new page cannot forget it or
@@ -24,6 +26,13 @@ final class PortalPostGuardContractTest extends TestCase
 
     private function source(string $page): string
     {
+        if ($page === 'vm_edit.php') {
+            return implode("\n", array_map(
+                static fn (string $module): string => (string) file_get_contents(dirname(__DIR__, 2) . '/' . $module),
+                VIRTUSPHERE_VM_EDIT_MODULES
+            ));
+        }
+
         $path = str_replace('\\', '/', dirname(__DIR__, 2)) . '/portal/' . $page;
         self::assertFileExists($path, $page . ' must exist');
 

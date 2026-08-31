@@ -65,9 +65,10 @@ $summary = trim((string) ($user['email'] ?? '')) !== ''
         <form class="stack narrow-form" method="post" action="account.php">
             <?php echo csrf_field(); ?>
             <label for="current_password"><?php echo h(__t('account.current_password')); ?><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></label>
-            <label for="new_password"><?php echo h(__t('account.new_password')); ?><input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="account-password-hint" required></label>
-            <label for="confirm_password"><?php echo h(__t('account.confirm_password')); ?><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="account-password-hint" required></label>
-            <p class="hint" id="account-password-hint"><?php echo h(__t('account.password_hint', ['min' => $passwordMinLength])); ?></p>
+            <?php $passwordHintId = form_hint_id('account', 'passwords'); ?>
+            <label><?php echo h(__t('account.new_password')); ?><input name="new_password" type="password"<?php echo form_control_attrs('account', 'new_password', null, [$passwordHintId], ''); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" required></label>
+            <label><?php echo h(__t('account.confirm_password')); ?><input name="confirm_password" type="password"<?php echo form_control_attrs('account', 'confirm_password', null, [$passwordHintId], ''); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" required></label>
+            <p class="hint" id="<?php echo h($passwordHintId); ?>"><?php echo h(__t('account.password_hint', ['min' => $passwordMinLength])); ?></p>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('account.change_password')); ?></button></div>
         </form>
         <?php } ?>

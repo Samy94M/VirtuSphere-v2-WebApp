@@ -16,9 +16,9 @@ function users_render_accounts(array $rows, array $actor, int $passwordMinLength
         <form class="form-grid" method="post" action="<?php echo h($actionUrl); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">
-            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old('create', 'name')); ?>"<?php echo form_input_class('create', 'name'); ?> required><?php echo form_error_html('create', 'name'); ?></label>
-            <label><?php echo h(__t('users.field_email')); ?><input name="email" type="email" value="<?php echo h(form_old('create', 'email')); ?>"<?php echo form_input_class('create', 'email'); ?>><?php echo form_error_html('create', 'email'); ?></label>
-            <label for="create-password"><?php echo h(__t('users.field_password')); ?><input id="create-password" name="password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="create-password-hint" required><?php echo form_error_html('create', 'password'); ?><small class="hint" id="create-password-hint"><?php echo h(__t('users.password_hint', ['min' => $passwordMinLength])); ?></small></label>
+            <label><?php echo h(__t('common.name')); ?><input name="name" value="<?php echo h(form_old('create', 'name')); ?>"<?php echo form_control_attrs('create', 'name'); ?> required><?php echo form_error_html('create', 'name'); ?></label>
+            <label><?php echo h(__t('users.field_email')); ?><input name="email" type="email" value="<?php echo h(form_old('create', 'email')); ?>"<?php echo form_control_attrs('create', 'email'); ?>><?php echo form_error_html('create', 'email'); ?></label>
+            <label><?php echo h(__t('users.field_password')); ?><input name="password" type="password"<?php echo form_control_attrs('create', 'password', null, true); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" required><?php echo form_error_html('create', 'password'); ?><small class="hint" id="<?php echo h(form_hint_id('create', 'password')); ?>"><?php echo h(__t('users.password_hint', ['min' => $passwordMinLength])); ?></small></label>
             <label><?php echo h(__t('users.field_role')); ?><select name="role"><?php $createRole = form_old('create', 'role', VIRTUSPHERE_ROLE_USER); foreach (role_options() as $roleOption) { ?><option value="<?php echo h($roleOption); ?>" <?php echo $createRole === $roleOption ? 'selected' : ''; ?>><?php echo h(role_label($roleOption)); ?></option><?php } ?></select></label>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
         </form>
@@ -73,12 +73,12 @@ function users_render_accounts(array $rows, array $actor, int $passwordMinLength
                         <?php } else { ?>
                         <form class="inline-form" method="post" action="<?php echo h($actionUrl); ?>">
                             <?php echo csrf_field(); ?><input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="<?php echo h((string) $row['id']); ?>">
-                            <?php $passwordInputId = 'reset-password-' . (int) $row['id']; $passwordHintId = $passwordInputId . '-hint'; ?>
+                            <?php $passwordForm = 'row-' . (int) $row['id']; $passwordInputId = form_element_id($passwordForm, 'password'); ?>
                             <label class="sr-only" for="<?php echo h($passwordInputId); ?>"><?php echo h(__t('users.reset_password_label', ['name' => $rowName])); ?></label>
-                            <input id="<?php echo h($passwordInputId); ?>" name="password" type="password" autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" aria-describedby="<?php echo h($passwordHintId); ?>" placeholder="<?php echo h(__t('users.new_password_placeholder')); ?>" required>
-                            <span class="sr-only" id="<?php echo h($passwordHintId); ?>"><?php echo h(__t('users.password_hint', ['min' => $passwordMinLength])); ?></span>
+                            <input name="password" type="password"<?php echo form_control_attrs($passwordForm, 'password', null, true); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" placeholder="<?php echo h(__t('users.new_password_placeholder')); ?>" required>
+                            <span class="sr-only" id="<?php echo h(form_hint_id($passwordForm, 'password')); ?>"><?php echo h(__t('users.password_hint', ['min' => $passwordMinLength])); ?></span>
                             <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('users.confirm_reset_password', ['name' => $rowName])); ?>"><?php echo h(__t('users.btn_reset')); ?></button>
-                            <?php echo form_error_html('row-' . (int) $row['id'], 'password'); ?>
+                            <?php echo form_error_html($passwordForm, 'password'); ?>
                         </form>
                         <?php } ?>
                     </td>

@@ -309,7 +309,7 @@ layout_header($title, $user, $active, 'missions');
             <form class="form-grid" method="post" action="missions.php?type=<?php echo h($type); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="create">
-                <label><?php echo h(__t('common.name')); ?><input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('create', 'mission_name')); ?>"<?php echo form_input_class('create', 'mission_name'); ?> required><?php echo form_error_html('create', 'mission_name'); ?></label>
+                <label><?php echo h(__t('common.name')); ?><input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('create', 'mission_name')); ?>"<?php echo form_control_attrs('create', 'mission_name'); ?> required><?php echo form_error_html('create', 'mission_name'); ?></label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
             </form>
         </section>

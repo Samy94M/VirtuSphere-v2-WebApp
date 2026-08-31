@@ -43,12 +43,6 @@ parameters:
 			path: lib/repo/deploy_job_queue.php
 
 		-
-			message: '#^Ternary operator condition is always true\.$#'
-			identifier: ternary.alwaysTrue
-			count: 1
-			path: lib/repo/vms.php
-
-		-
 			message: '#^Strict comparison using \=\=\= between int and null will always evaluate to false\.$#'
 			identifier: identical.alwaysFalse
 			count: 1
@@ -101,12 +95,6 @@ parameters:
 			identifier: variable.undefined
 			count: 7
 			path: portal/vlans.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 18
-			path: portal/vm_edit.php
 
 		-
 			message: '#^Unreachable statement \- code above always terminates\.$#'

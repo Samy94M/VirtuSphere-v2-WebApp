@@ -207,7 +207,7 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="updated_at" value="<?php echo h($mission['updated_at'] ?? ''); ?>">
             <div class="form-grid">
-                <label><?php echo h(__t('common.name')); ?><input name="mission_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('update', 'mission_name', (string) ($mission['mission_name'] ?? ''))); ?>" required <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'mission_name'); ?></label>
+                <label><?php echo h(__t('common.name')); ?><input name="mission_name"<?php echo form_control_attrs('update', 'mission_name'); ?> pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('update', 'mission_name', (string) ($mission['mission_name'] ?? ''))); ?>" required <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'mission_name'); ?></label>
                 <label><?php echo h(__t('mission_details.label_wds_vlan')); ?><?php vlan_select_field('wds_vlan', $storedVlan, $vlans, [
                     'none' => __t('mission_details.vlan_none'),
                     'unknown_suffix' => __t('mission_details.vlan_not_in_inventory'),
@@ -242,8 +242,10 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                     }
                     // A lone datastore without prose is an ordinary field, not a group.
                     $groupLocationFields = !$hideMissionDatacenter || $locationHints !== [];
+                    $hasLocationHint = $locationHints !== [];
                 ?>
-                <?php if ($groupLocationFields) { ?><div class="field-group"><?php } ?>
+                <?php $locationHintId = form_hint_id('update', 'location_group'); ?>
+                <?php if ($groupLocationFields) { ?><div class="field-group" role="group"<?php echo form_control_attrs('update', 'location_group', null, $hasLocationHint ? [$locationHintId] : false, ''); ?>><?php } ?>
                 <label><?php echo h(__t('mission_details.label_datastore')); ?><?php inventory_select_field($datastoreOptions, [
                     'name' => 'hypervisor_datastorage',
                     'value' => $datastoreValue,
@@ -251,6 +253,7 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                     'unknown_suffix' => __t('mission_details.location_not_in_inventory'),
                     'required' => !$isTemplate,
                     'disabled' => !can('missions.write', $user),
+                    'attributes' => form_control_attrs('update', 'hypervisor_datastorage'),
                 ]); ?><?php echo form_error_html('update', 'hypervisor_datastorage'); ?></label>
                 <?php if ($hideMissionDatacenter) { ?>
                     <input type="hidden" name="hypervisor_datacenter" value="<?php echo h($datacenterValue); ?>">
@@ -261,8 +264,10 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                         'empty_label' => __t('mission_details.datacenter_from_host'),
                         'unknown_suffix' => __t('mission_details.location_not_in_inventory'),
                         'disabled' => !can('missions.write', $user),
+                        'attributes' => form_control_attrs('update', 'hypervisor_datacenter'),
                     ]); ?><?php echo form_error_html('update', 'hypervisor_datacenter'); ?></label>
                 <?php } ?>
+                <?php if ($hasLocationHint) { ?><div id="<?php echo h($locationHintId); ?>"><?php } ?>
                 <?php foreach ($locationHints as [$hintSubject, $hintText]) { ?>
                     <p class="hint"><span class="hint-subject"><?php echo h($hintSubject); ?>:</span> <?php echo h($hintText); ?></p>
                 <?php } ?>
@@ -272,11 +277,12 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                           // operator to find the page. ?>
                     <p class="hint"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('mission_details.location_status_link')); ?></a></p>
                 <?php } ?>
+                <?php if ($hasLocationHint) { ?></div><?php } ?>
                 <?php if ($groupLocationFields) { ?></div><?php } ?>
-                <label><?php echo h(__t('mission_details.label_domain')); ?><input name="domain" value="<?php echo h(form_old('update', 'domain', (string) ($mission['domain'] ?? ''))); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('mission_details.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $isTemplate ? '' : 'required'; ?> <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'domain'); ?></label>
+                <label><?php echo h(__t('mission_details.label_domain')); ?><input name="domain"<?php echo form_control_attrs('update', 'domain'); ?> value="<?php echo h(form_old('update', 'domain', (string) ($mission['domain'] ?? ''))); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('mission_details.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $isTemplate ? '' : 'required'; ?> <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'domain'); ?></label>
                 <?php $missionCreator = (string) ($mission['mission_creator'] ?? ''); ?>
                 <label><?php echo h(__t('mission_details.label_creator')); ?><input value="<?php echo h($missionCreator); ?>" placeholder="<?php echo h(__t('common.creator_unknown')); ?>" readonly></label>
-                <label class="form-grid-span-2"><?php echo h(__t('mission_details.label_notes')); ?><textarea name="mission_notes" <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo h(form_old('update', 'mission_notes', (string) ($mission['mission_notes'] ?? ''))); ?></textarea><?php echo form_error_html('update', 'mission_notes'); ?></label>
+                <label class="form-grid-span-2"><?php echo h(__t('mission_details.label_notes')); ?><textarea name="mission_notes"<?php echo form_control_attrs('update', 'mission_notes'); ?> <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo h(form_old('update', 'mission_notes', (string) ($mission['mission_notes'] ?? ''))); ?></textarea><?php echo form_error_html('update', 'mission_notes'); ?></label>
 
                 <?php
                 // ESXi autostart defaults (ADR-0025). These become the target host's
@@ -287,7 +293,8 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                 $waitHeartbeatOn = form_old('update', 'autostart_wait_for_heartbeat', (string) ((int) ($mission['autostart_wait_for_heartbeat'] ?? 0))) === '1';
                 $missionStopAction = form_old('update', 'autostart_stop_action', (string) ($mission['autostart_stop_action'] ?? VIRTUSPHERE_MISSION_AUTOSTART_DEFAULTS['autostart_stop_action']));
                 ?>
-                <div class="form-grid-full">
+                <?php $autostartHintId = form_hint_id('update', 'autostart_group'); $heartbeatHintId = form_hint_id('update', 'autostart_heartbeat'); ?>
+                <div class="form-grid-full" role="group"<?php echo form_control_attrs('update', 'autostart_group', null, [$autostartHintId, $heartbeatHintId], ''); ?>>
                     <span class="field-label"><?php echo h(__t('mission_details.autostart_heading')); ?></span>
                     <div class="checkbox-grid checkbox-grid-aligned">
                         <label class="checkbox-item">
@@ -301,20 +308,21 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
                             <?php echo h(__t('mission_details.autostart_wait_heartbeat')); ?>
                         </label>
                     </div>
-                    <p class="hint"><?php echo h(__t('mission_details.autostart_hint')); ?></p>
-                    <p class="hint"><span class="hint-subject"><?php echo h(__t('mission_details.autostart_wait_heartbeat')); ?>:</span> <?php echo h(__t('mission_details.autostart_heartbeat_hint')); ?></p>
+                    <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('mission_details.autostart_hint')); ?></p>
+                    <p class="hint" id="<?php echo h($heartbeatHintId); ?>"><span class="hint-subject"><?php echo h(__t('mission_details.autostart_wait_heartbeat')); ?>:</span> <?php echo h(__t('mission_details.autostart_heartbeat_hint')); ?></p>
                 </div>
-                <label><?php echo h(__t('mission_details.autostart_start_delay')); ?><input type="number" name="autostart_start_delay" min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo h(form_old('update', 'autostart_start_delay', (string) ((int) ($mission['autostart_start_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT)))); ?>" <?php echo $missionWrite ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'autostart_start_delay'); ?></label>
-                <label><?php echo h(__t('mission_details.autostart_stop_delay')); ?><input type="number" name="autostart_stop_delay" min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo h(form_old('update', 'autostart_stop_delay', (string) ((int) ($mission['autostart_stop_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT)))); ?>" <?php echo $missionWrite ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'autostart_stop_delay'); ?></label>
+                <?php $delayHintId = form_hint_id('update', 'autostart_delays'); ?>
+                <label><?php echo h(__t('mission_details.autostart_start_delay')); ?><input type="number" name="autostart_start_delay"<?php echo form_control_attrs('update', 'autostart_start_delay', null, [$delayHintId]); ?> min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo h(form_old('update', 'autostart_start_delay', (string) ((int) ($mission['autostart_start_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT)))); ?>" <?php echo $missionWrite ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'autostart_start_delay'); ?></label>
+                <label><?php echo h(__t('mission_details.autostart_stop_delay')); ?><input type="number" name="autostart_stop_delay"<?php echo form_control_attrs('update', 'autostart_stop_delay', null, [$delayHintId]); ?> min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo h(form_old('update', 'autostart_stop_delay', (string) ((int) ($mission['autostart_stop_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT)))); ?>" <?php echo $missionWrite ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'autostart_stop_delay'); ?></label>
                 <label><?php echo h(__t('mission_details.autostart_stop_action')); ?>
-                    <select name="autostart_stop_action" <?php echo $missionWrite ? '' : 'disabled'; ?>>
+                    <select name="autostart_stop_action"<?php echo form_control_attrs('update', 'autostart_stop_action'); ?> <?php echo $missionWrite ? '' : 'disabled'; ?>>
                         <?php foreach (VIRTUSPHERE_AUTOSTART_STOP_ACTIONS as $stopActionValue) { ?>
                             <option value="<?php echo h($stopActionValue); ?>" <?php echo $missionStopAction === $stopActionValue ? 'selected' : ''; ?>><?php echo h(__t('mission_details.autostart_stop_' . $stopActionValue)); ?></option>
                         <?php } ?>
                     </select>
                     <?php echo form_error_html('update', 'autostart_stop_action'); ?>
                 </label>
-                <p class="hint form-grid-span-2"><?php echo h(__t('mission_details.autostart_delay_hint')); ?></p>
+                <p class="hint form-grid-span-2" id="<?php echo h($delayHintId); ?>"><?php echo h(__t('mission_details.autostart_delay_hint')); ?></p>
             </div>
             <?php if (can('missions.write', $user)) { ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
         </form>
@@ -326,7 +334,7 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
             <form class="form-grid" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="clone_template">
-                <label><?php echo h(__t('mission_details.target_mission_name')); ?><input name="target_mission_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('clone', 'target_mission_name')); ?>"<?php echo form_input_class('clone', 'target_mission_name'); ?> required><?php echo form_error_html('clone', 'target_mission_name'); ?></label>
+                <label><?php echo h(__t('mission_details.target_mission_name')); ?><input name="target_mission_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('clone', 'target_mission_name')); ?>"<?php echo form_control_attrs('clone', 'target_mission_name'); ?> required><?php echo form_error_html('clone', 'target_mission_name'); ?></label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('mission_details.copy')); ?></button></div>
             </form>
         </section>
@@ -339,7 +347,7 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
             <form class="form-grid" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_as_template">
-                <label><?php echo h(__t('mission_details.template_name')); ?><input name="target_template_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('save_template', 'target_template_name', VIRTUSPHERE_TEMPLATE_PREFIX . ($mission['mission_name'] ?? ''))); ?>"<?php echo form_input_class('save_template', 'target_template_name'); ?> required><?php echo form_error_html('save_template', 'target_template_name'); ?></label>
+                <label><?php echo h(__t('mission_details.template_name')); ?><input name="target_template_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('save_template', 'target_template_name', VIRTUSPHERE_TEMPLATE_PREFIX . ($mission['mission_name'] ?? ''))); ?>"<?php echo form_control_attrs('save_template', 'target_template_name'); ?> required><?php echo form_error_html('save_template', 'target_template_name'); ?></label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('mission_details.save_as_template')); ?></button></div>
             </form>
         </section>

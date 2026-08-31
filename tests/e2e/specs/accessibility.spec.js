@@ -13,6 +13,7 @@ const AxeBuilder = require('@axe-core/playwright').default;
 const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
+const { formReferenceProblems } = require('../lib/form-accessibility');
 
 const THEMES = ['light', 'dark'];
 const MARK = 'e2ea11y';
@@ -71,6 +72,12 @@ for (const pageDef of PORTAL_PAGES) {
           element.open = true;
         });
       });
+
+      const formProblems = await formReferenceProblems(page);
+      expect(
+        formProblems,
+        `form accessibility references on ${pageLabel(pageDef)} (${theme})\n${formProblems.join('\n')}`
+      ).toEqual([]);
 
       const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
 

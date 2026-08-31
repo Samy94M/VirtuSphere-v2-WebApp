@@ -40,20 +40,21 @@ declare(strict_types=1);
 
         <section class="panel">
             <h2><?php echo h(__t('settings.https_upload_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.https_upload_hint')); ?></p>
-            <form class="form-grid" method="post" action="settings.php" enctype="multipart/form-data" autocomplete="off">
+            <?php $httpsUploadHintId = form_hint_id('https_upload', 'upload_group'); ?>
+            <p class="muted" id="<?php echo h($httpsUploadHintId); ?>"><?php echo h(__t('settings.https_upload_hint')); ?></p>
+            <form class="form-grid" method="post" action="settings.php"<?php echo form_control_attrs('https_upload', 'upload_group', null, [$httpsUploadHintId], ''); ?> role="group" enctype="multipart/form-data" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="upload_https_cert">
                 <label><?php echo h(__t('settings.https_cert_label')); ?>
-                    <input name="cert_file" type="file"<?php echo form_input_class('https_upload', 'cert_file'); ?>>
+                    <input name="cert_file" type="file"<?php echo form_control_attrs('https_upload', 'cert_file'); ?>>
                     <?php echo form_error_html('https_upload', 'cert_file'); ?>
                 </label>
                 <label><?php echo h(__t('settings.https_key_label')); ?>
-                    <input name="key_file" type="file"<?php echo form_input_class('https_upload', 'key_file'); ?>>
+                    <input name="key_file" type="file"<?php echo form_control_attrs('https_upload', 'key_file'); ?>>
                     <?php echo form_error_html('https_upload', 'key_file'); ?>
                 </label>
                 <label><?php echo h(__t('settings.https_password_label')); ?>
-                    <input name="pfx_password" type="password" autocomplete="off"<?php echo form_input_class('https_upload', 'pfx_password'); ?>>
+                    <input name="pfx_password" type="password" autocomplete="off"<?php echo form_control_attrs('https_upload', 'pfx_password'); ?>>
                     <?php echo form_error_html('https_upload', 'pfx_password'); ?>
                 </label>
                 <?php

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/repo/vms_modules.php';
+
 final class PhaseCContractTest extends TestCase
 {
     public function testErrorPagesOnlyExposeDetailsBehindDebugFlag(): void
@@ -116,7 +118,10 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('virtusphere_normalize_mac', $importPlanner);
         self::assertStringContainsString('duplicate_macs', $import);
 
-        $vms = $this->source('lib/repo/vms.php');
+        $vms = implode("\n", array_map(
+            fn (string $module): string => $this->source($module),
+            VIRTUSPHERE_VM_REPO_MODULES
+        ));
         self::assertStringContainsString('function repo_vm_name_conflict_global', $vms);
         self::assertStringContainsString('netbiosHostname', $vms);
 

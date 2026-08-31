@@ -22,12 +22,12 @@ declare(strict_types=1);
     <div class="stack" id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" data-tab-panel hidden>
         <section class="panel" id="panel-time">
             <h2><?php echo h(__t('settings.time_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.time_hint')); ?></p>
+            <p class="muted" id="<?php echo h(form_hint_id('timezone', 'timezone')); ?>"><?php echo h(__t('settings.time_hint')); ?></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_timezone">
                 <label><?php echo h(__t('settings.timezone_label')); ?>
-                    <select name="timezone"<?php echo form_input_class('timezone', 'timezone'); ?>>
+                    <select name="timezone"<?php echo form_control_attrs('timezone', 'timezone', null, true); ?>>
                         <?php $selectedTz = form_old('timezone', 'timezone', $currentTimezone); ?>
                         <?php foreach ($timezoneGroups as $groupKey => $identifiers) { ?>
                             <optgroup label="<?php echo h(__t('settings.timezone_group_' . $groupKey)); ?>">
@@ -59,12 +59,12 @@ declare(strict_types=1);
 
         <section class="panel" id="panel-session">
             <h2><?php echo h(__t('settings.session_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.session_hint')); ?></p>
+            <p class="muted" id="<?php echo h(form_hint_id('session', 'session_lifetime_minutes')); ?>"><?php echo h(__t('settings.session_hint')); ?></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_session">
                 <label><?php echo h(__t('settings.session_label')); ?>
-                    <input name="session_lifetime_minutes" type="number" min="<?php echo h((string) VIRTUSPHERE_SESSION_LIFETIME_MINUTES_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_SESSION_LIFETIME_MINUTES_MAX); ?>" value="<?php echo h(form_old('session', 'session_lifetime_minutes', $sessionLifetimeMinutes)); ?>"<?php echo form_input_class('session', 'session_lifetime_minutes'); ?>>
+                    <input name="session_lifetime_minutes" type="number" min="<?php echo h((string) VIRTUSPHERE_SESSION_LIFETIME_MINUTES_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_SESSION_LIFETIME_MINUTES_MAX); ?>" value="<?php echo h(form_old('session', 'session_lifetime_minutes', $sessionLifetimeMinutes)); ?>"<?php echo form_control_attrs('session', 'session_lifetime_minutes', null, true); ?>>
                     <?php echo form_error_html('session', 'session_lifetime_minutes'); ?>
                 </label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
@@ -73,12 +73,12 @@ declare(strict_types=1);
 
         <section class="panel" id="panel-password-policy">
             <h2><?php echo h(__t('settings.password_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.password_hint')); ?></p>
+            <p class="muted" id="<?php echo h(form_hint_id('password_policy', 'password_min_length')); ?>"><?php echo h(__t('settings.password_hint')); ?></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_password_policy">
                 <label><?php echo h(__t('settings.password_label')); ?>
-                    <input name="password_min_length" type="number" min="<?php echo h((string) VIRTUSPHERE_PASSWORD_MIN_LENGTH_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_PASSWORD_MIN_LENGTH_MAX); ?>" value="<?php echo h(form_old('password_policy', 'password_min_length', $passwordMinLength)); ?>"<?php echo form_input_class('password_policy', 'password_min_length'); ?>>
+                    <input name="password_min_length" type="number" min="<?php echo h((string) VIRTUSPHERE_PASSWORD_MIN_LENGTH_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_PASSWORD_MIN_LENGTH_MAX); ?>" value="<?php echo h(form_old('password_policy', 'password_min_length', $passwordMinLength)); ?>"<?php echo form_control_attrs('password_policy', 'password_min_length', null, true); ?>>
                     <?php echo form_error_html('password_policy', 'password_min_length'); ?>
                 </label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>

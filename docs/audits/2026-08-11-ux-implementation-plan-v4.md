@@ -395,6 +395,23 @@ Der VM-Editor-Fehlerpfad `vm_field_error()` wird als Wrapper auf dieselbe Kernlo
 - Visual-Screenshots
 - `docs/QA.md`, Formular-/Portalhilfe, DE/EN-Texte, Changelog und dauerhafte Formularregeln sind innerhalb der Etappe synchronisiert; Audit-, Job-, Containerlogs und Wire-Verträge sind geprüft und begründet nicht betroffen, sofern die Inventur keinen tatsächlich sichtbaren Fehlertext darin findet.
 
+Umsetzungsstand 2026-08-31: Diese UX-Etappe wurde als Masterplan-Etappe 14
+abgeschlossen. Die Vorher-Matrix und ihre vollständig abgearbeitete
+Ownerliste liegen in
+`docs/audits/2026-08-31-form-accessibility-migration-matrix.md`. Die gemeinsame
+API, die VM-/Settings-Migration, die dynamischen Deploy-/Repeat-Verträge sowie
+Static-, DOM-, axe-, Tastatur- und Accessibility-Tree-Nachweise sind dort
+beidseitig auf die konkreten Dateien und Tests abgebildet. Die kanonische
+Fast-Lane bestand 29/29 Gates. Im vollständigen Integrationlauf bestanden 35
+von 36 Gates; der einzige Befund war ein historischer E2E-Selektor auf die vor
+der Migration manuell vergebene Passwort-ID. Nach seiner Umstellung auf die
+stabile ID der gemeinsamen API bestand das vollständig wiederholte
+`e2e-portal`-Gate mit 241 Chromium-Fällen und vier deterministischen
+Hell-/Dunkel-Läufen. Damit ist die aktuelle Abnahmemenge aller 36
+Integration-Gates grün; die unveränderten 35 Gates stammen aus dem unmittelbar
+vorherigen Komplettlauf, der einzige betroffene Gate wurde vollständig
+wiederholt.
+
 ---
 
 ## Etappe 4 – Navigation, Tabellen und Operatorfilter

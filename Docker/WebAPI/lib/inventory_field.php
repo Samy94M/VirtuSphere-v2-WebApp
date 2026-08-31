@@ -32,7 +32,7 @@ require_once __DIR__ . '/format.php';
  * @param array{buckets?:array<int,array<string,mixed>>, names:array<int,string>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $options
  * @param array{
  *     name:string, value:string, empty_label:string, unknown_suffix:string,
- *     required?:bool, disabled?:bool, input_placeholder?:string
+ *     required?:bool, disabled?:bool, input_placeholder?:string, attributes?:string
  * } $config
  */
 function inventory_select_field(array $options, array $config): void
@@ -40,13 +40,14 @@ function inventory_select_field(array $options, array $config): void
     $value = (string) $config['value'];
     $required = !empty($config['required']);
     $disabled = !empty($config['disabled']);
+    $attributes = (string) ($config['attributes'] ?? '');
 
     // Empty inventory of this kind: nothing to offer, so the field stays a plain
     // input. Decided server-side, so the escape hatch also works without JS.
     if ($options['names'] === []) {
         $placeholder = (string) ($config['input_placeholder'] ?? '');
         ?>
-        <input name="<?php echo h($config['name']); ?>" value="<?php echo h($value); ?>"
+        <input name="<?php echo h($config['name']); ?>" value="<?php echo h($value); ?>"<?php echo $attributes; ?>
                <?php echo $placeholder !== '' ? 'placeholder="' . h($placeholder) . '"' : ''; ?>
                <?php echo $required ? 'required' : ''; ?>
                <?php echo $disabled ? 'readonly' : ''; ?>>
@@ -63,7 +64,7 @@ function inventory_select_field(array $options, array $config): void
     // validation comes back through form_old() and renders as this option.
     $showUnknown = $value !== '' && !in_array($value, $options['names'], true);
     ?>
-    <select name="<?php echo h($config['name']); ?>" <?php echo $required ? 'required' : ''; ?> <?php echo $disabled ? 'disabled' : ''; ?>>
+    <select name="<?php echo h($config['name']); ?>"<?php echo $attributes; ?> <?php echo $required ? 'required' : ''; ?> <?php echo $disabled ? 'disabled' : ''; ?>>
         <option value=""><?php echo h($config['empty_label']); ?></option>
         <?php if ($showUnknown) { ?>
             <option value="<?php echo h($value); ?>" selected><?php echo h($value); ?> (<?php echo h($config['unknown_suffix']); ?>)</option>
@@ -166,12 +167,12 @@ function inventory_select_option(string $optionName, string $value, array $freeB
  * @param array<int, array<string, mixed>> $vlans active catalog rows (vlan_name)
  * @param array{none: string, unknown_suffix: string} $labels
  */
-function vlan_select_field(string $name, string $value, array $vlans, array $labels, bool $disabled = false): void
+function vlan_select_field(string $name, string $value, array $vlans, array $labels, bool $disabled = false, string $attributes = ''): void
 {
     $vlanNames = array_map(static fn (array $v): string => (string) ($v['vlan_name'] ?? ''), $vlans);
     $unknown = $value !== '' && !in_array($value, $vlanNames, true);
     ?>
-    <select name="<?php echo h($name); ?>" <?php echo $disabled ? 'disabled' : ''; ?>>
+    <select name="<?php echo h($name); ?>"<?php echo $attributes; ?> <?php echo $disabled ? 'disabled' : ''; ?>>
         <option value=""><?php echo h($labels['none']); ?></option>
         <?php if ($unknown) { ?>
             <option value="<?php echo h($value); ?>" selected><?php echo h($value); ?> (<?php echo h($labels['unknown_suffix']); ?>)</option>
