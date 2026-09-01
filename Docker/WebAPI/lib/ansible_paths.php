@@ -35,6 +35,10 @@ function ansible_required_files(): array
     return array_merge(
         array_values(VIRTUSPHERE_PLAYBOOKS),
         array_values(VIRTUSPHERE_SYSTEM_PLAYBOOKS),
+        // The per-VM create control files (Etappe 14B). They belong to no mode,
+        // so neither playbook map carries them, and they would be the exact
+        // repeat of the inventory-playbook defect if they were only dispatched.
+        VIRTUSPHERE_CREATE_ARTIFACTS,
         [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT]
     );
 }

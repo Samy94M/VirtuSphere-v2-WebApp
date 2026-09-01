@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/ansible_command_shell.php';
+require_once __DIR__ . '/ansible_command_probes.php';
 
 /**
  * The Ansible host preflight: which components are checked before a deploy or
@@ -78,31 +79,22 @@ function ansible_preflight_checks(bool $strict = false): array
         // The JSON probe therefore verifies the exact key and stays silent on
         // success; only its bounded failure diagnostics reach the job log.
         'community.vmware' => ansible_collection_probe_command($collectionModule),
+        // Presence is not readiness (Etappe 14B, plan 12.2). The incident report
+        // named ansible-core 2.16.3 on the production host while the pinned
+        // collection requires 2.19 or newer, and every check above passes on
+        // such a host: ansible-playbook exists, python imports, and ansible-doc
+        // reads documentation without loading a module. The version pair is
+        // therefore checked as its own component, and it is read from the
+        // INSTALLED artifacts on the host rather than from a second version pair
+        // written into PHP.
+        'runtime-versions' => ansible_runtime_version_probe_command(ansible_pinned_collection_version()),
+        // The async state directory a per-VM create needs: creatable with 0700,
+        // writable with 0600, removable again. A host whose home is read-only or
+        // whose umask forbids the mode fails here, before a job has started a
+        // VM it can then no longer observe. Uses mktemp, so it never touches the
+        // directory of a running job.
+        'async-workspace' => ansible_async_workspace_probe_command(),
     ];
-}
-
-function ansible_collection_probe_command(string $module): string
-{
-    $source = <<<'PY'
-import json, subprocess, sys
-module = sys.argv[1]
-result = subprocess.run(
-    ["ansible-doc", "-t", "module", "--json", module],
-    capture_output=True,
-    text=True,
-)
-try:
-    documents = json.loads(result.stdout)
-except (TypeError, ValueError):
-    documents = {}
-if result.returncode != 0 or not isinstance(documents, dict) or module not in documents:
-    sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
-    raise SystemExit(result.returncode or 1)
-PY;
-
-    return 'command -v ansible-doc >/dev/null 2>&1 && python3 -c '
-        . ansible_sh_quote($source) . ' ' . ansible_sh_quote($module) . ' 2>&1';
 }
 
 /**

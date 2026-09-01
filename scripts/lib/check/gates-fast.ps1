@@ -272,6 +272,29 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'Powercycle-Auswahl gegen Fixtures bewiesen (an/aus/suspendiert/kaputt/leer)' 'Powercycle-Auswahl weicht vom Vertrag ab'
     }
 
+    Add-Gate -Name 'ansible-create-async' -Lanes $allLanes -Kind 'container' -Body {
+        # Die Async-Naht des per-VM-Create ohne ESXi: ein Start mit poll 0 gibt
+        # eine wiederauffindbare Job-ID zurueck, eine eigene spaetere Abfrage
+        # findet sie im dedizierten Verzeichnis, meldet erst laufend und dann
+        # fertig, und der gezielte Cleanup entfernt genau diese eine
+        # Statusdatei. Statt vmware_guest laeuft ein sleep: die Naht gehoert
+        # ansible-core, nicht der Collection.
+        #
+        # Der wichtigste Fall ist der unangenehme: eine unbekannte Job-ID
+        # antwortet mit finished=1 und, unter failed_when: false, mit
+        # failed=false. Ein verlorener Job saehe damit aus wie ein fertiger,
+        # weshalb das Status-Playbook seine Unterscheidung auf die Anwesenheit
+        # der Statusdatei stuetzt. Die Fixture pinnt beides.
+        $fixture = Join-Path $repoRoot 'Docker/qa-ansible/create-async-fixtures.yml'
+        if (-not (Test-Path $fixture)) { return New-InfraResult 'create-async-fixtures.yml fehlt unter dem Pruef-Root (Zero-Match)' }
+        if (-not (Test-DockerImage $toolImages.ansible)) {
+            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+        }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $toolImages.ansible, 'ansible-playbook', '/repo/Docker/qa-ansible/create-async-fixtures.yml')
+        Format-ToolResult $r 'Async-Start, Wiederauffinden, Poll und gezielter Cleanup bewiesen' 'Async-Vertrag des per-VM-Create verletzt'
+    }
+
     Add-Gate -Name 'ansible-output-buffering' -Lanes $allLanes -Kind 'container' -Body {
         # Warum ein Gate fuer eine Umgebungsvariable: Der Create-Auftrag vom
         # 13.08.2026 endete mit "no output for 1800 seconds", waehrend vierzehn

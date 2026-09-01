@@ -100,6 +100,12 @@ const FILE_SIZE_ALLOWANCES = [
     // Raised: credentials.php 451->479 and constants.php 603->641 (the audit event
     // registry's endpoint list/report-channel version plus the Etappe-10D
     // PowerShell log help mirrors), migrate.php 1220->1222 (migration 0044).
+    // Etappe 14B raised ansible_yaml.php 543->545: the generated serverlist
+    // gained portal_vm_id, the selector a per-VM create playbook picks its one
+    // target by. That is one emitted field plus its one-line reason, and the
+    // serializer stays the single coherent thing it was. The preflight module
+    // was NOT raised in the same stage: it crossed the plain budget and was
+    // split into lib/ansible_command_probes.php instead.
     // Etappe 14B raised migrate.php 1248->1250: migration 0047 costs the
     // registry exactly its require line and its map entry, which is the growth
     // the registry exists for. Its body lives in lib/migrations/ like every
@@ -117,8 +123,8 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/ansible_yaml.php' => [
-        'lines' => 543,
-        'why' => 'one coherent serializer; semantically untouched by the current plan',
+        'lines' => 545,
+        'why' => 'one coherent serializer; grew by the one artifact field Etappe 14B needed',
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/repo/missions.php' => [

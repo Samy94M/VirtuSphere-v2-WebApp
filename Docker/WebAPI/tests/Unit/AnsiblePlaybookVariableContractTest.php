@@ -29,6 +29,8 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         'default', 'int', 'bool', 'length', 'list', 'map', 'attribute', 'lower',
         'first', 'selectattr', 'rejectattr', 'combine', 'dict2items', 'flatten',
         'to_json', 'to_nice_json', 'b64encode', 'trim', 'lookup',
+        // Filters and tests the create control playbooks use (Etappe 14B).
+        'string', 'replace', 'truncate', 'match', 'equalto',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',
         'true', 'false', 'True', 'False', 'none', 'None',
         'item', 'ansible_date_time', 'ansible_facts', 'hostvars',
@@ -53,6 +55,17 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
                 $provided = array_merge($provided, $accountKeys);
             }
             $provided = array_merge($provided, $this->locallyDefinedNames($source));
+            // Third source, next to the two generated files: the extra-vars the
+            // worker passes to a create control playbook. Declared in
+            // VIRTUSPHERE_CREATE_EXTRA_VARS rather than listed here, and checked
+            // in the other direction below, so a playbook cannot read a name
+            // nobody passes and a declaration cannot outlive its reader.
+            $provided = array_merge($provided, VIRTUSPHERE_CREATE_EXTRA_VARS[$name] ?? []);
+            // Names a file included with include_tasks defines. Without this a
+            // playbook could not use an include at all, and the shared identity
+            // check exists precisely so three playbooks do not each keep their
+            // own copy of that matrix.
+            $provided = array_merge($provided, $this->includedTaskNames($source));
 
             foreach ($this->rootIdentifiers($source) as $root) {
                 self::assertContains(
@@ -204,6 +217,54 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         }
 
         return $playbooks;
+    }
+
+    /**
+     * Names defined by every task file this source includes.
+     *
+     * @return string[]
+     */
+    private function includedTaskNames(string $source): array
+    {
+        preg_match_all('/include_tasks:\s*\.\/([\w.-]+\.yml)/', $source, $matches);
+        $names = [];
+        foreach (array_unique($matches[1]) as $file) {
+            $path = ansible_source_dir() . DIRECTORY_SEPARATOR . $file;
+            self::assertFileExists($path, 'A playbook includes ' . $file . ', which is not in the Ansible source directory.');
+            $names = array_merge($names, $this->locallyDefinedNames((string) file_get_contents($path)));
+        }
+
+        return $names;
+    }
+
+    public function testEveryDeclaredCreateExtraVarIsReadBySomePlaybook(): void
+    {
+        // The reverse direction of the extra-var declaration. A name that no
+        // playbook reads any more would keep the worker passing something into
+        // nothing, and the next reader of the constant would believe it matters.
+        $playbooks = $this->playbooks();
+        foreach (VIRTUSPHERE_CREATE_EXTRA_VARS as $playbook => $names) {
+            self::assertArrayHasKey($playbook, $playbooks, 'Extra-vars are declared for a playbook that does not exist.');
+            $source = $playbooks[$playbook] . "\n" . implode("\n", array_map(
+                fn (string $file): string => (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $file),
+                $this->includedTaskFiles($playbooks[$playbook])
+            ));
+            foreach ($names as $variable) {
+                self::assertStringContainsString(
+                    $variable,
+                    $source,
+                    sprintf('%s declares the extra-var "%s", which the playbook never reads.', $playbook, $variable)
+                );
+            }
+        }
+    }
+
+    /** @return string[] */
+    private function includedTaskFiles(string $source): array
+    {
+        preg_match_all('/include_tasks:\s*\.\/([\w.-]+\.yml)/', $source, $matches);
+
+        return array_values(array_unique($matches[1]));
     }
 
     /**

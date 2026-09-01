@@ -83,6 +83,17 @@ final class EsxiTrustModeTest extends TestCase
         self::assertIsArray($paths);
         self::assertNotEmpty($paths, 'zero-match: no playbook found');
 
+        // Not only the files whose name ends in _playbook.yml. The per-VM create
+        // (Etappe 14B) moved the shared identity query into a task file that
+        // three playbooks include, and a scan over the naming convention alone
+        // would have left the one file that actually issues a VMware call
+        // outside the trust contract. The registry names them, not a glob.
+        foreach (VIRTUSPHERE_CREATE_ARTIFACTS as $artifact) {
+            if (str_ends_with($artifact, '.yml') && !str_contains($artifact, '_playbook')) {
+                $paths[] = ansible_source_dir() . DIRECTORY_SEPARATOR . $artifact;
+            }
+        }
+
         $vmwarePlaybooks = 0;
         foreach ($paths as $path) {
             $source = file_get_contents($path);
@@ -93,10 +104,16 @@ final class EsxiTrustModeTest extends TestCase
             $vmwarePlaybooks++;
             self::assertStringNotContainsString('validate_certs: false', $source, basename($path));
             self::assertStringContainsString('validate_certs: "{{ esxi_validate_certs | bool }}"', $source, basename($path));
+            if (!str_contains($path, '_playbook')) {
+                // An included task file has no play of its own; the CA bundle
+                // environment is inherited from the play that includes it, and
+                // every one of those plays is checked below.
+                continue;
+            }
             self::assertStringContainsString('SSL_CERT_FILE', $source, basename($path));
             self::assertStringContainsString('REQUESTS_CA_BUNDLE', $source, basename($path));
         }
-        self::assertSame(6, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook must share the trust contract');
+        self::assertSame(9, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook must share the trust contract');
     }
 
     public function testCertificateFailuresNeverFallThroughToParse(): void

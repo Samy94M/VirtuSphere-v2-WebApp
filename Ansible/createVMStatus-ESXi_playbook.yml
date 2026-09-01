@@ -1,0 +1,188 @@
+---
+# Eine Statusabfrage fuer genau eine Async-Job-ID (Etappe 14B).
+#
+# Kurzer Aufruf, kein Warten: `async_status` wird genau einmal gefragt. Läuft
+# der Job noch, ist das Ergebnis `running` und der Worker fragt später wieder.
+# Ist er terminal und erfolgreich, folgt die Live-Identitätsprüfung, denn ein
+# grünes Modulergebnis ist eine Aussage über den Modulaufruf, nicht über die VM.
+#
+# Extra-Vars des Workers:
+#   vs_portal_vm_id  die Portal-VM dieser Einheit
+#   vs_async_jid     die gespeicherte Job-ID
+#   vs_async_dir     absolutes Async-Verzeichnis des gebundenen Handles
+#   vs_result_file   absoluter Pfad der Resultatdatei
+- name: Status einer Create-Einheit abfragen
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  tasks:
+    - name: Genau eine Ziel-VM aufloesen
+      ansible.builtin.set_fact:
+        vs_targets: >-
+          {{
+            vm_configurations | default([])
+            | selectattr('portal_vm_id', 'equalto', vs_portal_vm_id | int) | list
+          }}
+
+    - name: Die Ziel-ID muss genau einmal vorkommen
+      ansible.builtin.assert:
+        that:
+          - vs_targets | length == 1
+        fail_msg: >-
+          VirtuSphere protocol error: portal_vm_id {{ vs_portal_vm_id }} matched
+          {{ vs_targets | length }} entries in serverlist.yml.
+
+    - name: Ziel-VM festlegen
+      ansible.builtin.set_fact:
+        vs_target: "{{ vs_targets | first }}"
+
+    # ZUERST die Statusdatei, dann die Abfrage. Der Grund ist gemessen, nicht
+    # angenommen (Gate ansible-create-async pinnt es): `async_status` antwortet
+    # auf eine verschwundene Job-ID mit `finished: true` und `msg: could not
+    # find job`, und unter `failed_when: false` steht dort zusaetzlich
+    # `failed: false`. Ein verlorener Job saehe damit aus wie ein fertiger, und
+    # die Einheit wuerde als Erfolg oder Fehlschlag verbucht, obwohl niemand
+    # weiss, was auf dem Host passiert ist. Die Anwesenheit der Statusdatei ist
+    # die strukturelle Antwort auf dieselbe Frage; die Meldung des Moduls ist
+    # freier Text und entscheidet hier nichts.
+    - name: Statusdatei des Async-Jobs pruefen
+      ansible.builtin.stat:
+        path: "{{ vs_async_dir }}/{{ vs_async_jid }}"
+      delegate_to: localhost
+      register: vs_async_state
+
+    - name: Verlorenen Async-Zustand strukturiert melden
+      when: not vs_async_state.stat.exists
+      block:
+        - name: Fehlenden Zustand schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': 'async_state_missing',
+                  'error': 'the async state file of this job id is gone'
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne Abfrage beenden
+          ansible.builtin.meta: end_play
+
+    # Genau eine Frage an den Async-Job. `failed_when: false` ist hier kein
+    # toleriertes Scheitern, sondern die Trennung der Ausgänge weiter unten: ein
+    # Modulfehler des Async-Jobs ist ein Ergebnis dieser Einheit und kein Fehler
+    # dieses Steueraufrufs.
+    - name: Async-Job genau einmal abfragen
+      ansible.builtin.async_status:
+        jid: "{{ vs_async_jid }}"
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      register: vs_status
+      failed_when: false
+      changed_when: false
+
+    - name: Noch laufend melden
+      when: not (vs_status.finished | default(0) | int == 1)
+      block:
+        - name: Laufzustand schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'running',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'async_jid': vs_async_jid | string
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne weitere Abfrage beenden
+          ansible.builtin.meta: end_play
+
+    - name: Terminalen Modulfehler melden
+      when: vs_status.failed | default(false) | bool
+      block:
+        # Die Ursache wird auf eine Zeile begrenzt und traegt keine
+        # Modulargumente: der Marker ist eine Diagnosezeile, kein Dump.
+        - name: Fehlschlag schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'failed',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'async_jid': vs_async_jid | string,
+                  'error': (vs_status.msg | default('the create module reported a failure'))
+                           | string | replace('\n', ' ') | truncate(1024, true, '')
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne Identitaetspruefung beenden
+          ansible.builtin.meta: end_play
+
+    # Erst hier: der Async-Job ist terminal und meldet Erfolg. Was das für die
+    # VM heisst, entscheidet die Live-Abfrage, nicht der Modulrueckgabewert.
+    # Ohne den Abgleich gegen die GESPEICHERTE Portal-UUID: die VM ist gerade
+    # erst entstanden, ihre dauerhafte Identitaet ist das Ergebnis dieses Laufs.
+    - name: Identitaet nach dem Erfolg pruefen
+      ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
+      vars:
+        vs_identity_require_stored_match: false
+
+    - name: Ein Erfolg muss eine live gefundene VM haben
+      ansible.builtin.assert:
+        that:
+          - vs_existed_before | bool
+          - vs_precheck_moid | length > 0
+          - vs_precheck_instance_uuid | length > 0
+        fail_msg: >-
+          VirtuSphere identity result invalid: the async job for
+          {{ vs_target.vm_name }} succeeded, but the live inventory does not
+          show exactly one VM with a durable identity.
+
+    - name: Aktuellen Energiezustand der Ziel-VM lesen
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: "{{ esxi_validate_certs | bool }}"
+        datacenter: "{{ vs_target.datacenter_name }}"
+        moid: "{{ vs_precheck_moid }}"
+      delegate_to: localhost
+      register: vs_guest
+
+    - name: Erfolg mit verifizierter Identitaet schreiben
+      ansible.builtin.copy:
+        dest: "{{ vs_result_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'event': 'succeeded',
+              'portal_vm_id': vs_target.portal_vm_id | int,
+              'vm_name': vs_target.vm_name,
+              'async_jid': vs_async_jid | string,
+              'changed': vs_status.changed | default(false) | bool,
+              'moid': vs_precheck_moid,
+              'instance_uuid': vs_precheck_instance_uuid,
+              'power_state': vs_guest.instance.hw_power_status | default('unknown')
+            } | to_nice_json
+          }}
+      delegate_to: localhost

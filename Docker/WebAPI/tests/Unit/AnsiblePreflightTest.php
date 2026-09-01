@@ -79,6 +79,39 @@ final class AnsiblePreflightTest extends TestCase
         self::assertStringNotContainsString('ansible-doc -t module community.vmware.vmware_guest 2>&1', $probe);
     }
 
+    public function testNoEmbeddedProbeSourceCarriesACarriageReturn(): void
+    {
+        // This file is checked out with CRLF on Windows and with LF elsewhere,
+        // and a heredoc carries whatever the checkout had. The carriage returns
+        // survive the shell quoting and reach the remote shell inside every
+        // line: the async probe failed on Alpine with "TERM: invalid signal
+        // specification" and "exit: Illegal number: 1", and it would have
+        // depended on where the image was built. Every embedded source is
+        // normalized, so the assertion is on the built command, not on the file.
+        foreach (ansible_preflight_checks() as $component => $command) {
+            self::assertStringNotContainsString(
+                "\r",
+                $command,
+                'the ' . $component . ' probe carries a carriage return into the remote shell'
+            );
+        }
+        self::assertStringNotContainsString("\r", ansible_preflight_command('http://portal.lan/', false, ''));
+    }
+
+    public function testTheRuntimeVersionProbeComparesAgainstTheInstalledArtifacts(): void
+    {
+        $probe = ansible_preflight_checks()['runtime-versions'];
+
+        // The pinned version travels as an argument, and the floor is read from
+        // the installed collection's own meta/runtime.yml. No second version
+        // pair in PHP: that is what would keep passing while it stops meaning
+        // the same thing.
+        self::assertStringContainsString(ansible_pinned_collection_version(), $probe);
+        self::assertStringContainsString('requires_ansible', $probe);
+        self::assertStringContainsString('ansible-galaxy', $probe);
+        self::assertSame('6.2.0', ansible_pinned_collection_version(), 'the pin is read from Ansible/requirements.yml');
+    }
+
     public function testPortalProbeIsAppendedOnlyWithAnApiBaseUrl(): void
     {
         self::assertStringNotContainsString('health.php', ansible_preflight_command(''));

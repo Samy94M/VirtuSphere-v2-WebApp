@@ -1,0 +1,90 @@
+---
+# Die eine Identitätsabfrage des per-VM-Create (Etappe 14B).
+#
+# Wird von Prepare, Launch und terminalem Status eingebunden. Es gibt bewusst
+# keine zweite Kopie dieser Matrix in den drei Playbooks: sie entscheidet, ob
+# eine vorhandene namensgleiche VM die eigene ist, und drei Fassungen davon
+# wären drei Antworten auf dieselbe Frage.
+#
+# Flache Datei statt `tasks/`-Unterverzeichnis: der SFTP-Upload des Auftrags
+# kopiert ausschließlich Dateien der obersten Ebene. Ein Unterverzeichnis würde
+# still nicht mit hochgeladen, und der Lauf stürbe erst auf dem Host an einer
+# fehlenden Datei; genau dieser Fehler ist in diesem Projekt schon einmal mit
+# dem Inventar-Playbook passiert.
+#
+# Erwartet: vs_target (genau ein Eintrag aus vm_configurations).
+# Setzt: vs_existed_before, vs_precheck_moid, vs_precheck_instance_uuid.
+#
+# vs_identity_require_stored_match (Standard: true) steuert die LETZTE
+# Zusicherung. Vor einer Mutation muss eine vorhandene namensgleiche VM die im
+# Portal gespeicherte UUID tragen, sonst ist sie fremd. Nach einem erfolgreichen
+# Async-Job gilt das ausdrücklich nicht: die VM wurde gerade erst erstellt, ihre
+# UUID ist genau das, was dieser Lauf zurückmeldet, und das Portal kann sie noch
+# nicht kennen. Die Prüfung gegen das eigene Prepare-Ergebnis übernimmt an der
+# Stelle das Launch-Playbook.
+
+- name: Live-Inventar fuer die Identitaetspruefung lesen
+  community.vmware.vmware_vm_info:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+  delegate_to: localhost
+  register: vs_identity_inventory
+
+- name: Namensgleiche VMs dieser einen Ziel-VM sammeln
+  ansible.builtin.set_fact:
+    vs_identity_matches: >-
+      {{
+        vs_identity_inventory.virtual_machines | default([])
+        | selectattr('guest_name', 'equalto', vs_target.vm_name) | list
+      }}
+
+# Zwei namensgleiche VMs sind kein Grund, sich für eine zu entscheiden. ESXi
+# erlaubt sie in getrennten Ordnern, und `state: present` würde die zuerst
+# gefundene anfassen.
+- name: Ein Name darf hoechstens eine VM bezeichnen
+  ansible.builtin.assert:
+    that:
+      - vs_identity_matches | length <= 1
+    fail_msg: >-
+      VirtuSphere identity conflict: the name {{ vs_target.vm_name }} exists
+      more than once on this host. Resolve the duplicate in the ESXi Host
+      Client before deploying.
+
+- name: Ergebnis der Identitaetspruefung festhalten
+  ansible.builtin.set_fact:
+    vs_existed_before: "{{ (vs_identity_matches | length) == 1 }}"
+    vs_precheck_moid: "{{ (vs_identity_matches | first).moid | default('') if (vs_identity_matches | length) == 1 else '' }}"
+    vs_precheck_instance_uuid: >-
+      {{ (vs_identity_matches | first).instance_uuid | default('')
+         if (vs_identity_matches | length) == 1 else '' }}
+
+# Eine vorhandene VM ohne dauerhafte Identität ist kein Fund, sondern ein
+# unbrauchbares Ergebnis: der Name allein beweist nichts, und ohne UUID kann
+# der spätere Launch nicht per UUID selektieren.
+- name: Eine vorhandene VM muss eine dauerhafte Identitaet haben
+  ansible.builtin.assert:
+    that:
+      - not (vs_existed_before | bool) or (vs_precheck_instance_uuid | length > 0 and vs_precheck_moid | length > 0)
+    fail_msg: >-
+      VirtuSphere identity result invalid: {{ vs_target.vm_name }} exists but
+      reports no durable instance UUID.
+
+# Die gespeicherte Identität des Portals entscheidet, ob eine vorhandene VM die
+# eigene ist. Ohne gespeicherte UUID ist eine namensgleiche VM eine fremde.
+- name: Eine vorhandene VM muss zur gespeicherten Identitaet gehoeren
+  when: vs_identity_require_stored_match | default(true) | bool
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (vs_existed_before | bool)
+        or (
+          (vs_target.vm_instance_uuid | default('') | trim | length > 0)
+          and (vs_target.vm_instance_uuid | lower == vs_precheck_instance_uuid | lower)
+        )
+    fail_msg: >-
+      VirtuSphere VM identity collision: {{ vs_target.vm_name }} already exists,
+      but its instance UUID is not the one stored by the portal. Use the
+      explicit adoption action after verifying the VM in the ESXi Host Client.

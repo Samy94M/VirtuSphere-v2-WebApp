@@ -1,0 +1,70 @@
+---
+# Read-only Vorbereitung genau einer Create-Einheit (Etappe 14B).
+#
+# Dieses Playbook verändert nichts. Es beantwortet für genau eine Portal-VM die
+# Frage, die vor jeder Mutation feststehen muss: existiert dort schon etwas, und
+# wenn ja, gehört es uns? Das Ergebnis schreibt es in eine lokale Resultatdatei,
+# aus der emit_create_result.py den einen Marker erzeugt.
+#
+# Der Worker ruft es mit genau zwei Extra-Vars auf:
+#   vs_portal_vm_id  die zu bearbeitende Portal-VM
+#   vs_result_file   absoluter Pfad der zu schreibenden Resultatdatei
+#
+# Die Auswahl erfolgt über portal_vm_id, nicht über den Namen: zwei Portal-VMs
+# dürfen Namen tragen, die sich nur in der Schreibweise unterscheiden, und ein
+# Name ist auch sonst nirgends in diesem System eine Identität.
+- name: Create-Einheit vorbereiten
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  tasks:
+    - name: Genau eine Ziel-VM aufloesen
+      ansible.builtin.set_fact:
+        vs_targets: >-
+          {{
+            vm_configurations | default([])
+            | selectattr('portal_vm_id', 'equalto', vs_portal_vm_id | int) | list
+          }}
+
+    # Null oder mehr als ein Treffer ist ein Protokollfehler und keine Arbeit:
+    # das Artefakt und der Auftrag beschreiben dann verschiedene Mengen.
+    - name: Die Ziel-ID muss genau einmal vorkommen
+      ansible.builtin.assert:
+        that:
+          - vs_targets | length == 1
+        fail_msg: >-
+          VirtuSphere protocol error: portal_vm_id {{ vs_portal_vm_id }} matched
+          {{ vs_targets | length }} entries in serverlist.yml.
+
+    - name: Ziel-VM festlegen
+      ansible.builtin.set_fact:
+        vs_target: "{{ vs_targets | first }}"
+
+    - name: Identitaet pruefen
+      ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
+
+    # `to_nice_json` schreibt genau die Felder unten und nichts sonst: kein
+    # registriertes Gesamtobjekt, keine invocation.module_args, keine
+    # Zugangsdaten. Modus 0600, weil die Datei im Handle-Verzeichnis liegt.
+    - name: Ergebnis der Vorbereitung schreiben
+      ansible.builtin.copy:
+        dest: "{{ vs_result_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'event': 'prepared',
+              'portal_vm_id': vs_target.portal_vm_id | int,
+              'vm_name': vs_target.vm_name,
+              'existed_before': vs_existed_before | bool,
+              'precheck_moid': (vs_precheck_moid if (vs_precheck_moid | length > 0) else None),
+              'precheck_instance_uuid': (vs_precheck_instance_uuid if (vs_precheck_instance_uuid | length > 0) else None)
+            } | to_nice_json
+          }}
+      delegate_to: localhost

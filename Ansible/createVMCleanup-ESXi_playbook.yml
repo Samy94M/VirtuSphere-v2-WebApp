@@ -1,0 +1,41 @@
+---
+# Gezielte Bereinigung der Statusdatei genau einer Async-Job-ID (Etappe 14B).
+#
+# `async_status` mit `mode: cleanup` entfernt die Statusdatei EINES Jobs im
+# angegebenen Verzeichnis. Kein Glob, kein `rm -rf`, kein Basisverzeichnis aus
+# dem Portal: die Job-ID hat der Worker vor dem Start gespeichert und gegen ihre
+# Zeichenklasse geprüft, und das Verzeichnis stammt aus dem gebundenen Handle.
+#
+# Dieses Playbook läuft erst, wenn das Ergebnis der Einheit committed ist. Eine
+# `uncertain`-Einheit wird ausdrücklich NICHT bereinigt, auch wenn ihre Frist
+# abgelaufen ist: ihre Statusdatei ist der einzige verbliebene Beweis über eine
+# VM, deren Ausgang niemand festgestellt hat, und eine Sicherheitsmarge ist kein
+# Löschbeweis. Wer aufräumen darf, entscheidet das Repository, nicht dieses
+# Playbook.
+#
+# Extra-Vars des Workers:
+#   vs_async_jid   die gespeicherte Job-ID
+#   vs_async_dir   absolutes Async-Verzeichnis des gebundenen Handles
+- name: Async-Statusdatei einer Create-Einheit entfernen
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Job-ID und Verzeichnis muessen gesetzt sein
+      ansible.builtin.assert:
+        that:
+          - vs_async_jid is defined
+          - vs_async_jid | string | length > 0
+          - vs_async_dir is defined
+          - vs_async_dir is match('^/')
+        fail_msg: >-
+          VirtuSphere protocol error: cleanup needs both an async job id and the
+          absolute async directory of its bound handle.
+
+    - name: Genau diesen Async-Job bereinigen
+      ansible.builtin.async_status:
+        jid: "{{ vs_async_jid }}"
+        mode: cleanup
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      delegate_to: localhost

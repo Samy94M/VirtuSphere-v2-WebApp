@@ -141,7 +141,9 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
     $out = "vm_configurations:\n";
 
     foreach ($vms as $vm) {
-        $out .= '  - vm_name: ' . ansible_yaml_string((string) ($vm['vm_name'] ?? '')) . "\n";
+        // Selector of the per-VM create (Etappe 14B); the name stays display.
+        $out .= '  - portal_vm_id: ' . (int) ($vm['id'] ?? 0) . "\n";
+        $out .= '    vm_name: ' . ansible_yaml_string((string) ($vm['vm_name'] ?? '')) . "\n";
         // Stage 9 identity: the name selects a candidate, the instance UUID
         // proves which VM owns it. MOID is carried as the current inventory
         // handle for diagnostics and refreshes, never as the durable identity.

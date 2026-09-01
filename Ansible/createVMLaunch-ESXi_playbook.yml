@@ -1,0 +1,151 @@
+---
+# Start genau einer Create-Einheit als Async-Job (Etappe 14B).
+#
+# Dieses Playbook mutiert, und zwar genau eine VM. Es wiederholt vorher die
+# Identitätsprüfung und vergleicht sie mit dem, was die Vorbereitung gespeichert
+# hat: alles, was sich seit dem Prepare geändert hat, führt VOR dem Modulaufruf
+# zu einem strukturierten `rejected` ohne JID und ohne Mutation. Freier
+# Fehlertext wird dafür nicht ausgewertet.
+#
+# Warum `poll: 0`: Der Controller startet den Modulaufruf und kehrt sofort
+# zurück; die Job-ID wird dauerhaft gespeichert, und ein späterer, eigener
+# Statusaufruf beobachtet dieselbe ID. Ein abgerissener SSH-Kanal nimmt damit
+# nicht mehr das Ergebnis mit, was der Vorfall vom 13.08.2026 war. `poll: 0` ist
+# hier ausdrücklich kein Parallelbetrieb: der Worker startet keine zweite
+# Einheit, solange diese nicht terminal ist.
+#
+# Extra-Vars des Workers:
+#   vs_portal_vm_id      die zu erstellende Portal-VM
+#   vs_result_file       absoluter Pfad der Resultatdatei
+#   vs_async_dir         absolutes Async-Verzeichnis des gebundenen Handles
+#   vs_async_timeout     Sekunden, nach denen Ansible den Async-Job aufgibt
+#   vs_expected_existed_before / vs_expected_moid / vs_expected_instance_uuid
+#                        das gespeicherte Ergebnis der Vorbereitung
+- name: Create-Einheit starten
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  tasks:
+    - name: Genau eine Ziel-VM aufloesen
+      ansible.builtin.set_fact:
+        vs_targets: >-
+          {{
+            vm_configurations | default([])
+            | selectattr('portal_vm_id', 'equalto', vs_portal_vm_id | int) | list
+          }}
+
+    - name: Die Ziel-ID muss genau einmal vorkommen
+      ansible.builtin.assert:
+        that:
+          - vs_targets | length == 1
+        fail_msg: >-
+          VirtuSphere protocol error: portal_vm_id {{ vs_portal_vm_id }} matched
+          {{ vs_targets | length }} entries in serverlist.yml.
+
+    - name: Ziel-VM festlegen
+      ansible.builtin.set_fact:
+        vs_target: "{{ vs_targets | first }}"
+
+    - name: Identitaet erneut pruefen
+      ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
+
+    # Der Vergleich mit dem gespeicherten Prepare-Ergebnis. Er schließt das
+    # Fenster zwischen Vorbereitung und Mutation so weit, wie es die vorhandene
+    # Standalone-ESXi-Schnittstelle zulässt.
+    - name: Abweichung zur Vorbereitung feststellen
+      ansible.builtin.set_fact:
+        vs_identity_drifted: >-
+          {{
+            (vs_existed_before | bool) != (vs_expected_existed_before | bool)
+            or (vs_precheck_moid | lower) != (vs_expected_moid | default('') | lower)
+            or (vs_precheck_instance_uuid | lower) != (vs_expected_instance_uuid | default('') | lower)
+          }}
+
+    - name: Abweichung strukturiert ablehnen, ohne zu mutieren
+      when: vs_identity_drifted | bool
+      block:
+        - name: Ablehnung schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': 'identity_conflict',
+                  'error': 'live identity differs from the prepared result'
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Lauf ohne Mutation beenden
+          ansible.builtin.meta: end_play
+
+    # Genau zwei geschlossene Selektionszweige. Im Absent-Zweig bekommt das
+    # Modul den Snapshotnamen und KEINE UUID. Im Vorhanden-Zweig bekommt es
+    # ausschließlich die bereits gebundene Instance-UUID, weil Ansible eine UUID
+    # bei einer Neuanlage ignoriert: eine nach der Prüfung verschwundene eigene
+    # VM würde sonst unter ihrem Namen neu entstehen.
+    - name: Genau eine VM erstellen oder konvergieren
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_hostname }}"
+        port: "{{ esxi_port | int }}"
+        username: "{{ esxi_username }}"
+        password: "{{ esxi_password }}"
+        validate_certs: "{{ esxi_validate_certs | bool }}"
+        name: "{{ vs_target.vm_name if not (vs_existed_before | bool) else omit }}"
+        uuid: "{{ vs_precheck_instance_uuid if (vs_existed_before | bool) else omit }}"
+        use_instance_uuid: "{{ true if (vs_existed_before | bool) else omit }}"
+        state: present
+        folder: "/"
+        guest_id: "{{ vs_target.guest_id }}"
+        datacenter: "{{ vs_target.datacenter_name }}"
+        datastore: "{{ vs_target.datastore_name }}"
+        disk: "{{ vs_target.disks }}"
+        hardware:
+          memory_mb: "{{ vs_target.memory }}"
+          num_cpus: "{{ vs_target.vcpus }}"
+          hotadd_cpu: "{{ vs_target.hotadd_cpu | default(true) }}"
+          hotadd_memory: "{{ vs_target.hotadd_memory | default(true) }}"
+          version: 21
+          scsi: lsilogicsas
+          secure_boot: true
+          boot_firmware: "efi"
+          vpmc_enabled: true
+        networks: "{{ vs_target.network }}"
+      delegate_to: localhost
+      vars:
+        # Seit ansible-core 2.12 wird das Async-Verzeichnis über diese Variable
+        # gewaehlt, nicht ueber ANSIBLE_ASYNC_DIR im Task-Environment. Der Pfad
+        # kommt aus dem persistierten Handle und nie aus dem Portal.
+        ansible_async_dir: "{{ vs_async_dir }}"
+      async: "{{ vs_async_timeout | int }}"
+      poll: 0
+      register: vs_launch
+
+    - name: Start mit dauerhafter Job-ID festhalten
+      ansible.builtin.copy:
+        dest: "{{ vs_result_file }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'event': 'launched',
+              'portal_vm_id': vs_target.portal_vm_id | int,
+              'vm_name': vs_target.vm_name,
+              'async_jid': vs_launch.ansible_job_id | string,
+              'async_dir': vs_async_dir,
+              'existed_before': vs_existed_before | bool,
+              'precheck_moid': (vs_precheck_moid if (vs_precheck_moid | length > 0) else None),
+              'precheck_instance_uuid': (vs_precheck_instance_uuid if (vs_precheck_instance_uuid | length > 0) else None)
+            } | to_nice_json
+          }}
+      delegate_to: localhost

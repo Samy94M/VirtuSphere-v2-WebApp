@@ -267,6 +267,17 @@ function ansible_remote_steps(string $remoteDir, array $payload, bool $autostart
         // ADR-0032: opaque diagnostic id for the whole remote sequence; remote
         // tooling passes it through, nothing parses it.
         'export VS_CORRELATION_ID=' . ansible_sh_quote(virtusphere_correlation_id()),
+        // Etappe 14B. Python block-buffers stdout as soon as it is not a
+        // terminal, and the worker reads through an SSH pipe: without this, the
+        // result lines of a long loop sit in the buffer until the process ends.
+        // That is what the 13.08.2026 incident was - "no output for 1800
+        // seconds" over a create task that was still running, and fourteen of
+        // fifteen VMs appeared on ESXi afterwards. It is set here, once, for
+        // every playbook of every mode, because a progress marker in a playbook
+        // repairs nothing while its line is still in a buffer.
+        // The gate `ansible-output-buffering` measures both cases in the pinned
+        // QA image, so this line cannot quietly stop working.
+        'export PYTHONUNBUFFERED=1',
     ];
 
     $steps = [];

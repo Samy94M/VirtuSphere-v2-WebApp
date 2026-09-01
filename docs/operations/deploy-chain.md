@@ -210,6 +210,24 @@ Was diese Zeile bewusst NICHT besitzt: das Async-Verzeichnis, die Cleanup-Zähle
 
 Aufträge, die vor dieser Etappe eingereiht wurden, besitzen keine solchen Zeilen und bleiben unverändert lesbar. Ausgeführt wird der neue Ablauf noch nicht: Create und Full bleiben bis zur Standortabnahme gesperrt.
 
+## Der Einzel-VM-Vertrag des Create (Etappe 14B, vorbereitet)
+
+Jeder durch VirtuSphere gestartete `ansible-playbook` läuft ab sofort mit `PYTHONUNBUFFERED=1`. Python puffert seinen stdout blockweise, sobald er kein Terminal ist, und der Worker liest über eine SSH-Pipe: ohne das stehen die Ergebniszeilen einer langen Schleife bis zum Prozessende im Puffer. Genau das war der Vorfall vom 13.08.2026, „keine Ausgabe seit 1800 Sekunden" über einer Arbeit, die auf ESXi weiterlief.
+
+Für den per-VM-Create liegen vier Steuerplaybooks bereit. `createVMPrepare` prüft eine einzelne VM read-only, `createVMLaunch` wiederholt diese Prüfung, vergleicht sie mit dem gespeicherten Ergebnis und startet dann genau einen `vmware_guest`-Aufruf mit `async` und `poll: 0`, `createVMStatus` fragt genau eine Job-ID einmal ab, `createVMCleanup` entfernt gezielt deren Statusdatei. Die Auswahl erfolgt über `portal_vm_id` aus der Serverlist; der Name bleibt Anzeige und ESXi-Suchadresse. Die gemeinsame Identitätsprüfung liegt genau einmal in `create_identity_check_tasks.yml`.
+
+Der einzige maschinenlesbare Rückkanal ist eine Zeile je Steueraufruf:
+
+```text
+::virtusphere-create:: v1 <base64url ohne Padding>
+```
+
+`emit_create_result.py` erzeugt sie aus einer lokalen Resultatdatei, `lib/ansible_create_protocol.php` liest sie. Beide Seiten kennen dieselben sechs Ereignisse mit exakt denselben Feldern; ein fehlender, doppelter, zu großer oder widersprüchlicher Marker ist ein Protokollfehler und wird nie aus gewöhnlichen Ansible-Zeilen rekonstruiert.
+
+Zwei gemessene Eigenschaften stehen hinter dem Entwurf. Erstens antwortet `async_status` auf eine verschwundene Job-ID mit `finished: true` und, wenn der Aufruf sein Scheitern unterdrückt, mit `failed: false`; ein verlorener Job sähe damit aus wie ein fertiger. Das Status-Playbook entscheidet deshalb an der Anwesenheit der Statusdatei und nicht an der Meldung des Moduls. Zweitens verlangt die gepinnte `community.vmware` einen Mindest-`ansible-core`; der Preflight vergleicht ab jetzt die installierte Collection mit dem Pin und den installierten Kern mit dem, was diese Collection selbst fordert. Ein Host mit der aus dem Vorfall gemeldeten Kernversion fällt dort mit genau diesem Satz auf, statt bei jedem ESXi-Modul unerklärt zu scheitern.
+
+Ausgeführt wird die neue Folge noch nicht: der Worker treibt sie erst in der nächsten Teiletappe, und das bisherige Create-Playbook bleibt bis dahin unverändert in Betrieb.
+
 ## Abbruch und Teilfehler
 
 Ein laufender Abbruch wechselt zuerst auf `cancelling`. Der Auftrag bleibt aktiv und blockiert Löschen oder einen zweiten Missionsauftrag, bis der Worker `cancelled` bestätigt oder der Reaper einen toten Worker sicher konvergiert. Ein MAC-Rückruf zum noch abbrechenden, korrekt zugeordneten Auftrag wird angenommen; nach `cancelled` wird er abgelehnt und hinterlässt eine sichtbare Spur.

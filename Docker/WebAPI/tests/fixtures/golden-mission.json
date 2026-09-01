@@ -14,6 +14,7 @@
     },
     "vms": [
         {
+            "id": 101,
             "vm_name": "vm-ü01ß",
             "vm_moid": "vm-42",
             "vm_instance_uuid": "50112233-4455-6677-8899-aabbccddeeff",
@@ -46,6 +47,7 @@
             "autostart_stop_delay": -5
         },
         {
+            "id": 102,
             "vm_name": "on"
         }
     ],
@@ -77,6 +79,7 @@
         "serverlist": {
             "vm_configurations": [
                 {
+                    "portal_vm_id": 101,
                     "vm_name": "vm-ü01ß",
                     "vm_moid": "vm-42",
                     "vm_instance_uuid": "50112233-4455-6677-8899-aabbccddeeff",
@@ -101,6 +104,7 @@
                     "autostart": { "enabled": true, "start_delay": 3600, "stop_delay": -1 }
                 },
                 {
+                    "portal_vm_id": 102,
                     "vm_name": "on",
                     "vm_moid": "",
                     "vm_instance_uuid": "",

@@ -176,6 +176,56 @@ const VIRTUSPHERE_CREATE_ASYNC_DIR_NAME = 'async';
 const VIRTUSPHERE_CREATE_MARKER_PREFIX = '::virtusphere-create::';
 const VIRTUSPHERE_CREATE_PROTOCOL_VERSION = 1;
 
+// The four control playbooks of one create unit, plus the two files they share.
+// They are NOT deploy modes and therefore not in VIRTUSPHERE_PLAYBOOKS; they
+// are steps the worker drives, one VM at a time. They are listed here because
+// the artifact upload has to carry them: a playbook that is dispatched but not
+// uploaded dies on the host with "could not be found", which this project has
+// already paid for once with the inventory playbook.
+//
+// The shared identity tasks live as a FLAT file rather than under tasks/,
+// because the SFTP upload copies only the top level of the work directory. A
+// subdirectory would be dropped silently.
+const VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE = 'createVMPrepare-ESXi_playbook.yml';
+const VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH = 'createVMLaunch-ESXi_playbook.yml';
+const VIRTUSPHERE_CREATE_PLAYBOOK_STATUS = 'createVMStatus-ESXi_playbook.yml';
+const VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP = 'createVMCleanup-ESXi_playbook.yml';
+const VIRTUSPHERE_CREATE_IDENTITY_TASKS = 'create_identity_check_tasks.yml';
+const VIRTUSPHERE_CREATE_RESULT_EMITTER = 'emit_create_result.py';
+
+/**
+ * The extra-vars the worker passes to a create control playbook, per playbook.
+ *
+ * This is the third source a playbook variable can come from, next to the
+ * generated serverlist and accounts files, and it is declared here so it is
+ * checkable in both directions: a playbook that reads a name nobody passes
+ * fails on the host, and a name declared here that no playbook reads is a
+ * leftover. AnsiblePlaybookVariableContractTest walks both directions.
+ *
+ * Everything here is worker-controlled. Nothing in this list may ever be filled
+ * from a portal form: the async directory comes from the bound remote handle,
+ * the job id from what the launch stored, and the target from the materialized
+ * unit.
+ */
+const VIRTUSPHERE_CREATE_EXTRA_VARS = [
+    VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE => ['vs_portal_vm_id', 'vs_result_file'],
+    VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH => [
+        'vs_portal_vm_id', 'vs_result_file', 'vs_async_dir', 'vs_async_timeout',
+        'vs_expected_existed_before', 'vs_expected_moid', 'vs_expected_instance_uuid',
+    ],
+    VIRTUSPHERE_CREATE_PLAYBOOK_STATUS => ['vs_portal_vm_id', 'vs_result_file', 'vs_async_dir', 'vs_async_jid'],
+    VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP => ['vs_async_jid', 'vs_async_dir'],
+];
+
+const VIRTUSPHERE_CREATE_ARTIFACTS = [
+    VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE,
+    VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH,
+    VIRTUSPHERE_CREATE_PLAYBOOK_STATUS,
+    VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP,
+    VIRTUSPHERE_CREATE_IDENTITY_TASKS,
+    VIRTUSPHERE_CREATE_RESULT_EMITTER,
+];
+
 /**
  * True when the value may be stored as an async job id. Length is checked
  * explicitly as well as by the pattern, because the column is VARCHAR(191) and

@@ -5,14 +5,14 @@
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
       "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
-      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-output-buffering", "yaml-roundtrip",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests"
     ],
     "Integration": [
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
       "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
-      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-output-buffering", "yaml-roundtrip",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",
       "health-contract", "e2e-portal", "guard-harness"
     ],
@@ -20,7 +20,7 @@
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
       "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
-      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-output-buffering", "yaml-roundtrip",
+      "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",
       "health-contract", "e2e-portal", "guard-harness", "e2e-browser-matrix", "e2e-msedge", "restore-drill", "secret-scan",
       "sbom", "image-cve", "offline-bundle", "npm-audit"

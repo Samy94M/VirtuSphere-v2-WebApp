@@ -35,10 +35,11 @@ final class CreateFlowBaselineContractTest extends TestCase
     }
 
     /**
-     * Etappe D schreibt das um: dieselbe Sequenz, aber mit gesetztem
-     * PYTHONUNBUFFERED und einem Aufruf je VM statt eines Aufrufs fuer alle.
+     * Von Teiletappe D zur Haelfte umgeschrieben. Die Ausgabe laeuft jetzt
+     * ungebuffert, was den eigentlichen Vorfall behebt; die per-VM-Grenze fehlt
+     * weiterhin, weil der Worker die neue Folge erst in Teiletappe E treibt.
      */
-    public function testTheCreateSequenceIsOneUnbufferedPlaybookCallForTheWholeSelection(): void
+    public function testTheCreateSequenceIsUnbufferedButStillOneCallForTheWholeSelection(): void
     {
         $steps = ansible_remote_steps('/tmp/vs-job-1', ['mode' => 'create']);
 
@@ -48,21 +49,17 @@ final class CreateFlowBaselineContractTest extends TestCase
         $command = $steps[0]['command'];
         self::assertStringContainsString('ansible-playbook', $command);
         // Der Kern des Vorfalls: Python puffert stdout, sobald er kein Terminal
-        // ist, und der Worker liest ueber eine SSH-Pipe. Solange das hier fehlt,
-        // ist jede Fortschrittszeile im Playbook wirkungslos. Das Gate
+        // ist, und der Worker liest ueber eine SSH-Pipe. Das Gate
         // ansible-output-buffering misst denselben Sachverhalt am echten
         // Prozess, statt ihn nur im Commandstring zu behaupten.
-        self::assertStringNotContainsString(
-            'PYTHONUNBUFFERED',
-            $command,
-            'Baseline: der Create-Aufruf laeuft heute gepuffert (Etappe D setzt das)'
-        );
-        // Ein Aufruf, keine per-VM-Grenze: es gibt keine Stelle, an der der
-        // Worker heute zwischen zwei VMs etwas Dauerhaftes schreiben koennte.
+        self::assertStringContainsString('export PYTHONUNBUFFERED=1', $command);
+        // Ein Aufruf, keine per-VM-Grenze: es gibt bis Teiletappe E keine
+        // Stelle, an der der Worker zwischen zwei VMs etwas Dauerhaftes
+        // schreiben koennte.
         self::assertSame(
             1,
             substr_count($command, 'ansible-playbook'),
-            'Baseline: eine Auswahl ist ein einziger Playbookaufruf'
+            'Baseline: eine Auswahl ist bis Teiletappe E ein einziger Playbookaufruf'
         );
     }
 

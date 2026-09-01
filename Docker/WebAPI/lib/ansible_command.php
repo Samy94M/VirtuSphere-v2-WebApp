@@ -21,10 +21,13 @@ declare(strict_types=1);
  * - ansible_command_shell.php      the one shell-quoting primitive
  * - ansible_command_modes.php      payload/VM filter, mode-to-playbook SSoT,
  *                                  step markers, mission remote command
- * - ansible_command_preflight.php  preflight components and command, embedded
- *                                  probe sources, output readers
+ * - ansible_command_probes.php     the shell/Python programs embedded into
+ *                                  remote commands, each self-contained
+ * - ansible_command_preflight.php  preflight components and command, output
+ *                                  readers
  */
 
 require_once __DIR__ . '/ansible_command_shell.php';
 require_once __DIR__ . '/ansible_command_modes.php';
+require_once __DIR__ . '/ansible_command_probes.php';
 require_once __DIR__ . '/ansible_command_preflight.php';
