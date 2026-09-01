@@ -272,6 +272,32 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'Powercycle-Auswahl gegen Fixtures bewiesen (an/aus/suspendiert/kaputt/leer)' 'Powercycle-Auswahl weicht vom Vertrag ab'
     }
 
+    Add-Gate -Name 'ansible-output-buffering' -Lanes $allLanes -Kind 'container' -Body {
+        # Warum ein Gate fuer eine Umgebungsvariable: Der Create-Auftrag vom
+        # 13.08.2026 endete mit "no output for 1800 seconds", waehrend vierzehn
+        # von fuenfzehn VMs auf ESXi entstanden. Nicht der Task war zu Ende,
+        # sondern der Ausgabestrom: Python puffert stdout blockweise, sobald er
+        # kein Terminal ist, und der Worker liest ueber eine SSH-Pipe. Ein
+        # Fortschrittsmarker im Playbook repariert das nicht, solange die Zeile
+        # im Puffer steht.
+        #
+        # Die Probe misst deshalb Ankunftszeiten, nicht Text, und misst BEIDE
+        # Faelle. Der Kontrollfall ohne PYTHONUNBUFFERED muss das Puffern
+        # weiterhin zeigen; ohne ihn liesse eine Laufzeit, die ohnehin nie
+        # puffert, jede Unbuffered-Behauptung durchgehen und das Gate bewachte
+        # nichts. Sie braucht kein ESXi und kein Netz, nur die drei sleep-Items
+        # der Fixture.
+        $probe = Join-Path $repoRoot 'Docker/qa-ansible/output-buffering-probe.py'
+        if (-not (Test-Path $probe)) { return New-InfraResult 'output-buffering-probe.py fehlt unter dem Pruef-Root (Zero-Match)' }
+        if (-not (Test-DockerImage $toolImages.ansible)) {
+            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+        }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/output-buffering-probe.py')
+        if ($r.ExitCode -eq 2) { return New-InfraResult 'Buffering-Probe ohne brauchbare Umgebung (Fixture/ansible-playbook)' $r.Output }
+        Format-ToolResult $r 'Ausgabe kommt ohne PYTHONUNBUFFERED gesammelt, mit ihr laufend' 'Buffering-Vertrag der Playbookausgabe verletzt'
+    }
+
     Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
         # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
         # rendert die feindliche Fixture mit den Produktions-Generatoren,

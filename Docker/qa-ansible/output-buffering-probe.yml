@@ -1,0 +1,28 @@
+---
+# Fixture des Buffering-Beweises (QA-Werkzeug, wird nicht ausgeliefert;
+# Gate ansible-output-buffering, Treiber output-buffering-probe.py).
+#
+# Drei streng nacheinander laufende Items, die je zwei Sekunden brauchen und
+# nichts ausserhalb des Containers anfassen: kein ESXi, keine Collection, kein
+# Netz. Gemessen wird nicht, WAS ansible-playbook ausgibt, sondern WANN die
+# Zeile eines fertigen Items beim lesenden Prozess ankommt. Genau das war der
+# Produktionsvorfall vom 13.08.2026: der Create-Task lief weiter, waehrend der
+# Controller 1800 Sekunden lang keine Zeile mehr herausgab, und das
+# Idle-Fenster beendete den Transport ueber einer Arbeit, die auf ESXi
+# fortlief.
+#
+# `changed_when: false` haelt das Playbook idempotent; die Ausgabezeile je Item
+# entsteht trotzdem, und nur ihre Ankunftszeit ist hier die Aussage.
+- name: Ausgabezeitpunkte einer sequenziellen Schleife messen
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Drei sequenzielle Items mit fester Dauer
+      ansible.builtin.command: sleep 2
+      changed_when: false
+      loop:
+        - 1
+        - 2
+        - 3
+      loop_control:
+        label: "vs-probe-{{ item }}"

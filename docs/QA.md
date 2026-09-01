@@ -243,6 +243,53 @@ Re-running the whole matrix until it is green would prove nothing and was not
 done; the isolated re-run is the evidence, and the timeout change is the
 mitigation whose effect the next Release lane will show.
 
+### Etappe 14B baseline: what the create path looks like before the repair
+
+The create repair (`docs/audits/2026-08-13-create-flow-reliability-implementation-plan.md`)
+starts from a production incident: a fifteen-VM job ended after 1800 seconds
+with `Remote command produced no output (idle timeout)` while fourteen of the
+fifteen VMs appeared on ESXi. The output stream stopped; the ESXi task did not.
+Two artefacts pin that starting point so every later stage proves its change
+instead of asserting it.
+
+**`ansible-output-buffering` (Fast lane, containerised).** The mechanism is
+measurable without ESXi and without the network:
+`Docker/qa-ansible/output-buffering-probe.py` runs a three-item sleep loop
+twice in the pinned QA image and records when each finished item's line reaches
+the reading process. Without `PYTHONUNBUFFERED` all three lines arrived at
+9.57 s of a 9.82 s run; with it they arrived at 4.11 s, 6.70 s and 9.30 s of a
+9.44 s run. Both cases are asserted, and the thresholds are fractions of each
+run's own total so a slower machine moves both together. The control case is
+not decoration: a runtime that never buffered would let any unbuffered claim
+pass, and the gate would guard nothing. If the control case ever goes green-by-
+buffering-no-more, the runtime changed and the plan's premise needs re-reading -
+that is not a threshold to raise.
+
+**`CreateFlowBaselineContractTest`.** Six facts about today's path, each naming
+the sub-stage that rewrites it: the create sequence is one buffered
+`ansible-playbook` call for the whole selection (Etappe D), the playbook mutates
+every VM in one looped `vmware_guest` task with no `async` (Etappe D), there is
+no per-VM create result and no `create_started_at` in the schema (Etappe C), a
+retried create repeats the entire original selection because the only narrowing
+plan is the MAC export follow-up (Etappe F), and create-only produces no net
+lifecycle change by marking `deploying` and restoring the prior state, which the
+new orchestration has to keep (Etappe E).
+
+Three things the plan asked for turned out to be done already, by stages that
+landed after it was written: the `ansible-doc` preflight no longer copies the
+module manual into the job log, `ansible_command.php` is already a require
+facade over split modules, and the full log tail with `has_more`/`caught_up`
+arrived with Etappe 10A. Etappe G therefore shrinks to the progress card.
+
+Runtime versions, recorded rather than assumed. The pinned QA image carries
+ansible-core 2.19.11, Python 3.13.14 and community.vmware 6.2.0. Production
+reported ansible-core 2.16.3 in the incident; that number comes from the
+customer report, not from a machine this repository can reach, and it sits below
+the 2.19 floor that the 6.2.0 pin enforces. Whether the production host runs an
+older collection or the ESXi path is failing there for that reason is a site
+question, and Etappe D turns it into a hard preflight check instead of a
+document.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:
