@@ -313,6 +313,43 @@ final class VmNetworkContractIntegrationTest extends TestCase
             'vm_ids' => $vmIds,
         ]);
         self::assertContains('job_scope_limit', array_column($blockers, 'code'));
+
+        // The operator has to be able to ACT on it, so the check goes all the
+        // way to the rendered block: the sentence must name the limit and the
+        // number actually selected, and it must carry the link that leads to
+        // the list where the selection is made. A blocker that only exists in
+        // an array is a blocker nobody ever reads.
+        $scopeBlocker = array_values(array_filter(
+            $blockers,
+            static fn (array $blocker): bool => (string) $blocker['code'] === 'job_scope_limit'
+        ))[0];
+        self::assertStringContainsString((string) VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS, (string) $scopeBlocker['message']);
+        self::assertStringContainsString((string) count($vmIds), (string) $scopeBlocker['message']);
+        self::assertSame('vms.php?mission_id=' . $this->missionId, (string) $scopeBlocker['action']['url']);
+
+        // The second follow-up answers the question the sentence cannot: why the
+        // ceiling exists at all. Built with help_url(), never hand-written.
+        self::assertSame(help_url('deploy', 'help-network-contract'), (string) $scopeBlocker['help']['url']);
+        self::assertSame(__t('deploy.blocker_help_network_contract'), (string) $scopeBlocker['help']['label']);
+
+        ob_start();
+        deploy_render_blockers($blockers, ['id' => $this->userId, 'role' => 'admin'], []);
+        $html = (string) ob_get_clean();
+        self::assertStringContainsString(htmlspecialchars((string) $scopeBlocker['message'], ENT_QUOTES), $html);
+        self::assertStringContainsString('vms.php?mission_id=' . $this->missionId, $html);
+        // Both links sit in ONE .alert-actions row with the middle dot between
+        // them. Two links separated only by a space read as one long link, and
+        // this blocker is the first place in the deploy list that has two.
+        self::assertMatchesRegularExpression(
+            '#<div class="alert-actions">\s*<a href="vms\.php\?mission_id=' . $this->missionId . '">[^<]+</a>'
+            . '\s*<span class="muted" aria-hidden="true">&middot;</span>'
+            . '\s*<a href="[^"]*help-network-contract" data-deploy-blocker-help>#',
+            $html
+        );
+        // And the live client must produce the same shape, or the row silently
+        // loses its second link on the first refresh.
+        $json = deploy_blocker_json($scopeBlocker, ['id' => $this->userId, 'role' => 'admin']);
+        self::assertSame($scopeBlocker['help'], $json['help']);
     }
 
     public function testAnInterfaceCountOverTheCapBlocksTheSameWay(): void

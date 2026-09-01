@@ -9,6 +9,7 @@ require_once __DIR__ . '/deploy_network_blockers.php';
 require_once __DIR__ . '/deploy_queue_blocker_view.php';
 require_once __DIR__ . '/deploy_preflight_bounds.php';
 require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/help_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
@@ -248,13 +249,25 @@ function deploy_queue_blockers(mysqli $db, array $input): array
             try {
                 repo_vm_network_assert_scope_within_bounds($preflight['vms']);
             } catch (ValidationException $exception) {
-                $blockers[] = deploy_action_blocker(
+                $scopeBlocker = deploy_action_blocker(
                     'job_scope_limit',
                     portal_error_message($exception),
                     'vms.php?mission_id=' . $missionId,
                     __t('deploy.vms_empty_link'),
                     'vms.write'
                 );
+                // The only blocker whose number looks arbitrary from the outside,
+                // so it is the only one that carries a second link. The first one
+                // is the repair (where the selection is made); this one is the
+                // reason the ceiling exists, and it lives in the help exactly
+                // once. It needs no permission of its own: the deploy help panel
+                // already requires `deploy.run`, and nobody without that ever
+                // sees this list. Built with help_url(), never by hand.
+                $scopeBlocker['help'] = [
+                    'url' => help_url('deploy', 'help-network-contract'),
+                    'label' => __t('deploy.blocker_help_network_contract'),
+                ];
+                $blockers[] = $scopeBlocker;
             }
             foreach (repo_vm_network_preflight_blockers($preflight, $state['mode']) as $finding) {
                 $blockers[] = deploy_network_finding_item($finding, true);

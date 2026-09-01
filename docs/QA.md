@@ -220,9 +220,28 @@ Etappe-14A defect either, and the evidence is direct rather than inferred:
 - The same suite is fully green on Chromium (`e2e-portal`, Integration lane)
   and on Windows Edge (`e2e-msedge`, 786 s, Release lane).
 
-The pattern is interference and timing inside the 33-minute cross-engine run,
-not logic. Re-running the whole matrix until it is green would prove nothing,
-so it was not done; the isolated re-run is the evidence instead.
+The pattern is timing inside the 33-minute cross-engine run, not logic. The
+suite already runs single-worker and serial, so parallelism is ruled out; what
+is left is that both engines drive the portal through `docker exec` seeding
+more slowly than Chromium, late in a run where the machine is busiest.
+
+Two changes address it without hiding anything:
+
+- Firefox and WebKit get a per-project test timeout of 60 s and an expect
+  timeout of 15 s, against Chromium's 30 s and 7 s. More waiting time changes
+  nothing about what is asserted, so a real defect still fails; it only stops
+  the clock from deciding the outcome. Retries stay at zero on purpose: a retry
+  turns a genuine intermittent defect green and tells nobody.
+- Each Playwright gate writes its HTML report into its own folder
+  (`VIRTUSPHERE_E2E_REPORT_DIR`, set from the project list in
+  `Invoke-PlaywrightSuite`). All three gates used to share one folder, so the
+  last one to run erased the report of the one that had failed, and a red
+  matrix could not be diagnosed afterwards. That is what happened here: the
+  assertion texts of the three failures were gone before they could be read.
+
+Re-running the whole matrix until it is green would prove nothing and was not
+done; the isolated re-run is the evidence, and the timeout change is the
+mitigation whose effect the next Release lane will show.
 
 ## Test Commands
 

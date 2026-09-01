@@ -38,14 +38,27 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
             $kind = (string) ($blocker['kind'] ?? '');
             $action = deploy_blocker_action_for_user($blocker, $user);
             if ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_VM_NETWORK_MAPPING) { ?>
+                <?php
+                // Follow-ups go into the shared .alert-actions row, not after the
+                // sentence: two underlined links separated by one space read as a
+                // single long link, and the scope blocker is the first one here
+                // that has two. The row opens only when something fills it, and
+                // the middle dot appears only between two of them, because a lone
+                // link would otherwise start the row with a separator to its left.
+                $help = is_array($blocker['help'] ?? null) ? $blocker['help'] : null;
+                ?>
                 <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker>
                     <strong><?php echo h(__t('deploy.blocker_prefix')); ?></strong>
                     <?php echo h((string) $blocker['message']); ?>
-                    <?php if ($action !== null) {
-                        if ((string) $action['type'] !== 'link') {
-                            throw new LogicException('Unknown deploy blocker action for ' . $kind . ': ' . (string) $action['type']);
-                        } ?>
-                        <a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a>
+                    <?php if ($action !== null && (string) $action['type'] !== 'link') {
+                        throw new LogicException('Unknown deploy blocker action for ' . $kind . ': ' . (string) $action['type']);
+                    } ?>
+                    <?php if ($action !== null || $help !== null) { ?>
+                        <div class="alert-actions">
+                            <?php if ($action !== null) { ?><a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a><?php } ?>
+                            <?php if ($action !== null && $help !== null) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
+                            <?php if ($help !== null) { ?><a href="<?php echo h((string) $help['url']); ?>" data-deploy-blocker-help><?php echo h((string) $help['label']); ?></a><?php } ?>
+                        </div>
                     <?php } ?>
                 </div>
             <?php } elseif ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) {
@@ -118,6 +131,11 @@ function deploy_blocker_json(array $blocker, array $user): array
     if ($action !== null) {
         unset($action['permission']);
         $result['action'] = $action;
+    }
+    // The help follow-up travels too, or the live list would drop it on the
+    // first refresh and the page would quietly show less than it did on load.
+    if (is_array($blocker['help'] ?? null)) {
+        $result['help'] = $blocker['help'];
     }
     return $result;
 }

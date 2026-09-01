@@ -25,6 +25,11 @@ function Invoke-PlaywrightSuite {
         VIRTUSPHERE_ADMIN_USER      = (Get-QaEnvValue 'SEED_ADMIN_USER')
         VIRTUSPHERE_ADMIN_PASS      = (Get-QaEnvValue 'SEED_ADMIN_PASSWORD')
         DB_NAME                     = (Get-QaEnvValue 'DB_NAME')
+        # Eigener Berichtsordner je Gate. Chromium, die Firefox/WebKit-Matrix und
+        # Edge liefen zuvor alle in denselben Ordner, sodass das zuletzt laufende
+        # Gate den Bericht des gescheiterten ueberschrieb; eine rote Matrix war
+        # danach nicht mehr diagnostizierbar.
+        VIRTUSPHERE_E2E_REPORT_DIR  = ('playwright-report-' + ($Projects -join '-'))
     }
     foreach ($k in $e2eEnv.Keys) {
         $prevEnv[$k] = [Environment]::GetEnvironmentVariable($k)

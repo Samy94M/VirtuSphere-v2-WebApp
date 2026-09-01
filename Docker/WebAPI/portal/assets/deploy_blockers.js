@@ -58,13 +58,35 @@
         box.appendChild(strong);
         box.appendChild(document.createTextNode(' ' + String(blocker.message || '')));
 
+        // Same shape as the server render: follow-ups live in one .alert-actions
+        // row, the middle dot appears only between two of them, and the row is
+        // only created when something fills it.
         var action = blocker.action;
-        if (action && action.type === 'link') {
-            box.appendChild(document.createTextNode(' '));
-            var link = document.createElement('a');
-            link.href = action.url;
-            link.textContent = action.label;
-            box.appendChild(link);
+        var help = blocker.help;
+        if ((action && action.type === 'link') || help) {
+            var actions = document.createElement('div');
+            actions.className = 'alert-actions';
+            if (action && action.type === 'link') {
+                var link = document.createElement('a');
+                link.href = action.url;
+                link.textContent = action.label;
+                actions.appendChild(link);
+            }
+            if (action && action.type === 'link' && help) {
+                var dot = document.createElement('span');
+                dot.className = 'muted';
+                dot.setAttribute('aria-hidden', 'true');
+                dot.textContent = '·';
+                actions.appendChild(dot);
+            }
+            if (help) {
+                var helpLink = document.createElement('a');
+                helpLink.href = help.url;
+                helpLink.textContent = help.label;
+                helpLink.setAttribute('data-deploy-blocker-help', '');
+                actions.appendChild(helpLink);
+            }
+            box.appendChild(actions);
         }
 
         if (action && action.type === 'adopt') {

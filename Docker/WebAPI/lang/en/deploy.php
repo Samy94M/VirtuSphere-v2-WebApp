@@ -39,6 +39,7 @@ return [
     'blocker_count_one' => ':count blocker prevents queueing.',
     'blocker_count_many' => ':count blockers prevent queueing.',
     'blocker_jump' => 'Jump to first blocker',
+    'blocker_help_network_contract' => 'Help: network and PXE check',
     'blocker_omitted' => ':count further findings are not listed here. Fix the ones shown first; the list is recalculated afterwards.',
     'blocker_select_mission' => 'Select a mission.',
     'blocker_select_esxi' => 'Select an ESXi credential.',

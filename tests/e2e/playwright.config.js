@@ -34,12 +34,28 @@ module.exports = defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // The HTML report folder is per gate. Three gates run Playwright against the
+  // same checkout (Chromium, the Firefox/WebKit matrix, Edge) and they used to
+  // write into one folder, so the last gate to run erased the report of the one
+  // that had actually failed. A red matrix was then undiagnosable, which is
+  // exactly the situation the report exists for.
+  reporter: [
+    ['list'],
+    ['html', { open: 'never', outputFolder: process.env.VIRTUSPHERE_E2E_REPORT_DIR || 'playwright-report' }],
+  ],
   timeout: 30000,
   expect: { timeout: 7000 },
 
   use: {
     baseURL: BASE_URL,
+    // The suite asserts English portal text, so it asks for English instead of
+    // inheriting whatever the engine sends: Chromium and Firefox default to
+    // en-US in Playwright, WebKit takes the machine's locale. This pins the
+    // Accept-Language negotiation only. It is NOT what fixed the German text in
+    // the browser matrix - the portal writes `?lang=` into the session and that
+    // stored choice outranks the header entirely, so the leak had to be closed
+    // in the specs that set it. The visual project overrides this on purpose.
+    locale: 'en-US',
     // 'retain-on-failure', not 'on-first-retry': with retries at 0 there is never
     // a first retry, so the trace could never be written and the one artefact
     // worth having after a red run was silently never produced.

@@ -11,7 +11,7 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help_deploy.deploy_blockers_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_blockers_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_blockers_p2')); ?></p>
-            <h3><?php echo h(__t('help_deploy.network_contract_heading')); ?></h3>
+            <h3 id="help-network-contract" tabindex="-1"><?php echo h(__t('help_deploy.network_contract_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.network_contract_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p3')); ?></p>

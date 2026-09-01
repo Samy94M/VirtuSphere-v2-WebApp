@@ -374,8 +374,24 @@ require_once '/var/www/html/lib/repo/directory_users.php';
 $entry = directory_find_user_by_upn(db(), '${ALICE_UPN}');
 repo_directory_import_user(db(), $entry, VIRTUSPHERE_ROLE_USER);
 $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-$csr = openssl_csr_new(['commonName' => 'e2e-ad-https.local'], $key, ['digest_alg' => 'sha256']);
-$cert = openssl_csr_sign($csr, null, $key, 30, ['digest_alg' => 'sha256']);
+// The throwaway certificate carries a Subject Alternative Name, not just a
+// common name: every current browser requires one, and this fixture predates
+// that rule. Stated honestly, it did NOT fix the Firefox failure it was tried
+// for - that test still ends in SEC_ERROR_UNKNOWN and its cause is still open.
+// The SAN stays because a CN-only certificate is wrong regardless.
+$sanConf = tempnam(sys_get_temp_dir(), 'vs-san-');
+file_put_contents($sanConf, implode(PHP_EOL, [
+    '[req]',
+    'distinguished_name=dn',
+    '[dn]',
+    '[ext]',
+    'basicConstraints=CA:FALSE',
+    'subjectAltName=DNS:e2e-ad-https.local,DNS:localhost,IP:127.0.0.1',
+]) . PHP_EOL);
+$sslOpts = ['digest_alg' => 'sha256', 'config' => $sanConf, 'x509_extensions' => 'ext'];
+$csr = openssl_csr_new(['commonName' => 'e2e-ad-https.local'], $key, ['digest_alg' => 'sha256', 'config' => $sanConf]);
+$cert = openssl_csr_sign($csr, null, $key, 30, $sslOpts);
+@unlink($sanConf);
 openssl_x509_export($cert, $certPem);
 openssl_pkey_export($key, $keyPem);
 https_write_material($certPem, '', $keyPem);
@@ -492,6 +508,11 @@ test.describe('Status/log deep links, DE/EN, wrap geometry', () => {
       expect(helpHtml, `${lang}: the directory legend panel is missing`).toContain('panel-system-status');
       expect(helpHtml, `${lang}: a raw system_status.directory_legend_* key leaked into help.php`).not.toMatch(/system_status\.directory_legend_[a-z]+/);
     }
+    // `?lang=` pins the choice in the shared session, not just this response.
+    // The loop happens to end on 'en', which is what the other specs expect, so
+    // the leak is invisible today and would bite the moment someone reorders it.
+    // A spec restores the shared state it changed.
+    await page.goto('dashboard.php?lang=auto');
   });
 
   test('the controller table stays inside its wrapper at a narrow mobile width', async ({ page }) => {

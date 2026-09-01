@@ -39,6 +39,7 @@ return [
     'blocker_count_one' => ':count Blocker verhindert das Einreihen.',
     'blocker_count_many' => ':count Blocker verhindern das Einreihen.',
     'blocker_jump' => 'Zum ersten Blocker',
+    'blocker_help_network_contract' => 'Hilfe: Netzwerk- und PXE-Prüfung',
     'blocker_omitted' => ':count weitere Befunde werden hier nicht aufgeführt. Beheben Sie die angezeigten zuerst; die Liste wird danach neu berechnet.',
     'blocker_select_mission' => 'Wählen Sie eine Mission aus.',
     'blocker_select_esxi' => 'Wählen Sie einen ESXi-Zugang aus.',

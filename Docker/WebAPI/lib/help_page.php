@@ -20,6 +20,11 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // card lives on System status and its expectation sentence on the deploy
     // page. Two texts about one state machine drift; a link does not.
     'help-deploy-service' => 'deploy',
+    // The queue blocker for an oversized job scope links here. Its own sentence
+    // says what to do (split the selection) and carries the link that does it;
+    // what it cannot carry is WHY there is a ceiling at all, and that answer
+    // belongs in one place rather than in every blocker message.
+    'help-network-contract' => 'deploy',
 ];
 
 function help_panel_visible(string $panel, array $user): bool

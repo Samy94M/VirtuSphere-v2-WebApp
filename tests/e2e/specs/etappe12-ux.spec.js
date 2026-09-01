@@ -70,9 +70,24 @@ echo 'JSON' . json_encode(['value' => $value]) . 'JSON';
 });
 
 test.beforeEach(() => cleanup());
-test.afterAll(() => {
+test.afterAll(async ({ browser }) => {
   cleanup();
   runPhp(`repo_set_setting(db(), VIRTUSPHERE_SETTING_API_BASE_URL, '${apiBaseUrlBefore}'); echo 'OK';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+  // `?lang=de` is not a per-request switch: __locale_resolve() writes the choice
+  // into $_SESSION['locale_mode'], and every spec here shares one admin session.
+  // Left alone it makes the portal German for everything that runs afterwards.
+  // Inside one project that stays invisible, because this file sorts after the
+  // specs asserting English; the release matrix runs Firefox to the end and
+  // then starts WebKit from the top, so those specs met a session this file had
+  // already switched. Two of them went red for a reason that had nothing to do
+  // with them. A spec restores the shared state it changed.
+  const context = await browser.newContext({ storageState: ROLES.admin.storageState });
+  try {
+    const page = await context.newPage();
+    await page.goto('dashboard.php?lang=auto');
+  } finally {
+    await context.close();
+  }
 });
 
 test('live blocker list and queue button use the same endpoint verdict', async ({ page }) => {

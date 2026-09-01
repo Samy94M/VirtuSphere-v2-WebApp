@@ -376,3 +376,57 @@ test('deploy_log cancel: Cancel keeps the job, Confirm cancels it and stays on t
   expect(jobRow(jobId).status, 'the job is cancelled').toBe('cancelled');
   await expect(cancelButton, 'a terminal job no longer offers cancellation').toHaveCount(0);
 });
+
+// The job scope ceiling as the operator meets it: a blocker above the form,
+// before anything is queued, naming both numbers and carrying two follow-ups.
+//
+// The geometry is the assertion, not the markup. Two underlined links with one
+// space between them read as a single long link, and this blocker is the first
+// place in the deploy list that has two of them; the markup looks correct
+// either way, so only the real bounding boxes can show the gap.
+test('an oversize selection blocks before queueing and carries repair and help side by side', async ({ page }) => {
+  const seed = seedBase();
+  const overLimit = phpJson(`
+require_once '/var/www/html/lib/network_mac_constants.php';
+$db = db();
+$mid = ${seed.missionId};
+$limit = VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS;
+$existing = (int) ($db->query("SELECT COUNT(*) c FROM deploy_vms WHERE mission_id = $mid")->fetch_assoc()['c'] ?? 0);
+for ($i = $existing; $i <= $limit; $i++) {
+    $name = sprintf('E2EDSCOPE%03d', $i);
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os) VALUES (?, ?, ?, 'Win11')");
+    $stmt->bind_param('iss', $mid, $name, $name);
+    $stmt->execute();
+    $vmId = (int) $db->insert_id;
+    $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', '', 'dhcp')");
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+}
+$total = (int) ($db->query("SELECT COUNT(*) c FROM deploy_vms WHERE mission_id = $mid")->fetch_assoc()['c'] ?? 0);
+echo 'JSON' . json_encode(['limit' => $limit, 'total' => $total]) . 'JSON';
+`);
+  expect(overLimit.total, 'the fixture must really exceed the ceiling').toBeGreaterThan(overLimit.limit);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const blocker = page.locator('[data-deploy-blocker]').filter({ hasText: String(overLimit.limit) }).first();
+  await expect(blocker, 'the ceiling is named before anything is queued').toBeVisible();
+  await expect(blocker, 'the sentence names the limit and what was selected')
+    .toContainText(String(overLimit.total));
+  await expect(page.locator('[data-deploy-queue-button]'), 'queueing stays disabled').toBeDisabled();
+
+  const repair = blocker.locator(`a[href="vms.php?mission_id=${seed.missionId}"]`);
+  const help = blocker.locator('a[data-deploy-blocker-help]');
+  await expect(repair, 'the way to change the selection').toBeVisible();
+  await expect(help, 'the way to the reason the ceiling exists').toBeVisible();
+
+  const gap = await blocker.evaluate((node) => {
+    const links = [...node.querySelectorAll('.alert-actions a')].map((a) => a.getBoundingClientRect());
+    return links.length === 2 ? links[1].left - links[0].right : -1;
+  });
+  expect(gap, 'repair and help stay visibly separate links').toBeGreaterThanOrEqual(10);
+
+  // The help link lands on a section the help page really renders.
+  await help.click();
+  await expect(page).toHaveURL(/help\.php#help-network-contract$/);
+  await expect(page.locator('#help-network-contract')).toBeVisible();
+});
