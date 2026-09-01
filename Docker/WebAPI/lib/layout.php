@@ -59,6 +59,7 @@ function layout_app_scripts(string $nonce): void
         'assets/deploy_warnings.js',
         'assets/deploy_blockers.js',
         'assets/deploy_storage.js',
+        'assets/vm-network.js',
     ] as $script) {
         echo '<script defer nonce="' . h($nonce) . '" src="' . h(layout_asset_url($script)) . '"></script>' . "\n";
     }

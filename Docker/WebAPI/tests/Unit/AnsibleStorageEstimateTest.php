@@ -92,18 +92,18 @@ final class AnsibleStorageEstimateTest extends TestCase
         self::assertSame(1, $rows['ssd-fast']['vm_count']);
     }
 
-    public function testCaseAndPaddingVariantsOfTheSameDatastoreShareOneRow(): void
+    public function testCaseVariantsRemainDistinctAfterPortalPaddingIsTrimmed(): void
     {
-        // Grouped by esxi_inventory_name_key so the row can be matched against the
-        // cached inventory; the label keeps the first spelling seen.
+        // Portal padding is normalized, but ESXi case is operative identity.
         $rows = ansible_storage_by_datastore(self::MISSION, [
             $this->vm(1, [['disk_size' => 10]], 'SSD-Fast'),
             $this->vm(2, [['disk_size' => 10]], ' ssd-fast '),
         ]);
 
-        self::assertSame(['ssd-fast'], array_keys($rows));
-        self::assertSame('SSD-Fast', $rows['ssd-fast']['name']);
-        self::assertSame(20 * self::GB, $rows['ssd-fast']['bytes']);
+        self::assertSame(['SSD-Fast', 'ssd-fast'], array_keys($rows));
+        self::assertSame('SSD-Fast', $rows['SSD-Fast']['name']);
+        self::assertSame(10 * self::GB, $rows['SSD-Fast']['bytes']);
+        self::assertSame(10 * self::GB, $rows['ssd-fast']['bytes']);
     }
 
     public function testMissionWithoutDatastoreLandsUnderTheEmptyKey(): void

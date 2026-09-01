@@ -30,6 +30,10 @@ final class MissionTransferRoundTripTest extends TestCase
             self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
         }
         $this->cleanup();
+        $vlan = 'PHPUNIT-XFER-VLAN';
+        $stmt = $this->db->prepare('INSERT INTO deploy_vlan (vlan_name, retired_at) VALUES (?, NULL)');
+        $stmt->bind_param('s', $vlan);
+        $stmt->execute();
     }
 
     protected function tearDown(): void
@@ -208,7 +212,7 @@ final class MissionTransferRoundTripTest extends TestCase
 
         $report = mission_import($this->db, $payload, self::PREFIX . 'dup', true);
 
-        // Equality is case-insensitive (esxi_inventory_name_key), and the pair
+        // Portal VM-name uniqueness remains historically case-insensitive and
         // reports once, from the second occurrence.
         self::assertSame(['phpunitdup1'], $report['vm_name_duplicates']);
         self::assertTrue($report['blocked']);
@@ -297,7 +301,7 @@ final class MissionTransferRoundTripTest extends TestCase
             'vm_domain' => 'dc.example.com',
             'vm_guest_id' => VIRTUSPHERE_VM_DEFAULTS['guest_id'],
         ], $overrides) + [
-            'interfaces' => [['ip' => '', 'subnet' => '', 'gateway' => '', 'vlan' => '', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
+            'interfaces' => [['ip' => '', 'subnet' => '', 'gateway' => '', 'vlan' => 'PHPUNIT-XFER-VLAN', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
             'disks' => [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             'packages' => [],
         ];
@@ -323,7 +327,7 @@ final class MissionTransferRoundTripTest extends TestCase
                 'gateway' => '10.0.0.1',
                 'mode' => 'static',
                 'type' => 'vmxnet3',
-                'vlan' => '',
+                'vlan' => 'PHPUNIT-XFER-VLAN',
                 'mac' => $mac,
             ]],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
@@ -359,6 +363,10 @@ final class MissionTransferRoundTripTest extends TestCase
         $stmt = $this->db->prepare('DELETE FROM deploy_packages WHERE package_basename = ?');
         $base = 'phpunit_xfer_pkg';
         $stmt->bind_param('s', $base);
+        $stmt->execute();
+        $vlan = 'PHPUNIT-XFER-VLAN';
+        $stmt = $this->db->prepare('DELETE FROM deploy_vlan WHERE vlan_name = ?');
+        $stmt->bind_param('s', $vlan);
         $stmt->execute();
     }
 }

@@ -71,10 +71,82 @@ final class EsxiVlanReassignTest extends TestCase
         self::assertSame(0, (int) repo_scalar($this->db, "SELECT COUNT(*) FROM deploy_interfaces WHERE vlan = ?", 's', [$from]));
     }
 
+    public function testReassignUsesExactRawPortgroupNamesWithoutTrimming(): void
+    {
+        $normalized = self::PREFIX . 'raw';
+        $raw = $normalized . ' ';
+        $target = self::PREFIX . 'target';
+        $rawMission = $this->makeMission('m_raw', $normalized);
+        $rawVm = $this->makeVm($rawMission, 'PHPUNITRAW1', $normalized);
+        $normalizedMission = $this->makeMission('m_normalized', $normalized);
+        $normalizedVm = $this->makeVm($normalizedMission, 'PHPUNITRAW2', $normalized);
+        repo_execute($this->db, 'UPDATE deploy_missions SET wds_vlan = ? WHERE id = ?', 'si', [$raw, $rawMission]);
+        repo_execute($this->db, 'UPDATE deploy_interfaces SET vlan = ? WHERE vm_id = ?', 'si', [$raw, $rawVm]);
+
+        self::assertSame(['missions' => 1, 'interfaces' => 1], repo_reassign_vlan($this->db, $raw, $target));
+        self::assertSame($target, $this->missionVlan($rawMission));
+        self::assertSame($normalized, $this->missionVlan($normalizedMission));
+        self::assertSame($target, repo_scalar($this->db, 'SELECT vlan FROM deploy_interfaces WHERE vm_id = ?', 'i', [$rawVm]));
+        self::assertSame($normalized, repo_scalar($this->db, 'SELECT vlan FROM deploy_interfaces WHERE vm_id = ?', 'i', [$normalizedVm]));
+    }
+
     public function testReassignRejectsEmptyOrIdenticalArguments(): void
     {
         $this->expectException(InvalidArgumentException::class);
         repo_reassign_vlan($this->db, self::PREFIX . 'x', self::PREFIX . 'x');
+    }
+
+    public function testReassignRollsBackWhenTargetWouldDuplicateAnInterfaceVlan(): void
+    {
+        $from = self::PREFIX . 'source';
+        $to = self::PREFIX . 'target';
+        $missionId = $this->makeMission('m_collision', $from);
+        $vmId = $this->makeVm($missionId, 'PHPUNITRAC', $from);
+        repo_execute(
+            $this->db,
+            "INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, '', '', '', ?, '')",
+            'is',
+            [$vmId, $to]
+        );
+
+        try {
+            repo_reassign_vlan($this->db, $from, $to);
+            self::fail('a mass reassignment may not create a duplicate VM VLAN');
+        } catch (VmNetworkPreflightException $exception) {
+            self::assertContains(VIRTUSPHERE_VM_NETWORK_AMBIGUOUS, array_column($exception->findings, 'code'));
+        }
+
+        self::assertSame($from, $this->missionVlan($missionId), 'the mission write shares the rollback');
+        $stmt = $this->db->prepare('SELECT vlan FROM deploy_interfaces WHERE vm_id = ? ORDER BY id');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        self::assertSame([$from, $to], array_column(repo_fetch_all($stmt->get_result()), 'vlan'));
+    }
+
+    public function testReassignRejectsWdsOnlyChangeOwnedByRunningMissionJob(): void
+    {
+        $from = self::PREFIX . 'wds_source';
+        $to = self::PREFIX . 'wds_target';
+        $missionId = $this->makeMission('m_running', $from);
+        $this->makeVm($missionId, 'PHPUNITRAR', self::PREFIX . 'application');
+        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+        $payload = json_encode(['mode' => 'start', 'vm_ids' => []], JSON_THROW_ON_ERROR);
+        repo_execute(
+            $this->db,
+            'INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)',
+            'iss',
+            [$missionId, $running, $payload]
+        );
+
+        try {
+            repo_reassign_vlan($this->db, $from, $to);
+            self::fail('the WDS callback identity stays immutable while the mission job is running');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('owns this VM network scope', $exception->getMessage());
+        }
+
+        self::assertSame($from, $this->missionVlan($missionId));
+        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_interfaces WHERE vlan = ?', 's', [$to]));
     }
 
     public function testDeviationsFlagUnknownVlanButNotMatchingOrTemplate(): void

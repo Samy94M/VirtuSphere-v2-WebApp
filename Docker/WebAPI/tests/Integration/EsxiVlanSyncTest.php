@@ -28,6 +28,8 @@ final class EsxiVlanSyncTest extends TestCase
     private array $networkCacheSnapshot = [];
     /** @var array<int, array<string, mixed>> inventory-state rows of foreign credentials */
     private array $inventoryStateSnapshot = [];
+    /** @var list<int> foreign credentials that had no state row before isolation */
+    private array $temporaryStateCredentialIds = [];
 
     protected function setUp(): void
     {
@@ -105,13 +107,26 @@ final class EsxiVlanSyncTest extends TestCase
         $stmt->execute();
         $this->networkCacheSnapshot = repo_fetch_all($stmt->get_result());
         $this->inventoryStateSnapshot = repo_fetch_all($this->db->query(
-            'SELECT credential_id, last_success_at, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change FROM deploy_esxi_inventory_state'
+            'SELECT credential_id, last_success_at, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change, kind_freshness_json, kind_name_semantics_json, kind_observation_json FROM deploy_esxi_inventory_state'
         ));
 
         $stmt = $this->db->prepare('DELETE FROM deploy_esxi_inventory WHERE kind = ?');
         $stmt->bind_param('s', $network);
         $stmt->execute();
         $this->db->query('DELETE FROM deploy_esxi_inventory_state');
+
+        $snapshotIds = array_fill_keys(array_map(static fn (array $row): int => (int) $row['credential_id'], $this->inventoryStateSnapshot), true);
+        $type = VIRTUSPHERE_CREDENTIAL_TYPE_ESXI;
+        $stmt = $this->db->prepare('SELECT id FROM deploy_credentials WHERE type = ? AND id <> ? ORDER BY id');
+        $stmt->bind_param('si', $type, $this->credentialId);
+        $stmt->execute();
+        foreach (repo_fetch_all($stmt->get_result()) as $row) {
+            $credentialId = (int) $row['id'];
+            repo_esxi_inventory_touch_kind_freshness($this->db, $credentialId, [VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
+            if (!isset($snapshotIds[$credentialId])) {
+                $this->temporaryStateCredentialIds[] = $credentialId;
+            }
+        }
     }
 
     /**
@@ -130,6 +145,10 @@ final class EsxiVlanSyncTest extends TestCase
     private function restoreForeignInventory(): void
     {
         $network = VIRTUSPHERE_INVENTORY_KIND_NETWORK;
+        foreach ($this->temporaryStateCredentialIds as $credentialId) {
+            repo_execute($this->db, 'DELETE FROM deploy_esxi_inventory_state WHERE credential_id = ?', 'i', [$credentialId]);
+        }
+        $this->temporaryStateCredentialIds = [];
         // A credential deleted during the run took its cache and state with it
         // through ON DELETE CASCADE; re-inserting would only hit the foreign key
         // and abort the loop before the remaining rows are restored.
@@ -156,9 +175,9 @@ final class EsxiVlanSyncTest extends TestCase
         $this->networkCacheSnapshot = [];
 
         $stmt = $this->db->prepare(
-            'INSERT INTO deploy_esxi_inventory_state (credential_id, last_success_at, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change)
-             VALUES (?, ?, ?, ?, ?, ?, ?) AS new
-             ON DUPLICATE KEY UPDATE last_success_at = new.last_success_at, last_attempt_at = new.last_attempt_at, last_status = new.last_status, last_error_category = new.last_error_category, failure_streak = new.failure_streak, paused_until_credential_change = new.paused_until_credential_change'
+            'INSERT INTO deploy_esxi_inventory_state (credential_id, last_success_at, last_attempt_at, last_status, last_error_category, failure_streak, paused_until_credential_change, kind_freshness_json, kind_name_semantics_json, kind_observation_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AS new
+             ON DUPLICATE KEY UPDATE last_success_at = new.last_success_at, last_attempt_at = new.last_attempt_at, last_status = new.last_status, last_error_category = new.last_error_category, failure_streak = new.failure_streak, paused_until_credential_change = new.paused_until_credential_change, kind_freshness_json = new.kind_freshness_json, kind_name_semantics_json = new.kind_name_semantics_json, kind_observation_json = new.kind_observation_json'
         );
         foreach ($this->inventoryStateSnapshot as $row) {
             $credentialId = (int) $row['credential_id'];
@@ -171,7 +190,10 @@ final class EsxiVlanSyncTest extends TestCase
             $category = $row['last_error_category'];
             $streak = (int) $row['failure_streak'];
             $paused = (int) $row['paused_until_credential_change'];
-            $stmt->bind_param('issssii', $credentialId, $successAt, $attemptAt, $status, $category, $streak, $paused);
+            $freshness = $row['kind_freshness_json'];
+            $semantics = $row['kind_name_semantics_json'];
+            $observations = $row['kind_observation_json'];
+            $stmt->bind_param('issssiisss', $credentialId, $successAt, $attemptAt, $status, $category, $streak, $paused, $freshness, $semantics, $observations);
             $stmt->execute();
         }
         $this->inventoryStateSnapshot = [];
@@ -196,6 +218,7 @@ final class EsxiVlanSyncTest extends TestCase
         $this->makeVlan(self::PREFIX . 'back', '2026-01-01 00:00:00'); // retired, will reappear
 
         $this->setNetworks([self::PREFIX . 'keep', self::PREFIX . 'back', self::PREFIX . 'new']);
+        repo_esxi_inventory_touch_kind_freshness($this->db, $this->credentialId, [VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
         repo_esxi_inventory_record_success($this->db, $this->credentialId);
 
         $result = repo_esxi_vlan_sync($this->db);
@@ -218,12 +241,13 @@ final class EsxiVlanSyncTest extends TestCase
         self::assertSame('active', $this->vlanStatus(self::PREFIX . 'frozen'));
     }
 
-    public function testSyncRefreshesReportedCase(): void
+    public function testSyncKeepsCaseVariantsAsSeparateCatalogNames(): void
     {
-        // The catalog carried 'lab', ESXi now reports 'Lab': the upsert must
-        // follow the reported spelling (retire/un-retire logic stays ci).
+        // The catalog carried 'lab', ESXi now reports the distinct exact name
+        // 'Lab': one row is inserted and the absent exact row is retired.
         $this->makeVlan(self::PREFIX . 'lab', null);
         $this->setNetworks([self::PREFIX . 'Lab']);
+        repo_esxi_inventory_touch_kind_freshness($this->db, $this->credentialId, [VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
         repo_esxi_inventory_record_success($this->db, $this->credentialId);
 
         repo_esxi_vlan_sync($this->db);
@@ -231,23 +255,26 @@ final class EsxiVlanSyncTest extends TestCase
         self::assertNotNull($row);
         self::assertSame(self::PREFIX . 'Lab', (string) $row['vlan_name']);
         self::assertNull($row['retired_at']);
+        self::assertSame('retired', $this->vlanStatus(self::PREFIX . 'lab'));
     }
 
-    public function testCaseChoiceIsDeterministicAcrossSyncs(): void
+    public function testCaseVariantsRemainStableAcrossSyncs(): void
     {
-        // Two credentials report the same name in different cases; the catalog
-        // pins one spelling (lowest credential id wins) stable across syncs.
+        // Two credentials report distinct exact case variants; both stay stable.
         $secondId = $this->makeCredential('esxi2');
         $this->setNetworks([self::PREFIX . 'Case'], $this->credentialId);
         $this->setNetworks([self::PREFIX . 'case'], $secondId);
+        repo_esxi_inventory_touch_kind_freshness($this->db, $this->credentialId, [VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
+        repo_esxi_inventory_touch_kind_freshness($this->db, $secondId, [VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
         repo_esxi_inventory_record_success($this->db, $this->credentialId);
+        repo_esxi_inventory_record_success($this->db, $secondId);
 
         repo_esxi_vlan_sync($this->db);
-        $first = (string) repo_scalar($this->db, 'SELECT vlan_name FROM deploy_vlan WHERE vlan_name = ? LIMIT 1', 's', [self::PREFIX . 'case']);
+        $first = (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_vlan WHERE vlan_name IN (?, ?)', 'ss', [self::PREFIX . 'Case', self::PREFIX . 'case']);
         repo_esxi_vlan_sync($this->db);
-        $second = (string) repo_scalar($this->db, 'SELECT vlan_name FROM deploy_vlan WHERE vlan_name = ? LIMIT 1', 's', [self::PREFIX . 'case']);
+        $second = (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_vlan WHERE vlan_name IN (?, ?)', 'ss', [self::PREFIX . 'Case', self::PREFIX . 'case']);
 
-        self::assertSame(self::PREFIX . 'Case', $first);
+        self::assertSame(2, $first);
         self::assertSame($first, $second);
     }
 
@@ -281,20 +308,20 @@ final class EsxiVlanSyncTest extends TestCase
         // replace_kind() is DELETE + INSERT. Without its own transaction it
         // commits the empty middle, and a concurrent repo_esxi_vlan_sync() reads
         // "no portgroups" as positive evidence and retires them. Here the second
-        // INSERT dies on the column limit, with no caller transaction to save us.
+        // One non-persistable name fails the whole kind before any replacement.
         $this->setNetworks([self::PREFIX . 'old1', self::PREFIX . 'old2']);
         $poisoned = [
             ['name' => self::PREFIX . 'new'],
             ['name' => str_repeat('x', 300)], // deploy_esxi_inventory.name is varchar(191)
         ];
 
-        try {
-            repo_esxi_inventory_replace_kind($this->db, $this->credentialId, VIRTUSPHERE_INVENTORY_KIND_NETWORK, $poisoned);
-            self::fail('The oversized name must abort the rewrite.');
-        } catch (mysqli_sql_exception $exception) {
-            self::assertStringContainsString('Data too long', $exception->getMessage());
-        }
+        $result = repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'networks' => $poisoned,
+            'name_failures' => [VIRTUSPHERE_INVENTORY_KIND_NETWORK => 1],
+            'queries' => ['networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED], 'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED]],
+        ]);
 
+        self::assertSame(0, $result['network']['written']);
         self::assertSame([self::PREFIX . 'old1', self::PREFIX . 'old2'], $this->networkNames());
     }
 

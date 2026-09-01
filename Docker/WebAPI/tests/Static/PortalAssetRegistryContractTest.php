@@ -19,7 +19,7 @@ final class PortalAssetRegistryContractTest extends TestCase
         self::assertNotSame([], $files, 'no portal scripts found (zero-match)');
 
         $layout = (string) file_get_contents($root . '/lib/layout.php');
-        preg_match_all("/'assets\/([a-z_]+\.js)'/", $layout, $matches);
+        preg_match_all("/'assets\/([a-z_-]+\.js)'/", $layout, $matches);
         $registered = $matches[1];
         self::assertSame(
             count($registered),

@@ -62,7 +62,7 @@ async function collectMetadata(contract) {
     const browser = await chromium.launch({
       executablePath: resolution.executablePath,
       headless: true,
-      args: ['--no-sandbox'],
+      args: contract.launchArgs,
     });
     try {
       actual.browser.version = browser.version();

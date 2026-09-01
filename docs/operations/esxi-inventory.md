@@ -294,3 +294,39 @@ Der VLAN-Katalog beantwortet je Portgruppe zwei Fragen in getrennten Spalten:
 **Verifikation der VLAN-ID-Felder am produktiven Host (einmalig nach Rollout):** manuellen Inventory-Refresh auslösen, im Job-Log „Inventory updated ... network: N items" prüfen und auf der VLAN-Seite kontrollieren, ob IDs erscheinen. Das Playbook liefert die rohen Portgruppen-Objekte der `*_info`-Module; die Feldauswertung liegt im PHP-Parser. Die beiden Modulfamilien legen die ID unterschiedlich ab: Standard-Portgruppen führen `portgroup` und `vlan_id` direkt, Distributed-Portgruppen `portgroup_name` und einen Block `vlan_info` mit `vlan_id` und Trunk-Kennzeichen. Stimmen Feldpfade nicht, bleiben die Listen leer, der Empty-Guard hält den Bestand und nur die ID-Spalte bleibt stumm; kaputtgehen kann nichts.
 
 Distributed-Portgruppen werden für das erste gemeldete Datacenter abgerufen und sind mangels DVS in der Testumgebung nicht gegen echte Daten verifiziert.
+
+## Exakte Namen und kindweise Namensevidenz
+
+Seit Migration 0046 sind Datacenter-, Datastore- und Portgruppennamen operative
+Rohwerte mit binärer Kollation. Case, innere Leerzeichen und unterstützte
+Unicode-Zeichen bleiben erhalten. `Daten` und `DATEN` sind deshalb verschiedene
+Ziele. Ein case-gefalteter Diagnosekey darf ähnliche Werte als Warnung zeigen,
+beweist aber weder Vorhandensein noch Kapazität und darf nie einen Deploy- oder
+MAC-Erfolg auswählen.
+
+Leere oder nur aus Leerzeichen bestehende Namen, NUL, Unicode Cc/Cf/Cs,
+ungültiges UTF-8 und überlange Werte sind nicht operative Namen. Ein vollständig
+ungültiger Marker lässt den Pull fehlschlagen. Andere Randwerte bleiben im
+Systemstatus als unsupported sichtbar, werden aber aus Pickern, Katalogbeweisen,
+Speicherbewertung und Datacenter-Ableitung ausgeschlossen.
+
+Der Inventarzustand führt Namenssemantik und Evidenz getrennt je Kind:
+
+- Semantik 2 bedeutet, dass genau dieses Kind vollständig beantwortet und vom
+  exakten Writer geschrieben wurde. Ein erfolgreiches Datastore-Kind wertet
+  beispielsweise kein fehlgeschlagenes Datacenter-Kind auf.
+- `kind_freshness_json` hält den letzten positiven Stand auch für
+  answered-empty. `kind_observation_json` hält daneben den letzten Versuch und
+  dessen Ausgang. Ein späterer Fehler darf den älteren Beweis weder löschen
+  noch auffrischen.
+- Portgruppen-Retirement bleibt eingefroren, bis jeder relevante Zugang
+  Semantik-2-Evidenz besitzt. Ein Altreader darf Case-Varianten niemals
+  zusammenfalten.
+
+Ein leeres Missions-Datacenter wird nur abgeleitet, wenn der gewählte Zugang
+genau einen unterstützten Semantik-2-Rohnamen mit positiver Evidenz bis
+einschließlich 172800 Sekunden Alter liefert. Zero-Match, mehrere Werte,
+unsupported, zukünftige Zeit oder ältere Evidenz blockieren mit einer
+konkreten Konfigurationsursache. Ein explizit gespeicherter Missionswert
+umgeht diese Ableitung. Der Request verwendet für alle Altersentscheidungen
+dieselbe Zeitprobe; ein normaler Inventarabweichungshinweis bleibt warn-only.

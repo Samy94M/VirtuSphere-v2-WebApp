@@ -72,6 +72,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_process_job',
         'deploy_worker_transport_failure_with_step',
         'deploy_worker_autostart_preflight',
+        'deploy_worker_network_preflight',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
         'deploy_worker_credential',

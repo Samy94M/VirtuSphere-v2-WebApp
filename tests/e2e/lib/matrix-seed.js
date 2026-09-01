@@ -62,18 +62,15 @@ foreach ($rows as [$cid, $kind, $name, $cap, $free, $meta]) {
     $stmt->execute();
 }
 
-// A recorded successful pull on both: the presence buckets count credentials
-// that pulled, not credentials that exist.
-$stmt = $db->prepare('INSERT INTO deploy_esxi_inventory_state (credential_id, last_success_at, last_attempt_at, last_status, failure_streak) VALUES (?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), \\'ok\\', 0) ON DUPLICATE KEY UPDATE last_success_at = VALUES(last_success_at), last_attempt_at = VALUES(last_attempt_at), last_status = VALUES(last_status)');
 foreach ([$esxiA, $esxiB] as $cid) {
-    $stmt->bind_param('i', $cid);
-    $stmt->execute();
+    test_mark_inventory_kinds_v2($db, $cid, ['datacenter', 'datastore', 'network', 'host']);
 }
 
 $missionId = repo_create_mission($db, [
     'mission_name' => '${mark}-mission',
     'hypervisor_datastorage' => '${mark}-ds-shared',
     'hypervisor_datacenter' => '${mark}-DC',
+    'wds_vlan' => '${mark}-vlan',
     'domain' => 'seed.example.local',
 ], false, $admin);
 
@@ -98,7 +95,7 @@ echo 'JSON' . json_encode([
     'ansibleId' => $ansible,
 ]) . 'JSON';
 `,
-    ['lib/repo/credentials.php', 'lib/repo/missions.php'],
+    ['lib/repo/credentials.php', 'lib/repo/missions.php', 'tests/Support/NetworkMacFixtures.php'],
   );
 }
 

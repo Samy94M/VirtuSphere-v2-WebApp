@@ -8,6 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/log.php';
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
 
 /**
  * ADR-0032 test matrix, points 2-4: the enqueue persists the request's id on
@@ -179,6 +180,7 @@ final class CorrelationTraceTest extends TestCase
             $stmt->bind_param('iss', $missionId, $vmName, $vmName);
             $stmt->execute();
         }
+        test_prepare_network_mac_fixture($this->db, $missionId, $this->esxiCredentialId);
 
         return $missionId;
     }

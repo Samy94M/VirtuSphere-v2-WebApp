@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/inventory_error_constants.php';
+require_once __DIR__ . '/network_mac_constants.php';
 
 // Declaration order is the ENUM mirror order (ADR-0016, check-enum-sync):
 // cancelling sits between running and the terminal states, exactly where the

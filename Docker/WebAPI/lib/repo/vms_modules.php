@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 const VIRTUSPHERE_VM_REPO_MODULES = [
     'lib/repo/vms.php',
+    'lib/repo/vm_network.php',
     'lib/repo/vms_validation.php',
     'lib/repo/vms_persistence.php',
     'lib/repo/vms_operations.php',

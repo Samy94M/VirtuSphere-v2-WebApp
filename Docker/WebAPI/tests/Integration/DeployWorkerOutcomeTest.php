@@ -279,7 +279,10 @@ final class DeployWorkerOutcomeTest extends TestCase
     private function resultJson(string $outcome, array $successful, array $failed): string
     {
         return json_encode([
-            'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
+            // Worker-outcome convergence must continue to accept durable
+            // historical results. V2 is covered by the callback contract
+            // tests and requires the per-VM evidence/fingerprint bundle.
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
             'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
             'outcome' => $outcome,
             'successful_vm_ids' => $successful,

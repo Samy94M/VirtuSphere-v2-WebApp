@@ -33,7 +33,11 @@ paths = [
     # Historischer Dev-Self-Signed-Key, siehe Kopfkommentar.
     '''Docker/nginx/ssl/nginx-selfsigned\.key''',
 ]
-# Passwoerter, die Tests absichtlich als Literale fuehren (E2E-Fixtures).
+# Literale, die die Default-Regeln als Secret deuten, obwohl sie ein eng
+# begrenztes Testwort oder technische Dokumentationsprosa sind. Der zweite
+# Eintrag ist der historische Changelog-Begriff aus Commit 0381eedd; die
+# generic-api-key-Regel liest ihn nach "Machine-API-Wire," als Schluesselwert.
 stopwords = [
     "Rbac-Smuggle",
+    "ADR-0018-Semantik",
 ]

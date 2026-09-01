@@ -166,6 +166,90 @@ final class MachineApiWireTest extends TestCase
         }
     }
 
+    public function testMacCallbackRejectionAndRequestBoundHavePinnedWireEnvelopes(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->post('/db_importMAC.php?action=updateInterface', [
+            'mission_id' => 2147483001,
+            'job_id' => 2147483002,
+            'results' => [['failed' => true]],
+        ]);
+        self::assertSame(409, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame([
+            'error' => 'Deploy job does not accept this MAC import',
+            'reason_code' => 'callback_job_not_active',
+            'job_id' => 2147483002,
+        ], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // What "no results" means on the wire. A `results` that is absent or
+        // not a list is an unusable request and keeps its legacy 400; an
+        // explicitly empty list is a statement the V2 planner answers per
+        // expected VM, so it must not be refused by shape. Both halves are
+        // pinned because only one of them is a legacy meaning.
+        foreach ([
+            ['mission_id' => 2147483001],
+            ['mission_id' => 2147483001, 'job_id' => 2147483002, 'results' => 'oops'],
+            ['mission_id' => 2147483001, 'job_id' => 2147483002, 'results' => 5],
+        ] as $shape) {
+            [$status, , $body] = $this->post('/db_importMAC.php?action=updateInterface', $shape);
+            self::assertSame(400, $status, $body);
+        }
+        [$status, , $body] = $this->post('/db_importMAC.php?action=updateInterface', [
+            'mission_id' => 2147483001,
+            'job_id' => 2147483002,
+            'results' => [],
+        ]);
+        self::assertSame(409, $status, $body);
+        self::assertStringNotContainsString(
+            'No result entries received',
+            $body,
+            'an explicitly empty list must be judged on its job, not rejected by shape'
+        );
+
+        // The request bound, on the wire, at MAX-1 / MAX / MAX+1. Only the last
+        // one is 413; the two below it must reach JSON decoding and fail there
+        // on their content, never on their size. A bound that also refuses the
+        // exact limit is a limit nobody can use.
+        foreach ([
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES - 1,
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES,
+        ] as $size) {
+            [$status, $headers, $body] = $this->postRaw(
+                '/db_importMAC.php?action=updateInterface',
+                str_repeat('x', $size)
+            );
+            self::assertNotSame(413, $status, 'size ' . $size . ' is inside the request bound: ' . $body);
+            self::assertStringContainsString('application/json', strtolower($headers), 'size ' . $size);
+            self::assertStringNotContainsString('request_too_large', $body, 'size ' . $size);
+        }
+
+        [$status, $headers, $body] = $this->postRaw(
+            '/db_importMAC.php?action=updateInterface',
+            str_repeat('x', VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES + 1)
+        );
+        self::assertSame(413, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame([
+            'error' => 'MAC import payload exceeds the request limit',
+            'reason_code' => 'request_too_large',
+        ], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // Bytes, not characters: the same byte count in two-byte characters is
+        // still inside the bound, one character more is over it.
+        [$status] = $this->postRaw(
+            '/db_importMAC.php?action=updateInterface',
+            str_repeat('ä', intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2))
+        );
+        self::assertNotSame(413, $status);
+        [$status, , $body] = $this->postRaw(
+            '/db_importMAC.php?action=updateInterface',
+            str_repeat('ä', intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2) + 1)
+        );
+        self::assertSame(413, $status, $body);
+    }
+
     /**
      * Negative contract of the E3 retirement (ADR-0035): the legacy desktop
      * token API is gone as a path, not merely disabled. 404 is the claim; any
@@ -225,11 +309,17 @@ final class MachineApiWireTest extends TestCase
      */
     private function post(string $path, array $payload): array
     {
+        return $this->postRaw($path, json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    /** @return array{0:int,1:string,2:string} */
+    private function postRaw(string $path, string $body): array
+    {
         $context = stream_context_create([
             'http' => [
                 'method' => 'POST',
                 'header' => "Content-Type: application/json\r\n",
-                'content' => json_encode($payload, JSON_THROW_ON_ERROR),
+                'content' => $body,
                 'ignore_errors' => true,
                 'timeout' => 5,
             ],

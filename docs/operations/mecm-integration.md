@@ -98,6 +98,27 @@ die ermittelten MAC-Adressen über `db_importMAC.php` meldet. Optional unter
 Den Token nie in ein Ticket, diese Dokumentation oder einen Kommandozeilenparameter
 kopieren; der Installer fragt ihn verdeckt ab.
 
+Der MAC-Rückkanal ist jobgebunden. Für einen neuen Resultat-V2-Callback müssen
+Mission, aktiver `running`/`cancelling`-Job, exportfähiger Modus, Attempt,
+Runtime-Generation und beim Remotevertrag das aktuelle Exporthandle
+zusammenpassen. Unter der Lockreihenfolge Mission, Job, Runtime, Remotehandle,
+VM, Interfaces wird der VM-Name exakt aufgelöst und ausschließlich die eine
+Netzwerkkarte akzeptiert, deren Portgruppe exakt dem Missionswert
+**WDS-Portgruppe (PXE)** entspricht. Eine beliebige DHCP-Karte ist kein
+Identitätsbeweis.
+
+Resultat V2 speichert für jede erwartete VM den WDS-Verdict und einen
+semantischen Callback-Fingerprint aus den sortierten erwarteten VM-IDs und den
+normalisierten semantischen Ergebniszeilen einschließlich ihrer Multiplizität.
+Reine Zeilen-/Keyreihenfolge, Modulmetadaten und Fehlerfreitext ändern ihn
+nicht. Derselbe Callback ist nur für dieselbe noch
+aktive Ausführung idempotent 200 ohne Domainwrite; ein abweichender,
+unlesbarer oder terminal wiederholter Callback ist 409. Nur eine erfolgreiche
+WDS-MAC aktualisiert Interface, VM-Identität und `deployed/pending`; alle
+anderen NICs und VMs bleiben atomar unverändert. Historische Resultate V1
+bleiben eingeschränkt lesbar. Request, persistiertes Resultat und Antwort sind
+begrenzt; Body, Token und Provider-Rohantworten werden nicht protokolliert.
+
 Die Registry-ACL und der geplante SYSTEM-Task verwenden intern die
 sprachunabhängigen Well-Known-SIDs `S-1-5-18` (SYSTEM) und `S-1-5-32-544`
 (lokale Administratoren). Dadurch funktioniert derselbe Installer auf deutschen
@@ -526,11 +547,14 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
 - **MAC-Adressen**: kanonisches Format `AA:BB:CC:DD:EE:FF` (Großbuchstaben,
   Doppelpunkte). Lookups akzeptieren alle üblichen Schreibweisen; der
   Ansible-Import lehnt Dubletten (gleiche MAC an anderer VM) und mehrdeutige
-  Ziele (zwei NICs derselben VM im selben VLAN) mit klarer Fehlermeldung ab.
+  Ziele (zwei NICs derselben VM mit demselben exakten Portgruppennamen) mit
+  klarer Fehlermeldung ab. Portgruppennamen sind case-sensitive; die PXE-MAC
+  stammt nur von der exakt passenden WDS-Portgruppe der Mission.
   Eine fehlerhafte NIC verwirft alle MAC-Schreibplaene dieser VM, nicht aber
   vollstaendig valide VMs desselben Callbacks. Die alten Diagnosefelder
-  `duplicate_macs`/`unmatched_interfaces` bleiben erhalten; `vm_results`
-  nennt pro Inputzeile Outcome, Updatezahl und feste Fehlercodes.
+  `duplicate_macs`/`unmatched_interfaces` bleiben erhalten; Resultat V2 nennt
+  pro erwarteter VM Outcome, Updatezahl, WDS-Evidenz, feste Fehlercodes und den
+  semantischen Callback-Fingerprint.
 
 ## Paket-Lebenszyklus (Etappe 3)
 

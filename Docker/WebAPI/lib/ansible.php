@@ -53,7 +53,13 @@ function ansible_prepare_job_artifacts(
     // when the host has none or several; the gate below then refuses the job
     // rather than guessing. Re-read at run time on purpose: the cache may have
     // changed since the job was queued.
-    $hostDatacenter = repo_esxi_sole_datacenter($db, (int) ($esxiCredential['id'] ?? 0)) ?? '';
+    $datacenterResolution = repo_esxi_datacenter_resolution($db, (int) ($esxiCredential['id'] ?? 0), virtusphere_request_now());
+    $hostDatacenter = (string) $datacenterResolution['resolution'] === 'resolved' ? (string) $datacenterResolution['name'] : '';
+    if (virtusphere_deploy_mode_needs_location((string) $payload['mode'])
+        && trim((string) ($mission['hypervisor_datacenter'] ?? '')) === ''
+        && $hostDatacenter === '') {
+        throw new RuntimeException(esxi_datacenter_blocker_code($datacenterResolution) . ': mission datacenter cannot be derived from current exact-name evidence.');
+    }
     ansible_assert_mission_ready($mission, $hostDatacenter, (string) $payload['mode']);
 
     // The ESXi host object name, as the hypervisor knows itself. Only the
@@ -172,7 +178,11 @@ function ansible_esxi_host_object_name(mysqli $db, int $credentialId): string
 
     $hosts = repo_esxi_inventory_for_credential($db, $credentialId)['host'] ?? [];
 
-    return count($hosts) === 1 ? trim((string) ($hosts[0]['name'] ?? '')) : '';
+    if (count($hosts) !== 1) {
+        return '';
+    }
+    $name = (string) ($hosts[0]['name'] ?? '');
+    return esxi_object_name_classify_raw($name)['supported'] ? $name : '';
 }
 
 /**
@@ -189,7 +199,7 @@ function ansible_assert_mission_ready(array $mission, string $hostDatacenter = '
     if (!virtusphere_deploy_mode_needs_location($mode)) {
         return;
     }
-    if (trim((string) ($mission['hypervisor_datacenter'] ?? '')) === '' && trim($hostDatacenter) === '') {
+    if (trim((string) ($mission['hypervisor_datacenter'] ?? '')) === '' && $hostDatacenter === '') {
         throw new RuntimeException('Mission datacenter is required: the ESXi credential of this job does not report exactly one datacenter.');
     }
     if (trim((string) ($mission['hypervisor_datastorage'] ?? '')) === '') {

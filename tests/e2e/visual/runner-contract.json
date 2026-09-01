@@ -31,6 +31,17 @@
     { "name": "mobile", "width": 390, "height": 844 }
   ],
   "deviceScaleFactor": 1,
+  "launchArgs": [
+    "--no-sandbox",
+    "--disable-gpu",
+    "--run-all-compositor-stages-before-draw",
+    "--force-color-profile=srgb",
+    "--force-device-scale-factor=1",
+    "--disable-lcd-text",
+    "--disable-threaded-animation",
+    "--disable-threaded-scrolling",
+    "--disable-checker-imaging"
+  ],
   "screenshotScale": "css",
   "clock": "2026-08-27T08:15:00.000Z",
   "randomSeed": 110011,

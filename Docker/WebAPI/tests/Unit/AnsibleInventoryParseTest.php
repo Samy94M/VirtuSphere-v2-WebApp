@@ -75,11 +75,10 @@ final class AnsibleInventoryParseTest extends TestCase
         // A range is a trunk, never an integer id.
         self::assertNull($byName['dvs-trunk']['vlan_id']);
         self::assertTrue($byName['dvs-trunk']['trunk']);
-        // Case-insensitive dedupe across both sources: the first item wins,
-        // so the DVS case variant with a different id does not appear.
-        self::assertArrayNotHasKey('vlan_903', $byName);
+        // Case variants are different ESXi objects and keep their own IDs.
+        self::assertSame(905, $byName['vlan_903']['vlan_id']);
         // The empty-named object was dropped entirely.
-        self::assertCount(3, $parsed['networks']);
+        self::assertCount(4, $parsed['networks']);
     }
 
     /**
@@ -141,20 +140,19 @@ final class AnsibleInventoryParseTest extends TestCase
                 // Nameless entry: unusable for a name comparison, dropped, and
                 // counted as a normalization loss rather than vanishing.
                 ['guest_name' => '', 'moid' => 'vm-25'],
-                // Case duplicate: one row per name, the first wins, exactly as
-                // the network dedupe does. Two rows would break the unique key.
+                // Case variant: a distinct ESXi object under the binary key.
                 ['guest_name' => 'ws-001', 'moid' => 'vm-99'],
                 ['guest_name' => 'WS-002', 'moid' => 'vm-30', 'power_state' => 'poweredOn'],
             ],
         ]);
 
         $parsed = ansible_parse_inventory_output($out);
-        self::assertSame(['WS-001', 'WS-002'], array_column($parsed['vms'], 'name'));
+        self::assertSame(['WS-001', 'ws-001', 'WS-002'], array_column($parsed['vms'], 'name'));
         self::assertSame('vm-24', $parsed['vms'][0]['meta_json']['moid']);
         self::assertSame('503c89f1-5734-4d4d-a930-4d92b97a7289', $parsed['vms'][0]['meta_json']['instance_uuid']);
         self::assertSame('poweredOff', $parsed['vms'][0]['meta_json']['power_state']);
-        self::assertSame('vm-30', $parsed['vms'][1]['meta_json']['moid']);
-        self::assertSame(['raw' => 4, 'kept' => 3], $parsed['normalization']['vms']);
+        self::assertSame('vm-30', $parsed['vms'][2]['meta_json']['moid']);
+        self::assertSame(['raw' => 4, 'kept' => 3, 'persistable' => 3, 'supported' => 3], $parsed['normalization']['vms']);
     }
 
     /**
@@ -302,8 +300,7 @@ final class AnsibleInventoryParseTest extends TestCase
         // ansible_inventory.php used to drop unusable raw entries silently: a
         // module output whose shape stopped matching looked exactly like a host
         // with fewer portgroups, and nothing anywhere said so (B15). The parser
-        // now reports raw vs. kept per kind. A case-duplicate is NOT a loss
-        // (the dedupe is intentional); only unusable shapes count.
+        // now reports raw, parseable, persistable and supported counts per kind.
         $out = $this->markerOutput([
             'datacenters' => ['DC1', '   '],
             'datastores' => [['name' => 'ds1'], ['capacity' => 5], 'not-a-dict'],
@@ -315,12 +312,11 @@ final class AnsibleInventoryParseTest extends TestCase
         $parsed = ansible_parse_inventory_output($out);
         $normalization = $parsed['normalization'];
 
-        self::assertSame(['raw' => 2, 'kept' => 1], $normalization['datacenters']);
-        self::assertSame(['raw' => 3, 'kept' => 1], $normalization['datastores']);
+        self::assertSame(['raw' => 2, 'kept' => 1, 'persistable' => 1, 'supported' => 1], $normalization['datacenters']);
+        self::assertSame(['raw' => 3, 'kept' => 1, 'persistable' => 1, 'supported' => 1], $normalization['datastores']);
         // 4 raw: one good, one unusable int, one nameless dict, one
-        // case-duplicate. The duplicate collapses in the dedupe but still
-        // counts as kept here (it WAS parseable), so kept is 2, not 1.
-        self::assertSame(['raw' => 4, 'kept' => 2], $normalization['networks']);
+        // exact-case variant. Both parse and persist as distinct names.
+        self::assertSame(['raw' => 4, 'kept' => 2, 'persistable' => 2, 'supported' => 2], $normalization['networks']);
     }
 
     public function testNormalizationLogLineNamesTheDrops(): void

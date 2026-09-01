@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/system_status_esxi_evidence.php';
+
 /**
  * The ESXi half of the System status page: inventory cards, host facts and the
  * mission/VM deviation scan with its VLAN repair form.
@@ -181,9 +183,8 @@ function system_status_kind_freshness_line(array $kindFreshness, string $kind, a
 
 /**
  * @param array<string,array<int,array<string,mixed>>> $detail
- * @param array<string, string> $kindFreshness per-kind answered-at stamps of the credential's state row
  */
-function system_status_render_inventory_detail(array $detail, array $kindFreshness = []): void
+function system_status_render_inventory_detail(array $detail, ?array $state = null): void
 {
     foreach ([
         VIRTUSPHERE_INVENTORY_KIND_HOST => __t('system_status.inv_th_hosts'),
@@ -192,10 +193,14 @@ function system_status_render_inventory_detail(array $detail, array $kindFreshne
         VIRTUSPHERE_INVENTORY_KIND_NETWORK => __t('system_status.inv_th_networks'),
     ] as $kind => $label) {
         $rows = $detail[$kind] ?? [];
+        $kindFreshness = json_decode((string) ($state['kind_freshness_json'] ?? ''), true);
+        $kindFreshness = is_array($kindFreshness) ? $kindFreshness : [];
         $freshnessLine = system_status_kind_freshness_line($kindFreshness, $kind, $rows);
+        $evidence = esxi_inventory_kind_evidence($state, $kind, $rows, virtusphere_request_now());
         ?>
         <div class="inventory-detail-group"><h4><?php echo h($label); ?> (<?php echo h((string) count($rows)); ?>)<?php if ($freshnessLine !== '') { ?> <small class="muted"><?php echo h($freshnessLine); ?></small><?php } ?></h4>
-        <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { $isDatastore = $kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE; $size = $isDatastore ? system_status_datastore_size($row) : ''; ?><li><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php if ($size !== '') { ?> <small><?php echo h($size); ?></small><?php } ?><?php if ($isDatastore) { echo system_status_datastore_health_badge($row); } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
+        <?php foreach (system_status_esxi_evidence_lines($evidence) as $line) { ?><p class="muted"><?php echo h($line); ?></p><?php } ?>
+        <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { $isDatastore = $kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE; $size = $isDatastore ? system_status_datastore_size($row) : ''; $classification = esxi_object_name_classify_raw((string) $row['name']); ?><li><?php if (!$classification['supported']) { ?><span aria-hidden="true">⟦</span><code class="inventory-raw-name"><?php echo h((string) $row['name']); ?></code><span aria-hidden="true">⟧</span> <small><?php echo h(__t('system_status.inv_unsupported_name', ['count' => mb_strlen((string) $row['name'], 'UTF-8')])); ?></small><?php } else { ?><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php } ?><?php if ($size !== '') { ?> <small><?php echo h($size); ?></small><?php } ?><?php if ($isDatastore) { echo system_status_datastore_health_badge($row); } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
         </div>
         <?php
     }
@@ -298,8 +303,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                     <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?></button></form><?php } ?>
                 </div>
                 <?php if ($isSelected) {
-                    $kindFreshnessDecoded = $state !== null ? json_decode((string) ($state['kind_freshness_json'] ?? ''), true) : null;
-                    ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail, is_array($kindFreshnessDecoded) ? $kindFreshnessDecoded : []); ?></div><?php } ?>
+                    ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail, $state); ?></div><?php } ?>
             </article>
         <?php } ?>
         </div><?php } ?>

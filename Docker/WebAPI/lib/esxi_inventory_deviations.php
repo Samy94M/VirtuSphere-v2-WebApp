@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/repo/vm_network.php';
+
 /**
- * Lower-cased set of inventory names of one kind across all credentials.
+ * Exact set of inventory names of one kind across all credentials.
  *
  * @return array<string, true>
  */
@@ -11,7 +13,7 @@ function esxi_inventory_name_set(mysqli $db, string $kind): array
 {
     $set = [];
     foreach (repo_esxi_inventory_names_by_kind($db, $kind) as $name) {
-        $set[esxi_inventory_name_key($name)] = true;
+        $set[$name] = true;
     }
 
     return $set;
@@ -19,17 +21,16 @@ function esxi_inventory_name_set(mysqli $db, string $kind): array
 /** True when a non-empty value is absent from a non-empty inventory name set. */
 function esxi_inventory_value_unknown(string $value, array $nameSet): bool
 {
-    return $value !== '' && $nameSet !== [] && !isset($nameSet[esxi_inventory_name_key($value)]);
+    return $value !== '' && $nameSet !== [] && !isset($nameSet[$value]);
 }
 
 /**
  * Values missing from per-kind name sets. A kind with an empty set is skipped
  * (empty-guard: an empty inventory of that kind proves nothing). Comparison
- * runs through esxi_inventory_name_key; the output keeps the original
- * spelling, de-duplicated case-insensitively and sorted.
+ * uses exact names; case variants remain distinct and sorted.
  *
  * @param array<string, array<int, string>> $valuesByKind kind => stored values
- * @param array<string, array<string, true>> $nameSetsByKind kind => lower-cased name set
+ * @param array<string, array<string, true>> $nameSetsByKind kind => exact raw-name set
  * @return array<int, string>
  */
 function esxi_inventory_missing_values(array $valuesByKind, array $nameSetsByKind): array
@@ -41,9 +42,9 @@ function esxi_inventory_missing_values(array $valuesByKind, array $nameSetsByKin
             continue;
         }
         foreach ($values as $value) {
-            $value = trim((string) $value);
+            $value = (string) $value;
             if (esxi_inventory_value_unknown($value, $nameSet)) {
-                $key = esxi_inventory_name_key($value);
+                $key = strlen($value) . ':' . $value;
                 if (!isset($missing[$key])) {
                     $missing[$key] = $value; // first spelling wins, like every other dedupe here
                 }
@@ -75,22 +76,22 @@ function esxi_inventory_mission_missing_by_credential(mysqli $db, int $missionId
     }
 
     $valuesByKind = [
-        VIRTUSPHERE_INVENTORY_KIND_DATACENTER => [trim((string) ($mission['hypervisor_datacenter'] ?? ''))],
-        VIRTUSPHERE_INVENTORY_KIND_DATASTORE => [trim((string) ($mission['hypervisor_datastorage'] ?? ''))],
-        VIRTUSPHERE_INVENTORY_KIND_NETWORK => [trim((string) ($mission['wds_vlan'] ?? ''))],
+        VIRTUSPHERE_INVENTORY_KIND_DATACENTER => [(string) ($mission['hypervisor_datacenter'] ?? '')],
+        VIRTUSPHERE_INVENTORY_KIND_DATASTORE => [(string) ($mission['hypervisor_datastorage'] ?? '')],
+        VIRTUSPHERE_INVENTORY_KIND_NETWORK => [(string) ($mission['wds_vlan'] ?? '')],
     ];
     $stmt = $db->prepare('SELECT vm_datacenter, vm_datastore FROM deploy_vms WHERE mission_id = ?');
     $stmt->bind_param('i', $missionId);
     $stmt->execute();
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_DATACENTER][] = trim((string) ($row['vm_datacenter'] ?? ''));
-        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_DATASTORE][] = trim((string) ($row['vm_datastore'] ?? ''));
+        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_DATACENTER][] = (string) ($row['vm_datacenter'] ?? '');
+        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_DATASTORE][] = (string) ($row['vm_datastore'] ?? '');
     }
     $stmt = $db->prepare('SELECT i.vlan FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.mission_id = ?');
     $stmt->bind_param('i', $missionId);
     $stmt->execute();
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_NETWORK][] = trim((string) ($row['vlan'] ?? ''));
+        $valuesByKind[VIRTUSPHERE_INVENTORY_KIND_NETWORK][] = (string) ($row['vlan'] ?? '');
     }
 
     // One query for every credential and every kind this function compares, and
@@ -110,7 +111,7 @@ function esxi_inventory_mission_missing_by_credential(mysqli $db, int $missionId
     }
     $unionMissing = [];
     foreach (esxi_inventory_missing_values($valuesByKind, $unionSets) as $value) {
-        $unionMissing[esxi_inventory_name_key($value)] = true;
+        $unionMissing[$value] = true;
     }
 
     $out = [];
@@ -119,7 +120,7 @@ function esxi_inventory_mission_missing_by_credential(mysqli $db, int $missionId
         $credentialSets = ($setsByCredential[$credentialId] ?? []) + array_fill_keys($kinds, []);
         $missing = array_values(array_filter(
             esxi_inventory_missing_values($valuesByKind, $credentialSets),
-            static fn (string $value): bool => !isset($unionMissing[esxi_inventory_name_key($value)])
+            static fn (string $value): bool => !isset($unionMissing[$value])
         ));
         if ($missing !== []) {
             $out[$credentialId] = $missing;
@@ -163,15 +164,15 @@ function esxi_inventory_mission_deviations(mysqli $db, bool $includeTemplates = 
         : $db->query("SELECT id, mission_name, hypervisor_datacenter, hypervisor_datastorage, wds_vlan FROM deploy_missions WHERE LEFT(mission_name, 1) <> '_' ORDER BY mission_name");
     foreach (repo_fetch_all($rows) as $mission) {
         $issues = [];
-        $dc = trim((string) ($mission['hypervisor_datacenter'] ?? ''));
+        $dc = (string) ($mission['hypervisor_datacenter'] ?? '');
         if (esxi_inventory_value_unknown($dc, $datacenters)) {
             $issues[] = ['field' => 'datacenter', 'value' => $dc];
         }
-        $ds = trim((string) ($mission['hypervisor_datastorage'] ?? ''));
+        $ds = (string) ($mission['hypervisor_datastorage'] ?? '');
         if (esxi_inventory_value_unknown($ds, $datastores)) {
             $issues[] = ['field' => 'datastore', 'value' => $ds];
         }
-        $vlan = trim((string) ($mission['wds_vlan'] ?? ''));
+        $vlan = (string) ($mission['wds_vlan'] ?? '');
         if (esxi_inventory_value_unknown($vlan, $networks)) {
             $issues[] = ['field' => 'vlan', 'value' => $vlan];
         }
@@ -241,11 +242,11 @@ function esxi_inventory_vm_deviations(mysqli $db, array $datacenters, array $dat
                    AND (COALESCE(v.vm_datacenter, '') <> '' OR COALESCE(v.vm_datastore, '') <> '')"
             );
         foreach (repo_fetch_all($rows) as $row) {
-            $dc = trim((string) ($row['vm_datacenter'] ?? ''));
+            $dc = (string) ($row['vm_datacenter'] ?? '');
             if (esxi_inventory_value_unknown($dc, $datacenters)) {
                 esxi_inventory_add_vm_issue($entries, $row, 'vm_datacenter', $dc);
             }
-            $ds = trim((string) ($row['vm_datastore'] ?? ''));
+            $ds = (string) ($row['vm_datastore'] ?? '');
             if (esxi_inventory_value_unknown($ds, $datastores)) {
                 esxi_inventory_add_vm_issue($entries, $row, 'vm_datastore', $ds);
             }
@@ -269,7 +270,7 @@ function esxi_inventory_vm_deviations(mysqli $db, array $datacenters, array $dat
                  WHERE LEFT(m.mission_name, 1) <> '_' AND COALESCE(i.vlan, '') <> ''"
             );
         foreach (repo_fetch_all($rows) as $row) {
-            $vlan = trim((string) $row['vlan']);
+            $vlan = (string) $row['vlan'];
             if (esxi_inventory_value_unknown($vlan, $networks)) {
                 esxi_inventory_add_vm_issue($entries, $row, 'vlan', $vlan);
             }
@@ -304,23 +305,87 @@ function esxi_inventory_deviating_mission_ids(mysqli $db): array
  */
 function repo_reassign_vlan(mysqli $db, string $from, string $to): array
 {
-    $from = trim($from);
-    $to = trim($to);
-    if ($from === '' || $to === '' || $from === $to) {
+    if (trim($from) === '' || trim($to) === '' || $from === $to) {
         throw new InvalidArgumentException('Source and target VLAN are required and must differ.');
     }
 
     return repo_transaction($db, static function () use ($db, $from, $to): array {
-        $stmt = $db->prepare('UPDATE deploy_missions SET wds_vlan = ? WHERE wds_vlan = ?');
-        $stmt->bind_param('ss', $to, $from);
-        $stmt->execute();
-        $missions = $stmt->affected_rows;
+        // Lock every mission first. SQL collation must not decide which spelling
+        // is rewritten, so candidates are selected and compared exactly in PHP.
+        $missions = repo_fetch_all($db->query('SELECT id, wds_vlan FROM deploy_missions ORDER BY id FOR UPDATE'));
+        $missionIds = [];
+        foreach ($missions as $mission) {
+            if ((string) ($mission['wds_vlan'] ?? '') === $from) {
+                $missionIds[] = (int) $mission['id'];
+            }
+        }
 
-        $stmt = $db->prepare('UPDATE deploy_interfaces SET vlan = ? WHERE vlan = ?');
-        $stmt->bind_param('ss', $to, $from);
-        $stmt->execute();
-        $interfaces = $stmt->affected_rows;
+        // Active-job locks come before VM/interface locks. Include every VM of
+        // a mission whose WDS value changes, even when none of its interfaces
+        // currently uses the source VLAN: the callback expectation is still
+        // part of the running mission scope.
+        $missionSet = array_fill_keys($missionIds, true);
+        $scopeRows = repo_fetch_all($db->query(
+            'SELECT v.id AS vm_id, v.mission_id, i.vlan '
+            . 'FROM deploy_vms v LEFT JOIN deploy_interfaces i ON i.vm_id = v.id '
+            . 'ORDER BY v.mission_id, v.id, i.id'
+        ));
+        $affectedVmIdsByMission = [];
+        foreach ($scopeRows as $row) {
+            $missionId = (int) $row['mission_id'];
+            if (isset($missionSet[$missionId]) || (string) ($row['vlan'] ?? '') === $from) {
+                $affectedVmIdsByMission[$missionId][(int) $row['vm_id']] = true;
+            }
+        }
+        foreach ($affectedVmIdsByMission as $missionId => $vmSet) {
+            repo_vm_network_assert_scope_idle($db, (int) $missionId, array_map('intval', array_keys($vmSet)));
+        }
 
-        return ['missions' => max(0, $missions), 'interfaces' => max(0, $interfaces)];
+        $rows = repo_fetch_all($db->query(
+            'SELECT i.id, i.vm_id, v.mission_id, v.vm_name, i.ip, i.subnet, i.gateway, i.dns1, i.dns2, i.vlan, i.mac, i.mode, i.type '
+            . 'FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id '
+            . 'ORDER BY v.mission_id, i.vm_id, i.id FOR UPDATE'
+        ));
+        $byVm = [];
+        $affectedInterfaceIds = [];
+        foreach ($rows as $row) {
+            $vmId = (int) $row['vm_id'];
+            $byVm[$vmId][] = $row;
+            if ((string) $row['vlan'] === $from) {
+                $affectedInterfaceIds[] = (int) $row['id'];
+            }
+        }
+
+        $issues = [];
+        foreach ($affectedVmIdsByMission as $missionId => $vmSet) {
+            foreach (array_keys($vmSet) as $vmId) {
+                $proposed = [];
+                $vmName = '';
+                foreach ($byVm[(int) $vmId] ?? [] as $row) {
+                    $vmName = (string) $row['vm_name'];
+                    if ((string) $row['vlan'] === $from) {
+                        $row['vlan'] = $to;
+                    }
+                    $proposed[] = $row;
+                }
+                if ($proposed === []) {
+                    continue;
+                }
+                array_push($issues, ...vm_network_issues_for_interfaces($proposed, (int) $missionId, (int) $vmId, $vmName));
+            }
+        }
+        if ($issues !== []) {
+            vm_network_sort_issues($issues);
+            throw new VmNetworkPreflightException($issues);
+        }
+
+        $updateMission = $db->prepare('UPDATE deploy_missions SET wds_vlan = ? WHERE id = ?');
+        foreach ($missionIds as $missionId) {
+            $updateMission->bind_param('si', $to, $missionId);
+            $updateMission->execute();
+        }
+        repo_vm_network_update_vlan_ids($db, $affectedInterfaceIds, $to);
+
+        return ['missions' => count($missionIds), 'interfaces' => count($affectedInterfaceIds)];
     });
 }

@@ -265,8 +265,7 @@ function repo_get_mission(mysqli $db, int $missionId): ?array
     return repo_fetch_one($db, 'SELECT m.*, (SELECT COUNT(*) FROM deploy_vms v WHERE v.mission_id = m.id) AS vm_count FROM deploy_missions m WHERE m.id = ? LIMIT 1', 'i', [$missionId]);
 }
 
-// True when any VM of the mission is already known to MECM - renaming the
-// mission would orphan its MECM collection (mission name = collection name).
+// Renaming a MECM-known mission would orphan its same-named collection.
 function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 {
     $registered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
@@ -276,49 +275,50 @@ function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 
 function repo_update_mission_checked(mysqli $db, int $missionId, array $missionData, string $expectedUpdatedAt, bool $requireLocation = false): bool
 {
-    $mission = repo_get_mission($db, $missionId);
-    if ($mission === null) {
-        throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
-    }
-    if ($expectedUpdatedAt !== '' && (string) $mission['updated_at'] !== $expectedUpdatedAt) {
-        throw new RuntimeException(validator_text('validate.mission_stale', 'The mission was changed by someone else in the meantime. Please reload and save again.'));
-    }
-
-    $values = [];
-    foreach (REPO_MISSION_EDITABLE_COLUMNS as $column) {
-        if (array_key_exists($column, $missionData)) {
-            $values[$column] = $missionData[$column];
+    return repo_transaction($db, static function () use ($db, $missionId, $missionData, $expectedUpdatedAt, $requireLocation): bool {
+        // The mission is the first lock for every network writer. Staleness and
+        // the WDS active-job gate therefore cover one indivisible edit.
+        $mission = repo_fetch_one($db, 'SELECT * FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$missionId]);
+        if ($mission === null) {
+            throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
         }
-    }
-    if ($values === []) {
-        return true;
-    }
-
-    // Rename guard (E2, repo layer on purpose - page-level guards are
-    // bypassable): once VMs are submitted/registered in MECM the mission name
-    // is locked because it doubles as the MECM collection name.
-    if (array_key_exists('mission_name', $values)
-        && (string) $values['mission_name'] !== (string) $mission['mission_name']
-        && repo_mission_has_mecm_active_vms($db, $missionId)) {
-        $message = validator_text('validate.mission_rename_mecm_locked', 'Mission cannot be renamed: its name is the MECM collection name and VMs of this mission are already registered in MECM.');
-        throw new ValidationException(['mission_name' => $message], $message);
-    }
-
-    $values = repo_validate_mission_values($db, $values, $missionId, false, $requireLocation);
-
-    $sets = [];
-    foreach (array_keys($values) as $column) {
-        $sets[] = "`{$column}` = ?";
-    }
-    $sets[] = 'updated_at = NOW()';
-
-    $params = array_values($values);
-    $types = str_repeat('s', count($params)) . 'i';
-    $params[] = $missionId;
-    $stmt = $db->prepare('UPDATE deploy_missions SET ' . implode(', ', $sets) . ' WHERE id = ?');
-    $stmt->bind_param($types, ...$params);
-
-    return $stmt->execute();
+        if ($expectedUpdatedAt !== '' && (string) $mission['updated_at'] !== $expectedUpdatedAt) {
+            throw new RuntimeException(validator_text('validate.mission_stale', 'The mission was changed by someone else in the meantime. Please reload and save again.'));
+        }
+        $values = [];
+        foreach (REPO_MISSION_EDITABLE_COLUMNS as $column) {
+            if (array_key_exists($column, $missionData)) {
+                $values[$column] = $missionData[$column];
+            }
+        }
+        if ($values === []) {
+            return true;
+        }
+        // Repo-owned E2 guard: MECM uses the mission name as collection name,
+        // so page-level checks alone cannot protect registered VMs.
+        if (array_key_exists('mission_name', $values)
+            && (string) $values['mission_name'] !== (string) $mission['mission_name']
+            && repo_mission_has_mecm_active_vms($db, $missionId)) {
+            $message = validator_text('validate.mission_rename_mecm_locked', 'Mission cannot be renamed: its name is the MECM collection name and VMs of this mission are already registered in MECM.');
+            throw new ValidationException(['mission_name' => $message], $message);
+        }
+        $values = repo_validate_mission_values($db, $values, $missionId, false, $requireLocation);
+        if (array_key_exists('wds_vlan', $values)
+            && (string) $values['wds_vlan'] !== (string) ($mission['wds_vlan'] ?? '')) {
+            repo_vm_network_assert_scope_idle($db, $missionId, []);
+        }
+        $sets = [];
+        foreach (array_keys($values) as $column) {
+            $sets[] = "`{$column}` = ?";
+        }
+        $sets[] = 'updated_at = NOW()';
+        $params = array_values($values);
+        $types = str_repeat('s', count($params)) . 'i';
+        $params[] = $missionId;
+        $stmt = $db->prepare('UPDATE deploy_missions SET ' . implode(', ', $sets) . ' WHERE id = ?');
+        $stmt->bind_param($types, ...$params);
+        return $stmt->execute();
+    });
 }
 
 function repo_clone_template_to_new_mission(mysqli $db, int $templateMissionId, string $targetMissionName, int $userId): array

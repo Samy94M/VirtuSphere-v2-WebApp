@@ -141,3 +141,28 @@ the portal therefore showed a terminal job whose sequence was still executing:
 - Help explains the two words: "Abbruch angefordert" (worker will stop at the
   next step boundary; the job still holds its locks) vs. "abgebrochen"
   (confirmed end state).
+
+## Amendment (2026-08-31): callback fence and retry precedence
+
+The callback window still includes `cancelling`, but status alone is no longer
+sufficient. `db_importMAC.php` locks and validates Mission -> Job -> runtime
+identity -> current remote export handle when applicable -> VM -> interfaces.
+Mode/export expectation, execution contract, attempt and runtime/handle
+generation must all describe the execution that produced the body. A callback
+to any terminal state is 409, including a byte- or semantically identical
+replay; only an identical callback while that exact execution is active is a
+200 no-op.
+
+Active-job scope includes both `running` and `cancelling` for network writer
+guards. An interface/WDS write racing such a job rolls back rather than changing
+the meaning of an in-flight callback. Retry likewise refuses unresolved active
+or foreign-generation remote evidence before it evaluates identity, network or
+external prerequisites. A fully reconciled terminal historical handle does not
+poison later generations. These additions preserve the existing cancellation
+ownership, one terminal publication and retained `result_json` rules.
+
+A worker network preflight is still before the first remote boundary. Its
+bounded result and `failed/configuration_blocked` terminal state therefore use
+one atomic owner/status CAS. A cancellation that wins first is confirmed as
+`cancelled` without retaining `kind=network_preflight`; the cancellation detail
+uses the pre-remote wording and never claims an already-running remote step.

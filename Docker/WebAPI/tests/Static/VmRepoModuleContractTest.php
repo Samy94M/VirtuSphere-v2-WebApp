@@ -33,6 +33,16 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_restart_vm_progress_watch',
         'repo_vm_progress_attention_count',
         'repo_vm_progress_attention_counts_by_mission',
+        'repo_vm_network_scope',
+        'repo_vm_network_issues_for_scope',
+        'repo_vm_network_preflight',
+        'repo_vm_network_preflight_blockers',
+        'repo_vm_network_preflight_warnings',
+        'repo_vm_network_assert_deploy_ready',
+        'repo_vm_network_assert_scope_within_bounds',
+        'repo_vm_network_assert_scope_idle',
+        'repo_vm_network_update_vlan_ids',
+        'repo_vm_network_assert_bundle_write_allowed',
         'repo_mark_vm_for_mecm_resync',
         'repo_replace_interfaces',
         'repo_interface_mac_value',
@@ -49,7 +59,7 @@ final class VmRepoModuleContractTest extends TestCase
         $root = str_replace('\\', '/', dirname(__DIR__, 2));
         $files = array_map(
             static fn (string $path): string => 'lib/repo/' . basename($path),
-            glob($root . '/lib/repo/vms*.php') ?: []
+            array_merge(glob($root . '/lib/repo/vms*.php') ?: [], [$root . '/lib/repo/vm_network.php'])
         );
         $files = array_values(array_diff($files, ['lib/repo/vms_modules.php']));
 

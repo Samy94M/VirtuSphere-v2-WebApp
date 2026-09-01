@@ -143,7 +143,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $phase = VIRTUSPHERE_DEPLOY_PHASE_MARKER;
         $parsed = ansible_parse_inventory_output($fullOutput);
         $phase = VIRTUSPHERE_DEPLOY_PHASE_DB;
-        $summary = repo_esxi_inventory_apply($channel->connection(), $credentialId, $parsed);
+        $summary = repo_esxi_inventory_apply($channel->connection(), $credentialId, $parsed, $jobId);
         repo_esxi_inventory_record_success($channel->connection(), $credentialId, $parsed['capabilities'], $jobId);
         if (credential_esxi_trust_mode($esxiCredential) === VIRTUSPHERE_ESXI_TRUST_STRICT) {
             repo_record_esxi_strict_test_success($channel->connection(), $credentialId);
@@ -205,6 +205,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
                 $category
             );
             repo_esxi_inventory_record_failure($db, $credentialId, $category, $jobId);
+            repo_esxi_inventory_record_failed_observations($db, $credentialId, $category, $jobId);
             if ($isOnset) {
                 audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_WARNING, [
                     'action' => 'paused',

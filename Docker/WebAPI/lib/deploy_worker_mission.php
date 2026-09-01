@@ -12,6 +12,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
+require_once __DIR__ . '/deploy_worker_network_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
 
@@ -60,6 +61,17 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     try {
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing deploy artifacts.');
         $channel->tick(0);
+        $materializedVmIds = deploy_worker_network_preflight(
+            $channel,
+            $job,
+            $workerId,
+            isset($options['network_preflight_block_observer']) && is_callable($options['network_preflight_block_observer'])
+                ? $options['network_preflight_block_observer']
+                : null
+        );
+        if ($vmIds === []) {
+            $vmIds = $materializedVmIds;
+        }
         $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), (int) $job['mission_id'], 'deploy job ' . $jobId . ' started', $vmIds);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
 
@@ -194,6 +206,23 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // The reason travels: "cancelled" and "the mission was deleted under me"
         // look identical in the log otherwise, and the second one is the finding.
         deploy_worker_handle_cancelled($channel->connection(), $job, $vmIds, $cancelled->getMessage());
+    } catch (DeployWorkerConfigurationBlocked $exception) {
+        $message = deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
+        repo_append_deploy_job_log($channel->connection(), $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
+        $terminalStatus = deploy_worker_finish_job(
+            $channel->connection(),
+            $jobId,
+            $workerId,
+            VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            $message,
+            VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED,
+            $message,
+            $exception->result,
+            false
+        );
+        if ($terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_FAILED) {
+            deploy_worker_audit_outcome($channel->connection(), $job, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
+        }
     } catch (Throwable $exception) {
         // Same redaction as the inventory path: a transport error can echo the
         // command line it ran, and accounts.yml values have no business in a

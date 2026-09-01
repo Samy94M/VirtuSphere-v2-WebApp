@@ -220,14 +220,36 @@ final class EsxiInventoryCacheTest extends TestCase
         self::assertFalse($summary['network']['cleared']);
         self::assertCount(1, repo_esxi_inventory_for_credential($this->db, $this->credentialId)['network']);
         $state = repo_esxi_inventory_state($this->db, $this->credentialId);
-        self::assertTrue($state === null || $state['kind_freshness_json'] === null);
+        self::assertNotNull($state, 'the attempt observation exists even though no kind became authoritative');
+        self::assertSame([], json_decode((string) $state['kind_freshness_json'], true));
+        self::assertSame([], json_decode((string) $state['kind_name_semantics_json'], true));
     }
 
-    public function testCaseInsensitiveDedupe(): void
+    public function testDedupeKeepsCaseVariantsAsExactNames(): void
     {
         $result = repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'network', repo_esxi_inventory_name_items(['Prod', 'prod', 'PROD', 'Test']));
-        // "Prod"/"prod"/"PROD" collapse to one; "Test" is separate.
-        self::assertSame(2, $result['written']);
+        self::assertSame(4, $result['written']);
+    }
+
+    public function testNonPersistableNameKeepsTheWholeAffectedKindFrozen(): void
+    {
+        repo_esxi_inventory_replace_kind($this->db, $this->credentialId, 'network', repo_esxi_inventory_name_items(['VLAN-OLD']));
+        $summary = repo_esxi_inventory_apply($this->db, $this->credentialId, [
+            'networks' => [['name' => 'VLAN-NEW']],
+            'queries' => [
+                'networks_standard' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED],
+                'networks_dvs' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED],
+            ],
+            'name_failures' => [VIRTUSPHERE_INVENTORY_KIND_NETWORK => 1],
+        ]);
+
+        self::assertSame(['written' => 0, 'removed' => 0, 'kept_empty' => true, 'cleared' => false], $summary['network']);
+        self::assertSame(['VLAN-OLD'], array_column(repo_esxi_inventory_for_credential($this->db, $this->credentialId)['network'], 'name'));
+        $state = repo_esxi_inventory_state($this->db, $this->credentialId);
+        self::assertSame([], json_decode((string) $state['kind_name_semantics_json'], true));
+        $observations = json_decode((string) $state['kind_observation_json'], true);
+        self::assertSame('failed', $observations[VIRTUSPHERE_INVENTORY_KIND_NETWORK]['outcome']);
+        self::assertSame('unsupported_inventory_name', $observations[VIRTUSPHERE_INVENTORY_KIND_NETWORK]['reason_code']);
     }
 
     public function testVlanPresenceReportCountsOnlySuccessfulCredentials(): void
@@ -248,10 +270,10 @@ final class EsxiInventoryCacheTest extends TestCase
         $report = repo_esxi_vlan_presence_report($this->db);
         self::assertContains(self::PREFIX . 'esxi', $report['eligible']);
         self::assertNotContains(self::PREFIX . 'esxi2', $report['eligible']);
-        self::assertSame([self::PREFIX . 'esxi2'], $report['ids'][esxi_inventory_name_key(self::PREFIX . 'vlanA')][903]);
+        self::assertSame([self::PREFIX . 'esxi2'], $report['ids'][self::PREFIX . 'vlanA'][903]);
 
-        $presenceA = $report['by_name'][esxi_inventory_name_key(self::PREFIX . 'vlanA')] ?? [];
-        $presenceB = $report['by_name'][esxi_inventory_name_key(self::PREFIX . 'vlanB')] ?? [];
+        $presenceA = $report['by_name'][self::PREFIX . 'vlanA'] ?? [];
+        $presenceB = $report['by_name'][self::PREFIX . 'vlanB'] ?? [];
         self::assertContains(self::PREFIX . 'esxi', $presenceA);
         self::assertContains(self::PREFIX . 'esxi2', $presenceA);
         self::assertContains(self::PREFIX . 'esxi', $presenceB);

@@ -75,6 +75,13 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
       await page.evaluate(() => document.fonts.ready);
       const family = await page.locator('body').evaluate((body) => getComputedStyle(body).fontFamily);
       expect(family).toContain('Segoe UI');
+      // Chromium can report network/font readiness one compositor frame before
+      // translucent panels and their backdrop blur have settled. Two explicit
+      // frame boundaries keep the strict zero-pixel determinism contract without
+      // weakening its threshold or changing the rendered product state.
+      await page.evaluate(() => new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }));
       await page.screenshot({
         path: path.join(outputDir, `${target.name}-${viewport.name}.png`),
         fullPage: true,

@@ -63,12 +63,14 @@ test('VM repeat templates produce unique names and IDs through keyboard activati
   const addInterface = page.locator('[data-add-row="interfaces"]');
   await addInterface.focus();
   await page.keyboard.press('Enter');
+  await addInterface.focus();
   await page.keyboard.press('Enter');
   await expect(interfaceRows).toHaveCount(initialInterfaces + 2);
 
   const addDisk = page.locator('[data-add-row="disks"]');
   await addDisk.focus();
   await page.keyboard.press('Enter');
+  await addDisk.focus();
   await page.keyboard.press('Enter');
   await expect(diskRows).toHaveCount(initialDisks + 2);
 

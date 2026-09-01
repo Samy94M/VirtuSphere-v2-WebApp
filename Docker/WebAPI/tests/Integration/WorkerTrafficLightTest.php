@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
@@ -108,6 +109,13 @@ final class WorkerTrafficLightTest extends TestCase
      * tick now carries the throttled integration report too, so the three
      * liveness signals cannot disagree.
      */
+    // Its own process, because its subject IS a process-lifetime static: the
+    // report throttle in deploy_worker_report_alive() exists so a worker does
+    // not write its status row on every read slice. Shared with an earlier test
+    // in the same PHPUnit process, that throttle silently suppresses the one
+    // call under test, and the assertion then fails for a reason that has
+    // nothing to do with the code it checks - green alone, red in the suite.
+    #[RunInSeparateProcess]
     public function testAHeartbeatTickDuringALongRemoteStepKeepsTheAmpelFresh(): void
     {
         repo_record_worker_result($this->db, VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER, VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS, true, 'queue: 0 waiting, 1 running');

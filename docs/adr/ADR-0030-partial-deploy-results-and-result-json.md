@@ -139,3 +139,93 @@ die Adressen erzeugt hat, besitzt den Job noch), und sein `result_json`
 Sequenz, nicht zum Endstatus. Für den Retry ändert sich nichts - `cancelled`
 behält das schlichte Wieder-Einreihen (eine Cancellation macht keine
 Outcome-Aussage), `cancelling` ist aktiv und wird nie zum Retry angeboten.
+
+## Amendment (2026-08-31): strict V2 network and callback evidence
+
+New callbacks persist result version 2. Besides the aggregate lists and counts,
+V2 requires one canonical `vm_results` entry per expected VM, the exact WDS
+portgroup verdict, bounded closed error codes and a SHA-256
+`callback_fingerprint` over the semantic request. The sorted expected VM IDs
+are part of the fingerprint. Semantic rows and their NIC observations are
+sorted, key order is canonicalized, and allowlisted diagnostic metadata/error
+free text is excluded, while repeated input observations retain their full
+multiplicity. A malformed or internally inconsistent V2 document is not
+silently read as V1. Historical V1 documents remain readable with their
+documented reduced evidence.
+
+The callback is job- and execution-bound. It accepts only a mode whose current
+playbook sequence contains the export step, an active `running` or `cancelling`
+job, the current attempt/runtime generation and, for `remote_v1`, the exact
+current export handle. `legacy_v1` keeps its existing wire and does not invent a
+remote handle. VM lookup is exact, and success requires exactly one interface
+whose VLAN is the mission's exact WDS portgroup plus a valid returned MAC.
+Another interface can never establish VM success.
+
+An identical semantic callback for the same active execution is HTTP 200 and a
+write-free no-op. A different, unreadable or terminal duplicate is HTTP 409 and
+cannot overwrite `result_json`, identity, MAC or lifecycle state. Rejections
+append a bounded job-log trace where a job is known and use the existing
+throttled machine-API audit event; secrets and request bodies are not logged.
+
+The request body is limited to 16 MiB, persisted result and response to 1 MiB;
+the PHP upload setting is 20 MiB so application validation remains the owner.
+Bounds are UTF-8 safe. Response additions such as the structured reason code
+and V2 details are additive: the endpoint path, request envelope, established
+HTTP meanings and legacy status strings remain unchanged.
+
+`deploy_job_retry_plan()` is the sole retry decision. It recomputes the current
+VM scope and resolves blockers in the order unresolved remote execution,
+identity, network, then external prerequisites. A partial MAC result repeats
+only its currently failed VMs as export; successful VMs are never recreated or
+power-cycled by that retry.
+
+The separate pre-remote `network_preflight` version 1 result also records
+canonical `missing_vm_ids` when an explicit queued selection no longer fully
+materializes. Those IDs affect expected/blocked/missing counts but are not
+misclassified as network issues. The result and `failed/configuration_blocked`
+transition are one owner/status CAS. If an operator cancellation wins that
+boundary, the job is confirmed `cancelled` without the preflight result and its
+terminal detail states that no remote step started. This is distinct from a MAC
+callback result produced by a sequence that had already reached remote work.
+
+### Display, candidate and JSON bounds
+
+Preflight findings are bounded in one place, `lib/deploy_preflight_bounds.php`,
+and only ever for presentation or storage; the queue decision keeps reading the
+complete `deploy_queue_blockers()` result for the complete scope, so no bound
+can turn a blocker into a release. A bounded list always carries the complete
+`total` and the number it omitted; a bounded candidate group additionally
+carries `candidate_total` and `candidate_omitted_count`.
+
+Selection runs on one canonical total order (severity registry, mission ID,
+natural VM display name, binary exact VM name, VM ID, source-kind registry,
+interface ID, code, configured value, binary exact candidate name). The final
+binary comparisons matter: a case tie between two ESXi names is exactly where a
+folded comparison stops deciding, and the server render, the live JSON island
+and the stored worker result would each keep a different subset.
+
+An encoded island above `VIRTUSPHERE_DEPLOY_PREFLIGHT_JSON_MAX_BYTES` loses
+entries from the END of that order, one at a time, until it fits, and sets
+`truncated_by_bytes`. The omitted count is recomputed inside that loop, so the
+bytes and the numbers describing them cannot disagree. The stored worker result
+is bounded the same way and never refused: throwing there would turn a precise
+`configuration_blocked` verdict into `execution_failed`, which asserts that a
+playbook ran when none did. Its `counts` keep describing the complete decision,
+`vm_results_total` and `vm_results_omitted_count` explain the difference, and
+the decoder accepts exactly that shape while still rejecting a document whose
+declared numbers do not match its rows. Documents written before these fields
+existed read back as complete lists, because that is what they are.
+
+### The regular job scope
+
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` and
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM` cap one job's scope, and
+the cap is enforced at queue time, on the stagger member, on a retry and at the
+worker's pre-remote recheck. The reason is the 1 MiB callback bound above: a V2
+result that does not fit answers 409 AFTER the playbook created the VMs it is
+reporting about, leaving a failed job over changes that really happened and no
+selection the operator can split any more. The interface cap is the vSphere
+per-VM NIC limit; the VM cap is derived from the proven worst case (every VM
+failing, every identifier at its maximum stored byte length, two errors per
+interface) and re-measured by `MacImportBoundsTest`. The union of a stagger
+group is deliberately exempt, because it becomes one job per VM.

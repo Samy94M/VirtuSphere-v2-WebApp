@@ -27,10 +27,10 @@ final class DeployWorkerResultEvaluationTest extends TestCase
         self::assertFalse(ansible_mode_expects_mac_result(VIRTUSPHERE_DEPLOY_MODE_AUTOSTART));
     }
 
-    public function testValidResultsDecodeWithNormalizedVmIdLists(): void
+    public function testHistoricalV1ResultsRemainReadableAndNormalizeVmIdLists(): void
     {
         $json = json_encode([
-            'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
             'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
             'outcome' => 'partial',
             'successful_vm_ids' => [5, '3', 3, 0, -1, 'x'],
@@ -65,16 +65,16 @@ final class DeployWorkerResultEvaluationTest extends TestCase
         self::assertNull(mac_import_decode_result('   '), 'whitespace only');
         self::assertNull(mac_import_decode_result('{not json'), 'malformed JSON');
         self::assertNull(mac_import_decode_result('"a string"'), 'JSON but not an object');
-        self::assertNull(mac_import_decode_result($this->resultJson(['version' => 2])), 'unknown version must not be misread');
+        self::assertNull(mac_import_decode_result($this->resultJson(['version' => 999])), 'unknown version must not be misread');
         self::assertNull(mac_import_decode_result($this->resultJson(['kind' => 'inventory'])), 'foreign kind');
         self::assertNull(mac_import_decode_result($this->resultJson(['outcome' => 'green'])), 'unknown outcome');
         self::assertNull(mac_import_decode_result($this->resultJson(['outcome' => ''])), 'missing outcome');
     }
 
-    public function testMissingIdListsAndCountsDegradeToEmptyNotToAnError(): void
+    public function testHistoricalV1MissingIdListsAndCountsDegradeToEmptyNotToAnError(): void
     {
         $json = json_encode([
-            'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
             'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
             'outcome' => 'success',
         ], JSON_THROW_ON_ERROR);
@@ -98,9 +98,14 @@ final class DeployWorkerResultEvaluationTest extends TestCase
             'errors' => [['vm_id' => 3, 'vm_name' => 'vm03', 'code' => 'interface_not_found', 'vlan' => 'WDS']],
             'counts' => ['expected_vms' => 3, 'successful_vms' => 2, 'failed_vms' => 1, 'updated_interfaces' => 2],
             'retry' => ['mode' => 'export', 'vm_ids' => [3]],
+            'vm_results' => [
+                ['vm_id' => 1, 'vm_name' => 'vm01', 'outcome' => 'success', 'updated_interfaces' => 1, 'error_codes' => [], 'wds' => ['configured_portgroup' => 'WDS', 'portal_interface_id' => 11, 'verified' => true]],
+                ['vm_id' => 2, 'vm_name' => 'vm02', 'outcome' => 'success', 'updated_interfaces' => 1, 'error_codes' => [], 'wds' => ['configured_portgroup' => 'WDS', 'portal_interface_id' => 12, 'verified' => true]],
+                ['vm_id' => 3, 'vm_name' => 'vm03', 'outcome' => 'failed', 'updated_interfaces' => 0, 'error_codes' => ['interface_not_found'], 'wds' => ['configured_portgroup' => 'WDS', 'portal_interface_id' => null, 'verified' => false]],
+            ],
         ];
 
-        $decoded = mac_import_decode_result(json_encode(mac_import_result_contract($plan), JSON_THROW_ON_ERROR));
+        $decoded = mac_import_decode_result(json_encode(mac_import_result_contract($plan, str_repeat('a', 64)), JSON_THROW_ON_ERROR));
 
         self::assertNotNull($decoded);
         self::assertSame('partial', $decoded['outcome']);
@@ -113,7 +118,7 @@ final class DeployWorkerResultEvaluationTest extends TestCase
     private function resultJson(array $overrides = []): string
     {
         return json_encode(array_merge([
-            'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
             'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
             'outcome' => 'success',
             'successful_vm_ids' => [1],

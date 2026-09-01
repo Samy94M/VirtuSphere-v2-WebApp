@@ -91,7 +91,7 @@ function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
         if (repo_deploy_lock_mission($db, $missionId) === null) {
             return false;
         }
-        repo_deploy_assert_mission_idle($db, $missionId);
+        repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
 
         return repo_execute($db, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
     });

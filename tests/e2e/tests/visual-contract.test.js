@@ -83,6 +83,22 @@ test('visual capture pins the session countdown contract before navigation', () 
   assert.match(spec, /expect\(page\.locator\('\[data-session-clock\]'\)\)\.toHaveText\(sessionClockText\)/);
 });
 
+test('visual runner pins the deterministic software compositor arguments', () => {
+  assert.deepEqual(contract.launchArgs, [
+    '--no-sandbox',
+    '--disable-gpu',
+    '--run-all-compositor-stages-before-draw',
+    '--force-color-profile=srgb',
+    '--force-device-scale-factor=1',
+    '--disable-lcd-text',
+    '--disable-threaded-animation',
+    '--disable-threaded-scrolling',
+    '--disable-checker-imaging',
+  ]);
+  const config = fs.readFileSync(path.join(__dirname, '..', 'playwright.config.js'), 'utf8');
+  assert.match(config, /launchOptions: \{ \.\.\.CHROMIUM_LAUNCH, args: visualContract\.launchArgs \}/);
+});
+
 test('pixel comparison decodes PNG pixels and rejects one changed channel', () => {
   const coreRoot = path.dirname(require.resolve('playwright-core'));
   const { PNG } = require(path.join(coreRoot, 'lib', 'utilsBundle.js'));

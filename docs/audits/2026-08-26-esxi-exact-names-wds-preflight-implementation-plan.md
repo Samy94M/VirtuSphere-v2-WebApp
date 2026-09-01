@@ -2,7 +2,7 @@
 
 Stand: 27.08.2026
 
-Status: entscheidungsreifer Plan nach Contract-Review; Fakten geprüft; keine Produktimplementierung in diesem Arbeitslauf
+Status: lokale Etappe 14A seit 31.08.2026 implementiert; Standort-/Canary-Abnahme offen; Etappe 14B nicht begonnen
 
 Korrekturstand: 27.08.2026. Eingearbeitet sind die expliziten Amendments zum
 allgemeinen Netzwerkvertrag, kindweise Inventar-Namenssemantik, Datacenter-
@@ -1394,6 +1394,38 @@ die Kappung endet vor einem vollständigen Codepoint und
 Request- und Resultatgrenze erhalten positive, negative, exakte Grenz- und
 Umlauttests.
 
+### 14.8b Der reguläre Jobscope und was er kostet
+
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` = 40 und
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM` = 10 sind aus dem
+gemessenen Worst Case abgeleitet, nicht gewählt: jede VM scheitert, jeder
+Bezeichner liegt auf seiner maximalen gespeicherten Bytelänge, jede Karte
+erzeugt zwei Fehler. Das ergibt ein vollständiges V2-Resultat von 0,50 MiB und
+eine vollständige Antwort von 0,83 MiB, beide innerhalb der 1-MiB-Grenze mit
+Rand. `MacImportBoundsTest` misst beides nach und belegt mit dem doppelten
+Scope, dass die Zahl tragend ist.
+
+Der Preis ist benannt statt versteckt: eine Mission darf rund 500 VMs enthalten
+(`VIRTUSPHERE_MISSION_IMPORT_MAX_BYTES`), ein einzelner Auftrag deckt davon
+höchstens 40 ab. Für `full`, `powercycle` und `start` bleibt die Staffelung der
+vorgesehene Weg, weil sie ohnehin einen Auftrag je VM erzeugt und deshalb
+ausgenommen ist. `create`, `export` und `autostart` sind nicht staffelbar und
+damit real auf 40 VMs je Auftrag begrenzt; eine größere Mission wird in
+mehreren Aufträgen bereitgestellt.
+
+Die Grenze ist eine Folge der Antwortgröße, nicht des Netzwerkvertrags. Der
+eigentliche Platzverbrauch liegt darin, dass jede Fehlerzeile `vm_name` und
+`vlan` erneut vollständig trägt: bei zehn Karten sind das rund 8,9 KiB
+wiederholter Namen je VM. Wer den Scope anheben will, verkleinert zuerst diese
+Wiederholung, zum Beispiel durch eine Referenz auf den `vm_results`-Eintrag.
+Das ist eine Änderung am V2-Wire-Vertrag und gehört in eine eigene Etappe mit
+eigener Kompatibilitätsentscheidung, nicht in 14A.
+
+Nicht akzeptabel wäre die Alternative, die es vorher gab: der Auftrag läuft,
+der Export legt die VMs an, und erst die Antwort reißt die Grenze und wird mit
+409 abgewiesen. Danach existieren die VMs, das Ergebnis ist verloren, und keine
+Aufteilung der Auswahl macht das rückgängig.
+
 ### 14.9 Rejection-, Log- und Auditmatrix
 
 „Ohne Writes" bedeutet in diesem Abschnitt stets: keine Interface-, VM-,
@@ -2096,66 +2128,96 @@ Rollout sofort stoppen, wenn:
 
 Das Vorhaben ist erst abgeschlossen, wenn alle Punkte belegt sind:
 
-- [ ] ADR-0023 und ADR-0030 besitzen die beschriebenen Amendments.
-- [ ] Bestehender Netzwerk-/MAC-Plan verweist auf diese korrigierende SSoT.
-- [ ] Masterplan-Etappe 14A verweist auf diesen Plan und Pakete A bis I.
-- [ ] Operative VMware-Namensgleichheit ist überall case-sensitive.
-- [ ] `Prod` und `prod` sind getrennte Ziele; nur exakte Duplikate erzeugen
+- [x] ADR-0023 und ADR-0030 besitzen die beschriebenen Amendments.
+- [x] Bestehender Netzwerk-/MAC-Plan verweist auf diese korrigierende SSoT.
+- [x] Masterplan-Etappe 14A verweist auf diesen Plan und Pakete A bis I.
+- [x] Operative VMware-Namensgleichheit ist überall case-sensitive.
+- [x] `Prod` und `prod` sind getrennte Ziele; nur exakte Duplikate erzeugen
   den allgemeinen Mehrdeutigkeitsbefund.
-- [ ] Der Diagnosekey kann niemals Erfolg oder Kapazität beweisen.
-- [ ] Cache und VLAN-Katalog können Case- und Whitespace-Varianten ohne
+- [x] Der Diagnosekey kann niemals Erfolg oder Kapazität beweisen.
+- [x] Cache und VLAN-Katalog können Case- und Whitespace-Varianten ohne
   Trim-Collapse getrennt halten; unsupported Namen sind sichtbar.
-- [ ] Namenssemantik und Frische werden pro Inventarkind geführt.
-- [ ] Altcache wird je Kind bis zu dessen beantwortetem Neuabruf nicht als
+- [x] Namenssemantik und Frische werden pro Inventarkind geführt.
+- [x] Altcache wird je Kind bis zu dessen beantwortetem Neuabruf nicht als
   exakter Beweis ausgegeben.
-- [ ] Datacenter-Ableitung akzeptiert ausschließlich genau einen unterstützten
+- [x] Datacenter-Ableitung akzeptiert ausschließlich genau einen unterstützten
   Semantik-2-Rohnamen bis einschließlich 172800 Sekunden und bleibt vom
   Warn-only-Abweichungsvertrag getrennt.
-- [ ] `kind_observation_json` trennt den letzten Versuch von der letzten
+- [x] `kind_observation_json` trennt den letzten Versuch von der letzten
   positiven Namensevidenz; ein späterer Fehlschlag kann beide Wahrheiten
   gleichzeitig sichtbar lassen.
-- [ ] Systemstatus ist einziger Detail-Owner für Ursache, Refresh und Joblog;
+- [x] Systemstatus ist einziger Detail-Owner für Ursache, Refresh und Joblog;
   andere Oberflächen nutzen den zentralen Kurzpresenter und den vorhandenen
   Deep-Link-Helper ohne Textduplikat.
-- [ ] Kein Text bezeichnet die 48-Stunden-Namensevidenz als aktuelle
+- [x] Kein Text bezeichnet die 48-Stunden-Namensevidenz als aktuelle
   ESXi-Verfügbarkeits- oder Erreichbarkeitsgarantie.
-- [ ] `Daten` gegen `DATEN` ergibt Warnung plus offene Storagebewertung.
-- [ ] Jede Warnung nennt Mission/VM/Interface und den exakten Wert.
-- [ ] WDS-Portgruppe ist in Mission, VM, Deploy und Help eindeutig bezeichnet.
-- [ ] Full, Powercycle und Export blockieren null/mehrfach/case-falsch.
-- [ ] Create, Start und Autostart warnen, blockieren deswegen aber nicht.
-- [ ] Explizite Auswahl und „leer = alle“ stimmen in UI, Queue, Worker und Callback.
-- [ ] Staffelung ist all-or-nothing und erzeugt bei einem Blocker keine Zeile.
-- [ ] Queue- und Workerprüfung verwenden denselben Domainaggregator.
-- [ ] Worker blockiert vor Upload und erster Remoteoperation.
-- [ ] Gespeicherte Werte werden durch Cacheabweichungen nie blockiert.
-- [ ] MAC-Callback verlangt die exakte WDS-NIC und deren gültige MAC.
-- [ ] Callback prüft unter Locks Modus, Policy-Export-Step, Ausführungsvertrag,
+- [x] `Daten` gegen `DATEN` ergibt Warnung plus offene Storagebewertung.
+- [x] Jede Warnung nennt Mission/VM/Interface und den exakten Wert.
+- [x] WDS-Portgruppe ist in Mission, VM, Deploy und Help eindeutig bezeichnet.
+- [x] Full, Powercycle und Export blockieren null/mehrfach/case-falsch.
+- [x] Create, Start und Autostart warnen, blockieren deswegen aber nicht.
+- [x] Explizite Auswahl und „leer = alle“ stimmen in UI, Queue, Worker und Callback.
+- [x] Staffelung ist all-or-nothing und erzeugt bei einem Blocker keine Zeile.
+- [x] Queue- und Workerprüfung verwenden denselben Domainaggregator.
+- [x] Worker blockiert vor Upload und erster Remoteoperation.
+- [x] Gespeicherte Werte werden durch Cacheabweichungen nie blockiert.
+- [x] MAC-Callback verlangt die exakte WDS-NIC und deren gültige MAC.
+- [x] Callback prüft unter Locks Modus, Policy-Export-Step, Ausführungsvertrag,
   Attempt sowie Job-/Runtime-/Handle-Generation.
-- [ ] Callback-Expectation und Remote-Aktivierung sind getrennt; Create/Full
+- [x] Callback-Expectation und Remote-Aktivierung sind getrennt; Create/Full
   bleiben bis Etappe 14B remote deaktiviert.
-- [ ] Callback sperrt in der Reihenfolge Mission -> Job -> Runtime-Identität ->
+- [x] Callback sperrt in der Reihenfolge Mission -> Job -> Runtime-Identität ->
   gegebenenfalls Remote-Export-Handle -> VM -> Interfaces.
-- [ ] VM-Namen werden im Callback exakt ohne CI-SQL-Fallback aufgelöst.
-- [ ] Identischer Zweitcallback ist nur im aktiven Job, selben Attempt und
+- [x] VM-Namen werden im Callback exakt ohne CI-SQL-Fallback aufgelöst.
+- [x] Identischer Zweitcallback ist nur im aktiven Job, selben Attempt und
   derselben Generation 200/no-op; abweichend oder terminal ist 409 ohne
   Domainwrites.
-- [ ] Eine beliebige andere NIC kann keinen VM-Erfolg mehr erzeugen.
-- [ ] Per-VM-Atomarität, vollständige Resultatinvarianten, Partialstatus und
+- [x] Eine beliebige andere NIC kann keinen VM-Erfolg mehr erzeugen.
+- [x] Per-VM-Atomarität, vollständige Resultatinvarianten, Partialstatus und
   Retryscope bleiben korrekt.
-- [ ] `vm_results` und Callback-Fingerprint sind im strikten V2 persistiert;
+- [x] `vm_results` und Callback-Fingerprint sind im strikten V2 persistiert;
   historischer V1-Bestand bleibt eingeschränkt lesbar und wird nie mit einem
   beschädigten V2 verwechselt.
-- [ ] Request-, Resultat-, Response-, Anzeige-, Kandidaten- und JSON-Bounds sind
+- [x] Request-, Resultat-, Response-, Anzeige-, Kandidaten- und JSON-Bounds sind
   mit PHP-ini, nginx und Uploader synchron;
   UTF-8-Identifier werden nie mitten im Codepoint abgeschnitten.
-- [ ] Missions-WDS-Änderung verändert keine VM automatisch.
-- [ ] Alle Writer, Import-/Klon-/Reassignpfade verwenden den Domainvertrag.
-- [ ] Meldungen sind lokalisiert, handlungsfähig, responsive und barrierearm.
-- [ ] Help und aktive Dokumentation beantworten alle Punkte aus Abschnitt 17;
+- [x] Anzeige-, Kandidaten- und JSON-Bounds haben einen einzigen Owner
+  (`lib/deploy_preflight_bounds.php`); jede Liste liefert vollständiges `total`
+  und Auslassungszahl, Kandidatengruppen zusätzlich `candidate_total` und
+  `candidate_omitted_count`, und kein zweiter Pfad schneidet eine Befundliste.
+- [x] Die Auswahl folgt einer kanonischen Gesamtordnung, die auf binären
+  Vergleichen der exakt gespeicherten Bytes endet; Bytekappung entfernt
+  deterministisch vom Listenende und setzt `truncated_by_bytes`, während
+  abgeleitete Werte innerhalb der Kappungsschleife berechnet werden.
+- [x] Der Backendguard bewertet weiterhin den vollständigen Scope; keine Kappung
+  kann einen Blocker in eine Freigabe verwandeln.
+- [x] Das Worker-`result_json` wird begrenzt statt abgelehnt; ein blockierter
+  Auftrag endet nie fälschlich als `execution_failed`, und Decoder und
+  Presenter lesen das gekürzte Dokument mit vollständigen Zählern.
+- [x] `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` und
+  `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM` liegen in der Bounds-SSoT
+  und werden vor jeder Remote-Arbeit in Queue, Staffelungsslot, Retry und Worker
+  durchgesetzt; die Gruppenunion ist begründet ausgenommen.
+- [x] Ein Worst-Case-Test belegt, dass der maximal zulässige reguläre Jobscope
+  ein vollständiges V2-Resultat und eine vollständige Antwort jeweils unter
+  1 MiB erzeugt, und ein Gegentest belegt, dass der doppelte Scope eine Grenze
+  reißt. Ein regulär großer Job scheitert damit nicht erst nach realem Export.
+- [x] Missions-WDS-Änderung verändert keine VM automatisch.
+- [x] Alle Writer, Import-/Klon-/Reassignpfade verwenden den Domainvertrag.
+- [x] Meldungen sind lokalisiert, handlungsfähig, responsive und barrierearm.
+- [x] Help und aktive Dokumentation beantworten alle Punkte aus Abschnitt 17;
   ausführliche Datacenter-Ursachen und Reparaturschritte existieren nur einmal
   unter Systemstatus.
 - [ ] Unit-, Integration-, Static-, Guard-, E2E-, Visual- und Stagingmatrix ist grün.
+  Stand 01.09.2026: Unit, Static, Integration und Guard sind grün, `phpunit-full`
+  ohne Skips. Offen bleibt der Visual-Determinismusvergleich: `missions-desktop`
+  light weicht zwischen den beiden Aufnahmen einer Sitzung um 38 von 1 440 000
+  Pixeln ab, ±1 je Farbkanal auf antialiasten Kanten. Die Seite und das
+  zuständige `components.css` liegen außerhalb dieser Etappe, die Laufmetadaten
+  eines grünen und eines roten Laufs sind identisch, und der Vergleichsvertrag
+  hat Null-Toleranz. Belege in `docs/QA.md`. Nicht durch Wiederholen grün
+  gemacht und nicht durch Toleranzanhebung erledigt: Sollbaselines gehören zu
+  Etappe 17.
 - [ ] Produktionsgroßer Restore-Klon belegt Laufzeit, Peak-Platz,
   Schreibunterbrechung und unveränderte DDL-Eigenschaften.
 - [ ] Die DDL-Phase weist auch Machine-API-Writer und externe MECM-Tasks nach;
@@ -2168,8 +2230,19 @@ Das Vorhaben ist erst abgeschlossen, wenn alle Punkte belegt sind:
   fail-closed; nur zukünftige Writer zu markieren genügt nicht.
 - [ ] Fast-, Integration- und Release-Lane zeigen den vorgeschriebenen
   `[n/total]`-Fortschritt und sind grün.
+  Stand 01.09.2026: Fortschrittsvertrag in allen Lanes eingehalten. Fast
+  `29 pass / 0 fail / 0 skip`. Integration `35 pass / 1 fail / 0 skip`; der eine
+  Fehler ist der oben beschriebene Visual-Determinismusbefund außerhalb dieser
+  Etappe. Damit ist dieser Punkt bewusst NICHT abgehakt.
 - [ ] Backup, Bestandsaudit, kindweises Semantik-2-Inventar, Canary und
   Rollbackentscheidung sind dokumentiert.
+
+Die offenen Punkte 2159 bis 2168 und 2171 bis 2172 sind bewusst die physische
+Standortgrenze: produktionsgroßer Restore-Klon, reale Writer-Unterbrechung,
+Writer-Cutover/Altreader-Backport, Bestandsinventar, Canary und
+Rollbackentscheidung. Sie sind keine vertagte lokale Codearbeit. Der lokale
+Stand sperrt Create/Full bis Etappe 14B und bis zur standortbezogenen Freigabe;
+synthetische QA darf diese Nachweise nicht ersetzen.
 
 Es bleiben danach nur die bewusst benannten physikalischen Grenzen: Ein
 Inventar-Snapshot beweist keine aktuelle Hostkonfiguration, ein Portgruppenname

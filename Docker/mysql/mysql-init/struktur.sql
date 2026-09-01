@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS deploy_missions (
     mission_name VARCHAR(255) NOT NULL,
     mission_status VARCHAR(255) NOT NULL,
     mission_notes TEXT,
-    wds_vlan VARCHAR(255),
-    hypervisor_datastorage VARCHAR(255),
-    hypervisor_datacenter VARCHAR(255),
+    wds_vlan VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    hypervisor_datastorage VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    hypervisor_datacenter VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
     domain VARCHAR(255),
     -- Provenance snapshot (username, not an FK), mirroring deploy_vms.vm_creator.
     -- Stamped from the session on create; NULL for rows that predate migration 0015.
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     vm_ram VARCHAR(255),
     vm_cpu VARCHAR(255),
     vm_disk VARCHAR(255),
-    vm_datastore VARCHAR(255),
-    vm_datacenter VARCHAR(255),
+    vm_datastore VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    vm_datacenter VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
     vm_guest_id VARCHAR(255),
     -- CPU/RAM hot-add options, applied only at VM creation (Paket F). Default on.
     cpu_hotplug TINYINT(1) NOT NULL DEFAULT 1,
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS deploy_interfaces (
     gateway VARCHAR(255) NOT NULL,
     dns1 VARCHAR(255),
     dns2 VARCHAR(255),
-    vlan VARCHAR(255),
+    vlan VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
     mac VARCHAR(255),
     mode VARCHAR(255),
     type VARCHAR(255),
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS deploy_vm_packages (
 
 CREATE TABLE IF NOT EXISTS deploy_vlan (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    vlan_name VARCHAR(255) NOT NULL,
+    vlan_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
     -- VLAN catalog becomes ESXi-owned (ADR-0023): retire instead of delete when a
     -- portgroup disappears from every host with a fresh successful fetch.
     retired_at TIMESTAMP NULL,
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory (
     id INT AUTO_INCREMENT PRIMARY KEY,
     credential_id INT NOT NULL,
     kind ENUM('datacenter','datastore','network','host','vm') NOT NULL,
-    name VARCHAR(191) NOT NULL,
+    name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
     capacity_bytes BIGINT NULL,
     free_bytes BIGINT NULL,
     meta_json JSON NULL,
@@ -215,6 +215,11 @@ CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
     -- kind whose frozen rows outlived its failing query. Keys are validated in
     -- PHP against VIRTUSPHERE_INVENTORY_KINDS (deliberately no second ENUM).
     kind_freshness_json JSON NULL,
+    -- Per-kind exact-name contract. Missing keys remain legacy semantics 1;
+    -- only a fully answered kind is promoted atomically to semantics 2.
+    kind_name_semantics_json JSON NULL,
+    -- Last attempt per kind, independent from the last positive evidence.
+    kind_observation_json JSON NULL,
     INDEX deploy_esxi_inventory_state_last_job (last_job_id),
     CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_esxi_inventory_state_last_job FOREIGN KEY (last_job_id) REFERENCES deploy_jobs(id) ON DELETE SET NULL
@@ -437,7 +442,7 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
         (terminal_reason_code IS NULL AND terminal_reason_detail IS NULL) OR
         (status = _utf8mb4'succeeded' AND terminal_reason_code = _utf8mb4'completed') OR
         (status = _utf8mb4'partial' AND terminal_reason_code = _utf8mb4'partial_result') OR
-        (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost')) OR
+        (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost',_utf8mb4'configuration_blocked')) OR
         (status = _utf8mb4'cancelled' AND terminal_reason_code IN (_utf8mb4'operator_cancelled',_utf8mb4'cancel_converged'))
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -46,6 +46,22 @@ final class RemoteStepPolicyTest extends TestCase
         self::assertSame(['powercycle', 'export'], array_keys($registry['powercycle']['steps']));
     }
 
+    public function testCallbackRegistryIsDerivedSeparatelyAndPreparesFullWithoutActivatingIt(): void
+    {
+        $registry = remote_step_callback_registry();
+        self::assertNotEmpty($registry);
+        foreach (virtusphere_user_deploy_modes() as $mode) {
+            if (!ansible_mode_expects_mac_result($mode)) {
+                self::assertArrayNotHasKey($mode, $registry);
+                continue;
+            }
+            self::assertSame('db_import_mac', $registry[$mode]['export'] ?? null, $mode);
+            self::assertSame('db_import_mac', remote_step_callback_expectation($mode, 'export'), $mode);
+        }
+        self::assertArrayHasKey(VIRTUSPHERE_DEPLOY_MODE_FULL, $registry);
+        self::assertArrayNotHasKey(VIRTUSPHERE_DEPLOY_MODE_FULL, remote_step_policy_registry());
+    }
+
     public function testDisabledLegacyAndRollbackNeverSelectRemoteOrFallback(): void
     {
         foreach (VIRTUSPHERE_REMOTE_POLICY_MODES as $mode) {

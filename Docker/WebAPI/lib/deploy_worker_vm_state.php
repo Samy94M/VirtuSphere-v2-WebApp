@@ -156,7 +156,7 @@ function deploy_worker_scope_vms(mysqli $db, int $missionId, array $vmIds): arra
  * db_importMAC.php is the SSoT for success/partial of an export sequence;
  * stdout never is. NULL means "no usable result".
  *
- * @return array{outcome:string, successful_vm_ids:list<int>, failed_vm_ids:list<int>, counts:array<string,int>}|null
+ * @return array{version:int,outcome:string,successful_vm_ids:list<int>,failed_vm_ids:list<int>,counts:array<string,int>,errors:list<mixed>,retry:array<mixed>,vm_results:list<mixed>,callback_fingerprint:string}|null
  */
 function deploy_worker_job_mac_result(mysqli $db, int $jobId): ?array
 {

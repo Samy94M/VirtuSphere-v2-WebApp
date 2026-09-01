@@ -152,7 +152,12 @@ declare(strict_types=1);
             <?php echo h($error); ?>
             <?php if ($extraErrors !== []) { ?>
                 <ul>
-                    <?php foreach ($extraErrors as $message) { ?><li><?php echo h($message); ?></li><?php } ?>
+                    <?php foreach ($extraErrors as $field => $message) {
+                        $targetId = '';
+                        if (preg_match('/^interfaces\.(\d+)\.vlan$/', (string) $field, $match) === 1) {
+                            $targetId = form_element_id('vm_edit', 'interface_vlan', (int) $match[1]);
+                        }
+                        ?><li><?php if ($targetId !== '') { ?><a href="#<?php echo h($targetId); ?>"><?php echo h($message); ?></a><?php } else { echo h($message); } ?></li><?php } ?>
                 </ul>
             <?php } ?>
         </div>
@@ -337,13 +342,16 @@ declare(strict_types=1);
             <label><?php echo h(__t('vm_edit.label_notes')); ?><textarea name="vm_notes" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo h($vm['vm_notes'] ?? ''); ?></textarea></label>
         </section>
 
-        <section class="panel stack" role="group"<?php echo form_control_attrs('vm_edit', 'interfaces', null, true, ''); ?>>
+        <section class="panel stack" id="interfaces" data-vm-network-editor data-row-label="<?php echo h(__t('vm_edit.interface_legend', ['number' => ':number'])); ?>" data-required-message="<?php echo h(__t('validate.interface_vlan_required')); ?>" data-duplicate-message="<?php echo h(__t('validate.interface_vlan_unique', ['vlan' => ':vlan'])); ?>" data-case-message="<?php echo h(__t('vm_edit.interface_case_hint')); ?>" data-added-message="<?php echo h(__t('vm_edit.interface_added')); ?>" data-removed-message="<?php echo h(__t('vm_edit.interface_removed')); ?>" data-restored-message="<?php echo h(__t('vm_edit.interface_restored')); ?>">
+            <div class="stack" role="group"<?php echo form_control_attrs('vm_edit', 'interfaces', null, true, ''); ?>>
             <div class="actions"><h2><?php echo h(__t('vm_edit.heading_interfaces')); ?></h2><?php if ($canWrite) { ?><button class="button button-secondary" type="button" data-add-row="interfaces"><?php echo h(__t('vm_edit.add_interface')); ?></button><?php } ?></div>
             <div class="stack" data-repeat-target="interfaces">
-                <?php foreach (array_values($interfaces) as $index => $interface) { render_interface_row($interface, $index, $vlans, $canWrite); } ?>
+                <?php foreach (array_values($interfaces) as $index => $interface) { render_interface_row($interface, $index, $vlans, $canWrite, false, $fieldErrors); } ?>
             </div>
             <template data-template="interfaces"><?php render_interface_row(vm_default_interfaces($mission)[0], '__INDEX__', $vlans, true, true); ?></template>
+            <div class="actions"><p class="muted" role="status" data-vm-network-status></p><button class="button button-secondary" type="button" data-vm-network-undo hidden><?php echo h(__t('vm_edit.interface_undo')); ?></button></div>
             <?php render_interface_gateway_hint(); ?>
+            </div>
         </section>
 
         <section class="panel stack" role="group"<?php echo form_control_attrs('vm_edit', 'disks', null, true, ''); ?>>

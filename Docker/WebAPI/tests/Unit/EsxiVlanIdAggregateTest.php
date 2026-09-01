@@ -30,7 +30,7 @@ final class EsxiVlanIdAggregateTest extends TestCase
             $this->row('VLAN_903', ['vlan_id' => 903, 'trunk' => false], 'esxi-02'),
         ]);
 
-        self::assertSame([903 => ['esxi-01', 'esxi-02']], $aggregate['ids']['vlan_903']);
+        self::assertSame([903 => ['esxi-01', 'esxi-02']], $aggregate['ids']['VLAN_903']);
         self::assertSame([], $aggregate['trunks']);
     }
 
@@ -41,8 +41,8 @@ final class EsxiVlanIdAggregateTest extends TestCase
             $this->row('vlan_903', ['vlan_id' => 905, 'trunk' => false], 'esxi-07'),
         ]);
 
-        // Case variants aggregate under one name key.
-        self::assertSame([903 => ['esxi-01'], 905 => ['esxi-07']], $aggregate['ids']['vlan_903']);
+        self::assertSame([903 => ['esxi-01']], $aggregate['ids']['VLAN_903']);
+        self::assertSame([905 => ['esxi-07']], $aggregate['ids']['vlan_903']);
     }
 
     public function testTrunksNeverEnterTheIdComparison(): void

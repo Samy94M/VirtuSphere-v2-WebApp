@@ -240,3 +240,37 @@ rows the host verifiably lost, and the mirror shows portgroups that do not exist
 The VLAN catalog's retire logic is unchanged: it already required fresh positive
 evidence and never deletes. `EsxiInventoryCacheTest` pins the three empty-result
 paths and the freshness stamps.
+
+## Amendment 6 (2026-08-31): exact raw names and per-kind evidence
+
+The earlier case-insensitive inventory de-duplication and comparison rules are
+superseded. ESXi object names are operative identifiers and are stored and
+compared as raw UTF-8 strings: case, whitespace and supported Unicode are part
+of the identity. Migration 0046 changes the inventory, VLAN catalog, mission
+location/WDS and VM location/interface VLAN columns to binary collation. `Prod`
+and `prod` can therefore coexist; only an exact duplicate is ambiguous. A
+case-folded diagnostic key may group likely mistakes for a warning, but can
+never prove presence, free capacity, a deploy target or callback success.
+
+Name validity is centralized in `lib/esxi_object_names.php`. Empty or
+whitespace-only values, NUL, Unicode categories Cc/Cf/Cs, invalid UTF-8 and
+names beyond the persisted bound are unsupported. A completely invalid
+inventory marker fails the pull instead of partially inventing truth. Other raw
+boundary characters remain visible as unsupported evidence but are excluded
+from pickers and every operative decision.
+
+Inventory name semantics and observations are now per kind. Semantics 2 means
+that one kind was fully answered and written by the exact-name writer; a
+success for another kind cannot upgrade it. `kind_observation_json` separates
+the last attempt from the last positive name evidence, so a later transport,
+authorization or parse failure remains visible without renewing freshness or
+erasing the previous evidence. VLAN retirement remains frozen until all
+relevant credentials have semantics-2 portgroup evidence.
+
+An omitted mission datacenter is derived only from exactly one supported,
+semantics-2 raw datacenter name whose positive evidence is no older than
+`VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS` (172800 seconds,
+inclusive). One request samples the current time once. An explicit mission
+datacenter bypasses derivation. Zero, unsupported, stale, future-dated or
+ambiguous evidence is a configuration blocker; a normal inventory deviation is
+still warn-only and never becomes an absence proof.

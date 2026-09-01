@@ -166,6 +166,10 @@ declare(strict_types=1);
             </ul>
             <p><?php echo h(__t('help_system_status.esxi_inv_p3')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_deviation')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_exact_names')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_name_evidence', [
+                'hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
+            ])); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_refresh_pause')); ?></p>
             <h3><?php echo h(__t('help_system_status.esxi_inv_ampel_heading')); ?></h3>
             <p><?php

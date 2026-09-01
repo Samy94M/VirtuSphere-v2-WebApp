@@ -7,11 +7,13 @@ require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../mac_import.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/vm_identity.php';
+require_once __DIR__ . '/vm_network.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_input.php';
 require_once __DIR__ . '/deploy_job_queries.php';
 require_once __DIR__ . '/deploy_job_guards.php';
 require_once __DIR__ . '/deploy_job_worker.php';
+require_once __DIR__ . '/deploy_job_retry.php';
 
 /**
  * Enqueue paths: the single mission job, its retry, the staggered group and the
@@ -36,7 +38,7 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
     return repo_transaction($db, static function () use ($db, $missionId, $userId, $esxiCredentialId, $ansibleCredentialId, $payload, $scheduledAtUtc): int {
         repo_deploy_assert_user_exists($db, $userId);
 
-        $stmt = $db->prepare('SELECT id, mission_name, hypervisor_datastorage, hypervisor_datacenter FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE');
+        $stmt = $db->prepare('SELECT id, mission_name, wds_vlan, hypervisor_datastorage, hypervisor_datacenter FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $missionId);
         $stmt->execute();
         $mission = $stmt->get_result()->fetch_assoc();
@@ -59,6 +61,7 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         if (repo_deploy_active_job_exists($db, $missionId)) {
             throw new RuntimeException('This mission already has an active deploy job.');
         }
+        repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
 
         $correlationId = virtusphere_correlation_id();
         $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, correlation_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -90,6 +93,10 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
     }
 
     return repo_transaction($db, static function () use ($db, $jobId, $userId): int {
+        $evaluation = deploy_retry_blockers($db, $jobId, true);
+        if (!$evaluation['allowed']) {
+            throw new DeployRetryBlockedException($evaluation);
+        }
         $job = repo_deploy_job($db, $jobId);
         if ($job === null) {
             throw new RuntimeException('Deploy job not found.');
@@ -164,7 +171,7 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
     return repo_transaction($db, static function () use ($db, $missionId, $userId, $esxiCredentialId, $ansibleCredentialId, $basePayload, $baseUtc, $staggerMinutes): array {
         repo_deploy_assert_user_exists($db, $userId);
 
-        $stmt = $db->prepare('SELECT id, mission_name, hypervisor_datastorage, hypervisor_datacenter FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE');
+        $stmt = $db->prepare('SELECT id, mission_name, wds_vlan, hypervisor_datastorage, hypervisor_datacenter FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $missionId);
         $stmt->execute();
         $mission = $stmt->get_result()->fetch_assoc();
@@ -190,6 +197,10 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             $esxiCredentialId,
             array_map(static fn (array $vm): int => (int) $vm['id'], $vms)
         );
+        $scopeIds = array_map(static fn (array $vm): int => (int) $vm['id'], $vms);
+        // Union pre-check for the whole group: it fans out into one job per VM
+        // below, so the per-job scope cap is deliberately not applied here.
+        repo_vm_network_assert_deploy_ready($db, $missionId, $scopeIds, (string) ($mission['wds_vlan'] ?? ''), (string) $basePayload['mode'], true, false);
 
         // Horizon guard for the LAST staggered slot (base + (n-1)*stagger).
         $baseEpoch = $baseUtc !== null ? strtotime($baseUtc . ' UTC') : time();
@@ -206,6 +217,7 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
         $index = 0;
         foreach ($vms as $vm) {
             $vmId = (int) $vm['id'];
+            repo_vm_network_assert_deploy_ready($db, $missionId, [$vmId], (string) ($mission['wds_vlan'] ?? ''), (string) $basePayload['mode']);
             $slotUtc = gmdate('Y-m-d H:i:s', $baseEpoch + $index * $staggerMinutes * 60);
             $payload = $basePayload;
             $payload['vm_ids'] = [$vmId];

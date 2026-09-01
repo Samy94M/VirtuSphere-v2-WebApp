@@ -15,6 +15,8 @@ require_once __DIR__ . '/../lib/mission_transfer.php';
 require_once __DIR__ . '/../lib/system_status.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 
+/** @var mysqli $connection Provided by bootstrap.php. */
+
 $user = portal_require_user($connection);
 $missionId = request_int($_GET, 'id');
 $mission = repo_get_mission($connection, $missionId);
@@ -118,6 +120,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('success', __t('mission_details.flash_saved_as_template', ['count' => (int) $result['created']]));
             redirect_to('mission_details.php?id=' . $result['target_mission_id']);
         }
+    } catch (VmNetworkScopeActiveException $exception) {
+        $message = __t('mission_details.err_wds_active_job');
+        form_remember('update', $_POST, ['wds_vlan' => $message]);
+        $action = can('deploy.run', $user)
+            ? ['url' => deploy_job_log_url($exception->jobId), 'label' => __t('mission_details.open_active_job')]
+            : null;
+        flash_set('error', $message, '', $action);
+        redirect_to('mission_details.php?id=' . $missionId);
     } catch (ValidationException $exception) {
         $message = portal_error_message($exception);
         if (($_POST['action'] ?? '') === 'clone_template') {
@@ -151,6 +161,20 @@ $vlans = repo_active_vlans($connection);
 // row, a failed validation elsewhere silently reverted a changed VLAN to the
 // stored one and nothing said so.
 $storedVlan = form_old('update', 'wds_vlan', (string) ($mission['wds_vlan'] ?? ''));
+$wdsImpact = repo_vm_network_preflight($connection, $missionId, [], $storedVlan);
+$wdsImpactCounts = [
+    VIRTUSPHERE_WDS_READY => 0,
+    VIRTUSPHERE_WDS_MISSION_MISSING => 0,
+    VIRTUSPHERE_WDS_PORTAL_MISSING => 0,
+    VIRTUSPHERE_WDS_PORTAL_CASE_MISMATCH => 0,
+    VIRTUSPHERE_WDS_PORTAL_AMBIGUOUS => 0,
+];
+foreach ($wdsImpact['wds'] as $verdict) {
+    $code = (string) ($verdict['code'] ?? '');
+    if (array_key_exists($code, $wdsImpactCounts)) {
+        $wdsImpactCounts[$code]++;
+    }
+}
 $datacenterOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATACENTER);
 $datastoreOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATASTORE);
 
@@ -208,10 +232,19 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
             <input type="hidden" name="updated_at" value="<?php echo h($mission['updated_at'] ?? ''); ?>">
             <div class="form-grid">
                 <label><?php echo h(__t('common.name')); ?><input name="mission_name"<?php echo form_control_attrs('update', 'mission_name'); ?> pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('update', 'mission_name', (string) ($mission['mission_name'] ?? ''))); ?>" required <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'mission_name'); ?></label>
+                <?php $wdsHintId = form_hint_id('update', 'wds_vlan'); ?>
                 <label><?php echo h(__t('mission_details.label_wds_vlan')); ?><?php vlan_select_field('wds_vlan', $storedVlan, $vlans, [
                     'none' => __t('mission_details.vlan_none'),
                     'unknown_suffix' => __t('mission_details.vlan_not_in_inventory'),
-                ], !can('missions.write', $user)); ?></label>
+                ], !can('missions.write', $user), form_control_attrs('update', 'wds_vlan', null, [$wdsHintId], '')); ?>
+                    <small class="hint" id="<?php echo h($wdsHintId); ?>"><?php echo h(__t('mission_details.wds_vlan_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_existing_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_impact', [
+                        'total' => count($wdsImpact['vms']),
+                        'ready' => $wdsImpactCounts[VIRTUSPHERE_WDS_READY],
+                        'missing' => $wdsImpactCounts[VIRTUSPHERE_WDS_MISSION_MISSING] + $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_MISSING],
+                        'case' => $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_CASE_MISMATCH],
+                        'ambiguous' => $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_AMBIGUOUS],
+                    ])); ?></small><?php echo form_error_html('update', 'wds_vlan'); ?>
+                </label>
                 <?php
                     // The location hints belong under the two controls they explain, so the
                     // fields and their prose form one group spanning two grid tracks. A hint

@@ -1,9 +1,7 @@
 <?php
-
 declare(strict_types=1);
-
 /** @return array<string,mixed> */
-function mac_import_error(string $code, ?int $vmId, string $vmName, string $vlan = '', string $mac = '', ?int $otherVmId = null): array
+function mac_import_error(string $code, ?int $vmId, string $vmName, string $vlan = '', string $mac = '', ?int $otherVmId = null, ?string $ambiguitySource = null): array
 {
     $error = ['code' => $code];
     if ($vmId !== null && $vmId > 0) {
@@ -21,7 +19,10 @@ function mac_import_error(string $code, ?int $vmId, string $vmName, string $vlan
     if ($otherVmId !== null && $otherVmId > 0) {
         $error['other_vm_id'] = $otherVmId;
     }
-
+    if ($code === VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN
+        && in_array($ambiguitySource, ['portal', 'esxi', 'both'], true)) {
+        $error['ambiguity_source'] = $ambiguitySource;
+    }
     return $error;
 }
 
@@ -50,7 +51,9 @@ function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, 
     foreach ($expected as $vmId => $_vm) {
         $vmPlan = $vmPlans[$vmId];
         $vmErrors = array_values($vmPlan['errors']);
-        if ($vmErrors === [] && $vmPlan['updates'] !== []) {
+        $wds = $vmPlan['wds'] ?? null;
+        $wdsVerified = $wds === null || (bool) ($wds['verified'] ?? false);
+        if ($vmErrors === [] && $vmPlan['updates'] !== [] && $wdsVerified) {
             $successful[] = (int) $vmId;
             $updatedInterfaces += count($vmPlan['updates']);
         } else {
@@ -63,18 +66,33 @@ function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, 
     sort($failed, SORT_NUMERIC);
     $outcome = $successful === [] ? 'failed' : (($failed === [] && $errors === []) ? 'success' : 'partial');
     $vmResults = [];
-    foreach ($rows as $row) {
-        $vmId = is_int($row['vm_id']) ? $row['vm_id'] : null;
-        $plan = $vmId !== null && isset($vmPlans[$vmId]) ? $vmPlans[$vmId] : null;
-        $codes = is_array($plan) ? array_column(array_values($plan['errors']), 'code') : $row['error_codes'];
+    foreach ($expected as $vmId => $vm) {
+        $plan = $vmPlans[$vmId];
+        $codes = array_column(array_values($plan['errors']), 'code');
         $codes = array_values(array_unique(array_map('strval', $codes)));
-        $vmResults[] = [
-            'vm_name' => (string) $row['vm_name'],
-            'outcome' => $codes === [] ? 'success' : 'failed',
-            'updated_interfaces' => $codes === [] && is_array($plan) ? count($plan['updates']) : 0,
+        sort($codes, SORT_STRING);
+        $success = in_array((int) $vmId, $successful, true);
+        $vmResult = [
+            'vm_id' => (int) $vmId,
+            'vm_name' => (string) ($vm['vm_name'] ?? ''),
+            'outcome' => $success ? 'success' : 'failed',
+            'updated_interfaces' => $success ? count($plan['updates']) : 0,
             'error_codes' => $codes,
         ];
+        if (is_array($plan['wds'] ?? null)) {
+            $vmResult['wds'] = [
+                'configured_portgroup' => (string) ($plan['wds']['configured_portgroup'] ?? ''),
+                'portal_interface_id' => isset($plan['wds']['portal_interface_id']) ? (int) $plan['wds']['portal_interface_id'] : null,
+                'verified' => $success && (bool) ($plan['wds']['verified'] ?? false),
+            ];
+        }
+        $vmResults[] = $vmResult;
     }
+
+    usort($errors, static fn (array $left, array $right): int => strcmp(
+        mac_import_error_sort_key($left),
+        mac_import_error_sort_key($right)
+    ));
 
     return [
         'outcome' => $outcome,
@@ -94,9 +112,12 @@ function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, 
 }
 
 /** @return array<string,mixed> */
-function mac_import_result_contract(array $plan): array
+function mac_import_result_contract(array $plan, string $callbackFingerprint = ''): array
 {
-    return [
+    if (preg_match('/^[a-f0-9]{64}$/', $callbackFingerprint) !== 1) {
+        throw new InvalidArgumentException('A V2 MAC import result requires its callback fingerprint.');
+    }
+    $contract = [
         'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
         'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
         'outcome' => $plan['outcome'],
@@ -105,9 +126,23 @@ function mac_import_result_contract(array $plan): array
         'errors' => $plan['errors'],
         'counts' => $plan['counts'],
         'retry' => $plan['retry'],
+        'vm_results' => $plan['vm_results'],
     ];
+    $contract['callback_fingerprint'] = $callbackFingerprint;
+
+    return $contract;
 }
 
+function mac_import_error_sort_key(array $error): string
+{
+    return sprintf(
+        '%010d\0%s\0%s\0%s',
+        (int) ($error['vm_id'] ?? 0),
+        (string) ($error['code'] ?? ''),
+        (string) ($error['vlan'] ?? ''),
+        (string) ($error['mac'] ?? '')
+    );
+}
 /**
  * Read side of the result_json contract: what the deploy worker trusts after a
  * sequence with an export step. Anything that is not a well-formed version-1
@@ -115,7 +150,7 @@ function mac_import_result_contract(array $plan): array
  * "no usable result", which the worker must treat as a failed export (L3) -
  * a malformed result must never pass as a green one.
  *
- * @return array{outcome:string, successful_vm_ids:list<int>, failed_vm_ids:list<int>, counts:array<string,int>}|null
+ * @return array{version:int,outcome:string,successful_vm_ids:list<int>,failed_vm_ids:list<int>,counts:array<string,int>,errors:list<mixed>,retry:array<mixed>,vm_results:list<mixed>,callback_fingerprint:string}|null
  */
 function mac_import_decode_result(?string $json): ?array
 {
@@ -124,9 +159,7 @@ function mac_import_decode_result(?string $json): ?array
     }
 
     $decoded = json_decode($json, true);
-    if (!is_array($decoded)
-        || (int) ($decoded['version'] ?? 0) !== VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION
-        || (string) ($decoded['kind'] ?? '') !== VIRTUSPHERE_MAC_IMPORT_RESULT_KIND) {
+    if (!is_array($decoded) || (string) ($decoded['kind'] ?? '') !== VIRTUSPHERE_MAC_IMPORT_RESULT_KIND) {
         return null;
     }
 
@@ -135,17 +168,173 @@ function mac_import_decode_result(?string $json): ?array
         return null;
     }
 
+    $version = (int) ($decoded['version'] ?? 0);
+    if (!in_array($version, [VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION, VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION], true)) {
+        return null;
+    }
+
     $counts = [];
     foreach (is_array($decoded['counts'] ?? null) ? $decoded['counts'] : [] as $key => $value) {
         $counts[(string) $key] = (int) $value;
     }
 
-    return [
+    $result = [
+        'version' => $version,
         'outcome' => $outcome,
         'successful_vm_ids' => mac_import_decode_vm_ids($decoded['successful_vm_ids'] ?? null),
         'failed_vm_ids' => mac_import_decode_vm_ids($decoded['failed_vm_ids'] ?? null),
         'counts' => $counts,
+        'errors' => is_array($decoded['errors'] ?? null) ? array_values($decoded['errors']) : [],
+        'retry' => is_array($decoded['retry'] ?? null) ? $decoded['retry'] : [],
+        'vm_results' => is_array($decoded['vm_results'] ?? null) ? array_values($decoded['vm_results']) : [],
+        'callback_fingerprint' => is_string($decoded['callback_fingerprint'] ?? null) ? $decoded['callback_fingerprint'] : '',
     ];
+
+    if ($version === VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION) {
+        return $result;
+    }
+
+    return mac_import_validate_v2_result($decoded, $result) ? $result : null;
+}
+
+/** @param array<string,mixed> $decoded @param array<string,mixed> $result */
+function mac_import_validate_v2_result(array $decoded, array $result): bool
+{
+    foreach (['successful_vm_ids', 'failed_vm_ids', 'errors', 'counts', 'retry', 'vm_results', 'callback_fingerprint'] as $field) {
+        if (!array_key_exists($field, $decoded)) {
+            return false;
+        }
+    }
+    if (!mac_import_v2_ids_are_canonical($decoded['successful_vm_ids'])
+        || !mac_import_v2_ids_are_canonical($decoded['failed_vm_ids'])
+        || preg_match('/^[a-f0-9]{64}$/', (string) $result['callback_fingerprint']) !== 1
+        || !is_array($decoded['errors']) || !array_is_list($decoded['errors'])
+        || !is_array($decoded['vm_results']) || !array_is_list($decoded['vm_results'])
+        || !is_array($decoded['counts']) || !is_array($decoded['retry'])) {
+        return false;
+    }
+
+    $successful = $result['successful_vm_ids'];
+    $failed = $result['failed_vm_ids'];
+    if (array_intersect($successful, $failed) !== []) {
+        return false;
+    }
+    $expectedIds = array_merge($successful, $failed);
+    sort($expectedIds, SORT_NUMERIC);
+    $vmResultIds = [];
+    $vmResultCodes = [];
+    $updatedInterfaces = 0;
+    $previousVmId = 0;
+    foreach ($decoded['vm_results'] as $vmResult) {
+        if (!is_array($vmResult)) {
+            return false;
+        }
+        $vmId = $vmResult['vm_id'] ?? null;
+        $codes = $vmResult['error_codes'] ?? null;
+        $wds = $vmResult['wds'] ?? null;
+        $updated = $vmResult['updated_interfaces'] ?? null;
+        if (!is_int($vmId) || $vmId <= $previousVmId || isset($vmResultIds[$vmId])
+            || !is_string($vmResult['vm_name'] ?? null)
+            || !in_array((string) ($vmResult['outcome'] ?? ''), ['success', 'failed'], true)
+            || !is_int($updated) || $updated < 0
+            || !is_array($codes) || !array_is_list($codes)
+            || $codes !== array_values(array_unique($codes))) {
+            return false;
+        }
+        $sortedCodes = $codes;
+        sort($sortedCodes, SORT_STRING);
+        if ($codes !== $sortedCodes || array_diff($codes, VIRTUSPHERE_MAC_IMPORT_ERROR_CODES) !== []) {
+            return false;
+        }
+        if (!is_array($wds)
+            || !array_key_exists('configured_portgroup', $wds)
+            || !array_key_exists('portal_interface_id', $wds)
+            || !array_key_exists('verified', $wds)
+            || !is_string($wds['configured_portgroup'] ?? null)
+            || (!is_null($wds['portal_interface_id'] ?? null) && (!is_int($wds['portal_interface_id']) || $wds['portal_interface_id'] <= 0))
+            || !is_bool($wds['verified'] ?? null)) {
+            return false;
+        }
+        $isSuccess = in_array($vmId, $successful, true);
+        if (($vmResult['outcome'] === 'success') !== $isSuccess
+            || ($isSuccess && ($codes !== [] || $updated <= 0 || $wds['verified'] !== true || !is_int($wds['portal_interface_id'])))
+            || (!$isSuccess && ($codes === [] || $updated !== 0 || $wds['verified'] !== false))) {
+            return false;
+        }
+        $vmResultIds[$vmId] = true;
+        $vmResultCodes[$vmId] = $codes;
+        $updatedInterfaces += $updated;
+        $previousVmId = $vmId;
+    }
+    $actualIds = array_map('intval', array_keys($vmResultIds));
+    sort($actualIds, SORT_NUMERIC);
+    if ($actualIds !== $expectedIds) {
+        return false;
+    }
+    $topLevelCodes = [];
+    $previousErrorKey = null;
+    foreach ($decoded['errors'] as $error) {
+        $code = is_array($error) ? ($error['code'] ?? null) : null;
+        $errorVmId = is_array($error) && array_key_exists('vm_id', $error) ? $error['vm_id'] : null;
+        if (!is_array($error) || !is_string($code) || !in_array($code, VIRTUSPHERE_MAC_IMPORT_ERROR_CODES, true)
+            || ($errorVmId !== null && (!is_int($errorVmId) || $errorVmId <= 0))
+            || (array_key_exists('vm_name', $error) && !is_string($error['vm_name']))
+            || (array_key_exists('vlan', $error) && !is_string($error['vlan']))
+            || (array_key_exists('mac', $error) && !is_string($error['mac']))
+            || (array_key_exists('other_vm_id', $error) && (!is_int($error['other_vm_id']) || $error['other_vm_id'] <= 0))
+            || (array_key_exists('ambiguity_source', $error) && !in_array($error['ambiguity_source'], ['portal', 'esxi', 'both'], true))) {
+            return false;
+        }
+        $errorKey = mac_import_error_sort_key($error);
+        if ($previousErrorKey !== null && strcmp($previousErrorKey, $errorKey) > 0) {
+            return false;
+        }
+        $previousErrorKey = $errorKey;
+        if (is_int($errorVmId) && isset($vmResultIds[$errorVmId])) {
+            $topLevelCodes[$errorVmId][$code] = true;
+        }
+    }
+    foreach ($vmResultCodes as $vmId => $codes) {
+        $reported = array_keys($topLevelCodes[$vmId] ?? []);
+        sort($reported, SORT_STRING);
+        if ($reported !== $codes) {
+            return false;
+        }
+    }
+    $counts = $decoded['counts'];
+    foreach (['expected_vms', 'successful_vms', 'failed_vms', 'updated_interfaces'] as $key) {
+        if (!is_int($counts[$key] ?? null) || $counts[$key] < 0) {
+            return false;
+        }
+    }
+    if ($counts['expected_vms'] !== count($expectedIds)
+        || $counts['successful_vms'] !== count($successful)
+        || $counts['failed_vms'] !== count($failed)
+        || $counts['updated_interfaces'] !== $updatedInterfaces
+        || (string) ($decoded['retry']['mode'] ?? '') !== 'export'
+        || !mac_import_v2_ids_are_canonical($decoded['retry']['vm_ids'] ?? null)
+        || $decoded['retry']['vm_ids'] !== $failed) {
+        return false;
+    }
+    $derivedOutcome = $successful === []
+        ? 'failed'
+        : ($failed === [] && $decoded['errors'] === [] ? 'success' : 'partial');
+    return $result['outcome'] === $derivedOutcome;
+}
+
+function mac_import_v2_ids_are_canonical(mixed $ids): bool
+{
+    if (!is_array($ids) || !array_is_list($ids)) {
+        return false;
+    }
+    foreach ($ids as $id) {
+        if (!is_int($id) || $id <= 0) {
+            return false;
+        }
+    }
+    $canonical = array_values(array_unique($ids));
+    sort($canonical, SORT_NUMERIC);
+    return $ids === $canonical;
 }
 
 /** @return list<int> */

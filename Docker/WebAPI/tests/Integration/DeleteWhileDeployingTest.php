@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
+
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
@@ -63,6 +65,7 @@ final class DeleteWhileDeployingTest extends TestCase
         );
         $this->esxiId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, 443);
         $this->ansibleId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 22);
+        test_prepare_network_mac_fixture($this->db, $this->missionId, $this->esxiId, 'VLAN10');
     }
 
     protected function tearDown(): void
@@ -115,7 +118,7 @@ final class DeleteWhileDeployingTest extends TestCase
             repo_delete_vm_by_id($this->db, $this->missionId, $this->vmId);
             self::fail('the single-VM delete must be refused while a job is running');
         } catch (RuntimeException $exception) {
-            self::assertStringContainsString('active deploy job', $exception->getMessage());
+            self::assertStringContainsString('VM network scope', $exception->getMessage());
         }
 
         self::assertSame(1, $this->vmRows());

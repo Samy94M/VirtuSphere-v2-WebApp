@@ -10,6 +10,8 @@ require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/vm_network_display.php';
+require_once __DIR__ . '/../lib/vm_urls.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -143,6 +145,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $rows = getVMs($connection, $missionId);
+$networkIssuesByVm = [];
+foreach ($rows as $networkVm) {
+    $networkIssuesByVm[(int) $networkVm['id']] = vm_network_issues_for_interfaces(
+        (array) ($networkVm['interfaces'] ?? []),
+        $missionId,
+        (int) $networkVm['id'],
+        (string) ($networkVm['vm_name'] ?? '')
+    );
+}
+$hasNetworkIssues = array_filter($networkIssuesByVm) !== [];
 $canWrite = can('vms.write', $user);
 
 // Column sorting: sort before the CSV export so the download matches the view.
@@ -175,9 +187,12 @@ if (($_GET['export'] ?? '') === 'csv') {
         __t('common.name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.th_ram'),
         __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
         __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
+        __t('vms.csv_network_status'), __t('vms.csv_network_detail'),
     ];
     $csvRows = [];
     foreach ($rows as $vm) {
+        $networkIssues = $networkIssuesByVm[(int) $vm['id']] ?? [];
+        $networkDetail = implode(';', array_map(static fn (array $issue): string => (string) $issue['code'] . ((string) $issue['vlan'] !== '' ? ':' . (string) $issue['vlan'] : ''), $networkIssues));
         $csvRows[] = [
             (string) ($vm['vm_name'] ?? ''),
             (string) ($vm['vm_hostname'] ?? ''),
@@ -191,6 +206,8 @@ if (($_GET['export'] ?? '') === 'csv') {
             (string) count($vm['interfaces'] ?? []),
             (string) count($vm['disks'] ?? []),
             (string) count($vm['packages'] ?? []),
+            $networkIssues === [] ? 'valid' : 'invalid',
+            $networkDetail,
         ];
     }
     audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
@@ -252,7 +269,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'status', __t('common.status'), $sort, $dir, $vmSortParams);
-                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
                     <tr>
@@ -285,6 +302,22 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <?php } ?>
                         <td><?php echo mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? '')); ?> <span class="muted"><?php echo h(mecm_updated_display($vm['updated'] ?? 0)); ?></span></td>
                         <td><?php echo h((string) count($vm['interfaces'] ?? [])); ?></td>
+                        <?php if ($hasNetworkIssues) { ?>
+                            <td><?php
+                                $networkIssues = $networkIssuesByVm[(int) $vm['id']] ?? [];
+                                if ($networkIssues === []) {
+                                    echo '&mdash;';
+                                } else {
+                                    $networkTitle = vm_network_finding_message($networkIssues[0]);
+                                    $networkBadge = portal_badge('warning', __t('vms.network_check'));
+                                    if ($canWrite) {
+                                        ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], 'interfaces')); ?>" title="<?php echo h($networkTitle); ?>"><?php echo $networkBadge; ?></a><?php
+                                    } else {
+                                        ?><span title="<?php echo h($networkTitle); ?>"><?php echo $networkBadge; ?></span><?php
+                                    }
+                                }
+                            ?></td>
+                        <?php } ?>
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['packages'] ?? [])); ?></td>
                         <td class="actions">

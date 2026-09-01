@@ -79,6 +79,9 @@ function vmListToCreate($missionId, $vmList, $mysqli)
                 }
 
                 $values = repo_validate_vm_payload($mysqli, $vmMissionId, repo_source_to_array($vm));
+                if (repo_deploy_lock_mission($mysqli, $vmMissionId) === null) {
+                    throw new RuntimeException('VM create skipped: mission not found.');
+                }
                 $values['mission_id'] = $vmMissionId;
                 $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
                 $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
@@ -118,11 +121,16 @@ function vmListToUpdate($vmList, $connection)
                 }
 
                 $values = repo_allowed_columns($vm, REPO_VM_COLUMNS);
+                $currentVm = repo_fetch_one($connection, 'SELECT * FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
+                if ($currentVm === null) {
+                    throw new RuntimeException('VM update skipped: VM not found.');
+                }
+                $missionId = (int) $currentVm['mission_id'];
+                if (repo_deploy_lock_mission($connection, $missionId) === null) {
+                    throw new RuntimeException('VM update skipped: mission not found.');
+                }
+                repo_vm_network_assert_scope_idle($connection, $missionId, [$vmId]);
                 if ($values !== []) {
-                    $currentVm = repo_fetch_one($connection, 'SELECT * FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
-                    if ($currentVm === null) {
-                        throw new RuntimeException('VM update skipped: VM not found.');
-                    }
                     $values = repo_validate_vm_payload($connection, (int) $currentVm['mission_id'], array_merge($currentVm, $values), $vmId);
                     repo_update_from_values($connection, 'deploy_vms', $values, 'id = ?', 'i', [$vmId]);
                 }
@@ -158,7 +166,12 @@ function vmListToDelete($vmList, $connection)
             foreach ($vmList as $vm) {
                 $id = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
                 if ($id > 0) {
-                    repo_execute($connection, 'DELETE FROM deploy_vms WHERE id = ?', 'i', [$id]);
+                    $missionId = (int) (repo_scalar($connection, 'SELECT mission_id FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$id]) ?? 0);
+                    if ($missionId <= 0 || repo_deploy_lock_mission($connection, $missionId) === null) {
+                        throw new RuntimeException('VM delete skipped: VM or mission not found.');
+                    }
+                    repo_vm_network_assert_scope_idle($connection, $missionId, [$id]);
+                    repo_execute($connection, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$id, $missionId]);
                 }
             }
 

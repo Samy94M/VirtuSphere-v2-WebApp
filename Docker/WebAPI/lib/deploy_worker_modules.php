@@ -22,6 +22,7 @@ const VIRTUSPHERE_DEPLOY_WORKER_MODULES = [
     'lib/deploy_worker_outcome.php',
     'lib/deploy_worker_loop.php',
     'lib/deploy_worker_mission.php',
+    'lib/deploy_worker_network_preflight.php',
     'lib/deploy_worker_inventory.php',
     'lib/deploy_worker_stream.php',
     'lib/deploy_worker_db_channel.php',

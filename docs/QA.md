@@ -92,6 +92,112 @@ the VM interface group must announce the Gateway hint. Integration remains the
 final proof because it also runs the complete axe matrix and deterministic
 light/dark visual project against the synthetic QA stack.
 
+### Etappe 14A network and MAC contract
+
+The contract is tested at four independent boundaries:
+
+- `VmNetworkContractTest`, `EsxiObjectNamesTest`,
+  `EsxiDatacenterResolutionTest` and `MacImportV2ContractTest` cover exact
+  names, `0`, whitespace/case variants, grouped zero/duplicate issues,
+  versioned fingerprints, WDS mode semantics, per-kind evidence, inclusive
+  datacenter age, strict V2 decoding and historical V1 reads.
+- `VmNetworkContractIntegrationTest` proves hard-mode zero inserts,
+  Start/Autostart warning-only queuing, all-or-nothing stagger writes,
+  grandfathered unrelated edits, stored-MAC preservation against a conflicting
+  incoming value, a running/cancelling interface-writer race and the
+  queued-versus-claimed Missions-WDS writer boundary.
+  `DeployWorkerNetworkPreflightIntegrationTest` drives the actual worker: a
+  changed bundle and a deleted explicit selection both produce canonical
+  progress, structured evidence and zero remote work; a real second connection
+  proves cancellation can win the combined result/terminal CAS without leaving
+  `network_preflight` on the cancelled job.
+  `DeployEnqueueRaceTest`, `DeployJobRetryFlowTest`,
+  `DeployDatacenterResolutionTest` and `DeployWorkerOutcomeTest` pin current
+  selection/retry scope, blocker precedence, cache races and convergence.
+- `MacImportCallbackTest` proves exact WDS success, missing/case/ambiguous WDS,
+  non-export modes, attempt/generation/handle fences, per-VM atomicity,
+  order-independent semantic active replay, scope/fingerprint conflicts,
+  terminal duplicate rejection, bounded joblog/audit traces and zero domain
+  writes on the rejection matrix. `MachineApiWireTest` pins the additive 409
+  reason envelope and the exact `413 request_too_large` response;
+  `MacImportV2ContractTest` proves exact result/response bounds and precedence.
+- `NetworkMacContractTest` is the positive/negative/zero-match ownership guard.
+  Its production owner glob rejects an unguarded interface writer, a second mode list, a queue or
+  worker bypass, case-insensitive callback lookup and a V2 path without the
+  semantic fingerprint. It also pins the two bound families: one owner for the
+  display/JSON bounds with no second `array_slice` over a finding list, and the
+  per-job scope cap in the one repo gate that queue, stagger member, retry and
+  worker recheck already pass through.
+- `DeployPreflightBoundsTest` covers the display bounds: selection at
+  DETAIL-1/DETAIL/DETAIL+1, an empty list, reproducible selection from a
+  reordered input, the candidate bound with both counts, byte capping that
+  removes from the list end and flags itself, an envelope that cannot fit even
+  empty, UTF-8 names that survive whole, the shared byte limiter at every
+  budget across a two-byte character, and the decoder against a truncated,
+  a historical unbounded and three inconsistent documents.
+- `MacImportBoundsTest` covers the callback bounds against the real constants:
+  result and response at MAX-1/MAX/MAX+1, the request bound measured in bytes
+  including a payload of umlauts, identifier cuts that end before a codepoint,
+  and the worst case of the largest regular job scope
+  (`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` x
+  `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM`, every VM failing, every
+  identifier at its maximum stored width) producing a complete V2 result and a
+  complete response inside 1 MiB with margin. The counter-test proves the cap is
+  load-bearing: twice that scope breaks a bound.
+  `MissionImportUploadLimitContractTest` extends the same ladder outwards, so
+  `post_max_size` and both nginx sources stay above the 16 MiB request contract
+  and the uploader read cap equals the application response bound.
+
+The browser integration covers server-rendered and live queue blockers, exact
+VM-editor VLAN controls, legacy invalid values, add/remove/undo/keyboard focus,
+stale live responses, mobile wrap and both locales/themes. Machine API coverage
+continues to assert the existing request envelope, HTTP meanings, five status
+strings, RBAC/CSRF separation and additive-only response/result fields.
+
+Final acceptance runs only through `scripts/check.ps1`: the complete Fast lane,
+then Integration against its fresh `virtusphere-qa` stack. No dynamic skip or
+`infrastructure_error` is a pass. Both lanes retain their canonical
+`[n/total] RUN` and result lines; focused commands above are debugging evidence,
+not a replacement for the lanes.
+
+Recorded result of the Etappe-14A acceptance runs (2026-09-01, on a working
+tree verified unchanged for the whole duration of each run):
+
+- Fast: `29 pass, 0 fail, 0 infrastructure_error, 0 not_applicable, 0 skip`.
+  `phpunit-unit` 217.7 s green with `--fail-on-skipped`.
+- Integration: `35 pass, 1 fail, 0 infrastructure_error, 0 not_applicable,
+  0 skip`. `phpunit-full` 334.5 s green **without skips** against the freshly
+  built QA stack, which is where the 16 MiB request bound is exercised on the
+  real path (`post_max_size = 20M` verified inside the running QA container);
+  `migrate-check` pending=0 on a fresh database; `schema-convergence`,
+  `health-contract` and `guard-harness` (722.6 s) green.
+
+The one failure is `e2e-portal`, and it is a visual-harness determinism finding,
+not an Etappe-14A defect. The harness captures every page twice per theme and
+compares run 1 against run 2 under a committed zero-tolerance contract
+(`channelThreshold: 0`, `maxDiffPixelRatio: 0`). Seven of eight images are
+byte-identical; `missions-desktop` in the light theme differs in 38 of 1 440 000
+pixels (ratio 0.0000264), by plus or minus one in single colour channels in both
+directions, on the antialiased corners and edges of one control. What that
+bounds it to:
+
+- `portal/missions.php`, the page in that image, is not touched by Etappe 14A,
+  and `components.css`, which styles that control, is not in the diff either.
+- Run metadata of a green and a red run are identical: browser revision 1228,
+  the three pinned font SHA-256 values, launch arguments, viewports, locale and
+  timezone.
+- The same pixel set reproduces exactly across two consecutive runs, while a
+  third run on the same code produced zero differences. Cross-run differences
+  outside a session sit in a different region (a timestamp), which the contract
+  never compares because it only relates run 1 to run 2 inside one session.
+
+The `launchArgs` block in `tests/e2e/visual/runner-contract.json` is the
+Etappe-14A attempt to make that rasterization deterministic. It reduced the
+finding but did not remove it. Raising the tolerance or chasing the rasterizer
+further both change what every future visual gate means, and reviewed visual
+targets belong to Etappe 17, so neither was done here. The gate stays red and
+named rather than silently retried until green.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:

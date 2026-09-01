@@ -4,6 +4,13 @@ Stand: 13.08.2026
 
 Status: entscheidungsreifer Gesamtplan; seit 2026-08-20 in Offline-Implementierung (8R-O) und Standortabnahme (8R-S) getrennt
 
+Umsetzungsstand Etappe 14A: seit 31.08.2026 lokal implementiert und bis auf die
+unten ausdrücklich getrennten Standortnachweise abgenommen. Etappe 14B wurde
+nicht begonnen; Create/Full bleiben entsprechend der korrigierenden SSoT remote
+deaktiviert. Produktions-Restore, Bestandsaudit, Canary, Rollbackentscheidung und
+die drei realen Vorfall-VMs benötigen die benannte Standortumgebung und werden
+nicht durch synthetische QA-Evidenz ersetzt.
+
 Korrigierender Teilplan: `docs/audits/2026-08-26-esxi-exact-names-wds-preflight-implementation-plan.md`
 ist seit 26.08.2026 die Fach-SSoT für operative ESXi-Namensgleichheit,
 case-sensitive Inventarhaltung, Datastore-/Portgruppen-Schreibweisen,
@@ -16,7 +23,9 @@ Remote-Recovery-, allgemeinen Netzwerk-/MAC- und Retryverträge.
 
 Zusammengeführt aus: VLAN-/MAC-Review und Codex-Session `019ffafd-2893-7ed1-94f1-d069b6e88174`
 
-Änderungsumfang dieses Arbeitslaufs: ausschließlich Plan-, SSoT- und Querverweisdokumentation; kein Produktivcode, kein Schema und kein Laufzeitverhalten
+Änderungsumfang der Etappe 14A vom 31.08.2026: Produktcode, additive Migration,
+Writer-/Queue-/Worker-/Callback-/Retryvertrag, Portal, QA und aktive
+Dokumentation gemäß Abschnitt 10 und korrigierender SSoT; kein Umfang aus 14B.
 
 ## 0. Verbindlicher Einordnungs- und Ausführungsvertrag
 
@@ -356,8 +365,10 @@ Ein Queueblocker erzeugt keinen Job. Der Worker-Recheck kann nach einer Änderun
   "counts": {
     "expected_vms": 15,
     "blocked_vms": 3,
+    "missing_vms": 0,
     "issues": 3
   },
+  "missing_vm_ids": [],
   "vm_results": [
     {
       "vm_id": 25,
@@ -378,8 +389,20 @@ Ein Queueblocker erzeugt keinen Job. Der Worker-Recheck kann nach einer Änderun
 Regeln:
 
 - `kind=network_preflight` ist ausschließlich für einen terminalen Worker-Recheck vor Remote-Arbeit zulässig.
+- Eine nach dem Queueing verschwundene explizite VM-ID bleibt in der kanonisch
+  sortierten, positiven und duplikatfreien Top-Level-Liste `missing_vm_ids`.
+  Sie ist kein Netzwerk-Issue und erfindet deshalb keinen Issue-Code.
+- `expected_vms` zählt den expliziten Sollscope, `blocked_vms` die betroffenen
+  materialisierten VMs plus fehlende IDs, `missing_vms` exakt diese IDs und
+  `issues` weiterhin ausschließlich echte Netzwerk-/WDS-Issues. Der Decoder
+  prüft Disjunktheit und sämtliche ableitbaren Countgleichungen fail-closed.
 - Der Vertrag wird auf denselben Bounds wie andere Deployresultate begrenzt und enthält keine IPs, MACs, Ansible-Payloads oder Secrets.
-- Für einen Job existiert zu einem Zeitpunkt genau ein finales `result_json`. Ein Preflight-Block erreicht keinen MAC-Import und kann daher keinen `mac_import`-Vertrag überschreiben.
+- Für einen Job existiert zu einem Zeitpunkt genau ein finales `result_json`.
+  Preflight-Resultat und `failed/configuration_blocked` werden in demselben
+  Owner-/Status-CAS geschrieben. Gewinnt parallel `cancelling`, wird ohne
+  Preflight-Resultat als `cancelled` bestätigt und ausdrücklich festgehalten,
+  dass kein Remote-Schritt startete. Ein Preflight-Block erreicht keinen
+  MAC-Import und kann daher keinen `mac_import`-Vertrag überschreiben.
 - Ein erfolgreicher Preflight persistiert kein eigenes Resultat. Bei einem späteren Export ist ausschließlich `kind=mac_import` das Resultat.
 - Create ohne Export kann bei Erfolg weiterhin ohne `result_json` enden. Create-Zwischenstände bleiben beim separaten Create-Plan.
 - Der zentrale Presenter dispatcht exhaustiv über bekannte `kind`-Werte. Ein unbekannter Kind-Wert ist ein neutraler technischer Fehler, niemals Erfolg.
@@ -448,7 +471,10 @@ Für Start und Autostart erzeugt der Domainbefund keinen Blocker, sondern eine g
 Unmittelbar nach dem erfolgreichen Claim und vor Artefakt-Upload oder erstem ESXi-Schreib-/Power-Schritt:
 
 1. Scope und Modus erneut aus dem gespeicherten Payload normalisieren.
-2. Falls der Modus Eindeutigkeit benötigt, alle Scope-VMs und Interfaces gebündelt lesen.
+2. Falls der Modus Eindeutigkeit benötigt, alle Scope-VMs und Interfaces
+   gebündelt lesen. Eine explizite ID, die nicht mehr materialisiert werden
+   kann, ist selbst ein Blocker; sie wird niemals still entfernt oder zu
+   „gesamte Mission“ erweitert.
 3. Pro VM die bekannten Progresszeilen schreiben:
 
    ```text
@@ -955,27 +981,33 @@ Alle Quellen dienen der Absicherung des Designs. Die konkrete Produktsemantik st
 
 Etappe 14A ist nur abgeschlossen, wenn jeder Punkt belegt ist:
 
-- [ ] Die globale Masterplanreihenfolge enthält Etappe 14A und die Create-Plan-Abhängigkeit ist abgeglichen.
-- [ ] Genau eine Namens-Key-SSoT und genau eine Netzwerk-Issue-SSoT existieren.
-- [ ] Jeder Schreibpfad aus Abschnitt 5 ist positiv, negativ und transaktional getestet.
-- [ ] Altbestand wird sichtbar, aber nicht automatisch verändert.
-- [ ] Unabhängige VM-Felder bleiben bei unverändertem Legacy-Bundle editierbar.
-- [ ] Create, Full, Power-Cycle und Export blockieren betroffene Scope-VMs vor Remote-Arbeit.
-- [ ] Start und Autostart warnen, blockieren aber nicht.
-- [ ] Queue, Live-Endpunkt, Repo und Worker verwenden denselben Aggregator.
-- [ ] Retry verwendet den tatsächlichen Retry-Scope und revalidiert serverseitig.
-- [ ] Portal-, ESXi- und unbekannte Ambiguity-Quelle werden korrekt dargestellt.
-- [ ] `vm_results` ist additiv persistiert und alte Resultate bleiben lesbar.
-- [ ] Ein Worker-Preflight-Block ist als `kind=network_preflight` strukturiert gespeichert; erfolgreicher Create bleibt davon unberührt.
-- [ ] Kein Machine-API-, MECM-, Cancel-, Lifecycle- oder Create-Ergebnisvertrag ist gebrochen.
-- [ ] VM-Editor, VM-Liste, Deploy-Seite, Jobliste und Jobdetail besitzen die beschriebenen verständlichen Zustände und Aktionen.
-- [ ] JS-less, RBAC, Sessionende, stale Response, zwei Tabs, Mobile, Wrap, beide Themes, Keyboard, axe und Screenreader-Stichprobe sind grün.
-- [ ] Ansible-Logs sind per VM lesbar, ohne vollständige komplexe Items oder Secrets auszugeben.
-- [ ] Joblog-Ende, ältere Seiten und Rohdownload funktionieren über die bestehenden Owner auch bei mehr als 1.500 Zeilen.
-- [ ] Alle DE/EN-Kataloge, Hilfen, ADRs, Betriebsdokus, QA und Changelog sind synchron.
+- [x] Die globale Masterplanreihenfolge enthält Etappe 14A und die Create-Plan-Abhängigkeit ist abgeglichen.
+- [x] Genau eine Namens-Key-SSoT und genau eine Netzwerk-Issue-SSoT existieren.
+- [x] Jeder Schreibpfad aus Abschnitt 5 ist positiv, negativ und transaktional getestet.
+- [x] Altbestand wird sichtbar, aber nicht automatisch verändert.
+- [x] Unabhängige VM-Felder bleiben bei unverändertem Legacy-Bundle editierbar.
+- [x] Create, Full, Power-Cycle und Export blockieren betroffene Scope-VMs vor Remote-Arbeit.
+- [x] Start und Autostart warnen, blockieren aber nicht.
+- [x] Queue, Live-Endpunkt, Repo und Worker verwenden denselben Aggregator.
+- [x] Retry verwendet den tatsächlichen Retry-Scope und revalidiert serverseitig.
+- [x] Portal-, ESXi- und unbekannte Ambiguity-Quelle werden korrekt dargestellt.
+- [x] `vm_results` ist additiv persistiert und alte Resultate bleiben lesbar.
+- [x] Ein Worker-Preflight-Block ist als `kind=network_preflight` strukturiert gespeichert; erfolgreicher Create bleibt davon unberührt.
+- [x] Kein Machine-API-, MECM-, Cancel-, Lifecycle- oder Create-Ergebnisvertrag ist gebrochen.
+- [x] VM-Editor, VM-Liste, Deploy-Seite, Jobliste und Jobdetail besitzen die beschriebenen verständlichen Zustände und Aktionen.
+- [x] JS-less, RBAC, Sessionende, stale Response, zwei Tabs, Mobile, Wrap, beide Themes, Keyboard, axe und Screenreader-Stichprobe sind grün.
+- [x] Ansible-Logs sind per VM lesbar, ohne vollständige komplexe Items oder Secrets auszugeben.
+- [x] Joblog-Ende, ältere Seiten und Rohdownload funktionieren über die bestehenden Owner auch bei mehr als 1.500 Zeilen.
+- [x] Alle DE/EN-Kataloge, Hilfen, ADRs, Betriebsdokus, QA und Changelog sind synchron.
 - [ ] `scripts/check.ps1 -Lane Fast`, Integration und Release sind grün; Fortschritt wird gemäß Repositoryvertrag sichtbar ausgegeben.
 - [ ] Produktionsrevision, Migration, Bestandsaudit, Canary, Retry-Scope und Rollbacknachweis sind dokumentiert.
 - [ ] Die drei konkreten VMs können nach fachlich bestätigter VLAN-Korrektur im Export-Retry erfolgreich verarbeitet werden, ohne bereits erfolgreiche VMs neu zu erstellen oder zu powercyclen.
+
+Die letzten beiden offenen Punkte sind Standortabnahmen, keine offenen lokalen
+Produktentscheidungen: Sie verlangen Produktionsrevision, produktionsgroßen
+Restore-Klon, realen ESXi-/WDS-Bestand, Canary/Rollback und die drei im Vorfall
+benannten VMs. Die lokale Etappe liefert dafür Gates, Runbooks und fail-closed
+Aktivierungsbedingungen; ein lokaler Lauf darf diese Beweise nicht erfinden.
 
 Es gibt in diesem Plan keine offene Produktentscheidung. Wenn bei der Umsetzung ein Fall auftaucht, der eine zweite NIC derselben VM im selben VLAN wirklich voraussetzt, wird Etappe 14A für diesen Fall nicht aufgeweicht. Dafür wird ein getrenntes Identitätsdesign mit ADR, Migration, Rücklesebeweis und eigener Testmatrix erstellt.
 

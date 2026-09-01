@@ -14,11 +14,11 @@ final class MacImportTransactionContractTest extends TestCase
 
         self::assertNotFalse($jobGate);
         self::assertNotFalse($begin);
-        self::assertLessThan($begin, $jobGate, 'job/mission/status validation must happen before BEGIN');
+        self::assertLessThan($begin, $jobGate, 'the non-locking trace lookup must happen before BEGIN');
         // ADR-0033: the callback window is running OR cancelling (the sequence
         // that produced the MACs still owns the job); only confirmed end
         // states refuse, and the recheck behind BEGIN uses the same window.
-        self::assertStringContainsString('VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)', $source);
+        self::assertStringContainsString('$cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING', $source);
         self::assertStringContainsString('status IN (?, ?) LIMIT 1 FOR UPDATE', $source);
         self::assertStringContainsString('MacImportConflictException', $source);
         self::assertStringContainsString("], 409)", $source);
@@ -58,7 +58,7 @@ final class MacImportTransactionContractTest extends TestCase
 
     public function testWireAndDurableResultContractsStayAdditiveAndBounded(): void
     {
-        $endpoint = $this->source('db_importMAC.php');
+        $endpoint = $this->source('db_importMAC.php') . "\n" . $this->source('lib/mac_import_callback.php');
         foreach (['success', 'legacy_payload', 'updated_interfaces', 'updated_vms', 'missing_vms', 'unmatched_interfaces', 'duplicate_macs'] as $field) {
             self::assertStringContainsString("'{$field}' =>", $endpoint, $field);
         }
@@ -66,12 +66,19 @@ final class MacImportTransactionContractTest extends TestCase
             self::assertStringContainsString("'{$field}' =>", $endpoint, $field);
         }
 
-        $planner = $this->source('lib/mac_import.php');
+        $planner = implode("\n", [
+            $this->source('lib/mac_import.php'),
+            $this->source('lib/mac_import_constants.php'),
+            $this->source('lib/mac_import_result.php'),
+            $this->source('lib/mac_import_network.php'),
+        ]);
         foreach (['interface_not_found', 'duplicate_mac', 'invalid_mac', 'ambiguous_vlan', 'vm_not_in_mission', 'missing_name', 'missing_nic_data', 'esxi_query_failed', 'identity_mismatch'] as $code) {
             self::assertStringContainsString("'{$code}'", $planner, $code);
         }
         self::assertStringContainsString('mac_import_bounded_identifier', $planner);
-        self::assertLessThanOrEqual(400, substr_count($planner, "\n") + 1, 'new PHP modules stay below the ADR-0006 warning threshold');
+        foreach (['lib/mac_import.php', 'lib/mac_import_constants.php', 'lib/mac_import_result.php', 'lib/mac_import_network.php'] as $module) {
+            self::assertLessThanOrEqual(400, substr_count($this->source($module), "\n") + 1, $module);
+        }
         self::assertLessThanOrEqual(400, substr_count($this->source('lib/mac_import_result.php'), "\n") + 1);
     }
 

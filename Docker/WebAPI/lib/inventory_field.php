@@ -142,7 +142,7 @@ function inventory_credential_label(array $credential): string
  */
 function inventory_select_option(string $optionName, string $value, array $freeByKey, array $unusableByKey = []): void
 {
-    $key = esxi_inventory_name_key($optionName);
+    $key = $optionName;
     $free = $freeByKey[$key] ?? null;
     $label = $optionName;
     if (!empty($unusableByKey[$key])) {
@@ -167,13 +167,13 @@ function inventory_select_option(string $optionName, string $value, array $freeB
  * @param array<int, array<string, mixed>> $vlans active catalog rows (vlan_name)
  * @param array{none: string, unknown_suffix: string} $labels
  */
-function vlan_select_field(string $name, string $value, array $vlans, array $labels, bool $disabled = false, string $attributes = ''): void
+function vlan_select_field(string $name, string $value, array $vlans, array $labels, bool $disabled = false, string $attributes = '', bool $allowEmpty = true): void
 {
     $vlanNames = array_map(static fn (array $v): string => (string) ($v['vlan_name'] ?? ''), $vlans);
     $unknown = $value !== '' && !in_array($value, $vlanNames, true);
     ?>
-    <select name="<?php echo h($name); ?>"<?php echo $attributes; ?> <?php echo $disabled ? 'disabled' : ''; ?>>
-        <option value=""><?php echo h($labels['none']); ?></option>
+    <select name="<?php echo h($name); ?>"<?php echo $attributes; ?> <?php echo $disabled ? 'disabled' : ''; ?> <?php echo $allowEmpty ? '' : 'required data-vm-network-vlan'; ?>>
+        <option value=""<?php echo !$allowEmpty ? ' disabled' : ''; ?>><?php echo h($labels['none']); ?></option>
         <?php if ($unknown) { ?>
             <option value="<?php echo h($value); ?>" selected><?php echo h($value); ?> (<?php echo h($labels['unknown_suffix']); ?>)</option>
         <?php } ?>

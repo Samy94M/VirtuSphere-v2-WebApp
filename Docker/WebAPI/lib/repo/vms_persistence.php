@@ -11,11 +11,32 @@ function repo_replace_interfaces(mysqli $db, int $vmId, mixed $interfaces, bool 
     }
 
     $interfaces = repo_validate_interfaces($interfaces);
-    $seenIds = [];
+    $vm = repo_fetch_one($db, 'SELECT mission_id, vm_name FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
+    if ($vm === null) {
+        throw new RuntimeException('VM not found for interface persistence.');
+    }
+    $missionId = (int) $vm['mission_id'];
+    if (repo_deploy_lock_mission($db, $missionId) === null) {
+        throw new RuntimeException('Mission not found for interface persistence.');
+    }
+
+    // Resolve preserved MACs before the fingerprint comparison. A form that
+    // omits an unchanged MAC must compare equal to the effective stored bundle.
+    $effectiveInterfaces = [];
     foreach ($interfaces as $interface) {
         $interfaceId = repo_id(repo_object_get($interface, 'id', repo_object_get($interface, 'Id')));
+        $effective = repo_allowed_columns($interface, ['ip', 'subnet', 'gateway', 'dns1', 'dns2', 'vlan', 'mode', 'type']);
+        $effective['id'] = $interfaceId;
+        $effective['mac'] = repo_interface_mac_value($db, $vmId, $interfaceId, $interface, $preserveExistingMacs);
+        $effectiveInterfaces[] = $effective;
+    }
+    repo_vm_network_assert_bundle_write_allowed($db, $missionId, $vmId, (string) $vm['vm_name'], $effectiveInterfaces);
+
+    $seenIds = [];
+    foreach ($effectiveInterfaces as $interface) {
+        $interfaceId = repo_id(repo_object_get($interface, 'id', repo_object_get($interface, 'Id')));
         $values = repo_allowed_columns($interface, ['ip', 'subnet', 'gateway', 'dns1', 'dns2', 'vlan', 'mode', 'type']);
-        $values['mac'] = repo_interface_mac_value($db, $vmId, $interfaceId, $interface, $preserveExistingMacs);
+        $values['mac'] = (string) $interface['mac'];
 
         if ($interfaceId > 0) {
             repo_update_from_values($db, 'deploy_interfaces', $values, 'id = ? AND vm_id = ?', 'ii', [$interfaceId, $vmId]);
@@ -44,18 +65,22 @@ function repo_replace_interfaces(mysqli $db, int $vmId, mixed $interfaces, bool 
 
 function repo_interface_mac_value(mysqli $db, int $vmId, int $interfaceId, object|array $interface, bool $preserveExistingMacs): string
 {
-    $macValue = repo_object_get($interface, 'mac');
-    if ($macValue !== null && trim((string) $macValue) !== '') {
-        // Canonicalize on write (E2); unparseable values pass through so the
-        // interface validator can flag them.
-        return virtusphere_normalize_mac((string) $macValue) ?? (string) $macValue;
-    }
     if ($preserveExistingMacs && $interfaceId > 0) {
+        // The MAC callback is the authority for an existing interface. Portal,
+        // legacy and transfer writers may round-trip a stale or forged value,
+        // but the effective bundle and its fingerprint must keep the stored MAC.
         $stmt = $db->prepare('SELECT mac FROM deploy_interfaces WHERE id = ? AND vm_id = ?');
         $stmt->bind_param('ii', $interfaceId, $vmId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         return (string) ($row['mac'] ?? '');
+    }
+
+    $macValue = repo_object_get($interface, 'mac');
+    if ($macValue !== null && trim((string) $macValue) !== '') {
+        // Canonicalize on write (E2); unparseable values pass through so the
+        // interface validator can flag them.
+        return virtusphere_normalize_mac((string) $macValue) ?? (string) $macValue;
     }
 
     return '';
@@ -153,7 +178,11 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
         : repo_creator_name($db, $userId);
 
     return repo_transaction($db, static function () use ($db, $missionId, $vmId, $values, $interfaces, $disks, $packages, $expectedUpdatedAt, $userId): int {
+        if (repo_deploy_lock_mission($db, $missionId) === null) {
+            throw new RuntimeException('Mission not found.');
+        }
         if ($vmId > 0) {
+            repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
             $current = repo_fetch_one($db, 'SELECT id, updated_at FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
             if ($current === null) {
                 throw new RuntimeException('VM not found.');

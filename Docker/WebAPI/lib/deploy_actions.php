@@ -142,6 +142,9 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
         if ($action === 'retry') {
             $jobId = request_int($_POST, 'job_id');
+            if (request_string($_POST, 'origin') === VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG) {
+                $redirectBase = deploy_job_log_url($jobId);
+            }
             $newJobId = repo_retry_deploy_job($connection, $jobId, (int) $user['id']);
             audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED, 'deploy_job', $newJobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'retry_of_job_id' => $jobId,
@@ -150,6 +153,9 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             redirect_to(deploy_job_log_url($newJobId));
         }
 
+        redirect_to($redirectBase);
+    } catch (DeployRetryBlockedException) {
+        flash_set('error', __t('deploy.retry_blocked'));
         redirect_to($redirectBase);
     } catch (VmIdentityConflictException $exception) {
         form_remember('schedule', $_POST, []);

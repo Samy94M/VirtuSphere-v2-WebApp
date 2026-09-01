@@ -14,6 +14,7 @@ require_once __DIR__ . '/status_events.php';
 // that predicate and the mission lock it needs live in the job repo.
 require_once __DIR__ . '/deploy_jobs.php';
 require_once __DIR__ . '/vm_identity.php';
+require_once __DIR__ . '/vm_network.php';
 
 const REPO_VM_COLUMNS = [
     'vm_name',

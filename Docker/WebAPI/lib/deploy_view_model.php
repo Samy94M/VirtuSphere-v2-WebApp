@@ -74,6 +74,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
 
     $selectedEsxiId = deploy_form_value('credential_esxi_id');
     $deployBlockers = deploy_queue_blockers($connection, deploy_form_state()['values']);
+    $deployWarnings = deploy_queue_warnings($connection, deploy_form_state()['values']);
     $canQueue = $deployBlockers === [];
     $initialHostWarning = $hostWarnings[$selectedEsxiId] ?? '';
     $initialCapabilityWarning = $capabilityWarnings[$selectedEsxiId] ?? '';
@@ -81,6 +82,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
 
     $scheduleMinLocal = (new DateTimeImmutable('now', new DateTimeZone(portal_timezone())))->format('Y-m-d\TH:i');
     $groupPositions = [];
+    $retryEvaluations = [];
     $byGroup = [];
     foreach ($jobs as $job) {
         $groupKey = (string) ($job['group_id'] ?? '');
@@ -95,6 +97,12 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
             $groupPositions[$id] = [$pos + 1, $total];
         }
     }
+    foreach ($jobs as $job) {
+        if (!deploy_job_is_retryable((string) ($job['status'] ?? ''), isset($job['mission_id']) ? (int) $job['mission_id'] : null)) {
+            continue;
+        }
+        $retryEvaluations[(int) $job['id']] = deploy_retry_blockers($connection, (int) $job['id']);
+    }
 
     return compact(
         'missions',
@@ -104,6 +112,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         'selectedMission',
         'missionVms',
         'deployBlockers',
+        'deployWarnings',
         'selectedMissionDeviates',
         'hostWarnings',
         'capabilityWarnings',
@@ -116,6 +125,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         'serviceSnapshot',
         'initialCapacity',
         'scheduleMinLocal',
-        'groupPositions'
+        'groupPositions',
+        'retryEvaluations'
     );
 }

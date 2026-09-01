@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/mission_transfer.php';
+require_once dirname(__DIR__, 2) . '/lib/network_mac_constants.php';
 
 /**
  * The four upload limits the mission import passes through, in order.
@@ -128,6 +129,65 @@ final class MissionImportUploadLimitContractTest extends TestCase
                     . 'can see the action, the CSRF token or the payload at all'
             );
         }
+    }
+
+    /**
+     * The same ladder for the machine callback (correction plan 14.8).
+     *
+     * `db_importMAC.php` is the one place that enforces the exact 16 MiB
+     * contract and answers its JSON `request_too_large`. That only happens
+     * while the layers below let the body through: above `post_max_size` PHP
+     * discards it before the endpoint runs, so the uploader would get an empty
+     * body and a parse error instead of the documented 413, and the operator
+     * would be told the Ansible host sent nonsense. nginx must stay above PHP
+     * for the same reason one step further out.
+     */
+    public function testTheCallbackRequestBoundIsBelowTheInfrastructureLimits(): void
+    {
+        $php = $this->phpIniLimits();
+        $nginx = $this->nginxLimits();
+
+        self::assertGreaterThan(
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES,
+            $php['post_max_size'],
+            sprintf(
+                'post_max_size (%d B) must exceed VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES (%d B), or PHP drops a '
+                    . 'legal callback body before db_importMAC.php can answer its own 413.',
+                $php['post_max_size'],
+                VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES
+            )
+        );
+        foreach ($nginx as $label => $limit) {
+            self::assertGreaterThan(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, $limit, $label);
+        }
+    }
+
+    /**
+     * The uploader reads at most MAX_RESPONSE_BYTES of the answer, so the
+     * response bound the endpoint enforces has to be the same number. If the
+     * application allowed more, the Ansible side would truncate a valid answer
+     * and report a protocol error for a job that succeeded.
+     */
+    public function testTheUploaderResponseCapMatchesTheApplicationBound(): void
+    {
+        $path = dirname(__DIR__, 4) . '/Ansible/upload_mac_list.py';
+        if (!is_file($path)) {
+            self::markTestSkipped('Ansible/upload_mac_list.py is not visible from this runtime');
+        }
+        $found = preg_match(
+            '/^MAX_RESPONSE_BYTES\s*=\s*(.+)$/m',
+            (string) file_get_contents($path),
+            $match
+        );
+        self::assertSame(1, $found, 'upload_mac_list.py no longer declares MAX_RESPONSE_BYTES');
+        $expression = trim($match[1]);
+        self::assertMatchesRegularExpression('/^[0-9 *]+$/', $expression, 'unexpected MAX_RESPONSE_BYTES expression');
+        $value = array_product(array_map('intval', preg_split('/\s*\*\s*/', $expression) ?: []));
+        self::assertSame(
+            VIRTUSPHERE_MAC_IMPORT_RESPONSE_MAX_BYTES,
+            $value,
+            'the uploader read cap and VIRTUSPHERE_MAC_IMPORT_RESPONSE_MAX_BYTES must be the same number'
+        );
     }
 
     public function testBothNginxSourcesAgree(): void

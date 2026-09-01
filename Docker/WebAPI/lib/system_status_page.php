@@ -11,6 +11,7 @@ require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/repo/catalog.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/vm_network_display.php';
 
 /**
  * POST actions of the system status page (ADR-0018/0023): the manual ESXi
@@ -172,6 +173,14 @@ function system_status_handle_post(mysqli $connection, array $user): void
             } else {
                 flash_set('success', __t('system_status.reassign_done', ['missions' => $result['missions'], 'interfaces' => $result['interfaces']]));
             }
+        } catch (VmNetworkPreflightException $exception) {
+            $summary = vm_network_finding_summary($exception->findings);
+            $message = __t('system_status.reassign_network_conflict', ['details' => implode(' ', $summary['rows'])]);
+            if ($summary['omitted'] > 0) {
+                $message .= ' ' . __t('system_status.reassign_network_conflict_more', ['count' => $summary['omitted']]);
+            }
+            form_remember('vlan_reassign', $_POST, []);
+            flash_set('error', $message);
         } catch (Throwable $exception) {
             form_remember('vlan_reassign', $_POST, []);
             flash_set('error', portal_error_message($exception));

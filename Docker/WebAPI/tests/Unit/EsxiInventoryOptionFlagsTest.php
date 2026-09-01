@@ -21,7 +21,7 @@ final class EsxiInventoryOptionFlagsTest extends TestCase
         foreach ($perCredential as $credentialNames) {
             $groups[] = ['names' => $credentialNames];
             foreach ($credentialNames as $name) {
-                $names[mb_strtolower($name)] = $name;
+                $names[$name] = $name;
             }
         }
 
@@ -52,11 +52,9 @@ final class EsxiInventoryOptionFlagsTest extends TestCase
         self::assertFalse($this->flags([['ha-datacenter']], 2)['exact']);
     }
 
-    public function testCaseVariantsAcrossHostsCountAsAgreement(): void
+    public function testCaseVariantsAcrossHostsDoNotCountAsAgreement(): void
     {
-        // The inventory de-duplicates case-insensitively, so the union has one
-        // entry and both hosts must be seen as reporting it.
-        self::assertTrue($this->flags([['ha-datacenter'], ['HA-Datacenter']], 2)['exact']);
+        self::assertFalse($this->flags([['ha-datacenter'], ['HA-Datacenter']], 2)['exact']);
     }
 
     public function testEmptyInventoryIsNotExact(): void
@@ -72,32 +70,30 @@ final class EsxiInventoryOptionFlagsTest extends TestCase
         self::assertFalse(esxi_inventory_value_unknown('', ['dc-nord' => true]));
     }
 
-    public function testAKnownValueIsRecognisedRegardlessOfCase(): void
+    public function testAKnownValueRequiresExactCase(): void
     {
-        self::assertFalse(esxi_inventory_value_unknown('DC-NORD', ['dc-nord' => true]));
+        self::assertTrue(esxi_inventory_value_unknown('DC-NORD', ['dc-nord' => true]));
+        self::assertFalse(esxi_inventory_value_unknown('dc-nord', ['dc-nord' => true]));
         self::assertTrue(esxi_inventory_value_unknown('DC-Sued', ['dc-nord' => true]));
     }
 
-    public function testTheUnionKeepsTheFirstSpellingOfACaseVariant(): void
+    public function testTheUnionKeepsCaseVariantsAsSeparateObjects(): void
     {
-        // Two hosts reporting the same datastore differently. Which spelling the
-        // picker shows may not depend on the credential name the groups are
-        // sorted by: an operator renaming a credential would silently relabel an
-        // option. Same rule as esxi_inventory_missing_values().
+        // Two raw names differing by case are two ESXi objects.
         $union = esxi_inventory_name_union([
             ['names' => ['DataStore1', 'ssd-fast']],
             ['names' => ['datastore1']],
         ]);
 
-        self::assertSame(['DataStore1', 'ssd-fast'], $union['names']);
-        self::assertSame(['datastore1' => true, 'ssd-fast' => true], $union['name_set']);
+        self::assertSame(['DataStore1', 'datastore1', 'ssd-fast'], $union['names']);
+        self::assertSame(['DataStore1' => true, 'ssd-fast' => true, 'datastore1' => true], $union['name_set']);
     }
 
     public function testTheUnionDropsEmptyNamesAndSurvivesAGroupWithoutAny(): void
     {
         // A credential that was pulled but holds no row of this kind still shows
         // up as a group; it must not add an empty option or fatal.
-        $union = esxi_inventory_name_union([['names' => []], ['names' => ['  ', 'ds1']]]);
+        $union = esxi_inventory_name_union([['names' => []], ['names' => ['', 'ds1']]]);
 
         self::assertSame(['ds1'], $union['names']);
         self::assertSame(['names' => [], 'name_set' => []], esxi_inventory_name_union([]));

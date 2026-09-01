@@ -8,6 +8,7 @@ require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
 require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
 require_once __DIR__ . '/migrations/0045_deploy_claim_state.php';
+require_once __DIR__ . '/migrations/0046_network_mac_contract.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1198,6 +1199,7 @@ SQL;
     '0043_deploy_terminal_metadata' => migrate_0043_deploy_terminal_metadata(...),
     '0044_structured_audit_events' => migrate_0044_structured_audit_events(...),
     '0045_deploy_claim_state' => migrate_0045_deploy_claim_state(...),
+    '0046_network_mac_contract' => migrate_0046_network_mac_contract(...),
 ];
 try {
     $db = db();
@@ -1219,13 +1221,11 @@ try {
     }
 
     migrator_preflight($db);
-
     foreach ($migrations as $name => $migration) {
         if (migrator_applied($db, $name)) {
             migrator_out($name . ': skipped');
             continue;
         }
-
         migrator_acquire_schema_lock($db);
         try {
             $migration($db);

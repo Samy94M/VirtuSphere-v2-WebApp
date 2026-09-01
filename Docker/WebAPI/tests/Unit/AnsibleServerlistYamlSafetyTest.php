@@ -104,6 +104,16 @@ final class AnsibleServerlistYamlSafetyTest extends TestCase
         self::assertStringContainsString('name: "VLAN:evil \\"x\\""', $yml);
     }
 
+    public function testInterfacePortgroupBoundaryWhitespaceIsPreservedExactly(): void
+    {
+        $vm = $this->vm(['interfaces' => [['vlan' => 'WDS ', 'type' => 'vmxnet3', 'mac' => '']]]);
+        $yml = ansible_serverlist_yml($this->mission(['wds_vlan' => 'WDS']), [$vm]);
+
+        self::assertStringContainsString('name: "WDS "', $yml);
+        self::assertStringContainsString('needs_mac: true', $yml, 'WDS-space is not the configured WDS portgroup');
+        self::assertStringNotContainsString('name: "WDS"', $yml);
+    }
+
     /**
      * device_type is emitted bare for a safe value but must be quoted for a value
      * outside the bare charset, so ansible_yaml_bare() cannot produce broken YAML.

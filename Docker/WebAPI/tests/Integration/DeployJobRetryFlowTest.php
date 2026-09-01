@@ -109,6 +109,103 @@ final class DeployJobRetryFlowTest extends TestCase
         self::assertStringNotContainsString('export-only', $this->jobLog($newJobId));
     }
 
+    public function testRepairedNetworkPreflightFailureIsRetryableWithoutMacProtocolError(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('preflight', 1);
+        $result = vm_network_preflight_result_contract(
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            [['id' => $vmIds[0], 'vm_name' => 'blocked-at-worker']],
+            [[
+                'code' => VIRTUSPHERE_VM_NETWORK_AMBIGUOUS,
+                'vm_id' => $vmIds[0],
+                'vlan' => 'WDS',
+                'interface_ids' => [11, 12],
+            ]]
+        );
+        $jobId = $this->insertTerminalJob(
+            $missionId,
+            VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            $vmIds,
+            json_encode($result, JSON_THROW_ON_ERROR)
+        );
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertTrue($evaluation['allowed']);
+        self::assertNotContains('retry_result_protocol_error', array_column($evaluation['findings'], 'code'));
+        $newJobId = repo_retry_deploy_job($this->db, $jobId, $this->userId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, $this->jobPayload($newJobId)['mode']);
+    }
+
+    public function testRetryReportsNetworkFindingsEvenWhenRemoteRecoveryAlreadyBlocks(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('precedence', 1);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, null);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET recovery_requested_at = NOW() WHERE id = ?', 'i', [$jobId]);
+        repo_execute($this->db, "UPDATE deploy_interfaces SET vlan = '' WHERE vm_id = ?", 'i', [$vmIds[0]]);
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        $kinds = array_column($evaluation['findings'], 'kind');
+        self::assertContains('remote', $kinds);
+        self::assertContains('network', $kinds);
+        self::assertLessThan(array_search('network', $kinds, true), array_search('remote', $kinds, true));
+    }
+
+    public function testRetryFindingKindsKeepRemoteIdentityNetworkExternalPrecedence(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('all_precedence', 1);
+        $vmId = $vmIds[0];
+        $result = json_encode([
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
+            'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
+            'outcome' => 'failed',
+            'successful_vm_ids' => [],
+            'failed_vm_ids' => [$vmId],
+            'errors' => [
+                ['code' => 'future_protocol_break', 'vm_id' => $vmId],
+                ['code' => VIRTUSPHERE_MAC_IMPORT_ERROR_INTERFACE_NOT_FOUND, 'vm_id' => $vmId],
+            ],
+            'counts' => ['expected_vms' => 1, 'successful_vms' => 0, 'failed_vms' => 1, 'updated_interfaces' => 0],
+            'retry' => ['mode' => 'export', 'vm_ids' => [$vmId]],
+        ], JSON_THROW_ON_ERROR);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, $result);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET recovery_requested_at = NOW() WHERE id = ?', 'i', [$jobId]);
+
+        $token = substr(hash('sha256', $this->prefix . ':' . $jobId), 0, 32);
+        $unit = 'virtusphere-retry-' . $jobId . '.service';
+        $remoteDir = '/tmp/virtusphere-retry-' . $jobId;
+        $step = 'export';
+        $controller = 'prepared';
+        $effect = 'active_or_possible';
+        $reconciliation = 'pending';
+        $cleanup = 'pending';
+        $stmt = $this->db->prepare(
+            'INSERT INTO deploy_remote_executions '
+            . '(job_id, job_attempt, step_key, protocol_version, run_token, unit_name, remote_dir, instance_id, generation_id, controller_state, effect_state, reconciliation_state, cleanup_state) '
+            . 'VALUES (?, 1, ?, 1, ?, ?, ?, RANDOM_BYTES(16), RANDOM_BYTES(16), ?, ?, ?, ?)'
+        );
+        $stmt->bind_param('issssssss', $jobId, $step, $token, $unit, $remoteDir, $controller, $effect, $reconciliation, $cleanup);
+        $stmt->execute();
+
+        $vmName = (string) repo_scalar($this->db, 'SELECT vm_name FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+        $kind = VIRTUSPHERE_INVENTORY_KIND_VM;
+        $meta = json_encode(['moid' => 'vm-foreign', 'instance_uuid' => 'foreign-instance'], JSON_THROW_ON_ERROR);
+        $stmt = $this->db->prepare('INSERT INTO deploy_esxi_inventory (credential_id, kind, name, meta_json) VALUES (?, ?, ?, ?)');
+        $stmt->bind_param('isss', $this->esxiCredentialId, $kind, $vmName, $meta);
+        $stmt->execute();
+        repo_execute($this->db, "UPDATE deploy_interfaces SET vlan = '' WHERE vm_id = ?", 'i', [$vmId]);
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        $kindTransitions = [];
+        foreach (array_column($evaluation['findings'], 'kind') as $findingKind) {
+            if ($kindTransitions === [] || end($kindTransitions) !== $findingKind) {
+                $kindTransitions[] = $findingKind;
+            }
+        }
+        self::assertSame(['remote', 'identity', 'network', 'external'], $kindTransitions);
+        self::assertContains('retry_result_protocol_error', array_column($evaluation['findings'], 'code'));
+    }
+
     public function testActiveAndSucceededJobsCannotBeRetried(): void
     {
         [$missionId, $vmIds] = $this->insertMissionWithVms('guard', 1);
@@ -117,8 +214,8 @@ final class DeployJobRetryFlowTest extends TestCase
             try {
                 repo_retry_deploy_job($this->db, $jobId, $this->userId);
                 self::fail($status . ' must not be retryable');
-            } catch (RuntimeException $exception) {
-                self::assertStringContainsString('can be retried', $exception->getMessage());
+            } catch (DeployRetryBlockedException $exception) {
+                self::assertSame('retry_job_not_terminal', $exception->evaluation['blocking_findings'][0]['code']);
             }
             $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE id = ?');
             $stmt->bind_param('i', $jobId);
@@ -146,8 +243,9 @@ final class DeployJobRetryFlowTest extends TestCase
         $status = 'active';
         $datacenter = 'DC1';
         $datastore = 'datastore1';
-        $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status, hypervisor_datacenter, hypervisor_datastorage) VALUES (?, ?, ?, ?)');
-        $stmt->bind_param('ssss', $name, $status, $datacenter, $datastore);
+        $wds = 'WDS';
+        $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status, hypervisor_datacenter, hypervisor_datastorage, wds_vlan) VALUES (?, ?, ?, ?, ?)');
+        $stmt->bind_param('sssss', $name, $status, $datacenter, $datastore, $wds);
         $stmt->execute();
         $missionId = (int) $this->db->insert_id;
         $this->missionIds[] = $missionId;
@@ -158,7 +256,13 @@ final class DeployJobRetryFlowTest extends TestCase
             $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
             $stmt->bind_param('iss', $missionId, $vmName, $vmName);
             $stmt->execute();
-            $vmIds[] = (int) $this->db->insert_id;
+            $vmId = (int) $this->db->insert_id;
+            $vmIds[] = $vmId;
+            $vlan = 'WDS';
+            $empty = '';
+            $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
+            $stmt->bind_param('isssss', $vmId, $empty, $empty, $empty, $vlan, $empty);
+            $stmt->execute();
         }
 
         return [$missionId, $vmIds];
@@ -179,7 +283,7 @@ final class DeployJobRetryFlowTest extends TestCase
     private function resultJson(string $outcome, array $successful, array $failed): string
     {
         return json_encode([
-            'version' => VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION,
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
             'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
             'outcome' => $outcome,
             'successful_vm_ids' => $successful,

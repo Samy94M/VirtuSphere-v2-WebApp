@@ -29,7 +29,7 @@ final class DeployTerminalMetadataContractTest extends TestCase
         $handler = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_actions.php');
         $urls = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_urls.php');
 
-        self::assertStringContainsString("'terminal_html' => deploy_terminal_blocks_html(\$job)", $portal);
+        self::assertStringContainsString("'terminal_html' => deploy_terminal_blocks_html(\$job, \$retryEvaluation, \$existingVmIds)", $portal);
         self::assertStringContainsString("'can_cancel'", $portal);
         self::assertStringContainsString('name="origin"', $portal);
         self::assertStringContainsString('deploy_job_cancel_redirect_url', $handler);

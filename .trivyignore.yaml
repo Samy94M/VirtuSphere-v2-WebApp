@@ -13,9 +13,9 @@
 # Eine Ausnahme ohne Ablaufdatum ist keine Ausnahme, sondern ein Ignorieren;
 # solche Eintraege sind in Reviews abzulehnen.
 #
-# Stand 2026-07-27 (Owner aller Eintraege: Samy):
-# - mysql:8.4 (aktuellster Oracle-Build 8dbcf53): gosu ist weiterhin mit
-#   alter Go-stdlib gebaut (15 CVEs), mysqlsh buendelt trotz aktualisierter
+# Stand 2026-09-01 (Owner aller Eintraege: Samy):
+# - mysql:8.4.11 (aktuellster Oracle-Build b3b90af): gosu ist weiterhin mit
+#   alter Go-stdlib gebaut, mysqlsh buendelt trotz aktualisierter
 #   Paketversionen dieselben 4 offenen Advisories. Beheben kann das nur ein
 #   neuer Oracle-Image-Build; gosu laeuft nur beim Containerstart als
 #   Privilege-Dropper, mysqlsh ist kein Netzdienst.
@@ -70,6 +70,27 @@ vulnerabilities:
     expired_at: 2026-09-30
   - id: CVE-2026-42504
     statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-33818
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; nur Startup-Privilege-Dropper, kein Netzdienst; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-39821
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-56853
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-56858
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-56859
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-56860
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
+    expired_at: 2026-09-30
+  - id: CVE-2026-56862
+    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
     expired_at: 2026-09-30
   # --- mysql:8.4 / mysqlsh-Python-Pakete ---
   - id: GHSA-537c-gmf6-5ccf

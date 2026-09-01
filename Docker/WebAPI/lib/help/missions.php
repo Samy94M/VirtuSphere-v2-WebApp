@@ -50,7 +50,9 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.location_p1')); ?></p>
             <p><?php echo h(__t('help_missions.location_p2')); ?></p>
             <ul>
-                <li><?php echo h(__t('help_missions.location_datacenter_optional')); ?></li>
+                <li><?php echo h(__t('help_missions.location_datacenter_optional', [
+                    'hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
+                ])); ?></li>
                 <li><?php echo h(__t('help_missions.location_datastore_scope')); ?></li>
                 <li><?php echo h(__t('help_missions.location_per_disk')); ?></li>
                 <li><?php echo h(__t('help_missions.location_single_host')); ?></li>

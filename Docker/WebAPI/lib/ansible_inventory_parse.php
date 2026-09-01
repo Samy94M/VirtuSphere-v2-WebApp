@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/esxi_object_names.php';
+
 /**
  * Core inventory output normalization (ADR-0023). Split out of
  * lib/ansible_inventory.php (Etappe 7, ADR-0006): the marker decode, the two
@@ -29,7 +31,7 @@ declare(strict_types=1);
 function ansible_inventory_network_item(mixed $raw, string $source): ?array
 {
     if (is_string($raw)) {
-        $name = trim($raw);
+        $name = $raw;
 
         return $name === '' ? null : ['name' => $name, 'meta_json' => null];
     }
@@ -38,7 +40,7 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
     }
 
     $nameField = $source === 'dvs' ? 'portgroup_name' : 'portgroup';
-    $name = trim((string) ($raw[$nameField] ?? $raw['name'] ?? ''));
+    $name = (string) ($raw[$nameField] ?? $raw['name'] ?? '');
     if ($name === '') {
         return null;
     }
@@ -78,7 +80,7 @@ function ansible_inventory_vm_item(mixed $raw): ?array
         return null;
     }
 
-    $name = trim((string) ($raw['guest_name'] ?? $raw['name'] ?? ''));
+    $name = (string) ($raw['guest_name'] ?? $raw['name'] ?? '');
     if ($name === '') {
         return null;
     }
@@ -121,17 +123,34 @@ function ansible_parse_inventory_output(string $stdout): array
     // to vanish silently, which looks exactly like a host that has less. The
     // dedupe below is NOT a loss (a case-duplicate WAS parseable), so `kept`
     // counts parseable entries before de-duplication.
+    $nameFailures = array_fill_keys(VIRTUSPHERE_INVENTORY_KINDS, 0);
+    $normalization = [];
     $rawDatacenters = (array) ($data['datacenters'] ?? []);
-    $datacenters = array_values(array_filter(array_map(static fn ($v): string => trim((string) $v), $rawDatacenters), static fn (string $v): bool => $v !== ''));
+    $datacenters = [];
+    foreach ($rawDatacenters as $value) {
+        if (!is_string($value)) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_DATACENTER]++;
+            continue;
+        }
+        $classification = esxi_object_name_classify_raw($value);
+        if (!$classification['persistable']) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_DATACENTER]++;
+            continue;
+        }
+        $datacenters[] = $value;
+    }
 
     $rawDatastores = (array) ($data['datastores'] ?? []);
     $datastores = [];
     foreach ($rawDatastores as $ds) {
         if (!is_array($ds)) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_DATASTORE]++;
             continue;
         }
-        $name = trim((string) ($ds['name'] ?? ''));
-        if ($name === '') {
+        $name = is_string($ds['name'] ?? null) ? (string) $ds['name'] : '';
+        $classification = esxi_object_name_classify_raw($name);
+        if (!$classification['persistable']) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_DATASTORE]++;
             continue;
         }
         $capacity = $ds['capacity'] ?? $ds['capacity_bytes'] ?? null;
@@ -144,8 +163,8 @@ function ansible_parse_inventory_output(string $stdout): array
         ];
     }
 
-    // Raw portgroup objects (or legacy plain names) from both module kinds,
-    // de-duplicated case-insensitively; the first item's meta wins.
+    // Raw portgroup objects (or legacy plain names) from both module kinds.
+    // Only byte-identical duplicate names collapse; case variants are distinct.
     $networks = [];
     $rawNetworks = 0;
     $keptNetworks = 0;
@@ -154,10 +173,16 @@ function ansible_parse_inventory_output(string $stdout): array
             $rawNetworks++;
             $item = ansible_inventory_network_item($raw, $source);
             if ($item === null) {
+                $nameFailures[VIRTUSPHERE_INVENTORY_KIND_NETWORK]++;
                 continue;
             }
             $keptNetworks++;
-            $key = esxi_inventory_name_key($item['name']);
+            $classification = esxi_object_name_classify_raw((string) $item['name']);
+            if (!$classification['persistable']) {
+                $nameFailures[VIRTUSPHERE_INVENTORY_KIND_NETWORK]++;
+                continue;
+            }
+            $key = (string) $item['name'];
             if (!isset($networks[$key])) {
                 $networks[$key] = $item;
             }
@@ -165,38 +190,66 @@ function ansible_parse_inventory_output(string $stdout): array
     }
     $networks = array_values($networks);
 
-    // Same case-insensitive dedupe as the networks above, and for a harder
-    // reason: (credential_id, kind, name) is unique, so two case variants of
-    // one name would make the write fail instead of the cache disagree.
+    // Same byte-exact duplicate handling as the networks above. The inventory
+    // unique key uses a binary collation, so case variants remain separate.
     $rawVms = (array) ($data['vms'] ?? []);
     $vms = [];
     $keptVms = 0;
     foreach ($rawVms as $raw) {
         $item = ansible_inventory_vm_item($raw);
         if ($item === null) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_VM]++;
             continue;
         }
         $keptVms++;
-        $key = esxi_inventory_name_key($item['name']);
+        $classification = esxi_object_name_classify_raw((string) $item['name']);
+        if (!$classification['persistable']) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_VM]++;
+            continue;
+        }
+        $key = (string) $item['name'];
         if (!isset($vms[$key])) {
             $vms[$key] = $item;
         }
     }
     $vms = array_values($vms);
 
+    $hosts = ansible_parse_inventory_hosts($data['hosts'] ?? [], $data['fetched_epoch'] ?? null);
+    $rawHosts = is_array($data['hosts'] ?? null) && (array) $data['hosts'] !== [] ? 1 : 0;
+    $hosts = array_values(array_filter($hosts, static function (array $host) use (&$nameFailures): bool {
+        $classification = esxi_object_name_classify_raw((string) $host['name']);
+        if (!$classification['persistable']) {
+            $nameFailures[VIRTUSPHERE_INVENTORY_KIND_HOST]++;
+            return false;
+        }
+        return true;
+    }));
+    $supportedCount = static function (array $items): int {
+        $count = 0;
+        foreach ($items as $item) {
+            $name = is_array($item) ? (string) ($item['name'] ?? '') : (string) $item;
+            if (esxi_object_name_classify_raw($name)['supported']) {
+                $count++;
+            }
+        }
+        return $count;
+    };
+
     return [
         'datacenters' => $datacenters,
         'datastores' => $datastores,
         'networks' => $networks,
         'vms' => $vms,
-        'hosts' => ansible_parse_inventory_hosts($data['hosts'] ?? [], $data['fetched_epoch'] ?? null),
+        'hosts' => $hosts,
         'capabilities' => ansible_parse_inventory_capabilities($data['about'] ?? [], $data['host_runtime'] ?? []),
         'queries' => ansible_parse_inventory_queries($data['queries'] ?? []),
+        'name_failures' => $nameFailures,
         'normalization' => [
-            'datacenters' => ['raw' => count($rawDatacenters), 'kept' => count($datacenters)],
-            'datastores' => ['raw' => count($rawDatastores), 'kept' => count($datastores)],
-            'networks' => ['raw' => $rawNetworks, 'kept' => $keptNetworks],
-            'vms' => ['raw' => count($rawVms), 'kept' => $keptVms],
+            'datacenters' => ['raw' => count($rawDatacenters), 'kept' => count($datacenters), 'persistable' => count($datacenters), 'supported' => $supportedCount($datacenters)],
+            'datastores' => ['raw' => count($rawDatastores), 'kept' => count($datastores), 'persistable' => count($datastores), 'supported' => $supportedCount($datastores)],
+            'networks' => ['raw' => $rawNetworks, 'kept' => $keptNetworks, 'persistable' => count($networks), 'supported' => $supportedCount($networks)],
+            'hosts' => ['raw' => $rawHosts, 'kept' => count($hosts), 'persistable' => count($hosts), 'supported' => $supportedCount($hosts)],
+            'vms' => ['raw' => count($rawVms), 'kept' => $keptVms, 'persistable' => count($vms), 'supported' => $supportedCount($vms)],
         ],
     ];
 }

@@ -31,14 +31,14 @@ final class EsxiInventoryMissingValuesTest extends TestCase
         self::assertSame(['datastore2'], $missing);
     }
 
-    public function testComparisonIsCaseAndWhitespaceInsensitive(): void
+    public function testBoundaryWhitespaceAndCaseMustMatchExactly(): void
     {
         $missing = esxi_inventory_missing_values(
             [VIRTUSPHERE_INVENTORY_KIND_NETWORK => [' vlan_903 ', 'VLAN_904']],
             [VIRTUSPHERE_INVENTORY_KIND_NETWORK => ['vlan_903' => true]]
         );
 
-        self::assertSame(['VLAN_904'], $missing);
+        self::assertSame([' vlan_903 ', 'VLAN_904'], $missing);
     }
 
     public function testEmptyValuesAreIgnored(): void
@@ -48,10 +48,10 @@ final class EsxiInventoryMissingValuesTest extends TestCase
             [VIRTUSPHERE_INVENTORY_KIND_DATACENTER => ['dc1' => true]]
         );
 
-        self::assertSame([], $missing);
+        self::assertSame(['  '], $missing, 'boundary whitespace is raw ESXi-name evidence, not an empty-string alias');
     }
 
-    public function testAggregatesAcrossKindsAndDeduplicatesCaseInsensitively(): void
+    public function testAggregatesAcrossKindsAndRetainsCaseVariants(): void
     {
         $missing = esxi_inventory_missing_values(
             [
@@ -64,7 +64,6 @@ final class EsxiInventoryMissingValuesTest extends TestCase
             ]
         );
 
-        // First spelling wins the dedupe; output is sorted.
-        self::assertSame(['fastpool', 'VLAN_903'], $missing);
+        self::assertSame(['fastpool', 'VLAN_903', 'vlan_903'], $missing);
     }
 }

@@ -31,16 +31,13 @@ function repo_esxi_vlan_sync(mysqli $db): array
         // read and the retire loop would otherwise make us retire names that
         // are, by then, present again.
         $present = repo_esxi_vlan_present_names($db);
-        $hasFreshFetch = repo_esxi_inventory_has_fresh_success($db);
+        $baselineComplete = repo_esxi_network_semantics_baseline_complete($db);
 
         foreach ($present as $name) {
             $before = repo_fetch_one($db, 'SELECT id, retired_at FROM deploy_vlan WHERE vlan_name = ? LIMIT 1', 's', [$name]);
             // Row-alias syntax (VALUES() in ODKU is deprecated on MySQL 8.4).
-            // Refreshing vlan_name follows a case change on ESXi; an assignment
-            // that now differs only by case shows the "(not in inventory)"
-            // fallback option until re-saved, never a false warning (all warn
-            // logic is case-insensitive). A case-only refresh counts neither as
-            // upsert nor as un-retire.
+            // Exact names are independent rows. A case variant is inserted as a
+            // separate ESXi-owned portgroup and never rewrites another spelling.
             $stmt = $db->prepare('INSERT INTO deploy_vlan (vlan_name, retired_at) VALUES (?, NULL) AS new ON DUPLICATE KEY UPDATE vlan_name = new.vlan_name, retired_at = NULL');
             $stmt->bind_param('s', $name);
             $stmt->execute();
@@ -51,10 +48,10 @@ function repo_esxi_vlan_sync(mysqli $db): array
             }
         }
 
-        if ($hasFreshFetch && $present !== []) {
+        if ($baselineComplete) {
             $activeVlans = repo_fetch_all($db->query('SELECT id, vlan_name FROM deploy_vlan WHERE retired_at IS NULL'));
             foreach ($activeVlans as $row) {
-                if (!isset($present[esxi_inventory_name_key((string) $row['vlan_name'])])) {
+                if (!isset($present[(string) $row['vlan_name']])) {
                     repo_execute($db, 'UPDATE deploy_vlan SET retired_at = NOW() WHERE id = ?', 'i', [(int) $row['id']]);
                     $result['retired']++;
                 }
@@ -65,26 +62,29 @@ function repo_esxi_vlan_sync(mysqli $db): array
     });
 }
 /**
- * Union of every cached portgroup name, fresh AND frozen, keyed case-insensitively.
+ * Union of every cached supported portgroup name, keyed exactly.
  *
- * No DISTINCT here: the *_ci collation would collapse case variants of the same
- * name non-deterministically. Ordering by credential_id and taking the first
- * spelling per name key in PHP pins WHICH case the catalog carries (the lowest
- * credential id's), stable across syncs.
+ * No DISTINCT here: operative identity is the exact raw name. Ordering and the
+ * PHP key keep duplicates of that exact name deterministic across credentials.
  *
  * @return array<string, string> name key => the spelling the catalog carries
  */
 function repo_esxi_vlan_present_names(mysqli $db): array
 {
     $present = [];
-    $stmt = $db->prepare('SELECT credential_id, name FROM deploy_esxi_inventory WHERE kind = ? ORDER BY credential_id, name');
+    $stmt = $db->prepare('SELECT i.credential_id, i.name, i.meta_json, s.kind_name_semantics_json FROM deploy_esxi_inventory i INNER JOIN deploy_esxi_inventory_state s ON s.credential_id = i.credential_id WHERE i.kind = ? ORDER BY i.credential_id, i.name');
     $network = VIRTUSPHERE_INVENTORY_KIND_NETWORK;
     $stmt->bind_param('s', $network);
     $stmt->execute();
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $name = trim((string) $row['name']);
-        $key = esxi_inventory_name_key($name);
-        if ($name !== '' && !isset($present[$key])) {
+        $semantics = json_decode((string) ($row['kind_name_semantics_json'] ?? ''), true);
+        if (!is_array($semantics) || (int) ($semantics[VIRTUSPHERE_INVENTORY_KIND_NETWORK] ?? 1) !== 2) {
+            continue;
+        }
+        $name = (string) $row['name'];
+        $classification = esxi_object_name_classify_raw($name);
+        $key = $name;
+        if ($classification['supported'] && !isset($present[$key])) {
             $present[$key] = $name;
         }
     }
@@ -111,6 +111,29 @@ function repo_esxi_inventory_has_fresh_success(mysqli $db): bool
     return $count > 0;
 }
 
+/** Retirement stays frozen until every configured ESXi credential has a V2 network baseline. */
+function repo_esxi_network_semantics_baseline_complete(mysqli $db): bool
+{
+    $stmt = $db->prepare('SELECT c.id, s.kind_freshness_json, s.kind_name_semantics_json FROM deploy_credentials c LEFT JOIN deploy_esxi_inventory_state s ON s.credential_id = c.id WHERE c.type = ? ORDER BY c.id');
+    $type = VIRTUSPHERE_CREDENTIAL_TYPE_ESXI;
+    $stmt->bind_param('s', $type);
+    $stmt->execute();
+    $rows = repo_fetch_all($stmt->get_result());
+    if ($rows === []) {
+        return false;
+    }
+    foreach ($rows as $row) {
+        $freshness = json_decode((string) ($row['kind_freshness_json'] ?? ''), true);
+        $semantics = json_decode((string) ($row['kind_name_semantics_json'] ?? ''), true);
+        if (!is_array($freshness) || !isset($freshness[VIRTUSPHERE_INVENTORY_KIND_NETWORK])
+            || !is_array($semantics) || (int) ($semantics[VIRTUSPHERE_INVENTORY_KIND_NETWORK] ?? 1) !== 2) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /**
  * Aggregates cached network rows into per-name VLAN-id and trunk maps (pure,
  * feeds the catalog's VLAN-ID column). IDs come only from integer vlan_id
@@ -126,7 +149,7 @@ function repo_esxi_vlan_id_aggregate(array $rows): array
     $ids = [];
     $trunks = [];
     foreach ($rows as $row) {
-        $key = esxi_inventory_name_key((string) ($row['name'] ?? ''));
+        $key = (string) ($row['name'] ?? '');
         if ($key === '') {
             continue;
         }
@@ -172,7 +195,7 @@ function repo_esxi_vlan_presence_report(mysqli $db): array
 
     $byName = [];
     foreach ($rows as $row) {
-        $byName[esxi_inventory_name_key((string) $row['name'])][] = (string) $row['credential_name'];
+        $byName[(string) $row['name']][] = (string) $row['credential_name'];
     }
 
     return ['eligible' => $eligible, 'by_name' => $byName] + repo_esxi_vlan_id_aggregate($rows);

@@ -54,6 +54,36 @@ The playbooks under `Ansible/` are not self-contained: they read variables that 
 
 Modes map to playbooks in `ansible_playbooks_for_mode()`: `create`, `export`, `start`, `powercycle` (runs `powercycleVMs-ESXi_playbook.yml` then the export playbook), `autostart` (writes the ESXi autostart policy, ADR-0025) and `full` (`create → powercycle → export → start`, plus `autostart` when the mission enabled it). The power-cycle exists because ESXi may only assign a NIC its MAC once the VM has been powered on, and the MAC export otherwise reads nothing. `powercycleVMs-ESXi_playbook.yml` briefly powers a VM on, waits `PowerCycleWaitSeconds` (portal field, default 5s, clamped 1–300s), then hard powers it off (`state: powered-off`, `force: yes`; freshly created VMs have no guest OS/tools, so a graceful shutdown would hang).
 
+Before any remote upload, the shared network contract validates the selected VM
+scope (empty selection means the complete mission). A VLAN/portgroup is trimmed
+at the portal boundary, then compared exactly and case-sensitively. Empty or
+exactly duplicated names within one VM block `create`, `full`, `powercycle` and
+`export`; `start` and `autostart` retain the finding as a warning. Separately,
+the WDS/PXE contract requires exactly one interface whose name exactly equals
+the mission WDS portgroup. That specialized finding blocks `full`,
+`powercycle` and `export`, while `create`, `start` and `autostart` warn. Queue,
+stagger, worker and retry use the same aggregator, and the worker rechecks after
+claim before SFTP/SSH. Etappe 14A does not enable the prepared remote `create`
+or `full` contracts; that remains Etappe 14B.
+
+The same gate caps one job's regular scope at
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` VMs and
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM` interfaces per VM
+(`lib/network_mac_constants.php`), enforced at queue time, per stagger slot, on
+a retry and at the worker's pre-remote recheck; an oversize selection appears as
+a queue blocker asking the operator to split it. The reason is the callback
+bound below: a V2 result larger than 1 MiB answers 409 only after the export
+already created the VMs it reports on, which no split can undo afterwards. The
+union of a stagger group is exempt, because it becomes one job per VM.
+
+`post_max_size=20M` lives in `Docker/php/conf.d/zz-virtusphere.ini`, which is
+COPIED into the image. After changing it, `docker compose build` plus `up -d`
+for `php`, `deploy-worker` and `maintenance-worker` is required; a plain restart
+keeps the old image and the old limit, and `db_importMAC.php` would then answer
+a parse error over an empty body instead of its documented `413
+request_too_large`. `php -i | grep post_max_size` inside the container is the
+check.
+
 The deploy form's label map (`virtusphere_deploy_mode_labels()`) is the source of truth for which modes an operator may ask for. `inventory` is a *system* mode: it has no label, cannot be posted, and `repo_create_system_job()` refuses anything else. The read side (`deploy_job_normalize_mode()`) still accepts it, because the worker reads back a queued inventory job's payload. The location gate follows the same shape: `autostart` reads neither `datacenter_name` nor `datastore_name`, so a mission without a datastore can still have its autostart policy written, while every other mode is refused. Staggering is refused for `autostart` in the repository as well as on the page, because a config write has nothing to spread over time.
 
 ### VM identity, collision block and adoption
@@ -149,7 +179,7 @@ The legacy machine API remains wire-compatible during migration, but the WP1 hot
 - Root `intern.php` remains a redirect stub to `/portal/dashboard.php`; root `login.php` is no longer present. Logout is only `/portal/logout.php` as a POST plus CSRF. A stale logout POST without an active portal session, for example after a container restart or expired server-side session, is treated as already logged out and redirects to `login.php`; GET requests and active-session CSRF mismatches still return HTTP 400.
 - The former desktop token API (root `access.php`, `api/login.php`) is removed (ADR-0035); both paths answer 404 by wire contract.
 - `mecm_packages.php` rejects a completely empty JSON payload (`{}` or `[]`) with HTTP 400 before catalog sync can run. Missing payload types are now non-destructive: if a request contains only packages, `deploy_os` is left untouched; if it contains only task sequences, `deploy_packages` is left untouched. The absent type is logged as a warning.
-- `db_importMAC.php?action=updateInterface` requires `{ "mission_id": 123, "job_id": 456, "results": [...] }` (ADR-0035). Existing response fields remain; `result_version`, `outcome`, `job_id`, `vm_results`, `counts` and bounded `errors` are additive. Per-VM failures return HTTP 200 with `success:false` and write no NIC or deployed state for that VM. Job/mission/status conflicts return 409 without writes.
+- `db_importMAC.php?action=updateInterface` requires `{ "mission_id": 123, "job_id": 456, "results": [...] }` (ADR-0035). Existing response fields remain; `result_version`, `outcome`, `job_id`, `vm_results`, `counts` and bounded `errors` are additive. New result V2 also persists exact per-VM WDS evidence and a semantic callback fingerprint; historical V1 remains readable. Per-VM failures return HTTP 200 with `success:false` and write no NIC or deployed state for that VM. Job/mission/status/attempt/generation/remote-handle conflicts and differing or terminal duplicate callbacks return 409 without domain writes; only an identical replay of the same active execution is 200/no-op. The request body is capped at 16 MiB, stored result and response at 1 MiB, with PHP `post_max_size=20M` so the application owns the structured rejection.
 - `mecm-api.php?action=getDeviceInfos&mac=...` deliberately keeps its old IP-or-MAC allowlist behavior. The legacy 403 response still echoes the client IP for compatibility in the LAN contract.
 - Since ADR-0019/E3 that GET is side-effect-free and returns only the client bootstrap fields. V23 posts client readiness to `mecm_client_ack.php`; the POST uses the same IP-or-known-MAC authentication, is idempotent, and works over the default HTTP mode without CA/certificate/thumbprint configuration.
 - Unhandled machine-API exceptions return the existing JSON envelope shape with generic `Interner Serverfehler`; internal details are written through `machine_api_log_warning`/fallback logging instead of being sent to clients.

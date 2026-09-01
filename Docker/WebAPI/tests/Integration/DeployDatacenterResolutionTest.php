@@ -228,8 +228,14 @@ final class DeployDatacenterResolutionTest extends TestCase
     /** @param array<int,string> $names */
     private function setDatacenters(int $credentialId, array $names): void
     {
-        $items = array_map(static fn (string $name): array => ['name' => $name], $names);
-        repo_esxi_inventory_replace_kind($this->db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATACENTER, $items);
+        repo_esxi_inventory_apply($this->db, $credentialId, [
+            'datacenters' => $names,
+            'queries' => ['datacenters' => ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED]],
+            'normalization' => [
+                'datacenters' => ['raw' => count($names), 'persistable' => count($names), 'supported' => count($names)],
+            ],
+        ]);
+        virtusphere_request_now_reset();
     }
 
     /** @return array<string,mixed> the mission row shape the gate reads */

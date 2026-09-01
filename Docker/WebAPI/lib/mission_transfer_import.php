@@ -122,9 +122,8 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
     }
 
     // Collect referenced VLANs (mission WDS + per-interface) and check presence.
-    // Keyed by esxi_inventory_name_key() (trim + lower-case, the project-wide
-    // SSoT for VLAN-name equality) so two differently-cased spellings of the same
-    // nonexistent VLAN report once, not twice.
+    // Keyed by exact portgroup identity. Case-only variants are separate ESXi
+    // objects and therefore separate findings.
     //
     // The value is the spelling shown to the operator, and it has to be the
     // FIRST one in the file: a plain assignment in the per-interface loop below
@@ -134,7 +133,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
     $vlanRefs = [];
     $missionVlan = trim((string) ($document['mission']['wds_vlan'] ?? ''));
     if ($missionVlan !== '') {
-        $vlanRefs[esxi_inventory_name_key($missionVlan)] = $missionVlan;
+        $vlanRefs[$missionVlan] = $missionVlan;
     }
 
     // Field-level validation on the canonical mission values: EXACTLY the value
@@ -165,7 +164,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         // within this same file: the position is the only stable handle in both
         // cases, since two duplicate-named VMs cannot be told apart by name.
         $vmLabel = $vm['label'];
-        $nameKey = $vmName !== '' ? esxi_inventory_name_key($vmName) : '';
+        $nameKey = $vmName !== '' ? mission_transfer_vm_name_key($vmName) : '';
         $isDuplicateInFile = false;
         if ($vmName !== '') {
             if (isset($seenVmNames[$nameKey])) {
@@ -217,6 +216,16 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         ) as $fieldMessage) {
             $report['vm_field_errors'][] = $vmLabel . ': ' . $fieldMessage;
         }
+        foreach (vm_network_issues_for_interfaces($vm['interfaces'], 0, 0, $vmName) as $networkIssue) {
+            $message = (string) $networkIssue['code'] === VIRTUSPHERE_VM_NETWORK_EMPTY
+                ? validator_text('validate.interface_vlan_required', 'Every stored network interface requires a VLAN.')
+                : validator_text(
+                    'validate.interface_vlan_unique',
+                    'Each network interface of a VM requires a different VLAN.',
+                    ['vlan' => (string) $networkIssue['vlan']]
+                );
+            $report['vm_field_errors'][] = $vmLabel . ': ' . $message;
+        }
         foreach (mission_import_list_field_errors(
             static fn (array $rows): array => repo_validate_disks($rows),
             'disks',
@@ -241,7 +250,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         foreach ($vm['interfaces'] as $interface) {
             $ifVlan = trim($interface['vlan']);
             if ($ifVlan !== '') {
-                $vlanRefs[esxi_inventory_name_key($ifVlan)] ??= $ifVlan;
+                $vlanRefs[$ifVlan] ??= $ifVlan;
             }
         }
 
@@ -254,8 +263,8 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         }
     }
 
-    // Iterates the VALUES, not the normalized keys: the key folds the casing so
-    // one missing VLAN reports once, the value carries the spelling the file used.
+    // Iterates the exact reference map: case-only variants are separate findings,
+    // and the value preserves the first spelling from the uploaded document.
     foreach ($vlanRefs as $vlanName) {
         if (!repo_vlan_name_exists($db, $vlanName)) {
             $report['missing_vlans'][] = $vlanName;

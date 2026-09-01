@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../esxi_object_names.php';
+
 /**
  * ESXi inventory cache (ADR-0023). ESXi is the source; these rows are a
  * read-only mirror used only for display and warnings, never to block a deploy.
@@ -10,23 +12,12 @@ declare(strict_types=1);
  * - Replace the rows of one (credential, kind) atomically.
  * - Empty-result guard: a successful fetch that returns 0 items for a kind
  *   keeps the existing rows (a transient blank must not wipe the cache).
- * - Case-insensitive de-duplication (the UNIQUE key uses a *_ci collation, so
- *   "Prod" and "prod" would otherwise collide).
+ * - Exact de-duplication. Case, Unicode form and whitespace are identity.
  */
 
 /**
- * Canonical case- and whitespace-insensitive key for inventory names. The single
- * definition of "same name" for dedupe, presence, deviation and picker logic;
- * every comparison must go through it so the pages can never disagree.
- */
-function esxi_inventory_name_key(string $name): string
-{
-    return mb_strtolower(trim($name));
-}
-
-/**
- * De-duplicates normalized items by lower-cased name (first wins) and drops
- * empty names.
+ * De-duplicates only exact supported/persistable raw names. The first payload
+ * remains authoritative for fields, while source_count records multiplicity.
  *
  * @param array<int, array<string, mixed>> $items
  * @return array<int, array<string, mixed>>
@@ -35,14 +26,24 @@ function repo_esxi_inventory_dedupe(array $items): array
 {
     $seen = [];
     foreach ($items as $item) {
-        $name = trim((string) ($item['name'] ?? ''));
-        if ($name === '') {
+        $name = (string) ($item['name'] ?? '');
+        $classification = esxi_object_name_classify_raw($name);
+        if (!$classification['persistable']) {
             continue;
         }
-        $key = esxi_inventory_name_key($name);
+        $key = $name;
         if (!isset($seen[$key])) {
             $item['name'] = $name;
+            $meta = is_array($item['meta_json'] ?? null) ? $item['meta_json'] : [];
+            $meta['source_count'] = 1;
+            $meta['name_supported'] = $classification['supported'];
+            if (!$classification['supported']) {
+                $meta['unsupported_reason'] = $classification['reason'];
+            }
+            $item['meta_json'] = $meta;
             $seen[$key] = $item;
+        } else {
+            $seen[$key]['meta_json']['source_count']++;
         }
     }
 
@@ -123,7 +124,7 @@ function repo_esxi_inventory_replace_kind(mysqli $db, int $credentialId, string 
  * @param array<string, array{state?:string}> $queries
  * @return array<int, string>
  */
-function repo_esxi_inventory_answered_kinds(array $queries): array
+function repo_esxi_inventory_answered_kinds(array $queries, array $nameFailures = []): array
 {
     if ($queries === []) {
         return [];
@@ -139,6 +140,9 @@ function repo_esxi_inventory_answered_kinds(array $queries): array
 
     $answered = [];
     foreach ($map as $kind => $queryNames) {
+        if ((int) ($nameFailures[$kind] ?? 0) > 0) {
+            continue;
+        }
         foreach ($queryNames as $queryName) {
             if ((string) ($queries[$queryName]['state'] ?? '') !== VIRTUSPHERE_INVENTORY_QUERY_ANSWERED) {
                 continue 2;
@@ -156,26 +160,33 @@ function repo_esxi_inventory_answered_kinds(array $queries): array
  * kinds may treat an empty result as authoritative (B15), and every answered
  * kind gets its freshness stamped, including the empty ones.
  *
- * @param array{datacenters?:array, datastores?:array, networks?:array, hosts?:array, vms?:array, queries?:array} $parsed
+ * @param array{datacenters?:array,datastores?:array,networks?:array,hosts?:array,vms?:array,queries?:array,name_failures?:array<string,int>} $parsed
  * @return array<string, array{written:int, removed:int, kept_empty:bool, cleared:bool}>
  */
-function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed): array
+function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed, ?int $jobId = null): array
 {
-    $answeredKinds = repo_esxi_inventory_answered_kinds((array) ($parsed['queries'] ?? []));
+    $nameFailures = (array) ($parsed['name_failures'] ?? []);
+    $answeredKinds = repo_esxi_inventory_answered_kinds((array) ($parsed['queries'] ?? []), $nameFailures);
 
-    return repo_transaction($db, static function () use ($db, $credentialId, $parsed, $answeredKinds): array {
+    return repo_transaction($db, static function () use ($db, $credentialId, $parsed, $answeredKinds, $nameFailures, $jobId): array {
         $authoritative = static fn (string $kind): bool => in_array($kind, $answeredKinds, true);
+        $replace = static function (string $kind, array $items) use ($db, $credentialId, $authoritative, $nameFailures): array {
+            if ((int) ($nameFailures[$kind] ?? 0) > 0) {
+                return ['written' => 0, 'removed' => 0, 'kept_empty' => true, 'cleared' => false];
+            }
+            return repo_esxi_inventory_replace_kind($db, $credentialId, $kind, $items, $authoritative($kind));
+        };
 
         $summary = [];
-        $summary['datacenter'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATACENTER, repo_esxi_inventory_name_items($parsed['datacenters'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_DATACENTER));
-        $summary['datastore'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_DATASTORE, (array) ($parsed['datastores'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_DATASTORE));
+        $summary['datacenter'] = $replace(VIRTUSPHERE_INVENTORY_KIND_DATACENTER, repo_esxi_inventory_name_items($parsed['datacenters'] ?? []));
+        $summary['datastore'] = $replace(VIRTUSPHERE_INVENTORY_KIND_DATASTORE, (array) ($parsed['datastores'] ?? []));
         // Networks may arrive as plain names (legacy) or as items with a
         // vlan_id meta; both are accepted.
-        $summary['network'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_NETWORK, repo_esxi_inventory_mixed_items((array) ($parsed['networks'] ?? [])), $authoritative(VIRTUSPHERE_INVENTORY_KIND_NETWORK));
-        $summary['host'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_HOST, (array) ($parsed['hosts'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_HOST));
-        $summary['vm'] = repo_esxi_inventory_replace_kind($db, $credentialId, VIRTUSPHERE_INVENTORY_KIND_VM, (array) ($parsed['vms'] ?? []), $authoritative(VIRTUSPHERE_INVENTORY_KIND_VM));
+        $summary['network'] = $replace(VIRTUSPHERE_INVENTORY_KIND_NETWORK, repo_esxi_inventory_mixed_items((array) ($parsed['networks'] ?? [])));
+        $summary['host'] = $replace(VIRTUSPHERE_INVENTORY_KIND_HOST, (array) ($parsed['hosts'] ?? []));
+        $summary['vm'] = $replace(VIRTUSPHERE_INVENTORY_KIND_VM, (array) ($parsed['vms'] ?? []));
 
-        repo_esxi_inventory_touch_kind_freshness($db, $credentialId, $answeredKinds);
+        repo_esxi_inventory_record_kind_evidence($db, $credentialId, $answeredKinds, $parsed, $jobId);
 
         return $summary;
     });
@@ -192,25 +203,75 @@ function repo_esxi_inventory_apply(mysqli $db, int $credentialId, array $parsed)
  */
 function repo_esxi_inventory_touch_kind_freshness(mysqli $db, int $credentialId, array $kinds): void
 {
-    $kinds = array_values(array_intersect($kinds, VIRTUSPHERE_INVENTORY_KINDS));
-    if ($kinds === []) {
-        return;
-    }
+    repo_esxi_inventory_record_kind_evidence($db, $credentialId, $kinds, [], null);
+}
+
+/**
+ * Cache, freshness, semantics and observation are committed by the caller's
+ * single transaction. A failed/skipped kind updates only observation.
+ *
+ * @param list<string> $answeredKinds
+ */
+function repo_esxi_inventory_record_kind_evidence(mysqli $db, int $credentialId, array $answeredKinds, array $parsed, ?int $jobId): void
+{
+    $answeredKinds = array_values(array_intersect($answeredKinds, VIRTUSPHERE_INVENTORY_KINDS));
 
     // Database clock, like every other timestamp on this row (NOW() writes).
     $now = (string) repo_scalar($db, 'SELECT NOW()');
-    $row = repo_fetch_one($db, 'SELECT kind_freshness_json FROM deploy_esxi_inventory_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
-    $decoded = $row !== null ? json_decode((string) ($row['kind_freshness_json'] ?? ''), true) : null;
-    $map = is_array($decoded) ? $decoded : [];
-    foreach ($kinds as $kind) {
-        $map[$kind] = $now;
+    $row = repo_fetch_one($db, 'SELECT kind_freshness_json, kind_name_semantics_json, kind_observation_json FROM deploy_esxi_inventory_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
+    $freshness = json_decode((string) ($row['kind_freshness_json'] ?? ''), true);
+    $semantics = json_decode((string) ($row['kind_name_semantics_json'] ?? ''), true);
+    $observations = json_decode((string) ($row['kind_observation_json'] ?? ''), true);
+    $freshness = is_array($freshness) ? $freshness : [];
+    $semantics = is_array($semantics) ? $semantics : [];
+    $observations = is_array($observations) ? $observations : [];
+    $normalization = (array) ($parsed['normalization'] ?? []);
+    $kindKeys = ['datacenter' => 'datacenters', 'datastore' => 'datastores', 'network' => 'networks', 'host' => 'hosts', 'vm' => 'vms'];
+    foreach (VIRTUSPHERE_INVENTORY_KINDS as $kind) {
+        $answered = in_array($kind, $answeredKinds, true);
+        if ($answered) {
+            $freshness[$kind] = $now;
+            $semantics[$kind] = 2;
+        }
+        if ($parsed === [] && !$answered) {
+            continue;
+        }
+        $key = $kindKeys[$kind];
+        $counts = (array) ($normalization[$key] ?? []);
+        $failureReason = (string) ($parsed['observation_failure_reason'] ?? '');
+        $observations[$kind] = [
+            'attempted_at' => $now,
+            'outcome' => $answered ? 'answered' : 'failed',
+            'reason_code' => $answered ? null : ($failureReason !== '' ? $failureReason : ((int) (($parsed['name_failures'][$kind] ?? 0)) > 0 ? 'unsupported_inventory_name' : 'query_incomplete')),
+            'job_id' => $jobId !== null && $jobId > 0 ? $jobId : null,
+            'raw_item_count' => $answered ? (int) ($counts['raw'] ?? 0) : null,
+            'persisted_item_count' => $answered ? (int) ($counts['persistable'] ?? $counts['kept'] ?? 0) : null,
+            'supported_name_count' => $answered ? (int) ($counts['supported'] ?? $counts['kept'] ?? 0) : null,
+        ];
     }
 
-    $json = json_encode($map, JSON_THROW_ON_ERROR);
+    $freshnessJson = json_encode($freshness, JSON_THROW_ON_ERROR);
+    $semanticsJson = json_encode($semantics, JSON_THROW_ON_ERROR);
+    $observationJson = json_encode($observations, JSON_THROW_ON_ERROR);
     // Row-alias syntax (VALUES() in ODKU is deprecated on MySQL 8.4).
-    $stmt = $db->prepare('INSERT INTO deploy_esxi_inventory_state (credential_id, kind_freshness_json) VALUES (?, ?) AS new ON DUPLICATE KEY UPDATE kind_freshness_json = new.kind_freshness_json');
-    $stmt->bind_param('is', $credentialId, $json);
+    $stmt = $db->prepare('INSERT INTO deploy_esxi_inventory_state (credential_id, kind_freshness_json, kind_name_semantics_json, kind_observation_json) VALUES (?, ?, ?, ?) AS new ON DUPLICATE KEY UPDATE kind_freshness_json = new.kind_freshness_json, kind_name_semantics_json = new.kind_name_semantics_json, kind_observation_json = new.kind_observation_json');
+    $stmt->bind_param('isss', $credentialId, $freshnessJson, $semanticsJson, $observationJson);
     $stmt->execute();
+}
+
+/** Records a pull-wide failure without changing positive freshness/semantics. */
+function repo_esxi_inventory_record_failed_observations(mysqli $db, int $credentialId, string $reasonCode, ?int $jobId): void
+{
+    $reasonCode = in_array($reasonCode, VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES, true)
+        ? $reasonCode
+        : VIRTUSPHERE_INVENTORY_ERROR_WORKER;
+    repo_esxi_inventory_record_kind_evidence(
+        $db,
+        $credentialId,
+        [],
+        ['observation_failure_reason' => $reasonCode],
+        $jobId
+    );
 }
 
 /**

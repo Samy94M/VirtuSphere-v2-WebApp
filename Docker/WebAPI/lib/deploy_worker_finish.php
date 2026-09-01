@@ -184,11 +184,13 @@ function deploy_worker_finish_job(
     string $status,
     ?string $lastError = null,
     ?string $reasonCode = null,
-    ?string $reasonDetail = null
-): void
+    ?string $reasonDetail = null,
+    ?array $terminalResult = null,
+    bool $remoteStepStarted = true
+): ?string
 {
-    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail)) {
-        return;
+    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult)) {
+        return $status;
     }
 
     $job = repo_deploy_job($db, $jobId);
@@ -198,7 +200,7 @@ function deploy_worker_finish_job(
         // a foreign key and turns a clean stop into an unexplained crash.
         deploy_worker_log_if_job_exists($db, $jobId, 'Terminal status ' . $status . ' was not written: the job row no longer exists.');
 
-        return;
+        return null;
     }
 
     $observed = (string) $job['status'];
@@ -209,11 +211,13 @@ function deploy_worker_finish_job(
             $db,
             $jobId,
             $workerId,
-            'Cancelled after operator request; the remote step that was already running ran to its end, '
-            . 'so its changes on ESXi are in place; no further step was started.'
+            $remoteStepStarted
+                ? 'Cancelled after operator request; the remote step that was already running ran to its end, '
+                    . 'so its changes on ESXi are in place; no further step was started.'
+                : 'Cancelled after operator request at the pre-remote configuration boundary; no remote step was started.'
         )
     ) {
-        return;
+        return VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
     }
 
     // A terminal or foreign-owned row is immutable evidence. This diagnostic
@@ -221,6 +225,8 @@ function deploy_worker_finish_job(
     error_log('[deploy-worker] job ' . $jobId . ': terminal status ' . $status
         . ' was not written; observed status ' . $observed
         . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . '.');
+
+    return in_array($observed, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true) ? $observed : null;
 }
 
 function deploy_terminal_reason_for_exception(Throwable $exception): string

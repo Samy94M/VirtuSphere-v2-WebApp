@@ -73,7 +73,10 @@ module.exports = defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         channel: undefined,
-        launchOptions: CHROMIUM_LAUNCH,
+        // The functional Chromium project keeps the normal compositor. Visual
+        // QA uses the contract-pinned software path because GPU backdrop blur
+        // can vary a colour channel by one between otherwise identical runs.
+        launchOptions: { ...CHROMIUM_LAUNCH, args: visualContract.launchArgs },
         locale: visualContract.locale,
         timezoneId: visualContract.timezoneId,
         viewport: {

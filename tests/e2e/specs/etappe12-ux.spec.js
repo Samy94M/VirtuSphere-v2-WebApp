@@ -56,8 +56,9 @@ $name = '${MARK}-vm';
 $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os, updated) VALUES (?, ?, ?, 'Win11', 1)");
 $stmt->bind_param('iss', $mission, $name, $name);
 $stmt->execute();
+test_prepare_network_mac_fixture($db, $mission, $esxi, 'WDS', 'DC1');
 echo 'JSON' . json_encode(['mission' => $mission, 'esxi' => $esxi, 'ansible' => $ansible]) . 'JSON';
-`, ['lib/repo/credentials.php', 'lib/repo/missions.php']);
+`, ['lib/repo/credentials.php', 'lib/repo/missions.php', 'tests/Support/NetworkMacFixtures.php']);
 }
 
 test.beforeAll(() => {

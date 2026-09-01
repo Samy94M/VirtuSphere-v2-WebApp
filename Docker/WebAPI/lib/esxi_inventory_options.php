@@ -1,8 +1,8 @@
 <?php
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/esxi_object_names.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 
@@ -33,7 +33,7 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
  * it has. It stays the single source for preselecting and hiding; the buckets
  * decide presentation only.
  *
- * `name_set` is the same lower-cased map esxi_inventory_name_set() builds, so a
+ * `name_set` is the same exact raw-name map esxi_inventory_name_set() builds, so a
  * caller can ask esxi_inventory_value_unknown() instead of rolling its own
  * comparison. The picker label and the deviation report must never disagree.
  *
@@ -66,15 +66,11 @@ function esxi_inventory_options(mysqli $db, string $kind): array
 }
 
 /**
- * Case-insensitive union of the grouped names, plus the lower-cased set the
+ * Exact raw-name union of the grouped names, plus the exact set the
  * unknown-value predicate reads. Pure, so the de-duplication rule is testable
  * without a database.
  *
- * First spelling wins, like every other dedupe in this project
- * (esxi_inventory_missing_values, repo_esxi_vlan_present_names): overwriting let
- * the LAST group decide whether the picker says "DataStore1" or "datastore1",
- * which pinned a display detail to the credential name the groups are sorted by,
- * and an operator may rename a credential at any time.
+ * Case variants are different ESXi objects and therefore remain separate.
  *
  * @param array<int, array{names:array<int,string>}> $groups
  * @return array{names:array<int,string>, name_set:array<string,true>}
@@ -84,8 +80,8 @@ function esxi_inventory_name_union(array $groups): array
     $names = [];
     foreach ($groups as $group) {
         foreach ($group['names'] as $name) {
-            $key = esxi_inventory_name_key((string) $name);
-            if ($key !== '' && !isset($names[$key])) {
+            $key = (string) $name;
+            if (esxi_object_name_classify_raw($key)['supported'] && !isset($names[$key])) {
                 $names[$key] = (string) $name;
             }
         }
@@ -141,8 +137,8 @@ function esxi_inventory_presence_buckets(array $groups, int $eligibleCount): arr
     $presence = [];
     foreach ($groups as $index => $group) {
         foreach ($group['names'] as $name) {
-            $key = esxi_inventory_name_key((string) $name);
-            if ($key === '') {
+            $key = (string) $name;
+            if (!esxi_object_name_classify_raw($key)['supported']) {
                 continue;
             }
             if (!isset($presence[$key])) {
@@ -289,6 +285,9 @@ function esxi_inventory_free_union(array $groups): array
     $free = [];
     foreach ($groups as $group) {
         foreach ($group['free_by_key'] ?? [] as $key => $bytes) {
+            if (!esxi_object_name_classify_raw((string) $key)['supported']) {
+                continue;
+            }
             if (!array_key_exists($key, $free)) {
                 $free[$key] = $bytes;
                 continue;
@@ -323,7 +322,7 @@ function esxi_inventory_unusable_union(array $groups): array
     $unusable = [];
     foreach ($groups as $group) {
         foreach ($group['unusable_keys'] ?? [] as $key => $flag) {
-            if ($flag) {
+            if ($flag && esxi_object_name_classify_raw((string) $key)['supported']) {
                 $unusable[$key] = true;
             }
         }
@@ -365,7 +364,10 @@ function esxi_inventory_groups_agree(array $groups, int $unionSize): bool
     foreach ($groups as $group) {
         $distinct = [];
         foreach ($group['names'] as $name) {
-            $distinct[esxi_inventory_name_key((string) $name)] = true;
+            $name = (string) $name;
+            if (esxi_object_name_classify_raw($name)['supported']) {
+                $distinct[$name] = true;
+            }
         }
         if (count($distinct) !== $unionSize) {
             return false;
@@ -439,7 +441,6 @@ function esxi_inventory_location_notes(array $optionSets): array
             $hostChoice = true;
         }
     }
-
     $notes = [];
     if ($hostChoice) {
         $notes[] = 'host_choice';
@@ -450,6 +451,5 @@ function esxi_inventory_location_notes(array $optionSets): array
     if ($neverPulled) {
         $notes[] = 'never_pulled';
     }
-
     return $notes;
 }

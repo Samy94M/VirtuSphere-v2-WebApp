@@ -159,7 +159,10 @@ final class MachineApiAuditThrottleTest extends TestCase
             'deploy_job',
             424242,
             VIRTUSPHERE_AUDIT_RESULT_DENIED,
-            ['reason_code' => 'job_became_terminal'],
+            // A current code from the closed callback registry
+            // (VIRTUSPHERE_MAC_IMPORT_CALLBACK_REASON_META); the retired
+            // 'job_became_terminal' would teach a vocabulary no producer emits.
+            ['reason_code' => 'callback_job_not_active'],
             self::IP_A,
             self::TAG . '-callback'
         );

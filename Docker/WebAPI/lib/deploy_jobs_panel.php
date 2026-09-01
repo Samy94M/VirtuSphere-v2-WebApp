@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/vm_urls.php';
+
 /** @var list<array<string,mixed>> $missions */
 /** @var int $selectedMissionId */
 /** @var list<array<string,mixed>> $jobs */
 /** @var array<int,array{int,int}> $groupPositions */
+/** @var array<int,array<string,mixed>> $retryEvaluations */
 
 ?>
 <section class="panel">
@@ -54,6 +57,7 @@ declare(strict_types=1);
                         </form>
                     <?php } ?>
                     <?php if (deploy_job_is_retryable((string) $job['status'], $job['mission_id'] !== null ? (int) $job['mission_id'] : null)) {
+                        $retryEvaluation = $retryEvaluations[(int) $job['id']] ?? null;
                         $retryName = (string) ($job['mission_name'] ?? '');
                         if ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
                             $retryResult = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
@@ -68,13 +72,22 @@ declare(strict_types=1);
                         } else {
                             $retryConfirm = __t('deploy.confirm_retry', ['name' => $retryName]);
                         }
+                        if (is_array($retryEvaluation) && !empty($retryEvaluation['external_confirmation'])) {
+                            $retryConfirm = __t('deploy.confirm_retry_external', ['name' => $retryName]);
+                        }
                         ?>
-                        <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
-                            <?php echo csrf_field(); ?>
-                            <input type="hidden" name="action" value="retry">
-                            <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
-                            <button class="button button-secondary" type="submit" data-confirm="<?php echo h($retryConfirm); ?>"><?php echo h(__t('deploy.retry')); ?></button>
-                        </form>
+                        <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed'])) { ?>
+                            <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="action" value="retry">
+                                <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
+                                <button class="button button-secondary" type="submit" data-confirm="<?php echo h($retryConfirm); ?>"><?php echo h(__t('deploy.retry')); ?></button>
+                            </form>
+                        <?php } elseif (is_array($retryEvaluation) && (int) ($retryEvaluation['repair_vm_id'] ?? 0) > 0 && can('vms.write')) { ?>
+                            <a class="button button-secondary" href="<?php echo h(vm_edit_url((int) $job['mission_id'], (int) $retryEvaluation['repair_vm_id'], 'interfaces')); ?>"><?php echo h(__t('deploy.retry_fix_configuration')); ?></a>
+                        <?php } else { ?>
+                            <span class="muted"><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
+                        <?php } ?>
                     <?php } ?>
                     <?php if (($job['group_id'] ?? '') !== '' && isset($groupPositions[(int) $job['id']]) && $groupPositions[(int) $job['id']][0] === 1) { ?>
                         <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">

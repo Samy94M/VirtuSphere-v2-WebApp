@@ -319,6 +319,11 @@
     padding: 0 0 0 var(--space-4);
 }
 
+.inventory-raw-name {
+    white-space: break-spaces;
+    overflow-wrap: anywhere;
+}
+
 .break-anywhere,
 .status-facts code {
     overflow-wrap: anywhere;

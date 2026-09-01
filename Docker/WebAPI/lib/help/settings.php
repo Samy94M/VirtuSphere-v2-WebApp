@@ -48,7 +48,10 @@ declare(strict_types=1);
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_retire_p2')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_esxi_heading')); ?></h3>
-            <p><?php echo h(__t('help_settings.settings_esxi_p1', ['max' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX])); ?></p>
+            <p><?php echo h(__t('help_settings.settings_esxi_p1', [
+                'max' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX,
+                'evidence_hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
+            ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_esxi_p2_interval_zero')); ?></p>
         </section>
 

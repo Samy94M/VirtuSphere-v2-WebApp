@@ -114,6 +114,45 @@ function remote_step_policy_registry(): array
     return $policies;
 }
 
+function remote_step_callback_expectation(string $mode, string $stepKey): string
+{
+    $registry = remote_step_callback_registry();
+    if (!isset($registry[$mode][$stepKey])) {
+        throw new InvalidArgumentException('Remote mode/step has no callback policy.');
+    }
+    return (string) $registry[$mode][$stepKey];
+}
+
+/**
+ * Callback expectations follow the playbook sequence independently from the
+ * offline activation registry. In particular Full is prepared for its export
+ * callback without becoming remotely activatable before Etappe 14B.
+ *
+ * @return array<string,array<string,string>>
+ */
+function remote_step_callback_registry(): array
+{
+    $registry = [];
+    foreach (virtusphere_user_deploy_modes() as $mode) {
+        if (!ansible_mode_expects_mac_result($mode)) {
+            continue;
+        }
+        $steps = [];
+        foreach (ansible_playbooks_for_mode($mode) as $playbook) {
+            $stepKey = array_search($playbook, VIRTUSPHERE_PLAYBOOKS, true);
+            if (!is_string($stepKey)) {
+                throw new LogicException('Callback policy found an unregistered playbook.');
+            }
+            $steps[$stepKey] = $playbook === VIRTUSPHERE_PLAYBOOKS['export'] ? 'db_import_mac' : 'none';
+        }
+        if (($steps['export'] ?? '') !== 'db_import_mac') {
+            throw new LogicException('A MAC-result mode has no export callback expectation.');
+        }
+        $registry[$mode] = $steps;
+    }
+    return $registry;
+}
+
 /** @return array<string, mixed> */
 function remote_step_policy(
     string $playbook,

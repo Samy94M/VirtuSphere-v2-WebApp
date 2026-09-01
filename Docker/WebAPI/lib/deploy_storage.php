@@ -44,9 +44,8 @@ function deploy_selected_vms(array $missionVms, array $vmIds): array
 
 /**
  * Free and total bytes of the cached datastores of several ESXi credentials,
- * keyed by credential id and then by esxi_inventory_name_key() so a stored
- * value that differs in case still finds its row. One query for the whole
- * picker; both numbers are as old as the last successful pull.
+ * keyed by credential id and exact ESXi name. A case-only neighbor never lends
+ * its free bytes to the configured datastore.
  *
  * `free` goes through esxi_datastore_usable_free_bytes(), the single reader of
  * the two ways a number can be missing: the cache never had one, or the
@@ -60,7 +59,7 @@ function deploy_datastore_capacity_map(mysqli $db, array $credentialIds): array
 {
     $map = [];
     foreach (repo_esxi_inventory_datastore_rows($db, $credentialIds) as $row) {
-        $map[(int) $row['credential_id']][esxi_inventory_name_key((string) $row['name'])] = [
+        $map[(int) $row['credential_id']][(string) $row['name']] = [
             'free' => esxi_datastore_usable_free_bytes(
                 $row['free_bytes'] !== null ? (int) $row['free_bytes'] : null,
                 $row['meta_json'] ?? null

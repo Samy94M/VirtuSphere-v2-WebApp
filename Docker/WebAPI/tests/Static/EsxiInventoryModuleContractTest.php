@@ -11,7 +11,6 @@ require_once dirname(__DIR__, 2) . '/lib/esxi_inventory_modules.php';
 final class EsxiInventoryModuleContractTest extends TestCase
 {
     private const REPO_SURFACE = [
-        'esxi_inventory_name_key',
         'repo_esxi_inventory_dedupe',
         'repo_esxi_inventory_replace_kind',
         'repo_esxi_inventory_answered_kinds',
@@ -23,6 +22,8 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'repo_esxi_inventory_datastore_rows',
         'repo_esxi_inventory_record_success',
         'repo_esxi_inventory_record_failure',
+        'repo_esxi_inventory_record_failed_observations',
+        'repo_esxi_inventory_record_kind_evidence',
         'repo_esxi_inventory_clear_pause',
         'repo_esxi_inventory_state',
         'repo_esxi_inventory_states',
@@ -37,6 +38,8 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'repo_esxi_inventory_pulled_credential_ids',
         'repo_esxi_datacenters_for_credential',
         'repo_esxi_sole_datacenter',
+        'repo_esxi_datacenter_resolution',
+        'repo_esxi_network_semantics_baseline_complete',
         'repo_esxi_vlan_id_aggregate',
         'repo_esxi_vlan_presence_report',
     ];
@@ -62,6 +65,7 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'esxi_inventory_summaries',
         'esxi_inventory_detail',
         'esxi_inventory_enqueue_due',
+        'esxi_inventory_kind_evidence',
     ];
 
     public function testRegistriesMatchTheirFilesystemsInBothDirections(): void

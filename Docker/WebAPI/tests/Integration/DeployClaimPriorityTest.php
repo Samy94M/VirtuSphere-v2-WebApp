@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
+
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
@@ -41,6 +43,7 @@ final class DeployClaimPriorityTest extends TestCase
         $this->makeVm('PHPUNITPRIO1', '10.0.0.40');
         $this->esxiId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, 443);
         $this->ansibleId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 22);
+        test_prepare_network_mac_fixture($this->db, $this->missionId, $this->esxiId, 'VLAN10');
     }
 
     protected function tearDown(): void
@@ -83,7 +86,7 @@ final class DeployClaimPriorityTest extends TestCase
             $this->missionId,
             null,
             ['vm_name' => $name, 'vm_hostname' => $name, 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
-            [['ip' => $ip, 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => '', 'mac' => '']],
+            [['ip' => $ip, 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

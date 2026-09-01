@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
+
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/credentials.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
@@ -67,6 +69,7 @@ final class VmIdentityCollisionTest extends TestCase
         $this->ansibleId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 22);
         $this->userId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_users ORDER BY id LIMIT 1');
         self::assertGreaterThan(0, $this->userId, 'integration fixture requires one portal user');
+        test_prepare_network_mac_fixture($this->db, $this->missionId, $this->esxiId, 'VLAN90');
     }
 
     protected function tearDown(): void

@@ -71,6 +71,76 @@ bleiben mit `site_acceptance_required` markiert und werden nicht lokal geraten.
 Die Datei besitzt keinen Aktivierungswriter und keinen Aufrufer im Worker. Auch
 diese Grundlage ändert daher den unten beschriebenen Legacy-Produktpfad nicht.
 
+## Netzwerk-/MAC-Preflight (Etappe 14A)
+
+`lib/vm_network_contract.php` ist die pure SSoT für Interface-Issues,
+Fingerprint, WDS/PXE-Verdict und die aus der Playbookfolge abgeleitete
+Modusmatrix. `lib/repo/vm_network.php` materialisiert einen ausgewählten Scope
+in konstanter Queryzahl. Eine leere VM-Auswahl bedeutet weiterhin alle VMs der
+Mission; ein Retry prüft ausschließlich seinen neu berechneten tatsächlichen
+Scope.
+
+| Befund | Create / Full / Powercycle / Export | Start / Autostart |
+|---|---|---|
+| VLAN nach äußerer Trimmung leer oder innerhalb einer VM exakt doppelt | blockiert vor Queue beziehungsweise Remote | sichtbare Warnung, nicht blockierend |
+| spezielle WDS-PXE-Karte fehlt, weicht nur in Case ab oder ist mehrfach vorhanden | Full, Powercycle und Export blockieren; Create warnt | sichtbare Warnung, nicht blockierend |
+
+Die allgemeine Regel und die spezielle WDS-Regel sind bewusst getrennt: Eine
+Create-VM mit leerem oder exakt doppeltem VLAN ist ungültig und blockiert, auch
+wenn Create allein wegen einer fehlenden WDS-Karte nur warnen würde. `Daten`
+und `DATEN` bleiben zwei operative ESXi-Namen. Ein Case-ähnlicher Wert ist
+Diagnose, nie ein erfolgreicher Match.
+
+Writer sperren die Mission und weisen eine Netzwerkänderung zurück, solange ein
+Auftrag `running` oder `cancelling` ist. Ein unverändertes ungültiges
+Legacy-Bundle darf bei einer unabhängigen Feldänderung erhalten bleiben; sobald
+das Bundle verändert wird, muss es gültig sein. Speichern, Klonen, Import,
+Missionstransfer und geführte VLAN-Neuzuweisung verwenden denselben Fingerprint
+und dieselbe Prüfung.
+
+Queue und Staffelung führen Missionslock, Scopematerialisierung, allgemeine
+Netzwerkprüfung, WDS-Prüfung und Inserts in einer Transaktion aus. Ein Blocker
+erzeugt auch bei einer Staffelung null Jobzeilen. Nach dem Claim prüft der
+Worker denselben Scope erneut und schreibt bei einem Blocker ein strukturiertes
+`kind=network_preflight`-Ergebnis mit Abschlussgrund
+`configuration_blocked`, bevor SFTP, SSH oder ESXi erreicht werden. Das
+Auftragsprotokoll zeigt die Prüfung je VM mit dem kanonischen
+`[n/total]`-Fortschritt. Der getrennte Resultatvertrag trägt `version=1`,
+`outcome=failed`, Modus, Counts und ausschließlich die betroffenen VMs mit
+geschlossenen Issue-Codes. Nach einer Korrektur wird er beim Retry nicht als
+beschädigtes MAC-Resultat behandelt; der aktuelle Scope wird vollständig neu
+geprüft.
+
+Kann eine explizit eingereihte VM-ID nach einer erlaubten Änderung vor dem
+Claim nicht mehr materialisiert werden, bleibt sie als sortierte
+`missing_vm_ids`-Evidenz im Sollscope und blockiert vor Zugangsdaten- oder
+Remotezugriff. Sie erhält keinen erfundenen Netzwerk-Issue-Code. Resultat und
+`failed/configuration_blocked` werden atomar veröffentlicht. Gewinnt ein
+gleichzeitiger Abbruch, endet der Auftrag ohne Preflight-Resultat als
+`cancelled`; der Abschlussdetailtext bestätigt, dass kein Remote-Schritt lief.
+
+Der MAC-Rückruf akzeptiert nur den aktuellen exportfähigen Auftrag und dessen
+Attempt/Generation. Unter der Lockreihenfolge Mission, Job, Runtimeidentität,
+gegebenenfalls Remote-Exporthandle, VM und Interfaces muss exakt eine WDS-Karte
+mit gültiger MAC passen. Nur diese VM wird `deployed/pending`. Version 2 des
+Ergebnisses speichert per-VM-WDS-Evidenz und den semantischen
+Callback-Fingerprint; V1 bleibt historisch lesbar. Ein identischer zweiter
+Callback ist nur während desselben aktiven Laufs 200 ohne Domainwrite,
+abweichende oder terminale Wiederholungen sind 409. Der Fingerprint enthält die
+erwarteten VM-IDs und die normalisierten semantischen Zeilen mit Multiplizität;
+reine Reihenfolge und diagnostischer Freitext sind bedeutungslos. Der Retry
+zeigt sämtliche gleichzeitig bestehenden Befunde in der Reihenfolge
+Remoteevidenz, Identität, Netzwerk, externe Voraussetzung und wiederholt ein
+Teilergebnis nur im aktuellen fehlgeschlagenen Export-Scope.
+
+Eine Änderung der Missions-WDS-Portgruppe passt keine VM-Karte automatisch an.
+Sie bleibt bei nur eingereihten Jobs erlaubt, wird aber während
+`running`/`cancelling` unter demselben Missions-/Joblock mit einem Link auf das
+aktive Jobprotokoll abgewiesen.
+
+Etappe 14A aktiviert keinen neuen Remote-Create-Pfad. Create und Full bleiben
+bis zur getrennten Etappe 14B in der Remote-Aktivierungspolicy gesperrt.
+
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.

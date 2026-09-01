@@ -29,7 +29,7 @@ final class EsxiInventoryPresenceBucketsTest extends TestCase
     {
         $byKey = [];
         foreach ($names as $name) {
-            $byKey[esxi_inventory_name_key($name)] = $free[$name] ?? null;
+            $byKey[$name] = $free[$name] ?? null;
         }
 
         return [
@@ -146,14 +146,17 @@ final class EsxiInventoryPresenceBucketsTest extends TestCase
         self::assertSame([['some', ['ds1']]], $this->scopes($buckets));
     }
 
-    public function testCaseVariantsAcrossHostsAreOneName(): void
+    public function testCaseVariantsAcrossHostsAreDistinctNames(): void
     {
         $buckets = esxi_inventory_presence_buckets([
             $this->group('esxi-a', ['DataStore1']),
             $this->group('esxi-b', ['datastore1']),
         ], 2);
 
-        self::assertSame([['all', ['DataStore1']]], $this->scopes($buckets), 'first spelling wins, like every other dedupe');
+        self::assertSame([
+            ['only', ['DataStore1']],
+            ['only', ['datastore1']],
+        ], $this->scopes($buckets));
     }
 
     public function testTheFreeSpaceOfASharedNameIsTheTightestHost(): void

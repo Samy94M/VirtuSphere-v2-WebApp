@@ -167,10 +167,10 @@ function ansible_parse_inventory_hosts(mixed $facts, mixed $fetchedEpoch): array
         return [];
     }
 
-    $name = trim((string) ($facts['ansible_hostname'] ?? $facts['hw_name'] ?? $facts['ansible_nodename'] ?? ''));
-    if ($name === '') {
-        $name = 'esxi-host';
-    }
+    // ESXi object names are identity: preserve the module value byte-for-byte.
+    // A missing/unsupported name is counted by the common ingestion contract;
+    // inventing "esxi-host" would turn absence into a false object.
+    $name = (string) ($facts['ansible_hostname'] ?? $facts['hw_name'] ?? $facts['ansible_nodename'] ?? '');
 
     $ramMb = null;
     if (isset($facts['ansible_memtotal_mb'])) {

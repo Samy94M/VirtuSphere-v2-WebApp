@@ -6,6 +6,8 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_job_output.php';
 require_once __DIR__ . '/../deploy_job_result.php';
+require_once __DIR__ . '/../deploy_preflight_bounds.php';
+require_once __DIR__ . '/../remote_execution.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
@@ -61,9 +63,15 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
         }
 
         $jobId = (int) $row['id'];
+        $runtime = repo_fetch_one($db, 'SELECT LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        $generation = (string) ($runtime['generation_id'] ?? '');
+        if (preg_match('/^[a-f0-9]{32}$/', $generation) !== 1) {
+            throw new RuntimeException('Deploy runtime generation is missing.');
+        }
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, heartbeat_at = NOW(), attempts = attempts + 1, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('ssi', $running, $workerId, $jobId);
+        $legacyContract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('ssssi', $running, $workerId, $legacyContract, $generation, $jobId);
         $stmt->execute();
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
 
@@ -91,7 +99,8 @@ function repo_finish_deploy_job(
     string $status,
     ?string $lastError = null,
     ?string $reasonCode = null,
-    ?string $reasonDetail = null
+    ?string $reasonDetail = null,
+    ?array $terminalResult = null
 ): bool
 {
     if (!in_array($status, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
@@ -107,8 +116,9 @@ function repo_finish_deploy_job(
     deploy_terminal_reason_assert($status, $reasonCode);
     $lastError = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null;
     $reasonDetail = deploy_terminal_reason_detail($reasonDetail ?? ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null));
+    $terminalResultJson = $terminalResult === null ? null : repo_encode_deploy_preflight_result($terminalResult);
 
-    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail): bool {
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResultJson): bool {
         $stmt = $db->prepare('SELECT status, locked_by, result_json FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $jobId);
         $stmt->execute();
@@ -130,7 +140,10 @@ function repo_finish_deploy_job(
         // adding a terminal state without extending this map is a static error.
         $terminalLine = $terminalLines[$status];
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $terminalLine);
-        $resultJson = deploy_job_terminal_result_json(
+        if ($terminalResultJson !== null && $row['result_json'] !== null) {
+            throw new RuntimeException('Deploy preflight terminal result found an existing final result.');
+        }
+        $resultJson = $terminalResultJson ?? deploy_job_terminal_result_json(
             $row['result_json'] !== null ? (string) $row['result_json'] : null,
             $status
         );
@@ -160,6 +173,21 @@ function repo_finish_deploy_job(
 function repo_append_deploy_job_log(mysqli $db, int $jobId, string $stream, string $line): int
 {
     return repo_transaction($db, static fn (): int => repo_insert_deploy_job_log_unlocked($db, $jobId, $stream, $line));
+}
+
+/**
+ * Encodes the bounded structured result used by an atomic pre-remote finish.
+ *
+ * It bounds instead of refusing. A job stopped at the configuration boundary
+ * has to end as `configuration_blocked` with a reason the operator can act on;
+ * throwing here would send it down the failure path and label it
+ * `execution_failed`, which asserts that a playbook ran, which is the one thing
+ * that provably did not happen. The verdict is never at risk, only the number
+ * of rows illustrating it, and `counts` keeps stating the complete decision.
+ */
+function repo_encode_deploy_preflight_result(array $result): string
+{
+    return deploy_preflight_bounded_result($result, VIRTUSPHERE_DEPLOY_PREFLIGHT_JSON_MAX_BYTES)['json'];
 }
 
 function repo_insert_deploy_job_log_unlocked(mysqli $db, int $jobId, string $stream, string $line): int

@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../esxi_datacenter_resolution.php';
+require_once __DIR__ . '/../esxi_object_names.php';
+
 /**
  * Distinct inventory names of one kind across all credentials (for the
  * datacenter/datastore suggestion lists in the mission editor).
@@ -14,7 +17,10 @@ function repo_esxi_inventory_names_by_kind(mysqli $db, string $kind): array
     $stmt->bind_param('s', $kind);
     $stmt->execute();
 
-    return array_map(static fn (array $r): string => (string) $r['name'], repo_fetch_all($stmt->get_result()));
+    return array_values(array_filter(
+        array_map(static fn (array $r): string => (string) $r['name'], repo_fetch_all($stmt->get_result())),
+        static fn (string $name): bool => esxi_object_name_classify_raw($name)['supported']
+    ));
 }
 /**
  * Inventory names of one kind grouped by the credential that reported them, for
@@ -24,7 +30,7 @@ function repo_esxi_inventory_names_by_kind(mysqli $db, string $kind): array
  *
  * `names` stays a plain string list: it is the only thing the exact decision
  * (esxi_inventory_option_flags) may look at. `free_by_key` carries the optional
- * free space of the same rows, keyed by esxi_inventory_name_key, so the datastore
+ * free space of the same rows, keyed by exact datastore identity, so the datastore
  * picker can decorate its labels without a second query. Only datastore rows have
  * it; for every other kind the map is all-null.
  *
@@ -54,7 +60,10 @@ function repo_esxi_inventory_names_by_credential(mysqli $db, string $kind): arra
             ];
         }
         $name = (string) $row['name'];
-        $key = esxi_inventory_name_key($name);
+        if (!esxi_object_name_classify_raw($name)['supported']) {
+            continue;
+        }
+        $key = $name;
         $groups[$credentialId]['names'][] = $name;
         // The free number of a datastore in maintenance is a size, not space
         // anybody can deploy onto, so it never reaches the picker label as one.
@@ -80,8 +89,7 @@ function repo_esxi_inventory_names_by_credential(mysqli $db, string $kind): arra
  * two warning boxes. Same shape and same reason as
  * repo_esxi_inventory_datastore_rows(): one `IN (...)` for the whole page.
  *
- * The keys go through esxi_inventory_name_key(), so every comparison downstream
- * is the project's one definition of "same name".
+ * Keys are exact ESXi names; diagnostic similarity never enters presence.
  *
  * @param array<int, string> $kinds
  * @return array<int, array<string, array<string, true>>> credential_id => kind => name key set
@@ -100,7 +108,10 @@ function repo_esxi_inventory_name_sets_by_credential(mysqli $db, array $kinds): 
 
     $sets = [];
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $sets[(int) $row['credential_id']][(string) $row['kind']][esxi_inventory_name_key((string) $row['name'])] = true;
+        $name = (string) $row['name'];
+        if (esxi_object_name_classify_raw($name)['supported']) {
+            $sets[(int) $row['credential_id']][(string) $row['kind']][$name] = true;
+        }
     }
 
     return $sets;
@@ -141,7 +152,10 @@ function repo_esxi_datacenters_for_credential(mysqli $db, int $credentialId): ar
     $stmt->bind_param('is', $credentialId, $kind);
     $stmt->execute();
 
-    return array_map(static fn (array $r): string => (string) $r['name'], repo_fetch_all($stmt->get_result()));
+    return array_values(array_filter(
+        array_map(static fn (array $r): string => (string) $r['name'], repo_fetch_all($stmt->get_result())),
+        static fn (string $name): bool => esxi_object_name_classify_raw($name)['supported']
+    ));
 }
 
 /**
@@ -157,7 +171,32 @@ function repo_esxi_sole_datacenter(mysqli $db, int $credentialId): ?string
         return null;
     }
 
-    $names = repo_esxi_datacenters_for_credential($db, $credentialId);
+    $resolution = repo_esxi_datacenter_resolution($db, $credentialId, virtusphere_request_now());
 
-    return count($names) === 1 ? $names[0] : null;
+    return $resolution['resolution'] === 'resolved' ? (string) $resolution['name'] : null;
+}
+
+/** @return array<string,mixed> */
+function repo_esxi_datacenter_resolution(mysqli $db, int $credentialId, int $now): array
+{
+    if ($credentialId <= 0) {
+        return esxi_datacenter_resolution([], null, null, null, $now);
+    }
+    $kind = VIRTUSPHERE_INVENTORY_KIND_DATACENTER;
+    $stmt = $db->prepare('SELECT name, meta_json FROM deploy_esxi_inventory WHERE credential_id = ? AND kind = ? ORDER BY name');
+    $stmt->bind_param('is', $credentialId, $kind);
+    $stmt->execute();
+    $rows = repo_fetch_all($stmt->get_result());
+    $state = repo_fetch_one($db, 'SELECT kind_freshness_json, kind_name_semantics_json, kind_observation_json FROM deploy_esxi_inventory_state WHERE credential_id = ? LIMIT 1', 'i', [$credentialId]);
+    $freshness = json_decode((string) ($state['kind_freshness_json'] ?? ''), true);
+    $semantics = json_decode((string) ($state['kind_name_semantics_json'] ?? ''), true);
+    $observations = json_decode((string) ($state['kind_observation_json'] ?? ''), true);
+
+    return esxi_datacenter_resolution(
+        $rows,
+        is_array($freshness) ? ($freshness[$kind] ?? null) : null,
+        is_array($semantics) ? ($semantics[$kind] ?? 1) : 1,
+        is_array($observations) ? ($observations[$kind] ?? null) : null,
+        $now
+    );
 }

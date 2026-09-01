@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/deploy_log_phases.php';
+require_once __DIR__ . '/mac_import_result.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 
 /**
@@ -70,6 +71,41 @@ function deploy_log_view_model(mysqli $db, array $job, array $query): array
         'logs' => $result['logs'],
         'match_capped' => $result['has_more'],
     ];
+}
+
+/**
+ * Resolves the currently existing VMs named by a V2 callback once per page.
+ * Historical IDs are never trusted as links because an old VM can be deleted
+ * and its numeric ID eventually reused in another mission.
+ *
+ * @return list<int>|null NULL means that this is not a V2 MAC result.
+ */
+function deploy_log_existing_vm_ids(mysqli $db, array $job): ?array
+{
+    $result = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
+    if (!is_array($result) || $result['version'] !== VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION) {
+        return null;
+    }
+    $ids = array_values(array_unique(array_filter(array_map(
+        static fn (array $row): int => (int) ($row['vm_id'] ?? 0),
+        array_filter($result['vm_results'], 'is_array')
+    ), static fn (int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+    $missionId = (int) ($job['mission_id'] ?? 0);
+    $stmt = $db->prepare(
+        'SELECT id FROM deploy_vms WHERE mission_id = ? AND id IN ('
+        . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id'
+    );
+    $params = array_merge([$missionId], $ids);
+    $stmt->bind_param(str_repeat('i', count($params)), ...$params);
+    $stmt->execute();
+
+    return array_map(
+        static fn (array $row): int => (int) $row['id'],
+        $stmt->get_result()->fetch_all(MYSQLI_ASSOC)
+    );
 }
 
 /** @param array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} $page */

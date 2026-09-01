@@ -5,6 +5,8 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/remote_execution_constants.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/helpers.php';
 
 final class MacImportCallbackTest extends TestCase
 {
@@ -84,7 +86,7 @@ final class MacImportCallbackTest extends TestCase
                 ]],
                 ['instance' => [
                     'hw_name' => $this->vmName('B'),
-                    'hw_eth0' => ['macaddress' => $this->mac('b0'), 'summary' => 'wds'],
+                    'hw_eth0' => ['macaddress' => $this->mac('b0'), 'summary' => 'WDS'],
                 ]],
                 ['failed' => true, 'item' => ['vm_name' => $this->vmName('C')], 'msg' => 'must not be persisted'],
             ],
@@ -110,12 +112,39 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(['deployed', 'pending', 1], $this->vmState($vmB));
 
         $result = $this->jobResult($jobId);
-        self::assertSame(1, $result['version']);
+        self::assertSame(2, $result['version']);
         self::assertSame('mac_import', $result['kind']);
         self::assertSame('partial', $result['outcome']);
         self::assertSame([$vmB], $result['successful_vm_ids']);
         self::assertSame([$vmA, $vmC], $result['failed_vm_ids']);
         self::assertStringNotContainsString('must not be persisted', json_encode($result, JSON_THROW_ON_ERROR));
+    }
+
+    public function testUnsupportedNonWdsEsxiNameFailsTheWholeVmWithoutAnyMacWrite(): void
+    {
+        $missionId = $this->insertMission('unsupported-network');
+        $vmId = $this->insertVm($missionId, 'UNSUPPORTED');
+        $this->insertInterface($vmId, 'WDS');
+        $this->insertInterface($vmId, 'Prod ');
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('UNSUPPORTED'),
+                'hw_eth0' => ['macaddress' => $this->mac('supported-wds'), 'summary' => 'WDS'],
+                'hw_eth1' => ['macaddress' => $this->mac('unsupported-app'), 'summary' => 'Prod '],
+            ]]],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('failed', $response['outcome']);
+        self::assertContains('interface_not_found', $response['vm_results'][0]['error_codes']);
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'), 'per-VM atomicity also discards the otherwise valid WDS MAC');
+        self::assertSame('', $this->interfaceMac($vmId, 'Prod '), 'unsupported ESXi names never authorize a MAC mapping');
+        self::assertSame(['ready', 'not_ready', 0], $this->vmState($vmId));
     }
 
     /**
@@ -155,11 +184,13 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame([$this->vmName('GHOST')], $response['missing_vms']);
 
         $vmResults = array_column($response['vm_results'], null, 'vm_name');
-        self::assertSame(['interface_not_found'], $vmResults[$this->vmName('NOIFACE')]['error_codes']);
-        self::assertSame(['invalid_mac'], $vmResults[$this->vmName('BADMAC')]['error_codes']);
-        self::assertSame(['vm_not_in_job_scope'], $vmResults[$this->vmName('OUTOFSCOPE')]['error_codes']);
-        self::assertSame(['vm_not_in_mission'], $vmResults[$this->vmName('GHOST')]['error_codes']);
-        self::assertSame(['missing_name'], $vmResults['']['error_codes'], 'a nameless row must not disappear');
+        self::assertContains('interface_not_found', $vmResults[$this->vmName('NOIFACE')]['error_codes']);
+        self::assertContains('invalid_mac', $vmResults[$this->vmName('BADMAC')]['error_codes']);
+        self::assertCount(2, $vmResults, 'V2 lists exactly the expected job scope');
+        $topCodes = array_column($response['errors'], 'code');
+        self::assertContains('vm_not_in_job_scope', $topCodes);
+        self::assertContains('vm_not_in_mission', $topCodes);
+        self::assertContains('missing_name', $topCodes, 'a nameless row must not disappear');
 
         self::assertSame('', $this->interfaceMac($noInterface, 'APP'));
         self::assertSame('', $this->interfaceMac($badMac, 'WDS'));
@@ -197,6 +228,51 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame('success', json_decode($secondBody, true, 512, JSON_THROW_ON_ERROR)['outcome']);
         self::assertSame(1, $this->statusEventCount($vmId, 'ansible mac import'));
         self::assertSame('success', $this->jobResult($jobId)['outcome']);
+
+        $conflicting = $payload;
+        $conflicting['results'][0]['instance']['hw_eth0']['macaddress'] = $this->mac('other');
+        [$conflictStatus, $conflictBody] = $this->post($conflicting);
+        [$repeatStatus] = $this->post($conflicting);
+        self::assertSame(409, $conflictStatus, $conflictBody);
+        self::assertSame('callback_result_conflict', json_decode($conflictBody, true, 512, JSON_THROW_ON_ERROR)['reason_code']);
+        self::assertSame(409, $repeatStatus);
+        self::assertSame(virtusphere_normalize_mac($this->mac('one')), $this->interfaceMac($vmId, 'WDS'));
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_job_logs WHERE job_id = ? AND line = ?');
+        $line = 'Rejected a MAC callback (callback_result_conflict).';
+        $stmt->bind_param('is', $jobId, $line);
+        $stmt->execute();
+        self::assertSame(1, (int) $stmt->get_result()->fetch_assoc()['c'], 'identical refusals are throttled per job and reason');
+    }
+
+    public function testSemanticReplayIgnoresRowOrderButScopeChangesConflict(): void
+    {
+        $missionId = $this->insertMission('semantic-replay');
+        $vmA = $this->insertVm($missionId, 'SEM-A');
+        $vmB = $this->insertVm($missionId, 'SEM-B');
+        $this->insertInterface($vmA, 'WDS');
+        $this->insertInterface($vmB, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmA, $vmB]);
+        $rowA = ['instance' => ['hw_name' => $this->vmName('SEM-A'), 'hw_eth0' => ['macaddress' => $this->mac('sem-a'), 'summary' => 'WDS']]];
+        $rowB = ['instance' => ['hw_name' => $this->vmName('SEM-B'), 'hw_eth0' => ['macaddress' => $this->mac('sem-b'), 'summary' => 'WDS']]];
+
+        [$firstStatus] = $this->post(['mission_id' => $missionId, 'job_id' => $jobId, 'results' => [$rowA, $rowB]]);
+        $rowA['msg'] = 'diagnostic text changed';
+        [$replayStatus, $replayBody] = $this->post(['mission_id' => $missionId, 'job_id' => $jobId, 'results' => [$rowB, $rowA]]);
+        self::assertSame(200, $firstStatus);
+        self::assertSame(200, $replayStatus, $replayBody);
+        self::assertSame(1, $this->statusEventCount($vmA, 'ansible mac import'));
+        self::assertSame(1, $this->statusEventCount($vmB, 'ansible mac import'));
+
+        $vmC = $this->insertVm($missionId, 'SEM-C');
+        $this->insertInterface($vmC, 'WDS');
+        repo_execute($this->db, 'UPDATE deploy_jobs SET payload_json = ? WHERE id = ?', 'si', [
+            json_encode(['mode' => 'export', 'vm_ids' => [$vmA, $vmB, $vmC]], JSON_THROW_ON_ERROR),
+            $jobId,
+        ]);
+        [$conflictStatus, $conflictBody] = $this->post(['mission_id' => $missionId, 'job_id' => $jobId, 'results' => [$rowA, $rowB]]);
+        self::assertSame(409, $conflictStatus, $conflictBody);
+        self::assertSame('callback_result_conflict', json_decode($conflictBody, true, 512, JSON_THROW_ON_ERROR)['reason_code']);
+        self::assertSame('', $this->interfaceMac($vmC, 'WDS'));
     }
 
     public function testExistingMacOwnerWinsAConflictingResult(): void
@@ -250,6 +326,57 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame('', $this->interfaceMac($vmId, 'WDS'));
         self::assertNull($this->rawJobResult($foreignJob));
         self::assertNull($this->rawJobResult($terminalJob));
+        self::assertSame(0, $this->statusEventCount($vmId, 'ansible mac import'));
+    }
+
+    public function testModeContractGenerationAndRemoteHandleFencesRejectWithoutDomainWrites(): void
+    {
+        $missionId = $this->insertMission('fences');
+        $vmId = $this->insertVm($missionId, 'FENCED');
+        $this->insertInterface($vmId, 'WDS');
+        $result = [['instance' => [
+            'hw_name' => $this->vmName('FENCED'),
+            'hw_eth0' => ['macaddress' => $this->mac('fenced'), 'summary' => 'WDS'],
+        ]]];
+
+        $cases = [];
+        $modeJob = $this->insertJob($missionId, [$vmId]);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET payload_json = ? WHERE id = ?', 'si', [
+            json_encode(['mode' => 'start', 'vm_ids' => [$vmId]], JSON_THROW_ON_ERROR),
+            $modeJob,
+        ]);
+        $cases[$modeJob] = 'callback_mode_rejected';
+
+        $contractJob = $this->insertJob($missionId, [$vmId]);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET execution_contract = NULL WHERE id = ?', 'i', [$contractJob]);
+        $cases[$contractJob] = 'callback_execution_contract_missing';
+
+        $generationJob = $this->insertJob($missionId, [$vmId]);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET execution_generation_id = UNHEX(?) WHERE id = ?', 'si', [
+            str_repeat('a', 32),
+            $generationJob,
+        ]);
+        $cases[$generationJob] = 'callback_generation_mismatch';
+
+        $remoteJob = $this->insertJob($missionId, [$vmId]);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET execution_contract = ? WHERE id = ?', 'si', [
+            VIRTUSPHERE_EXECUTION_CONTRACT_REMOTE,
+            $remoteJob,
+        ]);
+        $cases[$remoteJob] = 'callback_remote_handle_mismatch';
+
+        foreach ($cases as $jobId => $reason) {
+            [$status, $body] = $this->post([
+                'mission_id' => $missionId,
+                'job_id' => $jobId,
+                'results' => $result,
+            ]);
+            self::assertSame(409, $status, $reason . ': ' . $body);
+            self::assertSame($reason, json_decode($body, true, 512, JSON_THROW_ON_ERROR)['reason_code']);
+            self::assertNull($this->rawJobResult($jobId));
+        }
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'));
+        self::assertSame(['ready', 'not_ready', 0], $this->vmState($vmId));
         self::assertSame(0, $this->statusEventCount($vmId, 'ansible mac import'));
     }
 
@@ -338,12 +465,30 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(['ready', 'not_ready', 0], $this->vmState($submittedVm));
     }
 
-    private function insertMission(string $suffix): int
+    public function testSyntheticMissingVmResultPreservesTheRawWdsPortgroup(): void
+    {
+        $missionId = $this->insertMission('raw-wds', 'WDS ');
+        $vmId = $this->insertVm($missionId, 'MISSING');
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('WDS ', $response['vm_results'][0]['wds']['configured_portgroup']);
+        self::assertContains('missing_nic_data', $response['vm_results'][0]['error_codes']);
+    }
+
+    private function insertMission(string $suffix, string $wds = 'WDS'): int
     {
         $name = $this->prefix . '_' . $suffix;
         $status = 'active';
-        $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)');
-        $stmt->bind_param('ss', $name, $status);
+        $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status, wds_vlan) VALUES (?, ?, ?)');
+        $stmt->bind_param('sss', $name, $status, $wds);
         $stmt->execute();
         $id = (int) $this->db->insert_id;
         $this->missionIds[] = $id;
@@ -379,8 +524,12 @@ final class MacImportCallbackTest extends TestCase
         // which is a flake and reads as a real regression. Same shape as
         // DeployWorkerOutcomeTest::insertJob.
         $payload = json_encode(['mode' => 'export', 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
-        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, heartbeat_at) VALUES (?, ?, ?, NOW())');
-        $stmt->bind_param('iss', $missionId, $status, $payload);
+        $contract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+        $stmt = $this->db->prepare(
+            'INSERT INTO deploy_jobs (mission_id, status, payload_json, heartbeat_at, execution_contract, execution_generation_id) '
+            . 'SELECT ?, ?, ?, NOW(), ?, current_generation_id FROM deploy_runtime_identity WHERE id = 1'
+        );
+        $stmt->bind_param('isss', $missionId, $status, $payload, $contract);
         $stmt->execute();
 
         return (int) $this->db->insert_id;

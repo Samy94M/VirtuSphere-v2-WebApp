@@ -413,6 +413,32 @@ NetBIOS-Hostname ≤15 Zeichen (Bestandsschutz greift), globale VM-Namen-
 Eindeutigkeit, MAC-Kanonisierung und Dubletten-Guard. Prüfen, ob Bestandsdaten
 Warnungen auslösen, und diese bereinigen.
 
+Für Etappe 14A kommt vor der Freigabe der Netzwerk-/MAC-Bestandsnachweis hinzu:
+
+1. Backup und Restore-Check ausführen, alle Writer und externen MECM-Aufgaben
+   drainieren beziehungsweise pausieren und Migration 0046 nur im gemeinsamen
+   Wartungsfenster anwenden. Vorher/nachher Zeilenzahlen, DDL-Eigenschaften,
+   freien Datenbankplatz und `migrate.php --check` dokumentieren.
+2. Jeden ESXi-Zugang neu inventarisieren. Je Datacenter, Datastore und
+   Portgruppe getrennt Semantik 2, positive Evidenz oder answered-empty sowie
+   den letzten Versuch im Systemstatus prüfen. Ein Gesamterfolg ersetzt keinen
+   fehlgeschlagenen Kindnachweis.
+3. Das read-only Bestandsaudit über denselben Netzwerkowner ausführen. Es nennt
+   Mission, VM, exakten VLAN-Namen und Interface-IDs, aber keine MAC, IP oder
+   Zugangsdaten. Leere beziehungsweise exakt doppelte Namen und case-ähnliche
+   WDS-Werte fachlich klären; nichts automatisch umschreiben.
+4. Im isolierten QA-Stack einen gültigen Zwei-NIC-Canary und einen
+   Duplicate-Canary ausführen. Beim negativen Fall müssen Queue und Worker null
+   Uploads, null SSH und null Jobzeilen einer gestaffelten Gruppe belegen.
+5. Am autorisierten Standort nur die fachlich bestätigte betroffene VM mit dem
+   berechneten Export-Retry-Scope canaryen. Kein Create oder Powercycle der
+   ganzen Mission. Identischer aktiver Zweitcallback muss 200/no-op,
+   abweichender oder terminaler Zweitcallback 409 ohne Domainwrite liefern.
+
+Bei einem fehlenden Standortzugang wird dieser reale Canary nicht simuliert und
+nicht als grün eingetragen. Die lokale Revision bleibt dann vollständig
+fail-closed; Create/Full werden vor Etappe 14B nicht remote aktiviert.
+
 ## Code auf den Host bringen und Releases nachziehen
 
 Der Produktionshost erreicht GitHub nicht (ausgehender Proxy); interne

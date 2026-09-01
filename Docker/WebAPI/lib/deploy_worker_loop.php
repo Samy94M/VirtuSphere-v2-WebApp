@@ -114,6 +114,10 @@ function deploy_worker_run_once(mysqli $db, string $workerId, array $options): b
         return false;
     }
 
+    // FPM resets request state automatically; this process is a permanent
+    // loop, so each claimed job establishes its own one-sample clock context.
+    virtusphere_request_now_reset();
+
     // ADR-0032: every log line this job produces carries the job's stored
     // correlation id; a legacy job without one falls back to the worker's
     // process id. Dropped again in finally so the ids of two consecutive

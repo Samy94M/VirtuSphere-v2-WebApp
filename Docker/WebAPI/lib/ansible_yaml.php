@@ -1,7 +1,5 @@
 <?php
-
 declare(strict_types=1);
-
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/deploy_constants.php';
@@ -12,8 +10,8 @@ require_once __DIR__ . '/ansible_paths.php';
 /**
  * Deploy artifact content: the accounts.yml and serverlist.yml the playbooks
  * read, the per-VM value shaping behind them (disks, interfaces, autostart,
- * effective datacenter/datastore), the storage estimate that shares the same
- * shaping, and the YAML/Python escapers. Split out of ansible.php by domain
+ * effective datacenter/datastore), storage estimate and YAML/Python escapers.
+ * Split out of ansible.php by domain
  * (ADR-0006 file-size discipline); no behaviour change.
  */
 
@@ -79,13 +77,13 @@ function ansible_write_esxi_trust_artifact(string $workDir, array $esxiCredentia
  */
 function ansible_vm_needs_mac(array $mission, array $vm): bool
 {
-    $wdsVlan = trim((string) ($mission['wds_vlan'] ?? ''));
-    if ($wdsVlan === '') {
+    $wdsVlan = (string) ($mission['wds_vlan'] ?? '');
+    if (trim($wdsVlan) === '') {
         return true;
     }
 
     foreach (($vm['interfaces'] ?? []) as $interface) {
-        if (trim((string) ($interface['vlan'] ?? '')) === $wdsVlan) {
+        if ((string) ($interface['vlan'] ?? '') === $wdsVlan) {
             return trim((string) ($interface['mac'] ?? '')) === '';
         }
     }
@@ -114,7 +112,10 @@ function ansible_effective_datacenter(array $mission, array $vm, string $hostDat
 
     $missionValue = trim((string) ($mission['hypervisor_datacenter'] ?? ''));
 
-    return $missionValue !== '' ? $missionValue : trim($hostDatacenter);
+    // The inherited value is an ESXi-owned object name. It has already passed
+    // the raw-name classifier in the inventory resolver and must not be
+    // normalized a second time on its way into the playbook.
+    return $missionValue !== '' ? $missionValue : $hostDatacenter;
 }
 
 /**
@@ -336,10 +337,9 @@ function ansible_vm_disk_bytes(array $vm): int
  * actually lands on (ansible_effective_datastore: the per-VM override, else the
  * mission value). Warn-only input for the deploy page; it never gates a job.
  *
- * The group key is esxi_inventory_name_key(), so two VMs whose datastore differs
- * only in case or padding still add up on one row and can be matched against the
- * cached inventory. The label keeps the first spelling seen, like every other
- * dedupe in the inventory layer. A VM whose effective datastore is empty (a
+ * The group key is the exact datastore value. Case and Unicode form are ESXi
+ * identity and must never be added into another datastore's capacity. A VM
+ * whose effective datastore is empty (a
  * template, or a mission that never set one) lands under the '' key and is the
  * caller's job to label.
  *
@@ -351,7 +351,7 @@ function ansible_storage_by_datastore(array $mission, array $vms): array
     $rows = [];
     foreach ($vms as $vm) {
         $name = ansible_effective_datastore($mission, $vm);
-        $key = esxi_inventory_name_key($name);
+        $key = $name;
         if (!isset($rows[$key])) {
             $rows[$key] = ['name' => $name, 'bytes' => 0, 'vm_count' => 0, 'per_vm' => []];
         }
@@ -368,8 +368,8 @@ function ansible_vm_interfaces(array $mission, array $vm): array
 {
     $interfaces = [];
     foreach (($vm['interfaces'] ?? []) as $interface) {
-        $name = trim((string) ($interface['vlan'] ?? ''));
-        if ($name === '') {
+        $name = (string) ($interface['vlan'] ?? '');
+        if (trim($name) === '') {
             continue;
         }
 
@@ -381,8 +381,8 @@ function ansible_vm_interfaces(array $mission, array $vm): array
     }
 
     if ($interfaces === []) {
-        $fallbackVlan = trim((string) ($mission['wds_vlan'] ?? ''));
-        if ($fallbackVlan === '') {
+        $fallbackVlan = (string) ($mission['wds_vlan'] ?? '');
+        if (trim($fallbackVlan) === '') {
             throw new RuntimeException('VM has no network interfaces and mission WDS VLAN is empty.');
         }
 
@@ -419,8 +419,8 @@ function ansible_patch_upload_script(string $path, string $apiBaseUrl, int $miss
     // the job's), so callers do not need to thread it through.
     $correlationId ??= virtusphere_correlation_id();
 
-    // The portal's own certificate fingerprint, but only when the callback URL is
-    // actually https: the MAC callback is the one channel that decides whether a
+    // The portal's certificate fingerprint, only when the callback URL is https:
+    // the MAC callback is the channel that decides whether a
     // deploy succeeded, and against a self-signed certificate an unpinned upload
     // would fail with a bare network error. Empty for http and for a certificate
     // from a PKI the Ansible host already trusts (then the default chain check

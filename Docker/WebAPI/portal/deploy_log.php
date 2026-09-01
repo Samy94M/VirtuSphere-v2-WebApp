@@ -87,6 +87,10 @@ if ($format === 'json') {
     }
     $page = deploy_job_log_format_page($page);
     $emptyState = deploy_job_log_empty_state($job, $page['logs']);
+    $retryEvaluation = deploy_job_is_retryable((string) $job['status'], (int) ($job['mission_id'] ?? 0))
+        ? deploy_retry_blockers($connection, (int) $job['id'])
+        : null;
+    $existingVmIds = deploy_log_existing_vm_ids($connection, $job);
     echo json_encode([
         'ok' => true,
         'job' => [
@@ -110,7 +114,7 @@ if ($format === 'json') {
         'caught_up' => $page['caught_up'],
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
-        'terminal_html' => deploy_terminal_blocks_html($job),
+        'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds),
         'actions' => [
             'can_cancel' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true),
         ],
@@ -176,6 +180,10 @@ $logFilter = $view['filter'];
 $oldestSeq = $page['oldest_seq'] ?? 0;
 $lastSeq = $page['newest_seq'] ?? 0;
 $isTerminal = in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
+$retryEvaluation = deploy_job_is_retryable((string) $job['status'], (int) ($job['mission_id'] ?? 0))
+    ? deploy_retry_blockers($connection, (int) $job['id'])
+    : null;
+$existingVmIds = deploy_log_existing_vm_ids($connection, $job);
 $originUrl = deploy_job_origin_url($job);
 // An empty log on an old finished job is almost certainly the retention prune,
 // not a job that printed nothing. Saying so beats an unexplained empty table.
@@ -207,6 +215,19 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
                     <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('deploy.confirm_cancel', ['name' => (int) ($job['mission_id'] ?? 0) > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')])); ?>" data-confirm-action="<?php echo h(__t('deploy.cancel_job')); ?>"><?php echo h(__t('common.cancel')); ?></button>
                 </form>
             <?php } ?>
+            <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed'])) { ?>
+                <form class="inline-form" method="post" action="deploy.php?mission_id=<?php echo h((string) $job['mission_id']); ?>">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="retry">
+                    <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
+                    <input type="hidden" name="origin" value="<?php echo h(VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG); ?>">
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(!empty($retryEvaluation['external_confirmation']) ? __t('deploy.confirm_retry_external', ['name' => (string) ($job['mission_name'] ?? '')]) : __t('deploy.confirm_retry', ['name' => (string) ($job['mission_name'] ?? '')])); ?>"><?php echo h(__t('deploy.retry')); ?></button>
+                </form>
+            <?php } elseif (is_array($retryEvaluation) && (int) ($retryEvaluation['repair_vm_id'] ?? 0) > 0 && can('vms.write', $user)) { ?>
+                <a class="button button-secondary" href="<?php echo h(vm_edit_url((int) $job['mission_id'], (int) $retryEvaluation['repair_vm_id'], 'interfaces')); ?>"><?php echo h(__t('deploy.retry_fix_configuration')); ?></a>
+            <?php } elseif (is_array($retryEvaluation)) { ?>
+                <span class="muted"><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
+            <?php } ?>
         </div>
     </section>
 
@@ -217,7 +238,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
     </section>
 
-    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job); ?></div>
+    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds); ?></div>
 
     <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
     <?php deploy_log_render_phases($timeline); ?>

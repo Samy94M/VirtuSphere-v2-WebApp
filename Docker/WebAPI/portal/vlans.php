@@ -78,7 +78,7 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status');
             <tbody>
             <?php foreach ($rows as $row) {
                 $retired = $row['retired_at'] !== null;
-                $nameKey = esxi_inventory_name_key((string) $row['vlan_name']);
+                $nameKey = (string) $row['vlan_name'];
                 $hosts = $presenceReport['by_name'][$nameKey] ?? [];
                 ?>
                 <tr>

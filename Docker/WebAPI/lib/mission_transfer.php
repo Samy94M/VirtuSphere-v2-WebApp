@@ -19,13 +19,17 @@ declare(strict_types=1);
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/vms.php';
 require_once __DIR__ . '/repo/catalog.php';
-// esxi_inventory_name_key(): the project-wide SSoT for name equality, used by
-// the import analysis to fold two spellings of one VLAN into one finding.
 require_once __DIR__ . '/repo/esxi_inventory_cache.php';
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/defaults.php';
 
 const VIRTUSPHERE_MISSION_EXPORT_VERSION = 1;
+
+/** Mission/VM names keep their historical case-insensitive DB uniqueness. */
+function mission_transfer_vm_name_key(string $name): string
+{
+    return mb_strtolower(trim($name), 'UTF-8');
+}
 
 // Upload/parse guards for import (A4). ~500 VMs is roughly 1 MB; 2 MB leaves
 // headroom and can be raised centrally if a customer needs bigger missions.

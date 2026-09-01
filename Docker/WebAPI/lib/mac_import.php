@@ -1,27 +1,12 @@
 <?php
-
 declare(strict_types=1);
-
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/mac.php';
-
-const VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION = 1;
-const VIRTUSPHERE_MAC_IMPORT_RESULT_KIND = 'mac_import';
-
-const VIRTUSPHERE_MAC_IMPORT_ERROR_INTERFACE_NOT_FOUND = 'interface_not_found';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_MAC = 'duplicate_mac';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_INVALID_MAC = 'invalid_mac';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN = 'ambiguous_vlan';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_VM_NOT_IN_MISSION = 'vm_not_in_mission';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_VM_NOT_IN_JOB_SCOPE = 'vm_not_in_job_scope';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NAME = 'missing_name';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA = 'missing_nic_data';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_ESXI_QUERY_FAILED = 'esxi_query_failed';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_RESULT = 'duplicate_result';
-const VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH = 'identity_mismatch';
+require_once __DIR__ . '/mac_import_constants.php';
 require_once __DIR__ . '/mac_import_result.php';
-
+require_once __DIR__ . '/mac_import_callback.php';
+require_once __DIR__ . '/mac_import_network.php';
 /** @return array{0:int,1:?int,2:array<int,mixed>,3:bool} */
 function mac_import_normalize_payload(array $payload): array
 {
@@ -42,7 +27,6 @@ function mac_import_normalize_payload(array $payload): array
     if (array_key_exists('results', $results) && is_array($results['results'])) {
         $results = array_values($results['results']);
     }
-
     return [$missionId, $jobId, $results, $legacy];
 }
 
@@ -109,7 +93,6 @@ function mac_import_job_scope_ids(array $job): ?array
 
     $result = array_map('intval', array_keys($ids));
     sort($result, SORT_NUMERIC);
-
     return $result;
 }
 
@@ -121,10 +104,10 @@ function mac_import_job_scope_ids(array $job): ?array
  * @param list<int>|null $jobScopeIds NULL is the whole mission for managed jobs.
  * @return array<string,mixed>
  */
-function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool $managed, ?array $jobScopeIds): array
+function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool $managed, ?array $jobScopeIds, ?string $missionWdsVlan = null): array
 {
     [$vmsById, $vmsByName] = mac_import_mission_vms($db, $missionId);
-    $interfaceLookup = $db->prepare('SELECT id, vm_id, vlan, mac FROM deploy_interfaces WHERE vm_id = ? AND vlan = ? ORDER BY id FOR UPDATE');
+    $interfacesByVm = mac_import_mission_interfaces($db, array_keys($vmsById));
 
     $expected = [];
     if ($managed) {
@@ -158,8 +141,9 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
 
         $instance = is_array($entry['instance'] ?? null) ? $entry['instance'] : null;
         $item = is_array($entry['item'] ?? null) ? $entry['item'] : [];
-        $instanceName = is_array($instance) ? trim((string) ($instance['hw_name'] ?? '')) : '';
-        $itemName = trim((string) ($item['vm_name'] ?? $item['name'] ?? ''));
+        // Result names are ESXi-owned identity. Do not trim or case-fold them.
+        $instanceName = is_array($instance) ? (string) ($instance['hw_name'] ?? '') : '';
+        $itemName = (string) ($item['vm_name'] ?? $item['name'] ?? '');
         $vmName = $instanceName !== '' ? $instanceName : $itemName;
         $row['vm_name'] = mac_import_bounded_identifier($vmName, 191);
 
@@ -172,11 +156,9 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
             continue;
         }
 
-        $vm = $vmsByName[$vmName] ?? mac_import_mission_vm_by_name($db, $missionId, $vmName);
-        if (is_array($vm)) {
-            // Preserve the database collation's legacy case-insensitive match.
-            $vm = $vmsById[(int) $vm['id']] ?? $vm;
-        }
+        // PHP exact lookup on purpose. The table's historical collation must
+        // never turn a callback for `prod` into a write for `Prod`.
+        $vm = $vmsByName[$vmName] ?? null;
         if (!is_array($vm)) {
             mac_import_add_row_error($row, $unscopedErrors, VIRTUSPHERE_MAC_IMPORT_ERROR_VM_NOT_IN_MISSION);
             $rows[] = $row;
@@ -222,45 +204,45 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
         }
         $vmPlans[$vmId]['identity'] = $identity;
 
-        $nicCount = 0;
-        foreach ($instance as $key => $value) {
-            if (!str_starts_with((string) $key, 'hw_eth')) {
+        $nics = mac_import_instance_nics($instance);
+        $portalGroups = mac_import_interfaces_by_vlan($interfacesByVm[$vmId] ?? []);
+        $esxiGroups = mac_import_nics_by_vlan($nics);
+        if ($missionWdsVlan !== null) {
+            mac_import_validate_wds($vmPlans[$vmId], $interfacesByVm[$vmId] ?? [], $nics, $missionWdsVlan);
+        }
+        foreach ($nics as $nic) {
+            $mac = (string) $nic['mac'];
+            $vlan = (string) $nic['vlan'];
+            if (!esxi_object_name_classify_raw($vlan)['supported']) {
+                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_INTERFACE_NOT_FOUND, $vlan);
                 continue;
             }
-            $nicCount++;
-            if (!is_array($value)) {
-                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA);
-                continue;
-            }
-
-            $mac = trim((string) ($value['macaddress'] ?? ''));
-            $vlan = trim((string) ($value['summary'] ?? ''));
             if ($mac === '' || $vlan === '') {
                 mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA, $vlan);
                 continue;
             }
-            $normalizedMac = virtusphere_normalize_mac($mac);
+            $normalizedMac = $nic['normalized_mac'];
             if ($normalizedMac === null) {
                 mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_INVALID_MAC, $vlan, $mac);
                 continue;
             }
 
-            $interfaceLookup->bind_param('is', $vmId, $vlan);
-            $interfaceLookup->execute();
-            $matches = $interfaceLookup->get_result()->fetch_all(MYSQLI_ASSOC);
+            $nameKey = mac_import_exact_name_key($vlan);
+            $matches = $portalGroups[$nameKey] ?? [];
             if ($matches === []) {
                 mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_INTERFACE_NOT_FOUND, $vlan);
                 continue;
             }
-            if (count($matches) > 1) {
-                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN, $vlan);
+            $source = mac_import_ambiguity_source(count($matches), count($esxiGroups[$nameKey] ?? []));
+            if ($source !== null) {
+                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN, $vlan, '', null, $source);
                 continue;
             }
 
             $interface = $matches[0];
             $interfaceId = (int) $interface['id'];
             if (isset($vmPlans[$vmId]['updates'][$interfaceId])) {
-                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN, $vlan);
+                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN, $vlan, '', null, 'esxi');
                 continue;
             }
             $vmPlans[$vmId]['updates'][$interfaceId] = [
@@ -269,13 +251,22 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
                 'vlan' => $vlan,
             ];
         }
-        if ($nicCount === 0) {
+        if ($nics === []) {
             mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA);
         }
     }
 
     foreach ($expected as $vmId => $vm) {
         mac_import_ensure_vm_plan($vmPlans, $vm);
+        if ($missionWdsVlan !== null && !is_array($vmPlans[$vmId]['wds'])) {
+            // A callback can fail before an ESXi NIC row exists. V2 still
+            // carries one explicit WDS verdict for every expected VM.
+            $vmPlans[$vmId]['wds'] = [
+                'configured_portgroup' => $missionWdsVlan,
+                'portal_interface_id' => null,
+                'verified' => false,
+            ];
+        }
         if ($vmPlans[$vmId]['input_indexes'] !== []) {
             continue;
         }
@@ -290,7 +281,6 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
     }
 
     mac_import_validate_duplicate_macs($db, $vmPlans);
-
     return mac_import_finalize_plan($expected, $vmPlans, $rows, $unscopedErrors);
 }
 
@@ -311,72 +301,38 @@ function mac_import_mission_vms(mysqli $db, int $missionId): array
 
     return [$byId, $byName];
 }
-/** @return array<string,mixed>|null */
-function mac_import_mission_vm_by_name(mysqli $db, int $missionId, string $vmName): ?array
+
+/** @param list<int> $vmIds @return array<int,list<array<string,mixed>>> */
+function mac_import_mission_interfaces(mysqli $db, array $vmIds): array
 {
-    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated, vm_instance_uuid FROM deploy_vms WHERE mission_id = ? AND vm_name = ? LIMIT 1');
-    $stmt->bind_param('is', $missionId, $vmName);
+    if ($vmIds === []) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT id, vm_id, vlan, mac FROM deploy_interfaces WHERE vm_id IN ('
+        . implode(',', array_fill(0, count($vmIds), '?')) . ') ORDER BY vm_id, id FOR UPDATE'
+    );
+    $stmt->bind_param(str_repeat('i', count($vmIds)), ...$vmIds);
     $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-
-    return is_array($row) ? $row : null;
+    $byVm = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $byVm[(int) $row['vm_id']][] = $row;
+    }
+    return $byVm;
 }
 
-
-/** @param array<int,array> $vmPlans */
-function mac_import_validate_duplicate_macs(mysqli $db, array &$vmPlans): void
-{
-    $planned = [];
-    foreach ($vmPlans as $vmId => $vmPlan) {
-        if ($vmPlan['errors'] !== []) {
-            continue;
-        }
-        foreach ($vmPlan['updates'] as $update) {
-            $planned[(string) $update['mac']][] = ['vm_id' => (int) $vmId, 'interface_id' => (int) $update['id']];
-        }
-    }
-    ksort($planned, SORT_STRING);
-
-    $lookup = $db->prepare("SELECT id, vm_id FROM deploy_interfaces WHERE mac = ? AND mac <> '' ORDER BY id FOR UPDATE");
-    foreach ($planned as $mac => $owners) {
-        $lookup->bind_param('s', $mac);
-        $lookup->execute();
-        $existing = $lookup->get_result()->fetch_all(MYSQLI_ASSOC);
-        if (count($existing) > 1) {
-            foreach ($owners as $owner) {
-                mac_import_add_vm_error($vmPlans[$owner['vm_id']], VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_MAC, '', $mac, (int) $existing[0]['vm_id']);
-            }
-            continue;
-        }
-        if ($existing !== []) {
-            $existingRow = $existing[0];
-            foreach ($owners as $owner) {
-                if ((int) $existingRow['id'] !== $owner['interface_id']) {
-                    mac_import_add_vm_error($vmPlans[$owner['vm_id']], VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_MAC, '', $mac, (int) $existingRow['vm_id']);
-                }
-            }
-            continue;
-        }
-        if (count($owners) > 1) {
-            foreach ($owners as $owner) {
-                $other = current(array_filter($owners, static fn (array $candidate): bool => $candidate['interface_id'] !== $owner['interface_id']));
-                mac_import_add_vm_error($vmPlans[$owner['vm_id']], VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_MAC, '', $mac, is_array($other) ? (int) $other['vm_id'] : null);
-            }
-        }
-    }
-}
 
 /** @param array<int,array<string,mixed>> $vmPlans */
 function mac_import_ensure_vm_plan(array &$vmPlans, array $vm): void
 {
     $vmId = (int) $vm['id'];
-    $vmPlans[$vmId] ??= ['vm' => $vm, 'input_indexes' => [], 'updates' => [], 'errors' => [], 'identity' => null];
+    $vmPlans[$vmId] ??= ['vm' => $vm, 'input_indexes' => [], 'updates' => [], 'errors' => [], 'identity' => null, 'wds' => null];
 }
 
-function mac_import_add_vm_error(array &$vmPlan, string $code, string $vlan = '', string $mac = '', ?int $otherVmId = null): void
+function mac_import_add_vm_error(array &$vmPlan, string $code, string $vlan = '', string $mac = '', ?int $otherVmId = null, ?string $ambiguitySource = null): void
 {
     $vm = $vmPlan['vm'];
-    $error = mac_import_error($code, (int) $vm['id'], (string) $vm['vm_name'], $vlan, $mac, $otherVmId);
+    $error = mac_import_error($code, (int) $vm['id'], (string) $vm['vm_name'], $vlan, $mac, $otherVmId, $ambiguitySource);
     $key = json_encode($error, JSON_THROW_ON_ERROR);
     $vmPlan['errors'][$key] = $error;
 }
@@ -386,9 +342,9 @@ function mac_import_add_row_error(array &$row, array &$errors, string $code, ?in
     $row['error_codes'][] = $code;
     $errors[] = mac_import_error($code, $vmId, (string) $row['vm_name']);
 }
-
+/** Callback-side name of the shared UTF-8 safe byte limiter (network_mac_constants.php). */
 function mac_import_bounded_identifier(string $value, int $maxBytes): string
 {
-    return substr($value, 0, $maxBytes);
+    return virtusphere_bounded_utf8_bytes($value, $maxBytes);
 }
 

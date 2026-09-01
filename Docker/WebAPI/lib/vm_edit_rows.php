@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /** VM-editor dynamic interface/disk rows, group hints and field-error wrapper. */
 
-function render_interface_row(array $interface, int|string $index, array $vlans, bool $canWrite, bool $template = false): void
+function render_interface_row(array $interface, int|string $index, array $vlans, bool $canWrite, bool $template = false, array $fieldErrors = []): void
 {
     $prefix = $template ? 'interfaces[__INDEX__]' : 'interfaces[' . h((string) $index) . ']';
     $scope = $template ? '__INDEX__' : $index;
@@ -13,8 +13,10 @@ function render_interface_row(array $interface, int|string $index, array $vlans,
     $subnetPicker = vm_subnet_picker_value($subnet);
     $mode = (string) ($interface['mode'] ?? VIRTUSPHERE_VM_DEFAULTS['interface_mode']);
     $type = (string) ($interface['type'] ?? VIRTUSPHERE_VM_DEFAULTS['interface_type']);
+    $vlanError = $template ? '' : (string) ($fieldErrors['interfaces.' . $index . '.vlan'] ?? '');
     ?>
     <div class="form-row interface-row" data-repeat-row>
+        <p class="field-label" data-vm-network-row-label><?php echo h(__t('vm_edit.interface_legend', ['number' => is_int($index) ? $index + 1 : 1])); ?></p>
         <input type="hidden" name="<?php echo $prefix; ?>[id]" value="<?php echo h((string) ($interface['id'] ?? 0)); ?>">
         <label><?php echo h(__t('vm_edit.label_ip')); ?><input name="<?php echo $prefix; ?>[ip]"<?php echo form_control_attrs('vm_edit', 'interface_ip', $scope, false, ''); ?> value="<?php echo h($interface['ip'] ?? ''); ?>" data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_subnet')); ?><span class="compound-field"><input name="<?php echo $prefix; ?>[subnet]"<?php echo form_control_attrs('vm_edit', 'interface_subnet', $scope, false, ''); ?> value="<?php echo h($subnetInput); ?>" data-subnet-input data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>><select<?php echo form_control_attrs('vm_edit', 'interface_subnet_picker', $scope, false, ''); ?> data-subnet-picker data-dhcp-disable aria-label="<?php echo h(__t('vm_edit.subnet_mask')); ?>" <?php echo $canWrite ? '' : 'disabled'; ?>><option value=""><?php echo h(__t('vm_edit.mask')); ?></option><?php for ($mask = 0; $mask <= 30; $mask++) { $cidr = '/' . $mask; $value = vm_cidr_to_netmask($mask); ?><option value="<?php echo h($value); ?>" <?php echo $subnetPicker === $cidr ? 'selected' : ''; ?>><?php echo h($cidr); ?></option><?php } ?></select></span></label>
@@ -22,9 +24,9 @@ function render_interface_row(array $interface, int|string $index, array $vlans,
         <label><?php echo h(__t('vm_edit.label_dns1')); ?><input name="<?php echo $prefix; ?>[dns1]"<?php echo form_control_attrs('vm_edit', 'interface_dns1', $scope, false, ''); ?> value="<?php echo h($interface['dns1'] ?? ''); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_dns2')); ?><input name="<?php echo $prefix; ?>[dns2]"<?php echo form_control_attrs('vm_edit', 'interface_dns2', $scope, false, ''); ?> value="<?php echo h($interface['dns2'] ?? ''); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_vlan')); ?><?php vlan_select_field($prefix . '[vlan]', (string) ($interface['vlan'] ?? ''), $vlans, [
-            'none' => __t('vm_edit.vlan_none'),
+            'none' => __t((string) ($interface['vlan'] ?? '') === '' ? 'vm_edit.vlan_missing_legacy' : 'vm_edit.vlan_choose'),
             'unknown_suffix' => __t('vm_edit.vlan_not_in_inventory'),
-        ], !$canWrite, form_control_attrs('vm_edit', 'interface_vlan', $scope, false, '')); ?></label>
+        ], !$canWrite, form_control_attrs('vm_edit', 'interface_vlan', $scope, false, $vlanError), false); ?><?php echo form_error_html('vm_edit', 'interface_vlan', $scope, $vlanError); ?></label>
         <label><?php echo h(__t('vm_edit.label_mode')); ?><select name="<?php echo $prefix; ?>[mode]"<?php echo form_control_attrs('vm_edit', 'interface_mode', $scope, false, ''); ?> data-mode-select="<?php echo h(VIRTUSPHERE_INTERFACE_MODE_DHCP); ?>" <?php echo $canWrite ? '' : 'disabled'; ?>><?php foreach (VIRTUSPHERE_INTERFACE_MODES as $option) { ?><option value="<?php echo h($option); ?>" <?php echo $mode === $option ? 'selected' : ''; ?>><?php echo h($option); ?></option><?php } ?></select></label>
         <label><?php echo h(__t('vm_edit.label_type')); ?><select name="<?php echo $prefix; ?>[type]"<?php echo form_control_attrs('vm_edit', 'interface_type', $scope, false, ''); ?> <?php echo $canWrite ? '' : 'disabled'; ?>><?php foreach (VIRTUSPHERE_INTERFACE_TYPES as $option) { ?><option value="<?php echo h($option); ?>" <?php echo $type === $option ? 'selected' : ''; ?>><?php echo h($option); ?></option><?php } ?></select></label>
         <label><?php echo h(__t('vm_edit.label_mac')); ?><input<?php echo form_control_attrs('vm_edit', 'interface_mac', $scope, false, ''); ?> value="<?php echo h($interface['mac'] ?? ''); ?>" readonly></label>
@@ -81,7 +83,10 @@ function render_disk_type_hint(): void
 function render_interface_gateway_hint(): void
 {
     ?>
-    <p class="hint" id="<?php echo h(form_hint_id('vm_edit', 'interfaces')); ?>"><?php echo h(__t('vm_edit.gateway_hint')); ?></p>
+    <div id="<?php echo h(form_hint_id('vm_edit', 'interfaces')); ?>">
+        <p class="hint"><?php echo h(__t('vm_edit.network_contract_hint')); ?></p>
+        <p class="hint"><?php echo h(__t('vm_edit.gateway_hint')); ?></p>
+    </div>
     <?php
 }
 

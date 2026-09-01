@@ -20,7 +20,7 @@ final class EsxiInventoryFreeUnionTest extends TestCase
         foreach ($perCredential as $freeByName) {
             $keyed = [];
             foreach ($freeByName as $name => $free) {
-                $keyed[esxi_inventory_name_key((string) $name)] = $free;
+                $keyed[(string) $name] = $free;
             }
             $groups[] = ['free_by_key' => $keyed];
         }
@@ -50,10 +50,9 @@ final class EsxiInventoryFreeUnionTest extends TestCase
         self::assertSame(['ha-datacenter' => null], $this->union([['ha-datacenter' => null], ['ha-datacenter' => null]]));
     }
 
-    public function testCaseVariantsOfTheSameNameMerge(): void
+    public function testCaseVariantsRemainSeparate(): void
     {
-        // Same key as every other inventory comparison (esxi_inventory_name_key).
-        self::assertSame(['ds1' => 100], $this->union([['DS1' => 300], ['ds1' => 100]]));
+        self::assertSame(['DS1' => 300, 'ds1' => 100], $this->union([['DS1' => 300], ['ds1' => 100]]));
     }
 
     public function testDisjointNamesAreAllKept(): void

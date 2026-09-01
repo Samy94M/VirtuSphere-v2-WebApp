@@ -31,6 +31,7 @@ final class PortalConfirmNamingContractTest extends TestCase
         'credentials.confirm_use_legacy',
         'deploy.confirm_cancel',
         'deploy.confirm_retry',
+        'deploy.confirm_retry_external',
         'deploy.confirm_retry_partial',
         'deploy.confirm_retry_partial_many',
         'deploy.confirm_retry_partial_one',

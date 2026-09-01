@@ -5,12 +5,16 @@ declare(strict_types=1);
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/deploy_form_state.php';
 require_once __DIR__ . '/deploy_page.php';
+require_once __DIR__ . '/deploy_network_blockers.php';
+require_once __DIR__ . '/deploy_queue_blocker_view.php';
+require_once __DIR__ . '/deploy_preflight_bounds.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/vms.php';
+require_once __DIR__ . '/repo/vm_network.php';
 
 /**
  * One exhaustive, discriminated list for every condition that disables queueing.
@@ -211,11 +215,17 @@ function deploy_queue_blockers(mysqli $db, array $input): array
         try {
             deploy_assert_datacenter_resolvable($db, $missionId, $state['credential_esxi_id'], $state['mode']);
         } catch (ValidationException $exception) {
+            $message = portal_error_message($exception);
+            $code = 'datacenter_name_never_confirmed';
+            if (preg_match('/^(datacenter_name_[a-z_]+):\s*(.*)$/s', $message, $match) === 1) {
+                $code = $match[1];
+                $message = $match[2];
+            }
             $blockers[] = deploy_action_blocker(
-                'datacenter',
-                portal_error_message($exception),
-                mission_details_url($missionId),
-                __t('deploy.open_mission_details')
+                $code,
+                $message,
+                system_status_url('credential-' . $state['credential_esxi_id'], ['inventory' => $state['credential_esxi_id']]),
+                __t('deploy.inventory_deviation_link')
             );
         }
     }
@@ -223,6 +233,32 @@ function deploy_queue_blockers(mysqli $db, array $input): array
         $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
         if (array_intersect($state['vm_ids'], $missionVmIds) === []) {
             $blockers[] = deploy_selection_blocker('selection_gone', __t('deploy.err_selection_gone'));
+        }
+    }
+
+    if ($selectedMission !== null && $missionVms !== []) {
+        $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
+        $scopeIds = $state['vm_ids'] === [] ? [] : array_values(array_intersect($state['vm_ids'], $missionVmIds));
+        if ($state['vm_ids'] === [] || $scopeIds !== []) {
+            $preflight = repo_vm_network_preflight($db, $missionId, $scopeIds, (string) ($selectedMission['wds_vlan'] ?? ''));
+            // The same scope cap the repo enforces before the insert, shown here
+            // as a blocker with its own fix: an operator must learn that the
+            // selection is too large while it is still a selection, not from an
+            // exception after the submit.
+            try {
+                repo_vm_network_assert_scope_within_bounds($preflight['vms']);
+            } catch (ValidationException $exception) {
+                $blockers[] = deploy_action_blocker(
+                    'job_scope_limit',
+                    portal_error_message($exception),
+                    'vms.php?mission_id=' . $missionId,
+                    __t('deploy.vms_empty_link'),
+                    'vms.write'
+                );
+            }
+            foreach (repo_vm_network_preflight_blockers($preflight, $state['mode']) as $finding) {
+                $blockers[] = deploy_network_finding_item($finding, true);
+            }
         }
     }
 
@@ -284,91 +320,4 @@ function deploy_assert_queue_unblocked(mysqli $db, array $input): void
     if ($blockers !== []) {
         throw new ValidationException([], (string) $blockers[0]['message']);
     }
-}
-
-/** @param list<array<string,mixed>> $blockers */
-function deploy_render_blockers(array $blockers, array $user): void
-{
-    $count = count($blockers);
-    ?>
-    <div data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" aria-live="polite">
-        <p data-deploy-blocker-summary<?php echo $count === 0 ? ' hidden' : ''; ?>>
-            <strong><?php echo h(__t($count === 1 ? 'deploy.blocker_count_one' : 'deploy.blocker_count_many', ['count' => $count])); ?></strong>
-            <a href="#deploy-blocker-1" data-deploy-blocker-jump><?php echo h(__t('deploy.blocker_jump')); ?></a>
-        </p>
-        <div data-deploy-blocker-list>
-        <?php foreach ($blockers as $index => $blocker) {
-            $id = (string) ($blocker['target_id'] ?? ('deploy-blocker-' . ($index + 1)));
-            $kind = (string) ($blocker['kind'] ?? '');
-            $action = deploy_blocker_action_for_user($blocker, $user);
-            if ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION) { ?>
-                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker>
-                    <strong><?php echo h(__t('deploy.blocker_prefix')); ?></strong>
-                    <?php echo h((string) $blocker['message']); ?>
-                    <?php if ($action !== null) {
-                        if ((string) $action['type'] !== 'link') {
-                            throw new LogicException('Unknown deploy blocker action for ' . $kind . ': ' . (string) $action['type']);
-                        } ?>
-                        <a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a>
-                    <?php } ?>
-                </div>
-            <?php } elseif ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) {
-                ?>
-                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker>
-                    <p><strong><?php echo h(__t('deploy.blocker_prefix')); ?></strong> <?php echo h((string) $blocker['message']); ?></p>
-                    <?php if ($action !== null && (string) $action['type'] === 'adopt') { ?>
-                        <form class="inline-form" method="post" action="<?php echo h((string) $action['url']); ?>">
-                            <?php echo csrf_field(); ?>
-                            <input type="hidden" name="action" value="adopt_vm">
-                            <?php foreach ($action['fields'] as $field => $value) { ?>
-                                <input type="hidden" name="<?php echo h((string) $field); ?>" value="<?php echo h((string) $value); ?>">
-                            <?php } ?>
-                            <button class="button button-secondary" type="submit" data-confirm="<?php echo h((string) $action['confirm']); ?>"><?php echo h((string) $action['label']); ?></button>
-                        </form>
-                    <?php } elseif ($action !== null && (string) $action['type'] === 'link') { ?>
-                        <a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a>
-                    <?php } elseif ($action !== null) {
-                        throw new LogicException('Unknown deploy identity action: ' . (string) $action['type']);
-                    } ?>
-                </div>
-            <?php } else {
-                throw new LogicException('Unknown deploy blocker kind: ' . $kind);
-            }
-        } ?>
-        </div>
-    </div>
-    <?php
-}
-
-/** @return null|array<string,mixed> */
-function deploy_blocker_action_for_user(array $blocker, array $user): ?array
-{
-    $action = $blocker['action'] ?? null;
-    if (!is_array($action)) {
-        return null;
-    }
-    $permission = (string) ($action['permission'] ?? '');
-    if ($permission !== '' && !can($permission, $user)) {
-        return null;
-    }
-
-    return $action;
-}
-
-/** @return array<string,mixed> */
-function deploy_blocker_json(array $blocker, array $user): array
-{
-    $result = [
-        'kind' => (string) $blocker['kind'],
-        'code' => (string) $blocker['code'],
-        'message' => (string) $blocker['message'],
-        'target_id' => (string) $blocker['target_id'],
-    ];
-    $action = deploy_blocker_action_for_user($blocker, $user);
-    if ($action !== null) {
-        unset($action['permission']);
-        $result['action'] = $action;
-    }
-
-    return $result;
 }

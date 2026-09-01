@@ -125,9 +125,10 @@ function repo_deploy_assert_mission_ready(mysqli $db, array $mission, int $esxiC
         throw new RuntimeException('Templates cannot be deployed directly.');
     }
     if (virtusphere_deploy_mode_needs_location($mode)) {
+        $datacenterResolution = repo_esxi_datacenter_resolution($db, $esxiCredentialId, virtusphere_request_now());
         if (trim((string) ($mission['hypervisor_datacenter'] ?? '')) === ''
-            && repo_esxi_sole_datacenter($db, $esxiCredentialId) === null) {
-            throw new RuntimeException('Mission datacenter is required: the selected ESXi credential does not report exactly one datacenter.');
+            && (string) $datacenterResolution['resolution'] !== 'resolved') {
+            throw new RuntimeException(esxi_datacenter_blocker_code($datacenterResolution) . ': mission datacenter cannot be derived from current exact-name evidence.');
         }
         if (trim((string) ($mission['hypervisor_datastorage'] ?? '')) === '') {
             throw new RuntimeException('Mission datastore is required before deployment.');

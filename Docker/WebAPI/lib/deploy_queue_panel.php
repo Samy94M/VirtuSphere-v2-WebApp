@@ -6,6 +6,7 @@ declare(strict_types=1);
 /** @var array<string,mixed>|null $deployPreview */
 /** @var string $redirectBase */
 /** @var list<array<string,mixed>> $deployBlockers */
+/** @var list<array<string,mixed>> $deployWarnings */
 /** @var array<string,mixed> $user */
 /** @var bool $selectedMissionDeviates */
 /** @var int $selectedMissionId */
@@ -68,7 +69,7 @@ if ($deployPreview !== null) { ?>
           // an operator has already entered. The sentence says which of the two
           // it will be. ?>
     <p class="muted"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></p>
-    <?php deploy_render_blockers($deployBlockers, $user); ?>
+    <?php deploy_render_blockers($deployBlockers, $user, $deployWarnings); ?>
     <?php if ($selectedMissionDeviates) { ?>
         <div class="alert alert-warning"><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>
     <?php } ?>

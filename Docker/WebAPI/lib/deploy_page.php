@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/esxi_datacenter_presenter.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
@@ -10,6 +11,7 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 const VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE = 'prerequisite';
 const VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION = 'empty_mission';
 const VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT = 'identity_conflict';
+const VIRTUSPHERE_DEPLOY_BLOCKER_VM_NETWORK_MAPPING = 'vm_network_mapping';
 
 /**
  * Gates and island builders of portal/deploy.php.
@@ -44,16 +46,16 @@ function deploy_assert_datacenter_resolvable(mysqli $db, int $missionId, int $es
         return;
     }
 
-    $candidates = repo_esxi_datacenters_for_credential($db, $esxiCredentialId);
-    if (count($candidates) === 1) {
+    $resolution = repo_esxi_datacenter_resolution($db, $esxiCredentialId, virtusphere_request_now());
+    if ((string) $resolution['resolution'] === 'resolved') {
         return;
     }
+    $presentation = esxi_datacenter_compact_presentation($resolution);
 
-    $message = $candidates === []
-        ? __t('deploy.err_datacenter_no_inventory')
-        : __t('deploy.err_datacenter_ambiguous', ['names' => implode(', ', $candidates)]);
-
-    throw new ValidationException(['credential_esxi_id' => __t('deploy.err_datacenter_unresolved')], $message);
+    throw new ValidationException(
+        ['credential_esxi_id' => __t('deploy.err_datacenter_unresolved')],
+        $presentation['code'] . ': ' . $presentation['message']
+    );
 }
 
 /**

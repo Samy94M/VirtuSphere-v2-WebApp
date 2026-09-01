@@ -11,6 +11,7 @@ BeforeAll {
     $script:CheckRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
+    $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
 }
 
 Describe 'Visible progress reporting contract' {
@@ -42,5 +43,14 @@ Describe 'Visible progress reporting contract' {
         $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] RUN visual-'
         $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] pass visual-'
         $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] fail visual-'
+    }
+
+    It 'reports every effective VM around the worker network preflight' {
+        $script:NetworkPreflight | Should -Match '\$progressRows\s*=\s*\$preflight\[''vms''\]'
+        $script:NetworkPreflight | Should -Match 'foreach\s*\(\$missingVmIds\s+as\s+\$missingVmId\)'
+        $script:NetworkPreflight | Should -Match '\$total\s*=\s*count\(\$progressRows\)'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+RUN network/WDS preflight'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+OK network/WDS preflight'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
     }
 }

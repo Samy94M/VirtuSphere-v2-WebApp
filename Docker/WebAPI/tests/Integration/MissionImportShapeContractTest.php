@@ -37,6 +37,11 @@ final class MissionImportShapeContractTest extends TestCase
             self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
         }
         $this->cleanup();
+        $stmt = $this->db->prepare('INSERT INTO deploy_vlan (vlan_name, retired_at) VALUES (?, NULL)');
+        foreach (['PHPUNIT-SHAPE-VLAN', 'PHPUNIT-SHAPE-VLAN-2'] as $vlan) {
+            $stmt->bind_param('s', $vlan);
+            $stmt->execute();
+        }
     }
 
     protected function tearDown(): void
@@ -77,7 +82,7 @@ final class MissionImportShapeContractTest extends TestCase
     {
         $payload = $this->payload([
             $this->vm('PHPUNITSHP2', [
-                'interfaces' => [$this->interface(), $this->interface(['ip' => ''])],
+                'interfaces' => [$this->interface(), $this->interface(['ip' => '', 'vlan' => 'PHPUNIT-SHAPE-VLAN-2'])],
                 'disks' => [$this->disk('System'), $this->disk('Data')],
             ]),
             $this->vm('PHPUNITSHP3'),
@@ -252,12 +257,10 @@ final class MissionImportShapeContractTest extends TestCase
     }
 
     /**
-     * Two spellings of one missing VLAN are one finding, shown in the spelling
-     * the file used first. The equality rule is esxi_inventory_name_key(), the
-     * project-wide SSoT, so the preview cannot disagree with the catalog about
-     * what "the same VLAN" means.
+     * Case variants are distinct exact ESXi portgroups and therefore remain two
+     * findings; the preview must not collapse them through a diagnostic key.
      */
-    public function testTwoSpellingsOfOneMissingVlanReportOnce(): void
+    public function testCaseVariantsOfMissingVlansRemainDistinctExactFindings(): void
     {
         $payload = $this->payload([
             $this->vm('PHPUNITSHPC', ['interfaces' => [$this->interface(['vlan' => 'PhpunitShapeVlan'])]]),
@@ -266,7 +269,7 @@ final class MissionImportShapeContractTest extends TestCase
 
         $report = mission_import($this->db, $payload, self::PREFIX . 'vlan', true);
 
-        self::assertSame(['PhpunitShapeVlan'], $report['missing_vlans']);
+        self::assertSame(['PhpunitShapeVlan', 'PHPUNITSHAPEVLAN'], $report['missing_vlans']);
         self::assertTrue($report['blocked_in_file']);
     }
 
@@ -365,7 +368,7 @@ final class MissionImportShapeContractTest extends TestCase
     {
         return array_merge([
             'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '',
-            'vlan' => '', 'mode' => 'dhcp', 'type' => 'vmxnet3',
+            'vlan' => 'PHPUNIT-SHAPE-VLAN', 'mode' => 'dhcp', 'type' => 'vmxnet3',
         ], $overrides);
     }
 
@@ -388,7 +391,7 @@ final class MissionImportShapeContractTest extends TestCase
                 'vm_domain' => 'dc.example.com',
                 'vm_guest_id' => VIRTUSPHERE_VM_DEFAULTS['guest_id'],
             ],
-            [['ip' => '', 'subnet' => '', 'gateway' => '', 'mode' => 'dhcp', 'type' => 'vmxnet3', 'vlan' => '', 'mac' => '']],
+            [['ip' => '', 'subnet' => '', 'gateway' => '', 'mode' => 'dhcp', 'type' => 'vmxnet3', 'vlan' => 'PHPUNIT-SHAPE-VLAN', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',
@@ -404,6 +407,8 @@ final class MissionImportShapeContractTest extends TestCase
         $stmt->execute();
         $stmt = $this->db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
         $stmt->bind_param('s', $pattern);
+        $stmt->execute();
+        $stmt = $this->db->prepare("DELETE FROM deploy_vlan WHERE vlan_name IN ('PHPUNIT-SHAPE-VLAN', 'PHPUNIT-SHAPE-VLAN-2')");
         $stmt->execute();
     }
 }

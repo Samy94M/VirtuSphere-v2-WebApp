@@ -59,13 +59,14 @@ final class DeployEnqueueRaceTest extends TestCase
             'hypervisor_datastorage' => 'ds1',
             'hypervisor_datacenter' => 'DC1',
             'domain' => 'dc.example.com',
+            'wds_vlan' => 'WDS',
         ], true);
         repo_save_vm(
             $this->db,
             $this->missionId,
             null,
             ['vm_name' => 'PHPUNITRACE1', 'vm_hostname' => 'PHPUNITRACE1', 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
-            [['ip' => '10.9.9.10', 'subnet' => '255.255.255.0', 'gateway' => '10.9.9.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => '', 'mac' => '']],
+            [['ip' => '10.9.9.10', 'subnet' => '255.255.255.0', 'gateway' => '10.9.9.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'WDS', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

@@ -30,8 +30,9 @@ foreach (['E2EDVM1', 'E2EDVM2'] as $i => $vmName) {
     $stmt->bind_param('is', $vmId, $mac);
     $stmt->execute();
 }
+test_prepare_network_mac_fixture($db, $mid, $esxi, 'WDS', 'DC1');
 echo 'JSON' . json_encode(['admin' => $admin, 'esxi' => $esxi, 'ansible' => $ans, 'missionId' => $mid]) . 'JSON';
-`, ['lib/repo/credentials.php', 'lib/repo/missions.php']);
+`, ['lib/repo/credentials.php', 'lib/repo/missions.php', 'tests/Support/NetworkMacFixtures.php']);
 }
 
 function seedScheduledJob(seed) {
@@ -63,6 +64,21 @@ $stmt->bind_param('i', $id);
 $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_all(MYSQLI_ASSOC)) . 'JSON';
 `);
+}
+
+function seedFailedJob(seed) {
+  return phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
+$stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, last_error) VALUES (?, ?, 'failed', ?, ?, ?, 'seeded failure')");
+$mid = ${seed.missionId};
+$uid = ${seed.admin};
+$esxi = ${seed.esxi};
+$ans = ${seed.ansible};
+$stmt->bind_param('iisii', $mid, $uid, $payload, $esxi, $ans);
+$stmt->execute();
+echo 'JSON' . json_encode(['id' => (int) $db->insert_id]) . 'JSON';
+`).id;
 }
 
 function cleanup() {
@@ -277,18 +293,7 @@ echo 'GROUP=' . $result['group_id'];
 // e2e-covers-cancel: deploy.php:retry
 test('retry: Cancel creates nothing, Confirm queues a new job for the failed one', async ({ page }) => {
   const seed = seedBase();
-  const failedId = phpJson(`
-$db = db();
-$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
-$stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, last_error) VALUES (?, ?, 'failed', ?, ?, ?, 'seeded failure')");
-$mid = ${seed.missionId};
-$uid = ${seed.admin};
-$esxi = ${seed.esxi};
-$ans = ${seed.ansible};
-$stmt->bind_param('iisii', $mid, $uid, $payload, $esxi, $ans);
-$stmt->execute();
-echo 'JSON' . json_encode(['id' => (int) $db->insert_id]) . 'JSON';
-`).id;
+  const failedId = seedFailedJob(seed);
 
   await page.goto(`deploy.php?mission_id=${seed.missionId}`);
   const dialog = page.locator('[data-confirm-dialog]');
@@ -311,6 +316,37 @@ echo 'JSON' . json_encode(['id' => (int) $db->insert_id]) . 'JSON';
   const jobs = missionJobs(seed.missionId);
   expect(jobs.length, 'the retry queued a second job').toBe(2);
   expect(Number(jobs[0].id), 'the original job is untouched').toBe(failedId);
+});
+
+// e2e-covers: deploy_log.php:retry
+// e2e-covers-cancel: deploy_log.php:retry
+test('deploy_log retry: Cancel keeps the failed job alone, Confirm queues its current scope', async ({ page }) => {
+  const seed = seedBase();
+  const failedId = seedFailedJob(seed);
+
+  await page.goto(`deploy_log.php?id=${failedId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const retry = page.locator('form:has(input[name="action"][value="retry"]) button');
+  await expect(retry, 'a retryable log exposes the same repository decision').toBeVisible();
+
+  await retry.click();
+  await expect(dialog, 'retrying from the log asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(missionJobs(seed.missionId), 'dismissing the log action creates no job').toHaveLength(1);
+
+  await retry.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL((url) => url.pathname.endsWith('/deploy_log.php')
+      && Number(url.searchParams.get('id')) !== failedId),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const jobs = missionJobs(seed.missionId);
+  expect(jobs, 'confirming from the log queues one successor').toHaveLength(2);
+  expect(Number(jobs[0].id), 'the original failed job remains immutable').toBe(failedId);
+  expect(Number(new URL(page.url()).searchParams.get('id')), 'the browser follows the successor log')
+    .toBe(Number(jobs[1].id));
 });
 
 // e2e-covers: deploy_log.php:cancel

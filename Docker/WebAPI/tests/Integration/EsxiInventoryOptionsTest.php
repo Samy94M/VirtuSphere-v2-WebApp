@@ -146,8 +146,8 @@ final class EsxiInventoryOptionsTest extends TestCase
             VIRTUSPHERE_INVENTORY_KIND_NETWORK,
         ]);
 
-        self::assertSame(['datastore-a' => true], $sets[$a][VIRTUSPHERE_INVENTORY_KIND_DATASTORE], 'keys go through esxi_inventory_name_key()');
-        self::assertArrayHasKey(esxi_inventory_name_key(self::PREFIX . 'vlan-a'), $sets[$a][VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
+        self::assertSame(['DataStore-A' => true], $sets[$a][VIRTUSPHERE_INVENTORY_KIND_DATASTORE], 'operative option keys preserve exact ESXi names');
+        self::assertArrayHasKey(self::PREFIX . 'vlan-a', $sets[$a][VIRTUSPHERE_INVENTORY_KIND_NETWORK]);
         self::assertArrayNotHasKey(VIRTUSPHERE_INVENTORY_KIND_DATASTORE, $sets[$b], 'a credential without rows of a kind carries no set for it');
         self::assertArrayNotHasKey(VIRTUSPHERE_INVENTORY_KIND_HOST, $sets[$a], 'only the requested kinds are read');
     }
