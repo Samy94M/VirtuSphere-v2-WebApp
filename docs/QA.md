@@ -186,8 +186,11 @@ bounds it to:
 - Run metadata of a green and a red run are identical: browser revision 1228,
   the three pinned font SHA-256 values, launch arguments, viewports, locale and
   timezone.
-- The same pixel set reproduces exactly across two consecutive runs, while a
-  third run on the same code produced zero differences. Cross-run differences
+- The noise moves. Two consecutive runs produced exactly the same 38-pixel set
+  on that one image; a third run on the same code produced zero differences;
+  and the Release-lane run additionally surfaced 11 pixels on
+  `deploy-desktop` in the dark theme, again plus or minus one on an antialiased
+  edge. A defect would keep hitting the same place. Cross-run differences
   outside a session sit in a different region (a timestamp), which the contract
   never compares because it only relates run 1 to run 2 inside one session.
 
@@ -197,6 +200,29 @@ finding but did not remove it. Raising the tolerance or chasing the rasterizer
 further both change what every future visual gate means, and reviewed visual
 targets belong to Etappe 17, so neither was done here. The gate stays red and
 named rather than silently retried until green.
+
+The Release lane on the Etappe-14A commit answered
+`42 pass, 2 fail, 0 infrastructure_error, 0 not_applicable, 0 skip`. Every
+non-browser gate is green, including `restore-drill`, `secret-scan` over the
+full history, `sbom`, `image-cve` (six images, no fixable critical or high),
+`offline-bundle` built and verified offline, and `npm-audit`.
+
+The second failure is `e2e-browser-matrix`, where a small minority of the suite
+failed on Firefox and WebKit only while the rest passed. It is not an
+Etappe-14A defect either, and the evidence is direct rather than inferred:
+
+- `deploy-log.spec.js:120` and `deploy-recovery.spec.js:38` both PASS on WebKit
+  when re-run against the same commit on a correctly seeded QA stack, together
+  with every other case in those two files.
+- `directory-ad.spec.js:436` exercises AD sign-in. The commit touches no auth,
+  directory, LDAP, login, session or permission file at all, and the rest of
+  that same file passed in the lane run.
+- The same suite is fully green on Chromium (`e2e-portal`, Integration lane)
+  and on Windows Edge (`e2e-msedge`, 786 s, Release lane).
+
+The pattern is interference and timing inside the 33-minute cross-engine run,
+not logic. Re-running the whole matrix until it is green would prove nothing,
+so it was not done; the isolated re-run is the evidence instead.
 
 ## Test Commands
 

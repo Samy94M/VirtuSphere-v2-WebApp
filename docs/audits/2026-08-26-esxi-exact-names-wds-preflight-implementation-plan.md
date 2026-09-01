@@ -2218,6 +2218,12 @@ Das Vorhaben ist erst abgeschlossen, wenn alle Punkte belegt sind:
   hat Null-Toleranz. Belege in `docs/QA.md`. Nicht durch Wiederholen grün
   gemacht und nicht durch Toleranzanhebung erledigt: Sollbaselines gehören zu
   Etappe 17.
+  Ebenso offen bleibt `e2e-browser-matrix`: drei von 482 Tests fallen nur auf
+  Firefox und WebKit. Auch das ist kein Etappenbefund. `deploy-log.spec.js:120`
+  und `deploy-recovery.spec.js:38` bestehen bei isoliertem Nachlauf auf WebKit
+  gegen denselben Commit (14 von 14 grün), `directory-ad.spec.js:436` liegt in
+  einer Domäne, deren Dateien der Commit überhaupt nicht anfasst, und dieselbe
+  Suite ist auf Chromium und auf Windows-Edge vollständig grün.
 - [ ] Produktionsgroßer Restore-Klon belegt Laufzeit, Peak-Platz,
   Schreibunterbrechung und unveränderte DDL-Eigenschaften.
 - [ ] Die DDL-Phase weist auch Machine-API-Writer und externe MECM-Tasks nach;
@@ -2230,10 +2236,13 @@ Das Vorhaben ist erst abgeschlossen, wenn alle Punkte belegt sind:
   fail-closed; nur zukünftige Writer zu markieren genügt nicht.
 - [ ] Fast-, Integration- und Release-Lane zeigen den vorgeschriebenen
   `[n/total]`-Fortschritt und sind grün.
-  Stand 01.09.2026: Fortschrittsvertrag in allen Lanes eingehalten. Fast
-  `29 pass / 0 fail / 0 skip`. Integration `35 pass / 1 fail / 0 skip`; der eine
-  Fehler ist der oben beschriebene Visual-Determinismusbefund außerhalb dieser
-  Etappe. Damit ist dieser Punkt bewusst NICHT abgehakt.
+  Stand 01.09.2026: Fortschrittsvertrag in allen drei Lanes eingehalten. Fast
+  `29 pass / 0 fail / 0 skip`. Integration `35 pass / 1 fail / 0 skip`. Release
+  auf dem Commit `42 pass / 2 fail / 0 infrastructure_error / 0 skip`, jedes
+  Nicht-Browser-Gate grün einschließlich Restore-Drill, Secret-Scan, SBOM,
+  Image-CVE, Offline-Bundle und npm-audit. Die zwei Fehler sind die oben
+  beschriebenen Browserbefunde außerhalb dieser Etappe. Damit ist dieser Punkt
+  bewusst NICHT abgehakt.
 - [ ] Backup, Bestandsaudit, kindweises Semantik-2-Inventar, Canary und
   Rollbackentscheidung sind dokumentiert.
 
