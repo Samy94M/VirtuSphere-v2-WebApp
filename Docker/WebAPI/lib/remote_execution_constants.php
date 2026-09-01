@@ -55,9 +55,32 @@ const VIRTUSPHERE_REMOTE_CONTROLLER_STATES = [
 ];
 const VIRTUSPHERE_REMOTE_EFFECT_STATES = ['not_started', 'active_or_possible', 'goal_verified', 'divergence_verified', 'unknown'];
 const VIRTUSPHERE_REMOTE_RECONCILIATION_STATES = ['not_required', 'pending', 'running', 'resolved_success', 'resolved_failure', 'manual_required'];
-const VIRTUSPHERE_REMOTE_CLEANUP_STATES = ['pending', 'eligible', 'running', 'cleaned', 'failed'];
+// `eligible` carries a name of its own because a consumer has to ask for it by
+// value: a create unit selects its cleanup candidates by joining on this state,
+// and a string literal in that query is a mirror nothing walks.
+const VIRTUSPHERE_REMOTE_CLEANUP_STATE_ELIGIBLE = 'eligible';
+const VIRTUSPHERE_REMOTE_CLEANUP_STATES = ['pending', VIRTUSPHERE_REMOTE_CLEANUP_STATE_ELIGIBLE, 'running', 'cleaned', 'failed'];
 
 const VIRTUSPHERE_REMOTE_PROTOCOL_DOCUMENT_MAX_BYTES = 65536;
+
+// Bounds of the remote cleanup loop, owned here because cleanup is a property
+// of the handle, not of whatever a step happens to do with it. A create unit
+// binds its async directory to exactly one handle and reads these through it;
+// a second copy per consumer would let two answers to "may I try again yet"
+// drift apart.
+//
+// The batch size keeps one worker round bounded: cleanup runs on the same
+// transport as the work, and a host with a hundred stale directories must not
+// turn a round into a scan. The auto-attempt cap ends the loop rather than the
+// problem: after it, the case is visible and waits for a person, because a
+// cleanup that cannot succeed will not start succeeding on attempt nine. The
+// backoff pair spans five minutes to a day, doubling with a cap, so a host
+// that is briefly unreachable is retried soon and a host that is gone is not
+// asked every five minutes for a week.
+const VIRTUSPHERE_REMOTE_CLEANUP_BATCH_SIZE = 25;
+const VIRTUSPHERE_REMOTE_CLEANUP_MAX_AUTO_ATTEMPTS = 8;
+const VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MIN_SECONDS = 300;
+const VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MAX_SECONDS = 86400;
 
 // The three axes of the deploy service snapshot (Etappe 13R).
 //

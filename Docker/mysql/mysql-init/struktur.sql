@@ -418,6 +418,11 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- Scheduling (ADR-0022): scheduled_at is a UTC run-not-before time;
     -- group_id ties a staggered batch of per-VM jobs together.
     scheduled_at DATETIME NULL,
+    -- Etappe 14B: UTC start of the create section and the persistent source of
+    -- its budget. Set by the worker at the first create unit, not at claim
+    -- time: queue waiting is not create work, and a budget starting there would
+    -- shrink with queue length. A retry is a new job and gets a new value.
+    create_started_at DATETIME NULL,
     group_id CHAR(12) NULL,
     -- Diagnostic correlation id (ADR-0032): ties the job to the portal request
     -- that enqueued it. Opaque, never authorization; NULL predates the id.
@@ -573,6 +578,84 @@ CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
     CONSTRAINT fk_deploy_recovery_resolution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_recovery_resolution_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE RESTRICT,
     CONSTRAINT fk_deploy_recovery_resolution_actor FOREIGN KEY (actor_id) REFERENCES deploy_users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-VM create results (Etappe 14B): one durable row per VM per create job.
+-- The async directory, the cleanup counters and the cleanup backoff are NOT
+-- here; they belong to deploy_remote_executions, which this row binds to
+-- through remote_execution_id. The ENUM order of action, status and outcome
+-- mirrors lib/deploy_create_constants.php (ADR-0016, check-enum-sync).
+CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    vm_id INT NULL,
+    vm_name VARCHAR(191) NOT NULL,
+    position INT UNSIGNED NOT NULL,
+    total INT UNSIGNED NOT NULL,
+    action ENUM('create','verify_skip') NOT NULL,
+    status ENUM('pending','prepared','running','succeeded','failed','uncertain','skipped') NOT NULL DEFAULT 'pending',
+    outcome ENUM('created','updated','unchanged') NULL,
+    changed TINYINT(1) NULL,
+    existed_before TINYINT(1) NULL,
+    precheck_moid VARCHAR(64) NULL,
+    precheck_instance_uuid VARCHAR(64) NULL,
+    async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    remote_execution_id BIGINT UNSIGNED NULL,
+    async_deadline_at DATETIME NULL,
+    vm_moid VARCHAR(64) NULL,
+    vm_instance_uuid VARCHAR(64) NULL,
+    error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    error_detail TEXT NULL,
+    resumed_from_result_id BIGINT UNSIGNED NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_create_result_position_unique (job_id, position),
+    UNIQUE KEY deploy_create_result_vm_unique (job_id, vm_id),
+    UNIQUE KEY deploy_create_result_remote_unique (remote_execution_id),
+    INDEX deploy_create_result_progress (job_id, status, position),
+    CONSTRAINT fk_deploy_create_result_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_create_result_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_create_result_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_create_result_resumed FOREIGN KEY (resumed_from_result_id) REFERENCES deploy_create_vm_results(id) ON DELETE SET NULL,
+    CONSTRAINT deploy_create_result_position_check CHECK (position >= 1 AND position <= total),
+    CONSTRAINT deploy_create_result_flags_check CHECK (
+        (changed IS NULL OR changed IN (0,1)) AND (existed_before IS NULL OR existed_before IN (0,1))
+    ),
+    -- The bound remote handle is NOT part of this check: MySQL refuses a column
+    -- in both a CHECK and a foreign key with a referential action. It is
+    -- enforced in deploy_create_assert_transition_fields(), the only writer.
+    CONSTRAINT deploy_create_result_running_check CHECK (
+        status <> _utf8mb4'running' OR
+        (async_jid IS NOT NULL AND async_deadline_at IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_success_check CHECK (
+        status NOT IN (_utf8mb4'succeeded', _utf8mb4'skipped') OR
+        (outcome IS NOT NULL AND changed IS NOT NULL AND vm_moid IS NOT NULL
+         AND vm_instance_uuid IS NOT NULL AND finished_at IS NOT NULL)
+    ),
+    -- The source row of a skip is likewise enforced in PHP, for the same
+    -- reason as above: resumed_from_result_id carries a referential action.
+    CONSTRAINT deploy_create_result_skip_check CHECK (
+        status <> _utf8mb4'skipped' OR action = _utf8mb4'verify_skip'
+    ),
+    CONSTRAINT deploy_create_result_failure_check CHECK (
+        status NOT IN (_utf8mb4'failed', _utf8mb4'uncertain') OR
+        (error_code IS NOT NULL AND error_detail IS NOT NULL AND finished_at IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_open_check CHECK (
+        status NOT IN (_utf8mb4'pending', _utf8mb4'prepared', _utf8mb4'running') OR finished_at IS NULL
+    ),
+    CONSTRAINT deploy_create_result_no_false_outcome_check CHECK (
+        status IN (_utf8mb4'succeeded', _utf8mb4'skipped') OR
+        (outcome IS NULL AND changed IS NULL AND vm_moid IS NULL AND vm_instance_uuid IS NULL)
+    ),
+    CONSTRAINT deploy_create_result_outcome_check CHECK (
+        outcome IS NULL OR
+        (outcome = _utf8mb4'created' AND existed_before = 0 AND changed = 1) OR
+        (outcome = _utf8mb4'updated' AND existed_before = 1 AND changed = 1) OR
+        (outcome = _utf8mb4'unchanged' AND existed_before = 1 AND changed = 0)
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_settings (

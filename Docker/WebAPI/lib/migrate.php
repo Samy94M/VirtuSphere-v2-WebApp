@@ -9,6 +9,7 @@ require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
 require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
 require_once __DIR__ . '/migrations/0045_deploy_claim_state.php';
 require_once __DIR__ . '/migrations/0046_network_mac_contract.php';
+require_once __DIR__ . '/migrations/0047_deploy_create_results.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1200,6 +1201,7 @@ SQL;
     '0044_structured_audit_events' => migrate_0044_structured_audit_events(...),
     '0045_deploy_claim_state' => migrate_0045_deploy_claim_state(...),
     '0046_network_mac_contract' => migrate_0046_network_mac_contract(...),
+    '0047_deploy_create_results' => migrate_0047_deploy_create_results(...),
 ];
 try {
     $db = db();

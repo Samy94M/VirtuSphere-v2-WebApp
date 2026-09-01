@@ -94,19 +94,30 @@ final class CreateFlowBaselineContractTest extends TestCase
     }
 
     /**
-     * Etappe C legt `deploy_create_vm_results` und `deploy_jobs.create_started_at`
-     * an. Bis dahin ist diese Zusicherung die genaue Antwort auf die Frage, die
-     * der Vorfall gestellt hat: Welche der fuenfzehn VMs waren fertig?
+     * Von Teiletappe C umgeschrieben. Die Frage des Vorfalls, welche der
+     * fuenfzehn VMs fertig waren, hat seitdem eine dauerhafte Antwort; was noch
+     * fehlt, ist der Worker, der sie schreibt (Teiletappe E).
      */
-    public function testThereIsNoPersistentPerVmCreateResultYet(): void
+    public function testThePerVmCreateResultExistsButNoWorkerWritesItYet(): void
     {
         $schema = $this->repoSource('Docker/mysql/mysql-init/struktur.sql');
 
-        self::assertStringNotContainsString('deploy_create_vm_results', $schema);
-        self::assertStringNotContainsString('create_started_at', $schema);
-        // Der Auftrag haelt heute nur EIN Ergebnisdokument, und das gehoert dem
-        // MAC-Import, nicht dem Create-Abschnitt.
+        self::assertStringContainsString('deploy_create_vm_results', $schema);
+        self::assertStringContainsString('create_started_at', $schema);
+        // `result_json` bleibt der MAC-Import-/Pipelinevertrag und wird NICHT
+        // mit Create-Zwischenstaenden ueberladen.
         self::assertStringContainsString('result_json', $schema);
+
+        // Kein Workermodul liest oder schreibt die Zeilen. Solange das gilt, ist
+        // der Create-Pfad unveraendert und diese Etappe additiv; Teiletappe E
+        // ersetzt diese Zusicherung durch die Orchestrierung.
+        foreach (['deploy_worker_mission.php', 'deploy_worker_finish.php', 'deploy_worker_reaper.php'] as $module) {
+            self::assertStringNotContainsString(
+                'deploy_create_',
+                $this->repoSource('Docker/WebAPI/lib/' . $module),
+                $module . ' benutzt die Create-Ergebniszeilen bereits'
+            );
+        }
     }
 
     /**

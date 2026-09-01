@@ -200,6 +200,16 @@ Eine Aufsicht, die selbst gerade erst verbunden ist, urteilt nicht: sie kann in 
 
 Der VM-Name ist nur die Suche, nicht der Identitätsbeweis. Portal und Playbooks verwenden die gespeicherte Instance-UUID; die MOID ist der aktuelle Hostgriff und darf sich nach erneuter Registrierung ändern. Eine unbekannte namensgleiche VM blockiert. Die ausdrücklich bestätigte Adoption ist nur erlaubt, nachdem ein Administrator die VM am Host geprüft hat; sie speichert die Identität und verändert weder Hardware noch Energiezustand.
 
+## Ergebnis je VM eines Create-Auftrags (Etappe 14B, vorbereitet)
+
+Ein Auftrag, dessen Modus das Create-Playbook ausführt (`create` und `full`), löst seine VM-Auswahl schon beim Einreihen auf und legt in derselben Transaktion je VM eine dauerhafte Zeile in `deploy_create_vm_results` an. Eine leere Auswahl bedeutet damit nicht mehr „alle, später entschieden": eine nach dem Einreihen angelegte VM kann einen wartenden Auftrag nicht mehr still erweitern, und bei einem geplanten Start liegen zwischen beiden Zeitpunkten Stunden.
+
+Position und Gesamtzahl folgen ausschließlich `vm_name, id`. Position 7 bezeichnet dadurch in Portal, Protokoll und Wiederholung dieselbe VM. Jede Zeile trägt ihren eigenen Zustand (`pending`, `prepared`, `running`, `succeeded`, `failed`, `uncertain`, `skipped`); `uncertain` ist ausdrücklich kein weicheres `failed`, sondern der Zustand, in dem VirtuSphere den Ausgang nicht kennt, und er hält den Auftrag an, statt mit der nächsten VM weiterzumachen.
+
+Was diese Zeile bewusst NICHT besitzt: das Async-Verzeichnis, die Cleanup-Zähler und den Cleanup-Backoff. Die gehören dem generischen Remote-Handle, an das die Zeile über `remote_execution_id` gebunden ist; eine zweite Kopie hätte die Frage „darf dieses Verzeichnis schon entfernt werden" zwei Eigentümern gegeben.
+
+Aufträge, die vor dieser Etappe eingereiht wurden, besitzen keine solchen Zeilen und bleiben unverändert lesbar. Ausgeführt wird der neue Ablauf noch nicht: Create und Full bleiben bis zur Standortabnahme gesperrt.
+
 ## Abbruch und Teilfehler
 
 Ein laufender Abbruch wechselt zuerst auf `cancelling`. Der Auftrag bleibt aktiv und blockiert Löschen oder einen zweiten Missionsauftrag, bis der Worker `cancelled` bestätigt oder der Reaper einen toten Worker sicher konvergiert. Ein MAC-Rückruf zum noch abbrechenden, korrekt zugeordneten Auftrag wird angenommen; nach `cancelled` wird er abgelehnt und hinterlässt eine sichtbare Spur.

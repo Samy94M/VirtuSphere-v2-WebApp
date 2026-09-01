@@ -89,6 +89,75 @@ check_pair "Inventory-Kinds"   "$LIB/deploy_constants.php" "VIRTUSPHERE_INVENTOR
 check_pair "Autostart-Stop"    "$LIB/deploy_constants.php" "VIRTUSPHERE_AUTOSTART_STOP_ACTION_" "autostart_stop_action"
 check_pair "Joblog-Quellen"    "$LIB/deploy_constants.php" "VIRTUSPHERE_DEPLOY_LOG_"      "stream"
 
+# Tabellenweite Variante. Notwendig geworden, weil `status` als Spaltenname
+# mehrfach vorkommt: check_pair nimmt die ERSTE ENUM-Definition der Datei und
+# verglich damit die Create-Ergebnisse gegen die Jobstatus. Ausserdem liegen
+# neue Migrationen nicht mehr in migrate.php, sondern unter lib/migrations/;
+# ein Spiegel, den kein Wächter sieht, ist genau die still gruene Luecke, die
+# dieses Skript verhindern soll.
+table_enum_values() { # $1=file $2=table $3=column
+  awk -v table="$table_marker" -v column="$3" '
+    index($0, table) { inside = 1 }
+    inside && $0 ~ ("(^|[^[:alnum:]_])" column "([^[:alnum:]_]|$).*ENUM[(]") && !found {
+      match($0, /ENUM\([^)]*\)/)
+      value = substr($0, RSTART + 5, RLENGTH - 6)
+      gsub(/['"'"' ]/, "", value)
+      print value
+      found = 1
+    }
+    inside && /^\) ENGINE=|ENGINE=InnoDB/ { inside = 0 }
+  ' "$1"
+}
+
+check_table_pair() { # $1=label $2=php-file $3=const-prefix $4=table $5=column
+  expected=$(php_values "$2" "$3")
+  if [ -z "$expected" ]; then
+    echo "FEHLER: [enum-sync.no-consts] keine Consts mit Praefix $3 in $2 gefunden." >&2
+    errors=$((errors + 1))
+    return 0
+  fi
+  # Zwei Quellen sind Pflicht: das Frischschema UND mindestens eine Migration.
+  # Nur eine von beiden hiesse, dass eine frische und eine migrierte Datenbank
+  # auseinanderlaufen duerfen, ohne dass es jemand merkt; genau das ist die
+  # Konvergenzregel aus .claude/rules/database.md.
+  pair_errors=0
+  migration_seen=0
+  table_marker="$4"
+  sql_values=$(table_enum_values "$SQL" "$4" "$5")
+  if [ -n "$sql_values" ] && [ "$sql_values" != "$expected" ]; then
+    echo "FEHLER: [enum-sync.drift] $1 — ENUM-Drift in $SQL fuer $4.$5:" >&2
+    echo "  PHP-SSoT: $expected" >&2
+    echo "  DB-ENUM:  $sql_values" >&2
+    pair_errors=$((pair_errors + 1))
+  fi
+  for src in $(ls Docker/WebAPI/lib/migrations/*.php 2>/dev/null) "$MIG"; do
+    [ -f "$src" ] || continue
+    actual=$(table_enum_values "$src" "$4" "$5")
+    [ -z "$actual" ] && continue
+    migration_seen=1
+    if [ "$actual" != "$expected" ]; then
+      echo "FEHLER: [enum-sync.drift] $1 — ENUM-Drift in $src fuer $4.$5:" >&2
+      echo "  PHP-SSoT: $expected" >&2
+      echo "  DB-ENUM:  $actual" >&2
+      pair_errors=$((pair_errors + 1))
+    fi
+  done
+  if [ -z "$sql_values" ] || [ "$migration_seen" -eq 0 ]; then
+    echo "FEHLER: [enum-sync.no-enum] $1 — $4.$5 fehlt im Frischschema oder in jeder Migration." >&2
+    pair_errors=$((pair_errors + 1))
+  fi
+  errors=$((errors + pair_errors))
+  # OK nur, wenn dieses Paar wirklich sauber war. Eine OK-Zeile direkt unter
+  # einer FEHLER-Zeile wird ueberlesen.
+  if [ "$pair_errors" -eq 0 ] && [ "$quiet" -ne 1 ]; then
+    echo "OK: $1 ($expected)"
+  fi
+}
+
+check_table_pair "Create-Aktionen" "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_ACTION_" "deploy_create_vm_results" "action"
+check_table_pair "Create-Status"   "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_RESULT_STATUS_" "deploy_create_vm_results" "status"
+check_table_pair "Create-Outcomes" "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_OUTCOME_" "deploy_create_vm_results" "outcome"
+
 if [ "$errors" -gt 0 ]; then
   echo "check-enum-sync: $errors Drift-Fehler." >&2
   exit 1

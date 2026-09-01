@@ -14,6 +14,8 @@ require_once __DIR__ . '/deploy_job_queries.php';
 require_once __DIR__ . '/deploy_job_guards.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/deploy_job_retry.php';
+require_once __DIR__ . '/deploy_create_results.php';
+require_once __DIR__ . '/../ansible_command_modes.php';
 
 /**
  * Enqueue paths: the single mission job, its retry, the staggered group and the
@@ -52,6 +54,25 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         // to nothing (its VMs were deleted since the form was rendered) throws
         // rather than silently widening to the whole mission.
         $payload['vm_ids'] = repo_deploy_filter_mission_vm_ids($db, $missionId, $payload['vm_ids']);
+
+        // A create-capable job resolves "whole mission" HERE instead of leaving
+        // it to the worker (Etappe 14B). "Everything, decided later" means a VM
+        // added between queueing and running silently joins a job nobody chose
+        // it for, and after a scheduled delay that gap is hours wide. The
+        // resolved list becomes both the payload and the materialized units, so
+        // the job, its scope and its progress rows describe one selection.
+        $createSelection = [];
+        if (ansible_mode_creates_vms((string) $payload['mode'])) {
+            $createSelection = deploy_create_resolve_selection($db, $missionId, $payload['vm_ids']);
+            if ($createSelection === []) {
+                // repo_deploy_assert_mission_ready() already refused an empty
+                // mission above, so this is the narrower case: a selection that
+                // resolved to nothing. Same sentence on purpose, because it is
+                // the same thing to the operator and it is already localized.
+                throw new RuntimeException('Mission has no VMs to deploy.');
+            }
+            $payload['vm_ids'] = array_map(static fn (array $vm): int => $vm['id'], $createSelection);
+        }
         $payloadJson = json_encode($payload, JSON_THROW_ON_ERROR);
 
         repo_deploy_assert_credential_type($db, $esxiCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
@@ -68,6 +89,11 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         $stmt->bind_param('iisiiss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $scheduledAtUtc, $correlationId);
         $stmt->execute();
         $jobId = (int) $db->insert_id;
+        if ($createSelection !== []) {
+            // Same transaction as the job row: a job with half its units would
+            // look like one that had already processed the rest.
+            repo_deploy_create_materialize($db, $jobId, $createSelection);
+        }
         $logSuffix = $scheduledAtUtc !== null ? ' scheduled for ' . $scheduledAtUtc . ' UTC' : '';
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued: ' . deploy_job_payload_summary($payloadJson) . $logSuffix);
 
@@ -230,6 +256,15 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             $stmt->bind_param('iisiisss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $slotUtc, $groupId, $correlationId);
             $stmt->execute();
             $jobId = (int) $db->insert_id;
+            if (ansible_mode_creates_vms((string) $payload['mode'])) {
+                // The staggered path inserts its slots itself instead of going
+                // through repo_create_deploy_job(), so it has to materialize the
+                // unit itself as well. Without this a staggered create would be
+                // the one create job with no per-VM row, and every consumer that
+                // asks "is this job tracked" would answer no for a job that is.
+                // One slot is one VM, hence one unit at position 1 of 1.
+                repo_deploy_create_materialize($db, $jobId, [['id' => $vmId, 'vm_name' => (string) $vm['vm_name']]]);
+            }
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued (group ' . $groupId . ', slot ' . ($index + 1) . '/' . count($vms) . ') scheduled for ' . $slotUtc . ' UTC');
             $schedule[] = ['vm_id' => $vmId, 'vm_name' => (string) ($vm['vm_name'] ?? ''), 'scheduled_at' => $slotUtc];
             $index++;

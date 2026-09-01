@@ -166,6 +166,13 @@ const VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS = 300;
 // a job whose outcome is already decided.
 const VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS = 30;
 
+// Per-VM create contract (Etappe 14B). Loaded here rather than at the top of
+// this facade because deploy_create_total_budget_seconds() derives the create
+// budget from VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS above; a require before
+// that line would leave a caller of the module alone with an undefined
+// constant instead of the one number both budgets share.
+require_once __DIR__ . '/deploy_create_constants.php';
+
 // Second reaper (AP6): the deploy worker reaps only at its own loop start, so
 // a worker stuck inside a blocking transport call would never be reaped until
 // it returns. The maintenance worker runs the same reap on this interval.

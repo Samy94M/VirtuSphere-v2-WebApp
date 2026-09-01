@@ -28,6 +28,7 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_modes_using_powercycle',
         'ansible_modes_using_start',
         'ansible_mode_expects_mac_result',
+        'ansible_mode_creates_vms',
         'ansible_step_marker_line',
         'ansible_step_marker_parse',
         'ansible_step_failure_suffix',

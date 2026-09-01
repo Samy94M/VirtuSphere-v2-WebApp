@@ -204,10 +204,17 @@ function Assert-Guard {
 }
 
 # --- Fall-Katalog ----------------------------------------------------------------
+# Jede Datei, aus der check-enum-sync.sh eine Seite eines Spiegels liest. Fehlt
+# eine, meldet der Waechter fuer dieses Paar [enum-sync.no-consts] und der
+# Fixture-Lauf wird rot, BEVOR die eigentliche Mutation greift: der Fall besteht
+# dann aus dem falschen Grund und wuerde auch ohne Mutation bestehen.
+# directory_constants.php fehlte hier genau so.
 $enumFixtureFiles = @(
     'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/permissions.php',
     'Docker/WebAPI/lib/deploy_constants.php', 'Docker/WebAPI/lib/credentials.php',
-    'Docker/mysql/mysql-init/struktur.sql', 'Docker/WebAPI/lib/migrate.php'
+    'Docker/WebAPI/lib/directory_constants.php', 'Docker/WebAPI/lib/deploy_create_constants.php',
+    'Docker/mysql/mysql-init/struktur.sql', 'Docker/WebAPI/lib/migrate.php',
+    'Docker/WebAPI/lib/migrations'
 )
 $fileSizeFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal')
 $phpVerFixtureFiles = @(
@@ -269,6 +276,20 @@ $cases = @(
     @{ Name = 'enum-sync.reordered'; Body = {
         $fx = New-Fixture $enumFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' $enumList "'running','queued','cancelling','succeeded','failed','cancelled','partial'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    # Tabellenweite Paare (Etappe 14B). `status` ist als Spaltenname mehrdeutig,
+    # deshalb prueft der Waechter hier CREATE-TABLE-Block-scoped, und der neue
+    # Spiegel liegt in lib/migrations/ statt in migrate.php. Beide Seiten
+    # bekommen ihre eigene Mutation, sonst bewiese der Fall nur eine davon.
+    @{ Name = 'enum-sync.table-scoped-schema'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/mysql/mysql-init/struktur.sql' "'pending','prepared','running','succeeded','failed','uncertain','skipped'" "'pending','prepared','running','succeeded','uncertain','failed','skipped'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    @{ Name = 'enum-sync.table-scoped-migration'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrations/0047_deploy_create_results.php' "'create','verify_skip'" "'verify_skip','create'"
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
     } }
     @{ Name = 'enum-sync.zero-match'; Body = {

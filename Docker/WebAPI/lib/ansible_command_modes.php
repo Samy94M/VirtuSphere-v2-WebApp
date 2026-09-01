@@ -156,6 +156,21 @@ function ansible_mode_expects_mac_result(string $mode): bool
     return in_array(VIRTUSPHERE_PLAYBOOKS['export'], ansible_playbooks_for_mode($mode), true);
 }
 
+/**
+ * Whether a mode's sequence runs the create playbook, i.e. whether the queue
+ * has to materialize one durable create result row per selected VM (Etappe
+ * 14B). Derived the same way as the three helpers above, so a mode that gains
+ * or loses the create step cannot leave the queue behind: a create-capable job
+ * without rows would be indistinguishable from a legacy job, and a job with
+ * rows for a mode that never creates anything would report progress nobody
+ * makes. Today: 'full' and 'create'. The autostart flag only appends a step and
+ * cannot change the answer.
+ */
+function ansible_mode_creates_vms(string $mode): bool
+{
+    return in_array(VIRTUSPHERE_PLAYBOOKS['create'], ansible_playbooks_for_mode($mode), true);
+}
+
 // Step markers (AP6): every per-playbook remote command is bracketed by a begin
 // and an end line on stdout. The worker controls and names the step from its
 // descriptor; the persisted markers are the technical display evidence. The
