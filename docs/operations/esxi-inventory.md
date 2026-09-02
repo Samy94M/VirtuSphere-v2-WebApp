@@ -241,7 +241,7 @@ ihren gespeicherten Wert; er wird nicht automatisch geleert.
 
 Zwei weitere Eigenheiten:
 
-- **Der Datastore-Override wirkt nur beim Erstellen der VM.** Nur `createVMs-ESXi_playbook.yml` liest `datastore_name`; Power-Cycle, Start und Export lesen ausschließlich `datacenter_name`. Eine bereits erstellte VM zieht durch eine Änderung nicht um.
+- **Der Datastore-Override wirkt nur beim Erstellen der VM.** Nur `createVMLaunch-ESXi_playbook.yml` liest `datastore_name`; Power-Cycle, Start und Export lesen ausschließlich `datacenter_name`. Eine bereits erstellte VM zieht durch eine Änderung nicht um.
 - **Pro Disk ist ein eigener Datastore derzeit nicht möglich.** Der Top-Level-Parameter `datastore` von `community.vmware.vmware_guest` überstimmt laut Moduldoku `disk[].datastore` und lässt ihn ignorieren; genau diesen Parameter setzt das create-Playbook. Ein Feld dafür wäre wirkungslos. Voraussetzung für eine Umsetzung wäre ein Playbook-Umbau plus Verifikation gegen den produktiven Host.
 
 Die Mission speichert kein Zugangsdatum; der Zielhost wird erst beim Deploy gewählt. Die Auswahlliste ist deshalb eine Vereinigung über alle Zugangsdaten. Gruppiert wird nach dem **Risiko**, nicht nach der Herkunft: Die Frage am Feld lautet nicht „wer hat den Wert gemeldet", sondern „übersteht dieser Wert die Host-Wahl, die ich später treffe". Jeder Name steht in genau einer Gruppe:

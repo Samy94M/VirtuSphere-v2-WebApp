@@ -200,7 +200,7 @@ Eine Aufsicht, die selbst gerade erst verbunden ist, urteilt nicht: sie kann in 
 
 Der VM-Name ist nur die Suche, nicht der Identitätsbeweis. Portal und Playbooks verwenden die gespeicherte Instance-UUID; die MOID ist der aktuelle Hostgriff und darf sich nach erneuter Registrierung ändern. Eine unbekannte namensgleiche VM blockiert. Die ausdrücklich bestätigte Adoption ist nur erlaubt, nachdem ein Administrator die VM am Host geprüft hat; sie speichert die Identität und verändert weder Hardware noch Energiezustand.
 
-## Ergebnis je VM eines Create-Auftrags (Etappe 14B, vorbereitet)
+## Ergebnis je VM eines Create-Auftrags
 
 Ein Auftrag, dessen Modus das Create-Playbook ausführt (`create` und `full`), löst seine VM-Auswahl schon beim Einreihen auf und legt in derselben Transaktion je VM eine dauerhafte Zeile in `deploy_create_vm_results` an. Eine leere Auswahl bedeutet damit nicht mehr „alle, später entschieden": eine nach dem Einreihen angelegte VM kann einen wartenden Auftrag nicht mehr still erweitern, und bei einem geplanten Start liegen zwischen beiden Zeitpunkten Stunden.
 
@@ -208,9 +208,9 @@ Position und Gesamtzahl folgen ausschließlich `vm_name, id`. Position 7 bezeich
 
 Was diese Zeile bewusst NICHT besitzt: das Async-Verzeichnis, die Cleanup-Zähler und den Cleanup-Backoff. Die gehören dem generischen Remote-Handle, an das die Zeile über `remote_execution_id` gebunden ist; eine zweite Kopie hätte die Frage „darf dieses Verzeichnis schon entfernt werden" zwei Eigentümern gegeben.
 
-Aufträge, die vor dieser Etappe eingereiht wurden, besitzen keine solchen Zeilen und bleiben unverändert lesbar. Ausgeführt wird der neue Ablauf noch nicht: Create und Full bleiben bis zur Standortabnahme gesperrt.
+Aufträge, die vor dieser Etappe eingereiht wurden, besitzen keine solchen Zeilen und bleiben unverändert lesbar. Ein Auftrag ohne materialisierte Zeilen wird mit einer Anweisung abgelehnt, statt still über einen zweiten Pfad zu laufen: Das frühere Sammel-Playbook `createVMs-ESXi_playbook.yml` ist gelöscht, weil ein zweiter Create-Pfad ein zweiter Beweis wäre.
 
-## Der Einzel-VM-Vertrag des Create (Etappe 14B, vorbereitet)
+## Der Einzel-VM-Vertrag des Create
 
 Jeder durch VirtuSphere gestartete `ansible-playbook` läuft ab sofort mit `PYTHONUNBUFFERED=1`. Python puffert seinen stdout blockweise, sobald er kein Terminal ist, und der Worker liest über eine SSH-Pipe: ohne das stehen die Ergebniszeilen einer langen Schleife bis zum Prozessende im Puffer. Genau das war der Vorfall vom 13.08.2026, „keine Ausgabe seit 1800 Sekunden" über einer Arbeit, die auf ESXi weiterlief.
 
@@ -226,7 +226,32 @@ Der einzige maschinenlesbare Rückkanal ist eine Zeile je Steueraufruf:
 
 Zwei gemessene Eigenschaften stehen hinter dem Entwurf. Erstens antwortet `async_status` auf eine verschwundene Job-ID mit `finished: true` und, wenn der Aufruf sein Scheitern unterdrückt, mit `failed: false`; ein verlorener Job sähe damit aus wie ein fertiger. Das Status-Playbook entscheidet deshalb an der Anwesenheit der Statusdatei und nicht an der Meldung des Moduls. Zweitens verlangt die gepinnte `community.vmware` einen Mindest-`ansible-core`; der Preflight vergleicht ab jetzt die installierte Collection mit dem Pin und den installierten Kern mit dem, was diese Collection selbst fordert. Ein Host mit der aus dem Vorfall gemeldeten Kernversion fällt dort mit genau diesem Satz auf, statt bei jedem ESXi-Modul unerklärt zu scheitern.
 
-Ausgeführt wird die neue Folge noch nicht: der Worker treibt sie erst in der nächsten Teiletappe, und das bisherige Create-Playbook bleibt bis dahin unverändert in Betrieb.
+## Wie der Worker eine Create-VM treibt
+
+Der Missionsworker arbeitet die materialisierten Zeilen selbst ab, eine nach der anderen. Vor dem ersten Start prüft er die Menge als Ganzes: fortlaufende Positionen, gleiches `total` in jeder Zeile, keine VM doppelt, keine Zeile ohne VM. Danach gilt für jede Einheit dieselbe Folge aus vier Steuerplaybooks: `createVMPrepare` liest den Ist-Zustand read-only, `createVMLaunch` wiederholt diese Prüfung, vergleicht sie mit dem gespeicherten Prepare-Ergebnis und startet dann genau einen `vmware_guest`-Aufruf asynchron, `createVMStatus` fragt dessen Job-ID ab, `createVMCleanup` entfernt deren Statusdatei.
+
+Die nächste VM startet ausschließlich dann, wenn keine Zeile mehr `prepared`, `running` oder `uncertain` ist, und diese Antwort kommt aus den Zeilen, nicht aus dem Gedächtnis des Prozesses. Ein neu gestarteter Worker liest deshalb denselben Zustand. Eine unklare Einheit hält den Auftrag immer an; sie ist der einzige Zustand, in dem VirtuSphere den Ausgang auf ESXi nicht kennt, und die nächste VM zu starten hieße, diese Unkenntnis zu überschreiben.
+
+Das Async-Verzeichnis wird nicht zusätzlich gespeichert, sondern aus dem ohnehin deterministischen Arbeitsverzeichnis des Auftrags abgeleitet: `<Arbeitsverzeichnis>/create.vm.<Position>/async`. Dadurch findet ein neu gestarteter Worker dieselbe Job-ID ohne zweite Kopie in der Datenbank. Das Gesamtbudget der Create-Strecke ist kein eigener Wert, sondern das SSH-Gesamtbudget; es läuft ab `deploy_jobs.create_started_at` und wird per `COALESCE` genau einmal gesetzt, also nicht durch einen Wiederaufnahmelauf zurückgedreht.
+
+Die feste Wartezeit nach dem Erstellen (früher `CreateSettleSeconds`, 60 Sekunden blind) ist ersatzlos entfallen. Jede Einheit wird bis zum Ende gepollt und ihre Live-Identität zurückgelesen; das ist der Beweis, den die Wartezeit nur zu ersetzen versuchte.
+
+Nach jedem Erfolg bindet **eine** Transaktion die Identität: Auftrag, Ergebniszeile und VM gesperrt, eine leere UUID wird gebunden, eine gleiche UUID frischt nur die MOID auf, eine abweichende UUID schreibt nichts. Eine vierte Beweiskombination, die keiner dieser drei entspricht, ist `identity_result_invalid` und damit ein Fehler, keine Auslegung.
+
+Im Auftragsprotokoll erscheint je Einheit eine technische, nicht übersetzte SYSTEM-Zeile:
+
+```text
+[7/15] RUN create Backup-12345
+[7/15] POLL create Backup-12345
+[7/15] DONE create Backup-12345 created
+Create summary: total=15 created=14 updated=0 unchanged=0 skipped=0 failed=1 uncertain=0 not_started=0
+```
+
+`RUN`, `POLL`, `DONE`, `FAIL` und `HOLD` sind die fünf Verben; `HOLD` bedeutet, dass diese Einheit den Auftrag angehalten hat. Die Schlüssel der Zusammenfassung bleiben technisch, weil ein Operator sie greppt; die sichtbaren Zähler im Portal kommen aus denselben Zeilen über die Sprachkataloge.
+
+Der Abschluss folgt einer festen Matrix: alles erfolgreich oder übersprungen ergibt `succeeded`, mindestens ein Erfolg ergibt `partial`, kein Erfolg ergibt `failed`. `partial` ist hier eine echte Kategorie und keine gerundete Niederlage: Ein Auftrag, der vierzehn von fünfzehn VMs erstellt hat, hat den Zielhost verändert. Ein Create-only-Auftrag lässt den fachlichen Lebenszyklus der VMs netto unverändert, ein `full` bricht vor dem Powercycle ab und konvergiert wie bisher.
+
+Der Reaper konvergiert in derselben Transaktion nur die noch fliegenden Einheiten nach `uncertain`; bestätigte Erfolge, Fehler und Übersprungene bleiben unangetastet. Ein stehengelassenes `running` wäre die Behauptung eines Polls, den niemand mehr ausführt.
 
 ## Abbruch und Teilfehler
 

@@ -39,15 +39,43 @@ before the callback. The callback independently rejects a stored UUID mismatch
 before writing identity, MACs or state.
 
 The full pipeline is the sole exception for an empty stored UUID after create.
-Its first step has just proved the name absent and created the VM in the same
-sequential remote command; later steps may use that unbound object, and export
-then persists its identity. Standalone power, export, start and autostart modes
-have no preceding proof and require a stored UUID.
+Its create step has just proved the name absent and created the VM within the
+same job; later steps may use that unbound object, and export then persists its
+identity. Standalone power, export, start and autostart modes have no preceding
+proof and require a stored UUID.
 
 Production deployment support is direct standalone ESXi only. A vCenter
 credential remains useful for the documented partial read-only inventory, but
 is not a supported deploy target. The support-matrix guard pins that row,
 including the first-datacenter and root-folder limits.
+
+### Amendment: create binds identity per VM (see ADR-0041)
+
+Create no longer runs one looped call over the whole selection. Each VM is one
+unit that the worker drives, so the identity check and the binding both moved
+inside that unit:
+
+- The live check runs twice per unit, in `createVMPrepare` and again in
+  `createVMLaunch` immediately before `state: present`, and its outcome is a
+  closed fact (`vs_identity_conflict` with a code and a reason) reported as a
+  `rejected` marker. A foreign namesake is therefore a decided outcome for that
+  one VM, not an aborted call: as an unmarked abort it would have reached the
+  worker as a protocol error and sent the operator to the wrong place, while a
+  foreign namesake is the most common real case.
+- After each success one transaction binds the identity: an empty UUID is bound,
+  an equal UUID refreshes only the MOID, a differing UUID writes nothing, and a
+  fourth evidence combination is `identity_result_invalid` rather than an
+  interpretation. A create-only job therefore no longer needs a later export to
+  learn who its VMs are.
+
+`identity_unbound_allowed` stays exactly as decided above, including for `full`.
+The plan that produced this amendment expected the per-VM binding to make it
+unnecessary; it does not, and the reason is mechanical: `serverlist.yml` is
+generated once when the job's artifacts are prepared, before the first playbook
+runs. The UUID a later step of the same `full` job reads from that file is
+therefore the state from before create, whatever the database now knows. Removing
+the flag would require regenerating the artifact between steps, which is a
+behavioural change with its own host proof and not a documentation edit.
 
 ## Consequences
 

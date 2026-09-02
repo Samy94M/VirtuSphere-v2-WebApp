@@ -81,6 +81,7 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_deploy.deploy_cancel_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1b')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_cancel_p1c')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p3')); ?></p>
         </section>
@@ -123,6 +124,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.create_progress_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p4')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_p5')); ?></p>
         </section>
 
         <section class="panel">

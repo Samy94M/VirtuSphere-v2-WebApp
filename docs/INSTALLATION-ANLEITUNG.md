@@ -46,7 +46,9 @@ Auf dem Portal-Host müssen vorhanden sein:
 - `openssl` für lokale Secret-Erzeugung.
 - Schreibrechte im Repository für `.env`, `Docker/WebAPI/logs`, `Docker/logs/nginx` und `Docker/mysql/mysql-data`.
 
-Auf dem Ansible-Ausführungs-Host müssen `python3`, `ansible-playbook` aus `ansible-core`, die Python-Module `pyvmomi` und `requests` sowie die Collection `community.vmware` vorhanden sein. Der dedizierte SSH-Benutzer benötigt Schreibrechte in seinem Home-Verzeichnis und unter `/tmp`; ausgehend müssen ESXi auf Port 443 und die konfigurierte Portal-API-Basis-URL erreichbar sein.
+Auf dem Ansible-Ausführungs-Host müssen `python3`, `ansible-playbook` aus `ansible-core`, die Python-Module `pyvmomi` und `requests` sowie die Collection `community.vmware` vorhanden sein. Die Collection muss genau die in `Ansible/requirements.yml` gepinnte Version haben, und `ansible-core` muss mindestens die Version haben, die diese Collection selbst fordert; der Verbindungstest des Ansible-Zugangs prüft beides und lehnt eine Abweichung ab, statt sie zu benutzen. Der dedizierte SSH-Benutzer benötigt Schreibrechte in seinem Home-Verzeichnis und unter `/tmp`; ausgehend müssen ESXi auf Port 443 und die konfigurierte Portal-API-Basis-URL erreichbar sein.
+
+Beim Anlegen von VMs legt jeder Auftrag unter seinem Arbeitsverzeichnis je VM ein Async-Verzeichnis mit Modus 0700 an und speichert dort die Job-ID des laufenden Vorgangs. Dieses `/tmp` muss deshalb einen Neustart des Workers überstehen; wird es je Sitzung neu eingehängt, kann ein unterbrochener Auftrag seinen eigenen Lauf nicht mehr wiederfinden.
 
 Vor dem Air-Gap-Betrieb müssen benötigte Docker-Images, Composer-/Vendor-Inhalte und die Ansible-Toolchain bereits lokal vorhanden sein. Das Setup-Skript installiert keine Betriebssystempakete und lädt zur Laufzeit keine externen Pakete nach. Die lokale QA-Basis mit PHPUnit, Hook-Scan und Lang-Audit ist in `docs/QA.md` dokumentiert; Composer-Updates müssen `composer.lock` und passende `Docker/WebAPI/vendor`-Artefakte zusammenhalten.
 

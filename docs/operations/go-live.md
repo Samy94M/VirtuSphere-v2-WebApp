@@ -89,7 +89,9 @@ Auf dem Host installieren und bereitstellen:
 | `ansible-playbook` (ansible-core) und `python3` | führt die Playbooks aus |
 | Python-Modul `pyvmomi` | vSphere-Anbindung (`pip install pyvmomi`) |
 | Python-Modul `requests` | jedes `community.vmware`-Modul importiert es (`pip install requests`); `pyvmomi` bringt es nicht mit, und ohne es scheitert **jeder** Playbook-Aufruf beim Import, bevor er ein Argument liest |
-| Collection `community.vmware` | die `vmware_guest`-Module (`ansible-galaxy collection install -r Ansible/requirements.yml`) |
+| Collection `community.vmware` **in exakt der gepinnten Version** | die `vmware_guest`-Module (`ansible-galaxy collection install -r Ansible/requirements.yml`). Die Version steht ausschließlich in dieser Datei; der Preflight vergleicht die installierte Collection damit und lehnt eine andere ab, statt sie stillschweigend zu benutzen |
+| `ansible-core` mindestens in der Version, die diese Collection selbst fordert | Der Preflight liest den Wert aus der installierten Collection (`meta/runtime.yml`) statt ihn zu wiederholen und meldet einen zu alten Kern mit genau diesem Satz. Ohne diese Prüfung scheitert stattdessen jedes ESXi-Modul ohne erkennbaren Grund; genau so sah der Vorfall vom 13.08.2026 auf dem Kundenhost aus |
+| Schreibrecht im Heimatverzeichnis des Kontos und ein `/tmp`, das einen Worker-Neustart überlebt | Beim Anlegen der VMs legt jeder Auftrag unter seinem Arbeitsverzeichnis je VM ein eigenes Async-Verzeichnis (`create.vm.<Position>/async`, Modus 0700) an. Dort liegt die Job-ID des laufenden `vmware_guest`-Aufrufs; sie ist der einzige Weg, nach einem Verbindungsabbruch denselben Lauf weiterzuverfolgen statt eine zweite VM zu erzeugen. Ein `/tmp`, das je Sitzung neu eingehängt wird, zerstört genau diesen Beweis |
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
@@ -111,6 +113,30 @@ Prüfkette ausgeführt haben kann. Ein Auftrag, der vor dem Start aus der
 Warteschlange abgebrochen wurde, erscheint dort nicht. Der Volltest lässt sich direkt in derselben Zeile erneut
 starten; sein Audit bleibt unter Protokolle → Sicherheit, Kategorie
 `credentials`.
+
+### Create-Rauchtest vor der Produktivfreigabe
+
+Der Volltest belegt Zugang und Umgebung, nicht das Anlegen einer VM. Vor der
+Freigabe deshalb einmal einen echten `create`-Auftrag über eine Wegwerf-Mission
+fahren und dabei drei Dinge belegen, nicht annehmen:
+
+1. **Der Fortschritt kommt laufend an.** Im Auftragsprotokoll muss je VM eine
+   Zeile `[n/total] RUN|POLL|DONE create <Name>` erscheinen, und zwar während der
+   Auftrag läuft, nicht erst an seinem Ende. Erscheint alles gesammelt am Schluss,
+   ist die Ausgabe wieder gepuffert; dann nicht die Zeitbudgets erhöhen, sondern
+   die Ursache suchen.
+2. **Eine lange Platte ist der interessante Fall.** Mindestens eine VM mit Eager
+   Zeroed Thick in einer Größe, deren Anlegen deutlich über der Leerlaufgrenze
+   liegt. Der Auftrag darf dabei nicht abbrechen, weil er weiterhin regelmäßig
+   nachfragt.
+3. **Der Host bleibt sauber.** Nach dem Auftrag auf dem Ansible-Host prüfen, dass
+   unter `/tmp/virtusphere-job-*` nichts von diesem Auftrag zurückbleibt.
+   Bleibt etwas liegen, sagt das Protokoll auch, warum: Ein Schritt, der nie
+   zurückgemeldet hat, wird bewusst nicht aufgeräumt, weil unter einem laufenden
+   Playbook zu löschen genau den Beweis zerstört, um den es geht.
+
+Danach die Wegwerf-VMs gezielt und einzeln am Host entfernen, niemals über ein
+Namenspräfix.
 
 ---
 

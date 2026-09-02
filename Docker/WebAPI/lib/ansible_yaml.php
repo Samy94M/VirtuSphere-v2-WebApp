@@ -120,7 +120,7 @@ function ansible_effective_datacenter(array $mission, array $vm, string $hostDat
 
 /**
  * Datastore a single VM is created on. Same inheritance as the datacenter, but
- * only createVMs-ESXi_playbook.yml reads item.datastore_name, so changing it on
+ * only createVMLaunch-ESXi_playbook.yml reads item.datastore_name, so changing it on
  * an existing VM has no effect until the VM is recreated.
  */
 function ansible_effective_datastore(array $mission, array $vm): string

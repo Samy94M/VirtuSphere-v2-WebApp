@@ -19,7 +19,7 @@ Required on the Ubuntu host:
 | Dimension | Supported | Notes |
 |---|---|---|
 | ESXi / vSphere | 7.0, 8.0 | The range `community.vmware` 6.x targets. Older releases are out of general support. The 6.x line itself reaches end of life in November 2027; `Ansible/requirements.yml` is the single source for that date and for the one module the pin already marks deprecated. |
-| ESXi for **creating** VMs | 8.0 Update 2 or newer | `createVMs-ESXi_playbook.yml` creates VMs at hardware version 21, and Broadcom documents vmx-21 as not compatible with ESXi releases before 8.0 Update 2. On an older host the create step fails hard, so this floor is narrower than the row above on purpose: inventory, autostart and power-cycling work from 7.0, only creation does not. The retired desktop client (ADR-0035) shipped the same 21, which is why nobody met this: it proves the hosts in the field are already 8.0 U2 or newer, not that 7.0 works. `check-doc-semantics.sh` (rule 15) fails the build if the playbook's version and this floor drift apart. |
+| ESXi for **creating** VMs | 8.0 Update 2 or newer | `createVMLaunch-ESXi_playbook.yml` creates VMs at hardware version 21, and Broadcom documents vmx-21 as not compatible with ESXi releases before 8.0 Update 2. On an older host the create step fails hard, so this floor is narrower than the row above on purpose: inventory, autostart and power-cycling work from 7.0, only creation does not. The retired desktop client (ADR-0035) shipped the same 21, which is why nobody met this: it proves the hosts in the field are already 8.0 U2 or newer, not that 7.0 works. `check-doc-semantics.sh` (rule 15) fails the build if the playbook's version and this floor drift apart. |
 | Licence | any licensed edition (Standard, Enterprise Plus, VCF) | The write API is what deploy and autostart need. |
 | Free licence (incl. 8.0 U3e) | inventory only | Broadcom's free hypervisor exposes a read-only API. Inventory pulls work; creating VMs and writing the autostart policy do not. The portal reads the licence from the host and warns before a job runs. |
 | Host in a vSphere HA cluster | deploy yes, autostart no | ESXi disables autostart on HA cluster members; the HA restart priority owns startup there. |
@@ -47,8 +47,8 @@ A database outage while a job runs is survivable and does not fail the job. The 
 The playbooks under `Ansible/` are not self-contained: they read variables that the WebAPI generates at deploy time in `Docker/WebAPI/lib/ansible.php`. The playbook `{{ ... }}` names and the generated keys must stay in lockstep; renaming one side breaks the deploy silently, so change both together.
 
 - `accounts.yml` (from `ansible_accounts_yml`): `esxi_hostname`, `esxi_port`, `esxi_username`, `esxi_password`, `ansible_username`, `apiUrl`. `esxi_port` is always emitted; `credential_esxi_normalize` defaults it to `443` (`VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTPS`) when the ESXi credential has no explicit port, so `port: "{{ esxi_port | int }}"` is always defined.
-- `serverlist.yml` (from `ansible_serverlist_yml`): `vm_configurations`, a list whose items carry `vm_name`, `vm_moid`, `vm_instance_uuid`, `guest_id`, `datacenter_name`, `datastore_name`, `disks` (a list), `network` (a list of `name` + `device_type`, where `device_type` is one of `vmxnet3`/`e1000`/`e1000e` from `VIRTUSPHERE_INTERFACE_TYPES`, enum-validated on write so it always matches what `vmware_guest` accepts), `memory`, `vcpus`, `hotadd_cpu`/`hotadd_memory` (bool, from the VM `cpu_hotplug`/`ram_hotplug` flags; the create playbook maps them to `hardware.hotadd_cpu`/`hotadd_memory`), `needs_mac` (bool) and `autostart` (a block of `enabled`, `start_delay`, `stop_delay`; a delay of `-1` means "inherit the mission default" and is passed through to `vmware_host_auto_start` unchanged). It also emits the top-level `PowerCycleWaitSeconds`, `StartWaitSeconds` (both in seconds, both portal fields), the fixed `CreateSettleSeconds` and `identity_unbound_allowed`; the last value is true only inside `full`, where create in the same sequential run has just proved an unbound name absent. Every playbook pause reads one of the three timing values, and none of them may be configured up to the SSH idle budget, which `AnsiblePauseBudgetContractTest` enforces. Plus a `mission_configuration.autostart` block (`enabled`, `start_delay`, `stop_delay`, `stop_action`, `wait_for_heartbeat`) which becomes the host's `system_defaults`. The create playbook maps these into `vmware_guest` `disk`/`networks`/`hardware`; when connecting straight to a standalone ESXi host, `datacenter_name` must resolve to `ha-datacenter`. When a deploy job selects specific VMs, `vm_configurations` contains only that subset; an empty selection means the whole mission.
-- Only `createVMs-ESXi_playbook.yml` defines a `hardware:` block (VM sizing, firmware, hardware version); `startVMs-` powers on existing VMs via `vmware_guest_powerstate` and has no hardware settings. It pauses `StartWaitSeconds` first, so MECM can take the freshly registered devices into their collections before the VM PXE-boots.
+- `serverlist.yml` (from `ansible_serverlist_yml`): `vm_configurations`, a list whose items carry `vm_name`, `vm_moid`, `vm_instance_uuid`, `guest_id`, `datacenter_name`, `datastore_name`, `disks` (a list), `network` (a list of `name` + `device_type`, where `device_type` is one of `vmxnet3`/`e1000`/`e1000e` from `VIRTUSPHERE_INTERFACE_TYPES`, enum-validated on write so it always matches what `vmware_guest` accepts), `memory`, `vcpus`, `hotadd_cpu`/`hotadd_memory` (bool, from the VM `cpu_hotplug`/`ram_hotplug` flags; the create playbook maps them to `hardware.hotadd_cpu`/`hotadd_memory`), `needs_mac` (bool) and `autostart` (a block of `enabled`, `start_delay`, `stop_delay`; a delay of `-1` means "inherit the mission default" and is passed through to `vmware_host_auto_start` unchanged). It also emits the top-level `PowerCycleWaitSeconds`, `StartWaitSeconds` (both in seconds, both portal fields) and `identity_unbound_allowed`; the last value is true only inside `full`, where create in the same job has just proved an unbound name absent. The fixed `CreateSettleSeconds` is gone with the per-VM create flow: its blind 60-second wait was replaced by reading each VM's live identity back. Every playbook pause reads one of the three timing values, and none of them may be configured up to the SSH idle budget, which `AnsiblePauseBudgetContractTest` enforces. Plus a `mission_configuration.autostart` block (`enabled`, `start_delay`, `stop_delay`, `stop_action`, `wait_for_heartbeat`) which becomes the host's `system_defaults`. The create playbook maps these into `vmware_guest` `disk`/`networks`/`hardware`; when connecting straight to a standalone ESXi host, `datacenter_name` must resolve to `ha-datacenter`. When a deploy job selects specific VMs, `vm_configurations` contains only that subset; an empty selection means the whole mission.
+- Only `createVMLaunch-ESXi_playbook.yml` defines a `hardware:` block (VM sizing, firmware, hardware version); `startVMs-` powers on existing VMs via `vmware_guest_powerstate` and has no hardware settings. It pauses `StartWaitSeconds` first, so MECM can take the freshly registered devices into their collections before the VM PXE-boots.
 
 ### Deploy modes and the MAC-generation power-cycle
 
@@ -63,8 +63,8 @@ the WDS/PXE contract requires exactly one interface whose name exactly equals
 the mission WDS portgroup. That specialized finding blocks `full`,
 `powercycle` and `export`, while `create`, `start` and `autostart` warn. Queue,
 stagger, worker and retry use the same aggregator, and the worker rechecks after
-claim before SFTP/SSH. Etappe 14A does not enable the prepared remote `create`
-or `full` contracts; that remains Etappe 14B.
+claim before SFTP/SSH. A network blocker produces no remote work at all: no
+upload, no async job id and no change on ESXi.
 
 The same gate caps one job's regular scope at
 `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` VMs and
@@ -85,6 +85,55 @@ request_too_large`. `php -i | grep post_max_size` inside the container is the
 check.
 
 The deploy form's label map (`virtusphere_deploy_mode_labels()`) is the source of truth for which modes an operator may ask for. `inventory` is a *system* mode: it has no label, cannot be posted, and `repo_create_system_job()` refuses anything else. The read side (`deploy_job_normalize_mode()`) still accepts it, because the worker reads back a queued inventory job's payload. The location gate follows the same shape: `autostart` reads neither `datacenter_name` nor `datastore_name`, so a mission without a datastore can still have its autostart policy written, while every other mode is refused. Staggering is refused for `autostart` in the repository as well as on the page, because a config write has nothing to spread over time.
+
+### One VM at a time: the create contract
+
+`create` and `full` do not run one playbook over a loop of VMs. The queue
+materializes the selected scope into one durable `deploy_create_vm_results` row
+per VM in the same transaction that creates the job, ordered by `vm_name, id`,
+so position 7 means the same VM in the portal, in the job log and on a retry. An
+empty selection is resolved at queue time and no longer means "all VMs, decided
+later": a VM created afterwards cannot silently widen a job that is waiting for
+its scheduled start.
+
+The worker then drives each row itself through four control playbooks
+(`createVMPrepare`, `createVMLaunch`, `createVMStatus`, `createVMCleanup`, plus
+the shared `create_identity_check_tasks.yml` and `emit_create_result.py`; all six
+are listed in `VIRTUSPHERE_CREATE_ARTIFACTS` because the SFTP upload has to carry
+them). `createVMLaunch` starts exactly one `vmware_guest` call with `async` and
+`poll: 0`; the worker polls its job id every
+`VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS`. Operational consequences:
+
+- **Runtime versions are checked, not assumed.** The preflight compares the
+  installed `community.vmware` against the pin in `Ansible/requirements.yml` and
+  the installed `ansible-core` against what that collection itself requires. A
+  host below either floor fails there with that sentence instead of failing
+  unexplained inside every ESXi module.
+- **Every `ansible-playbook` runs with `PYTHONUNBUFFERED=1`.** Python buffers
+  stdout blockwise once it is not a terminal, and the worker reads over an SSH
+  pipe. Without it a long run's result lines sit in the buffer until the process
+  ends, which is what produced "no output for 1800 seconds" over work that was
+  still running on ESXi.
+- **The async state directory is derived, not stored.** It is
+  `<remote job dir>/create.vm.<position>/async` under the already deterministic
+  `/tmp/virtusphere-job-<id>-<mission slug>` on the Ansible host, created with
+  mode 0700 and without following symlinks. A restarted worker finds the same job
+  id there without a second copy in the database, which is why the Ansible host's
+  `/tmp` must survive a worker restart and must not be a per-session mount.
+- **The wall-clock budget of the create section is the SSH total budget**
+  (`deploy_create_total_budget_seconds()`), measured from
+  `deploy_jobs.create_started_at`, which is set once with `COALESCE` so a resumed
+  job does not restart its own clock. Exceeding it makes the unit `uncertain`,
+  never a blind retry.
+- **Cleanup is explicit.** `createVMCleanup` removes one job id's status file;
+  the worker removes the whole work directory only after a step sequence ended.
+  A step that never returned is deliberately left in place and said so in the
+  log, because deleting under a running playbook would destroy the evidence about
+  VMs whose outcome is still unknown.
+- **Identity is bound immediately.** After each successful unit one transaction
+  locks job, result row and VM, binds an empty UUID, refreshes only the MOID on
+  an equal UUID and writes nothing on a differing one. A create-only job does not
+  need a later export to learn who the VM is.
 
 ### VM identity, collision block and adoption
 

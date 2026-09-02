@@ -113,8 +113,23 @@ Standortabnahme. Das JSON enthält einen gehashten Hostfingerprint und keine
 Credentials. Es aktiviert aus sich selbst keinen Modus; ohne den noch offenen,
 revisions- und bundlegebundenen 8R-S-Import bleibt jeder neue Remote-Modus
 `disabled`. Auf Entwicklungs- oder Ersatzhosts erzeugte Ergebnisse sind keine
-Standortevidenz. `create` und `full` bleiben unabhängig davon bis Etappe 14B
-gesperrt.
+Standortevidenz.
+
+`create` und `full` laufen unabhängig davon weiterhin über den bestehenden
+SSH-Weg, seit Etappe 14B aber mit einem Aufruf je VM. Dafür gilt offline dasselbe
+wie sonst: Es wird zur Laufzeit nichts nachgeladen. `ansible-core`, `pyvmomi`,
+`requests` und die Collection kommen als gepinnte Wheels beziehungsweise als
+gepinnte Collection aus `deps/wheels` und `collections/` des Bundles, und der
+Preflight vergleicht die installierte Collection mit dem Pin und den installierten
+Kern mit dem, was diese Collection selbst fordert. Eine abweichende Version wird
+abgelehnt, nicht stillschweigend verwendet.
+
+Ein kurzer Selbsttest der Async-Naht ohne ESXi lohnt sich hier, weil sie das
+einzige Stück des Create-Wegs ist, das vom Host und nicht von VirtuSphere abhängt:
+Ein `command`-Aufruf mit `async` und `poll: 0` muss eine Job-ID hinterlassen, die
+eine spätere, eigene Abfrage im selben Verzeichnis wiederfindet. Findet sie nichts,
+fehlt dem Konto das Schreibrecht im Heimatverzeichnis oder `/tmp` wird je Sitzung
+neu eingehängt; beides macht einen unterbrochenen Create-Auftrag unauflösbar.
 
 ## Schritt 5: `.env` anlegen
 

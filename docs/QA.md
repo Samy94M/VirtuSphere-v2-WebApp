@@ -265,15 +265,18 @@ pass, and the gate would guard nothing. If the control case ever goes green-by-
 buffering-no-more, the runtime changed and the plan's premise needs re-reading -
 that is not a threshold to raise.
 
-**`CreateFlowBaselineContractTest`.** Six facts about today's path, each naming
-the sub-stage that rewrites it: the create sequence is one buffered
-`ansible-playbook` call for the whole selection (Etappe D), the playbook mutates
-every VM in one looped `vmware_guest` task with no `async` (Etappe D), there is
-no per-VM create result and no `create_started_at` in the schema (Etappe C), a
-retried create repeats the entire original selection because the only narrowing
-plan is the MAC export follow-up (Etappe F), and create-only produces no net
-lifecycle change by marking `deploying` and restoring the prior state, which the
-new orchestration has to keep (Etappe E).
+**`CreateFlowBaselineContractTest`.** Six facts, each written first as the
+starting point and then rewritten by the sub-stage that changed it, which is how
+the file reads today: create is no longer a step of the remote sequence at all
+(Etappe E drives one call per VM), the playbook mutates exactly one VM
+asynchronously instead of looping over the selection (Etappe D), the per-VM
+create result and `create_started_at` exist and are written by the worker
+(Etappe C/E), a retried create still repeats the entire original selection
+because already created VMs become `verify_skip` units rather than disappearing
+from the scope (Etappe F), create-only still produces no net lifecycle change,
+which the new orchestration had to keep, and the full log tail contract was
+already in place from Etappe 10A. A red assertion here without one of those
+stages means the create path moved by accident.
 
 Three things the plan asked for turned out to be done already, by stages that
 landed after it was written: the `ansible-doc` preflight no longer copies the
@@ -289,6 +292,55 @@ the 2.19 floor that the 6.2.0 pin enforces. Whether the production host runs an
 older collection or the ESXi path is failing there for that reason is a site
 question, and Etappe D turns it into a hard preflight check instead of a
 document.
+
+### Etappe 14B: what proves the repaired create path
+
+Four layers, none of which needs ESXi. **The async seam** is the
+`ansible-create-async` gate: a sleep stub in the pinned QA image proves that a
+`poll: 0` start leaves a re-findable job id in the dedicated directory, that a
+separate later query reports running and then finished, and that the targeted
+cleanup removes exactly that status file. It also pins the reason the whole
+design hangs off the status file: an unknown job id answers `finished` without
+`failed`, so a lost job would otherwise look like a completed one.
+
+**The state machine** is `CreateFlowWorkerContractTest` (no database, no SSH):
+no cleanup trap in the control command, 0700 creation without following
+symlinks, extra-vars as typed JSON in both directions, the budget boundary at
+-1/0/+1 and with no start time, an in-flight unit beating a lower pending
+position, four materialisation defects, the terminal status matrix and the two
+log line formats. `DeployCreateWorkerFlowTest` runs the same machine against
+real MySQL on a deterministic fifteen-unit fixture with failures at positions 1,
+8 and 15: twelve confirmed successes stay untouched, the job ends `partial`, a
+confirmed failure continues while an `uncertain` unit stops the job, the
+identity commit is exercised in all five branches including replay and case,
+a foreign fence writes nothing, and the reaper converges exactly the one unit
+still in flight and is idempotent.
+
+**The retry boundary** is `DeployCreateRetryMatrixTest` plus
+`DeployJobRetryFlowTest` and `DeployCreateReleaseTest`: an unresolved unit
+blocks the retry with `retry_create_unresolved`, and the release that lifts it
+requires a successful inventory pull strictly newer than both the job and the
+unit, with neither the name nor the stored UUID present in it. The operator's
+Recent-Tasks statement is deliberately not one of those conditions; it is
+recorded as their statement, never as something VirtuSphere established.
+
+**The browser layer** is `deploy-create-progress.spec.js` for the per-VM card
+and its paging.
+
+What none of this proves is the real host. Transport loss, a cancel during a
+running VM and a database outage are exercised against the pure functions and
+the stored rows, not against a real SSH transport, and the thirteen controlled
+ESXi staging cases (section 15.6 of the create plan) remain a site acceptance:
+a small thin VM, a second run ending `unchanged`, an allowed hardware
+deviation ending `updated`, one and two foreign namesakes blocked before any
+mutation, a representative eager-zeroed-thick VM running past the old idle
+window, a fifteen-VM job whose vSphere Recent Tasks show at most one concurrent
+create task, a controlled SSH break after and before a stored job id, a cancel
+during a long VM, a worker restart during a live job id, a second complete run,
+and the cleanup check. They create real VMs and real datastore usage, so target
+host, datastore, VM prefix and the person responsible for deleting them are
+recorded before the first one runs, and only those recorded throwaway VMs are
+removed afterwards, never by a name prefix.
 
 ## Test Commands
 

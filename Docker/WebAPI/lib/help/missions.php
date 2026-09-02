@@ -72,7 +72,10 @@ declare(strict_types=1);
                   // beide stehen sonst als Zahl bzw. Name im Text und lügen, sobald
                   // jemand die Konstante bewegt. ?>
             <p><?php echo h(__t('help_missions.disktype_p2', ['default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type'])])); ?></p>
-            <p><?php echo h(__t('help_missions.disktype_p3', ['minutes' => intdiv(VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS, 60)])); ?></p>
+            <p><?php echo h(__t('help_missions.disktype_p3', [
+                'minutes' => intdiv(VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS, 60),
+                'hours' => intdiv(deploy_create_total_budget_seconds(), 3600),
+            ])); ?></p>
         </section>
 
         <section class="panel">
