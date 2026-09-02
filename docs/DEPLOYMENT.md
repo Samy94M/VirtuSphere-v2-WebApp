@@ -159,6 +159,30 @@ The `Ansible/` copies are the web-app deploy source; the former desktop `bin/` b
 
 The `deploy-worker`, `maintenance-worker`, `php`, `webserver` and `mysql` services run with `restart: unless-stopped` so the stack recovers after a host reboot or a container crash without manual intervention. Every runtime service carries a healthcheck (AP8): MySQL answers `mysqladmin ping`, PHP answers the FPM FastCGI ping, nginx answers its own `/nginx-health` location, and both workers keep a liveness file fresh that `lib/worker_healthcheck.php` judges. `webserver` waits for real PHP readiness (`service_healthy`), so a cold `docker compose up -d --wait` only returns green when the whole chain accepts work. phpMyAdmin is admin tooling in the optional `tools` profile (`docker compose --profile tools up -d phpmyadmin`, loopback-only) and is not part of the runtime stack.
 
+**Stopping a worker is answered rather than waited out.** Until Etappe 14C a
+`docker stop` on `deploy-worker` or `maintenance-worker` took the full grace
+period and ended in exit 137 (measured: 30.4 s), on every restart, stack update
+and host reboot. Two individually harmless facts combined into that. A process
+that is PID 1 ignores every signal it has installed no handler for, because the
+kernel applies no default actions there; and this container inherits
+`STOPSIGNAL SIGQUIT` from the `php:*-fpm` base image, where that is php-fpm's
+graceful shutdown. So SIGQUIT arrived, nobody listened, and Docker eventually
+sent SIGKILL, leaving the worker no chance to write a last line or release
+ownership while its playbook kept changing ESXi. All three loop processes now
+install the shared handler from `lib/worker_stop_signal.php` and stop in 0.4 s
+with exit 0. The promise is deliberately modest: an IDLE process exits at once,
+which is the vast majority of stops; a BUSY one records the request, logs one
+line and keeps going, because no signal to this process can stop a playbook on
+another host.
+
+**Two process shapes (ADR-0042).** `docker-compose.yml` runs the worker directly
+and stays that way. `docker-compose.supervisor.yml` runs a supervisor that holds
+exactly one worker as its child, restarts it after confirmed heartbeat failures
+and never starts a second one before `waitpid` confirms the old one is gone. It
+is applied only together with an audited switch of the stored process contract
+(`lib/deploy_supervisor_switch.php`); the service snapshot fails closed to
+`degraded` while the running shape and the stored contract disagree.
+
 In `--loop` mode the worker tolerates a MySQL outage instead of exiting: it retries the initial connection with backoff (up to 30s between attempts) and, if the database drops mid-loop, reconnects through `db(true)` and continues claiming jobs. This closes the earlier failure where a slow MySQL start or a MySQL restart left the worker container dead and deploy jobs stuck in `queued` with no portal-visible error. The `--once` mode used by tooling still fails fast (three connection attempts, then a non-zero exit).
 
 Long-running worker phases send heartbeats at least every `VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS` (30s) through phase boundaries and streamed Ansible output. At the beginning of each loop the worker reaps running jobs whose heartbeat is older than `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` (600s): the job is marked `failed`, its lock is cleared, a SYSTEM log line is written, and affected mission VMs are reset through the existing deploy-worker VM status path. A reaped ESXi inventory job additionally records the durable `worker` failure and its exact job id, so the System-status card cannot retain an older green result while the terminal system job disappears from the active queue. Terminal updates are guarded by `id`, `locked_by` and `running` status so a worker that lost ownership cannot overwrite a cancelled or reaped job.

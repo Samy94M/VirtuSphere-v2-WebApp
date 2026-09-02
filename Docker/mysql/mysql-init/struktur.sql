@@ -472,6 +472,20 @@ CREATE TABLE IF NOT EXISTS deploy_runtime_identity (
     id TINYINT UNSIGNED PRIMARY KEY,
     current_generation_id BINARY(16) NOT NULL,
     supervisor_contract VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    -- The supervisor's published state (migration 0049). Nullable and never
+    -- backfilled: under `worker_v1` these stay NULL, which is the truth, not a
+    -- gap. `supervisor_child_pid` is diagnostic only; a pid means nothing
+    -- outside the container that owns it, so nothing may act on it.
+    supervisor_heartbeat_at TIMESTAMP NULL,
+    supervisor_pid INT UNSIGNED NULL,
+    supervisor_phase VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    supervisor_child_pid INT UNSIGNED NULL,
+    supervisor_child_started_at TIMESTAMP NULL,
+    supervisor_restart_window_started_at TIMESTAMP NULL,
+    supervisor_restart_count INT UNSIGNED NOT NULL DEFAULT 0,
+    supervisor_next_retry_at TIMESTAMP NULL,
+    supervisor_contract_changed_at TIMESTAMP NULL,
+    supervisor_contract_changed_by INT NULL,
     claim_state VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'accepting',
     claim_changed_at TIMESTAMP NULL,
     claim_changed_by INT NULL,
@@ -479,11 +493,25 @@ CREATE TABLE IF NOT EXISTS deploy_runtime_identity (
     rotation_reason VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     rotated_by INT NULL,
     CONSTRAINT deploy_runtime_identity_singleton CHECK (id = 1),
-    CONSTRAINT deploy_runtime_identity_supervisor_check CHECK (supervisor_contract IN ('worker_v1','supervisor_v1')),
-    CONSTRAINT deploy_runtime_identity_claim_check CHECK (claim_state IN ('accepting','pause_after_current','paused')),
-    CONSTRAINT deploy_runtime_identity_reason_check CHECK (rotation_reason IN ('install','restore','clone')),
+    -- The `_ascii` introducers are load-bearing, not decoration. All four
+    -- columns below are ascii, and a CHECK literal without an introducer is
+    -- recorded with the CONNECTION charset at CREATE time (`_latin1` for the
+    -- client that loads this file). The moment any later ALTER rebuilds the
+    -- table, MySQL re-resolves the literals against the ascii column and stores
+    -- them as `_ascii` - so a fresh install and a migrated install end up with
+    -- textually different constraints for identical semantics, and
+    -- check-schema-convergence.sh fails. Migration 0049 is what surfaced it;
+    -- the divergence was latent here from the start, and the rest of this file
+    -- already writes the introducer (see deploy_jobs_execution_contract_check).
+    CONSTRAINT deploy_runtime_identity_supervisor_check CHECK (supervisor_contract IN (_ascii'worker_v1',_ascii'supervisor_v1')),
+    CONSTRAINT deploy_runtime_supervisor_phase_check CHECK (
+        supervisor_phase IS NULL OR supervisor_phase IN (_ascii'idle',_ascii'running',_ascii'stopping',_ascii'cooldown',_ascii'wait_retry',_ascii'manual',_ascii'stopped')
+    ),
+    CONSTRAINT deploy_runtime_identity_claim_check CHECK (claim_state IN (_ascii'accepting',_ascii'pause_after_current',_ascii'paused')),
+    CONSTRAINT deploy_runtime_identity_reason_check CHECK (rotation_reason IN (_ascii'install',_ascii'restore',_ascii'clone')),
     CONSTRAINT fk_deploy_runtime_identity_rotated_by FOREIGN KEY (rotated_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
-    CONSTRAINT fk_deploy_runtime_identity_claim_by FOREIGN KEY (claim_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+    CONSTRAINT fk_deploy_runtime_identity_claim_by FOREIGN KEY (claim_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_runtime_supervisor_actor FOREIGN KEY (supervisor_contract_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO deploy_runtime_identity (id, current_generation_id, supervisor_contract, rotation_reason)

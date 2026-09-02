@@ -17,7 +17,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/remote_execution_constants.php';
 require_once __DIR__ . '/integration_health.php';
+require_once __DIR__ . '/deploy_supervisor_constants.php';
+require_once __DIR__ . '/deploy_supervisor_policy.php';
 require_once __DIR__ . '/repo/deploy_job_service_state.php';
+require_once __DIR__ . '/repo/deploy_supervisor_state.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 
 /**
@@ -37,6 +40,8 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
  * @param array{
  *     supervisor_contract: string,
  *     process_alive: bool,
+ *     child_alive: bool,
+ *     shape_matches_contract: bool,
  *     active_job: bool,
  *     active_job_consistent: bool,
  *     overdue_seconds: int,
@@ -51,11 +56,28 @@ function deploy_service_availability(array $facts): string
     if (!in_array($facts['supervisor_contract'], VIRTUSPHERE_SUPERVISOR_CONTRACTS, true)) {
         return VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED;
     }
+    // The same rule one level down: the contract is a claim about which process
+    // shape is running, and a claim that the observation contradicts is not a
+    // basis for any other answer. A supervisor reporting while the row says
+    // `worker_v1` is exactly that case, and it is the state a half-finished
+    // maintenance window leaves behind.
+    if (!$facts['shape_matches_contract']) {
+        return VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED;
+    }
     if (!$facts['process_alive']) {
         return VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE;
     }
-    if ($facts['supervisor_contract'] === VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR && $facts['restart_cooldown']) {
-        return VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN;
+    if ($facts['supervisor_contract'] === VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR) {
+        // Cooldown BEFORE the missing child, and the order is load-bearing: a
+        // supervisor in its restart window legitimately holds no child, and
+        // reporting that as a fault would make every planned restart look like
+        // a breakage.
+        if ($facts['restart_cooldown']) {
+            return VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN;
+        }
+        if (!$facts['child_alive']) {
+            return VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED;
+        }
     }
     if ($facts['active_job'] && !$facts['active_job_consistent']) {
         return VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED;
@@ -149,20 +171,35 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
     $queue = repo_deploy_queue_pressure($db, $now);
     $active = repo_deploy_active_job_summary($db, $now);
     $recovery = repo_deploy_recovery_attention_counts($db);
+    $supervisor = repo_deploy_supervisor_state($db);
+
+    $contract = $identity['supervisor_contract'];
+    $supervisorFresh = deploy_supervisor_state_is_fresh($supervisor, $now);
+    // The child's liveness is read the way every other surface reads it, from
+    // the worker's own status row. That is not a second opinion about the file
+    // the supervisor watches: the two live in different containers, and each
+    // layer uses the only source it can actually reach.
+    $childAlive = integration_deploy_worker_alive_now($db, $now);
 
     $availability = deploy_service_availability([
-        'supervisor_contract' => $identity['supervisor_contract'],
-        // Only the worker contract is observable in this build; the supervisor
-        // contract has no process to observe yet and therefore reports as not
-        // alive, which the fail-closed rule turns into `offline` rather than a
-        // guess. Etappe 14C is what makes it observable.
-        'process_alive' => $identity['supervisor_contract'] === VIRTUSPHERE_SUPERVISOR_CONTRACT_WORKER
-            && integration_deploy_worker_alive_now($db, $now),
+        'supervisor_contract' => $contract,
+        // Which process has to be alive depends on which shape is running: under
+        // `worker_v1` it is the worker itself, under `supervisor_v1` it is the
+        // supervisor, and a missing child there is `degraded` or `cooldown`,
+        // never `offline`.
+        'process_alive' => $contract === VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR
+            ? $supervisorFresh
+            : $childAlive,
+        'child_alive' => $childAlive,
+        // A supervisor reporting under `worker_v1` means the container was
+        // started into the new shape without the window that decides it.
+        'shape_matches_contract' => $contract === VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR || !$supervisorFresh,
         'active_job' => $active['job_id'] !== null,
         'active_job_consistent' => $active['consistent'],
         'overdue_seconds' => $queue['overdue_seconds'],
         'claim_state' => $claim['state'],
-        'restart_cooldown' => false,
+        'restart_cooldown' => $supervisor['phase'] !== null
+            && deploy_supervisor_is_cooling_down(['phase' => $supervisor['phase']]),
     ]);
     $attention = deploy_service_recovery_attention($recovery);
 
@@ -170,13 +207,37 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
         'availability' => $availability,
         'claim_state' => $claim['state'],
         'recovery_attention' => $attention,
-        'source_contract' => $identity['supervisor_contract'],
+        'source_contract' => $contract,
         'badge' => deploy_service_badge_variant($availability, $attention),
         'queue' => $queue,
         'active' => $active,
         'claim' => $claim,
         'recovery' => $recovery,
+        'supervisor' => $supervisor + ['fresh' => $supervisorFresh, 'child_alive' => $childAlive],
     ];
+}
+
+/**
+ * Whether the supervisor's published heartbeat is recent enough to count.
+ *
+ * The published copy is written on a slower cadence than the local file, so the
+ * bound is the publish interval and not the tick: judging a row that is written
+ * every thirty seconds against a four-tick file window would call a healthy
+ * supervisor dead between two of its own writes.
+ *
+ * @param array<string,mixed> $supervisor
+ */
+function deploy_supervisor_state_is_fresh(array $supervisor, int $now): bool
+{
+    if ($supervisor['heartbeat_at'] === null) {
+        return false;
+    }
+    $seen = strtotime((string) $supervisor['heartbeat_at']);
+    if ($seen === false) {
+        return false;
+    }
+
+    return ($now - $seen) <= (3 * VIRTUSPHERE_SUPERVISOR_PUBLISH_INTERVAL_SECONDS);
 }
 
 /**
@@ -198,7 +259,11 @@ function deploy_service_queue_expectation(array $snapshot): string
 
     return match ($snapshot['availability']) {
         VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => __t('deploy.service_expect_offline'),
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => __t('deploy.service_expect_degraded'),
+        // Cooldown gets its own sentence rather than sharing the degraded one.
+        // It is a planned, ending state, and "something is wrong" would suggest
+        // an action that would be the wrong one here: waiting is the action.
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => __t('deploy.service_expect_cooldown'),
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED => __t('deploy.service_expect_degraded'),
         VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => __t('deploy.service_expect_busy'),
         default => $snapshot['recovery_attention'] === VIRTUSPHERE_DEPLOY_ATTENTION_NONE
             ? __t('deploy.service_expect_ready')

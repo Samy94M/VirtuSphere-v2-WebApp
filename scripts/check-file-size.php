@@ -109,11 +109,12 @@ const FILE_SIZE_ALLOWANCES = [
     // Etappe 14B raised migrate.php 1248->1250 for migration 0047 and 1250->1252
     // for 0048: a migration costs the registry exactly its require line and its
     // map entry, which is the growth the registry exists for. Their bodies live
-    // in lib/migrations/ like every migration since 0042.
+    // in lib/migrations/ like every migration since 0042. Etappe 14C raised it
+    // 1252->1254 for 0049, the same two lines for the same reason.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1252,
+        'lines' => 1254,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

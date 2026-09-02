@@ -7,6 +7,7 @@ return [
     'service_expect_busy' => 'Der Bereitstellungsdienst arbeitet gerade: Der Auftrag wird gespeichert und wartet.',
     'service_expect_paused' => 'Die Auftragsannahme ist pausiert: Der Auftrag wird gespeichert und wartet, bis jemand sie fortsetzt.',
     'service_expect_degraded' => 'Der Bereitstellungsdienst ist beeinträchtigt: Der Auftrag wird gespeichert, ein sofortiger Start ist aber nicht zugesagt.',
+    'service_expect_cooldown' => 'Der Bereitstellungsdienst startet gerade seinen Arbeitsprozess neu: Der Auftrag wird gespeichert und danach übernommen.',
     'service_expect_offline' => 'Der Bereitstellungsdienst ist nicht erreichbar: Der Auftrag wird gespeichert und startet erst, wenn der Dienst wieder läuft.',
     'service_expect_recovering' => 'Eine Wiederherstellung läuft: Der Auftrag wird gespeichert und wartet, bis der Dienst wieder frei ist.',
     // Wiederherstellungsdiagnose eines Auftrags (Etappe 13R). Sichtbar nur,

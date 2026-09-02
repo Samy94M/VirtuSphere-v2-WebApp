@@ -21,7 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && LDAP_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
     && docker-php-ext-configure ldap --with-libdir="lib/${LDAP_MULTIARCH}" \
-    && docker-php-ext-install gd ldap mysqli zip \
+    # pcntl is bundled with PHP (no download, air-gap safe) and exists for one
+    # reason: the deploy supervisor runs as PID 1, and PID 1 without an
+    # installed signal handler IGNORES SIGTERM. Without pcntl_signal a
+    # `docker stop` would sit out its whole grace period and then SIGKILL both
+    # the supervisor and the worker it is watching, in the middle of a playbook
+    # that is changing ESXi. Waiting for a child needs no pcntl
+    # (proc_get_status() reaps), and sending a signal needs only posix_kill;
+    # RECEIVING one is what this extension is here for.
+    && docker-php-ext-install gd ldap mysqli pcntl zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

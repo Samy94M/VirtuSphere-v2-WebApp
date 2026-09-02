@@ -20,6 +20,7 @@ if (PHP_SAPI !== 'cli') {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/maintenance_tasks.php';
 require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/worker_stop_signal.php';
 
 function maintenance_worker_options(array $argv): array
 {
@@ -45,10 +46,20 @@ function maintenance_worker_options(array $argv): array
 function maintenance_worker_main(array $argv): int
 {
     $options = maintenance_worker_options($argv);
+    // Same measured defect as in the deploy worker (Etappe 14C): PID 1 ignores
+    // every signal it has no handler for, and this image's inherited
+    // `STOPSIGNAL SIGQUIT` is the one that arrives. Without this the container
+    // sat out its whole stop grace and ended in a SIGKILL on every restart.
+    worker_install_stop_handler(VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE);
     $db = maintenance_worker_connect_db($options);
     $state = ['last_run' => [], 'states' => []];
 
     do {
+        if (!$options['once'] && worker_stop_requested()) {
+            fwrite(STDERR, "[maintenance-worker] stopping between passes\n");
+
+            return 0;
+        }
         worker_heartbeat_touch();
         try {
             maintenance_worker_run_once($db, $state, $options['once']);
@@ -68,7 +79,7 @@ function maintenance_worker_main(array $argv): int
         if ($options['once']) {
             return 0;
         }
-        sleep((int) $options['sleep']);
+        worker_idle_wait((int) $options['sleep']);
     } while (true);
 }
 

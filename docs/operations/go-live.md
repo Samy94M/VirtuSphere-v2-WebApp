@@ -114,6 +114,23 @@ Warteschlange abgebrochen wurde, erscheint dort nicht. Der Volltest lässt sich 
 starten; sein Audit bleibt unter Protokolle → Sicherheit, Kategorie
 `credentials`.
 
+### Stoppverhalten einmal messen
+
+Ein Container, der sein Stoppsignal nicht beantwortet, wird nach der Frist hart
+gekillt, und beim Deploy-Worker bedeutet das: mitten in einem Playbook, ohne
+letzte Protokollzeile und ohne Freigabe des Auftragsbesitzes. Das war bis
+Etappe 14C der Normalfall, weil ein Prozess als PID 1 jedes Signal ohne eigenen
+Handler ignoriert und dieses Image `STOPSIGNAL SIGQUIT` erbt. Einmal belegen:
+
+```bash
+time docker compose stop deploy-worker
+docker inspect --format '{{.State.ExitCode}}' virtusphere-v2-webapp-deploy-worker-1
+```
+
+Erwartet wird ein Bruchteil einer Sekunde und Exitcode 0. Dauert es die volle
+Frist und steht dort 137, wurde das Kommando in eine Shell verpackt (dann ist die
+Shell PID 1) oder dem Image fehlt `pcntl`.
+
 ### Create-Rauchtest vor der Produktivfreigabe
 
 Der Volltest belegt Zugang und Umgebung, nicht das Anlegen einer VM. Vor der

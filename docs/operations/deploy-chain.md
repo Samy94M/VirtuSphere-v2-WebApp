@@ -186,6 +186,57 @@ Der Worker führt jeden Schreibzugriff eines laufenden Auftrags über einen Kana
 
 Endet der Remote-Befehl während der Störung, existiert sein Exitcode zunächst nur im Workerprozess. Der Loop-Worker wartet begrenzt auf die Datenbank, prüft die Ownership und finalisiert genau einmal. `deploy_worker.php --once` bleibt begrenzt und meldet auf STDERR ausdrücklich, dass dieser Ausgang nicht persistiert werden konnte und der Auftrag beansprucht bleibt. Missions- und Inventaraufträge verwenden denselben Kanal; es gibt keinen zweiten Reconnectpfad mit abweichendem Verhalten.
 
+## Wie der Bereitstellungsdienst beendet und neu gestartet wird
+
+Der Dienst kann in zwei Prozessformen laufen, und welche gilt, steht auf der
+Systemstatus-Karte unter „Prozessvertrag" (ADR-0042). Standard ist die einfache
+Form: der Arbeitsprozess ist der Hauptprozess seines Containers. In der
+beaufsichtigten Form hält eine Aufsicht genau einen Arbeitsprozess als Kind.
+
+**Ein Stoppsignal wird jetzt beantwortet.** Bis Etappe 14C war das nicht so, und
+der Grund ist eine Kombination aus zwei einzeln harmlosen Tatsachen. Erstens
+ignoriert ein Prozess, der PID 1 ist, jedes Signal, für das er keinen eigenen
+Handler installiert hat; der Kernel wendet dort keine Standardaktionen an.
+Zweitens erbt dieser Container vom PHP-FPM-Basisimage `STOPSIGNAL SIGQUIT`, weil
+php-fpm damit sauber herunterfährt. Es kam also SIGQUIT an, niemand hörte zu, und
+`docker stop` endete nach der vollen Frist im SIGKILL: gemessen 30,4 Sekunden und
+Exitcode 137, bei jedem Neustart, jedem Stackupdate und jedem Hostreboot. Genau
+dann konnte der Worker weder eine letzte Zeile schreiben noch seinen Besitz
+abgeben, und ein laufendes Playbook lief auf dem Ansible-Host weiter. Nach der
+Korrektur beenden sich Deploy-Worker, Wartungsworker und Aufsicht in 0,4 Sekunden
+mit Exitcode 0.
+
+Die Zusage dabei ist bewusst bescheiden: Ein **untätiger** Prozess endet sofort
+und sauber, und das ist die große Mehrheit aller Stopps. Ein Prozess **mitten in
+einem Auftrag** merkt sich die Anforderung und arbeitet weiter, denn das Playbook
+verändert ESXi auf einem anderen Host und kein Signal an diesen Prozess hält das
+auf. Er schreibt dafür eine Zeile ins Containerlog, was vorher niemand hatte.
+
+**Die Aufsicht startet nie einen zweiten Arbeitsprozess**, bevor das Ende des
+alten bestätigt ist, und bestätigt heißt hier `waitpid`, nicht „wir haben ein
+Signal geschickt". Ein einzelnes ausgebliebenes Lebenszeichen zählt nicht; erst
+mehrere bestätigte gelten als Befund. Danach folgt eine feste Reihe: auffordern,
+Frist abwarten, hart beenden, Frist abwarten, aufgeben. Aufgeben heißt
+ausdrücklich aufgeben: ein Prozess, der ein hartes Beenden überlebt, ist ein
+Kernelzustand, und Ersatz für ihn wäre ein zweiter Ausführer derselben Arbeit.
+
+**Ein Datenbankausfall löst keinen Neustart aus.** Ein Arbeitsprozess, der einen
+Ausfall aussitzt, ist gesund; das ist seit Etappe 2 ausdrücklich so entschieden
+und der Grund, warum der Worker überhaupt einen Datenbankkanal hat. Die Aufsicht
+entscheidet deshalb ausschließlich anhand der Lebenszeichendatei des Prozesses
+und nie anhand der Datenbank. Sie veröffentlicht ihren Zustand best effort in die
+Datenbank, weil das Portal in einem anderen Container läuft und diese Datei gar
+nicht lesen kann.
+
+Der Wechsel zwischen den Formen ist ein auditiertes Wartungsfenster und passiert
+nie von selbst. `lib/deploy_supervisor_switch.php --check` nennt alle offenen
+Voraussetzungen auf einmal; `--to=supervisor_v1` schaltet um und schreibt genau
+eine Auditzeile, die Ablehnung eingeschlossen. Danach wird der Container mit
+`docker-compose.supervisor.yml` gestartet, das Kommando und Healthcheck gemeinsam
+umstellt. Solange die laufende Prozessform nicht zum gespeicherten Vertrag passt,
+meldet der Dienst sich absichtlich als beeinträchtigt statt einen Zustand zu
+raten.
+
 ## Ein Auftrag, den die Aufsicht beendet hat
 
 Steht als Abschlussgrund `stale_heartbeat`, kam über das Fenster `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` kein Herzschlag an. Nur beim dadurch fehlgeschlagenen laufenden Auftrag bleibt dieselbe redigierte Diagnose zusätzlich als letzter Fehler für die Zeit nach der Log-Retention erhalten. Ein abbrechender Auftrag konvergiert dagegen mit `cancel_converged` zu `cancelled` und schreibt niemals einen letzten Fehler. Die begrenzte Detailmeldung nennt ausschließlich Beobachtbares: Job-ID, Alter des letzten Herzschlags gegen dieses Limit, wer den Lock hielt und den daraus folgenden Übergang.

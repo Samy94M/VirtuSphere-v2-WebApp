@@ -7,6 +7,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/worker_stop_signal.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_mission.php';
 
@@ -44,9 +45,15 @@ function deploy_worker_main(array $argv): int
 {
     $options = deploy_worker_options($argv);
     $workerId = deploy_worker_id();
+    worker_install_stop_handler(VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER);
     $db = deploy_worker_connect_db($options);
 
     do {
+        if (!$options['once'] && worker_stop_requested()) {
+            fwrite(STDERR, "[deploy-worker] stopping: no job in flight\n");
+
+            return 0;
+        }
         worker_heartbeat_touch();
         try {
             deploy_worker_report_alive($db);
@@ -71,7 +78,7 @@ function deploy_worker_main(array $argv): int
             return $claimed ? 0 : 2;
         }
         if (!$claimed) {
-            sleep((int) $options['sleep']);
+            worker_idle_wait((int) $options['sleep']);
         }
     } while (true);
 }

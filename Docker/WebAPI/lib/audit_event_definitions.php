@@ -66,6 +66,11 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED = 'deploy.recovery_docu
 // and the exact unit are here; the reason the operator typed stays in the
 // append-only resolution, for the same reason as the event above.
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED = 'deploy.create_released';
+// The process-contract switch (Etappe 14C). It changes which process shape runs
+// the deploy service, never automatically and only inside a maintenance window,
+// so the trail records both the switch and the refusal: a refusal names the
+// condition that was not met, which is the operator's next task.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT = 'deploy.supervisor_contract_switched';
 const VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE = 'integration.state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR = 'system.unhandled_error';
 const VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED = 'logs.csv_exported';
@@ -166,6 +171,11 @@ function audit_event_registry(): array
         // the evidence moved between the operator looking and confirming, which
         // is exactly the race this action is fenced against.
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['position'], ['resolution_id', 'name', 'blocker']),
+        // Object id : like the claim axis, the process contract belongs to the
+        // service as a whole. Success and failure both, because a refused
+        // switch is the row a maintenance window actually needs: it names the
+        // condition that stopped it.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['system'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['target_contract'], ['previous_contract', 'blocker'], 'nullable'),
         // The only event whose category depends on its object id. Its allowlist
         // is derived from the same map, so an unknown source is refused as an
         // unknown OBJECT rather than as an unresolvable category: the two would

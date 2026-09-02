@@ -21,6 +21,8 @@ final class DeployServiceHealthTest extends TestCase
         return array_merge([
             'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_WORKER,
             'process_alive' => true,
+            'child_alive' => true,
+            'shape_matches_contract' => true,
             'active_job' => false,
             'active_job_consistent' => true,
             'overdue_seconds' => 0,
@@ -119,6 +121,91 @@ final class DeployServiceHealthTest extends TestCase
             VIRTUSPHERE_DEPLOY_AVAILABILITY_READY,
             deploy_service_availability($this->facts(['restart_cooldown' => true]))
         );
+    }
+
+    /**
+     * The supervisor branch of the precedence (Etappe 14C, plan section 21.2).
+     *
+     * The order of the two supervisor rules is the point: a supervisor inside
+     * its restart window legitimately holds no child, so `cooldown` has to beat
+     * "the child is missing". The other way round, every planned restart would
+     * be reported as a breakage, and an operator would go looking for a fault
+     * that is the system working.
+     */
+    public function testASupervisorWithoutAChildIsCoolingDownNotDegraded(): void
+    {
+        $facts = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'child_alive' => false,
+            'restart_cooldown' => true,
+        ]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN, deploy_service_availability($facts));
+    }
+
+    public function testASupervisorWhoseChildStoppedAnsweringIsDegraded(): void
+    {
+        $facts = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'child_alive' => false,
+            'restart_cooldown' => false,
+        ]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, deploy_service_availability($facts));
+    }
+
+    public function testAMissingSupervisorIsOfflineEvenWithALiveChild(): void
+    {
+        $facts = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'process_alive' => false,
+            'child_alive' => true,
+        ]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, deploy_service_availability($facts));
+    }
+
+    public function testAHealthySupervisorWithAJobIsBusy(): void
+    {
+        $facts = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'active_job' => true,
+        ]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY, deploy_service_availability($facts));
+    }
+
+    public function testTheChildAxisDoesNotApplyToTheWorkerContract(): void
+    {
+        // Under `worker_v1` there IS no child; the worker is the process. A
+        // false `child_alive` there must not invent a second fault, because the
+        // same fact already decided `process_alive`.
+        $facts = $this->facts(['child_alive' => false]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, deploy_service_availability($facts));
+    }
+
+    public function testAnObservedShapeThatContradictsTheContractFailsClosed(): void
+    {
+        $facts = $this->facts(['shape_matches_contract' => false]);
+
+        self::assertSame(
+            VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED,
+            deploy_service_availability($facts),
+            'a supervisor reporting under worker_v1 must never read as ready'
+        );
+    }
+
+    public function testTheSupervisorFreshnessBoundIsTheSlowerPublishCadence(): void
+    {
+        $now = 10_000;
+        $atLimit = ['heartbeat_at' => date('Y-m-d H:i:s', $now - 3 * VIRTUSPHERE_SUPERVISOR_PUBLISH_INTERVAL_SECONDS)];
+        $past = ['heartbeat_at' => date('Y-m-d H:i:s', $now - 3 * VIRTUSPHERE_SUPERVISOR_PUBLISH_INTERVAL_SECONDS - 1)];
+
+        self::assertTrue(deploy_supervisor_state_is_fresh($atLimit, $now), 'the bound is inclusive');
+        self::assertFalse(deploy_supervisor_state_is_fresh($past, $now));
+        self::assertFalse(deploy_supervisor_state_is_fresh(['heartbeat_at' => null], $now));
+        self::assertFalse(deploy_supervisor_state_is_fresh(['heartbeat_at' => 'not a time'], $now));
     }
 
     public function testAttentionPrioritisesManualReviewOverRecovering(): void

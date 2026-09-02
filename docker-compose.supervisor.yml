@@ -1,0 +1,38 @@
+# The supervised process shape of the deploy service (Etappe 14C, ADR-0042).
+#
+# NOT active by default. `docker-compose.yml` starts the worker directly, and it
+# stays that way until an audited maintenance window switches the stored process
+# contract:
+#
+#   docker compose exec php php /var/www/html/lib/deploy_supervisor_switch.php --check
+#   docker compose exec php php /var/www/html/lib/deploy_supervisor_switch.php --to=supervisor_v1 --actor=<user id>
+#   docker compose -f docker-compose.yml -f docker-compose.supervisor.yml up -d deploy-worker
+#
+# The order matters in both directions. The service snapshot fails closed when
+# the observed process shape does not match the stored contract, so starting
+# this override while the row still says `worker_v1` puts the deploy service
+# into a permanent degraded state that is not a fault. Rolling back is the same
+# sequence reversed: switch to `worker_v1` with drained, paused claims and a
+# stopped supervisor, then start the container without this file.
+#
+# Command AND healthcheck move together, in one file, on purpose. A supervisor
+# judged by the WORKER's liveness file would report unhealthy during every
+# legitimate restart cooldown, because during a cooldown the child is correctly
+# gone. Two half-switched settings is the failure this file exists to prevent.
+services:
+  deploy-worker:
+    command: ["php", "/var/www/html/lib/deploy_supervisor.php"]
+    healthcheck:
+      # Supervisor liveness, never queue success. A deliberately paused but
+      # responsive service is healthy here; whether jobs are being taken up is
+      # the claim axis on the System status page, which has a person reading it.
+      # Docker `unhealthy` is nowhere in this product a restart claim.
+      test: ["CMD", "php", "/var/www/html/lib/supervisor_healthcheck.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    # PID 1 has to be able to receive SIGTERM, which is why pcntl is in the
+    # image. `init: true` is deliberately NOT set: an injected init would become
+    # PID 1 instead, and then the process this product wrote to reap its child
+    # would not be the one the kernel hands orphans to.

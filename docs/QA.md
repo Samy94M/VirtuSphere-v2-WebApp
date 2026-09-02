@@ -342,6 +342,51 @@ host, datastore, VM prefix and the person responsible for deleting them are
 recorded before the first one runs, and only those recorded throwaway VMs are
 removed afterwards, never by a name prefix.
 
+### Etappe 14C: what proves the supervised process shape
+
+`DeploySupervisorPolicyTest` drives the decision machine as a pure function,
+including the negative assertion the etappe rests on: a walk over every state in
+which the child may still be alive, proving that none of them answers `start`.
+It also pins that one stale observation is not a finding, that the restart
+window ends in a stored deadline rather than a hot loop, and that a shutdown
+outranks a pending cooldown.
+
+`DeploySupervisorFaultRunTest` is the fault run, and it uses REAL processes. Its
+child beats its liveness file, stops beating, stays alive and deliberately
+ignores SIGTERM; the policy drives it through the real seam. What that proves
+and the pure test cannot: that "the child is gone" is established by waitpid
+against an actual process, that a child ignoring SIGTERM is escalated rather
+than replaced, and that exactly one child exists at every point of the run. The
+clock is simulated and the process is real, which is the only combination that
+tests the thing without faking it.
+
+`DeploySupervisorContractTest` pins what a source review keeps getting wrong
+because everything reads correctly: the default compose file still starts the
+worker, the override moves command AND healthcheck together, the healthcheck
+touches no database, no supervisor module reaches into job execution, exactly
+one call site starts a child, and the blocker vocabulary is closed in both
+directions.
+
+Two of its assertions exist because a real run contradicted a correct-looking
+source. **`docker stop` sends SIGQUIT here**, not SIGTERM: the `php:*-fpm` base
+image declares `STOPSIGNAL SIGQUIT` for php-fpm's graceful shutdown and this
+container inherits it. Combined with the fact that PID 1 ignores any signal it
+has no handler for, `docker stop` on the deploy worker took 30.4 s and ended in
+exit 137 while `docker kill -s TERM` exited cleanly in the same build. After the
+fix all three loop processes stop in 0.4 s with exit 0. The measurement is a
+container-level fact, so the guard is a source contract on the shared signal
+list plus the sentence that says why SIGQUIT is in it.
+
+`DeployServiceHealthTest` gained the supervisor branch of the availability
+precedence, including the order that matters: `cooldown` beats "the child is
+missing", because a supervisor inside its restart window legitimately holds no
+child and the other way round every planned restart would read as a breakage.
+
+Not proven here and deliberately open: that a healed worker creates no second VM
+on ESXi. Everything in front of that is proven (no second child, no second job,
+no second create unit, no second async job id); the VM itself is the site
+acceptance, case 11 of section 15.6 of the create plan.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:

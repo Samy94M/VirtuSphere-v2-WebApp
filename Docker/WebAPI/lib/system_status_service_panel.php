@@ -37,6 +37,37 @@ function deploy_service_claim_label(string $state): string
     };
 }
 
+/**
+ * The localized name of one process contract.
+ *
+ * It exists because the card used to print `source_contract` raw, so an
+ * operator read the token "worker_v1" on a status page. The technical value
+ * stays raw everywhere it is stored or transported; only what a person reads
+ * goes through a label helper, and an unknown value gets a neutral sentence
+ * rather than its token.
+ */
+function deploy_service_contract_label(string $contract): string
+{
+    return match ($contract) {
+        VIRTUSPHERE_SUPERVISOR_CONTRACT_WORKER => __t('system_status.service_contract_worker'),
+        VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR => __t('system_status.service_contract_supervisor'),
+        default => __t('system_status.service_contract_unknown'),
+    };
+}
+
+/** The localized name of one supervisor phase, or a dash when none is published. */
+function deploy_service_supervisor_phase_label(?string $phase): string
+{
+    return match ($phase) {
+        VIRTUSPHERE_SUPERVISOR_PHASE_IDLE, VIRTUSPHERE_SUPERVISOR_PHASE_RUNNING => __t('system_status.service_supervisor_watching'),
+        VIRTUSPHERE_SUPERVISOR_PHASE_STOPPING => __t('system_status.service_supervisor_stopping'),
+        VIRTUSPHERE_SUPERVISOR_PHASE_COOLDOWN, VIRTUSPHERE_SUPERVISOR_PHASE_WAIT_RETRY => __t('system_status.service_supervisor_cooldown'),
+        VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL => __t('system_status.service_supervisor_manual'),
+        VIRTUSPHERE_SUPERVISOR_PHASE_STOPPED => __t('system_status.service_supervisor_stopped'),
+        default => __t('system_status.service_supervisor_none'),
+    };
+}
+
 /** The localized name of one attention state. */
 function deploy_service_attention_label(string $state): string
 {
@@ -46,6 +77,53 @@ function deploy_service_attention_label(string $state): string
         VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW => __t('system_status.service_attention_manual'),
         default => __t('system_status.service_unknown'),
     };
+}
+
+/**
+ * The supervisor and its child, as two separate facts.
+ *
+ * Only under `supervisor_v1`, and deliberately so: under `worker_v1` there is
+ * no supervisor and no child, and two rows saying "none" would be two rows an
+ * operator has to learn to ignore. Both are shown whenever they exist, because
+ * a compact badge is a summary and a summary must not be the only place a fact
+ * appears: `cooldown` with a healthy supervisor and `degraded` with a hung
+ * child look the same in one word and are two different next steps.
+ *
+ * @param array<string,mixed> $snapshot
+ * @return list<array{label:string,html:string}>
+ */
+function system_status_supervisor_facts(array $snapshot): array
+{
+    if ((string) $snapshot['source_contract'] !== VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR) {
+        return [];
+    }
+    $supervisor = $snapshot['supervisor'] ?? [];
+    $facts = [
+        [
+            'label' => __t('system_status.service_fact_supervisor'),
+            'html' => h(deploy_service_supervisor_phase_label($supervisor['phase'] ?? null)),
+        ],
+        [
+            'label' => __t('system_status.service_fact_child'),
+            'html' => h(($supervisor['child_alive'] ?? false)
+                ? __t('system_status.service_child_answering')
+                : __t('system_status.service_child_silent')),
+        ],
+    ];
+    if ((int) ($supervisor['restart_count'] ?? 0) > 0) {
+        $facts[] = [
+            'label' => __t('system_status.service_fact_restarts'),
+            'html' => h((string) (int) $supervisor['restart_count']),
+        ];
+    }
+    if (($supervisor['next_retry_at'] ?? null) !== null) {
+        $facts[] = [
+            'label' => __t('system_status.service_fact_next_retry'),
+            'html' => system_status_fact_time($supervisor['next_retry_at']),
+        ];
+    }
+
+    return $facts;
 }
 
 /**
@@ -88,7 +166,8 @@ function system_status_render_deploy_service(array $snapshot, array $user): void
             </div>
             <?php
             echo system_status_fact_list([
-                ['label' => __t('system_status.service_fact_contract'), 'html' => h((string) $snapshot['source_contract'])],
+                ['label' => __t('system_status.service_fact_contract'), 'html' => h(deploy_service_contract_label((string) $snapshot['source_contract']))],
+                ...system_status_supervisor_facts($snapshot),
                 ['label' => __t('system_status.service_fact_queue_due'), 'html' => h((string) $queue['due'])],
                 ['label' => __t('system_status.service_fact_queue_scheduled'), 'html' => h((string) $queue['scheduled'])],
                 ['label' => __t('system_status.service_fact_oldest_due'), 'html' => system_status_fact_time($queue['oldest_due_at'])],

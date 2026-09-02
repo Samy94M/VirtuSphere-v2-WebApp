@@ -116,6 +116,11 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.service_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.service_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.service_p4')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_supervisor_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_supervisor_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_supervisor_p3')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_supervisor_p4')); ?></p>
+            <p><?php echo h(__t('help_deploy.service_supervisor_p5')); ?></p>
         </section>
 
         <section class="panel" id="help-create-progress">

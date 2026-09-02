@@ -77,6 +77,10 @@ function audit_context_field_registry(): array
         // release was refused when it was. The reason they typed is NOT here;
         // it lives in the append-only resolution behind system.config.
         'position' => $int, 'blocker' => $id,
+        // Etappe 14C. Both are closed contract tokens, so `identifier` is the
+        // right type: a value outside VIRTUSPHERE_SUPERVISOR_CONTRACTS cannot
+        // reach here through the switch, and the type stops anything else.
+        'target_contract' => $id, 'previous_contract' => $id,
         'failed_count' => $int, 'mission_count' => $int, 'interface_count' => $int,
         'rows_exported' => $int, 'total_rows' => $int, 'limit' => $int,
         'retire_count' => $int, 'active_count' => $int, 'threshold_percent' => $int,

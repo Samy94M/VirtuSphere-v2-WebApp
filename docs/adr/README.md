@@ -41,3 +41,4 @@
 - [ADR-0039: Explicitly imported Active Directory identities authenticate over strict LDAPS](ADR-0039-active-directory-authentication-over-ldaps.md)
 - [ADR-0040: Durable Remote Execution separates offline implementation from site acceptance](ADR-0040-durable-remote-execution-offline-and-site-acceptance.md)
 - [ADR-0041: Creating VMs is one worker-driven unit per VM, with a persisted job id](ADR-0041-worker-driven-per-vm-create.md)
+- [ADR-0042: The deploy service has two process shapes, and switching between them is a decision](ADR-0042-deploy-supervisor-and-process-contract.md)

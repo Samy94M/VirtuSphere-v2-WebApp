@@ -7,6 +7,7 @@ return [
     'service_expect_busy' => 'The deploy service is working: the job is saved and waits.',
     'service_expect_paused' => 'Job intake is paused: the job is saved and waits until somebody resumes it.',
     'service_expect_degraded' => 'The deploy service is degraded: the job is saved, but an immediate start is not promised.',
+    'service_expect_cooldown' => 'The deploy service is restarting its worker process: the job is saved and picked up afterwards.',
     'service_expect_offline' => 'The deploy service is unreachable: the job is saved and starts once the service is running again.',
     'service_expect_recovering' => 'A recovery is in progress: the job is saved and waits until the service is free again.',
     // Per-job recovery diagnostics (Etappe 13R). Rendered only when a durable

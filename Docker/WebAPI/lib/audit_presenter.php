@@ -82,6 +82,13 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
                 . ' as not created (resolution ' . ($context['resolution_id'] ?? 0) . ')'
             : 'refused to release create unit ' . ($context['position'] ?? 0) . ' of deploy job id ' . $id
                 . ': ' . ($context['blocker'] ?? 'unknown')),
+        // Etappe 14C. A refusal names the ONE condition it stopped at, because
+        // that condition is the operator's next task; "not ready" would not be.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+            ? 'switched the deploy process contract from ' . ($context['previous_contract'] ?? 'unknown')
+                . ' to ' . ($context['target_contract'] ?? 'unknown')
+            : 'refused to switch the deploy process contract to ' . ($context['target_contract'] ?? 'unknown')
+                . ': ' . ($context['blocker'] ?? 'unknown')),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => 'recovery review over ' . ($context['reviewed_count'] ?? 0)
             . ' stale job(s): ' . ($context['requested_count'] ?? 0) . ' requested, ' . ($context['manual_count'] ?? 0) . ' left for manual review',
         VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
