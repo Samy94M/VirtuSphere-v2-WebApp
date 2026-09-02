@@ -28,6 +28,7 @@
     var terminalBlocks = root.querySelector('[data-deploy-terminal-blocks]');
     var cancelForm = root.querySelector('[data-deploy-cancel-form]');
     var scroller = root.querySelector('[data-deploy-log-scroller]');
+    var progressCard = document.querySelector('[data-deploy-create-progress]');
     var island = document.querySelector('[data-i18n-deploy-log]');
     var i18n = {};
     if (island) {
@@ -133,6 +134,19 @@
         setConnection(translate('live'));
     }
 
+    // Visibility and href in ONE place. before_seq=0 is rejected by the
+    // endpoint with a 400, so a control revealed without its link updated
+    // would be a button that navigates to an error page; the server omits the
+    // href for the same reason while nothing older exists.
+    function setOlderState(hasOlder) {
+        if (!olderButton) { return; }
+        olderButton.hidden = !hasOlder;
+        if (hasOlder && beforeSeq > 0) {
+            olderButton.setAttribute('href', 'deploy_log.php?id=' + encodeURIComponent(jobId) + '&before_seq=' + encodeURIComponent(String(beforeSeq)));
+        } else {
+            olderButton.removeAttribute('href');
+        }
+    }
     function atBottom() {
         if (!scroller) { return true; }
         return (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) <= bottomTolerance;
@@ -169,6 +183,49 @@
         setFeedback(translate(count === 1 ? 'new_lines_one' : 'new_lines_many', {count: count}));
     }
 
+    // The create progress card. Every value arrives finished from the server,
+    // including the sentence about the current unit: a translated string is
+    // never assembled in the browser, and the unit status is a token a reader
+    // must not see raw. Only numbers and already-localized text are written.
+    function renderCreateProgress(progress) {
+        if (!progressCard) { return; }
+        if (!progress) {
+            // A job with no create section at all. Removing the card is right;
+            // leaving it at zero would claim the job creates nothing.
+            progressCard.remove();
+            progressCard = null;
+            return;
+        }
+        var position = progressCard.querySelector('[data-create-position]');
+        if (position && typeof progress.position_label === 'string') {
+            position.textContent = progress.position_label;
+        }
+        // The label and the "since" are separate nodes, so replacing one
+        // cannot silently drop the other. No unit in flight empties the label
+        // rather than freezing on the VM that was last worked on.
+        var label = progressCard.querySelector('[data-create-current-label]');
+        if (label) {
+            label.textContent = progress.current && typeof progress.current.label === 'string'
+                ? progress.current.label
+                : '';
+        }
+        var since = progressCard.querySelector('[data-create-current-since]');
+        if (since) {
+            var sinceText = progress.current && typeof progress.current.since_label === 'string'
+                ? progress.current.since_label
+                : '';
+            // The separator belongs to the fragment and is hidden with it; a
+            // lone middle dot after an empty line reads as a rendering fault.
+            since.hidden = sinceText === '';
+            var sinceValue = since.querySelector('[data-create-since-text]');
+            if (sinceValue) { sinceValue.textContent = sinceText; }
+        }
+        var counters = progress.counters || {};
+        Object.keys(counters).forEach(function (name) {
+            var cell = progressCard.querySelector('[data-create-count="' + CSS.escape(name) + '"]');
+            if (cell) { cell.textContent = String(counters[name]); }
+        });
+    }
     function rowFor(entry) {
         var seqValue = String(entry.seq);
         if (body.querySelector('[data-log-seq="' + CSS.escape(seqValue) + '"]')) {
@@ -197,16 +254,21 @@
 
     function trimOldest() {
         var rows = body.querySelectorAll('[data-log-seq]');
+        var trimmed = false;
         while (rows.length > domLimit) {
             rows[0].remove();
             rows = body.querySelectorAll('[data-log-seq]');
-            if (olderButton) { olderButton.hidden = false; }
+            trimmed = true;
         }
         var first = body.querySelector('[data-log-seq]');
         if (first) {
             beforeSeq = parseInt(first.getAttribute('data-log-seq') || '0', 10);
             root.setAttribute('data-before-seq', String(beforeSeq));
         }
+        // Only now, with the cursor recomputed: trimming made older lines
+        // reachable again, and revealing the control inside the loop above
+        // would have pointed it at the cursor from before the trim.
+        if (trimmed) { setOlderState(true); }
     }
 
     function trimNewest() {
@@ -345,8 +407,9 @@
                 cancelForm.remove();
                 cancelForm = null;
             }
+            renderCreateProgress(payload.create_progress || null);
             if (Array.isArray(payload.logs)) { append(payload.logs); }
-            if (payload.has_older && olderButton) { olderButton.hidden = false; }
+            if (payload.has_older) { setOlderState(true); }
             root.setAttribute('data-caught-up', payload.caught_up ? '1' : '0');
             if (payload.job && payload.job.terminal) {
                 root.setAttribute('data-terminal', '1');
@@ -382,17 +445,26 @@
             busy = false;
             if (!payload || !payload.ok) { return; }
             if (Array.isArray(payload.logs)) { prepend(payload.logs); }
-            if (olderButton) { olderButton.hidden = !payload.has_older; }
+            setOlderState(!!payload.has_older);
             setFeedback(i18n.history_mode || '');
             setConnection(i18n.history_mode || '');
         }).catch(function () {
             busy = false;
             setFeedback(i18n.failed || '');
-            if (olderButton) { olderButton.hidden = false; }
+            setOlderState(true);
         });
     }
 
-    if (olderButton) { olderButton.addEventListener('click', loadOlder); }
+    if (olderButton) {
+        // The control is a real link now, so the default navigation is the
+        // no-JavaScript path and must be suppressed here, not relied on: a
+        // click that both fetched and navigated would throw the reader out of
+        // the live view they are standing in.
+        olderButton.addEventListener('click', function (event) {
+            event.preventDefault();
+            loadOlder();
+        });
+    }
 
     if (followToggle) {
         followToggle.addEventListener('change', function () {

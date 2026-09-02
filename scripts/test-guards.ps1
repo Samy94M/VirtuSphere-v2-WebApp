@@ -240,7 +240,12 @@ $docSemFixtureFiles = @(
     '.env.example',
     # SSoT der Hardware-Version: dasselbe Argument. Ohne das Playbook meldet
     # Regel 15 no-ssot und faerbt jeden anderen Fall mit.
-    'Ansible/createVMs-ESXi_playbook.yml'
+    # Der Name folgt dem, was check-doc-semantics.sh in $create_playbook
+    # liest. Teiletappe D hat das alte createVMs-Playbook in vier zerlegt und
+    # die Pruefung mitgezogen, diese Fixture aber nicht: sechzehn
+    # doc-semantics-Waechter liefen danach als infra und bewiesen nichts
+    # mehr, ohne dass irgendetwas rot wurde.
+    'Ansible/createVMLaunch-ESXi_playbook.yml'
 )
 # struktur.sql gehoert seit Etappe 10C dazu: bounds-sync prueft dort den
 # gespiegelten Audit-Kontext-Bytewert gegen die PHP-Konstante und bricht ohne
@@ -423,7 +428,7 @@ $cases = @(
         # die Support-Matrix nicht nennt, verspricht Hosts, auf denen die
         # VM-Erstellung hart fehlschlaegt.
         $fx = New-Fixture $docSemFixtureFiles
-        Edit-Fixture $fx 'Ansible/createVMs-ESXi_playbook.yml' 'version: 21' 'version: 19'
+        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: 21' 'version: 19'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-matrix\]'
     } }
     @{ Name = 'doc-semantics.hw-version-unknown'; Body = {
@@ -431,7 +436,7 @@ $cases = @(
         # gruener Lauf: sonst haette ein kuenftiges vmx-22 die Regel still
         # stillgelegt.
         $fx = New-Fixture $docSemFixtureFiles
-        Edit-Fixture $fx 'Ansible/createVMs-ESXi_playbook.yml' 'version: 21' 'version: 22'
+        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: 21' 'version: 22'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-unknown\]'
     } }
     @{ Name = 'doc-semantics.vcenter-deploy-boundary'; Body = {

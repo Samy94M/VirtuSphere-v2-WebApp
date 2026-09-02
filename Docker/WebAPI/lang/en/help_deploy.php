@@ -95,4 +95,12 @@ return [
     'autostart_run_p1' => 'The mode only writes the VMs selected in the job. A VM whose checkbox was cleared loses its entry on the next run that includes it, not before.',
     'autostart_run_p1b' => 'A VM only participates when its own checkbox is set AND the mission has autostart switched on. While the mission switch is off, the autostart fields in the VM editor are locked; a value already set stays stored and takes effect once the mission is switched on.',
     'autostart_run_p2' => 'The full pipeline appends the autostart step only for a mission that enabled it. The host autostart switch is never turned off, because VMs of other missions may live on it.',
+    // The create section progress and, above all, the unresolved outcome
+    // (Etappe 14B-G). The job log card states the fact and links here; the
+    // explanation lives in this one place.
+    'create_progress_heading' => 'Progress while the VMs are created',
+    'create_progress_p1' => 'The card above the log counts every VM separately, and it counts them from the stored result rows of the job, not from the log text above it. That is why the question of which VMs exist stays answerable even when the job stopped mid-run or the log is no longer complete.',
+    'create_progress_p2' => 'It shows which VM is being worked on and since when. How far a single create call has got is deliberately shown nowhere: none of the components involved reports it, and a bar that filled anyway would be an invented number.',
+    'create_progress_p3' => '"Unresolved" means the job sent the call for this VM but it was not established whether the VM exists afterwards. That is neither a failure nor a success, it is an open question. Check the ESXi inventory before you retry the job; a retry does not take an unresolved unit over on its own.',
+    'create_progress_p4' => '"Not started yet" are the units behind the point where the job stopped. Nothing happened for them, and a retry picks up exactly those.',
 ];

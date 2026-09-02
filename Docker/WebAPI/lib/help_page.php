@@ -25,6 +25,11 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // what it cannot carry is WHY there is a ceiling at all, and that answer
     // belongs in one place rather than in every blocker message.
     'help-network-contract' => 'deploy',
+    // The per-VM create progress, and above all what an unresolved unit means.
+    // The card on the job log states the fact and links here; it must not also
+    // explain, because the explanation is four paragraphs long and would then
+    // sit inside a card that a reader opens to count VMs.
+    'help-create-progress' => 'deploy',
 ];
 
 function help_panel_visible(string $panel, array $user): bool

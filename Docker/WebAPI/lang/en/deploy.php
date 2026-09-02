@@ -334,4 +334,22 @@ return [
     'mac_error_esxi_wds_interface_ambiguous' => 'ESXi returned more than one interface for the WDS/PXE port group.',
     'mac_error_wds_mac_missing' => 'The exact ESXi WDS/PXE interface has no valid MAC address.',
     'mac_error_unknown' => 'Unknown technical MAC-import error: :code.',
+    // The create section progress card (Etappe 14B-G). Every number is
+    // counted from deploy_create_vm_results, never from the log text above.
+    'create_progress_heading' => 'Created VMs',
+    'create_progress_position' => ':concluded of :total concluded',
+    'create_progress_current_running' => 'Working on :name (position :position).',
+    'create_progress_current_preparing' => 'Prepared: :name (position :position).',
+    'create_progress_current_uncertain' => 'What happened to :name (position :position) is unresolved.',
+    'create_progress_since' => 'since :time',
+    'create_progress_count_created' => 'Newly created',
+    'create_progress_count_updated' => 'Changed',
+    'create_progress_count_unchanged' => 'Unchanged',
+    'create_progress_count_skipped' => 'Skipped',
+    'create_progress_count_failed' => 'Failed',
+    'create_progress_count_uncertain' => 'Unresolved',
+    'create_progress_count_not_started' => 'Not started yet',
+    'create_progress_unresolved' => 'Whether the VM for :name (position :position) was created is not established. Check the inventory before you retry the job.',
+    'create_progress_link_inventory' => 'Check the ESXi inventory',
+    'create_progress_link_help' => 'What an unresolved outcome means',
 ];

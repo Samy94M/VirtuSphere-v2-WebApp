@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_log_panels.php';
 require_once __DIR__ . '/../lib/deploy_log_recovery.php';
 require_once __DIR__ . '/../lib/deploy_log_create_release.php';
+require_once __DIR__ . '/../lib/deploy_create_progress.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -113,6 +114,12 @@ if ($format === 'json') {
         'has_older' => $page['has_older'],
         'has_more' => $page['has_more'],
         'caught_up' => $page['caught_up'],
+        // The create progress is counted from deploy_create_vm_results, never
+        // re-derived from the log lines this response also carries. Null means
+        // the job has no create section at all, which is not the same as a
+        // section with nothing done yet, so the browser removes the card
+        // rather than showing it at zero.
+        'create_progress' => deploy_create_progress_payload($connection, $job),
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
         'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds),
@@ -191,10 +198,15 @@ $originUrl = deploy_job_origin_url($job);
 // The ' UTC' suffix is the house rule for DB timestamps: today PHP and MySQL
 // both run on UTC, but a date.timezone in php.ini would silently shift this.
 $emptyState = deploy_job_log_empty_state($job, $logs);
+// A page reached through the no-JavaScript older link is HISTORY, not the live
+// end of the run. Following it would append the newest incoming lines below a
+// window of old ones, which is a log that lies about its own order. The client
+// reads this the same way it reads a filtered view: no cursor, no polling.
+$isHistoryPage = deploy_job_log_cursor('before_seq', true, $_GET) !== null;
 
 layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 ?>
-<div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-before-seq="<?php echo h((string) $oldestSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>" data-caught-up="<?php echo $page['caught_up'] ? '1' : '0'; ?>" data-dom-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW); ?>" data-bottom-tolerance="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX); ?>" data-status-throttle="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_STATUS_THROTTLE_MS); ?>" data-filtered="<?php echo $logFilter['active'] ? '1' : '0'; ?>">
+<div class="stack" data-deploy-log data-job-id="<?php echo h((string) $job['id']); ?>" data-after-seq="<?php echo h((string) $lastSeq); ?>" data-before-seq="<?php echo h((string) $oldestSeq); ?>" data-terminal="<?php echo $isTerminal ? '1' : '0'; ?>" data-caught-up="<?php echo $page['caught_up'] ? '1' : '0'; ?>" data-dom-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW); ?>" data-bottom-tolerance="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX); ?>" data-status-throttle="<?php echo h((string) VIRTUSPHERE_DEPLOY_LOG_STATUS_THROTTLE_MS); ?>" data-filtered="<?php echo $logFilter['active'] || $isHistoryPage ? '1' : '0'; ?>">
     <section class="panel">
         <div class="actions">
             <a class="button button-secondary" href="<?php echo h($originUrl); ?>"><?php echo h(__t('common.back')); ?></a>
@@ -241,6 +253,10 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 
     <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds); ?></div>
 
+    <?php // Above the recovery and phase blocks on purpose: the question this
+          // card answers ("which of the fifteen VMs exist") is the one the
+          // incident was about, and it must not sit below four other panels. ?>
+    <?php deploy_log_render_create_progress($connection, $job, $user); ?>
     <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
     <?php deploy_log_render_create_release($connection, $job, $user); ?>
     <?php deploy_log_render_phases($timeline); ?>
@@ -251,7 +267,14 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <p class="muted"><?php echo h(__t('deploy.retention_hint', ['days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS])); ?></p>
         <p class="muted" data-deploy-log-window-note><?php echo h(__t('deploy.window_notice', ['limit' => VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW])); ?></p>
         <div class="actions">
-            <button class="button button-secondary" type="button" data-deploy-log-older<?php echo $page['has_older'] ? '' : ' hidden'; ?>><?php echo h(__t('deploy.load_older')); ?></button>
+            <?php // A LINK, not a button: this was a `type="button"` that did
+                  // nothing without JavaScript, on the one page a person opens
+                  // when something has already gone wrong. The endpoint has
+                  // accepted `before_seq` as a GET cursor all along, so the
+                  // capability existed and was simply not offered. The client
+                  // upgrades it in place (preventDefault plus the same fetch);
+                  // with scripting off the href does the paging. ?>
+            <a class="button button-secondary"<?php echo $page['has_older'] && $oldestSeq > 0 ? ' href="' . h(deploy_log_older_url((int) $job['id'], $oldestSeq)) . '"' : ''; ?> data-deploy-log-older<?php echo $page['has_older'] ? '' : ' hidden'; ?>><?php echo h(__t('deploy.load_older')); ?></a>
             <?php // Both switches carry a real visible label, not a title or an
                   // icon: they change what the view does, and a control whose
                   // meaning is only in a tooltip has no meaning on a keyboard. ?>

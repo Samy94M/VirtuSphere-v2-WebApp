@@ -117,3 +117,28 @@ function deploy_log_filter_url(int $jobId, array $filter): string
 
     return 'deploy_log.php?' . http_build_query($params);
 }
+
+/**
+ * The plain link to the page of lines older than $beforeSeq.
+ *
+ * The "load older" control was a `<button type="button">` and therefore did
+ * nothing at all without JavaScript, while the endpoint had accepted
+ * `before_seq` as a GET cursor the whole time: the capability existed and was
+ * simply not offered. A log is the one page a person opens when something has
+ * already gone wrong, which is the worst moment to require a working script.
+ *
+ * It carries no filter parameters, because a filtered view has no cursor at all
+ * (the rows are matches, not the sequence), and the filter form hides this
+ * control while it is active.
+ */
+function deploy_log_older_url(int $jobId, int $beforeSeq): string
+{
+    // Built into a variable first, like the function above. An inline array
+    // literal in the call would put a quoted key and a variable between the
+    // parentheses, which is the shape the CSP/SQL scanner treats as string
+    // interpolation into a query, and a guard that has to be argued with at
+    // every call site stops being a guard.
+    $params = ['id' => (string) $jobId, 'before_seq' => (string) $beforeSeq];
+
+    return 'deploy_log.php?' . http_build_query($params);
+}

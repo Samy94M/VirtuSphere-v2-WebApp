@@ -95,4 +95,12 @@ return [
     'autostart_run_p1' => 'Der Modus schreibt nur die VMs, die im Auftrag ausgewählt sind. Eine VM, deren Häkchen entfernt wurde, verliert ihren Eintrag erst bei einem Lauf, der sie mit einschließt.',
     'autostart_run_p1b' => 'Eine VM nimmt nur teil, wenn ihr eigenes Häkchen gesetzt ist und die Mission den Autostart eingeschaltet hat. Ist der Missions-Schalter aus, sind die Autostart-Felder im VM-Editor gesperrt; ein bereits gesetzter Wert bleibt gespeichert und greift, sobald die Mission eingeschaltet wird.',
     'autostart_run_p2' => 'Die vollständige Pipeline hängt den Autostart-Schritt nur an, wenn die Mission ihn aktiviert hat. Der Autostart-Schalter des Hosts wird nie ausgeschaltet, denn auf ihm können VMs anderer Missionen liegen.',
+    // Der Fortschritt des Create-Abschnitts und vor allem der ungeklaerte
+    // Ausgang (Etappe 14B-G). Die Karte im Joblog nennt den Fakt und verlinkt
+    // hierher; erklaert wird nur an dieser einen Stelle.
+    'create_progress_heading' => 'Fortschritt beim Anlegen der VMs',
+    'create_progress_p1' => 'Die Karte über dem Protokoll zählt jede VM einzeln, und zwar aus den gespeicherten Ergebniszeilen des Auftrags, nicht aus dem Protokolltext darüber. Deshalb bleibt die Antwort auf die Frage, welche VMs existieren, auch dann lesbar, wenn der Auftrag mitten im Lauf abgebrochen ist oder das Protokoll nicht mehr vollständig vorliegt.',
+    'create_progress_p2' => 'Angezeigt wird, an welcher VM gerade gearbeitet wird und seit wann. Wie weit ein einzelner Anlegevorgang gediehen ist, steht bewusst nirgends: das meldet keine der beteiligten Komponenten, und ein Balken, der sich trotzdem füllt, wäre eine erfundene Zahl.',
+    'create_progress_p3' => '„Ungeklärt" heißt: Der Auftrag hat den Aufruf für diese VM abgeschickt, aber es ist nicht festgestellt, ob die VM danach existiert. Das ist kein Fehler und kein Erfolg, sondern eine offene Frage. Prüfen Sie den ESXi-Bestand, bevor Sie den Auftrag wiederholen; eine Wiederholung übernimmt eine ungeklärte Einheit nicht von selbst.',
+    'create_progress_p4' => '„Noch nicht begonnen" sind die Einheiten hinter der Stelle, an der der Auftrag stehen geblieben ist. Für sie ist nichts geschehen, und eine Wiederholung nimmt genau sie wieder auf.',
 ];

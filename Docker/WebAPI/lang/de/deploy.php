@@ -334,4 +334,22 @@ return [
     'mac_error_esxi_wds_interface_ambiguous' => 'ESXi hat mehr als eine Schnittstelle für die WDS/PXE-Portgruppe geliefert.',
     'mac_error_wds_mac_missing' => 'Die exakte WDS/PXE-Schnittstelle auf ESXi besitzt keine gültige MAC-Adresse.',
     'mac_error_unknown' => 'Unbekannter technischer MAC-Importfehler: :code.',
+    // Die Fortschrittskarte des Create-Abschnitts (Etappe 14B-G). Jede Zahl
+    // kommt aus deploy_create_vm_results, nie aus dem Protokolltext darüber.
+    'create_progress_heading' => 'Erstellte VMs',
+    'create_progress_position' => ':concluded von :total abgeschlossen',
+    'create_progress_current_running' => 'In Arbeit: :name (Position :position).',
+    'create_progress_current_preparing' => 'Vorbereitet: :name (Position :position).',
+    'create_progress_current_uncertain' => 'Bei :name (Position :position) ist offen, was geschehen ist.',
+    'create_progress_since' => 'seit :time',
+    'create_progress_count_created' => 'Neu erstellt',
+    'create_progress_count_updated' => 'Geändert',
+    'create_progress_count_unchanged' => 'Unverändert',
+    'create_progress_count_skipped' => 'Übersprungen',
+    'create_progress_count_failed' => 'Fehlgeschlagen',
+    'create_progress_count_uncertain' => 'Ungeklärt',
+    'create_progress_count_not_started' => 'Noch nicht begonnen',
+    'create_progress_unresolved' => 'Für :name (Position :position) ist nicht festgestellt, ob die VM angelegt wurde. Prüfen Sie den Bestand, bevor Sie den Auftrag wiederholen.',
+    'create_progress_link_inventory' => 'ESXi-Bestand prüfen',
+    'create_progress_link_help' => 'Was ein ungeklärter Ausgang bedeutet',
 ];

@@ -682,8 +682,20 @@ A paused service is not degraded and `health.php` keeps answering `200` with
 `status=ok`; only `degraded` and `offline` make it report `status=degraded`. A
 snapshot that cannot be computed is `degraded`, never `503`.
 
-The job log view is proven in the browser by `deploy-log.spec.js` and
-`deploy-recovery.spec.js`. Follow mode is measured there as geometry rather than
+The job log view is proven in the browser by `deploy-log.spec.js`,
+`deploy-recovery.spec.js` and `deploy-create-progress.spec.js`. The last one
+covers the per-VM create card and the paging that has to work with scripting
+off. Both of its central assertions are only decidable in a browser. That the
+card counts from `deploy_create_vm_results` and not from the log above it shows
+only when the two say different things, which is what a windowed log of more
+than 1,500 lines produces; and whether the "load older" control works without
+JavaScript is a property of the rendered anchor plus the HTML render path, not
+of any function. It was a `<button type="button">` for three stages while the
+endpoint accepted `before_seq` all along, and when it became an anchor the
+renderer still answered every request with the newest tail, so the link looked
+live and reloaded the same page. A context with `javaScriptEnabled: false` is
+what caught the second half; clicking it with scripts running proves the
+handler, which was never the part that was missing. Follow mode is measured there as geometry rather than
 asserted as source text, because the two are not the same question: the file can
 carry every follow line, pass its static contract and still open a live log at
 the top of the newest window, where `atBottom()` is false, every batch counts as

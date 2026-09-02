@@ -37,7 +37,17 @@ function deploy_log_view_model(mysqli $db, array $job, array $query): array
     $filter = deploy_log_filter_from_query($query, $phaseNames);
 
     if (!$filter['active']) {
-        $page = repo_deploy_job_log_initial_tail($db, $jobId);
+        // The HTML render honours `before_seq` as well, which is what makes the
+        // "load older" control work with scripting off: it was an anchor whose
+        // href the server accepted only on the JSON path, so a click without
+        // JavaScript reloaded the same newest tail and looked like a control
+        // that does nothing. Only this one cursor: `after_seq` is the live
+        // poller's, and a page rendered forward from an arbitrary point would
+        // put a reader somewhere with no way back to the end.
+        $beforeSeq = deploy_job_log_cursor('before_seq', true, $query);
+        $page = $beforeSeq === null
+            ? repo_deploy_job_log_initial_tail($db, $jobId)
+            : repo_deploy_job_log_older($db, $jobId, $beforeSeq);
 
         return [
             'timeline' => $timeline,
@@ -121,12 +131,19 @@ function deploy_job_log_format_page(array $page): array
     return $page;
 }
 
-function deploy_job_log_cursor(string $name, bool $positive): ?int
+/**
+ * @param array<string,mixed>|null $query The request parameters, defaulting to
+ *     $_GET. The view model passes the array it was handed rather than reaching
+ *     for the superglobal a second time, so the same request cannot be read
+ *     from two sources that a test could set apart.
+ */
+function deploy_job_log_cursor(string $name, bool $positive, ?array $query = null): ?int
 {
-    if (!array_key_exists($name, $_GET)) {
+    $source = $query ?? $_GET;
+    if (!array_key_exists($name, $source)) {
         return null;
     }
-    $raw = $_GET[$name];
+    $raw = $source[$name];
     if (!is_string($raw) || preg_match('/^\d+$/D', $raw) !== 1) {
         throw new InvalidArgumentException($name . ' must be an integer cursor.');
     }

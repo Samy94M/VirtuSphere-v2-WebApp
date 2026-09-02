@@ -645,6 +645,7 @@ CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     job_id INT NOT NULL,
     remote_execution_id BIGINT UNSIGNED NULL,
+    create_result_id BIGINT UNSIGNED NULL,
     resolution_scope VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     resolution_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     reason VARCHAR(1024) NOT NULL, reference VARCHAR(255) NULL,
@@ -656,7 +657,7 @@ CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
     -- result and no remote handle) is enforced in PHP: MySQL refuses a column
     -- that appears both in a CHECK and in a foreign key with a referential
     -- action, and SET NULL is the right action for create_result_id.
-    CONSTRAINT deploy_recovery_resolution_scope_check CHECK ((resolution_scope = 'remote_execution' AND remote_execution_id IS NOT NULL) OR (resolution_scope = 'legacy_job' AND remote_execution_id IS NULL) OR (resolution_scope = 'create_unit' AND remote_execution_id IS NULL)),
+    CONSTRAINT deploy_recovery_resolution_scope_check CHECK ((resolution_scope = _utf8mb4'remote_execution' AND remote_execution_id IS NOT NULL) OR (resolution_scope = _utf8mb4'legacy_job' AND remote_execution_id IS NULL) OR (resolution_scope = _utf8mb4'create_unit' AND remote_execution_id IS NULL)),
     CONSTRAINT fk_deploy_recovery_resolution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_recovery_resolution_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE RESTRICT,
     CONSTRAINT fk_deploy_recovery_resolution_create_result FOREIGN KEY (create_result_id) REFERENCES deploy_create_vm_results(id) ON DELETE SET NULL,
