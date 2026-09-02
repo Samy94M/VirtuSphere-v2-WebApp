@@ -32,15 +32,21 @@ const VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT = 'upload_mac_list.py';
  */
 function ansible_required_files(): array
 {
-    return array_merge(
+    // Deduplicated since Etappe 14B-E, and the overlap it removes is exactly
+    // one entry: VIRTUSPHERE_PLAYBOOKS['create'] and the launch playbook of
+    // VIRTUSPHERE_CREATE_ARTIFACTS are the same file. The mode map names it
+    // because that is what makes a mode create VMs; the create contract names
+    // it because that is the list its extra-vars are keyed on. Neither may drop
+    // it, so the list is made unique here rather than by taking a side.
+    return array_values(array_unique(array_merge(
         array_values(VIRTUSPHERE_PLAYBOOKS),
         array_values(VIRTUSPHERE_SYSTEM_PLAYBOOKS),
-        // The per-VM create control files (Etappe 14B). They belong to no mode,
-        // so neither playbook map carries them, and they would be the exact
-        // repeat of the inventory-playbook defect if they were only dispatched.
+        // The per-VM create control files (Etappe 14B). Only the launch playbook
+        // belongs to a mode; the other five would be the exact repeat of the
+        // inventory-playbook defect if they were only dispatched.
         VIRTUSPHERE_CREATE_ARTIFACTS,
         [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT]
-    );
+    )));
 }
 
 function ansible_source_dir(): string

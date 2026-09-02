@@ -60,6 +60,44 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_mark_vms_failed',
         'deploy_worker_scope_vms',
         'deploy_worker_job_mac_result',
+        // Etappe 14B-E. The ownership fence of a claim, read fresh because
+        // the per-VM create writes compare all three of its parts.
+        'deploy_worker_job_fence',
+    ];
+
+    /**
+     * The per-VM create orchestration (Etappe 14B-E). Its own list because it
+     * is its own decision: three modules that drive one VM at a time, and every
+     * name here is something a future reader may call. The section driver and
+     * the two per-unit modules are separated by what changes them - the order
+     * of the units, the state of one unit, and the observation of a running
+     * async job are three different reasons to edit.
+     */
+    private const CREATE_SURFACE = [
+        'deploy_worker_run_create_section',
+        'deploy_worker_create_assert_materialized',
+        'deploy_worker_create_next_unit',
+        'deploy_worker_create_started_at',
+        'deploy_worker_create_remaining_seconds',
+        'deploy_worker_create_progress_line',
+        'deploy_worker_create_summary_line',
+        'deploy_worker_create_job_status',
+        // How a create section that did not fully succeed ends. It lives with
+        // the create domain rather than with the other conclusions, because
+        // its status matrix reads the create rows and nothing else does.
+        'deploy_worker_conclude_create_section',
+        'deploy_worker_create_drive_unit',
+        'deploy_worker_create_prepare_unit',
+        'deploy_worker_create_launch_unit',
+        'deploy_worker_create_verify_skip',
+        'deploy_worker_create_terminate_unit',
+        'deploy_worker_create_poll_unit',
+        'deploy_worker_create_finish_unit',
+        'deploy_worker_create_control_call',
+        'deploy_worker_create_discover_jid',
+        'deploy_worker_create_cleanup_async',
+        'deploy_worker_create_ownership',
+        'deploy_worker_create_sleep',
     ];
 
     /** What the CLI shell contributes, reachable without starting a loop. */
@@ -180,7 +218,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         sort($duplicates);
         self::assertSame([], $duplicates, 'a function is declared by more than one worker module: ' . implode('; ', $duplicates));
 
-        $expected = array_merge(self::OUTCOME_SURFACE, self::ENTRY_SURFACE);
+        $expected = array_merge(self::OUTCOME_SURFACE, self::ENTRY_SURFACE, self::CREATE_SURFACE);
         sort($expected);
         $found = array_keys($owners);
         sort($found);

@@ -25,9 +25,13 @@ declare(strict_types=1);
  *                                  remote commands, each self-contained
  * - ansible_command_preflight.php  preflight components and command, output
  *                                  readers
+ * - ansible_command_create.php    the four control calls of one create unit
+ *                                  (Etappe 14B), built without a cleanup trap
+ *                                  because the async job outlives the call
  */
 
 require_once __DIR__ . '/ansible_command_shell.php';
 require_once __DIR__ . '/ansible_command_modes.php';
 require_once __DIR__ . '/ansible_command_probes.php';
 require_once __DIR__ . '/ansible_command_preflight.php';
+require_once __DIR__ . '/ansible_command_create.php';

@@ -41,20 +41,39 @@ final class AnsibleVmIdentityContractTest extends TestCase
         self::assertStringContainsString('identity_unbound_allowed: false', $export);
     }
 
+    /**
+     * Umgeschrieben in Etappe 14B-E. Der Vertrag ist unveraendert - eine
+     * vorhandene namensgleiche VM ohne die gespeicherte Instance-UUID wird vor
+     * `state: present` abgelehnt - aber er liegt jetzt an zwei Stellen: die
+     * gemeinsame Identitaetspruefung stellt den Befund fest, und das
+     * Launch-Playbook beendet den Lauf damit, bevor es das Modul erreicht. Der
+     * Abbruch ist bewusst kein Playbookfehler mehr, sondern ein
+     * `rejected`-Marker: eine fremde Namensgleichheit ist der haeufigste echte
+     * Betriebsfall, und als abgebrochener Aufruf ohne Marker kaeme sie beim
+     * Worker als `protocol_error` an.
+     */
     public function testCreateRefusesAnExistingNameWithoutMatchingInstanceUuidBeforeStatePresent(): void
     {
-        $playbook = $this->source('createVMs-ESXi_playbook.yml');
-        $inventory = strpos($playbook, 'community.vmware.vmware_vm_info:');
-        $identity = strpos($playbook, 'vm_instance_uuid', (int) $inventory);
-        $mutationModule = strpos($playbook, 'community.vmware.vmware_guest:', ((int) $inventory) + 1);
-        $mutation = strpos($playbook, 'state: present', (int) $mutationModule);
+        $identityTasks = $this->source('create_identity_check_tasks.yml');
+        self::assertStringContainsString('vm_instance_uuid', $identityTasks);
+        self::assertStringContainsString('community.vmware.vmware_vm_info:', $identityTasks);
+        // Der geschlossene Code, nicht freier Text: der Worker speichert ihn,
+        // und das Portal entscheidet danach.
+        self::assertStringContainsString("'identity_conflict'", $identityTasks);
 
-        self::assertNotFalse($inventory);
-        self::assertNotFalse($identity);
-        self::assertNotFalse($mutationModule);
+        $launch = $this->source('createVMLaunch-ESXi_playbook.yml');
+        $include = strpos($launch, 'include_tasks: ./create_identity_check_tasks.yml');
+        $reject = strpos($launch, 'vs_identity_conflict | bool', (int) $include);
+        $endPlay = strpos($launch, 'meta: end_play', (int) $reject);
+        $mutationModule = strpos($launch, 'community.vmware.vmware_guest:');
+        $mutation = strpos($launch, 'state: present', (int) $mutationModule);
+
+        self::assertNotFalse($include, 'the launch playbook re-runs the shared identity check');
+        self::assertNotFalse($reject);
+        self::assertNotFalse($endPlay);
         self::assertNotFalse($mutation);
-        self::assertLessThan($mutation, $identity, 'the identity assertion must run before vmware_guest state: present');
-        self::assertStringContainsString('VirtuSphere VM identity collision', $playbook);
+        self::assertLessThan($mutation, $reject, 'the identity verdict must be read before vmware_guest state: present');
+        self::assertLessThan($mutation, $endPlay, 'the refusal must end the play before the mutation');
     }
 
     public function testPowerAndAutostartPlaybooksValidateTheUuidBeforeTheirFirstMutation(): void

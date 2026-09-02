@@ -287,7 +287,10 @@ done
 #
 # Geprueft wird deshalb das Paar, nicht die Zahl: das Playbook ist die SSoT, und die
 # Matrix muss die Untergrenze nennen, die diese Zahl verlangt.
-create_playbook='Ansible/createVMs-ESXi_playbook.yml'
+# Seit Etappe 14B-E mutiert nicht mehr das Schleifen-Playbook, sondern der
+# Launch-Aufruf, der genau eine VM erstellt. Die SSoT der Hardware-Version ist
+# damit diese Datei; der alte Pfad existiert nicht mehr.
+create_playbook='Ansible/createVMLaunch-ESXi_playbook.yml'
 matrix_doc='docs/DEPLOYMENT.md'
 if [ -f "$create_playbook" ] && [ -f "$matrix_doc" ]; then
   hw_version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$create_playbook" | head -n 1)

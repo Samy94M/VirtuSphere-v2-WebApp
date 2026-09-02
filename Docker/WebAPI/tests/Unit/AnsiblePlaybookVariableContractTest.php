@@ -79,7 +79,20 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
                 continue;
             }
 
-            preg_match_all('/\bitem\.((?:\w+\.)*\w+)/', $source, $matches);
+            // `item` in a loop and `vs_target` in a create control call are the
+            // same thing under two names: the one VM entry of the serverlist a
+            // task is working on. The create flow deliberately has no loop, so a
+            // scan that knows only `item` stops seeing the per-VM keys the
+            // moment the loop disappears - and would then report a key as
+            // unconsumed exactly when it moved into the new path. The included
+            // task files count as part of the playbook that includes them,
+            // because the shared identity check is where the create flow reads
+            // the stored instance uuid.
+            $scanned = $source;
+            foreach ($this->includedTaskFiles($source) as $included) {
+                $scanned .= "\n" . (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $included);
+            }
+            preg_match_all('/\b(?:item|vs_target)\.((?:\w+\.)*\w+)/', $scanned, $matches);
             foreach (array_unique($matches[1]) as $path) {
                 self::assertContains(
                     $path,

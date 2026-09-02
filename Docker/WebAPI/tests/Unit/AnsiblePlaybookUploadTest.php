@@ -70,13 +70,27 @@ final class AnsiblePlaybookUploadTest extends TestCase
         self::assertContains($inventory, ansible_required_files());
     }
 
-    public function testNoDuplicatesOnTheUploadList(): void
+    public function testNoDuplicatesOnTheUploadListAndOnlyOneDeliberateOverlap(): void
     {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
         $uploaded = ansible_required_files();
         self::assertSame(
             array_values(array_unique($uploaded)),
             array_values($uploaded),
-            'a file would be uploaded twice; the two playbook maps overlap'
+            'a file would be uploaded twice'
         );
+
+        // Since Etappe 14B-E the maps DO overlap, in exactly one entry: the
+        // create mode's playbook is the launch playbook of the per-VM create
+        // contract. Asserting the size of that overlap keeps this a real guard
+        // instead of a comparison the deduplication makes vacuous - a second,
+        // unnoticed overlap would mean two maps claim the same file for two
+        // different reasons.
+        $overlap = array_values(array_intersect(
+            array_merge(array_values(VIRTUSPHERE_PLAYBOOKS), array_values(VIRTUSPHERE_SYSTEM_PLAYBOOKS)),
+            VIRTUSPHERE_CREATE_ARTIFACTS
+        ));
+        self::assertSame([VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH], $overlap);
+        self::assertSame(VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH, VIRTUSPHERE_PLAYBOOKS['create']);
     }
 }

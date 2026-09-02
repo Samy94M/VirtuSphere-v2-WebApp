@@ -69,8 +69,16 @@ const VIRTUSPHERE_INTERFACE_MODES = [VIRTUSPHERE_INTERFACE_MODE_DHCP, 'static'];
 // list is the SSoT for both the vm_edit select and repo_validate_interfaces().
 const VIRTUSPHERE_INTERFACE_TYPES = ['vmxnet3', 'e1000', 'e1000e'];
 
+// The playbook a deploy mode is made of. `create` is the one entry that is no
+// longer a step the worker hands to the remote shell as a whole (Etappe 14B,
+// Teiletappe E): the create section is driven per VM, so this name says which
+// modes create VMs and which file the mutation lives in, while
+// ansible_remote_steps() deliberately leaves it out of the sequence. The value
+// mirrors VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH, which cannot be referenced here
+// because this file is loaded far below the create constants;
+// CreateFlowWorkerContractTest pins the two against each other.
 const VIRTUSPHERE_PLAYBOOKS = [
-    'create' => 'createVMs-ESXi_playbook.yml',
+    'create' => 'createVMLaunch-ESXi_playbook.yml',
     'powercycle' => 'powercycleVMs-ESXi_playbook.yml',
     'export' => 'exportVMs-Informations-ESXi_playbook.yml',
     'start' => 'startVMs-ESXi_playbook.yml',
@@ -131,14 +139,6 @@ const VIRTUSPHERE_POWERCYCLE_WAIT_MAX = 300;
 const VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT = 300;
 const VIRTUSPHERE_START_WAIT_SECONDS_MIN = 1;
 const VIRTUSPHERE_START_WAIT_SECONDS_MAX = 1500;
-
-// Seconds the create step waits for ESXi to register the VMs it just created,
-// before the next playbook addresses them by name. Not operator-tunable: it is a
-// property of the hypervisor, not of the MECM environment, so there is no form
-// field and the value is fixed. It lives here rather than as a literal in the
-// playbook so it is inside the same pause budget as the two configurable waits:
-// a pause nobody owns is a pause nothing checks.
-const VIRTUSPHERE_CREATE_SETTLE_SECONDS = 60;
 
 /**
  * The operator-facing name of one provisioning type. The stored value is the

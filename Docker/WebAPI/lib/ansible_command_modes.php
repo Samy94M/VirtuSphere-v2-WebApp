@@ -282,6 +282,15 @@ function ansible_remote_steps(string $remoteDir, array $payload, bool $autostart
 
     $steps = [];
     foreach (ansible_playbooks_for_mode($mode, $autostartEnabled) as $playbook) {
+        if ($playbook === VIRTUSPHERE_PLAYBOOKS['create']) {
+            // Etappe 14B, Teiletappe E: the create playbook is not a step of
+            // this sequence any more. It mutates exactly one VM per call, and
+            // the worker drives one call per VM so that every one of them has a
+            // durable result before the next one starts. Handing the whole
+            // selection to one remote command is what left the 13.08.2026
+            // incident with fourteen VMs on ESXi and no record of which.
+            continue;
+        }
         $commands = $preamble;
         $commands[] = 'echo ' . ansible_sh_quote(ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_BEGIN, $playbook));
         $commands[] = 'ansible-playbook ' . ansible_sh_quote($playbook) . ($verbose ? ' -vvv' : '') . ' 2>&1';

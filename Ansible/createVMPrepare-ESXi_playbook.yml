@@ -49,6 +49,33 @@
     - name: Identitaet pruefen
       ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
 
+    # Ein geschlossener Identitaetsbefund ist ein Ergebnis dieser Einheit, kein
+    # Fehler dieses Steueraufrufs: er wird als Marker gemeldet, damit der Worker
+    # den Code speichert und mit der naechsten VM weitermachen kann. Ein
+    # abgebrochener Aufruf ohne Marker behaelt dadurch genau eine Bedeutung:
+    # Transport, Zugang oder Modul sind kaputt.
+    - name: Identitaetsbefund ohne Mutation melden
+      when: vs_identity_conflict | bool
+      block:
+        - name: Ablehnung der Vorbereitung schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': vs_identity_conflict_code,
+                  'error': vs_identity_conflict_reason
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Vorbereitung ohne Ergebnis beenden
+          ansible.builtin.meta: end_play
+
     # `to_nice_json` schreibt genau die Felder unten und nichts sonst: kein
     # registriertes Gesamtobjekt, keine invocation.module_args, keine
     # Zugangsdaten. Modus 0600, weil die Datei im Handle-Verzeichnis liegt.

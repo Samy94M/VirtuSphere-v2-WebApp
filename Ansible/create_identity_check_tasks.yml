@@ -13,10 +13,21 @@
 # dem Inventar-Playbook passiert.
 #
 # Erwartet: vs_target (genau ein Eintrag aus vm_configurations).
-# Setzt: vs_existed_before, vs_precheck_moid, vs_precheck_instance_uuid.
+# Setzt: vs_existed_before, vs_precheck_moid, vs_precheck_instance_uuid,
+#        vs_identity_conflict, vs_identity_conflict_code,
+#        vs_identity_conflict_reason.
+#
+# Diese Datei bricht den Lauf NICHT ab (Etappe 14B-E). Eine fremde
+# Namensgleichheit ist der häufigste echte Betriebsfall und ein fachliches
+# Ergebnis dieser Einheit, kein Fehler des Steueraufrufs: als abgebrochener
+# Aufruf ohne Marker käme sie beim Worker als `protocol_error` an und schickte
+# den Operator an die falsche Stelle. Sie setzt deshalb einen geschlossenen
+# Code, den der aufrufende Playbook als `rejected`-Marker ausgibt. Ein
+# abgebrochener Aufruf bleibt damit das, was er ist: Transport, Zugangsdaten
+# oder Modul kaputt.
 #
 # vs_identity_require_stored_match (Standard: true) steuert die LETZTE
-# Zusicherung. Vor einer Mutation muss eine vorhandene namensgleiche VM die im
+# Bedingung. Vor einer Mutation muss eine vorhandene namensgleiche VM die im
 # Portal gespeicherte UUID tragen, sonst ist sie fremd. Nach einem erfolgreichen
 # Async-Job gilt das ausdrücklich nicht: die VM wurde gerade erst erstellt, ihre
 # UUID ist genau das, was dieser Lauf zurückmeldet, und das Portal kann sie noch
@@ -43,16 +54,9 @@
 
 # Zwei namensgleiche VMs sind kein Grund, sich für eine zu entscheiden. ESXi
 # erlaubt sie in getrennten Ordnern, und `state: present` würde die zuerst
-# gefundene anfassen.
-- name: Ein Name darf hoechstens eine VM bezeichnen
-  ansible.builtin.assert:
-    that:
-      - vs_identity_matches | length <= 1
-    fail_msg: >-
-      VirtuSphere identity conflict: the name {{ vs_target.vm_name }} exists
-      more than once on this host. Resolve the duplicate in the ESXi Host
-      Client before deploying.
-
+# gefundene anfassen. Genau ein Treffer liefert die Werte; alles andere liefert
+# leere Werte, damit kein späterer Zweig auf einem willkürlichen `first`
+# weiterrechnet.
 - name: Ergebnis der Identitaetspruefung festhalten
   ansible.builtin.set_fact:
     vs_existed_before: "{{ (vs_identity_matches | length) == 1 }}"
@@ -61,30 +65,44 @@
       {{ (vs_identity_matches | first).instance_uuid | default('')
          if (vs_identity_matches | length) == 1 else '' }}
 
-# Eine vorhandene VM ohne dauerhafte Identität ist kein Fund, sondern ein
-# unbrauchbares Ergebnis: der Name allein beweist nichts, und ohne UUID kann
-# der spätere Launch nicht per UUID selektieren.
-- name: Eine vorhandene VM muss eine dauerhafte Identitaet haben
-  ansible.builtin.assert:
-    that:
-      - not (vs_existed_before | bool) or (vs_precheck_instance_uuid | length > 0 and vs_precheck_moid | length > 0)
-    fail_msg: >-
-      VirtuSphere identity result invalid: {{ vs_target.vm_name }} exists but
-      reports no durable instance UUID.
-
-# Die gespeicherte Identität des Portals entscheidet, ob eine vorhandene VM die
-# eigene ist. Ohne gespeicherte UUID ist eine namensgleiche VM eine fremde.
-- name: Eine vorhandene VM muss zur gespeicherten Identitaet gehoeren
-  when: vs_identity_require_stored_match | default(true) | bool
-  ansible.builtin.assert:
-    that:
-      - >-
-        not (vs_existed_before | bool)
-        or (
-          (vs_target.vm_instance_uuid | default('') | trim | length > 0)
-          and (vs_target.vm_instance_uuid | lower == vs_precheck_instance_uuid | lower)
+# Die geschlossene Entscheidung. Reihenfolge ist Bedeutung: mehrere Treffer
+# schlagen alles andere, eine vorhandene VM ohne dauerhafte Identität ist ein
+# unbrauchbares Ergebnis und keine Kollision, und erst danach entscheidet die
+# gespeicherte Portal-UUID über eigen oder fremd.
+- name: Identitaetsbefund einordnen
+  ansible.builtin.set_fact:
+    vs_identity_conflict_code: >-
+      {{
+        'identity_conflict' if (vs_identity_matches | length) > 1
+        else (
+          'identity_result_invalid' if (
+            (vs_existed_before | bool)
+            and ((vs_precheck_instance_uuid | length) == 0 or (vs_precheck_moid | length) == 0)
+          )
+          else (
+            'identity_conflict' if (
+              (vs_identity_require_stored_match | default(true) | bool)
+              and (vs_existed_before | bool)
+              and (
+                (vs_target.vm_instance_uuid | default('') | trim | length) == 0
+                or (vs_target.vm_instance_uuid | lower != vs_precheck_instance_uuid | lower)
+              )
+            )
+            else ''
+          )
         )
-    fail_msg: >-
-      VirtuSphere VM identity collision: {{ vs_target.vm_name }} already exists,
-      but its instance UUID is not the one stored by the portal. Use the
-      explicit adoption action after verifying the VM in the ESXi Host Client.
+      }}
+
+- name: Ursache des Identitaetsbefunds festhalten
+  ansible.builtin.set_fact:
+    vs_identity_conflict: "{{ (vs_identity_conflict_code | length) > 0 }}"
+    vs_identity_conflict_reason: >-
+      {{
+        ('the name exists more than once on this host'
+         if (vs_identity_matches | length) > 1
+         else ('the existing VM reports no durable instance uuid'
+               if vs_identity_conflict_code == 'identity_result_invalid'
+               else ('an existing VM of this name does not carry the instance uuid stored by the portal'
+                     if (vs_identity_conflict_code | length) > 0
+                     else '')))
+      }}

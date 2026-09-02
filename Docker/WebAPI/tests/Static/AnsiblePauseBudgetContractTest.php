@@ -54,16 +54,6 @@ final class AnsiblePauseBudgetContractTest extends TestCase
             'max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX,
             'payload' => 'start_wait',
         ],
-        // Fixed, so its bounds collapse onto the value and there is no payload
-        // key to clamp: a hypervisor property is not an operator setting. It is
-        // registered all the same, because being inside this budget is what
-        // stops it from growing into a literal nothing checks again.
-        'CreateSettleSeconds' => [
-            'default' => VIRTUSPHERE_CREATE_SETTLE_SECONDS,
-            'min' => VIRTUSPHERE_CREATE_SETTLE_SECONDS,
-            'max' => VIRTUSPHERE_CREATE_SETTLE_SECONDS,
-            'payload' => null,
-        ],
     ];
 
     /** Duration keys the pause module accepts; only one of them is allowed. */
@@ -198,11 +188,12 @@ final class AnsiblePauseBudgetContractTest extends TestCase
 
     public function testThePayloadDecoderClampsEveryPauseToThoseBounds(): void
     {
+        // Every registered pause is operator-tunable again since Etappe 14B-E
+        // removed the fixed CreateSettleSeconds, so there is no payload-less
+        // entry left to skip. The counter below still proves the loop ran: a
+        // registry that lost its entries would otherwise pass silently.
         $clamped = 0;
         foreach (self::PAUSE_VARIABLES as $variable => $bounds) {
-            if ($bounds['payload'] === null) {
-                continue;
-            }
             $clamped++;
             $key = (string) $bounds['payload'];
 

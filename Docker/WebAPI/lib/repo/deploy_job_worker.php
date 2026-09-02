@@ -70,8 +70,17 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
         }
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
         $legacyContract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('ssssi', $running, $workerId, $legacyContract, $generation, $jobId);
+        // The ownership fence of this claim (Etappe 14B). A worker id is
+        // derived from host and process and survives a restart, so it cannot
+        // tell a returning old worker from its successor; a per-claim random
+        // token can, and the per-VM create writes compare it on every
+        // transition. The lease epoch travels with it so the same comparison
+        // keeps working once the remote execution contract owns the lease.
+        // Nothing here activates that contract: the job stays `legacy`.
+        $lockToken = bin2hex(random_bytes(16));
+        $epoch = (int) repo_scalar($db, "SELECT COALESCE(MAX(epoch), 0) FROM deploy_worker_leases WHERE lease_name = 'deploy-worker'");
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, lock_token = ?, worker_epoch = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssissi', $running, $workerId, $lockToken, $epoch, $legacyContract, $generation, $jobId);
         $stmt->execute();
         repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
 
@@ -149,7 +158,7 @@ function repo_finish_deploy_job(
         );
 
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
         $stmt->bind_param('sssssiss', $status, $lastError, $resultJson, $reasonCode, $reasonDetail, $jobId, $workerId, $running);
         $stmt->execute();
         $finished = $stmt->affected_rows === 1;

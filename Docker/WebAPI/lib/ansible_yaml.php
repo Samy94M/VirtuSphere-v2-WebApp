@@ -197,7 +197,7 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
     // still. Nothing converts a unit on the way.
     $out .= "\nPowerCycleWaitSeconds: " . $powerCycleWait . "\n";
     $out .= 'StartWaitSeconds: ' . $startWait . "\n";
-    $out .= 'CreateSettleSeconds: ' . VIRTUSPHERE_CREATE_SETTLE_SECONDS . "\n";
+    // CreateSettleSeconds is gone with Etappe 14B-E: the per-VM flow reads each VM's live identity back, so its blind 60 s wait was replaced by evidence.
     // Only a full pipeline may pass an unbound VM after create: the first
     // playbook in that same && sequence proved the name absent and created it.
     // A standalone power/export/start/autostart run has no such proof and must

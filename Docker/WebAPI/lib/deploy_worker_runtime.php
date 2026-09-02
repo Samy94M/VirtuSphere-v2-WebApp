@@ -278,6 +278,47 @@ function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $worker
     }
 }
 
+/**
+ * This worker's ownership fence for the job it holds (Etappe 14B).
+ *
+ * The worker id alone is not a fence. It is derived from host and process and
+ * survives a restart, so a returning old worker could satisfy it while its
+ * successor holds the job. The claim therefore mints a random lock token and
+ * records the lease epoch alongside it, and every per-VM create write compares
+ * all three. Read fresh rather than taken from the job array a caller has been
+ * carrying: the fence has to be the current one, not the one at claim time.
+ *
+ * @return array{worker_id:string,lock_token:string,worker_epoch:int}
+ */
+function deploy_worker_job_fence(mysqli $db, int $jobId, string $workerId): array
+{
+    $row = repo_fetch_one(
+        $db,
+        'SELECT locked_by, lock_token, worker_epoch FROM deploy_jobs WHERE id = ? LIMIT 1',
+        'i',
+        [$jobId]
+    );
+    if ($row === null || (string) ($row['locked_by'] ?? '') !== $workerId) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' is no longer locked by this worker.');
+    }
+    $token = (string) ($row['lock_token'] ?? '');
+    if ($token === '') {
+        // A job claimed before this stage. Its per-VM writes cannot be fenced,
+        // and a fence that silently degrades to "worker id only" is the kind of
+        // guard that stops guarding without turning red.
+        throw new DeployWorkerCancelled(
+            'Deploy job ' . $jobId . ' was claimed without a lock token and cannot drive per-VM create results. '
+            . 'Queue it again.'
+        );
+    }
+
+    return [
+        'worker_id' => $workerId,
+        'lock_token' => $token,
+        'worker_epoch' => (int) ($row['worker_epoch'] ?? 0),
+    ];
+}
+
 function deploy_worker_payload(array $job): array
 {
     $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);

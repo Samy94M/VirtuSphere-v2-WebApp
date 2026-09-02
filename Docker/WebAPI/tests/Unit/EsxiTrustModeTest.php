@@ -113,7 +113,10 @@ final class EsxiTrustModeTest extends TestCase
             self::assertStringContainsString('SSL_CERT_FILE', $source, basename($path));
             self::assertStringContainsString('REQUESTS_CA_BUNDLE', $source, basename($path));
         }
-        self::assertSame(9, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook must share the trust contract');
+        // Eight since Etappe 14B-E deleted createVMs-ESXi_playbook.yml: the
+        // create mutation moved into createVMLaunch, one VM per call, and a
+        // second create path would be a second trust contract.
+        self::assertSame(8, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook must share the trust contract');
     }
 
     public function testCertificateFailuresNeverFallThroughToParse(): void
@@ -156,8 +159,16 @@ final class EsxiTrustModeTest extends TestCase
             self::assertFileExists($dir . '/' . VIRTUSPHERE_ESXI_TRUST_FILE);
             self::assertStringStartsWith('-----BEGIN CERTIFICATE-----', (string) file_get_contents($dir . '/' . VIRTUSPHERE_ESXI_TRUST_FILE));
 
+            // The create path is a control call now, not a sequence step
+            // (Etappe 14B-E), so it is checked where it actually runs; a mode
+            // that still HAS a sequence step covers the other shape.
+            require_once dirname(__DIR__, 2) . '/lib/ansible_command_create.php';
             foreach ([
-                ansible_remote_steps('/tmp/deploy', ['mode' => 'create'])[0]['command'],
+                ansible_remote_steps('/tmp/deploy', ['mode' => 'export'])[0]['command'],
+                ansible_create_control_command('/tmp/deploy', VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE, 1, [
+                    'vs_portal_vm_id' => 1,
+                    'vs_result_file' => '/tmp/deploy/create.vm.1/prepare.json',
+                ]),
                 ansible_inventory_remote_command('/tmp/inventory'),
             ] as $command) {
                 self::assertStringContainsString('if [ -f esxi-trust.pem ]; then chmod 600 esxi-trust.pem; fi', $command);

@@ -99,7 +99,17 @@ function deploy_create_assert_transition_fields(string $to, array $fields): void
 
     $required = match ($to) {
         VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED => $missing('existed_before'),
-        VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING => $missing('async_jid', 'remote_execution_id', 'async_deadline_at'),
+        // Invariant 2. The bound remote handle is NOT part of this list
+        // (Etappe 14B, Teiletappe E): it belongs to the remote execution
+        // contract, which stays locked until its site acceptance, so a create
+        // unit under the legacy transport has none. What the invariant is
+        // actually about - the async state of a running unit is durably
+        // findable - is satisfied without it: the job id is stored here and the
+        // directory is derived from the job's deterministic remote directory
+        // (ansible_create_async_dir). The stage that binds a handle adds the
+        // requirement back for jobs that carry one; requiring it now would
+        // simply mean no unit could ever be started.
+        VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING => $missing('async_jid', 'async_deadline_at'),
         VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED => $missing('outcome', 'changed', 'existed_before', 'vm_moid', 'vm_instance_uuid'),
         VIRTUSPHERE_CREATE_RESULT_STATUS_SKIPPED => $missing('outcome', 'changed', 'existed_before', 'vm_moid', 'vm_instance_uuid', 'resumed_from_result_id'),
         VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,

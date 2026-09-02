@@ -47,6 +47,18 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_preflight_failed_component',
         'ansible_preflight_strip_markers',
         'ansible_sh_quote',
+        // Etappe 14B-E: the four control calls of one create unit. They are
+        // remote commands like the sequence steps above and belong to the same
+        // family, but they are built differently on purpose - no cleanup trap,
+        // because the async job they start outlives the call - so they are
+        // their own module rather than a branch inside ansible_remote_steps().
+        'ansible_create_unit_dir',
+        'ansible_create_async_dir',
+        'ansible_create_result_file',
+        'ansible_create_assert_remote_dir',
+        'ansible_create_control_command',
+        'ansible_create_assert_extra_vars',
+        'ansible_create_extra_vars_json',
     ];
 
     public function testRegistryMatchesTheFilesystemInBothDirections(): void

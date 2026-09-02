@@ -35,67 +35,65 @@ final class CreateFlowBaselineContractTest extends TestCase
     }
 
     /**
-     * Von Teiletappe D zur Haelfte umgeschrieben. Die Ausgabe laeuft jetzt
-     * ungebuffert, was den eigentlichen Vorfall behebt; die per-VM-Grenze fehlt
-     * weiterhin, weil der Worker die neue Folge erst in Teiletappe E treibt.
+     * Von Teiletappe E umgeschrieben. Der Create-Schritt ist kein Schritt der
+     * Remote-Folge mehr: der Worker treibt einen Aufruf je VM, damit zwischen
+     * zwei VMs etwas Dauerhaftes geschrieben werden kann. Was die anderen Modi
+     * angeht, bleibt die Folge unveraendert und weiterhin ungebuffert.
      */
-    public function testTheCreateSequenceIsUnbufferedButStillOneCallForTheWholeSelection(): void
+    public function testTheCreatePlaybookIsNoLongerAStepOfTheRemoteSequence(): void
     {
-        $steps = ansible_remote_steps('/tmp/vs-job-1', ['mode' => 'create']);
-
-        self::assertCount(1, $steps, 'Create ist heute genau ein Remote-Schritt');
-        self::assertSame(VIRTUSPHERE_PLAYBOOKS['create'], $steps[0]['playbook']);
-
-        $command = $steps[0]['command'];
-        self::assertStringContainsString('ansible-playbook', $command);
-        // Der Kern des Vorfalls: Python puffert stdout, sobald er kein Terminal
-        // ist, und der Worker liest ueber eine SSH-Pipe. Das Gate
-        // ansible-output-buffering misst denselben Sachverhalt am echten
-        // Prozess, statt ihn nur im Commandstring zu behaupten.
-        self::assertStringContainsString('export PYTHONUNBUFFERED=1', $command);
-        // Ein Aufruf, keine per-VM-Grenze: es gibt bis Teiletappe E keine
-        // Stelle, an der der Worker zwischen zwei VMs etwas Dauerhaftes
-        // schreiben koennte.
         self::assertSame(
-            1,
-            substr_count($command, 'ansible-playbook'),
-            'Baseline: eine Auswahl ist bis Teiletappe E ein einziger Playbookaufruf'
+            [],
+            ansible_remote_steps('/tmp/vs-job-1', ['mode' => 'create']),
+            'Create-only hat keinen Remote-Schritt mehr; die Einheiten treibt der Worker'
         );
+
+        $full = ansible_remote_steps('/tmp/vs-job-1', ['mode' => 'full']);
+        $playbooks = array_column($full, 'playbook');
+        self::assertNotContains(VIRTUSPHERE_PLAYBOOKS['create'], $playbooks, 'auch die Full-Pipeline reicht Create nicht mehr am Stueck weiter');
+        self::assertSame(
+            [VIRTUSPHERE_PLAYBOOKS['powercycle'], VIRTUSPHERE_PLAYBOOKS['export'], VIRTUSPHERE_PLAYBOOKS['start']],
+            $playbooks,
+            'die Folgeplaybooks der Full-Pipeline bleiben unveraendert'
+        );
+        foreach ($full as $step) {
+            // Der Kern des Vorfalls: Python puffert stdout, sobald er kein
+            // Terminal ist, und der Worker liest ueber eine SSH-Pipe. Das Gate
+            // ansible-output-buffering misst denselben Sachverhalt am echten
+            // Prozess, statt ihn nur im Commandstring zu behaupten.
+            self::assertStringContainsString('export PYTHONUNBUFFERED=1', $step['command']);
+            self::assertSame(1, substr_count($step['command'], 'ansible-playbook'), 'ein Schritt ist ein Playbookaufruf');
+        }
     }
 
     /**
-     * Etappe D ersetzt die Schleife durch genau eine Ziel-VM je Aufruf plus
-     * Async-Start, Statusabfrage und Cleanup.
+     * Von Teiletappe E umgeschrieben. Der mutierende Aufruf trifft genau eine
+     * VM und laeuft asynchron; das Schleifen-Playbook ist geloescht, damit es
+     * keinen zweiten Create-Pfad mit anderem Beweis gibt.
      */
-    public function testTheCreatePlaybookMutatesTheWholeSelectionInOneLoopedTask(): void
+    public function testTheCreatePlaybookMutatesExactlyOneVmAsynchronously(): void
     {
         $playbook = $this->repoSource('Ansible/' . VIRTUSPHERE_PLAYBOOKS['create']);
 
         self::assertSame(
             1,
             substr_count($playbook, 'community.vmware.vmware_guest:'),
-            'Baseline: genau ein mutierender vmware_guest-Task'
+            'genau ein mutierender vmware_guest-Task'
         );
-        self::assertStringContainsString(
-            'loop: "{{ vm_configurations }}"',
-            $playbook,
-            'Baseline: dieser Task laeuft ueber die gesamte Auswahl'
-        );
-        // Ohne async/poll haelt der Controller die Verbindung ueber die ganze
-        // Arbeit offen, und ein Transportabbruch nimmt das Ergebnis mit.
-        self::assertStringNotContainsString(
-            'async:',
-            $playbook,
-            'Baseline: der Create-Task laeuft heute synchron (Etappe D fuehrt async ein)'
+        self::assertStringNotContainsString('loop: "{{ vm_configurations }}"', $playbook, 'kein Loop ueber die Auswahl');
+        self::assertStringContainsString('poll: 0', $playbook);
+        self::assertFileDoesNotExist(
+            dirname(__DIR__, 4) . '/Ansible/createVMs-ESXi_playbook.yml',
+            'das alte Schleifen-Playbook bleibt geloescht; ein Legacy-Fallback waere ein zweiter Create-Pfad'
         );
     }
 
     /**
-     * Von Teiletappe C umgeschrieben. Die Frage des Vorfalls, welche der
-     * fuenfzehn VMs fertig waren, hat seitdem eine dauerhafte Antwort; was noch
-     * fehlt, ist der Worker, der sie schreibt (Teiletappe E).
+     * Von Teiletappe E umgeschrieben. Die Frage des Vorfalls, welche der
+     * fuenfzehn VMs fertig waren, hat jetzt nicht nur eine dauerhafte Antwort,
+     * sondern auch einen Worker, der sie schreibt.
      */
-    public function testThePerVmCreateResultExistsButNoWorkerWritesItYet(): void
+    public function testThePerVmCreateResultIsWrittenByTheWorker(): void
     {
         $schema = $this->repoSource('Docker/mysql/mysql-init/struktur.sql');
 
@@ -105,16 +103,21 @@ final class CreateFlowBaselineContractTest extends TestCase
         // mit Create-Zwischenstaenden ueberladen.
         self::assertStringContainsString('result_json', $schema);
 
-        // Kein Workermodul liest oder schreibt die Zeilen. Solange das gilt, ist
-        // der Create-Pfad unveraendert und diese Etappe additiv; Teiletappe E
-        // ersetzt diese Zusicherung durch die Orchestrierung.
-        foreach (['deploy_worker_mission.php', 'deploy_worker_finish.php', 'deploy_worker_reaper.php'] as $module) {
-            self::assertStringNotContainsString(
-                'deploy_create_',
-                $this->repoSource('Docker/WebAPI/lib/' . $module),
-                $module . ' benutzt die Create-Ergebniszeilen bereits'
-            );
-        }
+        self::assertStringContainsString(
+            'deploy_worker_run_create_section(',
+            $this->repoSource('Docker/WebAPI/lib/deploy_worker_mission.php'),
+            'der Missionsworker treibt die Create-Einheiten'
+        );
+        self::assertStringContainsString(
+            'deploy_worker_create_job_status(',
+            $this->repoSource('Docker/WebAPI/lib/deploy_worker_create.php'),
+            'der Jobabschluss liest die Ergebniszeilen statt eines Exitcodes'
+        );
+        self::assertStringContainsString(
+            'repo_deploy_create_converge_reaped(',
+            $this->repoSource('Docker/WebAPI/lib/repo/deploy_job_maintenance.php'),
+            'der Reaper konvergiert offene Einheiten, statt sie stumm laufend zu lassen'
+        );
     }
 
     /**

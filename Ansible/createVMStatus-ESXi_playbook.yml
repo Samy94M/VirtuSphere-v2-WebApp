@@ -145,16 +145,34 @@
       vars:
         vs_identity_require_stored_match: false
 
-    - name: Ein Erfolg muss eine live gefundene VM haben
-      ansible.builtin.assert:
-        that:
-          - vs_existed_before | bool
-          - vs_precheck_moid | length > 0
-          - vs_precheck_instance_uuid | length > 0
-        fail_msg: >-
-          VirtuSphere identity result invalid: the async job for
-          {{ vs_target.vm_name }} succeeded, but the live inventory does not
-          show exactly one VM with a durable identity.
+    # Ein Erfolg ohne live auffindbare, dauerhafte Identitaet ist kein Erfolg.
+    # Als Marker gemeldet statt als Abbruch: der Async-Job IST terminal, und
+    # diese Einheit hat damit ein Ergebnis, das der Worker speichern muss.
+    - name: Erfolg ohne verwertbare Identitaet melden
+      when: >-
+        (vs_identity_conflict | bool)
+        or not (vs_existed_before | bool)
+        or (vs_precheck_moid | length) == 0
+        or (vs_precheck_instance_uuid | length) == 0
+      block:
+        - name: Unbrauchbares Identitaetsergebnis schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': 'identity_result_invalid',
+                  'error': 'the async job succeeded, but the live inventory shows no single VM with a durable identity'
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne Erfolgsmeldung beenden
+          ansible.builtin.meta: end_play
 
     - name: Aktuellen Energiezustand der Ziel-VM lesen
       community.vmware.vmware_guest_info:

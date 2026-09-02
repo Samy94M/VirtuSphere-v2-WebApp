@@ -129,7 +129,6 @@
             ],
             "PowerCycleWaitSeconds": 7,
             "StartWaitSeconds": 123,
-            "CreateSettleSeconds": 60,
             "identity_unbound_allowed": true,
             "mission_configuration": {
                 "mission_name": "Bühne: \"Gold\" #7",

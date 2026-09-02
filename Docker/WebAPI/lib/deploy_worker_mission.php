@@ -15,6 +15,7 @@ require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_network_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
+require_once __DIR__ . '/deploy_worker_create.php';
 
 /**
  * The mission deploy processor: preflight, artifact preparation, the autostart
@@ -139,6 +140,36 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         });
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+
+        // The per-VM create section (Etappe 14B). It runs BEFORE the sequence
+        // below and owns the create playbook entirely: one call per VM, one
+        // durable result per VM. A full pipeline continues into its remaining
+        // playbooks only when every create unit ended successfully, because a
+        // power-cycle over a selection that is missing a VM would report a
+        // pipeline result about VMs that do not exist.
+        if (ansible_mode_creates_vms((string) $payload['mode'])) {
+            $createOutcome = deploy_worker_run_create_section(
+                $channel,
+                $job,
+                deploy_worker_job_fence($channel->connection(), $jobId, $workerId),
+                [
+                    'credential' => $ansibleCredential,
+                    'secret' => $ansibleSecret,
+                    'secrets' => [$esxiSecret, $ansibleSecret],
+                    'remote_dir' => $remoteDir,
+                    'verbose' => !empty($payload['verbose']),
+                    'options' => $options,
+                ]
+            );
+            // Honours a cancel that was accepted while the last create VM ran,
+            // and a lease this worker lost in the meantime.
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+            if (!$createOutcome['all_successful']) {
+                deploy_worker_conclude_create_section($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles, $createOutcome);
+
+                return;
+            }
+        }
 
         $steps = ansible_remote_steps($remoteDir, $payload, $autostartEnabled);
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible playbook sequence: ' . deploy_job_payload_summary((string) $job['payload_json']));

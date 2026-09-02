@@ -8,6 +8,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/status_events.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_worker.php';
+require_once __DIR__ . '/deploy_create_identity.php';
 
 /**
  * Unattended maintenance: log and system-job retention, the stale-job reaper and
@@ -153,17 +154,35 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 // SYSTEM line. The reaper supplies only the terminal metadata.
                 $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED;
                 $reasonDetail = deploy_terminal_reason_detail($message);
-                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, last_error = NULL, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, last_error = NULL, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
                 $stmt->bind_param('sssis', $cancelled, $reasonCode, $reasonDetail, $jobId, $cancelling);
             } else {
                 repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
                 $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT;
                 $reasonDetail = deploy_terminal_reason_detail($message);
-                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
                 $stmt->bind_param('ssssis', $failed, $message, $reasonCode, $reasonDetail, $jobId, $running);
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
+                // Etappe 14B: the create units of this job, in the same
+                // transaction as its terminal write. Confirmed successes,
+                // failures and skips are left exactly as they are - that is the
+                // property the 13.08.2026 incident lacked - and only a unit
+                // that was still in flight is converged, to `uncertain`. It is
+                // the honest word: this worker is gone, nobody will poll that
+                // async job again here, and nothing about the VM has been
+                // established either way.
+                $converged = repo_deploy_create_converge_reaped($db, $jobId, $observation);
+                if ($converged > 0) {
+                    repo_insert_deploy_job_log_unlocked(
+                        $db,
+                        $jobId,
+                        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+                        $converged . ' create unit(s) of this job had not finished and are now recorded as unresolved. '
+                        . 'Their VMs may or may not exist on ESXi; check the host before running this mission again.'
+                    );
+                }
                 $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
                 if (!$wasCancelling
                     && ($job['mission_id'] ?? null) === null

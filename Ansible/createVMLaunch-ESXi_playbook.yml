@@ -55,6 +55,31 @@
     - name: Identitaet erneut pruefen
       ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
 
+    # Derselbe geschlossene Befund wie in der Vorbereitung, und aus demselben
+    # Grund vor dem Drift-Vergleich: was jetzt fremd ist, wird nicht dadurch
+    # eigen, dass es sich seit der Vorbereitung nicht bewegt hat.
+    - name: Identitaetsbefund ohne Mutation melden
+      when: vs_identity_conflict | bool
+      block:
+        - name: Ablehnung des Starts schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': vs_identity_conflict_code,
+                  'error': vs_identity_conflict_reason
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Start ohne Mutation beenden
+          ansible.builtin.meta: end_play
+
     # Der Vergleich mit dem gespeicherten Prepare-Ergebnis. Er schließt das
     # Fenster zwischen Vorbereitung und Mutation so weit, wie es die vorhandene
     # Standalone-ESXi-Schnittstelle zulässt.

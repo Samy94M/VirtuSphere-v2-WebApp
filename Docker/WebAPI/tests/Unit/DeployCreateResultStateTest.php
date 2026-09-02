@@ -113,14 +113,34 @@ final class DeployCreateResultStateTest extends TestCase
         ]);
     }
 
-    public function testARunningUnitNeedsJobIdHandleAndDeadline(): void
+    /**
+     * Von Teiletappe E umgeschrieben. Der gebundene Remote-Handle gehoert dem
+     * Remote-Execution-Vertrag, der ohne Standortabnahme gesperrt bleibt; unter
+     * dem Legacy-Transport hat eine Create-Einheit keinen. Was Invariante 2
+     * wirklich verlangt, ist unveraendert scharf: eine laufende Einheit ohne
+     * dauerhafte Job-ID und ohne Frist gibt es nicht, und das Verzeichnis wird
+     * aus dem deterministischen Remote-Verzeichnis des Auftrags abgeleitet.
+     */
+    public function testARunningUnitNeedsItsJobIdAndDeadline(): void
     {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('remote_execution_id');
-        deploy_create_assert_transition_fields(VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING, [
-            'async_jid' => 'j1234567890.42',
-            'async_deadline_at' => '2026-09-01 12:00:00',
-        ]);
+        $complete = ['async_jid' => 'j1234567890.42', 'async_deadline_at' => '2026-09-01 12:00:00'];
+        deploy_create_assert_transition_fields(VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING, $complete);
+        self::assertArrayNotHasKey(
+            'remote_execution_id',
+            $complete,
+            'a running unit is legal without a bound remote handle'
+        );
+
+        foreach ($complete as $dropped => $ignored) {
+            $incomplete = $complete;
+            unset($incomplete[$dropped]);
+            try {
+                deploy_create_assert_transition_fields(VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING, $incomplete);
+                self::fail('a running unit without ' . $dropped . ' was accepted');
+            } catch (InvalidArgumentException $exception) {
+                self::assertStringContainsString($dropped, $exception->getMessage());
+            }
+        }
     }
 
     public function testAFailureCannotInventItsOwnErrorCode(): void
