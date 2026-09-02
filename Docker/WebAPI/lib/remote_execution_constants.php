@@ -154,3 +154,19 @@ const VIRTUSPHERE_REMOTE_OUTPUT_CHUNK_MAX_BYTES = 1048576;
 const VIRTUSPHERE_REMOTE_OBSERVATION_MAX_BYTES = 1468000;
 
 const VIRTUSPHERE_DEPLOY_WORKER_LEASE_NAME = 'deploy-worker';
+
+// The scope a recovery resolution covers. `remote_execution` names a durable
+// handle, `legacy_job` a job without one, and `create_unit` (Etappe 14B-F) one
+// unresolved per-VM create result. A release names the exact unit because a job
+// can hold several, decided at different times for different reasons; the
+// column half of that rule lives in PHP, because MySQL refuses a column in both
+// a CHECK and a foreign key with a referential action.
+const VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_REMOTE = 'remote_execution';
+const VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_LEGACY = 'legacy_job';
+const VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_CREATE_UNIT = 'create_unit';
+
+const VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPES = [
+    VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_REMOTE,
+    VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_LEGACY,
+    VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_CREATE_UNIT,
+];

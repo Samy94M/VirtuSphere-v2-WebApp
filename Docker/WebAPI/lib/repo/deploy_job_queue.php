@@ -27,7 +27,14 @@ require_once __DIR__ . '/../ansible_command_modes.php';
  * the whole group.
  */
 
-function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $esxiCredentialId, int $ansibleCredentialId, array $payloadData, ?string $scheduledAtUtc = null): int
+/**
+ * @param list<array<string,mixed>>|null $createRetrySource The source job's
+ *        create rows when this job is the retry of a create-tracked job. It
+ *        replaces the fresh materialization so a confirmed success becomes a
+ *        verify_skip unit bound to the row that proved it; there is still
+ *        exactly ONE materialization per job (Etappe 14B-F).
+ */
+function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $esxiCredentialId, int $ansibleCredentialId, array $payloadData, ?string $scheduledAtUtc = null, ?array $createRetrySource = null): int
 {
     if ($missionId <= 0 || $userId <= 0 || $esxiCredentialId <= 0 || $ansibleCredentialId <= 0) {
         throw new InvalidArgumentException('Mission, user, ESXi credential and Ansible credential are required.');
@@ -37,7 +44,7 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
     deploy_job_normalize_mission_mode((string) ($payloadData['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL));
     $payload = deploy_job_payload($payloadData);
 
-    return repo_transaction($db, static function () use ($db, $missionId, $userId, $esxiCredentialId, $ansibleCredentialId, $payload, $scheduledAtUtc): int {
+    return repo_transaction($db, static function () use ($db, $missionId, $userId, $esxiCredentialId, $ansibleCredentialId, $payload, $scheduledAtUtc, $createRetrySource): int {
         repo_deploy_assert_user_exists($db, $userId);
 
         $stmt = $db->prepare('SELECT id, mission_name, wds_vlan, hypervisor_datastorage, hypervisor_datacenter FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE');
@@ -89,7 +96,12 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         $stmt->bind_param('iisiiss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $scheduledAtUtc, $correlationId);
         $stmt->execute();
         $jobId = (int) $db->insert_id;
-        if ($createSelection !== []) {
+        if ($createRetrySource !== null) {
+            // Same transaction as the job row, and the same single
+            // materialization: the retry plan decides per unit whether it is a
+            // fresh create or the live verification of an earlier success.
+            repo_deploy_create_materialize_retry($db, $jobId, $createRetrySource);
+        } elseif ($createSelection !== []) {
             // Same transaction as the job row: a job with half its units would
             // look like one that had already processed the rest.
             repo_deploy_create_materialize($db, $jobId, $createSelection);
@@ -143,6 +155,24 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
             $payload['mode'] = $plan['mode'];
             $payload['vm_ids'] = $plan['vm_ids'];
         }
+
+        // The per-VM create retry (Etappe 14B-F, plan section 10.3). The WHOLE
+        // original selection travels into the new job, not the failed part of
+        // it: a full pipeline has to power-cycle, export and start every VM it
+        // was asked for, including the ones the first job already created.
+        // Those become verify_skip units - the work of proving live that the
+        // earlier success still holds - rather than a second create.
+        //
+        // A source job whose retry no longer creates anything (the export-only
+        // follow-up above) is deliberately untouched here: it materializes no
+        // create units and claims nothing about them.
+        $createRetrySource = null;
+        $sourceCreateRows = repo_deploy_create_results($db, $jobId);
+        if ($sourceCreateRows !== [] && ansible_mode_creates_vms((string) $payload['mode'])) {
+            $createRetrySource = $sourceCreateRows;
+            $payload['vm_ids'] = deploy_create_retry_vm_ids($sourceCreateRows);
+        }
+
         $newJobId = repo_create_deploy_job(
             $db,
             (int) $missionId,
@@ -150,11 +180,17 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
             (int) $job['credential_esxi_id'],
             (int) $job['credential_ansible_id'],
             $payload,
-            null
+            null,
+            $createRetrySource
         );
         $note = 'Retry of deploy job ' . $jobId;
         if ($plan !== null) {
             $note .= ' (export-only: ' . ($plan['scope'] === 'failed_vms' ? count($plan['vm_ids']) . ' failed VMs' : 'original selection') . ')';
+        }
+        if ($createRetrySource !== null) {
+            $createPlan = deploy_create_retry_plan($createRetrySource);
+            $note .= ' (create: ' . count($createPlan['verify']) . ' confirmed VM(s) to verify, '
+                . count($createPlan['create']) . ' to create)';
         }
         // ADR-0032: the retry runs under a NEW correlation id (the retrying
         // request's); this line is the deliberate link back to the old trace.

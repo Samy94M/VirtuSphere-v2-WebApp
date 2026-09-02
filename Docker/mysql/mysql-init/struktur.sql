@@ -563,23 +563,6 @@ CREATE TABLE IF NOT EXISTS deploy_remote_executions (
     CONSTRAINT deploy_remote_execution_truncated_check CHECK (output_truncated IN (0,1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    job_id INT NOT NULL,
-    remote_execution_id BIGINT UNSIGNED NULL,
-    resolution_scope VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    resolution_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    reason VARCHAR(1024) NOT NULL, reference VARCHAR(255) NULL,
-    evidence_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    actor_id INT NOT NULL, previous_state JSON NOT NULL,
-    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    INDEX deploy_recovery_resolution_job (job_id, id),
-    CONSTRAINT deploy_recovery_resolution_scope_check CHECK ((resolution_scope = 'remote_execution' AND remote_execution_id IS NOT NULL) OR (resolution_scope = 'legacy_job' AND remote_execution_id IS NULL)),
-    CONSTRAINT fk_deploy_recovery_resolution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
-    CONSTRAINT fk_deploy_recovery_resolution_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_deploy_recovery_resolution_actor FOREIGN KEY (actor_id) REFERENCES deploy_users(id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Per-VM create results (Etappe 14B): one durable row per VM per create job.
 -- The async directory, the cleanup counters and the cleanup backoff are NOT
 -- here; they belong to deploy_remote_executions, which this row binds to
@@ -657,6 +640,29 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
         (outcome = _utf8mb4'unchanged' AND existed_before = 1 AND changed = 0)
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    remote_execution_id BIGINT UNSIGNED NULL,
+    resolution_scope VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    resolution_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    reason VARCHAR(1024) NOT NULL, reference VARCHAR(255) NULL,
+    evidence_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor_id INT NOT NULL, previous_state JSON NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    INDEX deploy_recovery_resolution_job (job_id, id),
+    -- The create-unit half of the scope rule (a `create_unit` row names its
+    -- result and no remote handle) is enforced in PHP: MySQL refuses a column
+    -- that appears both in a CHECK and in a foreign key with a referential
+    -- action, and SET NULL is the right action for create_result_id.
+    CONSTRAINT deploy_recovery_resolution_scope_check CHECK ((resolution_scope = 'remote_execution' AND remote_execution_id IS NOT NULL) OR (resolution_scope = 'legacy_job' AND remote_execution_id IS NULL) OR (resolution_scope = 'create_unit' AND remote_execution_id IS NULL)),
+    CONSTRAINT fk_deploy_recovery_resolution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_recovery_resolution_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_deploy_recovery_resolution_create_result FOREIGN KEY (create_result_id) REFERENCES deploy_create_vm_results(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_recovery_resolution_actor FOREIGN KEY (actor_id) REFERENCES deploy_users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 CREATE TABLE IF NOT EXISTS deploy_settings (
     setting_key VARCHAR(191) PRIMARY KEY,

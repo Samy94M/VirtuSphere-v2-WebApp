@@ -39,6 +39,15 @@ final class E2eActionCoverageContractTest extends TestCase
         // hermetic LDAP-TLS fixture now exists (Docker/ldap-fixture,
         // docker-compose.qa.yml) and tests/e2e/specs/directory-ad.spec.js
         // covers every directory_* action against it.
+        //
+        // Etappe 14B-G owes the browser proof of the create release: the box it
+        // sits in is that slice's progress card, and its acceptance already
+        // names the three cases (cancel changes nothing, confirming under the
+        // allowed conditions writes state and audit, a foreign VM blocks). The
+        // action itself, its permissions and its refusals are proved in
+        // DeployCreateReleaseTest against a real database.
+        'deploy.php:create_unit_release' => '14B-G',
+        'deploy_log.php:create_unit_release' => '14B-G',
     ];
 
     /**

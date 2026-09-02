@@ -8,6 +8,7 @@ require_once __DIR__ . '/../lib/deploy_display.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_log_panels.php';
 require_once __DIR__ . '/../lib/deploy_log_recovery.php';
+require_once __DIR__ . '/../lib/deploy_log_create_release.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -241,6 +242,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds); ?></div>
 
     <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
+    <?php deploy_log_render_create_release($connection, $job, $user); ?>
     <?php deploy_log_render_phases($timeline); ?>
     <?php deploy_log_render_filter((int) $job['id'], $logFilter, $view['phase_names'], count($logs), $view['match_capped']); ?>
 

@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/deploy_create_results.php';
 
 /**
  * The repo half of the retry matrix: repo_retry_deploy_job() must turn the
@@ -95,18 +96,91 @@ final class DeployJobRetryFlowTest extends TestCase
         self::assertStringContainsString('export-only: original selection', $this->jobLog($newJobId));
     }
 
-    /** The pre-existing branch: a plain failed job without a result re-queues its old payload. */
+    /**
+     * The pre-existing branch: a plain failed job without a result re-queues its
+     * old payload. Since Etappe 14B-F it also carries its create rows, and the
+     * retry turns the confirmed one into a verify_skip unit instead of creating
+     * that VM a second time.
+     */
     public function testPlainFailedJobRequeuesTheOriginalPayload(): void
     {
         [$missionId, $vmIds] = $this->insertMissionWithVms('plain', 2);
-        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, null);
+        $jobId = $this->insertTerminalJob(
+            $missionId,
+            VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            $vmIds,
+            null,
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED]
+        );
 
         $newJobId = repo_retry_deploy_job($this->db, $jobId, $this->userId);
 
         $payload = $this->jobPayload($newJobId);
         self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, $payload['mode']);
+        // The WHOLE original selection, not the failed half: the pipeline after
+        // the create section has to run for every VM it was asked for.
         self::assertSame($vmIds, $payload['vm_ids']);
         self::assertStringNotContainsString('export-only', $this->jobLog($newJobId));
+        self::assertStringContainsString('create: 1 confirmed VM(s) to verify, 1 to create', $this->jobLog($newJobId));
+
+        $rows = repo_deploy_create_results($this->db, $newJobId);
+        self::assertSame(
+            [VIRTUSPHERE_CREATE_ACTION_VERIFY_SKIP, VIRTUSPHERE_CREATE_ACTION_CREATE],
+            array_map(static fn (array $row): string => (string) $row['action'], $rows)
+        );
+        // The skip points at the row that actually proved the VM, so the worker
+        // can compare the live UUID against real evidence rather than a claim.
+        self::assertNotNull($rows[0]['resumed_from_result_id']);
+        self::assertNull($rows[1]['resumed_from_result_id']);
+    }
+
+    /**
+     * Plan 10.4: a create-capable job from before this contract has no per-VM
+     * evidence at all, so its retry is refused rather than invented. The
+     * operator checks ESXi, adopts what is really theirs, and queues a fresh
+     * job through the form.
+     */
+    public function testALegacyCreateJobWithoutResultRowsCannotBeRetried(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('legacy', 2);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, null);
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertFalse($evaluation['allowed']);
+        self::assertContains('retry_create_results_missing', array_column($evaluation['blocking_findings'], 'code'));
+
+        $this->expectException(DeployRetryBlockedException::class);
+        repo_retry_deploy_job($this->db, $jobId, $this->userId);
+    }
+
+    /**
+     * An unresolved unit of the source job blocks the retry entirely, whatever
+     * the rest of the job looks like: its async create may still be alive on
+     * the Ansible host.
+     */
+    public function testAnUnresolvedCreateUnitBlocksTheRetry(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('unresolved', 2);
+        $jobId = $this->insertTerminalJob(
+            $missionId,
+            VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            $vmIds,
+            null,
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN]
+        );
+        repo_execute(
+            $this->db,
+            'UPDATE deploy_create_vm_results SET error_code = ?, error_detail = ?, finished_at = UTC_TIMESTAMP()'
+            . ' WHERE job_id = ? AND position = 2',
+            'ssi',
+            [VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT, 'fixture', $jobId]
+        );
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertFalse($evaluation['allowed']);
+        self::assertContains('retry_create_unresolved', array_column($evaluation['blocking_findings'], 'code'));
     }
 
     public function testRepairedNetworkPreflightFailureIsRetryableWithoutMacProtocolError(): void
@@ -127,7 +201,8 @@ final class DeployJobRetryFlowTest extends TestCase
             VIRTUSPHERE_DEPLOY_STATUS_FAILED,
             VIRTUSPHERE_DEPLOY_MODE_FULL,
             $vmIds,
-            json_encode($result, JSON_THROW_ON_ERROR)
+            json_encode($result, JSON_THROW_ON_ERROR),
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED]
         );
 
         $evaluation = deploy_retry_blockers($this->db, $jobId);
@@ -202,7 +277,11 @@ final class DeployJobRetryFlowTest extends TestCase
                 $kindTransitions[] = $findingKind;
             }
         }
-        self::assertSame(['remote', 'identity', 'network', 'external'], $kindTransitions);
+        // `create` sits between remote and identity since Etappe 14B-F, and the
+        // position is the meaning: it answers whether work of the SOURCE job may
+        // still be running, which has to be settled before anything about the
+        // VM's identity or its network is worth deciding.
+        self::assertSame(['remote', 'create', 'identity', 'network', 'external'], $kindTransitions);
         self::assertContains('retry_result_protocol_error', array_column($evaluation['findings'], 'code'));
     }
 
@@ -269,14 +348,78 @@ final class DeployJobRetryFlowTest extends TestCase
     }
 
     /** @param list<int> $vmIds */
-    private function insertTerminalJob(int $missionId, string $status, string $mode, array $vmIds, ?string $resultJson): int
+    /**
+     * A terminal job as the queue would have left it.
+     *
+     * `$createRows` decides which world the fixture is from. A create-capable
+     * job of the CURRENT world carries one materialized result per VM; a job
+     * without them is a legacy job queued before Etappe 14B, and its retry is
+     * refused fail-closed (plan 10.4). Both cases are real, and the tests below
+     * say which one they mean instead of getting one by accident.
+     *
+     * @param list<int> $vmIds
+     * @param list<string> $createRows One create status per VM, or [] for a
+     *        legacy job / a mode that creates nothing.
+     */
+    private function insertTerminalJob(int $missionId, string $status, string $mode, array $vmIds, ?string $resultJson, array $createRows = []): int
     {
         $payload = json_encode(['mode' => $mode, 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
         $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, result_json, credential_esxi_id, credential_ansible_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $stmt->bind_param('iisssii', $missionId, $this->userId, $status, $payload, $resultJson, $this->esxiCredentialId, $this->ansibleCredentialId);
         $stmt->execute();
+        $jobId = (int) $this->db->insert_id;
 
-        return (int) $this->db->insert_id;
+        $position = 0;
+        foreach ($createRows as $index => $createStatus) {
+            $position++;
+            $terminal = in_array($createStatus, VIRTUSPHERE_CREATE_RESULT_SUCCESSFUL_STATUSES, true);
+            $stmt = $this->db->prepare(
+                'INSERT INTO deploy_create_vm_results (job_id, vm_id, vm_name, position, total, action, status,'
+                . ' outcome, changed, existed_before, vm_moid, vm_instance_uuid, error_code, error_detail, finished_at)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $vmId = $vmIds[$index];
+            $vmName = (string) repo_scalar($this->db, 'SELECT vm_name FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+            $total = count($createRows);
+            $action = VIRTUSPHERE_CREATE_ACTION_CREATE;
+            $outcome = $terminal ? VIRTUSPHERE_CREATE_OUTCOME_CREATED : null;
+            $changed = $terminal ? 1 : null;
+            $existed = $terminal ? 0 : null;
+            $moid = $terminal ? 'vm-' . $position : null;
+            $uuid = $terminal ? '5001-' . $position : null;
+            // An unresolved row needs the same three fields as a failed one: the
+            // schema refuses a row that ends without naming its code, its
+            // reason and when it stopped.
+            $failed = in_array(
+                $createStatus,
+                [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN],
+                true
+            );
+            $errorCode = $failed ? VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED : null;
+            $errorDetail = $failed ? 'fixture' : null;
+            $finishedAt = $terminal || $failed ? gmdate('Y-m-d H:i:s') : null;
+            $stmt->bind_param(
+                'iisiisssiisssss',
+                $jobId,
+                $vmId,
+                $vmName,
+                $position,
+                $total,
+                $action,
+                $createStatus,
+                $outcome,
+                $changed,
+                $existed,
+                $moid,
+                $uuid,
+                $errorCode,
+                $errorDetail,
+                $finishedAt
+            );
+            $stmt->execute();
+        }
+
+        return $jobId;
     }
 
     /** @param list<int> $successful @param list<int> $failed */

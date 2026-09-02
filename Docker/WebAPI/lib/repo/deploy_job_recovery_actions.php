@@ -185,7 +185,9 @@ function repo_deploy_record_external_review(
         // The fingerprint binds the entry to the state it was written about, so
         // an entry cannot later be read as covering a state it never saw.
         $fingerprint = hash('sha256', $encoded);
-        $scope = $executionId === null ? 'legacy_job' : 'remote_execution';
+        $scope = $executionId === null
+            ? VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_LEGACY
+            : VIRTUSPHERE_RECOVERY_RESOLUTION_SCOPE_REMOTE;
 
         repo_execute(
             $db,

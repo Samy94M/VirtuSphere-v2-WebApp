@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../mac_import.php';
 require_once __DIR__ . '/../remote_execution_constants.php';
 require_once __DIR__ . '/deploy_job_input.php';
+require_once __DIR__ . '/deploy_create_results.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/vm_identity.php';
 require_once __DIR__ . '/vm_network.php';
@@ -128,6 +129,15 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
         $findings[] = deploy_retry_finding('identity', 'retry_result_protocol_error', true);
     }
 
+    // The per-VM create evidence (Etappe 14B-F). It is asked before anything
+    // about the network or the MAC result, because it answers a different
+    // question: whether work of the SOURCE job may still be running on the
+    // host. A retry that starts while one async create of this mission is
+    // unresolved is how one VM becomes two.
+    foreach (deploy_create_retry_findings($db, $jobId, $missionId, $mode, $lock) as $createFinding) {
+        $findings[] = $createFinding;
+    }
+
     // The current identity view, not the historical red result, decides if an
     // adoption/recovery has already repaired this scope.
     foreach (repo_vm_identity_conflicts($db, $missionId, (int) $job['credential_esxi_id'], $scopeIds) as $conflict) {
@@ -243,4 +253,78 @@ function deploy_retry_evaluation_unavailable(string $code): array
         'repair_vm_id' => null,
         'plan' => null,
     ];
+}
+
+/**
+ * What the source job's create rows say about retrying it (plan section 10.2
+ * and 10.4).
+ *
+ * Three closed answers, and the order is the order of certainty:
+ *
+ *  - a unit that is still prepared, running or unresolved blocks everything.
+ *    Its async job may be alive on the Ansible host, and the only thing worse
+ *    than a job that did not finish is two jobs creating the same VM;
+ *  - a VM of the original selection that no longer exists blocks too, because
+ *    the retry would materialize a unit the worker refuses at its first check;
+ *  - a source job with NO create rows at all that would create VMs is refused
+ *    fail-closed (10.4). It has no per-VM evidence, so a retry could only
+ *    invent one; the operator checks ESXi, adopts what is really theirs, and
+ *    queues a fresh job through the form.
+ *
+ * A source whose retry no longer creates anything (the export-only follow-up
+ * of a partial job) is not asked the third question: it materializes no create
+ * units and claims nothing about them.
+ *
+ * @return list<array<string,mixed>>
+ */
+function deploy_create_retry_findings(mysqli $db, int $jobId, int $missionId, string $mode, bool $lock): array
+{
+    $rows = repo_deploy_create_results($db, $jobId, $lock);
+    if ($rows === []) {
+        return ansible_mode_creates_vms($mode)
+            ? [deploy_retry_finding('create', 'retry_create_results_missing', true)]
+            : [];
+    }
+
+    $plan = deploy_create_retry_plan($rows);
+    if ($plan['blocked']) {
+        return [deploy_retry_finding('create', 'retry_create_unresolved', true, [
+            'position' => $plan['blocking_positions'][0],
+            'unresolved_count' => count($plan['blocking_positions']),
+        ])];
+    }
+
+    $sourceVmIds = array_values(array_filter(array_map(
+        static fn (array $row): int => $row['vm_id'] === null ? 0 : (int) $row['vm_id'],
+        $rows
+    )));
+    if (count($sourceVmIds) !== count($rows)
+        || count(deploy_create_resolve_selection($db, $missionId, $sourceVmIds)) !== count($rows)) {
+        return [deploy_retry_finding('create', 'retry_create_vm_missing', true, [
+            'expected' => count($rows),
+            'present' => count($sourceVmIds),
+        ])];
+    }
+
+    return [];
+}
+
+/**
+ * The VM ids a create retry runs over: the WHOLE original selection, in the
+ * order the source job used (plan section 10.3).
+ *
+ * Not the failed ones. A full pipeline has to power-cycle, export and start
+ * every VM of the mission it was asked for, including the ones the first job
+ * already created; those become verify_skip units rather than disappearing
+ * from the scope.
+ *
+ * @param list<array<string,mixed>> $rows
+ * @return list<int>
+ */
+function deploy_create_retry_vm_ids(array $rows): array
+{
+    return array_values(array_filter(array_map(
+        static fn (array $row): int => $row['vm_id'] === null ? 0 : (int) $row['vm_id'],
+        $rows
+    )));
 }

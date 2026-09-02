@@ -43,6 +43,10 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'deploy_retry_blockers',
         'deploy_retry_finding',
         'deploy_retry_has_blocking_kind',
+        // Etappe 14B-F: what the source job's per-VM create rows say about
+        // retrying it, and the scope such a retry runs over.
+        'deploy_create_retry_findings',
+        'deploy_create_retry_vm_ids',
         'deploy_retry_evaluation_unavailable',
         'deploy_schedule_error',
         'deploy_parse_schedule',

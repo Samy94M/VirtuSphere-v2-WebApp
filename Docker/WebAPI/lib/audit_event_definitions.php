@@ -62,6 +62,10 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED = 'deploy.remote_cleanup_re
 // words stay in the append-only evidence table, because a free sentence about a
 // production incident does not belong in a row every users.manage holder reads.
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED = 'deploy.recovery_documented';
+// The operator release of an unresolved create unit (Etappe 14B-F). The verdict
+// and the exact unit are here; the reason the operator typed stays in the
+// append-only resolution, for the same reason as the event above.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED = 'deploy.create_released';
 const VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE = 'integration.state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR = 'system.unhandled_error';
 const VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED = 'logs.csv_exported';
@@ -158,6 +162,10 @@ function audit_event_registry(): array
         // clicking.
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['execution_id']),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], $success, ['resolution_code', 'resolution_id']),
+        // Success and failure both, and the difference matters: a refusal means
+        // the evidence moved between the operator looking and confirming, which
+        // is exactly the race this action is fenced against.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['position'], ['resolution_id', 'name', 'blocker']),
         // The only event whose category depends on its object id. Its allowlist
         // is derived from the same map, so an unknown source is refused as an
         // unknown OBJECT rather than as an unresolvable category: the two would

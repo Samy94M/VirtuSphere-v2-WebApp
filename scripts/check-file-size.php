@@ -106,14 +106,14 @@ const FILE_SIZE_ALLOWANCES = [
     // serializer stays the single coherent thing it was. The preflight module
     // was NOT raised in the same stage: it crossed the plain budget and was
     // split into lib/ansible_command_probes.php instead.
-    // Etappe 14B raised migrate.php 1248->1250: migration 0047 costs the
-    // registry exactly its require line and its map entry, which is the growth
-    // the registry exists for. Its body lives in lib/migrations/ like every
-    // migration since 0042.
+    // Etappe 14B raised migrate.php 1248->1250 for migration 0047 and 1250->1252
+    // for 0048: a migration costs the registry exactly its require line and its
+    // map entry, which is the growth the registry exists for. Their bodies live
+    // in lib/migrations/ like every migration since 0042.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1250,
+        'lines' => 1252,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

@@ -73,6 +73,10 @@ function audit_context_field_registry(): array
         // and a saved search has to be able to tell them apart.
         'reviewed_count' => $int, 'requested_count' => $int, 'manual_count' => $int,
         'execution_id' => $int, 'resolution_id' => $int, 'resolution_code' => $id,
+        // Etappe 14B-F: which create unit an operator released, and why the
+        // release was refused when it was. The reason they typed is NOT here;
+        // it lives in the append-only resolution behind system.config.
+        'position' => $int, 'blocker' => $id,
         'failed_count' => $int, 'mission_count' => $int, 'interface_count' => $int,
         'rows_exported' => $int, 'total_rows' => $int, 'limit' => $int,
         'retire_count' => $int, 'active_count' => $int, 'threshold_percent' => $int,

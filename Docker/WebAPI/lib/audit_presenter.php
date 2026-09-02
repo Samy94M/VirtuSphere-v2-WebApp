@@ -74,6 +74,14 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             . ' remote cleanup retry for deploy job id ' . $id . ' (execution ' . ($context['execution_id'] ?? 0) . ')',
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => 'documented external check for deploy job id ' . $id
             . ': ' . ($context['resolution_code'] ?? 'inconclusive') . ' (resolution ' . ($context['resolution_id'] ?? 0) . ')',
+        // Etappe 14B-F. The sentence says what the operator ESTABLISHED, never
+        // what this system checked: it cannot see the host, and a line reading
+        // "verified" would claim a probe nobody ran.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+            ? 'released create unit ' . ($context['position'] ?? 0) . ' of deploy job id ' . $id
+                . ' as not created (resolution ' . ($context['resolution_id'] ?? 0) . ')'
+            : 'refused to release create unit ' . ($context['position'] ?? 0) . ' of deploy job id ' . $id
+                . ': ' . ($context['blocker'] ?? 'unknown')),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => 'recovery review over ' . ($context['reviewed_count'] ?? 0)
             . ' stale job(s): ' . ($context['requested_count'] ?? 0) . ' requested, ' . ($context['manual_count'] ?? 0) . ' left for manual review',
         VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
