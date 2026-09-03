@@ -573,10 +573,27 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         $script:DeviceSyncText | Should -Match 'Mitgliedschaftsoperationen unvollstaendig[^"]*"\s*-f\s*\$targetsSkipped,\s*\$targetsPlanned'
     }
 
-    It 'behandelt einen MAC-Konflikt als Fehlschlag des Devices, nicht als Notiz' {
+    It 'behandelt einen Identitaetskonflikt als Fehlschlag des Devices, nicht als Notiz' {
         # MECM wartet dann auf eine MAC, die beim PXE-Boot nie kommt; die VM aus
         # der Warteschlange zu nehmen macht das unbehebbar.
-        $script:DeviceSyncText | Should -Match "(?s)MAC-Konflikt.*?\`$itemFailures\+\+"
+        #
+        # Seit Etappe 14D entscheidet das nicht mehr ein handgeschriebener
+        # MAC-Vergleich, sondern die eine reine Aufloesung: jeder `block`-Ausgang
+        # zaehlt einen Fehlschlag, meldet seinen geschlossenen Code und laesst
+        # die VM per `continue` in der Warteschlange. Welche Faelle zu `block`
+        # fuehren, haelt VirtuSphere.RolloutIdentity.Tests.ps1 als Tabelle fest;
+        # hier steht nur, was der Sync mit dieser Antwort tut.
+        $script:DeviceSyncText | Should -Match "(?s)\`$identity\.Action -eq 'block'.*?\`$itemFailures\+\+.*?Add-VsRunCause -Causes \`$causes -Cause \`$identity\.Cause.*?continue"
+    }
+
+    It 'loest die Identitaet auf, BEVOR es eine Mitgliedschaft mutiert' {
+        # Eine Collection-Zuweisung an den falschen ResourceID-Datensatz ist
+        # nicht zurueckzunehmen, ohne dass jemand weiss, dass sie passiert ist.
+        $resolveAt = $script:DeviceSyncText.IndexOf('Resolve-VsDeviceIdentity')
+        $mutateAt = $script:DeviceSyncText.IndexOf('Add-CMDeviceCollectionDirectMembershipRule')
+        $resolveAt | Should -BeGreaterThan 0
+        $mutateAt | Should -BeGreaterThan 0
+        $resolveAt | Should -BeLessThan $mutateAt
     }
 
     It 'laesst die drei MECM-Vollabfragen bei einem Providerfehler werfen' -ForEach @(

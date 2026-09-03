@@ -19,11 +19,25 @@ $id = repo_create_mission($db, ['mission_name' => '${name}', 'hypervisor_datasto
 $vmIds = [];
 for ($i = 1; $i <= ${Number(count)}; $i++) {
     $vmName = 'E2EVM' . $i;
-    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os, lifecycle_state, mecm_sync_state, mecm_id, updated) VALUES (?, ?, ?, 'Win11', 'deployed', 'registered', ?, 1)");
+    // The Windows hostname is unique per MISSION, and the row carries its
+    // rollout snapshot, revision and hostname claim (Etappe 14D, ADR-0043).
+    //
+    // This seed writes deploy_vms directly, so it can reach states the product
+    // cannot, and it did: every mission got a VM with hostname 'E2EVM1', which
+    // repo_save_vm refuses and migration 0050 aborts on. The first reset then
+    // claimed that name globally and the second was correctly refused, so a
+    // green product looked like a red test. A fixture has to be a state the
+    // application could actually be in.
+    $vmHost = 'E2E' . $id . 'V' . $i;   // <= 15 chars, NetBIOS-safe, unique
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_rollout_hostname, mecm_rollout_revision, vm_os, lifecycle_state, mecm_sync_state, mecm_id, updated) VALUES (?, ?, ?, ?, 1, 'Win11', 'deployed', 'registered', ?, 1)");
     $mecm = 'E2E-MECM-' . $i;
-    $stmt->bind_param('isss', $id, $vmName, $vmName, $mecm);
+    $stmt->bind_param('issss', $id, $vmName, $vmHost, $vmHost, $mecm);
     $stmt->execute();
     $vmId = (int) $db->insert_id;
+    $stmt = $db->prepare("INSERT INTO deploy_vm_hostname_claims (hostname_key, vm_id, desired_claim, rollout_claim) VALUES (?, ?, 1, 1)");
+    $claimKey = strtolower($vmHost);
+    $stmt->bind_param('si', $claimKey, $vmId);
+    $stmt->execute();
     $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', ?, 'dhcp')");
     $mac = sprintf('00:50:56:AA:BB:%02X', $vmId % 256);
     $stmt->bind_param('is', $vmId, $mac);

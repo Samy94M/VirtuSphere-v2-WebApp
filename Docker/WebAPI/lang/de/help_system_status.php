@@ -49,6 +49,19 @@ return [
     // Der Aufklappblock unter den Zählern. Vorher sendeten Device-Sync und
     // Autoimporter dort nichts, also nannte „Datenwarnungen: 3" keine einzige VM.
     'system_status_status_p3' => 'Zählt eine Zeile Datenwarnungen oder Fehler, steht unter „Technische Details" eine Ursachenzeile: je Fall ein kurzer Code, dahinter „target=" mit dem VM- oder Ordnernamen und, wenn es um eine Zuweisung geht, „collection=" mit der Collection. Also etwa „collection_missing target=WEB01 collection=Firefox-115.0". Damit findet man die betroffene VM ohne Suche im Log des MECM-Servers. Die Liste ist gedeckelt und sagt am Ende, wie viele Fälle nicht mehr dastehen. Die Zähler selbst beziehen sich immer nur auf den letzten Lauf: ein sauberer Lauf setzt sie zurück, deshalb gehört die Ursachenzeile gelesen, solange sie da ist.',
+    // Etappe 14D: Sieben geschlossene Codes, die der Device-Sync in seiner
+    // Ursachenzeile schreiben kann, wenn er ein Geraet nicht zuordnen kann. Jeder
+    // nennt genau eine Massnahme; ohne diese Zuordnung ist der Code fuer den
+    // Operator nur ein Wort.
+    'system_status_identity_heading' => 'Wenn der Device-Sync eine VM nicht zuordnen kann',
+    'system_status_identity_p1' => 'Meldet die Zeile „MECM Device-Sync" Fehler, nennt die Ursachenzeile unter „Technische Details" den Grund als kurzen Code. Diese sieben betreffen die Identität eines Geräts. Sie bedeuten immer: Es wurde nichts geändert, und die VM bleibt in der Warteschlange, bis der genannte Schritt erledigt ist.',
+    'system_status_identity_1' => 'device_name_invalid: Der Windows-Hostname der VM taugt nicht als Gerätename in MECM. Im VM-Editor korrigieren: höchstens :max Zeichen, nur Buchstaben, Ziffern und innenliegende Bindestriche, kein Punkt.',
+    'system_status_identity_2' => 'previous_resource_present: Das Gerät des vorherigen Rollouts existiert in MECM noch. In der MECM-Konsole löschen; der nächste Scan importiert den neuen Namen danach von selbst.',
+    'system_status_identity_3' => 'resource_id_missing: Die gebundene ResourceID gibt es in MECM nicht mehr, das Gerät wurde dort also gelöscht. „MECM-ID zurücksetzen" ausführen, damit die VM neu importiert wird.',
+    'system_status_identity_4' => 'resource_mac_conflict: Das gebundene Gerät trägt in MECM eine andere MAC als die VM im Portal. Prüfen, ob die VM neu erstellt wurde; dann das alte Gerät in MECM löschen und zurücksetzen.',
+    'system_status_identity_5' => 'mac_conflict: Name und MAC zeigen auf verschiedene MECM-Geräte, oder eines von beiden gehört einem fremden Gerät. Von Hand entscheiden, welcher Datensatz gilt, und den anderen in MECM entfernen.',
+    'system_status_identity_6' => 'device_identity_ambiguous: Mehrere MECM-Datensätze passen auf denselben Namen, dieselbe MAC oder dieselbe ResourceID. Die Dubletten in der MECM-Konsole auflösen; das Skript wählt bewusst keinen davon aus.',
+    'system_status_identity_7' => 'stale_rollout_revision: Der Scan hat mit einem veralteten Stand gearbeitet, weil zwischendurch zurückgesetzt wurde. Hier ist nichts zu tun, der nächste Scan läuft mit dem aktuellen Stand durch.',
     'system_status_work_heading' => 'Mit den Status-Hinweisen arbeiten',
     'system_status_work_0' => 'Hat sich noch nie eine Synchronisationsaufgabe und kein Site-Health-Reporter gemeldet, ist MECM schlicht noch nicht angebunden. Dann stehen keine Hinweistexte an den Zeilen, denn dort ist nichts zu reparieren, was es noch nicht gibt; stattdessen nennt der Abschnitt einmal den nächsten Schritt.',
     'system_status_work_1' => 'Bei „Verzögert" oder „Ausgefallen" zuerst den Hinweistext direkt neben der Zeile lesen. Er nennt in Klartext die wahrscheinlichste Ursache und den nächsten Schritt; niemand muss die Bedeutung der Quellen auswendig kennen.',

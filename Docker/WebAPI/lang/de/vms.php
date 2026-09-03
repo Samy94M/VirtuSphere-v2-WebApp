@@ -8,7 +8,12 @@ return [
     'mission_details' => 'Missionsdetails',
     'open_deploy' => 'Bereitstellen',
     'add_vm' => 'VM hinzufügen',
-    'th_hostname' => 'Hostname',
+    // Etappe 14D: In dieser Tabelle stehen ZWEI Namen nebeneinander. „Name" und
+    // „Hostname" liessen offen, welcher davon in MECM landet.
+    'th_vm_name' => 'VM-Name in ESXi',
+    'th_hostname' => 'Windows-Hostname',
+    'rollout_diverged' => 'wartet auf Reset',
+    'rollout_diverged_title' => 'Dieser Rollout läuft weiter unter „:current". Der geänderte Name gilt erst nach dem Löschen des alten MECM-Geräts und „MECM-ID zurücksetzen".',
     'th_os' => 'OS',
     'th_cpu' => 'CPU',
     'th_ram' => 'RAM',
@@ -46,5 +51,8 @@ return [
     'bulk_skipped' => ':count übersprungen',
     'skip_active_job' => 'aktiver Deploy-Job',
     'skip_no_mac' => 'kein importierter MAC',
+    'skip_template' => 'Vorlage',
+    'skip_invalid_hostname' => 'Windows-Hostname ungültig',
+    'skip_already_pending' => 'bereits eingereiht',
     'skip_error' => 'Fehler',
 ];

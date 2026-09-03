@@ -317,7 +317,28 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
         $params[] = $missionId;
         $stmt = $db->prepare('UPDATE deploy_missions SET ' . implode(', ', $sets) . ' WHERE id = ?');
         $stmt->bind_param($types, ...$params);
-        return $stmt->execute();
+        $written = $stmt->execute();
+
+        // Crossing the template boundary by RENAME (Etappe 14D). Nothing stops
+        // `_Vorlage` from becoming `Vorlage`, and that turns a shelf of parked
+        // configurations into live VMs in one edit. Before 14D that already
+        // bypassed the global vm_name check, which only ever runs at VM save
+        // time and reads the mission's name AT THAT MOMENT; from 14D on it would
+        // equally bypass the hostname claim, and the estate would hold two
+        // machines with one Windows name without a single failed write.
+        //
+        // So the claims follow the rename inside the same transaction: becoming
+        // a template releases them, becoming a real mission acquires them, and a
+        // collision refuses the RENAME rather than leaving it half applied.
+        if (array_key_exists('mission_name', $values)) {
+            $wasTemplate = mission_name_is_template((string) $mission['mission_name']);
+            $isTemplate = mission_name_is_template((string) $values['mission_name']);
+            if ($wasTemplate !== $isTemplate) {
+                repo_mission_reconcile_hostname_claims($db, $missionId, $isTemplate);
+            }
+        }
+
+        return $written;
     });
 }
 
@@ -420,6 +441,10 @@ function repo_clone_mission_vms(mysqli $db, int $sourceMissionId, int $targetMis
     $stmt->execute();
     $sourceVms = repo_fetch_all($stmt->get_result());
 
+    $targetIsTemplate = mission_name_is_template(
+        (string) (repo_scalar($db, 'SELECT mission_name FROM deploy_missions WHERE id = ? LIMIT 1', 'i', [$targetMissionId]) ?? '')
+    );
+
     $created = 0;
     $skipped = [];
     foreach ($sourceVms as $sourceVm) {
@@ -442,7 +467,23 @@ function repo_clone_mission_vms(mysqli $db, int $sourceMissionId, int $targetMis
         $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
         $values['updated'] = 0;
 
+        // Rollout runtime is never COPIED: REPO_VM_COLUMNS carries no snapshot,
+        // revision, ResourceID, tombstone or MAC, which is what keeps a captured
+        // template free of the rollout it was captured from. What the clone does
+        // need is a FRESH start, and only when it becomes a real mission: a
+        // template target keeps all three NULL, a real one starts at revision 1
+        // from its own desired hostname.
+        $values += repo_vm_rollout_values_for_edit(
+            ['mecm_id' => null, 'mecm_rollout_hostname' => null, 'mecm_rollout_revision' => null, 'is_template' => $targetIsTemplate],
+            (string) $values['vm_hostname']
+        );
+
         $newVmId = repo_insert_from_values($db, 'deploy_vms', $values);
+        // The clone claims its hostname here, inside the cloning transaction, so
+        // two operators instantiating the same template concurrently cannot both
+        // win. A collision aborts the whole clone rather than producing a
+        // half-instantiated mission.
+        repo_vm_hostname_claims_sync($db, $newVmId, $targetIsTemplate, (string) $values['vm_hostname'], $values['mecm_rollout_hostname'] ?? null);
         $interfaces = repo_fetch_related($db, 'SELECT ip, subnet, gateway, dns1, dns2, vlan, mode, type FROM deploy_interfaces WHERE vm_id = ? ORDER BY id', (int) $sourceVm['id']);
         foreach ($interfaces as &$interface) {
             $interface['mac'] = '';

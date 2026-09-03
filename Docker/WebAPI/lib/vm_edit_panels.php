@@ -50,7 +50,7 @@ declare(strict_types=1);
                     <input type="hidden" name="action" value="reset_mecm_id">
                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
                     <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
-                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm_editing', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
                 </form>
                 <?php // Only for a VM MECM already knows: before the registration the
                       // portal selection travels with the next sync on its own, so the
@@ -173,32 +173,12 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('vm_edit.heading_vm')); ?></h2>
             <div class="form-grid vm-form-grid">
-                <?php if ($vmId > 0 && !$isTemplate) { ?>
-                    <?php $mecmIdValue = (string) ($vm['mecm_id'] ?? ''); ?>
-                    <label><?php echo h(__t('vm_edit.diagnostics_mecm_id')); ?><input value="<?php echo h($mecmIdValue !== '' ? $mecmIdValue : __t('vm_edit.mecm_id_none')); ?>" readonly></label>
-                <?php } ?>
-                <label><?php echo h(__t('common.name')); ?><input name="vm_name"<?php echo form_control_attrs('vm_edit', 'vm_name', null, false, (string) ($fieldErrors['vm_name'] ?? '')); ?> maxlength="16" value="<?php echo h($vm['vm_name'] ?? ''); ?>" required <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_name'); ?></label>
-                <?php
-                    // Legacy warning (E2): stored hostnames that violate the
-                    // NetBIOS rule are grandfathered but visibly flagged with
-                    // the name the MECM client phase would actually produce.
-                    $storedHostnameValue = (string) ($vm['vm_hostname'] ?? '');
-                    $hostnameLegacyInvalid = $storedHostnameValue !== ''
-                        && preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$/', $storedHostnameValue) !== 1;
-                    $hostnameClientPreview = $hostnameLegacyInvalid
-                        ? (string) preg_replace('/[^A-Za-z0-9-]/', '', substr($storedHostnameValue, 0, 15))
-                        : '';
-                    $hostnameFieldError = (string) ($fieldErrors['vm_hostname'] ?? '');
-                    $hostnameLegacyWarning = $hostnameLegacyInvalid
-                        ? __t('vm_edit.hostname_legacy_warning', ['preview' => $hostnameClientPreview])
-                        : '';
-                    $hostnameEffectiveError = $hostnameFieldError !== '' ? $hostnameFieldError : $hostnameLegacyWarning;
-                ?>
-                <label><?php echo h(__t('vm_edit.label_hostname')); ?><input name="vm_hostname"<?php echo form_control_attrs('vm_edit', 'vm_hostname', null, false, $hostnameEffectiveError); ?> maxlength="15" value="<?php echo h($vm['vm_hostname'] ?? ''); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_hostname'); ?>
-                    <?php if ($hostnameLegacyInvalid && $hostnameFieldError === '') { ?>
-                        <span class="field-error" id="<?php echo h(form_error_id('vm_edit', 'vm_hostname')); ?>"><?php echo h($hostnameLegacyWarning); ?></span>
-                    <?php } ?>
-                </label>
+                <?php // Die drei Identitaetsfelder (MECM-ID, ESXi-Name, Windows-Hostname)
+                      // liegen in lib/vm_edit_names.php: sie beantworten EINE Frage
+                      // gemeinsam, und sie tragen mit der Altwertwarnung und der
+                      // Rollout-Gegenueberstellung genau das, was nur neben ihnen Sinn
+                      // ergibt. Geladen ueber die vm_edit_form.php-Fassade. ?>
+                <?php vm_edit_identity_fields($vm, $vmId, $isTemplate, $canWrite, $fieldErrors); ?>
                 <label><?php echo h(__t('vm_edit.label_domain')); ?><input name="vm_domain"<?php echo form_control_attrs('vm_edit', 'vm_domain', null, false, (string) ($fieldErrors['vm_domain'] ?? '')); ?> value="<?php echo h($vm['vm_domain'] ?? ($mission['domain'] ?? '')); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('vm_edit.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_domain'); ?></label>
                 <label><?php echo h(__t('vm_edit.label_os')); ?><select name="vm_os"<?php echo form_control_attrs('vm_edit', 'vm_os', null, false, (string) ($fieldErrors['vm_os'] ?? '')); ?> required <?php echo $canWrite ? '' : 'disabled'; ?>>
                     <option value=""><?php echo h(__t('vm_edit.select_os')); ?></option>

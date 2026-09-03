@@ -29,6 +29,14 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_bulk_reset_mecm_ids',
         'repo_delete_vm_by_id',
         'repo_vm_has_imported_mac',
+        'repo_vm_hostname_input',
+        'repo_vm_rollout_state',
+        'repo_vm_hostname_claim_owner',
+        'repo_vm_hostname_claims_sync',
+        'repo_vm_hostname_claim_conflict',
+        'repo_vm_rollout_values_for_edit',
+        'repo_vm_rollout_edit_changes_identity',
+        'repo_mission_reconcile_hostname_claims',
         'repo_reset_vm_mecm_id',
         'repo_restart_vm_progress_watch',
         'repo_vm_progress_attention_count',
@@ -59,7 +67,14 @@ final class VmRepoModuleContractTest extends TestCase
         $root = str_replace('\\', '/', dirname(__DIR__, 2));
         $files = array_map(
             static fn (string $path): string => 'lib/repo/' . basename($path),
-            array_merge(glob($root . '/lib/repo/vms*.php') ?: [], [$root . '/lib/repo/vm_network.php'])
+            // The glob covers `vms*.php`; the two domain modules that do not
+            // match its prefix are named. `vm_rollout.php` joined in Etappe 14D
+            // and owns the hostname claim table, so leaving it out would have
+            // put seven functions outside the one-owner walk below.
+            array_merge(glob($root . '/lib/repo/vms*.php') ?: [], [
+                $root . '/lib/repo/vm_network.php',
+                $root . '/lib/repo/vm_rollout.php',
+            ])
         );
         $files = array_values(array_diff($files, ['lib/repo/vms_modules.php']));
 

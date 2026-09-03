@@ -43,6 +43,7 @@ return [
     'import_missing_vlans' => 'Missing VLANs (import blocked, please create them first):',
     'import_vm_conflicts' => 'VM names already used in other missions:',
     'import_vm_name_duplicates' => 'VM names used more than once in the same file:',
+    'import_vm_hostname_duplicates' => 'Windows hostnames used more than once in the same file (two Windows computers cannot carry the same name):',
     'import_mission_field_errors' => 'Invalid mission data:',
     'import_vm_field_errors' => 'Invalid VM data:',
     'import_field_errors_hint' => 'These problems are in the file itself; they can only be fixed by correcting the export file and uploading it again.',

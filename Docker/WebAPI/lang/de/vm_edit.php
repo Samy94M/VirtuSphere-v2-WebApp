@@ -48,7 +48,11 @@ return [
     'th_phase' => 'Phase',
     'th_event' => 'Ereignis',
     'th_detail' => 'Detail',
-    'label_hostname' => 'Hostname',
+    // Zwei Namensfelder nebeneinander: welches MECM bekommt, war aus „Name" und
+    // „Hostname" nicht zu erraten. Der eine benennt die VM in ESXi, der andere
+    // den Windowsrechner.
+    'label_vm_name' => 'VM-Name in ESXi',
+    'label_hostname' => 'Windows-Hostname',
     'label_domain' => 'Domäne',
     'domain_title' => 'DNS-FQDN mit mindestens einem Punkt verwenden, z. B. corp.example.local.',
     'label_os' => 'OS',
@@ -78,6 +82,10 @@ return [
     'no_packages' => 'Keine Pakete verfügbar.',
     'save_vm' => 'VM speichern',
     'flash_saved' => 'VM gespeichert.',
+    // Ohne diesen Satz verlaesst der Bearbeiter die Seite in dem Glauben, die
+    // Umbenennung sei wirksam, und merkt erst beim naechsten Rollout, dass sie
+    // es nicht war.
+    'flash_rollout_frozen' => 'Der neue Windows-Hostname ist gespeichert, gilt aber erst für den nächsten Rollout: Diese VM wurde bereits als „:hostname" an MECM übergeben. Für einen neuen Rollout das alte Gerät in MECM löschen und danach „MECM-ID zurücksetzen" ausführen.',
     // Diese VM kennt MECM schon, und der Device-Sync schaut nur auf VMs, die es
     // nicht kennt. Die Änderung ist also gespeichert und wirkt erst nach der
     // Übertragung; vorher hat das niemand gesagt.

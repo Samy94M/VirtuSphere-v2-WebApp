@@ -43,6 +43,7 @@ return [
     'import_missing_vlans' => 'Fehlende VLANs (Import blockiert, bitte zuerst anlegen):',
     'import_vm_conflicts' => 'VM-Namen bereits in anderen Missionen vergeben:',
     'import_vm_name_duplicates' => 'VM-Namen mehrfach in derselben Datei:',
+    'import_vm_hostname_duplicates' => 'Windows-Hostnamen mehrfach in derselben Datei (zwei Windows-Rechner können nicht denselben Namen tragen):',
     'import_mission_field_errors' => 'Ungültige Angaben zur Mission:',
     'import_vm_field_errors' => 'Ungültige Angaben zu VMs:',
     'import_field_errors_hint' => 'Diese Probleme liegen in der Datei selbst; sie lassen sich nur durch eine Korrektur der Exportdatei und einen erneuten Upload beheben.',

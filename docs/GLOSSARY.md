@@ -24,6 +24,10 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 
 - **Collection:** MECM-Sammlung. VirtuSphere verwendet unter anderem Missions-, Betriebssystem- und Paket-Collections.
 - **ResourceID:** MECM-interne numerische Gerätekennung. Sie wird nach dem Import an das Portal zurückgemeldet.
+- **Rolloutname (Snapshot):** der Windows-Hostname, den VirtuSphere genau diesem Rollout an MECM und den PXE-Client liefert (`mecm_rollout_hostname`). Er friert mit der ersten Bindung ein und ist weder ein behaupteter Live-Name von Windows noch ein Rücklesewert aus MECM.
+- **Rolloutrevision:** monotoner Zähler je VM, den jede mutierende Rückmeldung dieses Rollouts trägt. Eine veraltete, fehlende oder zukünftige Revision wird ohne Seiteneffekt mit 409 abgewiesen.
+- **Tombstone:** die beim Reset aufbewahrte vorherige ResourceID (`mecm_previous_id`). Sie hält die nächste Übergabe fail-closed, bis der Administrator das alte Gerät in MECM gelöscht hat; VirtuSphere löscht dort nie.
+- **Hostname-Claim:** Zeile in `deploy_vm_hostname_claims`, die einen normalisierten Rolloutnamen genau einer Nicht-Vorlagen-VM zuordnet. Eine VM darf ihren eingefrorenen und ihren neuen Namen gleichzeitig halten.
 - **owned:** eine Regel oder Collection ist durch VirtuSphere erstellt oder ausdrücklich adoptiert und darf deshalb innerhalb eines bestätigten Reconciliation-Plans verändert werden.
 - **manual:** außerhalb von VirtuSphere angelegt. Solche Regeln werden angezeigt beziehungsweise bewahrt, aber nie still übernommen oder entfernt.
 - **Provenienz:** gespeicherter Nachweis aus Ziel, Typ, MECM-ID, Herkunft, Akteur und Zeitpunkt. Nur dieser Nachweis erlaubt eine automatische Entfernung eigener veralteter Regeln.

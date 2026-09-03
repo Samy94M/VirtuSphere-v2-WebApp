@@ -25,6 +25,7 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_deploy.deploy_mode_start')); ?></li>
                 <li><?php echo h(__t('help_deploy.deploy_mode_autostart')); ?></li>
             </ul>
+            <p><?php echo h(__t('help_deploy.deploy_mode_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_verbose_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_verbose_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_verbose_p2')); ?></p>

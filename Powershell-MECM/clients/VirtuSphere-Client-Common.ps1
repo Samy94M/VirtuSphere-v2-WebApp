@@ -238,10 +238,22 @@ function Get-VsErrorDetail {
 function Confirm-VsClientReady {
     param(
         [Parameter(Mandatory)][string]$Api,
-        [Parameter(Mandatory)][string]$Mac
+        [Parameter(Mandatory)][string]$Mac,
+        # Additiv (Etappe 14D, ADR-0019-Amendment). Fehlt sie, bleibt der Body
+        # exakt der bisherige: ein Client-Paket vor dem Cutover meldet weiter
+        # ohne Revision, und der Server nimmt das nur fuer Revision 1 ohne
+        # Tombstone an. Ein leerer oder nicht numerischer Wert wird gar nicht
+        # erst gesendet, statt als "0" eine Revision zu erfinden, die es nicht
+        # gibt: das Feld weglassen heisst "ich kenne keine", und genau das ist
+        # dann wahr.
+        $RolloutRevision = $null
     )
 
-    $body = @{ mac = $Mac } | ConvertTo-Json
+    $payload = @{ mac = $Mac }
+    if ($null -ne $RolloutRevision -and "$RolloutRevision" -match '^\d+$' -and [int]$RolloutRevision -gt 0) {
+        $payload['rollout_revision'] = [int]$RolloutRevision
+    }
+    $body = $payload | ConvertTo-Json
     $response = Invoke-RestMethod -Uri (Get-VsApiUrl -Api $Api -Path '/mecm_client_ack.php') -Method Post `
         -ContentType 'application/json' -Body $body -Headers (Get-VsClientApiHeaders) -TimeoutSec 10
     if (-not $response -or -not $response.success) {

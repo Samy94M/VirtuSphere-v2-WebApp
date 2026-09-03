@@ -13,3 +13,4 @@ require_once __DIR__ . '/validate.php';
 require_once __DIR__ . '/vm_edit_values.php';
 require_once __DIR__ . '/vm_edit_rows.php';
 require_once __DIR__ . '/vm_edit_status.php';
+require_once __DIR__ . '/vm_edit_names.php';

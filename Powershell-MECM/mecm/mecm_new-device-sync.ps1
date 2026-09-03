@@ -135,10 +135,12 @@ while ($true) {
             # keine Task-Sequence-Collection wurde angelegt. Der Wurf hier landet
             # im catch des Laufs und wird als mecm_unavailable gemeldet, was der
             # Wahrheit entspricht.
-            $mecmDevices = @{}
-            foreach ($d in @(Get-CMDevice -Fast -ErrorAction Stop | Select-Object Name, MACAddress, ResourceID)) {
-                if ($d.Name) { $mecmDevices[$d.Name] = $d }
-            }
+            # Drei Multimaps statt einer name-keyed Hashtabelle (Etappe 14D).
+            # `$mecmDevices[$d.Name] = $d` loeste Duplikate still nach last-wins
+            # auf; welcher von zwei gleichnamigen Datensaetzen gewann, entschied
+            # die Reihenfolge der Providerantwort. Jetzt bleibt eine
+            # Mehrdeutigkeit sichtbar und wird zum Fehler, nicht zur Heuristik.
+            $mecmIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Fast -ErrorAction Stop | Select-Object Name, MACAddress, ResourceID)
             $taskSequences = @(Get-CMTaskSequence -Fast -ErrorAction Stop | Select-Object -ExpandProperty Name)
             $collectionCache = @{}
             foreach ($c in @(Get-CMDeviceCollection -ErrorAction Stop | Select-Object Name, CollectionID)) {
@@ -178,7 +180,17 @@ while ($true) {
             }
 
             foreach ($device in $devices) {
+                # $deviceName ist der ESXi-/Portalname und dient AUSSCHLIESSLICH
+                # der Protokollierung: er benennt die Zeile, die der Operator im
+                # Portal sucht. Was MECM als Geraetenamen bekommt, ist seit
+                # Etappe 14D $rolloutName, der eingefrorene Rollout-Snapshot aus
+                # dem Wire-Feld vm_hostname. Die beiden nie vertauschen: der eine
+                # identifiziert die VM in ESXi, der andere den Windowsrechner.
                 $deviceName = [string]$device.vm_name
+                $rolloutName = [string]$device.vm_hostname
+                $rolloutRevision = $device.rollout_revision
+                $boundResourceId = if ($device.mecm_id) { "$($device.mecm_id)" } else { '' }
+                $previousResourceId = if ($device.previous_resource_id) { "$($device.previous_resource_id)" } else { '' }
                 $deviceOS = [string]$device.vm_os
                 $missionName = if ($device.mission) { [string]$device.mission.mission_name } else { '' }
 
@@ -218,55 +230,89 @@ while ($true) {
                     }
                 }
 
-                # MAC-Konflikt (normalisiert): MECM kennt eine andere MAC als das
-                # Portal. Das ist ein Fehlschlag fuer DIESES Device, nicht bloss
-                # eine Notiz: die ResourceID zurueckzumelden nimmt die VM aus
-                # getDeviceList, und danach schiebt niemand mehr nach, waehrend
-                # MECM auf eine MAC wartet, die beim PXE-Boot nie kommt. Also
-                # bleibt die VM in der Warteschlange, bis ein Mensch entscheidet.
-                if ($mecmDevices.ContainsKey($deviceName)) {
-                    $mecmMac = ConvertTo-VsNormalizedMac ([string]$mecmDevices[$deviceName].MACAddress)
-                    if ($mecmMac -and $mecmMac -ne $deviceMac) {
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("MAC-Konflikt: MECM={0} ESXi={1} - manuelle Pruefung noetig, Device bleibt in der Warteschlange." -f $mecmMac, $deviceMac)
-                        $itemFailures++
-                        Add-VsRunCause -Causes $causes -Cause 'mac_conflict' -Target $deviceName
-                        continue
-                    }
+                # --- Identitaet aufloesen (Etappe 14D, ADR-0043) ---------------
+                #
+                # Eine reine Entscheidung ueber die drei Multimaps, damit sie
+                # ohne MECM testbar bleibt. Sie beantwortet genau drei Dinge:
+                # dieser Datensatz gehoert uns (use), es gibt noch keinen
+                # (import), oder etwas stimmt nicht und die VM bleibt in der
+                # Warteschlange (block, mit geschlossenem Code).
+                $identity = Resolve-VsDeviceIdentity -Index $mecmIndex -RolloutHostname $rolloutName -Mac $deviceMac `
+                    -BoundResourceId $boundResourceId -PreviousResourceId $previousResourceId
+                if ($identity.Action -eq 'block') {
+                    # Ein Identitaetsfehler tritt VOR jeder Mitgliedschafts-
+                    # mutation ein: eine Collection-Zuweisung an den falschen
+                    # ResourceID-Datensatz ist nicht zurueckzunehmen, ohne dass
+                    # jemand weiss, dass sie passiert ist.
+                    Write-VsLog -Level ERROR -Context $deviceName -Message ("Identitaet nicht aufloesbar ({0}): Rolloutname '{1}', MAC {2}, gebundene ResourceID '{3}', Vorgaenger '{4}' - Device bleibt in der Warteschlange." -f $identity.Cause, $rolloutName, $deviceMac, $boundResourceId, $previousResourceId)
+                    $itemFailures++
+                    Add-VsRunCause -Causes $causes -Cause $identity.Cause -Target $deviceName
+                    continue
                 }
 
-                # Import (falls neu) - Existenz aus dem Scan-Cache statt Einzelabfrage
-                if (-not $mecmDevices.ContainsKey($deviceName)) {
+                $resourceId = $identity.ResourceId
+                if ($identity.Action -eq 'import') {
+                    # Importiert wird der ROLLOUTNAME, nicht der ESXi-Name.
+                    $importThrew = $false
                     try {
-                        Import-CMComputerInformation -ComputerName $deviceName -MacAddress $deviceMac -CollectionName 'All Systems' -ErrorAction Stop | Out-Null
-                        Write-VsLog -Context $deviceName -Message ("Device importiert (MAC {0})." -f $deviceMac)
+                        Import-CMComputerInformation -ComputerName $rolloutName -MacAddress $deviceMac -CollectionName 'All Systems' -ErrorAction Stop | Out-Null
+                        Write-VsLog -Context $deviceName -Message ("Device als '{0}' importiert (MAC {1})." -f $rolloutName, $deviceMac)
                         $imported++
                         Start-Sleep -Seconds 2
                     } catch {
-                        # Kein Fehlertext-Parsing (Texte variieren je MECM-Version und
-                        # -Sprache): Import-Race liegt vor, wenn das Device trotz
-                        # Fehler inzwischen existiert - dann normal weitermachen.
-                        if (Get-CMDevice -Name $deviceName -Fast -ErrorAction SilentlyContinue) {
-                            # Race condition - Device wurde parallel angelegt
-                        } else {
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Import fehlgeschlagen: {0}" -f $_.Exception.Message)
+                        $importThrew = $true
+                        # Kein Fehlertext-Parsing (Texte variieren je MECM-Version
+                        # und -Sprache) und kein -MergeIfExist: nach dem Import
+                        # wird Name UND MAC erneut EINDEUTIG gelesen, und das
+                        # Ergebnis entscheidet. Ein Import-Race sieht danach
+                        # genauso aus wie ein gelungener Import, was er auch ist.
+                        Write-VsLog -Level DEBUG -Context $deviceName -Message ("Import meldete einen Fehler, Ergebnis wird nachgelesen: {0}" -f $_.Exception.Message)
+                    }
+
+                    # Nachlesen ueber dieselbe Entscheidung wie oben, nur gegen
+                    # einen frischen, eng gefassten Index. Ein Name-only-Fallback
+                    # waere hier genau der Fehlgriff, den der Tombstone verhindern
+                    # soll: er wuerde ein fremdes Geraet gleichen Namens adoptieren.
+                    Start-Sleep -Seconds 2
+                    $freshIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Name $rolloutName -Fast -ErrorAction SilentlyContinue | Select-Object Name, MACAddress, ResourceID)
+                    $confirmed = Resolve-VsDeviceIdentity -Index $freshIndex -RolloutHostname $rolloutName -Mac $deviceMac
+                    if ($confirmed.Action -ne 'use') {
+                        if ($confirmed.Action -eq 'import' -and $importThrew) {
+                            # Nichts da UND der Aufruf hat geworfen: das ist ein
+                            # echter Importfehlschlag, kein Wartefall. Die beiden
+                            # zu vermengen waere der teuerste Fehler von allen -
+                            # ein dauerhaft gescheiterter Import haette sich als
+                            # "kommt beim naechsten Scan" gemeldet, und die Ampel
+                            # waere gelb statt rot geblieben, fuer immer.
+                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' fehlgeschlagen und kein Datensatz vorhanden." -f $rolloutName)
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause 'device_import_failed' -Target $deviceName
-                            continue
+                        } elseif ($confirmed.Action -eq 'import') {
+                            # Der Aufruf lief durch, MECM hat den Datensatz nur
+                            # noch nicht sichtbar gemacht. Kein Konflikt, ein
+                            # spaeterer Scan.
+                            Write-VsLog -Level WARN -Context $deviceName -Message ("Import von '{0}' ist noch nicht sichtbar - naechster Scan." -f $rolloutName)
+                            $dataWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'resource_id_pending' -Target $deviceName
+                        } else {
+                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' nicht eindeutig bestaetigt ({1}) - Device bleibt in der Warteschlange." -f $rolloutName, $confirmed.Cause)
+                            $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause $confirmed.Cause -Target $deviceName
                         }
+                        continue
                     }
+                    $resourceId = $confirmed.ResourceId
                 }
 
-                # ResourceID: erst aus dem Scan-Cache (Normalfall fuer bestehende
-                # Devices), Einzelabfrage nur fuer frisch importierte
-                $resourceId = if ($mecmDevices.ContainsKey($deviceName)) { $mecmDevices[$deviceName].ResourceID } else { $null }
                 if (-not $resourceId) {
-                    $resourceId = (Get-CMDevice -Name $deviceName -Fast -ErrorAction SilentlyContinue).ResourceID
-                }
-                if (-not $resourceId) {
-                    try { Approve-CMDevice -Name $deviceName -ErrorAction Stop; Start-Sleep -Seconds 5 } catch {
+                    # Approve nur fuer ein frisch importiertes, noch nicht
+                    # freigegebenes Geraet; adressiert ueber den Rolloutnamen.
+                    try { Approve-CMDevice -Name $rolloutName -ErrorAction Stop; Start-Sleep -Seconds 5 } catch {
                         Write-VsLog -Level DEBUG -Context $deviceName -Message ("Auto-Approve nicht moeglich: {0}" -f $_.Exception.Message)
                     }
-                    $resourceId = (Get-CMDevice -Name $deviceName -Fast -ErrorAction SilentlyContinue).ResourceID
+                    $approvedIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Name $rolloutName -Fast -ErrorAction SilentlyContinue | Select-Object Name, MACAddress, ResourceID)
+                    $approved = Resolve-VsDeviceIdentity -Index $approvedIndex -RolloutHostname $rolloutName -Mac $deviceMac
+                    $resourceId = if ($approved.Action -eq 'use') { $approved.ResourceId } else { $null }
                 }
                 if (-not $resourceId) {
                     Write-VsLog -Level WARN -Context $deviceName -Message 'Noch keine ResourceID - naechster Scan.'
@@ -396,14 +442,29 @@ while ($true) {
                 # break).
                 if ($membershipReport.Count -gt 0) {
                     try {
-                        Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body @{
+                        # Die Rolloutrevision faehrt mit (Etappe 14D): eine alte
+                        # Scaniteration darf nach einem Reset weder Provenienz
+                        # noch ResourceID des NEUEN Rollouts schreiben. Fehlt sie
+                        # (Portal vor dem Cutover), laesst der Server sie nur fuer
+                        # Revision 1 ohne Tombstone durch.
+                        $membershipBody = @{
                             deviceid    = $device.id
                             memberships = @($membershipReport)
-                        } | Out-Null
+                        }
+                        if ($rolloutRevision) { $membershipBody['rollout_revision'] = [int]$rolloutRevision }
+                        Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $membershipBody | Out-Null
                     } catch {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung fehlgeschlagen: {0} - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f (Get-VsErrorDetail -ErrorRecord $_))
+                        # 409 heisst: dieser Scan arbeitet mit einem veralteten
+                        # Rollout. Kein Transportfehler, keine Handarbeit - der
+                        # naechste Scan liest die neue Revision und laeuft durch.
+                        # Eigener Code, weil "Meldung fehlgeschlagen" den Operator
+                        # sonst einen Netzwerkfehler suchen laesst, den es nicht
+                        # gibt.
+                        $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)
+                        $cause = if ($isStale) { 'stale_rollout_revision' } else { 'membership_report_failed' }
+                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung nicht uebernommen ({0}): {1} - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
                         $itemFailures++
-                        Add-VsRunCause -Causes $causes -Cause 'membership_report_failed' -Target $deviceName
+                        Add-VsRunCause -Causes $causes -Cause $cause -Target $deviceName
                         continue
                     }
                 }
@@ -427,15 +488,22 @@ while ($true) {
                 }
 
                 try {
-                    Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body @{
+                    # deviceName bleibt als Wire-Feld unveraendert der ESXi-Name:
+                    # das Portal identifiziert die Zeile ueber deviceid, und das
+                    # Feld hier zu drehen waere ein Wire-Change ohne Nutzen.
+                    $updateBody = @{
                         deviceName       = $deviceName
                         deviceResourceID = "$resourceId"
                         deviceid         = $device.id
-                    } | Out-Null
+                    }
+                    if ($rolloutRevision) { $updateBody['rollout_revision'] = [int]$rolloutRevision }
+                    Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body $updateBody | Out-Null
                 } catch {
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("ResourceID-Update fehlgeschlagen: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+                    $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)
+                    $cause = if ($isStale) { 'stale_rollout_revision' } else { 'resource_update_failed' }
+                    Write-VsLog -Level WARN -Context $deviceName -Message ("ResourceID-Update nicht uebernommen ({0}): {1}" -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
                     $resourceUpdateFailures++
-                    Add-VsRunCause -Causes $causes -Cause 'resource_update_failed' -Target $deviceName
+                    Add-VsRunCause -Causes $causes -Cause $cause -Target $deviceName
                 }
             }
 

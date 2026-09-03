@@ -105,7 +105,12 @@ try {
         // Read only (ADR-0019/E3): downloading configuration proves neither
         // that the registry write finished nor that the client can acknowledge
         // it. The explicit POST to mecm_client_ack.php owns the 5/5 transition.
-        $stmt = $connection->prepare('SELECT vm_name, vm_hostname, vm_domain, vm_os, mission_id FROM deploy_vms WHERE id = ? LIMIT 1');
+        // Still the exact minimal contract: the same five base fields plus the
+        // interfaces, with `vm_hostname` aliased onto the frozen rollout
+        // snapshot (Etappe 14D) and exactly `rollout_revision` added. The client
+        // renames Windows to what it reads here, so it has to read the name this
+        // rollout was handed, not a desired value that may have moved since.
+        $stmt = $connection->prepare('SELECT vm_name, mecm_rollout_hostname AS vm_hostname, vm_domain, vm_os, mission_id, mecm_rollout_revision AS rollout_revision FROM deploy_vms WHERE id = ? LIMIT 1');
         $stmt->bind_param('i', $vmId);
         $stmt->execute();
         $data = $stmt->get_result()->fetch_assoc() ?: [];
@@ -121,7 +126,31 @@ try {
     }
 
     if ($action === 'getDeviceList') {
-        $result = machine_api_prepared_result($connection, 'SELECT * FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ? ORDER BY id', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
+        // Explicit projection, never `SELECT *` (Etappe 14D, ADR-0043). The old
+        // star handed every column of deploy_vms to the MECM server, so each
+        // internal column a later stage added became wire by accident - and this
+        // stage adds three of them. VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS is the
+        // pinned list; MachineApiWireTest walks it in both directions.
+        //
+        // Two deliberate aliases and nothing else changes:
+        //  - `vm_hostname` on the wire is the FROZEN rollout snapshot, not the
+        //    current portal desired value. MECM must receive the name this
+        //    rollout was handed, or a correction typed after the hand-off would
+        //    silently reinterpret a device MECM already accepted. The desired
+        //    value is deliberately NOT exported.
+        //  - `previous_resource_id` is the delete tombstone under a wire name;
+        //    the internal column name never leaves the database.
+        // `vm_name` keeps meaning the ESXi identity, exactly as before.
+        $result = machine_api_prepared_result(
+            $connection,
+            'SELECT ' . implode(', ', VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS) . ',
+                    mecm_rollout_hostname AS vm_hostname,
+                    mecm_rollout_revision AS rollout_revision,
+                    mecm_previous_id AS previous_resource_id
+               FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ? ORDER BY id',
+            's',
+            [VIRTUSPHERE_MECM_SYNC_PENDING]
+        );
         $data = [];
         while ($vm = $result->fetch_assoc()) {
             $vmId = (int) $vm['id'];

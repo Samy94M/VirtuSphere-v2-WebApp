@@ -23,6 +23,18 @@ declare(strict_types=1);
             </ul>
         </section>
 
+        <?php // Etappe 14D: Ein eigener Abschnitt, weil die beiden Namen und der
+              // eingefrorene Rolloutname die haeufigste Rueckfrage der Etappe sind
+              // und in der Namensregelliste als sechster Aufzaehlungspunkt
+              // untergegangen waeren. ?>
+        <section class="panel">
+            <h2><?php echo h(__t('help_missions.rollout_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.rollout_p1')); ?></p>
+            <p><?php echo h(__t('help_missions.rollout_p2')); ?></p>
+            <p><?php echo h(__t('help_missions.rollout_p3')); ?></p>
+            <p><?php echo h(__t('help_missions.rollout_p4')); ?></p>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_missions.status_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.status_p1')); ?></p>

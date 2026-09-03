@@ -15,8 +15,9 @@ config.json-Ordner  --->   mecm_autoimporter.ps1                deploy_packages/
                            mecm_Packages-TaskSeq-sync.ps1 --->  mecm_packages.php
                            (meldet Collections/TaskSeqs)
 Portal: Mission/VM  --->   mecm_new-device-sync.ps1       <---  mecm-api.php?action=getDeviceList
-anlegen, Pakete            (importiert Devices, weist
-verknüpfen                  Collections zu)               --->  mecm_updateid.php (ResourceID)
+anlegen, Pakete            (importiert Devices unter dem
+verknüpfen                  Rolloutnamen, weist
+                            Collections zu)               --->  mecm_updateid.php (ResourceID)
                                                                                         getinfo (Registry füllen)
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
                                                                 getDeviceInfos        staticip (Netz konfigurieren)
@@ -28,6 +29,11 @@ verknüpfen                  Collections zu)               --->  mecm_updateid.p
 - Reihenfolge der Client-Phasen ist über MECM-Anwendungsabhängigkeiten fixiert:
   `getinfo → hostname → staticip → disks` (disks optional).
 - Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
+- **Was MECM als Gerätenamen bekommt, ist der Windows-Hostname, nicht der
+  ESXi-Name** (Etappe 14D, ADR-0043). Genauer: der für diesen Rollout
+  eingefrorene Snapshot `mecm_rollout_hostname`, den `getDeviceList` unter dem
+  unveränderten Wire-Key `vm_hostname` liefert. `vm_name` bleibt die
+  ESXi-Identität und wandert nicht nach MECM.
 
 ## Admin-Runbook: MECM erstmals anbinden
 
@@ -321,6 +327,17 @@ zusätzlich an der VM im Portal.
 > Interface-Felder, ohne Notizen, Ersteller, Pakete oder Lifecycle-Zustand.
 > `getMissionName` ist entfernt; das ausgelieferte Device-Sync-Skript verwendete
 > schon vorher ausschließlich die eingebettete Mission.
+>
+> **Etappe 14D (ADR-0043, ADR-0019-Amendment 3):** `getDeviceList` hat sein
+> `SELECT *` verloren; die gelieferten Spalten stehen als
+> `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` fest und werden von
+> `MachineApiWireTest` in beide Richtungen gegen die echte Antwort geprüft.
+> Zwei bewusste Aliasse und ein additives Feld: `vm_hostname` trägt den
+> eingefrorenen Rolloutnamen (nie den aktuellen Portal-Sollwert),
+> `previous_resource_id` ist der Lösch-Tombstone unter einem Wire-Namen, und
+> `rollout_revision` ist der Fence. `getDeviceInfos` bleibt minimal und bekommt
+> genau ein Feld dazu, `rollout_revision`; sein `vm_hostname` ist ebenfalls der
+> Snapshot, weil der Client Windows nach dem benennt, was er dort liest.
 
 ## VM außer Betrieb nehmen
 
@@ -529,6 +546,55 @@ docker compose up -d maintenance-worker    # startet/erneuert den Dienst
 docker compose logs -f maintenance-worker  # Live-Log
 ```
 
+## Rolloutname, Reset und Tombstone (Etappe 14D, ADR-0043)
+
+`vm_hostname` ist der Sollwert und das einzige editierbare Feld. Was MECM
+bekommt, ist `mecm_rollout_hostname`: der für den laufenden Rollout eingefrorene
+Snapshot. Solange `mecm_id IS NULL` folgt er dem Sollwert; mit der ersten
+Bindung friert er ein.
+
+Die SSoT-Kette, je Station ein Besitzer:
+
+```
+Portal-Sollwert (vm_hostname)
+  --> Rollout-Snapshot (mecm_rollout_hostname, eingefroren bei der Bindung)
+  --> MECM-Import (Import-CMComputerInformation -ComputerName <Snapshot>)
+  --> Windows (client_hostname.ps1, idempotent)
+  --> DDR-Anzeigename in MECM (Windows/Discovery, ab hier fremdes Eigentum)
+```
+
+**Neuer Rollout, der einzige unterstützte Weg:**
+
+1. `vm_hostname` im Portal korrigieren.
+2. Altes Gerät in der MECM-Konsole löschen (VirtuSphere löscht dort nie).
+3. Bei neu erzeugter VM zuerst die neue PXE-MAC jobgebunden importieren lassen.
+4. „MECM-ID zurücksetzen" ausführen.
+
+Der Reset ist der **einzige** Aktivierungspunkt. Kein Bereitstellungsmodus,
+auch nicht „Full pipeline", setzt einen Hostnamen.
+
+Was der Reset in einer Transaktion tut: Snapshot auf den Sollwert, alte
+ResourceID wird `mecm_previous_id` (Tombstone), `mecm_rollout_revision + 1`,
+Hostname-Claim vom alten auf den neuen Namen. Ein zweiter Klick mit demselben
+Namen ist ein idempotenter No-op; ein zweiter Klick nach einer Namenskorrektur
+zieht den Snapshot nach und **behält** den Tombstone, damit eine Tippfehler-
+korrektur nach dem Reset nicht bis zum Abschluss des Rollouts gesperrt ist. Der
+Tombstone verschwindet ausschließlich mit einer erfolgreichen neuen Bindung.
+
+Der Tombstone blockiert nicht den Reset, sondern die **Übergabe**: Solange das
+Vorgängergerät in MECM existiert, importiert der Device-Sync nicht und meldet
+`previous_resource_present`. Der VM-Editor zeigt denselben Sachverhalt als
+offenen Punkt mit der ResourceID.
+
+Vorlagen haben weder Snapshot noch Revision noch Tombstone. Ein Klon aus einer
+Vorlage initialisiert beides frisch aus seinem gewünschten `vm_hostname`;
+JSON-Export und -Import übertragen ausschließlich den Sollwert.
+
+Der wirksame Rolloutname ist portalweit eindeutig, erzwungen in
+`deploy_vm_hostname_claims` (case-insensitiver Primärschlüssel, Cascade auf die
+VM). Eine VM darf gleichzeitig ihren eingefrorenen und ihren neuen Namen halten;
+eine andere VM bekommt den alten erst im Reset-Commit.
+
 ## Namensregeln für VMs und Hostnamen (Etappe 2)
 
 Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
@@ -539,8 +605,10 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
   vom eingegebenen Namen abweichen. Bestands-VMs mit Alt-Hostnamen bleiben
   editierbar (Warnhinweis am Feld zeigt den Namen, den der Client erzeugen
   würde); erst eine Änderung muss die Regel erfüllen.
-- **VM-Name (`vm_name`)**: global eindeutig über alle normalen Missionen
-  hinweg (MECM-Gerätenamen sind global). Templates dürfen Namen doppeln;
+- **VM-Name (`vm_name`)**: der VM-Name in ESXi, global eindeutig über alle
+  normalen Missionen hinweg. Das ist eine Portal-/ESXi-Namenspolitik und
+  **nicht** der MECM-Gerätename: MECM importiert seit Etappe 14D den
+  Rollout-Snapshot des Windows-Hostnamens. Templates dürfen Namen doppeln;
   beim Klonen eines Templates werden Kollisionen vorab als Liste gemeldet.
 - **Missionsname**: ist gleichzeitig der MECM-Collection-Name. Sobald VMs der
   Mission in MECM übermittelt/registriert sind, ist der Name gesperrt.
@@ -751,8 +819,15 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 |---|---|---|
 | 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
 | VM ohne Mission / ohne DHCP-MAC | übersprungen, nächste VM | WARN |
-| MAC-Konflikt MECM ≠ ESXi | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „manuelle Prüfung" |
-| Import-Race (paralleler Scan) | toleriert; Existenz-Nachprüfung statt Fehlertext-Parsing (sprach-/versionsneutral) | still |
+| Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
+| Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
+| Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
+| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung | ERROR |
+| Mehrere Treffer nach Name, MAC oder ResourceID (`device_identity_ambiguous`) | blockiert; das Skript wählt bewusst keinen aus | ERROR |
+| Vorgängergerät noch vorhanden (`previous_resource_present`) | blockiert bis zum Löschen in der MECM-Konsole | ERROR |
+| Abweichender **Anzeigename** bei gültiger ResourceID und MAC | **kein Befund**: Windows/Discovery darf umbenennen; kein Reimport, kein Rename, keine Warnung | DEBUG |
+| Rückmeldung mit veralteter Rolloutrevision (`stale_rollout_revision`, HTTP 409) | Portal weist ab; der nächste Scan läuft mit der aktuellen Revision durch | WARN |
+| Import-Race (paralleler Scan) | toleriert; nach dem Import werden Name UND MAC erneut eindeutig gelesen, kein Fehlertext-Parsing und kein `-MergeIfExist` | still |
 | Mehrere DHCP-Interfaces an einer VM | erste MAC wird genutzt | WARN |
 | Auto-Approve scheitert / ResourceID fehlt noch | Retry im nächsten Scan | DEBUG + WARN |
 | Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |

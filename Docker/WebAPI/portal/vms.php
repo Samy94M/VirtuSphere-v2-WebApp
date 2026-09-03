@@ -12,6 +12,7 @@ require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/vm_network_display.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
+require_once __DIR__ . '/../lib/mecm_rollout_display.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -40,15 +41,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         if ($action === 'reset_mecm_id') {
+            // The template check stays here as the page-level shortcut, but the
+            // repository guard is the authority: it re-decides template, active
+            // job, MAC, hostname validity and tombstone under the mission lock,
+            // so the bulk path one row over cannot end up with different rules.
             if ($isTemplate) {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
             }
-            repo_reset_vm_mecm_id($connection, $missionId, $vmId, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'reset_mecm_id',
-                'mission_id' => $missionId,
-            ], (int) $user['id']);
-            flash_set('success', __t('portal.vm_mecm_reset_success'));
+            // One transaction for the state change AND the row that records it.
+            // Auditing after the commit is how a reset ends up applied with no
+            // trace when the audit insert is the thing that fails.
+            $outcome = repo_transaction($connection, static function () use ($connection, $missionId, $vmId, $user): array {
+                $result = repo_reset_vm_mecm_id($connection, $missionId, $vmId, (int) $user['id']);
+                // An absent value is OMITTED, never sent as an empty string.
+                // The registry refuses an empty context field, and because this
+                // audit shares the transaction with the reset, that refusal
+                // rolled the reset back: the operator got a generic error and
+                // the MECM ID was still there. A VM without a previous rollout
+                // name or without a bound ResourceID is a normal first reset,
+                // not something to report a blank about.
+                $context = [
+                    'action' => $result['changed'] ? 'reset_mecm_id' : 'reset_mecm_id_noop',
+                    'mission_id' => $missionId,
+                    'rollout_hostname' => $result['hostname'],
+                    'rollout_revision' => $result['revision'],
+                ];
+                if ((string) ($result['previous_hostname'] ?? '') !== '') {
+                    $context['previous_rollout_hostname'] = (string) $result['previous_hostname'];
+                }
+                if ((string) ($result['previous_id'] ?? '') !== '') {
+                    $context['previous_resource_id'] = (string) $result['previous_id'];
+                }
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $context, (int) $user['id']);
+
+                return $result;
+            });
+            // The success sentence names the name that is now armed and repeats
+            // the operator's unchanged duty: VirtuSphere deletes nothing in MECM.
+            flash_set('success', __t(
+                $outcome['changed'] ? 'portal.vm_mecm_reset_success' : 'portal.vm_mecm_reset_already_pending',
+                ['hostname' => $outcome['hostname']]
+            ));
         } elseif ($action === 'transfer_mecm') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
@@ -135,11 +168,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (ValidationException $exception) {
         flash_set('error', portal_error_message($exception));
+    } catch (RepoMecmResetBlocked $blocked) {
+        // A closed reason, mapped to a localized sentence (Etappe 14D). The
+        // predecessor recognised "no MAC" by searching the exception TEXT, so a
+        // reworded message would silently have degraded every refusal into the
+        // generic error page and taken the operator's next step with it.
+        flash_set('error', mecm_reset_blocker_message($blocked->reasonCode()));
     } catch (Throwable $exception) {
-        $message = $exception->getMessage() === 'VM needs an imported MAC address before MECM ID reset.'
-            ? __t('portal.vm_mecm_reset_no_mac')
-            : portal_error_message($exception);
-        flash_set('error', $message);
+        flash_set('error', portal_error_message($exception));
     }
     redirect_to($redirectPath);
 }
@@ -184,7 +220,7 @@ $vmLocationOverride = static function (array $vm): string {
 // downloads of the same list disagree on their shape.
 if (($_GET['export'] ?? '') === 'csv') {
     $header = [
-        __t('common.name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.th_ram'),
+        __t('vms.th_vm_name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.th_ram'),
         __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
         __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
         __t('vms.csv_network_status'), __t('vms.csv_network_detail'),
@@ -263,7 +299,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
             <table>
                 <thead><tr><?php if ($canWrite) { ?><th><input type="checkbox" data-bulk-all aria-label="<?php echo h(__t('vms.bulk_select_all')); ?>"></th><?php } ?><?php
                     $vmSortParams = ['mission_id' => (string) $missionId];
-                    echo portal_sort_header('vms.php', 'name', __t('common.name'), $sort, $dir, $vmSortParams);
+                    echo portal_sort_header('vms.php', 'name', __t('vms.th_vm_name'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'hostname', __t('vms.th_hostname'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'os', __t('vms.th_os'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
@@ -275,7 +311,15 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     <tr>
                         <?php if ($canWrite) { ?><td><input type="checkbox" form="bulk-vms" name="vm_ids[]" value="<?php echo h((string) $vm['id']); ?>" data-bulk-item aria-label="<?php echo h((string) ($vm['vm_name'] ?? '')); ?>"></td><?php } ?>
                         <td><?php echo h($vm['vm_name'] ?? ''); ?></td>
-                        <td><?php echo h($vm['vm_hostname'] ?? ''); ?></td>
+                        <?php // Die Abweichungsmarkierung sitzt IN der Hostnamenzelle und
+                              // bekommt keine eigene Spalte (14D.5.2): eine weitere Spalte
+                              // haette die Tabelle auf schmalen Geraeten umgebrochen, fuer
+                              // einen Zustand, den die meisten Zeilen nie haben. Der Titel
+                              // traegt den Namen, unter dem der Rollout weiterlaeuft. ?>
+                        <td><?php echo h($vm['vm_hostname'] ?? '');
+                            if (!$isTemplate && mecm_rollout_shows_divergence($vm)) { ?>
+                            <span title="<?php echo h(__t('vms.rollout_diverged_title', ['current' => (string) $vm['mecm_rollout_hostname']])); ?>"><?php echo portal_badge('warning', __t('vms.rollout_diverged')); ?></span>
+                        <?php } ?></td>
                         <td><?php echo h($vm['vm_os'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_ram'] ?? ''); ?></td>
@@ -327,7 +371,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="reset_mecm_id">
                                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vm['id']); ?>">
-                                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
+                                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? ''), 'hostname' => (string) ($vm['vm_hostname'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
                                 </form>
                             <?php } ?>
                             <?php if (can('vms.write', $user)) { ?>

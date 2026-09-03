@@ -217,24 +217,41 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
 1. Geräteliste per `GET /mecm-api.php?action=getDeviceList` laden. Bei
    0 Devices sofort schlafen; die teuren MECM-Vollabfragen entfallen, der
    10-Sekunden-Normalfall ist damit fast kostenlos.
-2. MECM-Daten **einmal pro Scan** cachen (alle Devices, Task Sequences,
-   Collections in Hashtables) statt Einzelabfragen je Device.
+2. MECM-Daten **einmal pro Scan** cachen: `New-VsMecmDeviceIndex` baut drei
+   Multimaps nach ResourceID, normalisiertem Namen und **jeder** normalisierten
+   MAC. Eine Hashtabelle mit dem Anzeigenamen als Einzelschlüssel ist verboten
+   (Etappe 14D): sie löste Duplikate still nach „last wins" auf, und welcher von
+   zwei gleichnamigen Datensätzen gewann, entschied die Reihenfolge der
+   Providerantwort. Eine Mehrdeutigkeit muss ein Fehler bleiben und darf keine
+   Auswahlheuristik werden.
 3. Ordner `VirtuSphere_OS` und `VirtuSphere_Missions` sicherstellen; für jede
    Task Sequence eine gleichnamige Collection im OS-Ordner anlegen.
 4. Je Device:
    - PXE-MAC aus dem ersten DHCP-Interface ermitteln (Warnung bei mehreren);
      ohne Mission oder MAC wird das Device übersprungen.
    - Mission-Collection bei Bedarf anlegen.
-   - MAC-Konflikte (MECM ≠ ESXi) werden **nur gemeldet**, nie automatisch
-     korrigiert.
-   - Neues Device per `Import-CMComputerInformation` in "All Systems"
-     importieren. Schlägt der Import fehl, prüft das Skript per
-     Existenzabfrage auf ein Import-Race (kein Fehlertext-Parsing, da die
-     Texte je MECM-Version und -Sprache variieren).
+   - **Identität auflösen** (`Resolve-VsDeviceIdentity`, rein und ohne
+     Providerzugriff, damit Pester jeden Zweig fahren kann). Die Reihenfolge ist
+     die Aussage: Eine gebundene ResourceID gilt allein, und ein davon
+     abweichender **Anzeigename ist ausdrücklich kein Fehler** (Windows und
+     Discovery dürfen umbenennen; kein Reimport, kein Rename, keine Warnung alle
+     zehn Sekunden). Ohne Bindung blockiert ein noch vorhandenes
+     Vorgängergerät; danach wird genau ein Objekt übernommen, wenn Name **und**
+     MAC gemeinsam eindeutig darauf zeigen. Jeder andere Ausgang ist ein
+     geschlossener Fehlercode, zählt einen Fehlschlag und lässt die VM in der
+     Warteschlange. Das passiert **vor** jeder Mitgliedschaftsmutation.
+   - Neues Device per `Import-CMComputerInformation -ComputerName <Rolloutname>`
+     in "All Systems" importieren; importiert wird der Windows-Hostname aus dem
+     Wire-Feld `vm_hostname`, nicht der ESXi-Name. Danach wird **nicht** nach
+     Fehlertext geraten, sondern Name und MAC werden erneut eindeutig gelesen
+     (kein `-MergeIfExist`, kein Name-only-Fallback).
    - ResourceID beschaffen, notfalls per `Approve-CMDevice` nachhelfen;
      ohne ResourceID: nächster Scan.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
-   - ResourceID per `POST /mecm_updateid.php?action=updateDevice` zurückmelden.
+   - Provenienz und ResourceID per `POST /mecm_updateid.php` zurückmelden,
+     beides mit `rollout_revision`. Antwortet das Portal mit 409, arbeitet
+     dieser Scan mit einem veralteten Rollout: eigener Code
+     `stale_rollout_revision`, kein Transportfehler, kein Handgriff nötig.
 5. Collection-Updates gesammelt anstoßen (einmal je geänderter Collection).
 
 ### Packages Sync (`mecm_Packages-TaskSeq-sync.ps1`, alle 60 s)

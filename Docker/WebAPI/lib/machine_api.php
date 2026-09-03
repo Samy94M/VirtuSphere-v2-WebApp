@@ -13,7 +13,16 @@ require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/mac.php';
 require_once __DIR__ . '/request.php';
 
-function machine_api_json(mixed $payload, int $status = 200): void
+/**
+ * Emits one machine-API response and ENDS the request.
+ *
+ * Declared `never` rather than `void` because that is what it does: every
+ * caller relies on it not returning, and a `void` signature made that reliance
+ * invisible to the analyser. The first function to declare `never` on top of it
+ * (the rollout-revision refusal) was therefore rejected as unprovable, which is
+ * the analyser correctly pointing at a type that was a lie.
+ */
+function machine_api_json(mixed $payload, int $status = 200): never
 {
     http_response_code($status);
     echo json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -279,4 +288,44 @@ function machine_api_throttle_allows(mysqli $db, string $category, string $event
 
         return ['allowed' => true, 'suppressed' => (int) $row['suppressed']];
     });
+}
+
+/**
+ * One exit for a callback the rollout fence refused (Etappe 14D, ADR-0043).
+ *
+ * It answers 409 and writes NOTHING of the domain: a refused callback belongs to
+ * a rollout that no longer exists, and the whole point of the fence is that such
+ * a caller cannot close the queue the reset just opened.
+ *
+ * The audit row runs through the same throttled machine-API channel as every
+ * other machine warning, because a MECM sync polls every few seconds and an
+ * un-upgraded site would otherwise write a row per poll per VM. It carries the
+ * revisions and the report type, never the request body: what a caller sends is
+ * the one field an attacker steers, and deploy_logs is readable by every
+ * `users.manage` holder.
+ *
+ * @param array<string, mixed> $vm the locked row, for the stored revision
+ */
+function machine_api_rollout_revision_refused(mysqli $db, int $vmId, string $reportType, ?int $reported, array $vm, ?string $clientIp): never
+{
+    machine_api_audit_warning(
+        $db,
+        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED,
+        'vm',
+        $vmId,
+        VIRTUSPHERE_AUDIT_RESULT_WARNING,
+        [
+            'report_type' => $reportType,
+            'reported_revision' => $reported === null ? 0 : $reported,
+            'rollout_revision' => $vm['mecm_rollout_revision'] === null ? 0 : (int) $vm['mecm_rollout_revision'],
+        ],
+        $clientIp
+    );
+
+    machine_api_json([
+        'error' => 'Rollout revision is stale',
+        // Additive and deliberately machine-readable: the sync keeps the device
+        // queued and re-reads getDeviceList rather than guessing from prose.
+        'rollout_revision' => $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
+    ], 409);
 }

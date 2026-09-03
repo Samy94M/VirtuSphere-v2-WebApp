@@ -39,6 +39,10 @@ return [
     'deploy_mode_powercycle' => 'Power-Cycle + Export MACs: schaltet VMs kurz ein und wieder aus, damit ESXi MAC-Adressen vergibt, und liest sie danach aus. Angefasst wird nur eine VM, deren PXE-Netzwerkkarte noch keine MAC im Portal hat und die zu Beginn des Laufs ausgeschaltet war; laufende oder angehaltene VMs bleiben in ihrem Zustand, und wieder ausgeschaltet wird nur, was dieser Lauf selbst gestartet hat.',
     'deploy_mode_export' => 'Export MACs: liest MAC-Adressen bereits laufender VMs aus.',
     'deploy_mode_start' => 'Start VMs: startet bereits angelegte VMs.',
+    // Etappe 14D: Die Frage "aktiviert dieser Modus den neuen Hostnamen?" wird
+    // sonst nirgends beantwortet, und die naheliegende Antwort ("Full pipeline
+    // macht alles") ist falsch.
+    'deploy_mode_p2' => 'Kein Bereitstellungsmodus setzt einen Windows-Hostnamen. Auch „Start VMs" und „Export MACs" aktivieren keinen neuen Rolloutnamen, und „Full pipeline" tut es ebenso wenig. Welchen Namen MECM für den nächsten Rollout bekommt, entscheidet allein die Aktion „MECM-ID zurücksetzen" in der VM-Liste oder im VM-Editor.',
     'deploy_verbose_heading' => 'Ansible -vvv',
     'deploy_verbose_p1' => 'Die Option „Ansible -vvv" erhöht die Diagnose-Ausgabe von Ansible auf die dritte Stufe. Das hilft bei der Fehlersuche, erzeugt aber deutlich mehr Log-Zeilen und sollte im Normalbetrieb ausgeschaltet bleiben. Was genau dabei zusätzlich erscheint, entscheidet Ansible je Modul und Version; die Option ist eine Detailstufe, keine Zusage über bestimmte Inhalte.',
     'deploy_verbose_p2' => 'Gespeicherte Zeilen werden vorher gegen die Zugangsdaten dieses Auftrags redigiert, sowohl im Klartext als auch in URL-kodierter Form. Zusätzlich markieren die Playbooks empfindliche Aufgaben mit „no_log". Beides zusammen ist eine gestaffelte Absicherung und keine Garantie: Eine höhere Detailstufe kann Werte in Formen ausgeben, die keine Redigierung zuverlässig erkennt. Für einen Lauf, dessen Ausgabe weitergegeben wird, ist -vvv deshalb die falsche Einstellung.',

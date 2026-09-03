@@ -387,6 +387,59 @@ on ESXi. Everything in front of that is proven (no second child, no second job,
 no second create unit, no second async job id); the VM itself is the site
 acceptance, case 11 of section 15.6 of the create plan.
 
+### Etappe 14D: what proves the rollout hostname
+
+`MecmRolloutContractTest` carries the fence decision table as a written-out data
+provider rather than something derived from the implementation: a table
+generated from the code only restates it, while a table a reader can check
+against the rule is what makes "a future revision is refused as firmly as an old
+one" reviewable. Alongside it, the closed reset-blocker vocabulary is walked
+against the exhaustive `match`, against the `@param` union that keeps PHPStan
+from demanding a `default` arm, and against the `vms.skip_<reason>` labels the
+bulk result builds at RUNTIME, which no grep for literals would ever find. The
+same file pins that `deploy_vm_hostname_claims` has exactly one writer and that
+`REPO_VM_COLUMNS` carries no rollout runtime, because that list is what a
+template capture, a clone and the JSON export copy field by field.
+
+`MachineApiWireTest` walks `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` against the
+live `getDeviceList` payload in BOTH directions, and its fixture seeds the
+rollout snapshot as a deliberately DIFFERENT value from the desired hostname.
+That second detail is the test: with both seeded equal, a wire that exported the
+desired value would pass a test written to prove it exports the snapshot.
+
+`VirtuSphere.RolloutIdentity.Tests.ps1` is the PowerShell half and it exists
+because the defect it replaces is invisible in any single line. `$mecmDevices[$d.Name] = $d`
+reads perfectly; what was wrong with it only shows in a table, so the suite is
+one. Driving that table found two real defects before any reviewer did: a
+PowerShell hashtable miss yields `$null`, and `@($null)` has Count 1, so an
+unknown name plus an unknown MAC looked like two hits with the same empty
+ResourceID and the resolver answered `use` with no ResourceID instead of
+`import`. The suite therefore also asserts the property directly: no input may
+produce `use` without a ResourceID.
+
+Three guards that already existed caught regressions in this stage rather than
+being written for it, which is the intended shape. `AuditRegistryTest` walks
+every registered event through the presenter and found that both new events had
+no description arm, so every fence-refusal audit was being swallowed by the
+`catch (Throwable)` around the machine-audit path: the 409 was correct and the
+row was silently absent. The cause-vocabulary guard found that `device_import_failed`
+had lost its producer in the sync rewrite, which would have reported a genuinely
+failed import as "pending, next scan" forever. And the file-size ratchet forced
+the split that put the reset in `lib/repo/vms_mecm_reset.php` and the VM
+identity fields in `lib/vm_edit_names.php`.
+
+Verified against reality rather than only in source: the 409/200/404/400 matrix
+was driven through the real endpoints against the dev database (legacy caller at
+revision 1, legacy caller after a reset, stale, future, malformed, unknown VM,
+idempotent replay, and the membership and client-ACK variants), the real
+`getDeviceList` and `getDeviceInfos` payloads were read back, and the reset was
+driven against real rows to observe the snapshot moving, the revision rising,
+the tombstone being set and the two claim rows collapsing into one.
+
+Not proven here and deliberately open: that the site's real task sequence adopts
+the imported name unchanged. That is a lab fact about MECM, not something an
+offline suite can establish, and the release stays blocked on it.
+
 ## Test Commands
 
 Run PHPUnit inside the PHP container:

@@ -456,8 +456,20 @@ $script:VsRunSiteErrorOutcome = @{
 $script:VsRunCauseVocabulary = @(
     'mission_missing',           # VM ohne Mission: nichts zuzuweisen
     'mac_missing',               # VM ohne DHCP-MAC: PXE kann nie greifen
-    'mac_conflict',              # MECM kennt eine andere MAC als das Portal
+    'mac_conflict',              # Rolloutname mit fremder MAC ODER MAC mit fremdem Namen
     'device_import_failed',      # Import-CMComputerInformation fehlgeschlagen
+    # --- Identitaet des Rolloutnamens (Etappe 14D, ADR-0043) ---------------
+    #
+    # Bewusst KEIN `device_name_conflict`: ein Name mit fremder MAC und eine MAC
+    # mit fremdem Namen sind dieselbe Frage aus zwei Richtungen, und zwei Codes
+    # dafuer haetten den Operator zwei verschiedene Zeilen suchen lassen. Der
+    # eine bestehende `mac_conflict` traegt beide Richtungen weiter.
+    'device_name_invalid',       # Rolloutname fehlt oder ist kein NetBIOS-Name: kein Import moeglich
+    'device_identity_ambiguous', # mehrere MECM-Datensaetze passen auf Name/MAC/ResourceID
+    'previous_resource_present', # Tombstone: das alte MECM-Geraet ist noch da und muss von Hand geloescht werden
+    'resource_id_missing',       # gebundene ResourceID existiert in MECM nicht mehr
+    'resource_mac_conflict',     # gebundene ResourceID traegt eine andere MAC als das Portal
+    'stale_rollout_revision',    # Portal wies die Rueckmeldung als veraltete Rolloutrevision ab (409)
     'collection_missing',        # Zielcollection existiert nicht
     'collection_assign_failed',  # Add-CMDeviceCollectionDirectMembershipRule fehlgeschlagen
     'collection_update_failed',  # Invoke-CMCollectionUpdate fehlgeschlagen
@@ -598,6 +610,171 @@ function Test-VsTemplateScriptCurrent {
 # enthaelt nur Regeln, die owned UND present UND nicht mehr desired sind - eine
 # Hand-Regel hat keine Provenienz und ist konstruktionsbedingt unantastbar
 # (preserve_manual/foreign werden nie angefasst, adoptiert wird nur im Portal).
+# ---------------------------------------------------------------------------
+# Identitaet eines MECM-Geraets (Etappe 14D, ADR-0043)
+# ---------------------------------------------------------------------------
+#
+# Normalisierter Vergleichsschluessel eines Windows-Rolloutnamens. Spiegelt
+# mecm_hostname_key() auf der PHP-Seite EXAKT: trimmen und ASCII-Case-Fold, nie
+# kuerzen, nie reparieren. Bewusst ToLowerInvariant statt ToLower: unter einer
+# tuerkischen Locale bildet ToLower() das I nicht auf i ab, und dann waere
+# "BACKUP-1" auf diesem Server ein anderer Rechner als auf jedem anderen.
+function ConvertTo-VsHostnameKey {
+    param([string]$Hostname)
+    if ([string]::IsNullOrWhiteSpace($Hostname)) { return '' }
+    return $Hostname.Trim().ToLowerInvariant()
+}
+
+# Ist der Name als MECM-Geraetename ueberhaupt verwendbar? Spiegelt
+# mecm_hostname_is_rollout_valid(): NetBIOS, hoechstens 15 Zeichen, kein Punkt,
+# kein fuehrender/abschliessender Bindestrich.
+function Test-VsRolloutHostname {
+    param([string]$Hostname)
+    if ([string]::IsNullOrWhiteSpace($Hostname)) { return $false }
+    return ($Hostname.Trim() -cmatch '^[A-Za-z0-9]([A-Za-z0-9-]{0,13}[A-Za-z0-9])?$')
+}
+
+# Baut die drei Multimaps eines Scans aus der Get-CMDevice-Vollabfrage.
+#
+# MULTImaps, nicht Hashtabellen mit einem Wert: der Vorgaenger war
+# `$mecmDevices[$d.Name] = $d`, also "last wins". Zwei Datensaetze mit demselben
+# Namen (nach einer Windows-Umbenennung, nach einem manuellen Reimport) loeschten
+# sich damit still gegenseitig aus, und welcher gewann, entschied die
+# Reihenfolge der Providerantwort. Eine Mehrdeutigkeit MUSS ein Fehler sein und
+# darf keine Auswahlheuristik werden; dafuer muss sie ueberhaupt erst sichtbar
+# bleiben.
+#
+# Der Name wird normalisiert abgelegt (MECM vergleicht Geraetenamen selbst
+# case-insensitiv), die MAC ueber ConvertTo-VsNormalizedMac. Ein Datensatz kann
+# mehrere MACs tragen; jede zaehlt.
+function New-VsMecmDeviceIndex {
+    param($Devices)
+
+    $index = @{
+        ByResourceId = @{}
+        ByName       = @{}
+        ByMac        = @{}
+    }
+    foreach ($device in @($Devices)) {
+        if ($null -eq $device) { continue }
+
+        $resourceId = "$($device.ResourceID)"
+        if (-not [string]::IsNullOrWhiteSpace($resourceId)) {
+            if (-not $index.ByResourceId.ContainsKey($resourceId)) { $index.ByResourceId[$resourceId] = @() }
+            $index.ByResourceId[$resourceId] += $device
+        }
+
+        $nameKey = ConvertTo-VsHostnameKey ([string]$device.Name)
+        if ($nameKey -ne '') {
+            if (-not $index.ByName.ContainsKey($nameKey)) { $index.ByName[$nameKey] = @() }
+            $index.ByName[$nameKey] += $device
+        }
+
+        # MACAddress ist je nach Abfrage ein Einzelwert oder eine Liste. Beides
+        # ueber denselben Pfad, damit ein Datensatz mit zwei NICs nicht nur unter
+        # der ersten auffindbar ist.
+        foreach ($rawMac in @($device.MACAddress)) {
+            $mac = ConvertTo-VsNormalizedMac ([string]$rawMac)
+            if (-not $mac) { continue }
+            if (-not $index.ByMac.ContainsKey($mac)) { $index.ByMac[$mac] = @() }
+            $index.ByMac[$mac] += $device
+        }
+    }
+
+    return $index
+}
+
+# Treffer eines Multimaps als ECHTES Array.
+#
+# Ohne diese Funktion nicht zu haben: `@($map[$key])` auf einem fehlenden
+# Schluessel liefert `$null`, und `@($null)` ist ein Array mit EINEM Element.
+# Jede `Count -eq 0`-Pruefung lief damit ins Leere, und ein unbekannter Name
+# plus eine unbekannte MAC sahen aus wie zwei Treffer mit derselben (leeren)
+# ResourceID: die Aufloesung antwortete `use` mit leerer ResourceID, statt zu
+# importieren. Gemessen, nicht vermutet - der Entscheidungstisch zeigte es.
+#
+# Die Rueckgabe wird bewusst NICHT mit `,` array-verpackt: PowerShell entrollt
+# ein leeres Array zu "nichts", und `@(nichts)` beim Aufrufer ist genau das
+# leere Array, das gebraucht wird. `,@()` haette stattdessen ein Array MIT einem
+# leeren Array geliefert - Count 1 - und damit denselben Fehler eine Ebene
+# hoeher wiederholt. Jeder Aufrufer klammert deshalb in `@(...)`.
+function Get-VsIndexHits {
+    param($Map, [string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key) -or $null -eq $Map -or -not $Map.ContainsKey($Key)) { return @() }
+    $hits = @($Map[$Key] | Where-Object { $null -ne $_ })
+    return $hits
+}
+
+# Entscheidet, WELCHER MECM-Datensatz zu dieser VM gehoert, oder dass keiner
+# gehoert und warum. Rein: keine Providerabfrage, kein Schreiben, damit die
+# Pester-Suite jeden Zweig ohne MECM fahren kann.
+#
+# Rueckgabe: @{ Action = 'use'|'import'|'block'; ResourceId = <string>; Cause = <Code> }
+#
+# Die Reihenfolge ist die Aussage:
+#
+#  1. Eine gebundene ResourceID ist die Identitaet. Nur sie wird aufgeloest, und
+#     ein ABWEICHENDER Anzeigename ist dann KEIN Befund: nach dem Rollout darf
+#     Windows/Discovery den Namen des Datensatzes aendern (das ist der von
+#     Microsoft vorgesehene Weg), und VirtuSphere bewertet das nicht als Fehler,
+#     benennt nicht um und warnt nicht alle zehn Sekunden. Fehlt die ResourceID
+#     oder traegt sie eine fremde MAC, wird blockiert: ein aehnlich benannter
+#     Ersatzdatensatz wird NIE adoptiert.
+#  2. Ohne Bindung blockiert ein noch vorhandenes Vorgaengergeraet (Tombstone).
+#     Ist es in MECM wirklich weg, ist der Tombstone veraltet und der Weg frei;
+#     das Portal raeumt ihn beim naechsten erfolgreichen Binden ab.
+#  3. Im ERSTEN Rollout darf genau ein Objekt uebernommen werden, und nur wenn
+#     Name UND MAC gemeinsam eindeutig auf denselben Datensatz zeigen. Das ist
+#     der Import-/Cache-Race: der vorige Scan hat importiert, die Rueckmeldung
+#     ging verloren. Alles andere bleibt in der Warteschlange.
+function Resolve-VsDeviceIdentity {
+    param(
+        [Parameter(Mandatory)]$Index,
+        [string]$RolloutHostname,
+        [string]$Mac,
+        [string]$BoundResourceId = '',
+        [string]$PreviousResourceId = ''
+    )
+
+    $block = { param([string]$cause) return @{ Action = 'block'; ResourceId = ''; Cause = $cause } }
+
+    if (-not (Test-VsRolloutHostname $RolloutHostname)) { return (& $block 'device_name_invalid') }
+    if ([string]::IsNullOrWhiteSpace($Mac)) { return (& $block 'mac_missing') }
+
+    if (-not [string]::IsNullOrWhiteSpace($BoundResourceId)) {
+        $hits = @(Get-VsIndexHits -Map $Index.ByResourceId -Key $BoundResourceId)
+        if ($hits.Count -eq 0) { return (& $block 'resource_id_missing') }
+        if ($hits.Count -gt 1) { return (& $block 'device_identity_ambiguous') }
+
+        $found = $false
+        foreach ($rawMac in @($hits[0].MACAddress)) {
+            if ((ConvertTo-VsNormalizedMac ([string]$rawMac)) -eq $Mac) { $found = $true; break }
+        }
+        if (-not $found) { return (& $block 'resource_mac_conflict') }
+
+        return @{ Action = 'use'; ResourceId = "$($hits[0].ResourceID)"; Cause = '' }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PreviousResourceId) -and $Index.ByResourceId.ContainsKey($PreviousResourceId)) {
+        return (& $block 'previous_resource_present')
+    }
+
+    $nameHits = @(Get-VsIndexHits -Map $Index.ByName -Key (ConvertTo-VsHostnameKey $RolloutHostname))
+    $macHits = @(Get-VsIndexHits -Map $Index.ByMac -Key $Mac)
+
+    if ($nameHits.Count -gt 1 -or $macHits.Count -gt 1) { return (& $block 'device_identity_ambiguous') }
+    if ($nameHits.Count -eq 0 -and $macHits.Count -eq 0) { return @{ Action = 'import'; ResourceId = ''; Cause = '' } }
+    if ($nameHits.Count -eq 1 -and $macHits.Count -eq 1 -and "$($nameHits[0].ResourceID)" -eq "$($macHits[0].ResourceID)") {
+        return @{ Action = 'use'; ResourceId = "$($nameHits[0].ResourceID)"; Cause = '' }
+    }
+
+    # Name mit fremder MAC, MAC mit fremdem Namen, oder beide auf verschiedene
+    # Datensaetze. Ein Code fuer alle drei: es ist dieselbe Frage aus drei
+    # Richtungen, und ein zweiter Code haette den Operator zwei Zeilen suchen
+    # lassen, die dieselbe Handarbeit verlangen.
+    return (& $block 'mac_conflict')
+}
+
 function Get-VsMembershipPlan {
     param(
         [array]$Desired = @(),
@@ -649,6 +826,8 @@ function Add-VsRunCause {
         [Parameter(Mandatory)]$Causes,
         [Parameter(Mandatory)]
         [ValidateSet('mission_missing', 'mac_missing', 'mac_conflict', 'device_import_failed',
+            'device_name_invalid', 'device_identity_ambiguous', 'previous_resource_present',
+            'resource_id_missing', 'resource_mac_conflict', 'stale_rollout_revision',
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',
             'collection_folder_failed', 'collection_remove_failed', 'membership_report_failed',
             'resource_id_pending', 'resource_update_failed',

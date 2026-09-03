@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     lifecycle_state ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready',
     mecm_sync_state ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready',
     mecm_id VARCHAR(255),
+    -- Rollout identity (Etappe 14D, ADR-0043). Internal runtime, NOT a second
+    -- desired value: vm_hostname above stays the one editable business SSoT.
+    -- `mecm_rollout_hostname` is the name this rollout hands MECM and the PXE
+    -- client, frozen at hand-off so a later portal correction cannot silently
+    -- reinterpret a device MECM already accepted. `mecm_rollout_revision` fences
+    -- every mutating callback of the rollout. `mecm_previous_id` is a delete
+    -- tombstone that keeps the next hand-off fail-closed until the administrator
+    -- has removed the old device in MECM; VirtuSphere never deletes there.
+    -- Templates keep all three NULL: they have no rollout to freeze.
+    mecm_rollout_hostname VARCHAR(255) NULL,
+    mecm_rollout_revision BIGINT UNSIGNED NULL,
+    mecm_previous_id VARCHAR(255) NULL,
     updated TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -107,6 +119,34 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     INDEX deploy_vms_mecm_pending_watch (mecm_sync_state, mecm_pending_since),
     INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at),
     CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Globally unique effective MECM names (Etappe 14D, ADR-0043). The uniqueness
+-- has to be decided INSIDE the writing transaction: a preceding SELECT lets two
+-- missions created in parallel both read "free" and both write, and the estate
+-- then has two Windows machines answering to one name. The primary key decides,
+-- so the loser gets a duplicate-key error instead.
+--
+-- The key stored here is already the output of mecm_hostname_key(), so ascii_bin
+-- compares exactly what PHP compared. A case-insensitive collation would put the
+-- folding rule in a second place, and the two would disagree about the Turkish
+-- dotless i the moment somebody changed the collation.
+--
+-- One VM may hold TWO rows while a rollout is frozen: its old rollout name and
+-- its new desired name. A key still belongs to exactly one VM. Templates hold
+-- none. The rows cascade with the VM, which frees the local claim but proves no
+-- deletion in MECM: a new VM with that name stays fail-closed on the tombstone.
+CREATE TABLE IF NOT EXISTS deploy_vm_hostname_claims (
+    hostname_key VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    vm_id INT NOT NULL,
+    desired_claim TINYINT(1) NOT NULL DEFAULT 0,
+    rollout_claim TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (hostname_key),
+    INDEX deploy_vm_hostname_claims_vm (vm_id),
+    CONSTRAINT deploy_vm_hostname_claims_purpose CHECK (desired_claim = 1 OR rollout_claim = 1),
+    CONSTRAINT fk_deploy_vm_hostname_claims_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_interfaces (

@@ -49,6 +49,12 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED => $action . ' ' . ($context['affected_count'] ?? 0) . ' vm(s) in mission id ' . $id . audit_description_ids($context['vm_ids'] ?? []),
         VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED => 'exported vm list of mission id ' . $id . ' as CSV (' . ($context['row_count'] ?? 0) . ' row(s))',
         VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED => 'adopted ESXi identity for vm id ' . $id . ' from credential id ' . ($context['credential_id'] ?? 0) . ' (moid ' . ($context['moid'] ?? '') . ', instance uuid ' . ($context['instance_uuid'] ?? '') . ')',
+        // Etappe 14D. The effect is the load-bearing half: `current_pending`
+        // means the rollout that is waiting picked the new name up, while
+        // `next_rollout` means it did not and will not until a reset.
+        VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME => 'changed windows hostname of vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0)
+            . ' from ' . ($context['old_value'] ?? '') . ' to ' . ($context['new_value'] ?? '')
+            . ' (effect ' . ($context['effect'] ?? '') . ', rollout name ' . ($context['rollout_hostname'] ?? '') . ', revision ' . ($context['rollout_revision'] ?? 0) . ')',
         VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => 'deleted retired ' . $objectType . ' id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_setting_description($id, $context),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => 'installed https certificate (CN=' . ($context['subject'] ?? '') . ', expires ' . ($context['valid_to'] ?? '') . ' UTC)',
@@ -98,6 +104,11 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => 'MAC callback rejected for job id ' . $id . ': ' . ($context['reason_code'] ?? 'conflict'),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => 'Machine endpoint ' . $id . ' failed internally (' . ($context['error_class'] ?? 'Throwable') . ')',
         VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => ($context['report_type'] ?? 'report') . ' for unknown VM id ' . $id . (isset($context['resource_id']) ? ' (ResourceID ' . $context['resource_id'] . ')' : ''),
+        // Etappe 14D. Reported revision 0 means the caller sent none at all,
+        // which is the pre-cutover script or client; it is a different finding
+        // from an outdated number and reads as such.
+        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => 'refused ' . ($context['report_type'] ?? 'report') . ' for vm id ' . $id
+            . ' (reported rollout revision ' . ($context['reported_revision'] ?? 0) . ', current ' . ($context['rollout_revision'] ?? 0) . ')',
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => 'Catalog sync rejected for ' . $id . ': payload would retire ' . ($context['retire_count'] ?? 0) . ' of ' . ($context['active_count'] ?? 0) . ' active entries (threshold ' . ($context['threshold_percent'] ?? 0) . '%).',
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => '[mecm_packages] package relink: ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => '[mecm_packages] retired without relink (no newer version in this payload): ' . audit_description_items($context),

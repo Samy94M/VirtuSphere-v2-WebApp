@@ -89,6 +89,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         'missing_vlans' => [],
         'vm_name_conflicts' => [],
         'vm_name_duplicates' => [],
+        'vm_hostname_duplicates' => [],
         // The document's own shape findings are field errors like any other, and
         // they land in the same two report lists the panel already renders.
         'mission_field_errors' => $document['mission_shape_errors'],
@@ -157,6 +158,7 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
     }
 
     $seenVmNames = [];
+    $seenHostnames = [];
     $reportedConflicts = [];
     foreach ($document['vms'] as $vm) {
         $vmName = $vm['vm_name'];
@@ -176,6 +178,26 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         }
         if ($isDuplicateInFile) {
             $vmLabel .= ' #' . $vm['position'];
+        }
+
+        // Two VMs in one file asking for the same Windows name (Etappe 14D).
+        // The claim table catches it at write time, but only for the SECOND VM
+        // and only after the first one is already inserted, so the whole import
+        // rolls back behind a preview that reported nothing. The effective value
+        // comes from repo_vm_hostname_input(), the same derivation the write
+        // uses, because a preview with its own idea of the fallback is how a dry
+        // run comes back clean for an import that cannot succeed.
+        //
+        // Only a rollout-valid value is compared: an invalid one takes no claim,
+        // so two of them collide with nothing.
+        $hostnameInput = repo_vm_hostname_input($vm['fields'], $vmName);
+        if (mecm_hostname_is_rollout_valid($hostnameInput)) {
+            $hostnameKey = mecm_hostname_key($hostnameInput);
+            if (isset($seenHostnames[$hostnameKey])) {
+                $report['vm_hostname_duplicates'][] = $hostnameInput;
+            } else {
+                $seenHostnames[$hostnameKey] = true;
+            }
         }
 
         $globalConflictVmNames = [];
@@ -287,8 +309,8 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
     //
     // blocked stays the single predicate the WRITE refuses on; it is a superset.
     $report['blocked_in_file'] = $report['missing_vlans'] !== [] || $report['vm_name_conflicts'] !== []
-        || $report['vm_name_duplicates'] !== [] || $report['mission_field_errors'] !== []
-        || $report['vm_field_errors'] !== [];
+        || $report['vm_name_duplicates'] !== [] || $report['vm_hostname_duplicates'] !== []
+        || $report['mission_field_errors'] !== [] || $report['vm_field_errors'] !== [];
     if ($report['blocked_in_file']) {
         $report['blocked'] = true;
     }

@@ -60,6 +60,17 @@ function audit_context_field_registry(): array
         'instance_uuid' => ['type' => 'identifier', 'max' => 64],
         'target_vlan' => ['type' => 'string', 'max' => 255],
         'resource_id' => ['type' => 'identifier', 'max' => 64],
+        // Etappe 14D: the rollout fence. Two separate integers rather than one
+        // "3 -> 1" sentence, because a saved search has to be able to ask "which
+        // callbacks arrived below the current revision" without parsing prose.
+        // 0 stands for "the caller sent none", which is the pre-cutover client;
+        // it is a distinct answer from "sent an old one" and must stay readable
+        // as such after the compatibility branch is eventually removed.
+        'reported_revision' => $int, 'rollout_revision' => $int,
+        'rollout_hostname' => ['type' => 'string', 'max' => 255],
+        'previous_rollout_hostname' => ['type' => 'string', 'max' => 255],
+        'previous_resource_id' => ['type' => 'identifier', 'max' => 64],
+        'effect' => $id, 'blocked_reason' => $id,
         'filter_fingerprint' => ['type' => 'hex', 'length' => 64],
         'duration_minutes' => $int, 'duration_seconds' => $int, 'failure_count' => $int,
         'controller_id' => $int, 'revision' => $int, 'port' => $int,

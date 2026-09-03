@@ -8,7 +8,12 @@ return [
     'mission_details' => 'Mission details',
     'open_deploy' => 'Deploy',
     'add_vm' => 'Add VM',
-    'th_hostname' => 'Hostname',
+    // Etappe 14D: this table shows TWO names side by side. "Name" and
+    // "Hostname" left open which of them ends up in MECM.
+    'th_vm_name' => 'VM name in ESXi',
+    'th_hostname' => 'Windows hostname',
+    'rollout_diverged' => 'waiting for reset',
+    'rollout_diverged_title' => 'This rollout continues as ":current". The changed name only applies after the old MECM device is deleted and "Reset MECM ID" is run.',
     'th_os' => 'OS',
     'th_cpu' => 'CPU',
     'th_ram' => 'RAM',
@@ -46,5 +51,8 @@ return [
     'bulk_skipped' => ':count skipped',
     'skip_active_job' => 'active deploy job',
     'skip_no_mac' => 'no imported MAC',
+    'skip_template' => 'template',
+    'skip_invalid_hostname' => 'invalid Windows hostname',
+    'skip_already_pending' => 'already queued',
     'skip_error' => 'error',
 ];

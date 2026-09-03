@@ -26,6 +26,7 @@ Für Entwicklung und Architektur folgen erst danach [AGENTS.md](AGENTS.md), [GRO
 Das Portal ist server-gerendert (PHP, kein JS-Build, kein CDN) und zweisprachig: Deutsch ist Standard, Englisch die zweite Sprache (ADR-0014). Der aktuelle Stand deckt ab:
 
 - Missions- und VM-Verwaltung: Infrastrukturvorlagen anlegen, kopieren, bearbeiten und löschen; Sammellöschung und MECM-ID-Reset auf der VM-Liste; CPU-/RAM-Hot-Add-Optionen.
+- Zwei Namen je VM, klar getrennt: der „VM-Name in ESXi" identifiziert die Maschine im Portal und auf dem Host, der „Windows-Hostname" wird der Gerätename in MECM. Für den laufenden Rollout ist er eingefroren; aktiviert wird ein neuer Name ausschließlich durch „MECM-ID zurücksetzen" (ADR-0043).
 - Deployment: geplante und gestaffelte Deploy-Läufe mit portalseitiger Zeitzone (ADR-0022), Deploy-Log und Statusverfolgung.
 - ESXi-Inventory: von ESXi geführter VLAN-Katalog, Inventory-Abgleich mit Abweichungsreport und geführter VLAN-Neuzuordnung (ADR-0023) sowie Autostart-Policy (ADR-0025).
 - Integrationen: MECM-, Ansible- und Maschinen-API-Anbindung mit Heartbeats, Meldekanal und Ampel-Statusanzeige auf der Seite „Systemstatus"; die Kataloge für OS und Pakete sind MECM-geführt und im Portal schreibgeschützt (ADR-0020).

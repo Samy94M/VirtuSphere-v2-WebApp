@@ -170,12 +170,39 @@ Describe 'Ursachenvokabular: kein Code ohne Aufrufer, kein Aufruf ohne Code' {
     It 'jeder Code des Vokabulars wird von mindestens einem Skript benutzt' {
         # Ein Code, den niemand setzt, ist eine Zeile Doku ohne Wirkung: der Fall,
         # den er beschreiben soll, laeuft weiter still durch.
+        #
+        # Seit Etappe 14D gibt es drei Formen, in denen ein Code entsteht: direkt
+        # am Aufruf (`-Cause 'x'`), als Rueckgabe der reinen Identitaets-
+        # aufloesung in VirtuSphere-Common.ps1, die der Device-Sync als
+        # `-Cause $identity.Cause` durchreicht, und als Zweigauswahl vor dem
+        # Aufruf (`$cause = if (...) { 'x' } else { 'y' }`). Alle drei sind echte
+        # Produzenten, also wird auf das Vorkommen des LITERALS geprueft.
+        #
+        # Damit das etwas prueft, muessen vorher BEIDE Selbstnennungen des Codes
+        # herausgeschnitten werden: die Vokabelliste und der spiegelgleiche
+        # ValidateSet in Add-VsRunCause. Ohne diese Schnitte erfuellte sich die
+        # Liste selbst, und der Test waere dauerhaft und unsichtbar gruen -
+        # genau die Sorte Waechter, die aussieht wie ein sauberes Repo. Beide
+        # Schnitte werden deshalb ueberprueft, bevor irgendetwas gesucht wird.
         $vocabulary = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsRunCauseVocabulary }
-        $sources = (Get-ChildItem -Path $script:MecmDir -Filter 'mecm_*.ps1' |
-            ForEach-Object { Get-Content -Path $_.FullName -Raw }) -join "`n"
+        $commonText = Get-Content -Path $script:MecmCommon -Raw
+        $withoutSelfReference = [regex]::Replace($commonText, '(?s)\$script:VsRunCauseVocabulary\s*=\s*@\(.*?\r?\n\)', '<vokabular entfernt>')
+        # Das innere `(?:(?!\[ValidateSet\().)*?` ist notwendig, nicht schmueckend:
+        # ein schlichtes `.*?` beginnt beim ERSTEN ValidateSet der Datei (dem von
+        # Invoke-VsApi) und frisst alles bis zu diesem hier - samt der
+        # Identitaetsaufloesung dazwischen. Der Schnitt loeschte damit genau die
+        # Produzenten, die er finden lassen sollte, und der Test wurde rot fuer
+        # einen Code, den es sehr wohl gibt.
+        $withoutSelfReference = [regex]::Replace($withoutSelfReference, '(?s)\[ValidateSet\((?:(?!\[ValidateSet\().)*?\)\]\s*\r?\n\s*\[string\]\$Cause', '<validateset entfernt>')
+        $withoutSelfReference | Should -Not -Match 'VsRunCauseVocabulary\s*=\s*@\(' -Because 'ohne diesen Schnitt erfuellt die Liste sich selbst'
+        $withoutSelfReference | Should -Not -Match "ValidateSet\('mission_missing'" -Because 'ohne diesen Schnitt erfuellt der ValidateSet die Liste'
+        $withoutSelfReference | Should -Match 'Resolve-VsDeviceIdentity' -Because 'der Schnitt darf die Aufloesung nicht mitnehmen, sonst prueft der Test das Gegenteil'
+
+        $sources = ((Get-ChildItem -Path $script:MecmDir -Filter 'mecm_*.ps1' |
+            ForEach-Object { Get-Content -Path $_.FullName -Raw }) + @($withoutSelfReference)) -join "`n"
 
         foreach ($code in $vocabulary) {
-            $sources | Should -Match ("Cause\s+'{0}'" -f [regex]::Escape($code)) -Because ("'{0}' setzt niemand" -f $code)
+            $sources | Should -Match ("'{0}'" -f [regex]::Escape($code)) -Because ("'{0}' setzt niemand" -f $code)
         }
     }
 

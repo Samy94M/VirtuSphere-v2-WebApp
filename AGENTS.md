@@ -51,6 +51,7 @@ Forbidden patterns live only in `GROK.md` section 1 and are not restated here; t
 - Escape HTML with `htmlspecialchars`; emit JSON with `json_encode`. Do not mix the two.
 - New or changed portal-visible text goes through `__t()` and keeps DE/EN catalog parity. Run `php scripts/lang-audit.php --ci` or the documented container equivalent for portal text, validation or error-message changes.
 - Keep machine API contracts intact: exact 5 legacy status strings, `updated` MECM flag, `mecm_id` preservation, MAC import by `(mission_id, vm_name)` after the deploy migration.
+- `getDeviceList` uses the pinned `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` projection, never `SELECT *`; on the wire `vm_name` is the ESXi identity and `vm_hostname` is the frozen rollout snapshot. Every mutating MECM/client callback carries `rollout_revision` and is fenced inside one transaction with its write (ADR-0043).
 - Do not localize or rename machine API fields or MECM/Ansible status strings for portal UI language work.
 - Keep the app air-gap friendly: no CDN, cloud service, telemetry or runtime package download dependency.
 - RBAC uses `can($permission)` from `lib/auth.php`. Do not hand-roll role checks in pages.

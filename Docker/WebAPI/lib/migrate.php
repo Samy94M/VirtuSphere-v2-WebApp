@@ -4,6 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/vm_location.php';
+// The rollout-hostname identity rules travel with migration 0050 (CLI require
+// closure: a worker/CLI entrypoint has no bootstrap to lean on).
+require_once __DIR__ . '/mecm_hostname.php';
 require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
 require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
@@ -12,6 +15,7 @@ require_once __DIR__ . '/migrations/0046_network_mac_contract.php';
 require_once __DIR__ . '/migrations/0047_deploy_create_results.php';
 require_once __DIR__ . '/migrations/0048_create_unit_release.php';
 require_once __DIR__ . '/migrations/0049_supervisor_runtime_state.php';
+require_once __DIR__ . '/migrations/0050_mecm_rollout_hostname.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1206,6 +1210,7 @@ SQL;
     '0047_deploy_create_results' => migrate_0047_deploy_create_results(...),
     '0048_create_unit_release' => migrate_0048_create_unit_release(...),
     '0049_supervisor_runtime_state' => migrate_0049_supervisor_runtime_state(...),
+    '0050_mecm_rollout_hostname' => migrate_0050_mecm_rollout_hostname(...),
 ];
 try {
     $db = db();

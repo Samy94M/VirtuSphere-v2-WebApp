@@ -61,6 +61,23 @@ bestätigte Antwort setzt lokal `SetupState=complete`. Damit hinterlässt auch e
 harter Abbruch während des POSTs keinen falschen MECM-Erkennungsstatus; der
 Server dedupliziert einen bereits angekommenen POST.
 
+Seit Etappe 14D (ADR-0043, ADR-0019-Amendment 3) trägt der ACK zusätzlich die
+`rollout_revision` aus derselben `getDeviceInfos`-Antwort, die der Lauf gerade
+gelesen und geschrieben hat. Ohne sie könnte der Client eines Rollouts, der
+zwischenzeitlich zurückgesetzt wurde, den Lebenszyklus des neuen abschließen;
+der Server prüft sie unter demselben VM-Lock wie seinen Write und antwortet
+sonst mit 409 ohne Seiteneffekt. Der Wert ist reine Korrelation: `client_getinfo`
+whitelistet und speichert ihn, `Confirm-VsClientReady` schickt ihn zurück, und
+**kein** Skript der Kette entscheidet anhand seines Werts. Ein Clientpaket von
+vor dem Cutover sendet das Feld gar nicht, statt eine `0` zu erfinden; der Server
+nimmt das ausschließlich für Revision 1 ohne Tombstone an.
+
+Ebenfalls seit 14D ist `vm_hostname` in der Antwort der **eingefrorene
+Rolloutname**, nicht der aktuelle Portal-Sollwert. `client_hostname.ps1` bleibt
+unverändert: Es benennt Windows nach dem, was in der Registry steht, und das ist
+genau der Name, unter dem MECM das Gerät importiert hat. Haben Import und Task
+Sequence ihn bereits angewandt, endet die Phase ohne Rename-Reboot.
+
 Die Client-Phasen authentifizieren sich über ihre bereits bekannte MAC; sie senden
 keinen Rückkanal-Token (der Token gilt nur für die Server-Heartbeats).
 

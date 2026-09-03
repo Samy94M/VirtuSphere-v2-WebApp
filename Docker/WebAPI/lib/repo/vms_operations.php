@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 /** Operator, identity, bulk and recovery operations for portal VMs. */
 
+
 /**
  * Bulk delete of VM DB records (never the hypervisor). VMs are skipped while
  * their mission has an active deploy job. Returns counts + skip reasons.
@@ -44,33 +45,6 @@ function repo_bulk_delete_vms(mysqli $db, int $missionId, array $vmIds): array
     });
 }
 
-/**
- * Bulk MECM-ID reset. Reuses repo_reset_vm_mecm_id per VM; VMs without an
- * imported MAC (or otherwise not resettable) are skipped with a reason.
- *
- * @param int[] $vmIds
- * @return array{done:int, skipped:array<int,array{vm_name:string,reason:string}>}
- */
-function repo_bulk_reset_mecm_ids(mysqli $db, int $missionId, array $vmIds, ?int $userId = null): array
-{
-    $result = ['done' => 0, 'skipped' => []];
-    foreach ($vmIds as $vmId) {
-        $vmId = (int) $vmId;
-        $name = (string) (repo_scalar($db, 'SELECT vm_name FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$vmId, $missionId]) ?? '');
-        if ($name === '') {
-            continue;
-        }
-        try {
-            repo_reset_vm_mecm_id($db, $missionId, $vmId, $userId);
-            $result['done']++;
-        } catch (Throwable $exception) {
-            $reason = str_contains($exception->getMessage(), 'imported MAC') ? 'no_mac' : 'error';
-            $result['skipped'][] = ['vm_name' => $name, 'reason' => $reason];
-        }
-    }
-
-    return $result;
-}
 
 /**
  * Deletes one VM row of a mission, never the VM on the hypervisor.
@@ -97,40 +71,6 @@ function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
     });
 }
 
-function repo_vm_has_imported_mac(mysqli $db, int $vmId): bool
-{
-    if ($vmId <= 0) {
-        return false;
-    }
-
-    return (int) repo_scalar($db, "SELECT COUNT(*) FROM deploy_interfaces WHERE vm_id = ? AND mac IS NOT NULL AND mac <> ''", 'i', [$vmId]) > 0;
-}
-
-function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $userId = null): void
-{
-    if ($missionId <= 0 || $vmId <= 0) {
-        throw new InvalidArgumentException('Mission and VM are required.');
-    }
-
-    repo_transaction($db, static function () use ($db, $missionId, $vmId, $userId): void {
-        $current = repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
-        if ($current === null) {
-            throw new RuntimeException('VM not found.');
-        }
-        if (!repo_vm_has_imported_mac($db, $vmId)) {
-            throw new RuntimeException('VM needs an imported MAC address before MECM ID reset.');
-        }
-
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1, mecm_id = NULL, mecm_pending_since = NOW(), os_install_watch_started_at = NULL, updated_at = NOW() WHERE id = ? AND mission_id = ?');
-        $lifecycleState = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
-        $mecmSyncState = VIRTUSPHERE_MECM_SYNC_PENDING;
-        $legacyStatus = VIRTUSPHERE_STATUS_DEPLOYED;
-        $stmt->bind_param('sssii', $lifecycleState, $mecmSyncState, $legacyStatus, $vmId, $missionId);
-        $stmt->execute();
-
-        repo_record_vm_status_event($db, $vmId, $lifecycleState, $mecmSyncState, $legacyStatus, 'mecm id reset from portal', $userId);
-    });
-}
 
 /**
  * Explicitly starts or restarts the observation clock that is valid for the

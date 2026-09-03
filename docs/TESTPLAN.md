@@ -29,3 +29,12 @@ Diese Punkte sind keine vergessenen Reste, sondern die im Runner als manuell dek
 - SYSTEM-Smoke der PowerShell-Clients in einer Wegwerf-Windows-VM und die MECM-Staging-Abnahme.
 - Reales Ansible-/ESXi-Staging mit zweitem Idempotenzlauf.
 - Clean-Checkout-Releaseprobe auf frischem Host.
+- **MECM-Labnachweis des Rolloutnamens (Etappe 14D, ADR-0043).** Eine VM
+  `VM-12345` mit Windows-Hostname `Backup-12345` importieren und belegen, dass
+  MECM sie als `Backup-12345` führt und Windows denselben Namen bekommt: ob die
+  reale Task Sequence den Importnamen unverändert übernimmt, ist eine Tatsache
+  über MECM und ist offline nicht beweisbar. Dazu im selben Lab: eine spätere
+  Portaländerung mutiert den bestehenden ResourceID-Datensatz nicht, eine echte
+  Windows-Umbenennung darf denselben Datensatz per Discovery umbenennen,
+  manuelles Löschen plus Reset importiert den neuen Snapshot, und ein alter
+  Callback wird mit 409 abgewiesen. Die Freigabe bleibt bis dahin gesperrt.

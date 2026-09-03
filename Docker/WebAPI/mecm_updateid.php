@@ -11,6 +11,7 @@ require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/status_events.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
+require_once __DIR__ . '/lib/mecm_rollout_fence.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -54,8 +55,54 @@ if ($action === 'reportMembership') {
             $entries[] = $entry;
         }
 
-        $vmExists = null !== repo_fetch_one($connection, 'SELECT id FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
-        if (!$vmExists) {
+        try {
+            $reportedRevision = mecm_rollout_fence_reported_revision($data['rollout_revision'] ?? null);
+        } catch (InvalidArgumentException) {
+            machine_api_json(['error' => 'Invalid data format'], 400);
+        }
+
+        // Fence and provenance write share ONE transaction (Etappe 14D).
+        //
+        // The row lock is only worth something while a transaction holds it.
+        // This endpoint runs in autocommit, where MySQL ends the implicit
+        // transaction of a bare `SELECT ... FOR UPDATE` at the end of that
+        // statement and releases the lock with it. A reset committing in the gap
+        // would then be overwritten by exactly the stale scan iteration the
+        // fence exists to stop, and the check would read as if it had held.
+        //
+        // Nothing inside the closure exits: machine_api_json() ends the process,
+        // which rolls an open transaction back, so a success answered from in
+        // there would discard its own write. The closure decides, the answers
+        // are given below it.
+        //
+        // Membership carries no binding of its own, so the fence decides on the
+        // revision alone and never answers `noop` here.
+        $outcome = repo_transaction($connection, static function () use ($connection, $vmId, $entries, $clientIp, $reportedRevision): array {
+            $vm = repo_fetch_one($connection, 'SELECT id, mecm_rollout_revision, mecm_previous_id FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+            if ($vm === null) {
+                return ['status' => 'unknown_vm', 'vm' => []];
+            }
+
+            $verdict = mecm_rollout_fence_decide(
+                $reportedRevision,
+                $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
+                null,
+                null,
+                $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id']
+            );
+            if ($verdict === VIRTUSPHERE_MECM_FENCE_STALE) {
+                // Returned rather than thrown: no domain row was written, so
+                // there is nothing to roll back, and the refusal's own audit row
+                // is written outside where no rollback can take it away.
+                return ['status' => 'stale', 'vm' => $vm];
+            }
+
+            repo_mecm_rules_apply_report($connection, $vmId, $entries, $clientIp);
+
+            return ['status' => 'ok', 'vm' => $vm];
+        });
+
+        if ($outcome['status'] === 'unknown_vm') {
             machine_api_audit_warning(
                 $connection,
                 VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM,
@@ -67,8 +114,10 @@ if ($action === 'reportMembership') {
             );
             machine_api_json(['error' => 'Unknown VM id'], 404);
         }
+        if ($outcome['status'] === 'stale') {
+            machine_api_rollout_revision_refused($connection, $vmId, 'membership', $reportedRevision, $outcome['vm'], $clientIp);
+        }
 
-        repo_mecm_rules_apply_report($connection, $vmId, $entries, $clientIp);
         machine_api_json(['success' => 'Data updated successfully']);
     } catch (JsonException) {
         machine_api_json(['error' => 'Invalid JSON body'], 400);
@@ -87,16 +136,70 @@ try {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
 
-    // Forward-only: this endpoint used to write `os_installing` unconditionally,
-    // so a VM that had already reported `os_installed` fell visibly back to 4/5
-    // every time the device-sync re-reported its ResourceID. The ResourceID is
-    // still stored in that case; only the lifecycle is not walked backwards.
+    try {
+        $reportedRevision = mecm_rollout_fence_reported_revision($data['rollout_revision'] ?? null);
+    } catch (InvalidArgumentException) {
+        machine_api_json(['error' => 'Invalid data format'], 400);
+    }
+
+    // Revision fence, binding and tombstone release share ONE transaction
+    // (Etappe 14D), for the reason spelled out at reportMembership above: in
+    // autocommit a bare `SELECT ... FOR UPDATE` gives its lock straight back, so
+    // the fence would decide on a revision that a reset can change before the
+    // binding runs. Nothing inside the closure exits, because ending the process
+    // rolls the transaction back and the success path has to commit.
     //
-    // A false return means the VM id does not exist. The endpoint answered 200
-    // "Data updated successfully" for it, and the device-sync reads that as
-    // "done": the device left the queue and was never reported again, for a row
-    // that was deleted in the portal. 404 lets the sync keep it and say so.
-    if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId)) {
+    // The tombstone is cleared HERE and only here: it may only go once a NEW
+    // ResourceID is really bound. Clearing it at reset time would drop the one
+    // thing that keeps the next hand-off fail-closed while the old device is
+    // still sitting in MECM.
+    $outcome = repo_transaction($connection, static function () use ($connection, $vmId, $mecmId, $reportedRevision): array {
+        $vm = repo_fetch_one($connection, 'SELECT id, mecm_id, mecm_rollout_revision, mecm_previous_id FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+        if ($vm === null) {
+            return ['status' => 'unknown_vm', 'vm' => []];
+        }
+
+        $verdict = mecm_rollout_fence_decide(
+            $reportedRevision,
+            $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
+            $vm['mecm_id'] === null ? null : (string) $vm['mecm_id'],
+            $mecmId,
+            $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id']
+        );
+        if ($verdict === VIRTUSPHERE_MECM_FENCE_STALE) {
+            return ['status' => 'stale', 'vm' => $vm];
+        }
+        if ($verdict === VIRTUSPHERE_MECM_FENCE_NOOP) {
+            // The same current rollout re-reporting the ResourceID it already
+            // bound. A duplicate, not a conflict: 200 with no second write and
+            // no second status event, so a sync retrying after a network hiccup
+            // does not fill the VM history with identical rows.
+            return ['status' => 'noop', 'vm' => $vm];
+        }
+
+        // Forward-only: this endpoint used to write `os_installing`
+        // unconditionally, so a VM that had already reported `os_installed` fell
+        // visibly back to 4/5 every time the device-sync re-reported its
+        // ResourceID. The ResourceID is still stored in that case; only the
+        // lifecycle is not walked backwards.
+        //
+        // A false return means the VM id does not exist. The endpoint answered
+        // 200 "Data updated successfully" for it, and the device-sync reads that
+        // as "done": the device left the queue and was never reported again, for
+        // a row that was deleted in the portal. 404 lets the sync keep it.
+        if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId)) {
+            return ['status' => 'unknown_vm', 'vm' => $vm];
+        }
+
+        // The binding succeeded, so the old device may stop blocking the
+        // hand-off. Same transaction as the binding: a tombstone that outlived
+        // its successful rebinding would refuse every future reset of this VM.
+        repo_execute($connection, 'UPDATE deploy_vms SET mecm_previous_id = NULL, updated_at = updated_at WHERE id = ?', 'i', [$vmId]);
+
+        return ['status' => 'ok', 'vm' => $vm];
+    });
+
+    if ($outcome['status'] === 'unknown_vm') {
         machine_api_audit_warning(
             $connection,
             VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM,
@@ -107,6 +210,9 @@ try {
             $clientIp
         );
         machine_api_json(['error' => 'Unknown VM id'], 404);
+    }
+    if ($outcome['status'] === 'stale') {
+        machine_api_rollout_revision_refused($connection, $vmId, 'resource_id', $reportedRevision, $outcome['vm'], $clientIp);
     }
 
     machine_api_json(['success' => 'Data updated successfully']);

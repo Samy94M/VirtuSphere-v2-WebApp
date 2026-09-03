@@ -39,6 +39,10 @@ return [
     'deploy_mode_powercycle' => 'Power-Cycle + Export MACs: briefly powers VMs on and off again so ESXi assigns MAC addresses, then reads them out. It only touches a VM whose PXE network interface has no MAC in the portal yet and that was powered off when the run started; running or suspended VMs keep their state, and only what this run itself started is powered off again.',
     'deploy_mode_export' => 'Export MACs: reads MAC addresses from VMs that are already running.',
     'deploy_mode_start' => 'Start VMs: starts VMs that already exist.',
+    // Etappe 14D: the question "does this mode activate the new hostname?" is
+    // answered nowhere else, and the obvious answer ("Full pipeline does
+    // everything") is wrong.
+    'deploy_mode_p2' => 'No deploy mode sets a Windows hostname. "Start VMs" and "Export MACs" activate no new rollout name, and neither does "Full pipeline". Which name MECM receives for the next rollout is decided solely by the "Reset MECM ID" action in the VM list or the VM editor.',
     'deploy_verbose_heading' => 'Ansible -vvv',
     'deploy_verbose_p1' => 'The "Ansible -vvv" option raises Ansible diagnostic output to its third level. This helps with troubleshooting but produces significantly more log lines and should stay off during normal operation. What exactly appears in addition is decided by Ansible per module and version; the option is a verbosity level, not a promise about particular content.',
     'deploy_verbose_p2' => 'Stored lines are redacted against this job\'s credentials beforehand, in plain and in URL-encoded form. On top of that the playbooks mark sensitive tasks with "no_log". Together these are layered protection, not a guarantee: a higher verbosity can print values in shapes no redaction reliably recognises. For a run whose output will be passed on, -vvv is therefore the wrong setting.',

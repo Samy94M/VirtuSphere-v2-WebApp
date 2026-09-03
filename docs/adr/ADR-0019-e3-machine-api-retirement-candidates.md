@@ -110,3 +110,32 @@ distribution points together with the WebApp. An old V22 client can still read
 configuration from the new server, but it has no explicit ACK and therefore
 does not advance from 4/5. Re-running `install-VirtuSphere-Clients.ps1` replaces
 the content and invokes `Update-CMDistributionPoint` for existing applications.
+
+## Amendment 3 (2026-09-03): the client bootstrap gains exactly one additive field
+
+Amendment 2 fixed `getDeviceInfos` at five bootstrap fields plus the nine client
+interface fields, and that minimality is the property worth keeping. ADR-0043
+adds exactly one field to it, `rollout_revision`, and changes the meaning of
+one: `vm_hostname` is now the frozen rollout snapshot rather than the live
+portal desired value. Nothing is removed and nothing else is added.
+
+The reason the field cannot be avoided: `mecm_client_ack.php` is what advances
+a VM to 5/5, and without a revision it cannot tell the client of the CURRENT
+rollout from the client of a previous one that was reset while its task sequence
+was still running. That late ACK would conclude the lifecycle of a rollout it
+knows nothing about. The revision travels down with the configuration and back
+up in the ACK, and the endpoint checks it under the same VM lock as its write.
+
+The field is diagnostic on the client, never a decision: `client_getinfo.ps1`
+whitelists and stores it, `Confirm-VsClientReady` sends it back, and no script
+of the chain branches on its value. A client package from before the cutover
+sends no revision at all - it omits the field rather than inventing a `0` - and
+the server accepts that only for revision 1 with no tombstone. Task sequence
+order and the detection markers are unchanged.
+
+This is again a coordinated cut, and its order is part of the runbook: WebApp
+first (it accepts both shapes), then the MECM server scripts and the client
+content, and only afterwards may an operator change a hostname or run a reset,
+because those push the revision above 1 and a not-yet-updated caller is then
+refused with 409. A partially updated site stays queued instead of registering
+a wrong record.

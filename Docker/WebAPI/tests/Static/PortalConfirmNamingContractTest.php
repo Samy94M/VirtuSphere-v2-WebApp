@@ -48,6 +48,12 @@ final class PortalConfirmNamingContractTest extends TestCase
         'os.confirm_delete_one',
         'os.confirm_delete_unused',
         'portal.vm_mecm_reset_confirm',
+        // Etappe 14D: dieselbe Zeilenaktion, im VM-Editor gestellt. Sie traegt
+        // `:name` wie jede Zeilenaktion, nennt aber bewusst KEINEN Hostnamen:
+        // direkt daneben steht das editierbare Hostnamenfeld, und ein
+        // serverseitig gerenderter Wert wuerde dort behaupten, was der
+        // Bearbeiter womoeglich gerade ungespeichert ueberschrieben hat.
+        'portal.vm_mecm_reset_confirm_editing',
         'portal.vm_mecm_transfer_confirm',
         'settings.allowlist_confirm_delete',
         'directory.confirm_deactivate_controller',

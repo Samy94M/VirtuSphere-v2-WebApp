@@ -722,6 +722,8 @@ Describe 'Waechter 1: kein Catch ohne Konsequenz' {
         # nach Datei UND Startzeile geschluesselt, damit ein zweiter tolerierter
         # Catch in derselben Datei nicht mitgedeckt wird.
         $script:CatchExempt = @{
+            'mecm_new-device-sync.ps1|Import meldete einen Fehler, Ergebnis wird nachgelesen' =
+                'Etappe 14D: Der Import-Catch darf hier NICHT entscheiden, weil aus dem Fehlertext zu schliessen genau das ist, was die Etappe abgeschafft hat (die Texte wechseln je MECM-Version und -Sprache, und ein Import-Race sieht darin aus wie ein Fehlschlag). Was entscheidet, ist das unmittelbar folgende Nachlesen von Name UND MAC ueber dieselbe reine Aufloesung: es endet in genau drei Ausgaengen, und zwei davon zaehlen (resource_id_pending als $dataWarnings, jeder Konfliktcode als $itemFailures), waehrend der dritte die ResourceID bindet. Ein Zaehler im Catch selbst wuerde einen gelungenen Import als Fehlschlag melden.'
             'mecm_new-device-sync.ps1|Auto-Approve nicht moeglich' =
                 'Auto-Approve ist best effort: die Genehmigung kann bereits gesetzt sein oder in dieser Site gar nicht verlangt werden. Ein Fehlschlag hindert den Import nicht, und die Zuweisung danach zaehlt ihren eigenen.'
         }

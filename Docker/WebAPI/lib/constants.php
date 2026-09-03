@@ -106,6 +106,83 @@ const VIRTUSPHERE_MECM_SYNC_STATES = [
     VIRTUSPHERE_MECM_SYNC_FAILED,
 ];
 
+// Rollout hostname (Etappe 14D, ADR-0043). The NetBIOS computer-name length is
+// a Microsoft invariant, not a value we tune; it lives here only so the repo,
+// the migration and the rollout predicate cannot each carry their own 15.
+const VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH = 15;
+// Revision every rollout of a VM carries. It starts at 1 for a fresh VM and for
+// every migrated legacy row, which is what makes the pre-cutover compatibility
+// branch expressible at all: "no revision on the wire" may only mean 1.
+const VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL = 1;
+// How many offending VMs migration 0050 prints before it summarises the rest.
+// A full list of a large estate scrolls the actionable head off the screen; the
+// count behind the cut says how much more there is.
+const VIRTUSPHERE_MECM_ROLLOUT_PREFLIGHT_REPORT_LIMIT = 20;
+// Why a MECM-ID reset was refused (Etappe 14D). A CLOSED vocabulary: the repo
+// throws the code, the portal maps it with an exhaustive match and no default,
+// and a test walks this constant, so a new blocker fails the build instead of
+// reaching a page as a raw token. `already_pending` is not a refusal but the
+// idempotent second click, and `error` is the unexpected fault the bulk path
+// still has to be able to report per row.
+//
+// A pending delete tombstone is deliberately NOT in this list (decision of
+// 2026-09-03). It is fail-closed where the hand-off happens, in the device
+// sync, and blocking the reset as well only locked the operator out of the
+// likeliest correction: reset, notice the hostname was wrong, fix it, reset
+// again. It is a visible STATE on the VM instead, which is more useful than a
+// refusal nobody sees unless they click twice.
+const VIRTUSPHERE_MECM_RESET_BLOCKERS = [
+    'template',
+    'active_job',
+    'no_mac',
+    'invalid_hostname',
+    'already_pending',
+    'error',
+];
+
+// The exact `getDeviceList` projection (Etappe 14D, ADR-0043). It replaces a
+// `SELECT *` that had silently promoted every new deploy_vms column to a wire
+// field. These are the columns the endpoint DELIVERED immediately before 14D
+// and they keep their names and semantics; `vm_hostname` is not in the list
+// because the endpoint aliases the frozen rollout snapshot onto that key, and
+// the three internal 14D columns are aliased or withheld at the call site.
+//
+// This is a wire contract, not a convenience list: adding a column here exports
+// it to the MECM server. MachineApiWireTest walks it against the live payload in
+// both directions, so a column added to the table cannot drift in unnoticed and
+// one removed here cannot silently disappear from the wire.
+const VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS = [
+    'id',
+    'mission_id',
+    'vm_name',
+    'vm_domain',
+    'vm_os',
+    'vm_ram',
+    'vm_cpu',
+    'vm_disk',
+    'vm_datastore',
+    'vm_datacenter',
+    'vm_guest_id',
+    'cpu_hotplug',
+    'ram_hotplug',
+    'autostart_enabled',
+    'autostart_start_delay',
+    'autostart_stop_delay',
+    'vm_creator',
+    'vm_status',
+    'lifecycle_state',
+    'mecm_sync_state',
+    'mecm_id',
+    'updated',
+    'created_at',
+    'updated_at',
+    'mecm_pending_since',
+    'os_install_watch_started_at',
+    'vm_notes',
+    'vm_moid',
+    'vm_instance_uuid',
+];
+
 // Display-only attention thresholds for long-running VM progress states
 // (ADR-0038). The dedicated clocks are deliberately separate from updated_at:
 // an unrelated edit must neither create nor postpone an operator warning.

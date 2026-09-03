@@ -69,6 +69,9 @@ function missions_render_import_preview(array $importPreview, array $user): void
         <?php if ($report['vm_name_duplicates'] !== []) { ?>
             <div class="alert alert-error"><strong><?php echo h(__t('missions.import_vm_name_duplicates')); ?></strong> <?php echo h(implode(', ', $report['vm_name_duplicates'])); ?></div>
         <?php } ?>
+        <?php if ($report['vm_hostname_duplicates'] !== []) { ?>
+            <div class="alert alert-error"><strong><?php echo h(__t('missions.import_vm_hostname_duplicates')); ?></strong> <?php echo h(implode(', ', $report['vm_hostname_duplicates'])); ?></div>
+        <?php } ?>
         <?php if ($report['mission_field_errors'] !== []) { ?>
             <div class="alert alert-error"><strong><?php echo h(__t('missions.import_mission_field_errors')); ?></strong>
                 <ul><?php foreach ($report['mission_field_errors'] as $fieldError) { ?><li><?php echo h($fieldError); ?></li><?php } ?></ul>

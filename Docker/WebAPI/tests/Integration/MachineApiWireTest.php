@@ -58,6 +58,70 @@ final class MachineApiWireTest extends TestCase
         }
     }
 
+    /**
+     * `getDeviceList` lost its `SELECT *` in Etappe 14D, and this is what makes
+     * that stick. The star had been promoting every new `deploy_vms` column to a
+     * wire field by accident, and the same stage adds three internal ones.
+     *
+     * Walked in BOTH directions against the live payload: a column added to the
+     * constant but not delivered is a wire promise nothing keeps, and a key
+     * delivered without being in the constant is exactly the silent leak the
+     * projection replaced. The three aliases are named here rather than derived,
+     * because each is a deliberate decision: `vm_hostname` carries the frozen
+     * snapshot (never the current desired value), `previous_resource_id` is the
+     * tombstone under a wire name so the internal column name never leaves the
+     * database, and `rollout_revision` is the fence.
+     */
+    public function testDeviceListProjectsExactlyThePinnedColumns(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'device-list');
+
+        try {
+            [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceList');
+            self::assertSame(200, $status, $body);
+
+            $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($payload);
+            $row = null;
+            foreach ($payload as $candidate) {
+                if ((int) $candidate['id'] === $fixture['vm_id']) {
+                    $row = $candidate;
+                }
+            }
+            self::assertIsArray($row, 'the fixture VM did not appear in getDeviceList');
+
+            // Everything the endpoint composes on top of the projection. These
+            // are separate contracts (ADR-0019 for the mission, ADR-0034 for the
+            // provenance) and are listed here so this test measures the
+            // projection and nothing else.
+            $composed = ['interfaces', 'mission', 'packages', 'owned_collections'];
+            $aliases = ['vm_hostname', 'rollout_revision', 'previous_resource_id'];
+
+            $delivered = array_values(array_diff($this->sortedKeys($row), $composed, $aliases));
+            $expected = VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS;
+            sort($expected);
+            self::assertSame($expected, $delivered, 'the delivered columns drifted from the pinned projection');
+
+            foreach ([...$composed, ...$aliases] as $key) {
+                self::assertArrayHasKey($key, $row, $key . ' is part of the wire and stopped being delivered');
+            }
+
+            // The two decisions the aliases encode, measured rather than assumed.
+            self::assertSame($fixture['vm_name'], $row['vm_name'], 'vm_name stays the ESXi identity');
+            self::assertSame($fixture['rollout_hostname'], $row['vm_hostname'], 'vm_hostname on the wire is the frozen snapshot');
+            self::assertNotSame($fixture['vm_hostname'], $row['vm_hostname'], 'the current desired value must not be exported');
+
+            // No internal column name may leak, whatever the projection says.
+            foreach (['mecm_rollout_hostname', 'mecm_rollout_revision', 'mecm_previous_id'] as $internal) {
+                self::assertArrayNotHasKey($internal, $row, $internal . ' leaked its database column name onto the wire');
+            }
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
     /** ADR-0019/E3: the mission already rides on getDeviceList. */
     public function testRetiredMissionNameActionUsesTheUnknownActionEnvelope(): void
     {
@@ -87,10 +151,21 @@ final class MachineApiWireTest extends TestCase
             self::assertStringContainsString('application/json', strtolower($headers));
             $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
             self::assertIsArray($payload);
+            // Etappe 14D adds EXACTLY one key and changes the meaning of one
+            // (ADR-0019 amendment 3). The list stays spelled out rather than
+            // derived: minimality is the property, and a derived list would
+            // grow with the payload it is supposed to bound.
             self::assertSame(
-                ['interfaces', 'mission_id', 'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
+                ['interfaces', 'mission_id', 'rollout_revision', 'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
                 $this->sortedKeys($payload)
             );
+            // `vm_hostname` is the FROZEN snapshot, not the desired value. The
+            // client renames Windows to what it reads here, so it has to read
+            // the name this rollout was handed.
+            self::assertSame($fixture['rollout_hostname'], $payload['vm_hostname']);
+            self::assertNotSame($fixture['vm_hostname'], $payload['vm_hostname']);
+            self::assertSame($fixture['vm_name'], $payload['vm_name'], 'vm_name stays the ESXi identity');
+            self::assertSame($fixture['rollout_revision'], $payload['rollout_revision']);
             self::assertSame([
                 'dns1', 'dns2', 'gateway', 'ip', 'mac', 'mode', 'subnet', 'type', 'vlan',
             ], $this->sortedKeys($payload['interfaces'][0]));
@@ -366,7 +441,7 @@ final class MachineApiWireTest extends TestCase
         return [$status, implode("\n", $headers), $body];
     }
 
-    /** @return array{mission_id:int,vm_id:int,mac:string} */
+    /** @return array{mission_id:int,vm_id:int,mac:string,vm_name:string,vm_hostname:string,rollout_hostname:string,rollout_revision:int} */
     private function createClientFixture(mysqli $db, string $label): array
     {
         $suffix = bin2hex(random_bytes(5));
@@ -379,13 +454,19 @@ final class MachineApiWireTest extends TestCase
 
         $vmName = 'E3-' . strtoupper(substr($suffix, 0, 8));
         $hostname = strtolower($vmName);
+        // The frozen rollout snapshot is DELIBERATELY a different value from the
+        // desired hostname (Etappe 14D). Seeding them equal would let a wire
+        // that exports the desired value pass a test meant to prove it exports
+        // the snapshot, which is the whole distinction this stage introduced.
+        $rolloutHostname = 'ROLLOUT-' . strtoupper(substr($suffix, 0, 6));
+        $rolloutRevision = VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL;
         $domain = 'example.test';
         $os = 'Windows 11';
         $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
         $mecm = VIRTUSPHERE_MECM_SYNC_PENDING;
         $status = VIRTUSPHERE_STATUS_DEPLOYED;
-        $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_domain, vm_os, lifecycle_state, mecm_sync_state, vm_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->bind_param('isssssss', $missionId, $vmName, $hostname, $domain, $os, $lifecycle, $mecm, $status);
+        $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_rollout_hostname, mecm_rollout_revision, vm_domain, vm_os, lifecycle_state, mecm_sync_state, vm_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssisssss', $missionId, $vmName, $hostname, $rolloutHostname, $rolloutRevision, $domain, $os, $lifecycle, $mecm, $status);
         $stmt->execute();
         $vmId = (int) $db->insert_id;
 
@@ -402,7 +483,15 @@ final class MachineApiWireTest extends TestCase
         $stmt->bind_param('isssssssss', $vmId, $ip, $subnet, $gateway, $dns1, $dns2, $vlan, $mac, $mode, $type);
         $stmt->execute();
 
-        return ['mission_id' => $missionId, 'vm_id' => $vmId, 'mac' => $mac];
+        return [
+            'mission_id' => $missionId,
+            'vm_id' => $vmId,
+            'mac' => $mac,
+            'vm_name' => $vmName,
+            'vm_hostname' => $hostname,
+            'rollout_hostname' => $rolloutHostname,
+            'rollout_revision' => $rolloutRevision,
+        ];
     }
 
     /** @return array{lifecycle_state:string,mecm_sync_state:string} */

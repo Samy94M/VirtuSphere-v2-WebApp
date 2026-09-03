@@ -16,4 +16,5 @@ const VIRTUSPHERE_VM_EDIT_MODULES = [
     'lib/vm_edit_values.php',
     'lib/vm_edit_rows.php',
     'lib/vm_edit_status.php',
+    'lib/vm_edit_names.php',
 ];

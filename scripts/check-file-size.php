@@ -111,15 +111,25 @@ const FILE_SIZE_ALLOWANCES = [
     // map entry, which is the growth the registry exists for. Their bodies live
     // in lib/migrations/ like every migration since 0042. Etappe 14C raised it
     // 1252->1254 for 0049, the same two lines for the same reason.
+    // Etappe 14D raised it 1254->1259 for 0050: the same two registry lines plus
+    // a three-line require of lib/mecm_hostname.php, which the migration's
+    // preflight and backfill call and which no bootstrap loads for the CLI. The
+    // same stage raised constants.php 645->722: the three rollout-hostname
+    // constants and their reasons (the NetBIOS 15, the initial revision and the
+    // migration's report limit), the closed reset-blocker vocabulary, and the
+    // explicit getDeviceList projection. That last one is the largest single
+    // entry because it names all 29 deploy_vms columns the wire has always
+    // carried plus the two additive ones; it is the wire contract's SSoT and
+    // belongs where every other SSoT constant sits, not next to one caller.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1254,
+        'lines' => 1259,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 645,
+        'lines' => 722,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],
@@ -128,8 +138,15 @@ const FILE_SIZE_ALLOWANCES = [
         'why' => 'one coherent serializer; grew by the one artifact field Etappe 14B needed',
         'stage' => 'kein Abbau geplant',
     ],
+    // Etappe 14D was the "next functional change" this exception was waiting
+    // for, and the check happened: the one part that had its own domain, the
+    // hostname-claim reconciliation across the template boundary, moved to
+    // lib/repo/vm_rollout.php, which owns the claim table. What is left here is
+    // the mission rename hook and the rollout initialisation of a clone, and
+    // both are decisions ABOUT a mission, not a second domain; splitting them
+    // out would scatter one transaction across two files.
     'Docker/WebAPI/lib/repo/missions.php' => [
-        'lines' => 463,
+        'lines' => 504,
         'why' => 'coherent mission repository just over the target; no independent second domain today',
         'stage' => 'bei naechster fachlicher Aenderung pruefen',
     ],

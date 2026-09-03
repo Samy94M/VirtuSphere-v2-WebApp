@@ -49,6 +49,18 @@ return [
     // The expandable block under the counters. Device-sync and the autoimporter
     // used to send nothing there, so "data warnings: 3" named not a single VM.
     'system_status_status_p3' => 'When a row counts data warnings or failures, "Technical details" holds a cause line: one short code per case, followed by "target=" with the VM or folder name and, where an assignment is involved, "collection=" with the collection. For example "collection_missing target=WEB01 collection=Firefox-115.0". That finds the affected VM without searching the log on the MECM server. The list is capped and says at the end how many cases are not shown. The counters themselves always describe the last run only: a clean run resets them, so read the cause line while it is there.',
+    // Etappe 14D: seven closed codes the device sync can write into its cause
+    // line when it cannot resolve a device. Each names exactly one measure;
+    // without that mapping the code is just a word to the operator.
+    'system_status_identity_heading' => 'When the device sync cannot resolve a VM',
+    'system_status_identity_p1' => 'When the "MECM device sync" row reports failures, the cause line under "Technical details" names the reason as a short code. These seven concern the identity of a device. They always mean: nothing was changed, and the VM stays in the queue until the named step is done.',
+    'system_status_identity_1' => 'device_name_invalid: the VM\'s Windows hostname cannot be used as a MECM device name. Correct it in the VM editor: at most :max characters, only letters, digits and internal hyphens, no dot.',
+    'system_status_identity_2' => 'previous_resource_present: the previous rollout\'s device still exists in MECM. Delete it in the MECM console; the next scan then imports the new name by itself.',
+    'system_status_identity_3' => 'resource_id_missing: the bound ResourceID no longer exists in MECM, so the device was deleted there. Run "Reset MECM ID" so the VM is imported again.',
+    'system_status_identity_4' => 'resource_mac_conflict: the bound device carries a different MAC in MECM than the VM has in the portal. Check whether the VM was recreated; if so, delete the old device in MECM and reset.',
+    'system_status_identity_5' => 'mac_conflict: name and MAC point at different MECM devices, or one of the two belongs to a foreign device. Decide by hand which record applies and remove the other one in MECM.',
+    'system_status_identity_6' => 'device_identity_ambiguous: several MECM records match the same name, the same MAC or the same ResourceID. Resolve the duplicates in the MECM console; the script deliberately picks none of them.',
+    'system_status_identity_7' => 'stale_rollout_revision: the scan worked with an outdated state because a reset happened in between. Nothing to do here, the next scan runs through with the current state.',
     'system_status_work_heading' => 'Working with the status hints',
     'system_status_work_0' => 'If neither a synchronisation task nor the site-health reporter has ever reported, MECM simply is not connected yet. The rows then carry no hint texts, because there is nothing to repair that does not exist yet; instead the section names the next step once.',
     'system_status_work_1' => 'On "Delayed" or "Down", first read the hint text right next to the row. It states the most likely cause and the next step in plain language; nobody has to memorise what each source means.',

@@ -33,6 +33,12 @@ const VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED = 'vm.mecm_state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED = 'vm.bulk_changed';
 const VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED = 'vm.list_exported';
 const VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED = 'vm.identity_adopted';
+// Etappe 14D: the desired Windows name moved. The effect field says whether it
+// reached the pending rollout at once (current_pending) or only applies to the
+// NEXT one after a reset (next_rollout). That is the difference between a
+// correction that takes effect and one that waits for an operator action, and
+// it is the first question anybody reading this row afterwards has.
+const VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME = 'vm.rollout_hostname_changed';
 const VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED = 'catalog.item_deleted';
 const VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED = 'settings.changed';
 const VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED = 'settings.certificate_installed';
@@ -78,6 +84,10 @@ const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED = 'machine_api.access_denied';
 const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED = 'machine_api.callback_rejected';
 const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE = 'machine_api.internal_failure';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM = 'mecm.unknown_vm_reported';
+// Etappe 14D: a mutating callback whose rollout revision is not current. It is
+// a MECM-category event because the MECM sync is who sends it, and it is a
+// warning rather than a failure: a stale callback is the fence doing its job.
+const VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED = 'mecm.rollout_revision_refused';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED = 'mecm.catalog_sync_rejected';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED = 'mecm.packages_relinked';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED = 'mecm.packages_relink_skipped';
@@ -135,10 +145,11 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['mission'], $success, ['action'], ['name', 'target_mission_id']),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['mission_list'], $success, ['row_count'], [], 'required', [], [], [], ['missions', 'templates']),
         VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['vm'], $success, ['action', 'mission_id'], ['changes']),
-        VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['vm'], $success, ['action', 'mission_id'], ['progress_kind']),
+        VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['vm'], $success, ['action', 'mission_id'], ['progress_kind', 'rollout_hostname', 'previous_rollout_hostname', 'previous_resource_id', 'rollout_revision', 'blocked_reason']),
         VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['mission'], $success, ['action', 'affected_count', 'vm_ids']),
         VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['mission'], $success, ['row_count']),
         VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['vm'], $success, ['credential_id', 'mission_id', 'moid', 'instance_uuid']),
+        VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME => audit_definition(VIRTUSPHERE_LOG_CATEGORY_VMS, ['vm'], $success, ['action', 'mission_id', 'effect'], ['old_value', 'new_value', 'rollout_hostname', 'rollout_revision']),
         VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => audit_definition(null, ['operating_system', 'vlan'], $success, [], [], 'required', [], ['operating_system' => VIRTUSPHERE_LOG_CATEGORY_OS, 'vlan' => VIRTUSPHERE_LOG_CATEGORY_VLANS]),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_SETTINGS, ['setting'], $success, ['action'], ['old_value', 'new_value', 'enabled', 'redirect_disabled']),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_SETTINGS, ['setting'], $success, ['subject', 'valid_to'], [], 'required', [], [], [], ['https_certificate']),
@@ -187,6 +198,7 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['reason_code'], $throttle),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['machine_endpoint'], [VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['error_class'], $throttle, 'required', [], [], [], $endpoints),
         VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['report_type'], ['resource_id', ...$throttle]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['report_type', 'reported_revision', 'rollout_revision'], [...$throttle]),
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['retire_count', 'active_count', 'threshold_percent'], $throttle, 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], $success, ['items', 'item_count'], [], 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['items', 'item_count'], [], 'required', [], [], [], $catalogs),

@@ -14,6 +14,8 @@ require_once __DIR__ . '/status_events.php';
 // that predicate and the mission lock it needs live in the job repo.
 require_once __DIR__ . '/deploy_jobs.php';
 require_once __DIR__ . '/vm_identity.php';
+// Rollout hostname, revision fence and the global hostname claim (Etappe 14D).
+require_once __DIR__ . '/vm_rollout.php';
 require_once __DIR__ . '/vm_network.php';
 
 const REPO_VM_COLUMNS = [
@@ -39,5 +41,6 @@ const REPO_VM_COLUMNS = [
 // Domain owners are deliberately loaded behind this historical public facade.
 require_once __DIR__ . '/vms_validation.php';
 require_once __DIR__ . '/vms_persistence.php';
+require_once __DIR__ . '/vms_mecm_reset.php';
 require_once __DIR__ . '/vms_operations.php';
 require_once __DIR__ . '/vms_legacy.php';

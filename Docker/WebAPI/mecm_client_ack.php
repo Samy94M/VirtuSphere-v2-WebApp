@@ -13,6 +13,7 @@ virtusphere_error_response_mode('json');
 require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/status_events.php';
+require_once __DIR__ . '/lib/mecm_rollout_fence.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -45,6 +46,16 @@ try {
     }
     $mac = virtusphere_normalize_mac($mac) ?? $mac;
 
+    // Additive rollout revision (Etappe 14D, ADR-0019 amendment). Absent means
+    // a pre-cutover client package; a present but unusable value is a malformed
+    // body and answers 400, because 409 would promise that a resync could make
+    // the same request work.
+    try {
+        $reportedRevision = mecm_rollout_fence_reported_revision($data['rollout_revision'] ?? null);
+    } catch (InvalidArgumentException) {
+        machine_api_json(['error' => 'Invalid data format'], 400);
+    }
+
     if (!machine_api_ip_allowed($connection, $clientIp) && !machine_api_mac_allowed($connection, $mac)) {
         machine_api_forbidden($clientIp, $connection, 'mecm_client_ack.php');
     }
@@ -53,7 +64,7 @@ try {
     try {
         // The lock makes a retry after an uncertain network result idempotent:
         // concurrent ACKs serialize and only the first writes a history event.
-        $stmt = $connection->prepare('SELECT v.id, v.lifecycle_state, v.mecm_sync_state, v.vm_status FROM deploy_vms v JOIN deploy_interfaces i ON i.vm_id = v.id WHERE i.mac = ? LIMIT 1 FOR UPDATE');
+        $stmt = $connection->prepare('SELECT v.id, v.lifecycle_state, v.mecm_sync_state, v.vm_status, v.mecm_rollout_revision, v.mecm_previous_id FROM deploy_vms v JOIN deploy_interfaces i ON i.vm_id = v.id WHERE i.mac = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('s', $mac);
         $stmt->execute();
         $vm = $stmt->get_result()->fetch_assoc();
@@ -63,6 +74,27 @@ try {
         }
 
         $vmId = (int) $vm['id'];
+
+        // The fence, under the row lock this SELECT is holding and BEFORE the
+        // deduplication below (Etappe 14D). A client of a previous rollout must
+        // not be able to conclude the lifecycle of the current one, and it must
+        // not receive a success answer either: the dedup would hand it a 200
+        // for a 5/5 that a different rollout produced.
+        //
+        // The ACK carries no binding of its own; the revision alone decides, so
+        // the fence answers only `accept` or `stale` here. The rollback keeps
+        // the promise that a refused callback writes nothing.
+        if (mecm_rollout_fence_decide(
+            $reportedRevision,
+            $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
+            null,
+            null,
+            $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id']
+        ) === VIRTUSPHERE_MECM_FENCE_STALE) {
+            $connection->rollback();
+            machine_api_rollout_revision_refused($connection, $vmId, 'client_ack', $reportedRevision, $vm, $clientIp);
+        }
+
         if ((string) $vm['lifecycle_state'] === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED
             && (string) $vm['mecm_sync_state'] === VIRTUSPHERE_MECM_SYNC_REGISTERED
             && (string) $vm['vm_status'] === VIRTUSPHERE_STATUS_OS_INSTALLED

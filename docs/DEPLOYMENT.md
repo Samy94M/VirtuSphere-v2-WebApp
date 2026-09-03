@@ -268,6 +268,26 @@ Mindestfreiplatz hat absichtlich keinen Default: Ohne einen autorisierten
 8R-S-Lauf auf dem echten Ziel und den späteren Evidenzimport bleiben alle neuen
 Remote-Modi `disabled`; der bestehende SSH-Pfad ändert sich dadurch nicht.
 
+Migration `0050_mecm_rollout_hostname` ist eine Grenze mit einer eigenen
+Reihenfolge (Etappe 14D, ADR-0043). Vor der DDL prüft sie alle
+Nicht-Vorlagen-VMs case-insensitiv auf kollidierende **gültige**
+`vm_hostname`-Werte und bricht ab, wenn zwei VMs denselben beanspruchen: Welche
+davon den Namen behält, ist eine Betreiberentscheidung, und hier eine zu treffen
+würde jemandes Maschine still umbenennen. Ungültige Altwerte blockieren nicht,
+werden aber begrenzt benannt; sie migrieren als Bestand, bekommen keinen Claim
+und bleiben vom nächsten Reset und Erstimport ausgeschlossen, bis sie korrigiert
+sind. Bestands-VMs starten mit Snapshot gleich Sollwert, Revision 1 und ohne
+Tombstone: genau der Zustand, den der Kompatibilitätszweig annimmt, damit ein
+heute migrierender Standort mit seinen vorhandenen MECM-Skripten und
+Clientpaketen weiterläuft. Vorlagen bekommen überall `NULL`.
+
+**Die Ausrollreihenfolge danach ist Teil des Vertrags:** zuerst Web/API, dann
+MECM-Serverskripte und Client-Content atomar, dann Versions-/Pester-/Labnachweis,
+und erst danach Hostnamenänderung und Reset freigeben. Ein Reset hebt die
+Revision über 1, und ab da beantwortet die WebApp eine Rückmeldung ohne Revision
+mit 409. Ein teilweise aktualisierter Standort bleibt dadurch sicher in der
+Warteschlange, statt einen falschen Datensatz zu registrieren.
+
 Migration `0042_remote_execution_foundation` ist dieselbe fail-closed Grenze in
 der Datenbank: Sie erzeugt die Runtime-Generation genau einmal, speichert die
 globale Claim-Pause und legt Aktivierungszeilen ausschließlich als `disabled`

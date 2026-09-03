@@ -67,6 +67,18 @@ declare(strict_types=1);
             <?php // Directly after the field explanation, because the cause line sits
                   // in the same card and is the only place a counter names a VM. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
+            <?php // Etappe 14D: Die sieben Identitaetscodes bekommen je eine
+                  // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
+                  // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
+            <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
+            <ul>
+                <?php for ($identityCause = 1; $identityCause <= 7; $identityCause++) { ?>
+                    <li><?php echo h(__t('help_system_status.system_status_identity_' . $identityCause, [
+                        'max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH,
+                    ])); ?></li>
+                <?php } ?>
+            </ul>
             <h3><?php echo h(__t('help_system_status.system_status_work_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_work_0')); ?></p>
             <ol>

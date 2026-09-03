@@ -5,6 +5,26 @@ declare(strict_types=1);
 /** VM value and child-row validation. Loaded through repo/vms.php only. */
 
 /**
+ * Which value a VM payload actually offers as its Windows hostname, before any
+ * validation. The empty field falls back to the ESXi/portal VM name, which is
+ * the behaviour every create path has had since E2.
+ *
+ * It is a named function rather than two lines inline because a second reader
+ * needs the SAME answer: the mission import preview has to know which hostnames
+ * an uploaded file would claim, and a preview deriving the effective value one
+ * way while the write derives it another is exactly how a dry run comes back
+ * clean for an import that then fails (Etappe 14D).
+ *
+ * @param array<string, mixed> $vmData
+ */
+function repo_vm_hostname_input(array $vmData, string $vmName): string
+{
+    $hostname = trim((string) ($vmData['vm_hostname'] ?? ''));
+
+    return $hostname !== '' ? $hostname : $vmName;
+}
+
+/**
  * Normalizes a VM boolean flag (cpu_hotplug/ram_hotplug). An absent key uses the
  * VIRTUSPHERE_VM_DEFAULTS value (true), so legacy-API creates and field-tolerant
  * imports get the default; a present value is read as a checkbox/bool.
@@ -173,10 +193,7 @@ function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int
     // looser names silently diverge. Grandfathering: an UNCHANGED legacy
     // hostname keeps the old lax rule so unrelated edits are not blocked;
     // any change (and every new VM) must pass the strict rule.
-    $hostnameInput = trim((string) ($vmData['vm_hostname'] ?? ''));
-    if ($hostnameInput === '') {
-        $hostnameInput = $name;
-    }
+    $hostnameInput = repo_vm_hostname_input($vmData, $name);
     $storedHostname = $excludeVmId > 0
         ? (string) (repo_scalar($db, 'SELECT vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$excludeVmId, $missionId]) ?? '')
         : '';
@@ -247,8 +264,25 @@ function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int
     if (!mission_name_is_template($missionName)) {
         $conflict = repo_vm_name_conflict_global($db, $name, $excludeVmId);
         if ($conflict !== null && (int) $conflict['mission_id'] !== $missionId) {
-            $message = validator_text('validate.vm_name_taken_global', 'VM name is already used in mission ":mission" - MECM device names must be unique.', ['mission' => (string) $conflict['mission_name']]);
+            $message = validator_text('validate.vm_name_taken_global', 'VM name is already used in mission ":mission". The VM name in ESXi has to be unique across the portal.', ['mission' => (string) $conflict['mission_name']]);
             throw new ValidationException(['vm_name' => $message], $message);
+        }
+
+        // The Windows rollout name (Etappe 14D). This is a REPORT, not the
+        // enforcement: `deploy_vm_hostname_claims` decides under the write's own
+        // lock, and this unlocked read exists so a dry run (the mission import
+        // preview, ADR-0006's "a preview reports on what the write persists")
+        // names the holder instead of letting the write fail behind a preview
+        // that promised nothing was wrong.
+        //
+        // Only a value that could actually start a rollout is checked: a
+        // grandfathered illegal hostname holds no claim, so it can neither
+        // collide nor be blocked by one.
+        if (mecm_hostname_is_rollout_valid($values['vm_hostname'])) {
+            $owner = repo_vm_hostname_claim_owner($db, mecm_hostname_key($values['vm_hostname']), $excludeVmId);
+            if ($owner !== null) {
+                throw repo_vm_hostname_claim_conflict($owner);
+            }
         }
     }
 

@@ -94,7 +94,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
+
+        // Etappe 14D: the desired Windows name moved. Its own event rather than
+        // one more entry in `changes`, because the question somebody reads this
+        // row to answer is not "what changed" but "did this rollout take it":
+        // `current_pending` says the waiting hand-off picked the new name up,
+        // `next_rollout` says the snapshot is frozen and only a reset activates
+        // it. Those two are one operator action apart.
+        //
+        // Compared by normalised key, so a pure change of spelling is correctly
+        // NOT an identity change; it stays visible in the vm.changed diff.
+        // `$frozenSnapshot` carries the one thing the flash below needs and is
+        // initialised HERE, not inside the branch: a variable that only exists
+        // on one path is a variable the next reader has to prove reachable.
+        $frozenSnapshot = '';
+        if ($vmId > 0 && !$isTemplate) {
+            // $savedVm was read for the diff above, under the same `$vmId > 0`.
+            $oldHostname = (string) ($vm['vm_hostname'] ?? '');
+            $newHostname = (string) ($savedVm['vm_hostname'] ?? '');
+            if (mecm_hostname_key($oldHostname) !== mecm_hostname_key($newHostname)) {
+                $snapshot = (string) ($savedVm['mecm_rollout_hostname'] ?? '');
+                $effect = mecm_hostname_same($snapshot, $newHostname) ? 'current_pending' : 'next_rollout';
+                if ($effect === 'next_rollout') {
+                    $frozenSnapshot = $snapshot;
+                }
+                // Optional fields are OMITTED when empty, never sent blank: the
+                // registry refuses an empty context value, and this audit shares
+                // a request with the save. `old_value` is empty for a VM that
+                // never had a hostname, `rollout_hostname` for one that has no
+                // snapshot yet; both are normal, and neither is worth a blank.
+                $rolloutContext = [
+                    'action' => 'updated',
+                    'mission_id' => $missionId,
+                    'effect' => $effect,
+                    'new_value' => $newHostname,
+                    'rollout_revision' => (int) ($savedVm['mecm_rollout_revision'] ?? 0),
+                ];
+                if ($oldHostname !== '') {
+                    $rolloutContext['old_value'] = $oldHostname;
+                }
+                if ($snapshot !== '') {
+                    $rolloutContext['rollout_hostname'] = $snapshot;
+                }
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $rolloutContext, (int) $user['id']);
+            }
+        }
+
         flash_set('success', __t('vm_edit.flash_saved'));
+        // A frozen snapshot means the correction was stored and changes nothing
+        // about the machine that is already handed over. Saying so here is the
+        // whole point: without it the operator leaves the page believing the
+        // rename took effect, and finds out at the next rollout that it did not.
+        if ($frozenSnapshot !== '') {
+            flash_set('info', __t('vm_edit.flash_rollout_frozen', ['hostname' => $frozenSnapshot]));
+        }
         // A registered VM is one MECM already holds, and the device-sync only
         // looks at VMs it does not. So a package or OS change made here is stored
         // and goes no further until somebody transfers it. Saying that is the

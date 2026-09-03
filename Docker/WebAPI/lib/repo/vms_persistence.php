@@ -136,9 +136,16 @@ function repo_get_vm_bundle(mysqli $db, int $vmId): ?array
     return $vm;
 }
 
-// MECM device names are global, so a VM name may exist at most once across
-// all non-template missions (templates intentionally duplicate names when
-// cloning). Application-level check only - no DB unique index is possible.
+// The ESXi/portal VM name is unique at most once across all non-template
+// missions (templates intentionally duplicate names when cloning).
+//
+// This is NOT the MECM device name and has not been since Etappe 14D: MECM
+// receives `mecm_rollout_hostname`, whose global uniqueness is enforced
+// transactionally in `deploy_vm_hostname_claims`. This check stays as it is
+// because loosening the ESXi/portal naming policy would be its own decision,
+// not a side effect of moving the MECM name somewhere else.
+//
+// Application-level check only - no DB unique index is possible.
 function repo_vm_name_conflict_global(mysqli $db, string $vmName, int $excludeVmId = 0): ?array
 {
     return repo_fetch_one(
@@ -181,16 +188,43 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
         if (repo_deploy_lock_mission($db, $missionId) === null) {
             throw new RuntimeException('Mission not found.');
         }
+        $isTemplate = mission_name_is_template(
+            (string) (repo_scalar($db, 'SELECT mission_name FROM deploy_missions WHERE id = ? LIMIT 1', 'i', [$missionId]) ?? '')
+        );
+        $desiredHostname = (string) $values['vm_hostname'];
+
         if ($vmId > 0) {
             repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
-            $current = repo_fetch_one($db, 'SELECT id, updated_at FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
+            $current = repo_fetch_one($db, 'SELECT id, updated_at, vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
             if ($current === null) {
                 throw new RuntimeException('VM not found.');
             }
             if ($expectedUpdatedAt !== '' && (string) $current['updated_at'] !== $expectedUpdatedAt) {
                 throw new RuntimeException('VM was changed by another user. Reload before saving.');
             }
+
+            // Rollout identity (Etappe 14D). The state is read under the row lock
+            // taken just above, so the snapshot/revision decision and the write
+            // it produces cannot be separated by another writer.
+            $state = repo_vm_rollout_state($db, $vmId);
+            if ($state !== null) {
+                // An active deploy job blocks ONLY a hostname edit that changes
+                // the machine's identity: the job already carries the name, and
+                // renaming underneath it leaves the playbook creating something
+                // the row no longer describes. Every other edit that is allowed
+                // today stays allowed.
+                if (
+                    repo_vm_rollout_edit_changes_identity($state, $desiredHostname, (string) $current['vm_hostname'])
+                    && repo_deploy_active_job_exists($db, $missionId)
+                ) {
+                    $message = validator_text('validate.vm_hostname_active_job', 'The Windows hostname cannot be changed while a deploy job of this mission is running.');
+                    throw new ValidationException(['vm_hostname' => $message], $message);
+                }
+                $values += repo_vm_rollout_values_for_edit($state, $desiredHostname);
+            }
+
             repo_update_from_values($db, 'deploy_vms', $values, 'id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+            repo_vm_hostname_claims_sync($db, $vmId, $isTemplate, $desiredHostname, $values['mecm_rollout_hostname'] ?? null);
             repo_replace_interfaces($db, $vmId, $interfaces, true);
             repo_replace_disks($db, $vmId, $disks);
             repo_replace_packages($db, $vmId, $packages);
@@ -201,7 +235,14 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
             $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;
             $values['mecm_sync_state'] = VIRTUSPHERE_MECM_SYNC_NOT_READY;
             $values['updated'] = 0;
+            // A fresh VM starts its first rollout: snapshot equal to the desired
+            // value, revision 1, no tombstone. A template VM gets none of it.
+            $values += repo_vm_rollout_values_for_edit(
+                ['mecm_id' => null, 'mecm_rollout_hostname' => null, 'mecm_rollout_revision' => null, 'is_template' => $isTemplate],
+                $desiredHostname
+            );
             $vmId = repo_insert_from_values($db, 'deploy_vms', $values);
+            repo_vm_hostname_claims_sync($db, $vmId, $isTemplate, $desiredHostname, $values['mecm_rollout_hostname'] ?? null);
             repo_replace_interfaces($db, $vmId, $interfaces, false);
             repo_replace_disks($db, $vmId, $disks);
             repo_replace_packages($db, $vmId, $packages);

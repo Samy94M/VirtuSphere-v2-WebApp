@@ -24,7 +24,18 @@ Write-VsClientLog 'Starte getinfo'
 
 $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 # Nur diese Felder werden aus der API-Antwort persistiert.
-$allowedFields = @('vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'mission_id')
+#
+# `vm_hostname` traegt seit Etappe 14D den EINGEFRORENEN Rolloutnamen, nicht den
+# aktuellen Portal-Sollwert: client_hostname.ps1 benennt Windows nach dem, was
+# hier steht, und muss deshalb den Namen bekommen, mit dem dieser Rollout an MECM
+# gegeben wurde. Eine spaetere Korrektur im Portal darf einen laufenden Rollout
+# nicht umdeuten.
+#
+# `rollout_revision` ist additiv (ADR-0019-Amendment) und rein zum Zurueckmelden:
+# der ACK traegt sie, damit ein Client eines VORIGEN Rollouts den Lebenszyklus
+# des neuen nicht abschliessen kann. Kein Skript der Kette trifft eine
+# Entscheidung anhand ihres Werts.
+$allowedFields = @('vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'mission_id', 'rollout_revision')
 
 function Save-VsValue {
     param([string]$Path, [string]$Name, [string]$Value)
@@ -132,7 +143,10 @@ try {
     Write-VsClientLog "Registry geschrieben ($index Interface(s))."
     # Verbindlich nach allen Nutzdaten: ein GET beweist nur, dass Daten gelesen
     # wurden. Erst dieser POST darf die VM im Portal auf 5/5 setzen.
-    Confirm-VsClientReady -Api $api -Mac $usedMac
+    # Die Rolloutrevision faehrt mit (Etappe 14D). Sie stammt aus DIESER Antwort
+    # und nicht aus der Registry: was hier bestaetigt wird, ist der Rollout, der
+    # gerade gelesen und geschrieben wurde.
+    Confirm-VsClientReady -Api $api -Mac $usedMac -RolloutRevision $data.rollout_revision
 
     # --- MECM-Erfolgs-Marker wirklich ZULETZT ------------------------------
     # Nach dem ACK, damit ein Prozessabbruch/Power-Loss waehrend des POSTs nie
