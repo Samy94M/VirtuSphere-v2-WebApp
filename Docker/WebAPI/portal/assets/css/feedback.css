@@ -36,12 +36,13 @@
 
 .alert {
     margin: 0 0 14px;
-    border: 1px solid var(--glass-border);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 10px 12px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* Opaque, and not glass (Etappe 16). An alert sits INSIDE a panel that is
+       already a blur layer, so it was the second one stacked on the same spot,
+       and it is the one element on the page whose whole job is to be read. */
+    background: var(--surface-muted);
 }
 
 /* An alert colours its whole text, so a link inside it is the same hue as the
@@ -217,11 +218,12 @@ textarea.is-invalid {
 .modal-box {
     width: min(420px, 100%);
     padding: 24px 26px;
-    border: 1px solid var(--glass-border);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    /* Opaque as well. The dim layer behind it already blurs the page, so a
+       translucent box made a third stacked blur and put moving content behind
+       the question the operator has to answer. */
+    background: var(--surface);
     color: var(--text);
     text-align: center;
     box-shadow: var(--shadow-modal);

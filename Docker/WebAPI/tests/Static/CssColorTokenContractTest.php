@@ -49,13 +49,18 @@ final class CssColorTokenContractTest extends TestCase
         $scanned = 0;
 
         foreach ($sheets as $path => $css) {
-            if (basename($path) === self::PALETTE_SHEET) {
-                continue;
-            }
-            $scanned++;
+            // base.css may name colours; it is the palette. It is still scanned
+            // for the pairing rule, because the one thing that must hold in
+            // every sheet is that a system background names its foreground, and
+            // a file exempt from the whole scan would be exempt from that too.
+            $paletteSheet = basename($path) === self::PALETTE_SHEET;
+            $scanned += $paletteSheet ? 0 : 1;
             $result = CssColorScanner::scan($css, basename($path));
-            $declarations += $result['declarations'];
+            $declarations += $paletteSheet ? 0 : $result['declarations'];
             foreach ($result['findings'] as $finding) {
+                if ($paletteSheet && $finding['id'] !== CssColorScanner::ID_SYSTEM_UNPAIRED) {
+                    continue;
+                }
                 $offenders[] = sprintf(
                     '[%s] %s: %s { %s: %s }',
                     $finding['id'],

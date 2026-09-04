@@ -24,8 +24,12 @@
     display: flex;
     flex-direction: column;
     padding: 18px 14px;
-    border-right: 1px solid var(--glass-border);
-    background: var(--glass-bg);
+    /* The rail has its own surface (Etappe 16). It used the same glass tokens
+       as the content panels, so the two read as one sheet of paper with a line
+       drawn on it; these four tokens are what make it a rail. */
+    border-right: 1px solid var(--sidebar-border);
+    background: color-mix(in srgb, var(--sidebar-bg) 86%, transparent);
+    color: var(--sidebar-text);
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
 }
@@ -80,13 +84,13 @@
     display: grid;
     gap: 4px;
     padding: 14px 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--sidebar-border);
 }
 
 .nav-group-title {
     margin: 0 0 4px;
     padding: 0 10px;
-    color: var(--muted);
+    color: var(--sidebar-muted);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -98,19 +102,19 @@
     border-left: 3px solid transparent;
     border-radius: 0 6px 6px 0;
     padding: 9px 10px 9px 7px;
-    color: var(--muted);
+    color: var(--sidebar-muted);
     text-decoration: none;
 }
 
 .nav-group a:hover {
-    background: var(--surface-muted);
-    color: var(--text);
+    background: var(--sidebar-active-bg);
+    color: var(--sidebar-text);
 }
 
 .nav-group a.active {
     border-left-color: var(--accent);
-    background: var(--surface-muted);
-    color: var(--text);
+    background: var(--sidebar-active-bg);
+    color: var(--sidebar-text);
     font-weight: 700;
 }
 

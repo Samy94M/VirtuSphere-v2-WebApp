@@ -1,25 +1,51 @@
 :root {
     color-scheme: light;
-    --bg: #f4f7f8;
+    /* Slate ground, indigo accent (ADR-0013, Etappe 16). Every value here is
+       measured rather than picked: normal text clears 4.5:1 on every ground it
+       is rendered on, including the alpha-composited glass surfaces, and the
+       parts that carry meaning without text clear 3:1. The numbers are in the
+       stage's acceptance row; the shape of the palette is in the ADR. */
+    --bg: #f3f5f9;
     --surface: #ffffff;
-    --surface-muted: #eef4f5;
-    --text: #172126;
-    --muted: #5c6b73;
-    --border: #cfdbdf;
-    --accent: #0f8f9d;
-    --accent-strong: #0b6973;
+    --surface-muted: #eaeef5;
+    --text: #1a2130;
+    --muted: #555f73;
+    /* Two borders, because they answer different questions. `--border` separates
+       (table rows, panel edges) and may stay quiet; `--control-border` outlines
+       a CONTROL, which WCAG 1.4.11 requires to be tellable from its surroundings
+       at 3:1. One token could not be both without making every table look like a
+       spreadsheet. */
+    --border: #ccd3e0;
+    --control-border: #7c8497;
+    --accent: #4f46e5;
+    --accent-strong: #4338ca;
     --success: #1f7a4d;
-    --warning: #a15c00;
+    --warning: #8f5200;
     --danger: #a42935;
-    --info: #2368a2;
-    --shadow: 0 12px 28px rgba(26, 45, 52, 0.08);
+    /* Info stays a cyan-leaning blue rather than a second indigo: it sits 44
+       degrees away from the accent in OKLCH hue, which is what keeps "this is a
+       note" apart from "this is the action" at a glance. */
+    --info: #0f6f96;
+    --shadow: 0 10px 24px rgba(23, 31, 48, 0.07);
     --btn-bg: var(--accent-strong);
     --btn-fg: #ffffff;
+    /* The sidebar is its own surface, not a tinted copy of the content area
+       (Etappe 16). It carries its own four tokens so the rail can read as a rail
+       while the panels keep theirs; the composited result stays clear of the
+       content surface, which a shared token set cannot promise. */
+    --sidebar-bg: #e7ebf3;
+    --sidebar-text: #1a2130;
+    --sidebar-muted: #4d5668;
+    --sidebar-border: #c3ccdb;
+    --sidebar-active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
     /* Dezentes Glas-Design (ADR-0013): translucent surfaces on nav/cards/modals;
-       tables and form controls stay solid. Single token set, no scattered values. */
-    --glass-bg: color-mix(in srgb, var(--surface) 74%, transparent);
+       tables and form controls stay solid. Single token set, no scattered values.
+       Etappe 16 raised the opacity and lowered the blur: the glass was doing
+       more work than it earned, and every point of transparency is contrast the
+       text underneath has to survive. */
+    --glass-bg: color-mix(in srgb, var(--surface) 86%, transparent);
     --glass-border: color-mix(in srgb, #ffffff 45%, var(--border));
-    --glass-blur: 12px;
+    --glass-blur: 8px;
     --glass-shadow: var(--shadow);
     /* The four effect colours the component sheets used to spell out. They are
        declared here for the same reason every other colour is: base.css is the
@@ -27,13 +53,13 @@
        are colours whatever else they also are. Keeping them out here is what
        let a hard black shadow sit on a light page and two near-identical
        near-blacks describe the same button text. */
-    --shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.28);
-    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.35);
-    --modal-backdrop: color-mix(in srgb, #02141a 72%, transparent);
-    --sheen: rgba(255, 255, 255, 0.4);
+    --shadow-lift: 0 6px 16px rgba(23, 31, 48, 0.16);
+    --shadow-modal: 0 16px 40px rgba(23, 31, 48, 0.22);
+    --modal-backdrop: color-mix(in srgb, #0d1220 62%, transparent);
+    --sheen: rgba(255, 255, 255, 0.32);
     --bg-accent-glow:
-        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
-        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 10%, transparent), transparent 55%);
+        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 5%, transparent), transparent 55%);
     /* Spacing scale (ADR-0013). Four steps and one radius, derived from what the
        status block actually needed rather than set in advance: a token nobody
        uses on its first day is the same drift as a rule without markup, only in
@@ -50,26 +76,38 @@
 
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #101619;
-    --surface: #182226;
-    --surface-muted: #223035;
-    --text: #eef5f6;
-    --muted: #a8b8be;
-    --border: #34464d;
-    --accent: #34b7c3;
-    --accent-strong: #72d4dc;
+    --bg: #0f131b;
+    --surface: #171d28;
+    --surface-muted: #212837;
+    --text: #e9edf6;
+    --muted: #a6b0c4;
+    --border: #333c4e;
+    --control-border: #6e788d;
+    --accent: #8f8cf8;
+    --accent-strong: #aba9fb;
     --success: #64c18c;
     --warning: #e1a449;
     --danger: #ef7d87;
-    --info: #7eb8e7;
-    --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    --info: #6ec1e4;
+    --shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
     --btn-bg: var(--accent);
-    --btn-fg: #0b1416;
-    --glass-bg: color-mix(in srgb, var(--surface) 58%, transparent);
+    --btn-fg: #111524;
+    /* Darker than the content surface rather than lighter: the rail recedes and
+       the panels come forward, which is the same reading order the light theme
+       gives with a tinted rail on white. */
+    --sidebar-bg: #090d13;
+    --sidebar-text: #e9edf6;
+    --sidebar-muted: #aeb8cc;
+    --sidebar-border: #2b3446;
+    --sidebar-active-bg: color-mix(in srgb, var(--accent) 16%, transparent);
+    --glass-bg: color-mix(in srgb, var(--surface) 72%, transparent);
     --glass-border: color-mix(in srgb, #ffffff 12%, var(--border));
     --bg-accent-glow:
-        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
-        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 12%, transparent), transparent 55%);
+        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
+        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 6%, transparent), transparent 55%);
+    --shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.42);
+    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
+    --modal-backdrop: color-mix(in srgb, #05080e 76%, transparent);
 }
 
 * {
@@ -162,7 +200,11 @@ select,
 textarea {
     width: 100%;
     min-height: 38px;
-    border: 1px solid var(--border);
+    /* A control is identified by its own boundary, so this border is a UI part
+       under WCAG 1.4.11 and takes the 3:1 token rather than the quiet separator
+       one. The fill alone does not carry it: surface-muted against surface is a
+       1.2 tint, which is a hint and not an outline. */
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     padding: 8px 10px;
     background: var(--surface-muted);

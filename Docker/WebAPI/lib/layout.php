@@ -75,6 +75,11 @@ function layout_app_styles(): void
         'assets/css/controls.css',
         'assets/css/feedback.css',
         'assets/css/status.css',
+        // Last on purpose: its rules are specificity-equal with the component
+        // defaults they hand back to the user agent, and they win only on
+        // position. It is a policy rather than a domain, and it applies in a
+        // mode where the portal must not have the last word about colour.
+        'assets/css/forced-colors.css',
     ] as $sheet) {
         echo '    <link rel="stylesheet" href="' . h(layout_asset_url($sheet)) . '">' . "\n";
     }

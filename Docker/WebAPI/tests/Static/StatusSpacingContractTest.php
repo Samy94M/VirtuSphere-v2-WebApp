@@ -25,8 +25,10 @@ require_once __DIR__ . '/../Support/CssRules.php';
  *  - The <link> order in lib/layout.php. Several status rules are
  *    specificity-equal with their counterparts in the four domain sheets (a
  *    panel's heading margin, a paragraph's, an alert's) and win only on
- *    position, so this sheet must be linked LAST. Moving it earlier would put
- *    every one of those margins back without changing a declaration.
+ *    position, so this sheet must be linked after all four. Moving it earlier
+ *    would put every one of those margins back without changing a declaration.
+ *    Only forced-colors.css may follow it, and for the same positional reason:
+ *    it hands colours back to the user agent and must have the last word.
  */
 final class StatusSpacingContractTest extends TestCase
 {
@@ -146,21 +148,40 @@ final class StatusSpacingContractTest extends TestCase
         );
     }
 
-    public function testTheStatusSheetLoadsLast(): void
+    public function testTheStatusSheetLoadsAfterEveryDomainSheet(): void
     {
         $order = CssRules::linkOrder($this->webApiRoot());
 
         self::assertNotSame([], $order, 'lib/layout.php must name the stylesheets it links');
         $status = array_search(self::SHEET, $order, true);
-
         self::assertIsInt($status, 'lib/layout.php must link ' . self::SHEET);
+
+        // The rule is "after everything it ties with", not "last in the file".
+        // Its heading, paragraph and alert margin resets are specificity-equal
+        // with the panel defaults in the four domain sheets and win only on
+        // position. `forced-colors.css` sits behind it and ties with nothing: it
+        // hands colours back to the user agent inside a media query, and it has
+        // to be last for the same positional reason.
+        //
+        // The predecessor of this assertion named components.css, which Etappe
+        // 16 split into four; "after that one file" would have passed with this
+        // sheet sitting third of five.
+        $domainSheets = ['panels.css', 'tables.css', 'controls.css', 'feedback.css'];
+        foreach ($domainSheets as $sheet) {
+            $position = array_search($sheet, $order, true);
+            self::assertIsInt($position, 'lib/layout.php must link ' . $sheet);
+            self::assertGreaterThan(
+                $position,
+                $status,
+                self::SHEET . ' must be linked after ' . $sheet
+            );
+        }
+
+        $after = array_slice($order, $status + 1);
         self::assertSame(
-            count($order) - 1,
-            $status,
-            self::SHEET . ' must be linked last: its heading, paragraph and alert margin resets are '
-            . 'specificity-equal with the panel defaults in the domain sheets and win only on position. '
-            . 'The predecessor of this assertion named components.css, which Etappe 16 split into four; '
-            . '"after that one file" would have passed with the sheet sitting third of five'
+            ['forced-colors.css'],
+            $after,
+            'only the forced-colors policy may load after ' . self::SHEET
         );
     }
 }

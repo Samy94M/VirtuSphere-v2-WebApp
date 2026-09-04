@@ -1,0 +1,95 @@
+/* What the portal gives back when the user agent owns the palette.
+
+   Under `forced-colors: active` the browser replaces colours with a pair the
+   reader chose, and the defect in that mode is not a missing accent: it is a
+   page that keeps painting anyway, so translucent glass, a soft shadow and a
+   tinted badge either survive as noise or collapse into one flat surface with
+   no edges left. Everything here therefore hands a decision back rather than
+   making a new one, and the two things that must survive are said in system
+   colours: the boundary of a surface and the focus ring.
+
+   This is a policy, not a domain, which is why it is its own sheet and why it
+   loads LAST: its rules are specificity-equal with the component defaults they
+   replace and win only on position. It is the one place in the portal allowed
+   to name a system colour, and CssColorTokenContractTest requires those to
+   appear in matching pairs, because a `Canvas` background under a foreground
+   the user agent did not choose is how high contrast turns unreadable. */
+
+@media (forced-colors: active) {
+    body {
+        background: Canvas;
+        color: CanvasText;
+    }
+
+    /* Every surface the portal paints itself. The blur and the shadow go: both
+       are decoration that a forced palette cannot express, and a blurred
+       backdrop in high contrast is a smear rather than a depth cue. The border
+       is what replaces them, because without it two stacked surfaces of the
+       same Canvas have no edge at all. */
+    .panel,
+    .card,
+    .sidebar,
+    .topbar,
+    .modal-box,
+    .alert,
+    .table-wrap,
+    tr.row-editor > td {
+        background: Canvas;
+        color: CanvasText;
+        border-color: CanvasText;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    /* The login page paints an animated aurora behind its card. There is no
+       colour left to animate, and a moving shape under text is a cost with no
+       remaining benefit. */
+    .login-page::before,
+    .login-panel::before,
+    .login-panel form .button::after {
+        display: none;
+    }
+
+    /* A badge says what it means with a colour, and here there is no colour to
+       say it with, so the outline is what is left to separate it from the prose
+       around it. The word inside it already carries the meaning. */
+    .badge {
+        border: 1px solid CanvasText;
+        color: CanvasText;
+        background: Canvas;
+    }
+
+    /* Buttons are the one element with a user-agent pair of their own. */
+    .button,
+    button.button,
+    a.button {
+        background: ButtonFace;
+        color: ButtonText;
+        border-color: ButtonText;
+    }
+
+    /* Controls keep their own boundary; the 3:1 token underneath means nothing
+       once the palette is replaced. */
+    input,
+    select,
+    textarea {
+        background: Field;
+        color: FieldText;
+        border-color: FieldText;
+    }
+
+    /* Forced colors keeps outlines on purpose, so the focus ring survives, but
+       it must not be drawn with an accent the user agent has already replaced.
+       Highlight is the colour the reader chose for exactly this. */
+    :focus-visible {
+        outline-color: Highlight;
+    }
+
+    /* A bar chart is a graphic: without a border its fill and its track are the
+       same colour and the value disappears. */
+    .capacity-bar,
+    .capacity-fill {
+        border: 1px solid CanvasText;
+    }
+}

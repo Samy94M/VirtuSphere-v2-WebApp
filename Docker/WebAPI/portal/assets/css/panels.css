@@ -50,13 +50,21 @@
 /* Browsers without backdrop-filter fall back to opaque surfaces (no grey haze). */
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    /* The one fallback, adjusted rather than duplicated (Etappe 16). `.alert`
+       and `.modal-box` left this list because they are opaque unconditionally
+       now; the sidebar keeps its own surface here rather than borrowing the
+       content one, or the rail would disappear into the page exactly on the
+       browsers that cannot blur. */
     .panel,
     .card,
-    .sidebar,
-    .topbar,
-    .alert,
-    .modal-box {
+    .topbar {
         background: var(--surface);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    .sidebar {
+        background: var(--sidebar-bg);
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
     }
