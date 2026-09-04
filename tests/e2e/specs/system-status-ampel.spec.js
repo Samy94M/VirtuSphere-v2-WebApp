@@ -396,8 +396,13 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     await expect(broken.locator('.alert-warning')).toHaveCount(0);
 
     // The overview rolls the worst of the two up, and `danger` outranks `warning`.
+    //
+    // Match the END of the href, not the whole value: Etappe 15 builds these
+    // targets with `system_status_url()`, which carries the current credential
+    // selection, so the address is `system_status.php[?...]#ansible` and a bare
+    // `#ansible` no longer exists on the page.
     await expect(
-      page.locator('.status-overview-card[href="#ansible"] .badge'),
+      page.locator('.status-overview-card[href$="#ansible"] .badge'),
     ).toHaveText(/Fehlgeschlagen|Failed/);
   } finally {
     cleanupSeeded();

@@ -135,9 +135,17 @@ for (const probe of PROBES) {
     // 3) Render context B + C: the detail heading (HTML text) and the rename
     // input (HTML attribute). The attribute context is the one a breakout probe
     // targets: `"><img>` would end the value attribute early.
+    //
+    // The heading is the H1, not the first H2. Etappe 15 gave the page one title
+    // SSoT: the name identifies the page and the H2 below names the settings
+    // section. This reads the end of the title rather than the whole string,
+    // because the SSoT is "<page kind>: <name>" and the page kind is localized;
+    // asserting the joined sentence would pin a label instead of the escaping
+    // this test is about.
     await page.goto(`mission_details.php?id=${missionId}`);
-    expect((await page.locator('h2').first().textContent()).trim(), 'detail heading renders the value')
-      .toBe(probe.value);
+    const heading = (await page.locator('h1').first().textContent()).trim();
+    expect(heading.endsWith(probe.value), `detail heading renders the value (got ${JSON.stringify(heading)})`)
+      .toBe(true);
     expect(await page.locator('input[name="mission_name"]').inputValue(), 'rename input round-trips the value')
       .toBe(probe.value);
   });

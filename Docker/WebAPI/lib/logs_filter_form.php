@@ -20,12 +20,15 @@ require_once __DIR__ . '/repo/log.php';
  * "who deleted this exact VM", which is not what the page is opened for most
  * days, and a form of ten controls makes the four that matter harder to find.
  *
- * The event codes and object types are shown as their raw identifiers on
- * purpose. They are the vocabulary of the audit registry, not prose: the same
- * string appears in the exported CSV, in a saved search and in this project's
- * own documentation, so translating it in the picker alone would give an
- * operator a word they cannot find anywhere else. What IS localized is the
- * grouping around them, so a code can be found without knowing the list.
+ * Event codes and object types carry a localized name AND their identifier.
+ * The identifier alone was the first shape and it was wrong in both directions:
+ * it appears on no other portal surface, not in the audit table and not in the
+ * CSV, so nobody could learn the vocabulary the picker offered, and an option
+ * reading `directory.bind_rejected` is character for character an untranslated
+ * `__t()` key, which is what the browser i18n scan reported it as. It is kept
+ * beside the name because a runbook, an ADR and the `?event=` parameter all
+ * name the code, and a filter you cannot match to the document that sent you
+ * here is one you have to guess at.
  */
 
 /** The form name for lib/forms.php ids; the page has exactly one form. */
@@ -105,11 +108,25 @@ function logs_filter_option(string $value, string $label, string $current): stri
 }
 
 /**
+ * Localized name for one audit vocabulary value, with its identifier behind it.
+ *
+ * Both halves are load-bearing; the reasons are in this file's header. The
+ * parameter is named `$code` rather than the more obvious word, because
+ * AuditProducerContractTest refuses a credential-shaped parameter on anything
+ * whose name contains `log`, and it is right to: the signature is the boundary,
+ * not today's call sites.
+ */
+function logs_filter_vocabulary_label(string $key, string $code): string
+{
+    return __t($key) . ' (' . $code . ')';
+}
+
+/**
  * The event codes of this tab, grouped by the category they file under.
  *
  * The group is the localized category name the operator already knows from the
- * table's own badges, which is what makes a list of technical identifiers
- * navigable without translating each one.
+ * table's own badges; the option itself carries the localized event name and
+ * its code.
  *
  * @return array<string,array<string,string>>
  */
@@ -120,7 +137,10 @@ function logs_filter_event_options(string $tab): array
     foreach (log_filter_event_codes_for_tab($tab) as $code) {
         $category = (string) ($registry[$code]['category'] ?? '');
         $group = $category !== '' ? log_category_label($category) : __t('logs.event_group_varies');
-        $groups[$group][$code] = $code;
+        $groups[$group][$code] = logs_filter_vocabulary_label(
+            'logs.eventcode_' . str_replace('.', '_', $code),
+            $code
+        );
     }
     ksort($groups, SORT_STRING);
 
@@ -159,7 +179,7 @@ function logs_render_filter_form(array $filter, string $resetUrl, ?string $expor
     }
     $objectTypes = [];
     foreach (log_filter_object_types() as $objectType) {
-        $objectTypes[$objectType] = $objectType;
+        $objectTypes[$objectType] = logs_filter_vocabulary_label('logs.objecttype_' . $objectType, $objectType);
     }
     ?>
     <form class="stack" method="get" action="logs.php">
