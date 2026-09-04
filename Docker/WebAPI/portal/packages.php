@@ -6,6 +6,8 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 
+/** @var mysqli $connection Provided by bootstrap.php. */
+
 // Packages are owned by MECM: mecm_packages.php performs a retire-missing +
 // upsert sync from the MECM catalog, so this portal page is read-only. Editing
 // here would be overwritten on the next sync.

@@ -303,7 +303,7 @@ function portal_page_nav(string $ariaLabel, array $items): string
 {
     $html = '<nav class="tab-list" aria-label="' . h($ariaLabel) . '">';
     foreach ($items as $item) {
-        $current = ($item['current'] ?? false) ? ' aria-current="page"' : '';
+        $current = $item['current'] ? ' aria-current="page"' : '';
         $html .= '<a class="tab" href="' . h($item['href']) . '"' . $current . '>' . h($item['label']) . '</a>';
     }
 

@@ -75,12 +75,6 @@ parameters:
 		-
 			message: '#^Variable \$connection might not be defined\.$#'
 			identifier: variable.undefined
-			count: 2
-			path: portal/packages.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
 			count: 1
 			path: portal/session_ping.php
 

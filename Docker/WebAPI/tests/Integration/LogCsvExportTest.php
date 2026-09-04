@@ -176,6 +176,52 @@ final class LogCsvExportTest extends TestCase
     }
 
     /**
+     * The Etappe-10C export semantics survive the Etappe-15 filter fields.
+     *
+     * A cap, a header and an audit row that hold for a category filter but not
+     * for a date range would be a contract that quietly stops applying as soon
+     * as somebody uses the new controls, which is when the file is most likely
+     * to be evidence. So the combined filter is driven end to end: the file
+     * carries exactly the matching rows, the correlation column is one of them,
+     * and the single audit row still describes the export rather than its
+     * contents.
+     */
+    public function testTheCapHeaderAndAuditSemanticsHoldForTheNewFilterFields(): void
+    {
+        $this->seedTraced(4, 'a1b2c3d4e5f60718');
+        $this->seedTraced(2, 'ffffffffffffffff');
+
+        $today = (new DateTimeImmutable('now', new DateTimeZone(portal_timezone())))->format('Y-m-d');
+        $filter = log_filter_from_query([
+            'tab' => self::TAB,
+            'ip' => self::IP,
+            'from' => $today,
+            'to' => $today,
+            'correlation' => 'a1b2c3d4e5f60718',
+        ]);
+        self::assertTrue(log_filter_is_usable($filter), 'the combined filter must be accepted');
+
+        $before = $this->auditRows();
+        $export = $this->prepareExport($filter);
+
+        self::assertSame(4, $export['total'], 'the count follows every condition, not only the category');
+        self::assertCount(4, $export['rows']);
+        self::assertFalse($export['bounds']['truncated']);
+        foreach ($export['rows'] as $row) {
+            self::assertSame('a1b2c3d4e5f60718', $row[6], 'the correlation column carries the value');
+        }
+
+        self::assertSame($before + 1, $this->auditRows(), 'still exactly one audit row');
+        $context = json_decode((string) $this->latestAuditRow()['context_json'], true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame(4, $context['rows_exported']);
+        self::assertSame(4, $context['total_rows']);
+        self::assertFalse($context['truncated']);
+        // The context describes the export, never the filter: the correlation
+        // id is as much a search term as the free text is.
+        self::assertStringNotContainsString('a1b2c3d4e5f60718', (string) $this->latestAuditRow()['context_json']);
+    }
+
+    /**
      * The same filter fingerprints identically across two exports, so an
      * operator can group them, and a different filter does not collide.
      */
@@ -192,6 +238,22 @@ final class LogCsvExportTest extends TestCase
     private function filter(): array
     {
         return log_filter_from_query(['tab' => self::TAB, 'ip' => self::IP, 'category' => self::CATEGORY]);
+    }
+
+    /** Rows of one traced request, written now so a same-day range covers them. */
+    private function seedTraced(int $count, string $correlationId): void
+    {
+        $stmt = $this->db->prepare(
+            'INSERT INTO deploy_logs (ip, category, log_message, correlation_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NOW(), NOW())'
+        );
+        $ip = self::IP;
+        $category = self::CATEGORY;
+        $message = 'phpunit traced export fixture';
+        $stmt->bind_param('ssss', $ip, $category, $message, $correlationId);
+        for ($i = 0; $i < $count; $i++) {
+            $stmt->execute();
+        }
     }
 
     private function seed(int $count, string $category = self::CATEGORY, string $message = 'phpunit export fixture'): void
