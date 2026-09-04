@@ -263,7 +263,9 @@ final class SystemStatusPanelBranchTest extends TestCase
     {
         $admin = ['id' => 1, 'role' => 'admin'];
         ob_start();
-        system_status_render_deviations($deviations, ['VLAN_701'], $admin, '', $hasInventory);
+        // The renderer takes the count the page computed, not the flag: null is
+        // "the scan could not run", which is the same fact as "no inventory".
+        system_status_render_deviations($deviations, ['VLAN_701'], $admin, '', system_status_deviation_count($deviations, $hasInventory));
 
         return (string) ob_get_clean();
     }

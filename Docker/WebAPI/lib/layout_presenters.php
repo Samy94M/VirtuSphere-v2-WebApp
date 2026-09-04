@@ -86,6 +86,29 @@ function esxi_state_badge(string $state): string
 }
 
 /**
+ * Badge for the mission/VM deviation count, from the count alone.
+ *
+ * The overview card and the section heading render the same three answers from
+ * the same number (system_status_deviation_count()), so the strip cannot report
+ * a colour or a wording the section below it contradicts. `null` is neutral and
+ * says the scan did not run; it is deliberately not green, because "not
+ * checked" and "nothing found" are different facts and only one of them is
+ * reassuring.
+ */
+function deviation_count_badge(?int $count): string
+{
+    if ($count === null) {
+        return portal_badge('neutral', __t('system_status.dev_count_unknown'));
+    }
+
+    return portal_badge($count > 0 ? 'warning' : 'success', match (true) {
+        $count === 0 => __t('system_status.dev_count_none'),
+        $count === 1 => __t('system_status.dev_count_one'),
+        default => __t('system_status.dev_count_many', ['count' => $count]),
+    });
+}
+
+/**
  * Badge for an already-derived Ansible state, so a caller holding the state
  * (the overview roll-up, the legend) does not have to fake a preflight row to
  * get its badge back.

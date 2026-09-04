@@ -311,10 +311,19 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
     <?php
 }
 
-/** @param array<int,array<string,mixed>> $deviations @param string[] $activeVlanNames */
-function system_status_render_deviations(array $deviations, array $activeVlanNames, array $user, string $reassignFrom, bool $hasInventory): void
+/**
+ * The deviation section.
+ *
+ * $deviationCount is the count the page computed once and also handed to the
+ * overview strip (system_status_deviation_count()); null means the scan could
+ * not run, which is the same fact as "no ESXi inventory" and is therefore not
+ * passed a second time as its own flag.
+ *
+ * @param array<int,array<string,mixed>> $deviations @param string[] $activeVlanNames
+ */
+function system_status_render_deviations(array $deviations, array $activeVlanNames, array $user, string $reassignFrom, ?int $deviationCount): void
 {
-    $issueCount = array_sum(array_map(static fn (array $entry): int => count($entry['issues']), $deviations));
+    $hasInventory = $deviationCount !== null;
     $hasVlanDeviation = false;
     foreach ($deviations as $entry) {
         foreach ($entry['issues'] as $issue) {
@@ -325,20 +334,8 @@ function system_status_render_deviations(array $deviations, array $activeVlanNam
         }
     }
     ?>
-    <?php
-    // Without an ESXi inventory there is nothing to compare against, so the
-    // scan never runs. Reporting that as a green "0 deviations" claimed a clean
-    // bill of health the page had not checked; say that it could not check.
-    $countBadge = $hasInventory
-        ? portal_badge($issueCount > 0 ? 'warning' : 'success', match (true) {
-            $issueCount === 0 => __t('system_status.dev_count_none'),
-            $issueCount === 1 => __t('system_status.dev_count_one'),
-            default => __t('system_status.dev_count_many', ['count' => $issueCount]),
-        })
-        : portal_badge('neutral', __t('system_status.dev_count_unknown'));
-    ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
-        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo $countBadge; ?></h2>
+        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount); ?></h2>
         <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
         <?php if (!$hasInventory) { ?><p class="muted"><?php echo h(__t('system_status.dev_no_inventory')); ?></p><?php } elseif ($deviations === []) { ?><p class="muted"><?php echo h(__t('system_status.dev_none')); ?></p><?php } else { ?>
             <div class="deviation-groups"><?php foreach ($deviations as $entry) { ?>

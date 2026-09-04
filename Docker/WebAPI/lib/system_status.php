@@ -26,6 +26,32 @@ function system_status_url(string $anchor, array $query = []): string
 }
 
 /**
+ * How many mission/VM deviations the scan found, or null when it could not run.
+ *
+ * The three answers are genuinely different and the difference is the whole
+ * point: null is "not checked", because without an ESXi inventory there is
+ * nothing to compare against and reporting that as a green zero would hand out
+ * a clean bill of health nobody issued; 0 is "checked, nothing found"; anything
+ * above is a count. The overview card and the section heading both read THIS
+ * value rather than each summing the issue lists themselves, because two
+ * derivations of one number are two numbers as soon as one of them is edited,
+ * and a strip saying "3" over a section listing four is worse than no strip.
+ *
+ * @param array<int,array<string,mixed>> $deviations
+ */
+function system_status_deviation_count(array $deviations, bool $hasInventory): ?int
+{
+    if (!$hasInventory) {
+        return null;
+    }
+
+    return array_sum(array_map(
+        static fn (array $entry): int => count((array) ($entry['issues'] ?? [])),
+        $deviations
+    ));
+}
+
+/**
  * SSoT renderer for one Ampel legend, shared by the System status page and the
  * help panel. Both used to hand-list their states and had drifted: the heartbeat
  * `missing` state was explained in help and absent from the page's own legend,

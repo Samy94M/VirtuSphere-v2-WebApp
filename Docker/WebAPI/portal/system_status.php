@@ -58,7 +58,12 @@ $activeVlanNames = array_map(
     static fn (array $vlan): string => (string) $vlan['vlan_name'],
     repo_active_vlans($connection)
 );
+// Computed once here, read by the overview card and by the section below it.
+$deviationCount = system_status_deviation_count($deviations, $hasInventory);
 $reassignFrom = mb_substr(request_trimmed($_GET, 'reassign_from'), 0, 255);
+// The selection the page is currently rendering, so the overview cards stay
+// same-document links and a chosen credential survives a jump to another card.
+$anchorQuery = $selectedInventoryId > 0 ? ['inventory' => $selectedInventoryId] : [];
 $refreshUrl = $selectedInventoryId > 0
     ? system_status_url('credential-' . $selectedInventoryId, ['inventory' => $selectedInventoryId])
     : 'system_status.php';
@@ -82,7 +87,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
         </div>
     </section>
 
-    <?php system_status_render_overview($snapshot); ?>
+    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery); ?>
     <?php // Directly under the overview: this is the card an operator opens the
           // page for while a deploy is in flight, and it is the only one that
           // carries an action changing what the installation does next. ?>
@@ -91,7 +96,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     <?php system_status_render_mecm($snapshot, $user); ?>
     <?php system_status_render_ansible($snapshot, $user); ?>
     <?php system_status_render_esxi($snapshot, $user, $selectedInventoryId, $selectedInventory); ?>
-    <?php system_status_render_deviations($deviations, $activeVlanNames, $user, $reassignFrom, $hasInventory); ?>
+    <?php system_status_render_deviations($deviations, $activeVlanNames, $user, $reassignFrom, $deviationCount); ?>
     <?php system_status_render_internal($snapshot, $user); ?>
 </div>
 <?php layout_footer(); ?>

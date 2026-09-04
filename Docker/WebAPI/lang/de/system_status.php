@@ -64,6 +64,7 @@ return [
     'overview_mecm' => 'MECM',
     'overview_ansible' => 'Ansible-Test',
     'overview_esxi' => 'ESXi-Inventar',
+    'overview_deviations' => 'Abweichungen',
     'overview_internal' => 'Interne Dienste',
     'directory_heading' => 'Active Directory',
     'directory_hint' => 'Betriebszustand der LDAPS-Anmeldung und ihrer geprüften Domänencontroller.',

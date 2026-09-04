@@ -64,6 +64,7 @@ return [
     'overview_mecm' => 'MECM',
     'overview_ansible' => 'Ansible test',
     'overview_esxi' => 'ESXi inventory',
+    'overview_deviations' => 'Deviations',
     'overview_internal' => 'Internal services',
     'directory_heading' => 'Active Directory',
     'directory_hint' => 'Operational state of LDAPS sign-in and its validated domain controllers.',

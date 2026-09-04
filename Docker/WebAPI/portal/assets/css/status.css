@@ -86,9 +86,12 @@
     font-size: 13px;
 }
 
+/* One column per card in system_status_render_overview(); the count is pinned
+   against that renderer by SystemStatusOverviewContractTest, because a fifth
+   card added to the PHP alone would silently start a second row of one. */
 .status-overview {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: var(--space-3);
 }
 
@@ -356,6 +359,15 @@
 .status-legend > summary {
     cursor: pointer;
     font-weight: 700;
+}
+
+/* Five cards need a step the four never did: below this the labels ("ESXi
+   inventory", "Internal services") wrap inside a fifth of the content width and
+   the strip grows taller than the section it summarises. */
+@media (max-width: 1180px) {
+    .status-overview {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 850px) {
