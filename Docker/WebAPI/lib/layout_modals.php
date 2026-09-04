@@ -6,7 +6,7 @@ declare(strict_types=1);
  * The portal's two modal dialogs (ADR-0013).
  *
  * Both are native <dialog class="modal"> elements sharing the .modal base in
- * components.css, so the browser owns the top layer, the focus trap and Escape.
+ * feedback.css, so the browser owns the top layer, the focus trap and Escape.
  * They are rendered once per page by layout_footer(); nothing else may build a
  * modal, a focus trap or a z-index stack beside them.
  *

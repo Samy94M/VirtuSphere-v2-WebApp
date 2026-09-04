@@ -11,7 +11,7 @@
         } catch (error) {}
     }
 
-    // Modal dialogs (SSoT: the .modal block in components.css). Both portal
+    // Modal dialogs (SSoT: the .modal block in feedback.css). Both portal
     // modals are native <dialog> elements, so the browser owns the top layer,
     // the focus trap and Escape. These helpers only add the background scroll
     // lock and guard against calling showModal() on an already open dialog,
@@ -56,7 +56,7 @@
     // Set by initConfirmDialog() once the dialog is present and usable. A browser
     // without <dialog> leaves it null and every submit proceeds unconfirmed,
     // exactly as it does with JS disabled: the POST handler is the real gate.
-    // No such browser reaches this portal (components.css already relies on :has(),
+    // No such browser reaches this portal (the portal sheets already rely on :has(),
     // which no engine shipped before <dialog>), so there is no window.confirm()
     // fallback to keep alive.
     var requestConfirm = null;

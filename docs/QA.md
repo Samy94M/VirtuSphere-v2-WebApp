@@ -182,7 +182,7 @@ directions, on the antialiased corners and edges of one control. What that
 bounds it to:
 
 - `portal/missions.php`, the page in that image, is not touched by Etappe 14A,
-  and `components.css`, which styles that control, is not in the diff either.
+  and `components.css`, which styles that control, is not in the diff either (that file was still the single component sheet then; Etappe 16 split it into four).
 - Run metadata of a green and a red run are identical: browser revision 1228,
   the three pinned font SHA-256 values, launch arguments, viewports, locale and
   timezone.
@@ -588,7 +588,7 @@ End-to-end browser tests gate the Integration and Release lanes, never the PR-fa
 
 `Docker/WebAPI/tests/Static/PortalConfirmContractTest.php` locks down the confirmation contract (see below). Like `PortalComboHooksTest`, it pins a markup-to-JavaScript agreement as text, because no compiler or linter checks one.
 
-`Docker/WebAPI/tests/Static/ModalAxisContractTest.php` does the same for the modal layout rules in `components.css` (see below), for the same reason: nothing else in the toolchain reads that stylesheet.
+`Docker/WebAPI/tests/Static/ModalAxisContractTest.php` does the same for the modal layout rules in `feedback.css` (see below), for the same reason: nothing else in the toolchain reads that stylesheet.
 
 `Docker/WebAPI/tests/Integration/DeployJobReaperTest.php` exercises the real database path for stale running jobs. It creates only `phpunit_phase_c_*` missions, removes them in setup/teardown, and skips if unrelated running deploy jobs exist because the production reaper is intentionally global.
 
@@ -688,7 +688,7 @@ The accept button takes its label from the trigger, so a new destructive button 
 
 ## Modal Axis
 
-Where modal content sits is decided in `components.css`, which no linter in this repo reads: `php -l`, `node --check` and the whole unit suite stay green while a dialog drifts off its axis or clips the name it is asking about. `tests/Static/ModalAxisContractTest.php` runs in the normal `unit` suite and parses the stylesheet (brace-depth aware, so `@media` does not swallow the rules nested inside it). It fails when:
+Where modal content sits is decided in `feedback.css`, which no linter in this repo reads: `php -l`, `node --check` and the whole unit suite stay green while a dialog drifts off its axis or clips the name it is asking about. `tests/Static/ModalAxisContractTest.php` runs in the normal `unit` suite and parses the stylesheet (brace-depth aware, so `@media` does not swallow the rules nested inside it). It fails when:
 
 - any rule other than `.modal[open]`, `.modal-box`, `.modal-msg` or `.modal-actions` declares `text-align`, `justify-content` or `align-items` on a modal, which is how a per-dialog override gets in;
 - one of those four stops making its decision, or makes a different one;

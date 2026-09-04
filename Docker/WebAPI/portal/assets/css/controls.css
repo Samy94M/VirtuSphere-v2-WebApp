@@ -1,0 +1,485 @@
+/* Controls and forms: buttons and their states, the action rows that hold
+   them, filter fields, inline forms, the form grid with its field, hint and
+   group children, and the checkbox/radio option cards.
+
+   One of the four domain sheets that replaced components.css in Etappe 16. */
+
+.button,
+button.button,
+a.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    border: 1px solid var(--btn-bg);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.button:hover {
+    text-decoration: none;
+    filter: brightness(0.96);
+}
+
+/* Disabled buttons (e.g. a blocked import confirm) must read as inactive, not
+   just refuse the click. Opacity keeps the variant colour but greys it back. */
+
+.button:disabled,
+button.button:disabled,
+.button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+    box-shadow: none;
+}
+
+.button:disabled:hover,
+button.button:disabled:hover,
+.button[disabled]:hover {
+    filter: none;
+}
+
+/* Pending submit (data-busy-label, set by core.js): a small spinner beside the
+   swapped label so a synchronous POST reads as "working", not "stuck". The
+   button's flex gap already spaces it from the text. */
+
+.button.is-busy::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: button-spin 0.6s linear infinite;
+}
+
+@keyframes button-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .button.is-busy::before {
+        animation: none;
+        /* A frozen arc reads as broken; show a full ring as a static busy dot. */
+        border-right-color: currentColor;
+    }
+}
+
+.button.button-secondary,
+.button.button-ghost {
+    background: var(--surface-muted);
+    color: var(--accent-strong);
+}
+
+.button.button-danger {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: var(--btn-fg);
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.actions > h2,
+.actions > h3 {
+    margin: 0;
+}
+
+.panel > .actions:first-child {
+    align-items: center;
+    min-height: 38px;
+    margin-bottom: 14px;
+}
+
+.panel > .actions:first-child > h2,
+.panel > .actions:first-child > h3 {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    margin-right: 2px;
+}
+
+.panel > .actions:only-child {
+    margin-bottom: 0;
+}
+
+/* A disclosure holding the diagnostic half of a filter form. It reads as part
+   of the form rather than as a panel of its own, so it borrows the field
+   background and keeps a hairline instead of a border box. */
+
+.filter-advanced {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.filter-advanced > summary {
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.inline-form {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 0;
+}
+
+.inline-form label {
+    min-width: 180px;
+}
+
+/* Filter bars: keep the label word beside its control on one line, so the label
+   does not add row height and shift the heading/button out of alignment. */
+
+.actions .filter-field,
+.inline-form .filter-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.filter-field select,
+.filter-field input {
+    width: auto;
+    min-width: 160px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px 18px;
+    /* Top-align cells so an inline .field-error grows downward and does not
+       push its own input up out of line with the neighbouring fields. */
+    align-items: start;
+}
+
+.form-grid > .actions {
+    align-self: end;
+    min-height: 38px;
+    padding-top: 0;
+}
+
+/* A primary submit that must read as the end of the form, on its own final row
+   rather than flowing into the empty cell beside the last field group. The button
+   keeps its natural size and left edge; only the row it sits on spans the grid. */
+
+.form-grid > .actions-row {
+    grid-column: 1 / -1;
+}
+
+.form-grid-full {
+    grid-column: 1 / -1;
+    /* Stack the section caption, its options and hints with one consistent gap.
+       Without this the bordered checkbox/radio rows touched (block flow gave them
+       0 margin) while hint paragraphs kept their larger UA margins, so the rhythm
+       read as both too tight and uneven. */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-grid-full > p {
+    margin: 0;
+}
+
+/* A control that is taller than a single-line input (a notes textarea) takes the
+   cells its row would otherwise leave empty, instead of opening its own row. */
+
+.form-grid-span-2 {
+    grid-column: span 2;
+}
+
+/* A captioned option group (field-label plus its radio/checkbox rows) rendered as
+   a regular grid cell so a sibling field can share the row. Mirrors the
+   .form-grid-full stack: the option rows carry no block margin and would touch
+   without the gap, and they size to their label instead of stretching across the
+   cell. */
+
+.field-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.field-stack > label:not(.checkbox-item) {
+    width: 100%;
+    max-width: 22rem;
+}
+
+/* Caption for a grouped control (a checkbox set) that has no single <label> of
+   its own. Matches the field captions of the inputs around it. */
+
+.field-label {
+    display: block;
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* Explanatory prose next to a field reads as secondary on every page that uses
+   it (deploy, VM editor, mission editor), and inside a form section it stops at
+   a comfortable measure instead of running the full panel width. */
+
+.hint {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.form-grid-full > .hint {
+    max-width: 78ch;
+}
+
+/* A pair of related fields plus the prose that explains them. The group takes two
+   tracks of the parent grid and repeats its track sizing inside, so its controls
+   keep the column width of the fields above while the hint runs directly under
+   the controls it describes. A hint placed as a plain full-width grid row instead
+   would start at the far left of the form, columns away from its field, and the
+   column it would have to span cannot be pinned in CSS: a hidden datacenter field
+   shifts every following control by one track. */
+
+.field-group {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: 18px;
+    row-gap: 8px;
+}
+
+.field-group > .hint,
+.field-group > .alert {
+    grid-column: 1 / -1;
+}
+
+/* Even under its own field the hint names its subject: the group holds two
+   controls and the text rarely applies to both. */
+
+.hint-subject {
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* A full-width section spans the whole form, but its individual controls should
+   not run the entire panel width. Single toggle/radio rows size to their label,
+   and a standalone text field/select is capped to a comfortable field width. Only
+   multi-column option grids (.checkbox-grid) keep their full-width stretch. */
+
+.form-grid-full > .checkbox-item {
+    align-self: flex-start;
+}
+
+.form-grid-full > label:not(.checkbox-item) {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 22rem;
+}
+
+.form-grid > .actions .button {
+    min-width: 88px;
+}
+
+.panel > h2 + .form-grid,
+.panel > h3 + .form-grid,
+.panel > h2 + form,
+.panel > h3 + form {
+    margin-top: 2px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.interface-row,
+.vm-form-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.compound-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 82px;
+    gap: 6px;
+}
+
+.ram-field {
+    grid-template-columns: minmax(0, 1fr) 116px;
+}
+
+.narrow-form {
+    width: min(560px, 100%);
+}
+
+.checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+}
+
+/* Fixed option sets that belong to the surrounding form fields (not open-ended
+   lists like packages or mission VMs) mirror the .form-grid tracks, so each
+   option box is exactly as wide as the inputs above it. */
+
+.checkbox-grid-aligned {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: 18px;
+}
+
+.checkbox-item {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-muted);
+    font-weight: 400;
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.checkbox-item:hover {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+/* A selected option carries a light accent wash, so a long option list reads at
+   a glance instead of forcing the eye onto every single checkbox. */
+
+.checkbox-item:has(input:checked) {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* The card, not the bare 16px box, carries the keyboard focus ring: same outline
+   tokens as the global :focus-visible rule in base.css, only relocated to the
+   wrapper (ADR-0013). A translucent halo of our own was tried and dropped: at any
+   alpha that still looked soft it missed the 3:1 non-text contrast floor.
+   Matching on :has(input:focus-visible) keeps the ring off mouse clicks and
+   outranks the :checked rule above, which would otherwise swallow the border. */
+
+.checkbox-item:has(input:focus-visible) {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.checkbox-item input:focus-visible {
+    outline: none;
+}
+
+.checkbox-item:has(input:disabled) {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .checkbox-item {
+        transition: none;
+    }
+}
+
+.checkbox-item input {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    min-height: auto;
+    accent-color: var(--accent);
+    cursor: inherit;
+}
+
+/* Breathing room between a stacked label's caption and the control it wraps.
+   Labels render as <label>Caption <input></label>, so without this the caption
+   sits almost on top of the field. Row-style labels (filter bars, checkboxes)
+   lay their control out horizontally and opt out below. */
+
+label > input,
+label > select,
+label > textarea,
+label > .compound-field {
+    margin-top: 6px;
+}
+
+.filter-field > input,
+.filter-field > select,
+.checkbox-item > input {
+    margin-top: 0;
+}
+
+/* A checkbox and its label as one control: without this the box and its text
+   wrap apart on a narrow viewport and the label lands under a different box. */
+
+.inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .panel > .actions:first-child {
+        align-items: stretch;
+    }
+
+    .panel > .actions:first-child > h2,
+    .panel > .actions:first-child > h3 {
+        width: 100%;
+    }
+
+    .form-grid,
+    .interface-row,
+    .vm-form-grid,
+    .checkbox-grid-aligned {
+        grid-template-columns: 1fr;
+    }
+
+    /* One track left: a span would add an implicit second column and push the
+       grid past the panel. */
+    .form-grid-span-2 {
+        grid-column: auto;
+    }
+
+    .field-group {
+        grid-column: auto;
+        grid-template-columns: 1fr;
+    }
+}

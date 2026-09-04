@@ -44,6 +44,43 @@ function layout_asset_url(string $path): string
 }
 
 /**
+ * The portal's stylesheets, in cascade order: the tokens and element defaults,
+ * the app shell, the four domain sheets that replaced components.css in
+ * Etappe 16, then status.css.
+ *
+ * The ORDER is the contract, not the list. Two equally specific rules are
+ * resolved by position, so once the component rules live in four files the file
+ * order IS that position: the four were cut so that concatenating them in
+ * exactly this sequence reproduces the cascade of the single file they came
+ * from, and status.css owns the System status page's inner rhythm with rules
+ * that are specificity-equal with the panel defaults and win only by sitting
+ * last (StatusSpacingContractTest). Moving an entry is a design change, not a
+ * cosmetic one, and it needs the computed-style comparison run again.
+ *
+ * Emitted from one place so the head of layout.php and the head of login.php
+ * cannot drift apart. They linked these by hand and had already drifted:
+ * login.php was missing status.css. Every entry is cache-busted through
+ * layout_asset_url(); PortalStyleRegistryContractTest fails on a stylesheet
+ * under assets/css that this list does not name, on a hand-written link beside
+ * it, and on an @import, which would load a sheet past both the version query
+ * and this registry.
+ */
+function layout_app_styles(): void
+{
+    foreach ([
+        'assets/css/base.css',
+        'assets/css/layout.css',
+        'assets/css/panels.css',
+        'assets/css/tables.css',
+        'assets/css/controls.css',
+        'assets/css/feedback.css',
+        'assets/css/status.css',
+    ] as $sheet) {
+        echo '    <link rel="stylesheet" href="' . h(layout_asset_url($sheet)) . '">' . "\n";
+    }
+}
+
+/**
  * The portal's client scripts, in load order: core (theme, modals, tabs,
  * session), forms, the deploy-log reader, then the deploy form. Each is an independent IIFE; `defer`
  * preserves this order. Emitted from one place so the head of layout.php and
@@ -80,14 +117,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo h($title); ?> - VirtuSphere</title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/base.css')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/layout.css')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/components.css')); ?>">
-    <?php // status.css owns the System status page's inner rhythm and must load
-          // after components.css: several of its rules are specificity-equal with
-          // their counterparts there and win only on position
-          // (StatusSpacingContractTest). ?>
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/status.css')); ?>">
+<?php layout_app_styles(); ?>
     <script nonce="<?php echo $nonce; ?>">
         try {
             var theme = localStorage.getItem('virtusphere.theme');

@@ -23,10 +23,10 @@ require_once __DIR__ . '/../Support/CssRules.php';
  *    that grows past its callers is the same drift as a rule without markup,
  *    only in the direction no other guard looks.
  *  - The <link> order in lib/layout.php. Several status rules are
- *    specificity-equal with their counterparts in components.css (a panel's
- *    heading margin, a paragraph's, an alert's) and win only on position.
- *    Swapping the two <link> elements would put every one of those margins back
- *    without changing a single declaration.
+ *    specificity-equal with their counterparts in the four domain sheets (a
+ *    panel's heading margin, a paragraph's, an alert's) and win only on
+ *    position, so this sheet must be linked LAST. Moving it earlier would put
+ *    every one of those margins back without changing a declaration.
  */
 final class StatusSpacingContractTest extends TestCase
 {
@@ -146,20 +146,21 @@ final class StatusSpacingContractTest extends TestCase
         );
     }
 
-    public function testTheStatusSheetLoadsAfterComponents(): void
+    public function testTheStatusSheetLoadsLast(): void
     {
         $order = CssRules::linkOrder($this->webApiRoot());
 
-        $components = array_search('components.css', $order, true);
+        self::assertNotSame([], $order, 'lib/layout.php must name the stylesheets it links');
         $status = array_search(self::SHEET, $order, true);
 
-        self::assertIsInt($components, 'lib/layout.php must link components.css');
         self::assertIsInt($status, 'lib/layout.php must link ' . self::SHEET);
-        self::assertGreaterThan(
-            $components,
+        self::assertSame(
+            count($order) - 1,
             $status,
-            self::SHEET . ' must be linked after components.css: its heading, paragraph and alert '
-            . 'margin resets are specificity-equal with the panel defaults there and win only on position'
+            self::SHEET . ' must be linked last: its heading, paragraph and alert margin resets are '
+            . 'specificity-equal with the panel defaults in the domain sheets and win only on position. '
+            . 'The predecessor of this assertion named components.css, which Etappe 16 split into four; '
+            . '"after that one file" would have passed with the sheet sitting third of five'
         );
     }
 }

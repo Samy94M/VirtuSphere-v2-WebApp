@@ -1,15 +1,15 @@
 /*
  * System status page: compact, linkable summaries with detail only on demand.
  *
- * Split out of components.css (ADR-0013) because these are proper names of one
+ * Split out of the shared component rules (ADR-0013) because these are proper names of one
  * page, not shared vocabulary: .status-row, .inventory-card, .deviation-groups
  * and their kin are rendered by portal/system_status.php and the
  * lib/system_status_*panels.php modules and by nothing else. Loaded AFTER
- * components.css in lib/layout.php, so a status rule that is specificity-equal
+ * the four domain sheets in lib/layout.php, so a status rule that is specificity-equal
  * with its counterpart there still wins; StatusSpacingContractTest pins that
  * order.
  *
- * What deliberately stayed in components.css: the panel padding this block sits
+ * What deliberately stayed in the shared sheets: the panel padding this block sits
  * inside, .ampel-legend (the help page renders the same list from the same
  * renderer), and the generic .empty-state / .section-heading-actions, which the
  * next page would otherwise have to fetch back or duplicate. This file owns the
@@ -41,7 +41,7 @@
 /* Panel defaults assume a flow layout: a heading, a paragraph and an alert each
    bring their own bottom margin. Inside the stacks above that margin would be
    added to the gap, so the elements that now sit in one hand it back. Each of
-   these ties the specificity of its components.css counterpart and wins on file
+   these ties the specificity of its counterpart in panels.css and wins on file
    order, which is why status.css must stay the later <link>. */
 .status-section > h2,
 .status-section > h3,

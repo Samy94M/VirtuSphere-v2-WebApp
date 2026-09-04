@@ -55,9 +55,7 @@ $nonce = h(virtusphere_csp_nonce());
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo h(__t('login.page_title')); ?></title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/base.css')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/layout.css')); ?>">
-    <link rel="stylesheet" href="<?php echo h(layout_asset_url('assets/css/components.css')); ?>">
+<?php layout_app_styles(); ?>
     <script nonce="<?php echo $nonce; ?>">
         try {
             var theme = localStorage.getItem('virtusphere.theme');

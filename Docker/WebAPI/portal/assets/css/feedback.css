@@ -1,0 +1,312 @@
+/* Feedback and modals: what the portal says back to the operator. Badges and
+   their colour key, alerts with their follow-up actions and diagnostics, the
+   empty state, field errors, and the two native dialogs.
+
+   One of the four domain sheets that replaced components.css in Etappe 16. */
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 2px 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-success {
+    color: var(--success);
+}
+
+.badge-warning {
+    color: var(--warning);
+}
+
+.badge-info {
+    color: var(--info);
+}
+
+.badge-neutral {
+    color: var(--muted);
+}
+
+.alert {
+    margin: 0 0 14px;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* An alert colours its whole text, so a link inside it is the same hue as the
+   prose around it and colour alone no longer marks it as a link (WCAG 1.4.1).
+   The underline is the non-colour affordance. It matters most exactly here: the
+   link in an error alert is the way out of the error. */
+
+.alert a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.alert-success {
+    border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+    color: var(--success);
+}
+
+.alert-error {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    color: var(--danger);
+}
+
+.alert-warning {
+    border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+    color: var(--warning);
+}
+
+/* One shared colour key for both traffic lights: one row per severity, badge
+   inline and the meaning flowing after it, wrapping under itself. Rendered by
+   system_status_legend_items() on system_status.php and on the help page, so
+   both teach the same colours from the same markup. list-style:none because the
+   badge already carries the row; a browser bullet in front of it reads as a
+   second marker, and with the marker gone the 20px indent `.panel ul` adds for
+   it is just a hanging left edge. Selector doubled to outrank that rule, which
+   is two class levels deep; the legend always sits inside a .panel. */
+
+.ampel-legend.ampel-legend {
+    list-style: none;
+    margin: 0;
+    padding-left: 0;
+    display: grid;
+    gap: 8px;
+    line-height: 1.5;
+}
+
+.ampel-legend .badge {
+    margin-right: 6px;
+}
+
+.empty-state {
+    padding: 14px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.empty-state p {
+    margin-top: 0;
+}
+
+.alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.alert-actions .button {
+    color: var(--btn-fg);
+    text-decoration: none;
+}
+
+.alert-info {
+    border-color: color-mix(in srgb, var(--info) 55%, var(--border));
+    color: var(--info);
+}
+
+/* Operator diagnostics inside an alert: collapsed by default, muted so the
+   localized message above stays the thing you read first. Native <details>,
+   no JS. */
+
+.alert-details {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.alert-details > summary {
+    cursor: pointer;
+}
+
+.alert-details pre {
+    margin: 6px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.badge-danger {
+    color: var(--danger);
+}
+
+.field-error {
+    display: block;
+    margin-top: 4px;
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+input.is-invalid,
+select.is-invalid,
+textarea.is-invalid {
+    border-color: var(--danger);
+}
+
+/* ==========================================================================
+   Modal dialogs (SSoT for the session-expiry warning and the confirm dialog)
+
+   Both are native <dialog> elements opened with showModal(), so the browser
+   owns the top layer, the focus trap and the Escape key. The dialog element
+   itself is the dim layer that covers the viewport; .modal-box is the panel.
+   A click that lands on the element and not on the box is therefore a
+   backdrop click, which is what app.js tests for.
+
+   The dim is painted on the element rather than on ::backdrop because custom
+   properties do not inherit into ::backdrop on older engines.
+   ========================================================================== */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    border: 0;
+    padding: 16px;
+    overflow: auto;
+    background: color-mix(in srgb, #02141a 72%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    color: var(--text);
+}
+
+/* Explicit, so the fallback path in app.js (which only toggles the [open]
+   attribute) still hides the dialog without the UA stylesheet. */
+
+.modal:not([open]) {
+    display: none;
+}
+
+.modal[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal::backdrop {
+    background: transparent;
+}
+
+/* showModal() makes the page inert but does not stop it scrolling behind the
+   dialog; app.js sets this class while any modal is open. */
+
+.is-modal-open,
+.is-modal-open body {
+    overflow: hidden;
+}
+
+.modal-box {
+    width: min(420px, 100%);
+    padding: 24px 26px;
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
+    color: var(--text);
+    text-align: center;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.modal-icon {
+    font-size: 34px;
+    line-height: 1;
+    margin-bottom: 10px;
+}
+
+.modal-danger .modal-icon {
+    color: var(--danger);
+}
+
+.modal-title {
+    margin: 0 0 8px;
+    font-size: 19px;
+}
+
+/* Every modal message, not just the confirm one: a message that fits a line
+   sits on the dialog axis with the icon, title and actions; one that wraps
+   reads left-aligned, because there the left edge is what carries the reader.
+   fit-content decides which without asking CSS whether the text wrapped. A
+   one-line message takes its own width and the auto inline margins recentre
+   it; a longer one hits max-width, fills the box and keeps its left edge.
+
+   overflow-wrap because a confirm question names its target (portal.md) and a
+   target name is user input: an unbroken 90-character service account would
+   otherwise run past the box, and a clipped name is exactly the misread the
+   naming rule exists to prevent. */
+
+.modal-msg {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto 18px;
+    overflow-wrap: anywhere;
+    text-align: left;
+    color: var(--muted);
+}
+
+.modal-msg strong {
+    color: var(--danger);
+    font-variant-numeric: tabular-nums;
+}
+
+.modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* Confirm dialog: its message can run to a few sentences (a used operating
+   system, a mission with waiting deploy jobs), so it gets a wider box and the
+   full-contrast text colour. The alignment it inherits from .modal-msg.
+   Dismiss sits left of the accept button. */
+
+.modal-confirm .modal-box {
+    width: min(480px, 100%);
+}
+
+.modal-confirm .modal-msg {
+    color: var(--text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .modal[open] {
+        animation: modal-fade 120ms ease-out;
+    }
+
+    .modal[open] .modal-box {
+        animation: modal-rise 140ms ease-out;
+    }
+}
+
+@keyframes modal-fade {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes modal-rise {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+}

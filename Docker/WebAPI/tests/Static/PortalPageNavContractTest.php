@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/../Support/CssRules.php';
+
 /**
  * Two portal shapes that look like styling decisions but are contracts.
  *
@@ -49,6 +51,22 @@ final class PortalPageNavContractTest extends TestCase
         self::assertFileExists($path, $relative . ' must exist');
 
         return (string) file_get_contents($path);
+    }
+
+    /**
+     * Every portal stylesheet, in cascade order, as one text.
+     *
+     * Globbed rather than named. This used to read `components.css`, and
+     * Etappe 16 split that file into four: a guard that names one sheet goes
+     * quiet the moment its rules move next door, which is the same trap the
+     * portal rules describe for renderer scans.
+     */
+    private function styles(): string
+    {
+        $sheets = CssRules::stylesheets($this->repoRoot());
+        self::assertNotSame([], $sheets, 'no portal stylesheet found; the scan root moved');
+
+        return implode("\n", $sheets);
     }
 
     /**
@@ -183,17 +201,17 @@ final class PortalPageNavContractTest extends TestCase
 
     public function testTheStylesheetDefinesBothClassesAndStacksThemAboveTheStickyHeader(): void
     {
-        $components = $this->source('portal/assets/css/components.css');
+        $styles = $this->styles();
         $base = $this->source('portal/assets/css/base.css');
 
-        self::assertStringContainsString('.table-sticky-actions .table-action-cell', $components);
-        self::assertStringContainsString('position: sticky', $components);
+        self::assertStringContainsString('.table-sticky-actions .table-action-cell', $styles);
+        self::assertStringContainsString('position: sticky', $styles);
 
         // The body cell slides over the data cells, the header cell over both.
         // Read out of the source rather than restated, so a later edit to any of
         // the three numbers has to keep the order.
-        $bodyZ = $this->zIndexOf($components, '.table-sticky-actions td.table-action-cell');
-        $headZ = $this->zIndexOf($components, '.table-sticky-actions th.table-action-cell');
+        $bodyZ = $this->zIndexOf($styles, '.table-sticky-actions td.table-action-cell');
+        $headZ = $this->zIndexOf($styles, '.table-sticky-actions th.table-action-cell');
         $headerZ = $this->zIndexOf($base, 'th');
 
         self::assertGreaterThan($headerZ, $bodyZ, 'the pinned body cell must clear the sticky table header');
@@ -202,26 +220,26 @@ final class PortalPageNavContractTest extends TestCase
 
     public function testThePinnedColumnHasAnOpaqueBackgroundAndAHoverState(): void
     {
-        $components = $this->source('portal/assets/css/components.css');
+        $styles = $this->styles();
 
         self::assertMatchesRegularExpression(
             '/\.table-sticky-actions \.table-action-cell \{[^}]*background: var\(--surface\)/',
-            $components,
+            $styles,
             'the pinned cell must paint its own opaque background; it overlaps the cells beside it'
         );
         self::assertStringContainsString(
             'tbody tr:hover > td.table-action-cell',
-            $components,
+            $styles,
             'the pinned cell must repeat the row hover tint, or the hovered row breaks at the pinned column'
         );
     }
 
     public function testThePinnedColumnIsReleasedOnNarrowViewports(): void
     {
-        $components = $this->source('portal/assets/css/components.css');
+        $styles = $this->styles();
         self::assertMatchesRegularExpression(
             '/@media \(max-width: 720px\) \{[^@]*\.table-sticky-actions \.table-action-cell \{[^}]*position: static/s',
-            $components,
+            $styles,
             'the pinned column must be released below the wrap breakpoint'
         );
     }

@@ -298,7 +298,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
 
     <section class="panel">
         <div class="table-wrap" tabindex="0">
-            <?php // The one table with a pinned action column (components.css):
+            <?php // The one table with a pinned action column (tables.css):
                   // fifteen columns, so the row actions would otherwise sit off
                   // screen exactly while scrolling back loses which row it was. ?>
             <table class="table-sticky-actions">

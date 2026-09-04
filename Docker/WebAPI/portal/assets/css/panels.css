@@ -1,0 +1,944 @@
+/* Data and page elements: the surfaces a page is built from (stack, grid,
+   panel, card), the data displays that sit on them (runtime facts, KPI values,
+   capacity bars, phase tracks, diagnostics, correlation ids), the login world
+   and the sidebar session timer, plus the two real tab widgets.
+
+   One of the four domain sheets that replaced components.css in Etappe 16.
+   Load order is decided once in layout_app_styles() (lib/layout.php); nothing
+   here may be reordered against a sibling sheet without re-running the computed
+   style parity check, because equally specific rules are resolved by position
+   and the file order IS that position. */
+
+.stack {
+    display: grid;
+    gap: 18px;
+}
+
+/* Grid/stack children default to min-width:auto, which lets wide tables push the
+   whole page sideways instead of scrolling inside .table-wrap. Pin them to 0. */
+
+.stack > *,
+.grid > * {
+    min-width: 0;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.panel,
+.card {
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: var(--glass-bg);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* Tables and form controls stay solid on top of the glass panels so data and
+   inputs keep full contrast (ADR-0013: glass only on nav/cards/modals). */
+
+.panel .table-wrap,
+.card .table-wrap {
+    background: var(--surface);
+    border-radius: 8px;
+}
+
+/* Browsers without backdrop-filter fall back to opaque surfaces (no grey haze). */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .panel,
+    .card,
+    .sidebar,
+    .topbar,
+    .alert,
+    .modal-box {
+        background: var(--surface);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+}
+
+.panel {
+    padding: 18px 20px;
+}
+
+.card {
+    padding: 14px;
+}
+
+.card h2,
+.panel h2,
+.panel h3,
+.card h3 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    line-height: 1.25;
+}
+
+.panel p + h3,
+.panel ul + h3 {
+    margin-top: 18px;
+}
+
+.panel ul,
+.card ul {
+    margin: 0 0 14px;
+    padding-left: 20px;
+}
+
+.panel ul:last-child,
+.card ul:last-child,
+.panel p:last-child,
+.card p:last-child {
+    margin-bottom: 0;
+}
+
+/* Consistent vertical rhythm for a panel's direct paragraphs (intro/hint text)
+   so they don't rely on uneven browser default margins. */
+
+.panel > p {
+    margin: 0 0 14px;
+}
+
+/* Keep a filter form and its table, and a table and its follow-up create form,
+   from butting together. Adjacent-sibling margins so a table that is the panel's
+   first content still sits flush under the heading. */
+
+.panel > form + .table-wrap,
+.panel > .table-wrap + form {
+    margin-top: 16px;
+}
+
+/* A mid-panel filter/action button row (not the panel header) sitting directly
+   above a table needs the same breathing room, so the buttons don't butt against
+   the table header (e.g. the VLAN catalog status filter). */
+
+.panel > .actions:not(:first-child) + .table-wrap {
+    margin-top: 14px;
+}
+
+/* Deploy settings keep the task first: one compact URL row, secondary reset,
+   and examples behind progressive disclosure. Runtime facts stay read-only. */
+
+.settings-url-intro {
+    max-width: 92ch;
+}
+
+.settings-url-form {
+    max-width: 720px;
+}
+
+.settings-url-input-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: stretch;
+    margin-top: 6px;
+}
+
+.settings-url-input-row input {
+    min-width: 0;
+}
+
+.settings-url-input-row .button {
+    white-space: nowrap;
+}
+
+.settings-reset-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-top: 12px;
+}
+
+.settings-examples {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.settings-examples > summary {
+    width: fit-content;
+    cursor: pointer;
+    color: var(--accent-strong);
+    font-weight: 700;
+}
+
+.settings-examples > summary:hover {
+    text-decoration: underline;
+}
+
+.settings-examples > ul {
+    margin: 10px 0 0;
+}
+
+.runtime-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 14px;
+}
+
+.runtime-fact {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.runtime-fact-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 12px;
+}
+
+.runtime-fact-head h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.runtime-value {
+    display: block;
+    min-width: 0;
+    margin-bottom: 8px;
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 750;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.runtime-fact > p {
+    margin: 0;
+}
+
+.runtime-fact > .alert {
+    margin: 0;
+}
+
+.runtime-fact-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: auto;
+    padding-top: 10px;
+    font-weight: 700;
+}
+
+.kpi {
+    display: grid;
+    gap: 6px;
+}
+
+.kpi .value {
+    font-size: 30px;
+    font-weight: 800;
+}
+
+/* A KPI count that carries a signal by itself: pending work amber, in-flight
+   work blue. Status badges bring their own colour, so these apply to bare
+   numbers only. */
+
+.kpi .value.value-warning {
+    color: var(--warning);
+}
+
+.kpi .value.value-info {
+    color: var(--info);
+}
+
+a.card {
+    color: inherit;
+    transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* Link cards lift on hover so a clickable tile reads apart from a static one
+   (the KPI row mixes both). */
+
+a.card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    transform: translateY(-2px);
+    text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    a.card {
+        transition: border-color 120ms ease;
+    }
+
+    a.card:hover {
+        transform: none;
+    }
+}
+
+.nowrap {
+    white-space: nowrap;
+}
+
+/* Long unbroken identifiers (certificate fingerprints) wrap inside their
+   cell instead of widening the table. */
+
+.wrap-anywhere {
+    overflow-wrap: anywhere;
+}
+
+/* A correlation id plus its copy accelerator and the confirmation that follows.
+   Inline-flex so the three parts stay on one line inside a table cell, and the
+   status keeps its own space instead of pushing the id sideways when it
+   appears. */
+
+.correlation-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.correlation-id .copy-button {
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+}
+
+.copy-status {
+    color: var(--success);
+    font-size: 0.8rem;
+}
+
+.copy-status.is-error {
+    color: var(--danger);
+}
+
+.diagnostics {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: 0 0 14px;
+}
+
+.diagnostics-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.diagnostics-item dt {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.diagnostics-item dd {
+    margin: 0;
+}
+
+.diagnostics-item code {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* VM deploy-status panel: a read-only overview card, kept visually separate from
+   the editable VM form below it. The status pill rides in the heading row. */
+
+.vm-status-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+    margin: 0 0 14px;
+}
+
+.vm-status-head h2 {
+    margin: 0;
+}
+
+/* Client deploy phases as a numbered progress track: each step is its own tile
+   with a state-colored left rail, so the four phases read at a glance instead of
+   wrapping into one cramped row. */
+
+.phase-track {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+    padding: 0;
+    list-style: none;
+}
+
+/* virtusphere_client_phase_state() has five values and there are four modifiers
+   below on purpose: `none` (the phase has never reported) IS this neutral base,
+   so .phase-step-none deliberately has no rule of its own. A phase nothing has
+   said anything about must not be coloured; only a reported state earns a
+   border colour. */
+
+.phase-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-muted);
+}
+
+.phase-step-index {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.phase-step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.phase-step-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.phase-step-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.phase-step-running {
+    border-left-color: var(--info);
+}
+
+.phase-step-unconfirmed {
+    border-left-color: var(--warning);
+}
+
+.phase-step-finished {
+    border-left-color: var(--success);
+}
+
+.phase-step-failed {
+    border-left-color: var(--danger);
+}
+
+.phase-step-finished .phase-step-index {
+    border-color: var(--success);
+    background: var(--success);
+    color: var(--surface);
+}
+
+.phase-step-failed .phase-step-index {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: var(--surface);
+}
+
+.capacity-bar {
+    display: inline-block;
+    width: 130px;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--surface-muted);
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.capacity-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--success);
+}
+
+.capacity-fill.warning {
+    background: var(--warning);
+}
+
+.capacity-fill.danger {
+    background: var(--danger);
+}
+
+/* A section heading whose actions sit beside the copy and wrap under it once
+   they no longer fit. Generic on purpose: the page-specific status blocks moved
+   to status.css, this shape did not, so the next page does not have to fetch it
+   back out of a page stylesheet or restate it. */
+
+.section-heading-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+}
+
+.section-heading-actions h2 {
+    margin: 0;
+}
+
+.section-heading-actions form {
+    margin: 0;
+}
+
+.status-time,
+.status-cadence,
+.status-trust {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* Credentials table: the status cell stacks a badge, a timestamp and the
+   cadence note, while the actions column beside it holds three buttons and
+   takes every pixel it can. Without a floor the cell is squeezed until even the
+   timestamp breaks mid-date, which is where the cadence line stops reading as a
+   sentence. The table scrolls inside .table-wrap, so the floor costs nothing. */
+
+.status-cell {
+    min-width: 190px;
+}
+
+/* Dashboard MECM tile: two labeled signal rows that never collapse into one
+   worst-of. Overrides the oversized single-value KPI number. */
+
+.value-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.signal-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.signal-label {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.login-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+}
+
+/* Login-only atmosphere (ADR-0013 glass world): a soft, slowly drifting aurora
+   behind the panel. Scoped to .login-page so no other portal page is touched. */
+
+.login-page::before {
+    content: "";
+    position: fixed;
+    inset: -15vmax;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(38% 42% at 20% 22%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
+        radial-gradient(42% 44% at 82% 28%, color-mix(in srgb, var(--info) 18%, transparent), transparent 70%),
+        radial-gradient(46% 48% at 55% 90%, color-mix(in srgb, var(--accent-strong) 16%, transparent), transparent 72%);
+    filter: blur(52px);
+    opacity: 0.34;
+    animation: login-aurora 28s ease-in-out infinite alternate;
+}
+
+.login-panel {
+    width: min(420px, 100%);
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    box-shadow:
+        0 24px 60px color-mix(in srgb, var(--accent-strong) 20%, transparent),
+        var(--shadow);
+    animation: login-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Accent hairline along the top edge of the card. */
+
+.login-panel::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--info));
+}
+
+.login-theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+}
+
+.login-panel h1 {
+    margin: 0 0 4px;
+    text-align: center;
+    color: var(--accent-strong);
+    background: linear-gradient(92deg, var(--accent), var(--info));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.login-tagline {
+    margin: 0 0 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+}
+
+.login-logo {
+    display: block;
+    width: 129px;
+    height: 129px;
+    object-fit: contain;
+    margin: 0 auto 12px;
+    filter:
+        drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 32%, transparent))
+        drop-shadow(0 0 16px color-mix(in srgb, var(--accent) 16%, transparent));
+}
+
+/* Icon-prefixed inputs (login only; global inputs stay solid and unchanged). */
+
+.login-input {
+    position: relative;
+    display: block;
+    margin-top: 6px;
+}
+
+.login-input-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: var(--muted);
+    pointer-events: none;
+}
+
+.login-input input {
+    padding-left: 38px;
+}
+
+.login-panel input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Accent submit button with a one-shot sheen and a nudging arrow on hover. */
+
+.login-panel form .button {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(92deg, var(--accent-strong), var(--accent));
+    border-color: transparent;
+    color: #ffffff;
+}
+
+:root[data-theme="dark"] .login-panel form .button {
+    color: #06181b;
+}
+
+.login-panel form .button::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    transform: skewX(-18deg);
+    transition: left 0.5s ease;
+}
+
+.login-panel form .button:hover::after {
+    left: 120%;
+}
+
+.login-btn-arrow {
+    transition: transform 0.2s ease;
+}
+
+.login-panel form .button:hover .login-btn-arrow {
+    transform: translateX(3px);
+}
+
+@keyframes login-rise {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes login-aurora {
+    0% {
+        transform: translate3d(-3%, -2%, 0) scale(1);
+    }
+    50% {
+        transform: translate3d(3%, 2%, 0) scale(1.06);
+    }
+    100% {
+        transform: translate3d(-1%, 3%, 0) scale(1.02);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login-page::before,
+    .login-panel {
+        animation: none;
+    }
+    .login-panel form .button::after,
+    .login-btn-arrow {
+        transition: none;
+    }
+}
+
+.value-small {
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+/* The phase sequence of a job. An ordered list, because the steps ran in that
+   order and the number is part of the fact; each row keeps its name, its
+   outcome badge and its line range on one baseline and wraps as a whole. */
+
+.phase-list {
+    margin: 0;
+    padding-left: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.phase-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.phase-name {
+    font-family: var(--font-mono, monospace);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+    .panel {
+        padding: 16px 14px;
+    }
+}
+
+/* ==========================================================================
+   Session timer (sidebar widget) + expiry warning modal
+   ========================================================================== */
+
+.session-timer {
+    margin-top: auto;
+    display: grid;
+    gap: 8px;
+    padding: 12px 10px;
+    border-top: 1px solid var(--border);
+}
+
+.session-timer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.session-timer-title {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.session-timer-clock {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.session-timer-clock.is-warning {
+    color: var(--danger);
+}
+
+.session-timer-extend {
+    width: 100%;
+    min-height: 34px;
+}
+
+@media (max-width: 860px) {
+    /* Sidebar is a horizontal-ish stack on mobile; don't force the timer down. */
+    .session-timer {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 16px;
+    }
+
+    .session-timer-head {
+        flex: 1 1 auto;
+    }
+
+    .session-timer-extend {
+        width: auto;
+        flex: 0 0 auto;
+    }
+}
+
+/* ==========================================================================
+   Tabs (progressive enhancement: the tab list ships hidden and is revealed
+   by app.js; without JS every panel stays visible)
+   ========================================================================== */
+
+.tab-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+
+.tab-list[hidden] {
+    display: none;
+}
+
+/* As a direct child of .stack the grid gap spaces the navigation; inside a
+   panel there is no gap, and the row that follows it used to get its clearance
+   from `.panel > .actions:first-child`, which it stops being the moment the
+   navigation moves in above it. */
+
+.panel > .tab-list {
+    margin-bottom: 14px;
+}
+
+/* .stack's display:grid would override the UA [hidden] rule. */
+
+[data-tab-panel][hidden] {
+    display: none;
+}
+
+.tab {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 7px 14px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+/* Link-based server-nav tabs (e.g. the log sections) reuse the .tab look but
+   navigate instead of toggling in-page panels; they mark the active tab with
+   aria-current and need the anchor decoration reset. */
+
+a.tab {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+.tab:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.tab[aria-selected='true'],
+.tab[aria-current='page'] {
+    border-color: var(--accent);
+    background: var(--surface);
+    color: var(--accent-strong);
+}
+
+/* Fragment navigation (help.php#panel-stack from the topbar help icon,
+   help.php#help-backup from the backup card) scrolls the target flush to the
+   viewport top, where the sticky .topbar covers it. Both the panel itself and any
+   deep-link anchor inside it need clearance, or the heading you jumped to is the
+   one thing you cannot read. */
+
+[data-tab-panel] [id] {
+    scroll-margin-top: 92px;
+}
+
+/* A jump to the panel itself (every settings.php POST redirect ends in
+   #panel-<tab>) additionally needs the tab row above it readable, because that
+   row is the only indicator of which tab is active; 92px would park it under
+   the topbar, showing only the bottom sliver of the labels. The budget covers
+   TWO tab rows (topbar + 2x38px rows + gaps): help.php carries nine tabs and
+   wraps at common desktop widths, and with a one-row budget the first row
+   slides behind the translucent topbar as ghost boxes. On one-row pages the
+   larger margin only clamps the scroll to the page top, which loses nothing. */
+
+[data-tab-panel] {
+    scroll-margin-top: 192px;
+}
+
+/* FAQ accordion (native <details>, no JS) */
+
+.faq details {
+    border-top: 1px solid var(--border);
+    padding: 12px 0;
+}
+
+.faq details:last-child {
+    padding-bottom: 0;
+}
+
+.faq summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.faq summary:hover {
+    color: var(--accent-strong);
+}
+
+.faq details[open] summary {
+    color: var(--accent-strong);
+}
+
+.faq details p {
+    margin: 10px 0 0;
+}
