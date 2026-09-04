@@ -93,6 +93,46 @@ function repo_deploy_jobs(mysqli $db, int $limit = 100, ?int $missionId = null):
     return repo_fetch_all($stmt->get_result());
 }
 
+/**
+ * The deploy jobs one portal request enqueued, newest first.
+ *
+ * Read beside an EXACT correlation search on logs.php, so an operator following
+ * a trace sees the jobs it started without going to the deploy page and
+ * matching timestamps by eye. The mission is LEFT JOINed because a system job
+ * (an ESXi inventory pull, ADR-0023) legitimately has none, and dropping those
+ * rows would make a trace look like it enqueued nothing.
+ *
+ * Ordered by id alone: `created_at` has second resolution and a staggered batch
+ * is written inside one second, so a tie there would order the same trace
+ * differently on two renders. One row over the limit is fetched so the caller
+ * can SAY that it capped rather than silently showing a prefix.
+ *
+ * @return array{jobs:list<array<string,mixed>>,truncated:bool}
+ */
+function repo_deploy_jobs_by_correlation(mysqli $db, string $correlationId, int $limit = VIRTUSPHERE_LOG_CORRELATION_JOB_LIMIT): array
+{
+    $limit = max(1, $limit);
+    if (trim($correlationId) === '') {
+        return ['jobs' => [], 'truncated' => false];
+    }
+
+    $queryLimit = $limit + 1;
+    $stmt = $db->prepare(
+        'SELECT j.id, j.mission_id, m.mission_name, j.status, j.created_at
+         FROM deploy_jobs j
+         LEFT JOIN deploy_missions m ON m.id = j.mission_id
+         WHERE j.correlation_id = ?
+         ORDER BY j.id DESC
+         LIMIT ?'
+    );
+    $stmt->bind_param('si', $correlationId, $queryLimit);
+    $stmt->execute();
+    $rows = repo_fetch_all($stmt->get_result());
+    $truncated = count($rows) > $limit;
+
+    return ['jobs' => $truncated ? array_slice($rows, 0, $limit) : $rows, 'truncated' => $truncated];
+}
+
 function repo_deploy_job(mysqli $db, int $jobId): ?array
 {
     return repo_fetch_one(

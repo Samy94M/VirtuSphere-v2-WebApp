@@ -359,7 +359,7 @@ function repo_recent_logs(mysqli $db, array $filter, int $limit = 50, int $offse
     $limit = max(1, min(500, $limit));
     $offset = max(0, $offset);
     $filter = repo_log_filter($filter);
-    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
+    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
         . $filter['sql'] . ' ORDER BY l.id DESC LIMIT ? OFFSET ?';
     $types = $filter['types'] . 'ii';
     $params = [...$filter['params'], $limit, $offset];

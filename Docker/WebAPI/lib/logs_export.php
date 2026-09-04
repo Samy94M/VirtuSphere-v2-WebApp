@@ -45,9 +45,13 @@ function logs_export_send_csv(mysqli $connection, array $filter, int $userId): n
     $export = logs_export_prepare($connection, $filter, $userId);
     $bounds = $export['bounds'];
     $rows = $export['rows'];
+    // The correlation id is a column of the file, not only of the screen: the
+    // export is what leaves the portal, and an incident report built from it
+    // has to be able to point back at the trace it came from.
     $header = [
         __t('logs.th_id'), __t('logs.th_time'), __t('logs.th_category'),
         __t('logs.th_user'), __t('logs.th_ip'), __t('logs.th_message'),
+        __t('logs.th_correlation'),
     ];
 
     portal_send_csv('logs-' . $filter['tab'], $header, $rows, [
@@ -125,6 +129,7 @@ function logs_export_rows(mysqli $connection, array $filter, int $max): array
                 (string) ($row['user_name'] ?? ($row['user_id'] ?? '')),
                 (string) ($row['ip'] ?? ''),
                 (string) ($row['log_message'] ?? ''),
+                (string) ($row['correlation_id'] ?? ''),
             ];
         }
         if (count($chunk) < VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS) {

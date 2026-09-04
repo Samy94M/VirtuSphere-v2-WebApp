@@ -558,9 +558,68 @@
         });
     }
 
+    // Copy-to-clipboard for a diagnostic identifier (the correlation id in the
+    // audit table, in the CSV header row and on a job log). A correlation id is
+    // sixteen hex characters that an operator has to retype into a search field
+    // to follow a trace; a copy button is the difference between a usable trace
+    // and a transcription exercise.
+    //
+    // A real <button> with a real label, so it is reachable with Tab and
+    // activated with Enter and Space by the browser rather than by a key
+    // handler of ours. It is rendered inside a container that also carries the
+    // value as text, so the value stays visible and selectable without JS: the
+    // button is an accelerator, never the only way to get the id.
+    //
+    // The confirmation is announced as well as shown. A silent success looks
+    // exactly like a silent failure, and clipboard writes DO fail (an insecure
+    // origin has no navigator.clipboard at all, which is the normal case on a
+    // LAN portal served over plain HTTP before the HTTPS flow is enabled). So
+    // the failure branch is a real branch with its own message, not a catch
+    // that shrugs.
+    function initCopyButtons() {
+        var RESET_MS = 2000;
+
+        function announce(button, message, ok) {
+            var status = button.parentNode ? button.parentNode.querySelector('[data-copy-status]') : null;
+            if (!status) {
+                return;
+            }
+            status.textContent = message;
+            status.classList.toggle('is-error', !ok);
+            status.hidden = false;
+            window.clearTimeout(Number(status.getAttribute('data-copy-timer')) || 0);
+            status.setAttribute('data-copy-timer', String(window.setTimeout(function () {
+                status.hidden = true;
+                status.textContent = '';
+                status.classList.remove('is-error');
+            }, RESET_MS)));
+        }
+
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-copy-value]');
+            if (!button) {
+                return;
+            }
+            event.preventDefault();
+            var value = button.getAttribute('data-copy-value') || '';
+            var done = button.getAttribute('data-copy-done') || '';
+            var failed = button.getAttribute('data-copy-failed') || '';
+            if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+                announce(button, failed, false);
+                return;
+            }
+            navigator.clipboard.writeText(value).then(function () {
+                announce(button, done, true);
+            }).catch(function () {
+                announce(button, failed, false);
+            });
+        });
+    }
+
     initConfirmDialog();
     initTabs();
     initSessionTimer();
     initTimeDrift();
     initBusyButtons();
+    initCopyButtons();
 }());

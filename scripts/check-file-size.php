@@ -121,6 +121,10 @@ const FILE_SIZE_ALLOWANCES = [
     // entry because it names all 29 deploy_vms columns the wire has always
     // carried plus the two additive ones; it is the wire contract's SSoT and
     // belongs where every other SSoT constant sits, not next to one caller.
+    // Etappe 15E raised constants.php 722->727: the bound on the deploy jobs listed
+    // beside an exact correlation search, with the reason it is bounded at all
+    // (one portal request can enqueue a staggered batch) and that the panel is an
+    // orientation aid rather than the job list, which deploy.php owns.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
@@ -129,7 +133,7 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 722,
+        'lines' => 727,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],

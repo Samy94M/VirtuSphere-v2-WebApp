@@ -53,6 +53,9 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'deploy_preview_rows',
         'deploy_job_payload_summary',
         'repo_deploy_jobs',
+        // Etappe 15E: the jobs one traced portal request enqueued, read beside an
+        // exact correlation search on logs.php.
+        'repo_deploy_jobs_by_correlation',
         'repo_deploy_job',
         'repo_deploy_retry_job',
         'repo_deploy_job_logs',

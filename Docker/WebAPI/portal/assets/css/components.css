@@ -539,6 +539,31 @@ tr.row-editor textarea {
     background: var(--surface);
 }
 
+/* A correlation id plus its copy accelerator and the confirmation that follows.
+   Inline-flex so the three parts stay on one line inside a table cell, and the
+   status keeps its own space instead of pushing the id sideways when it
+   appears. */
+.correlation-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.correlation-id .copy-button {
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+}
+
+.copy-status {
+    color: var(--success);
+    font-size: 0.8rem;
+}
+
+.copy-status.is-error {
+    color: var(--danger);
+}
+
 /* A disclosure holding the diagnostic half of a filter form. It reads as part
    of the form rather than as a panel of its own, so it borrows the field
    background and keeps a hairline instead of a border box. */

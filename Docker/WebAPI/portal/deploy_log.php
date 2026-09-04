@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/correlation_display.php';
 require_once __DIR__ . '/../lib/deploy_display.php';
+require_once __DIR__ . '/../lib/log_filter.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_log_panels.php';
 require_once __DIR__ . '/../lib/deploy_log_recovery.php';
@@ -249,6 +251,16 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
+        <?php // The trace of the portal request that enqueued this job
+              // (ADR-0032). Rendered exactly as the audit table renders it, so
+              // the id can be carried from here into the log search and back;
+              // the link goes to that search, which this page is not. It is
+              // gated on users.manage because the audit view it opens is.
+              // A job from before the id exists shows a dash, not a blank. ?>
+        <article class="card kpi"><span class="muted"><?php echo h(__t('logs.th_correlation')); ?></span><span class="value value-small"><?php echo portal_correlation_id(
+            (string) ($job['correlation_id'] ?? ''),
+            can('users.manage', $user) ? log_filter_correlation_url(VIRTUSPHERE_LOG_TAB_DEPLOY, (string) ($job['correlation_id'] ?? '')) : ''
+        ); ?></span></article>
     </section>
 
     <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds); ?></div>

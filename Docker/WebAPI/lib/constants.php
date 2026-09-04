@@ -35,6 +35,11 @@ const VIRTUSPHERE_LOGIN_ATTEMPT_RETENTION_DAYS = 7;
 // Hard cap for the logs.php CSV export: a year of security rows must not
 // produce an unbounded stream. A truncated export is by design, not an error.
 const VIRTUSPHERE_LOG_EXPORT_MAX_ROWS = 10000;
+// Deploy jobs listed beside an exact correlation search. One portal request can
+// enqueue a staggered batch, so the list is bounded and says when it was cut;
+// it is an orientation aid next to the audit rows, not the job list itself
+// (deploy.php owns that).
+const VIRTUSPHERE_LOG_CORRELATION_JOB_LIMIT = 20;
 
 // Local PowerShell day logs on the MECM server and deploy clients (Etappe
 // 10D). The two shipped packages mirror these values in their local logging

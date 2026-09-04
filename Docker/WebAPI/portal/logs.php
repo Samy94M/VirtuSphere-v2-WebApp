@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/correlation_display.php';
 require_once __DIR__ . '/../lib/log_filter.php';
+require_once __DIR__ . '/../lib/logs_correlation_panel.php';
 require_once __DIR__ . '/../lib/logs_export.php';
 require_once __DIR__ . '/../lib/logs_filter_form.php';
 require_once __DIR__ . '/../lib/portal_export.php';
@@ -91,7 +93,7 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
               // be on the page rather than inferred. ?>
         <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?> <?php echo h(__t('logs.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <div class="table-wrap" tabindex="0"><table>
-            <thead><tr><th><?php echo h(__t('logs.th_id')); ?></th><th><?php echo h(__t('logs.th_time')); ?></th><th><?php echo h(__t('logs.th_category')); ?></th><th><?php echo h(__t('logs.th_user')); ?></th><th><?php echo h(__t('logs.th_ip')); ?></th><th><?php echo h(__t('logs.th_message')); ?></th></tr></thead>
+            <thead><tr><th><?php echo h(__t('logs.th_id')); ?></th><th><?php echo h(__t('logs.th_time')); ?></th><th><?php echo h(__t('logs.th_category')); ?></th><th><?php echo h(__t('logs.th_user')); ?></th><th><?php echo h(__t('logs.th_ip')); ?></th><th><?php echo h(__t('logs.th_message')); ?></th><th><?php echo h(__t('logs.th_correlation')); ?></th></tr></thead>
             <tbody>
             <?php foreach ($rows as $row) { ?>
                 <tr>
@@ -101,9 +103,16 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                     <td><?php echo h($row['user_name'] ?? ($row['user_id'] ?? '')); ?></td>
                     <td><?php echo h($row['ip'] ?? ''); ?></td>
                     <td class="log-message"><?php echo h($row['log_message'] ?? ''); ?></td>
+                    <?php // The trace link is dropped while this view already IS
+                          // that trace: a link to the page you are on reads as a
+                          // different page. ?>
+                    <td class="nowrap"><?php echo portal_correlation_id(
+                        (string) ($row['correlation_id'] ?? ''),
+                        $filter['correlation'] === '' ? log_filter_correlation_url($tab, (string) ($row['correlation_id'] ?? '')) : ''
+                    ); ?></td>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td colspan="6" class="table-empty"><?php
+            <?php if ($rows === []) { ?><tr><td colspan="7" class="table-empty"><?php
                 // Three different answers. A refused filter has not been run at
                 // all, so saying "nothing found" would report a result the page
                 // never obtained.
@@ -127,5 +136,6 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
         </nav>
         <?php } ?>
     </section>
+    <?php logs_render_correlation_jobs($connection, $filter, $user); ?>
 </div>
 <?php layout_footer(); ?>
