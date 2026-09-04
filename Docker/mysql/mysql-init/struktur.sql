@@ -298,6 +298,10 @@ CREATE TABLE IF NOT EXISTS deploy_logs (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX deploy_logs_category_lookup (category),
     INDEX deploy_logs_event_object_time (event_code, object_type, object_id, created_at),
+    -- Etappe 15: the correlation id became a searched column (audit table, its
+    -- count, and the jobs of one traced request). id trails the key because
+    -- every reader orders by the primary key descending.
+    INDEX deploy_logs_correlation_lookup (correlation_id, id),
     CONSTRAINT fk_deploy_logs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
     CONSTRAINT deploy_logs_structured_audit_check CHECK (
         (event_code IS NULL AND object_type IS NULL AND object_id IS NULL AND result IS NULL AND context_json IS NULL) OR
@@ -477,6 +481,9 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- the first terminal row with attempts > 0. Completion time and id make
     -- that lookup deterministic.
     INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id),
+    -- Etappe 15: the jobs of one traced portal request, read beside its audit
+    -- rows; same shape as the deploy_logs lookup.
+    INDEX deploy_jobs_correlation_lookup (correlation_id, id),
     CONSTRAINT fk_deploy_jobs_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE,
     CONSTRAINT fk_deploy_jobs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
     CONSTRAINT fk_deploy_jobs_esxi_credential FOREIGN KEY (credential_esxi_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL,

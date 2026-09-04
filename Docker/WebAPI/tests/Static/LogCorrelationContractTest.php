@@ -114,6 +114,37 @@ final class LogCorrelationContractTest extends TestCase
     }
 
     /**
+     * The lookup indexes exist in both places a schema comes from.
+     *
+     * Etappe 15 turned the correlation id from a written column into a searched
+     * one: without an index the count is a full table scan and the page query is
+     * a backwards walk of the primary key that only stops at the LIMIT, on the
+     * page an operator opens precisely while something is going wrong. The
+     * measurement is in the migration's own docblock; this pins that neither
+     * the fresh schema nor the migration can lose the index on its own.
+     *
+     * The trailing `id` is part of the contract, not an accident: every reader
+     * filters on the id and orders by the primary key descending, so without it
+     * the range would be collected and sorted afterwards.
+     */
+    public function testTheCorrelationLookupIndexesExistInSchemaAndMigration(): void
+    {
+        // Repo root, like the other schema-aware contracts: this file lives at
+        // Docker/WebAPI/tests/Static, so four levels up is the checkout.
+        $schemaPath = str_replace('\\', '/', dirname(__DIR__, 4)) . '/Docker/mysql/mysql-init/struktur.sql';
+        self::assertFileExists($schemaPath, 'the fresh schema must be reachable; run the suite with the repo mounted');
+        $schema = (string) file_get_contents($schemaPath);
+        $migration = $this->source('lib/migrations/0051_correlation_lookup_index.php');
+
+        foreach (['deploy_logs_correlation_lookup', 'deploy_jobs_correlation_lookup'] as $index) {
+            self::assertStringContainsString($index . ' (correlation_id, id)', $schema, $index . ' must exist in the fresh schema');
+            self::assertStringContainsString($index, $migration, $index . ' must be added by the migration too');
+        }
+
+        self::assertStringContainsString('migrator_add_index(', $migration, 'the migration must be idempotent');
+    }
+
+    /**
      * The trace link drops every other filter. A trace is read to see the WHOLE
      * request; carrying the category or the date range that happened to be set
      * would show a slice of it while looking like the complete answer.

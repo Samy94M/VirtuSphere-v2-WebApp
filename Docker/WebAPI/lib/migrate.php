@@ -16,6 +16,7 @@ require_once __DIR__ . '/migrations/0047_deploy_create_results.php';
 require_once __DIR__ . '/migrations/0048_create_unit_release.php';
 require_once __DIR__ . '/migrations/0049_supervisor_runtime_state.php';
 require_once __DIR__ . '/migrations/0050_mecm_rollout_hostname.php';
+require_once __DIR__ . '/migrations/0051_correlation_lookup_index.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1211,6 +1212,7 @@ SQL;
     '0048_create_unit_release' => migrate_0048_create_unit_release(...),
     '0049_supervisor_runtime_state' => migrate_0049_supervisor_runtime_state(...),
     '0050_mecm_rollout_hostname' => migrate_0050_mecm_rollout_hostname(...),
+    '0051_correlation_lookup_index' => migrate_0051_correlation_lookup_index(...),
 ];
 try {
     $db = db();

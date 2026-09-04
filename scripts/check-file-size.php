@@ -125,10 +125,13 @@ const FILE_SIZE_ALLOWANCES = [
     // beside an exact correlation search, with the reason it is bounded at all
     // (one portal request can enqueue a staggered batch) and that the panel is an
     // orientation aid rather than the job list, which deploy.php owns.
+    // Etappe 15F raised migrate.php 1259->1261 for migration 0051: the same two
+    // registry lines - a require and a map entry - that every migration since
+    // 0042 costs, with its body in lib/migrations/.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1259,
+        'lines' => 1261,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],
