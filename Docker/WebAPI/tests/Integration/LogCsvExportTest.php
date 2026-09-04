@@ -6,6 +6,11 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/lang.php';
+// The export renders timestamps through the portal presenters. This file used
+// to reach them only because some earlier test in the full suite had loaded
+// layout.php first, so running it alone died on an undefined function - the
+// same require-closure gap CliRequireClosureContractTest guards in lib/.
+require_once dirname(__DIR__, 2) . '/lib/layout.php';
 require_once dirname(__DIR__, 2) . '/lib/log_filter.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/log.php';
 require_once dirname(__DIR__, 2) . '/lib/logs_export.php';
@@ -94,10 +99,9 @@ final class LogCsvExportTest extends TestCase
     {
         $this->seed(120);
         $filter = $this->filter();
-        $args = log_filter_repo_args($filter);
 
-        $table = repo_recent_logs($this->db, 50, 0, ...$args);
-        $export = logs_export_rows($this->db, $args, 120);
+        $table = repo_recent_logs($this->db, $filter, 50, 0);
+        $export = logs_export_rows($this->db, $filter, 120);
 
         self::assertCount(120, $export);
         foreach (array_values($table) as $index => $row) {
@@ -106,7 +110,7 @@ final class LogCsvExportTest extends TestCase
 
         // ... and the second page continues where the first left off, in the
         // same order the file has.
-        $secondPage = repo_recent_logs($this->db, 50, 50, ...$args);
+        $secondPage = repo_recent_logs($this->db, $filter, 50, 50);
         self::assertSame((string) $secondPage[0]['id'], $export[50][0]);
     }
 
@@ -119,9 +123,9 @@ final class LogCsvExportTest extends TestCase
         $all = log_filter_from_query(['tab' => self::TAB, 'ip' => self::IP]);
         $narrowed = log_filter_from_query(['tab' => self::TAB, 'ip' => self::IP, 'category' => self::CATEGORY]);
 
-        self::assertSame(40, repo_count_logs($this->db, ...log_filter_repo_args($all)));
-        self::assertSame(30, repo_count_logs($this->db, ...log_filter_repo_args($narrowed)));
-        self::assertCount(30, logs_export_rows($this->db, log_filter_repo_args($narrowed), 30));
+        self::assertSame(40, repo_count_logs($this->db, $all));
+        self::assertSame(30, repo_count_logs($this->db, $narrowed));
+        self::assertCount(30, logs_export_rows($this->db, $narrowed, 30));
     }
 
     /**
@@ -136,7 +140,7 @@ final class LogCsvExportTest extends TestCase
         // `deploy` is not in the security tab, so it is dropped and the whole
         // tab is exported instead. The row from the deploy tab must not appear.
         $filter = log_filter_from_query(['tab' => self::TAB, 'ip' => self::IP, 'category' => VIRTUSPHERE_LOG_CATEGORY_DEPLOY]);
-        $rows = logs_export_rows($this->db, log_filter_repo_args($filter), 100);
+        $rows = logs_export_rows($this->db, $filter, 100);
 
         self::assertCount(5, $rows);
     }

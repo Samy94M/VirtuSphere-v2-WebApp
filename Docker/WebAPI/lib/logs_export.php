@@ -12,10 +12,13 @@ require_once __DIR__ . '/repo/log.php';
  * Three properties are the whole point of this module and none of them can be
  * left to the caller:
  *
- *  - the export and the table run the SAME query. Both take their repository
- *    arguments from log_filter_repo_args() and both order by `l.id DESC`, so a
- *    download can never quietly cover a different set of rows than the screen
- *    it was started from.
+ *  - the export and the table run the SAME query. Both are handed the one
+ *    validated filter struct and both order by `l.id DESC`, so a download can
+ *    never quietly cover a different set of rows than the screen it was started
+ *    from. Passing the struct itself rather than an unpacked argument list is
+ *    what keeps that true as the filter grows: a positional list of same-typed
+ *    strings lets a caller swap two and get a working query for the wrong
+ *    question.
  *  - the match count is established BEFORE the first row is streamed. Once
  *    output has begun no header can be added and no decision can be revised,
  *    so "was this capped" has to be known while it is still answerable.
@@ -35,7 +38,7 @@ const VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS = 500;
 /**
  * Streams the export and exits. Never returns.
  *
- * @param array{tab:string,category:string,search:string,ip:string,categories:list<string>} $filter
+ * @param array<string,mixed> $filter The validated struct (lib/log_filter.php).
  */
 function logs_export_send_csv(mysqli $connection, array $filter, int $userId): never
 {
@@ -57,15 +60,14 @@ function logs_export_send_csv(mysqli $connection, array $filter, int $userId): n
 /**
  * Reads and audits one export before response streaming begins.
  *
- * @param array{tab:string,category:string,search:string,ip:string,categories:list<string>} $filter
+ * @param array<string,mixed> $filter The validated struct (lib/log_filter.php).
  * @return array{rows:list<list<string>>,total:int,bounds:array{limit:int,exported:int,truncated:bool}}
  */
 function logs_export_prepare(mysqli $connection, array $filter, ?int $userId): array
 {
-    $args = log_filter_repo_args($filter);
-    $total = repo_count_logs($connection, ...$args);
+    $total = repo_count_logs($connection, $filter);
     $bounds = log_filter_export_bounds($total);
-    $rows = logs_export_rows($connection, $args, $bounds['exported']);
+    $rows = logs_export_rows($connection, $filter, $bounds['exported']);
 
     // Exactly one audit row per export, written after the rows were read so the
     // download cannot contain its own audit line, and before the stream starts
@@ -102,18 +104,18 @@ function logs_export_prepare(mysqli $connection, array $filter, ?int $userId): a
  * 1, so asking it for nothing would return one row, and an export of an empty
  * result set would ship a data line.
  *
- * @param array{0:string,1:string,2:list<string>} $args
+ * @param array<string,mixed> $filter The validated struct (lib/log_filter.php).
  * @return list<list<string>>
  */
-function logs_export_rows(mysqli $connection, array $args, int $max): array
+function logs_export_rows(mysqli $connection, array $filter, int $max): array
 {
     $csvRows = [];
     for ($offset = 0; $offset < $max; $offset += VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS) {
         $chunk = repo_recent_logs(
             $connection,
+            $filter,
             min(VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS, $max - $offset),
-            $offset,
-            ...$args
+            $offset
         );
         foreach ($chunk as $row) {
             $csvRows[] = [

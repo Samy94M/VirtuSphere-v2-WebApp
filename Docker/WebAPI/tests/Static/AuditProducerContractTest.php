@@ -405,9 +405,13 @@ final class AuditProducerContractTest extends TestCase
     }
 
     /**
-     * The table and the export take their repository arguments from the same
-     * function. Two derivations from the same query string is one too many:
-     * the download is evidence.
+     * The table and the export query with the same struct. Two derivations from
+     * the same query string is one too many: the download is evidence.
+     *
+     * The struct is passed whole rather than unpacked into positional
+     * arguments. With nine same-typed fields, an unpacked list lets a caller
+     * swap two and get a perfectly working query for a different question,
+     * which is exactly the failure this contract exists to prevent.
      */
     public function testTheTableAndTheExportShareOneFilterDerivation(): void
     {
@@ -415,12 +419,37 @@ final class AuditProducerContractTest extends TestCase
         $export = $this->withoutComments($this->source('lib/logs_export.php'));
 
         self::assertStringContainsString('log_filter_from_query($_GET)', $page);
-        self::assertSame(2, substr_count($page, 'log_filter_repo_args($filter)'), 'the count and the table page must both use it');
-        self::assertStringContainsString('log_filter_repo_args($filter)', $export);
+        self::assertStringContainsString('repo_count_logs($connection, $filter)', $page, 'the count reads the struct');
+        self::assertStringContainsString('repo_recent_logs($connection, $filter,', $page, 'the table page reads the struct');
+        self::assertStringContainsString('repo_count_logs($connection, $filter)', $export);
+        self::assertStringContainsString('logs_export_rows($connection, $filter,', $export);
 
-        // The page must not rebuild the filter itself any more.
+        // The page must not rebuild the filter itself any more, and the old
+        // unpacked-argument helper must not come back.
+        self::assertStringNotContainsString('log_filter_repo_args', $page);
+        self::assertStringNotContainsString('log_filter_repo_args', $export);
         self::assertStringNotContainsString("request_trimmed(\$_GET, 'q')", $page);
         self::assertStringNotContainsString("request_trimmed(\$_GET, 'ip')", $page);
+    }
+
+    /**
+     * A rejected filter value is never queried around.
+     *
+     * Dropping it and querying the rest shows a WIDER result while the field
+     * still displays the value the operator believes is filtering, and for a
+     * correlation search that is the difference between "this request did
+     * nothing else" and "you searched for the wrong id". The export is gated on
+     * the same answer, or the file would answer the wide question the screen
+     * declined to answer.
+     */
+    public function testARejectedFilterIsNeverQueriedAround(): void
+    {
+        $page = $this->withoutComments($this->source('portal/logs.php'));
+
+        self::assertStringContainsString('log_filter_is_usable($filter)', $page);
+        self::assertStringContainsString('$usable && ($_GET[\'export\'] ?? \'\') === \'csv\'', $page, 'the export is gated on the same answer');
+        self::assertMatchesRegularExpression('/\$total = \$usable \? repo_count_logs/', $page);
+        self::assertMatchesRegularExpression('/\$rows = \$usable \? repo_recent_logs/', $page);
     }
 
     /** @return array<string, string> relative path => source */

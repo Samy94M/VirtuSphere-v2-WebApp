@@ -539,6 +539,20 @@ tr.row-editor textarea {
     background: var(--surface);
 }
 
+/* A disclosure holding the diagnostic half of a filter form. It reads as part
+   of the form rather than as a panel of its own, so it borrows the field
+   background and keeps a hairline instead of a border box. */
+.filter-advanced {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.filter-advanced > summary {
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
 .pagination {
     display: flex;
     flex-wrap: wrap;

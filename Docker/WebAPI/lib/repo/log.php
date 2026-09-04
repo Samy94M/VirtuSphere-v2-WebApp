@@ -203,12 +203,28 @@ function repo_purge_login_attempts(mysqli $db, int $retentionDays = VIRTUSPHERE_
 }
 
 /**
- * @param array<int, string> $categories Restrict to these categories (OR-combined
- *        via IN). Unknown values are dropped; an empty list means no restriction.
+ * The WHERE clause of one audit-log filter.
+ *
+ * Takes the validated struct from lib/log_filter.php rather than a growing list
+ * of positional strings. Nine of them had already accumulated in the call sites
+ * by the time the date range and the structured fields arrived, and a caller
+ * that swaps two same-typed arguments in that shape produces a working query
+ * for the wrong question. The struct also keeps the count, the table page and
+ * the export literally the same argument.
+ *
+ * Only fields present in the struct are read, and every one of them is a
+ * parameter; nothing here is interpolated. Categories are re-checked against the
+ * taxonomy even though the caller validated them, because this is the layer
+ * that owns what the column may contain.
+ *
+ * @param array<string,mixed> $filter
  * @return array{sql: string, types: string, params: array<int, string>}
  */
-function repo_log_filter(string $search, string $ip, array $categories = []): array
+function repo_log_filter(array $filter): array
 {
+    $search = (string) ($filter['search'] ?? '');
+    $ip = (string) ($filter['ip'] ?? '');
+    $categories = (array) ($filter['categories'] ?? []);
     $conditions = [];
     $types = '';
     $params = [];
@@ -236,17 +252,49 @@ function repo_log_filter(string $search, string $ip, array $categories = []): ar
             $params[] = $category;
         }
     }
+
+    // Half-open interval: `>=` on the lower bound, `<` on the upper. The upper
+    // bound is the start of the day AFTER the one typed, so the last day is
+    // included whole; a `<=` on that value would additionally match rows written
+    // in the first second of the following day.
+    if (($filter['from_utc'] ?? null) !== null) {
+        $conditions[] = 'l.created_at >= ?';
+        $types .= 's';
+        $params[] = (string) $filter['from_utc'];
+    }
+    if (($filter['to_utc'] ?? null) !== null) {
+        $conditions[] = 'l.created_at < ?';
+        $types .= 's';
+        $params[] = (string) $filter['to_utc'];
+    }
+
+    // Exact equality throughout. The correlation id is a diagnostic identity and
+    // the structured fields are closed vocabularies; a LIKE on any of them would
+    // turn an identity into a prefix and return rows that merely start the same.
+    foreach ([
+        'correlation' => 'l.correlation_id',
+        'event_code' => 'l.event_code',
+        'object_type' => 'l.object_type',
+        'object_id' => 'l.object_id',
+        'result' => 'l.result',
+    ] as $field => $column) {
+        $value = (string) ($filter[$field] ?? '');
+        if ($value !== '') {
+            $conditions[] = $column . ' = ?';
+            $types .= 's';
+            $params[] = $value;
+        }
+    }
+
     $sql = $conditions !== [] ? ' WHERE ' . implode(' AND ', $conditions) : '';
 
     return ['sql' => $sql, 'types' => $types, 'params' => $params];
 }
 
-/**
- * @param array<int, string> $categories
- */
-function repo_count_logs(mysqli $db, string $search = '', string $ip = '', array $categories = []): int
+/** @param array<string,mixed> $filter The validated struct (lib/log_filter.php). */
+function repo_count_logs(mysqli $db, array $filter): int
 {
-    $filter = repo_log_filter($search, $ip, $categories);
+    $filter = repo_log_filter($filter);
     $sql = 'SELECT COUNT(*) AS total FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id' . $filter['sql'];
 
     $stmt = $db->prepare($sql);
@@ -305,14 +353,12 @@ function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400,
     return $rows;
 }
 
-/**
- * @param array<int, string> $categories
- */
-function repo_recent_logs(mysqli $db, int $limit = 50, int $offset = 0, string $search = '', string $ip = '', array $categories = []): array
+/** @param array<string,mixed> $filter The validated struct (lib/log_filter.php). */
+function repo_recent_logs(mysqli $db, array $filter, int $limit = 50, int $offset = 0): array
 {
     $limit = max(1, min(500, $limit));
     $offset = max(0, $offset);
-    $filter = repo_log_filter($search, $ip, $categories);
+    $filter = repo_log_filter($filter);
     $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
         . $filter['sql'] . ' ORDER BY l.id DESC LIMIT ? OFFSET ?';
     $types = $filter['types'] . 'ii';

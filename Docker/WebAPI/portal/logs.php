@@ -6,6 +6,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/log_filter.php';
 require_once __DIR__ . '/../lib/logs_export.php';
+require_once __DIR__ . '/../lib/logs_filter_form.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 
@@ -20,45 +21,45 @@ const LOGS_PER_PAGE = 50;
 
 $tabKeys = array_keys(VIRTUSPHERE_LOG_TABS);
 // One validated struct for this request. The table below and the CSV export
-// both read their arguments out of it, so the download always answers the same
-// question as the screen it was started from (lib/log_filter.php).
+// both read it, so the download always answers the same question as the screen
+// it was started from (lib/log_filter.php).
 $filter = log_filter_from_query($_GET);
 $tab = $filter['tab'];
-$search = $filter['search'];
-$ip = $filter['ip'];
-$category = $filter['category'];
-$tabCategories = VIRTUSPHERE_LOG_TABS[$tab];
 $retentionDays = log_retention_days_for_tab($tab);
+// A rejected value is not dropped and queried around. Doing that would show a
+// WIDER result while the field still displays the value the operator believes
+// is filtering, which is the one outcome worse than an error message.
+$usable = log_filter_is_usable($filter);
 
 // CSV list export: read-only GET download of the current tab + filters,
 // streams and exits before layout. Ignores pagination on purpose (the export
 // is "everything the filter matches", capped) and fetches its rows before the
-// audit insert so the download never contains its own audit row.
-if (($_GET['export'] ?? '') === 'csv') {
+// audit insert so the download never contains its own audit row. A filter the
+// page refuses to run must not be exportable either, or the file would answer
+// the wide question the screen declined to answer.
+if ($usable && ($_GET['export'] ?? '') === 'csv') {
     logs_export_send_csv($connection, $filter, (int) $user['id']);
 }
 
 $page = max(1, request_int($_GET, 'page', 1));
-$total = repo_count_logs($connection, ...log_filter_repo_args($filter));
+$total = $usable ? repo_count_logs($connection, $filter) : 0;
 $exportBounds = log_filter_export_bounds($total);
 $totalPages = max(1, (int) ceil($total / LOGS_PER_PAGE));
 $page = min($page, $totalPages);
 $offset = ($page - 1) * LOGS_PER_PAGE;
-$rows = repo_recent_logs($connection, LOGS_PER_PAGE, $offset, ...log_filter_repo_args($filter));
+$rows = $usable ? repo_recent_logs($connection, $filter, LOGS_PER_PAGE, $offset) : [];
 
 $pageUrl = static fn (int $targetPage): string => log_filter_url($filter, ['page' => $targetPage]);
 
 // Same filter set as $pageUrl, but no page: the export always starts at the
 // newest matching row.
-$exportUrl = static fn (): string => log_filter_url($filter, ['export' => 'csv']);
+$exportUrl = $rows !== [] ? log_filter_url($filter, ['export' => 'csv']) : null;
 
-// Switching tabs keeps the free-text/IP filters but drops the tab-scoped
-// category and resets pagination.
-$tabUrl = static fn (string $targetTab): string => log_filter_url(
-    [...$filter, 'tab' => $targetTab],
-    [],
-    false
-);
+// Reset clears every filter and keeps only the tab. Switching tabs does the
+// same: a category, an event code or an object type belongs to the section it
+// was chosen in, and carrying it into another tab selects nothing while looking
+// like a filter.
+$tabUrl = static fn (string $targetTab): string => log_filter_url(log_filter_empty($targetTab));
 
 layout_header(__t('logs.title'), $user, 'logs', 'system-status');
 ?>
@@ -75,24 +76,7 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
         $tabKeys
     )); ?>
     <section class="panel">
-        <form class="form-grid" method="get" action="logs.php">
-            <input type="hidden" name="tab" value="<?php echo h($tab); ?>">
-            <label><?php echo h(__t('logs.search')); ?><input name="q" value="<?php echo h($search); ?>" placeholder="<?php echo h(__t('logs.search_placeholder')); ?>"></label>
-            <label><?php echo h(__t('logs.ip')); ?><input name="ip" value="<?php echo h($ip); ?>" placeholder="<?php echo h(__t('logs.ip_placeholder')); ?>"></label>
-            <label><?php echo h(__t('logs.category')); ?>
-                <select name="category">
-                    <option value=""><?php echo h(__t('logs.category_all')); ?></option>
-                    <?php foreach ($tabCategories as $categoryOption) { ?>
-                        <option value="<?php echo h($categoryOption); ?>" <?php echo $category === $categoryOption ? 'selected' : ''; ?>><?php echo h(log_category_label($categoryOption)); ?></option>
-                    <?php } ?>
-                </select>
-            </label>
-            <div class="actions">
-                <button class="button" type="submit"><?php echo h(__t('logs.apply')); ?></button>
-                <a class="button button-secondary" href="<?php echo h($tabUrl($tab)); ?>"><?php echo h(__t('logs.reset')); ?></a>
-                <?php if ($rows !== []) { ?><a class="button button-secondary" href="<?php echo h($exportUrl()); ?>"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
-            </div>
-        </form>
+        <?php logs_render_filter_form($filter, $tabUrl($tab), $exportUrl); ?>
         <?php if ($rows !== [] && $exportBounds['truncated']) { ?>
             <p class="muted" data-export-truncated="1"><?php echo h(__t('logs.export_truncated_note', [
                 'limit' => $exportBounds['limit'],
@@ -119,7 +103,16 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                     <td class="log-message"><?php echo h($row['log_message'] ?? ''); ?></td>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td colspan="6" class="table-empty"><?php echo h(($search !== '' || $ip !== '' || $category !== '') ? __t('logs.empty_filtered') : __t('logs.empty')); ?></td></tr><?php } ?>
+            <?php if ($rows === []) { ?><tr><td colspan="6" class="table-empty"><?php
+                // Three different answers. A refused filter has not been run at
+                // all, so saying "nothing found" would report a result the page
+                // never obtained.
+                echo h(match (true) {
+                    !$usable => __t('logs.empty_invalid'),
+                    log_filter_is_narrowed($filter) => __t('logs.empty_filtered'),
+                    default => __t('logs.empty'),
+                });
+            ?></td></tr><?php } ?>
             </tbody>
         </table></div>
         <?php if ($totalPages > 1) { ?>
