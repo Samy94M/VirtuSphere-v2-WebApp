@@ -306,15 +306,24 @@ echo 'JSON' . json_encode($db->query("SELECT claim_state FROM deploy_runtime_ide
     dialog.locator('button.button-danger, button[value="confirm"]').first().click(),
   ]);
 
+  // The active count is read in the SAME call as the state, because that is the
+  // input the product decided on. The spec used to assert `paused` outright on
+  // the assumption that no job runs in this suite, which it never established:
+  // the specs before this one queue real jobs and the QA stack runs a real
+  // worker, so one claimed job earlier in the run turned this into a red gate
+  // with nothing wrong. What is being pinned is the RULE, and it stays exactly
+  // as strict when nothing is active.
   stored = phpJson(`
 $db = db();
 $row = $db->query("SELECT claim_state, claim_changed_by IS NOT NULL AS has_actor FROM deploy_runtime_identity WHERE id = 1")->fetch_assoc();
 $audit = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = 'deploy.claim_paused'")->fetch_assoc()['c'];
-echo 'JSON' . json_encode(['state' => $row['claim_state'], 'actor' => (int) $row['has_actor'], 'audit' => $audit]) . 'JSON';
+$active = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_jobs WHERE status IN ('queued','running','cancelling')")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['state' => $row['claim_state'], 'actor' => (int) $row['has_actor'], 'audit' => $audit, 'active' => $active]) . 'JSON';
 `);
-  // No job is running in this suite, so the pause takes effect immediately
-  // rather than waiting for one.
-  expect(stored.state, 'with nothing active the pause is immediate').toBe('paused');
+  expect(
+    stored.state,
+    `a pause with ${stored.active} active job(s) must wait for them, and take effect at once without`
+  ).toBe(stored.active > 0 ? 'pause_after_current' : 'paused');
   expect(stored.actor, 'the pause records who decided it').toBe(1);
   expect(stored.audit, 'exactly one audit row for one decision').toBe(1);
 

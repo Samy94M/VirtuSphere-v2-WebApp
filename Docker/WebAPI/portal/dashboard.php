@@ -11,6 +11,12 @@ require_once __DIR__ . '/../lib/repo/heartbeats.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
+// The three label helpers of the service warning below live here, and the page
+// called them without loading the module. Nothing noticed for two stages: the
+// call sits inside the branch that renders only while the deploy service wants
+// attention, so the dashboard answered a fatal exactly when an operator opened
+// it to find out what was wrong, and stayed green every other day.
+require_once __DIR__ . '/../lib/system_status_service_panel.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
