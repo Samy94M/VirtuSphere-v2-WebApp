@@ -72,7 +72,11 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
           // top-level headings; a second help button pointed at the same anchor.
           // What is left is the one line the chrome cannot know. ?>
     <section class="page-intro">
-        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.hint')); ?></p>
+        <?php // Every timestamp on this page is rendered in the configured
+              // display timezone while the database holds UTC (ADR-0022), so
+              // the zone is named once here rather than left to be guessed from
+              // a row that may be hours off the reader's own clock. ?>
+        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
         <div class="actions">
             <a class="button" href="<?php echo h($refreshUrl); ?>"><?php echo h(__t('system_status.refresh_status')); ?></a>
         </div>

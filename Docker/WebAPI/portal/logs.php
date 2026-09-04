@@ -63,11 +63,17 @@ $tabUrl = static fn (string $targetTab): string => log_filter_url(
 layout_header(__t('logs.title'), $user, 'logs', 'system-status');
 ?>
 <div class="stack">
-    <nav class="tab-list" aria-label="<?php echo h(__t('logs.tabs_label')); ?>">
-        <?php foreach ($tabKeys as $tabKey) { ?>
-            <a class="tab" href="<?php echo h($tabUrl($tabKey)); ?>"<?php echo $tab === $tabKey ? ' aria-current="page"' : ''; ?>><?php echo h(log_tab_label($tabKey)); ?></a>
-        <?php } ?>
-    </nav>
+    <?php // Server-rendered page navigation through the one helper, so the
+          // "exactly one aria-current, no role=tab" shape has a single
+          // implementation (lib/layout_presenters.php). ?>
+    <?php echo portal_page_nav(__t('logs.tabs_label'), array_map(
+        static fn (string $tabKey): array => [
+            'href' => $tabUrl($tabKey),
+            'label' => log_tab_label($tabKey),
+            'current' => $tab === $tabKey,
+        ],
+        $tabKeys
+    )); ?>
     <section class="panel">
         <form class="form-grid" method="get" action="logs.php">
             <input type="hidden" name="tab" value="<?php echo h($tab); ?>">
@@ -95,7 +101,11 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
         <?php } ?>
     </section>
     <section class="panel">
-        <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?></p>
+        <?php // The time column is the configured display timezone while the
+              // rows are stored in UTC (ADR-0022). An audit row is read against
+              // an incident whose time somebody else noted, so the zone has to
+              // be on the page rather than inferred. ?>
+        <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?> <?php echo h(__t('logs.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('logs.th_id')); ?></th><th><?php echo h(__t('logs.th_time')); ?></th><th><?php echo h(__t('logs.th_category')); ?></th><th><?php echo h(__t('logs.th_user')); ?></th><th><?php echo h(__t('logs.th_ip')); ?></th><th><?php echo h(__t('logs.th_message')); ?></th></tr></thead>
             <tbody>

@@ -226,6 +226,37 @@ function portal_catalog_status_filter(string $action, string $current, array $la
     return $html;
 }
 
+/**
+ * Server-side page navigation: a set of links of which exactly one is the page
+ * currently open.
+ *
+ * This is deliberately NOT an ARIA tab widget. A tab widget promises a panel
+ * that swaps in place, arrow-key movement between the tabs and a single tab
+ * stop; these controls navigate to another URL, keep their own address and are
+ * reached with Tab like every other link. Announcing them as tabs would make a
+ * screen reader wait for a panel that never arrives and hand the operator a
+ * keyboard model that does not exist here, which is why `role="tab"` and
+ * `aria-selected` are absent by contract (PortalPageNavContractTest). The
+ * current entry is marked with `aria-current="page"` and there is exactly one
+ * of it: two would say the reader is in two places at once, none would leave
+ * the whole set unanchored.
+ *
+ * The look is the existing `.tab-list`/`.tab` pair, which the log sections
+ * already use in exactly this link-plus-aria-current shape.
+ *
+ * @param list<array{href:string,label:string,current:bool}> $items
+ */
+function portal_page_nav(string $ariaLabel, array $items): string
+{
+    $html = '<nav class="tab-list" aria-label="' . h($ariaLabel) . '">';
+    foreach ($items as $item) {
+        $current = ($item['current'] ?? false) ? ' aria-current="page"' : '';
+        $html .= '<a class="tab" href="' . h($item['href']) . '"' . $current . '>' . h($item['label']) . '</a>';
+    }
+
+    return $html . '</nav>';
+}
+
 // Localized label for a client deploy phase (fixed set, full-literal keys so
 // the lang catalog test can verify them).
 function client_phase_label(string $phase): string

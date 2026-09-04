@@ -7,6 +7,12 @@ return [
     'title_templates' => 'Vorlagen',
     'tab_missions' => 'Missionen',
     'tab_templates' => 'Vorlagen',
+    // Seitennavigation (kein Tab-Widget): die beiden Listen und, auf Detail-
+    // und VM-Seite, die beiden Bereiche derselben Mission.
+    'nav_label_lists' => 'Missionen und Vorlagen',
+    'nav_label_mission_detail' => 'Bereiche dieser Mission',
+    'nav_label_template_detail' => 'Bereiche dieser Vorlage',
+    'nav_details' => 'Details',
     'create_heading_mission' => 'Mission erstellen',
     'create_heading_template' => 'Vorlage erstellen',
     'name_no_spaces_title' => 'Name darf keine Leerzeichen enthalten.',

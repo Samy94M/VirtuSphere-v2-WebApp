@@ -7,6 +7,12 @@ return [
     'title_templates' => 'Templates',
     'tab_missions' => 'Missions',
     'tab_templates' => 'Templates',
+    // Page navigation (not a tab widget): the two lists and, on the detail and
+    // VM pages, the two sections of the same mission.
+    'nav_label_lists' => 'Missions and templates',
+    'nav_label_mission_detail' => 'Sections of this mission',
+    'nav_label_template_detail' => 'Sections of this template',
+    'nav_details' => 'Details',
     'create_heading_mission' => 'Create mission',
     'create_heading_template' => 'Create template',
     'name_no_spaces_title' => 'Name must not contain spaces.',

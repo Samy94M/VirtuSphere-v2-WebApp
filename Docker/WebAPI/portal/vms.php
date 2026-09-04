@@ -10,6 +10,7 @@ require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/vm_network_display.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
 require_once __DIR__ . '/../lib/mecm_rollout_display.php';
@@ -272,8 +273,9 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
 ?>
 <div class="stack">
     <section class="panel">
+        <?php // The mission navigation, current entry here (lib/mission_nav.php). ?>
+        <?php echo mission_detail_nav($missionId, $isTemplate, 'vms'); ?>
         <div class="actions">
-            <a class="button button-secondary" href="<?php echo h(mission_details_url($missionId)); ?>"><?php echo h(__t('vms.mission_details')); ?></a>
             <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('vms.open_deploy')); ?></a><?php } ?>
             <?php if (can('vms.write', $user)) { ?><a class="button" href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vms.add_vm')); ?></a><?php } ?>
             <?php if ($rows !== []) { ?><a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
@@ -296,7 +298,10 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
 
     <section class="panel">
         <div class="table-wrap" tabindex="0">
-            <table>
+            <?php // The one table with a pinned action column (components.css):
+                  // fifteen columns, so the row actions would otherwise sit off
+                  // screen exactly while scrolling back loses which row it was. ?>
+            <table class="table-sticky-actions">
                 <thead><tr><?php if ($canWrite) { ?><th><input type="checkbox" data-bulk-all aria-label="<?php echo h(__t('vms.bulk_select_all')); ?>"></th><?php } ?><?php
                     $vmSortParams = ['mission_id' => (string) $missionId];
                     echo portal_sort_header('vms.php', 'name', __t('vms.th_vm_name'), $sort, $dir, $vmSortParams);
@@ -305,7 +310,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'status', __t('common.status'), $sort, $dir, $vmSortParams);
-                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th class="table-action-cell"><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
                     <tr>
@@ -364,7 +369,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <?php } ?>
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['packages'] ?? [])); ?></td>
-                        <td class="actions">
+                        <td class="actions table-action-cell">
                             <a class="button button-secondary" href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo h(__t('common.edit')); ?></a>
                             <?php if (!$isTemplate && can('vms.write', $user)) { ?>
                                 <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">

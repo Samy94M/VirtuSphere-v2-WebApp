@@ -5,7 +5,6 @@ declare(strict_types=1);
 return [
     'title_template' => 'Vorlagen-VMs',
     'title_mission' => 'Missions-VMs',
-    'mission_details' => 'Missionsdetails',
     'open_deploy' => 'Bereitstellen',
     'add_vm' => 'VM hinzufügen',
     // Etappe 14D: In dieser Tabelle stehen ZWEI Namen nebeneinander. „Name" und

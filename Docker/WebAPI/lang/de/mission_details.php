@@ -5,6 +5,8 @@ declare(strict_types=1);
 return [
     'title_template' => 'Vorlagendetails',
     'title_mission' => 'Missionsdetails',
+    'heading_settings_mission' => 'Einstellungen der Mission',
+    'heading_settings_template' => 'Einstellungen der Vorlage',
     'open_deploy' => 'Bereitstellen',
     'label_wds_vlan' => 'WDS-Portgruppe (PXE)',
     'wds_vlan_hint' => 'Portgruppe, über die VMs dieser Mission per WDS/PXE starten. Für Full Pipeline, Power-Cycle + Export MACs und Export MACs muss jede betroffene VM genau eine Netzwerkkarte mit exakt diesem Portgruppennamen besitzen. Ohne WDS-Portgruppe können diese Modi nicht eingereiht werden.',

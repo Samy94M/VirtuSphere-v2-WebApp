@@ -59,6 +59,7 @@ return [
     'title' => 'System status',
     'heading' => 'System status',
     'hint' => 'A snapshot; it does not refresh itself.',
+    'timezone_note' => 'Times shown in :tz.',
     'overview_heading' => 'Overview',
     'overview_mecm' => 'MECM',
     'overview_ansible' => 'Ansible test',

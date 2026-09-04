@@ -5,7 +5,6 @@ declare(strict_types=1);
 return [
     'title_template' => 'Template VMs',
     'title_mission' => 'Mission VMs',
-    'mission_details' => 'Mission details',
     'open_deploy' => 'Deploy',
     'add_vm' => 'Add VM',
     // Etappe 14D: this table shows TWO names side by side. "Name" and

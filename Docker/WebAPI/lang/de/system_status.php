@@ -59,6 +59,7 @@ return [
     'title' => 'Systemstatus',
     'heading' => 'Systemstatus',
     'hint' => 'Momentaufnahme, sie aktualisiert sich nicht von selbst.',
+    'timezone_note' => 'Zeitangaben in :tz.',
     'overview_heading' => 'Überblick',
     'overview_mecm' => 'MECM',
     'overview_ansible' => 'Ansible-Test',

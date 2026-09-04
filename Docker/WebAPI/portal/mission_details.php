@@ -14,6 +14,7 @@ require_once __DIR__ . '/../lib/mission_transfer.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/mission_nav.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -207,13 +208,22 @@ if (!$hideMissionDatacenter) {
 }
 $locationNotes = esxi_inventory_location_notes($renderedLocationOptions);
 
-layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission_details.title_mission'), $user, $isTemplate ? 'templates' : 'missions', 'missions');
+// One title per page for tab and heading, as vms.php already builds one. They
+// disagreed here: the tab said only "Missionsdetails" while the name sat far
+// below as the settings heading, so the H1 named a page, not a mission.
+$pageTitle = ($isTemplate ? __t('mission_details.title_template') : __t('mission_details.title_mission'))
+    . ': ' . (string) ($mission['mission_name'] ?? '');
+
+layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missions');
 ?>
 <div class="stack">
     <section class="panel">
+        <?php // Details and VMs are two pages of one mission, so they are page
+              // navigation (lib/mission_nav.php), not buttons; the way back to
+              // the list is a different move and stays one. ?>
+        <?php echo mission_detail_nav($missionId, $isTemplate, 'details'); ?>
         <div class="actions">
             <a class="button button-secondary" href="<?php echo $isTemplate ? 'missions.php?type=templates' : 'missions.php?type=missions'; ?>"><?php echo h(__t('common.back')); ?></a>
-            <a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('common.vms')); ?></a>
             <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('mission_details.open_deploy')); ?></a><?php } ?>
             <form class="inline-form" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
                 <?php echo csrf_field(); ?>
@@ -225,7 +235,8 @@ layout_header($isTemplate ? __t('mission_details.title_template') : __t('mission
     </section>
 
     <section class="panel">
-        <h2><?php echo h($mission['mission_name'] ?? ''); ?></h2>
+        <?php // The name is the page heading now; this one names the section. ?>
+        <h2><?php echo h($isTemplate ? __t('mission_details.heading_settings_template') : __t('mission_details.heading_settings_mission')); ?></h2>
         <form class="stack" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="update">

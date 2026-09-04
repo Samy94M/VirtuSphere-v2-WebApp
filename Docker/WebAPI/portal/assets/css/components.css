@@ -469,6 +469,51 @@ td.actions .inline-form .button {
     white-space: nowrap;
 }
 
+/* Opt-in pinned action column. The VM list is the only table that asks for it:
+   it carries up to fifteen columns, so the row actions leave the viewport at
+   exactly the width that makes the row hard to identify again, and the operator
+   scrolls right, loses the name, scrolls back to read it and right again to
+   click. Every other table either fits or has no per-row action worth chasing,
+   and users.php stays out on purpose: two data columns never push the actions
+   off screen, and pinning there would only take width from the e-mail column.
+
+   The background has to be opaque, not inherited: this cell slides over the
+   data cells beside it, and .table-wrap paints --surface while a hovered row
+   paints --surface-muted, so the hover state is repeated here instead of being
+   left to shine through. */
+.table-sticky-actions .table-action-cell {
+    position: sticky;
+    right: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+}
+
+/* Stacking against the sticky header from base.css (th, z-index 1): the body's
+   pinned cell has to clear the data cells, and the header's pinned cell has to
+   clear both. The header rule also restores the header tone, which the
+   two-class selector above would otherwise overwrite with --surface. */
+.table-sticky-actions td.table-action-cell {
+    z-index: 2;
+}
+
+.table-sticky-actions th.table-action-cell {
+    z-index: 3;
+    background: var(--surface-muted);
+}
+
+.table-wrap .table-sticky-actions tbody tr:hover > td.table-action-cell {
+    background: var(--surface-muted);
+}
+
+/* Below the wrap breakpoint the table is read by scrolling, and a pinned column
+   of two buttons would hold a third of the viewport permanently. */
+@media (max-width: 720px) {
+    .table-sticky-actions .table-action-cell {
+        position: static;
+        border-left: 0;
+    }
+}
+
 /* Collapsible row editors (credentials): the editor row reads as a drawer of
    the record above it, not as a separate record. The record row keeps its
    bottom border only while the drawer is closed. */
@@ -1669,6 +1714,14 @@ textarea.is-invalid {
 
 .tab-list[hidden] {
     display: none;
+}
+
+/* As a direct child of .stack the grid gap spaces the navigation; inside a
+   panel there is no gap, and the row that follows it used to get its clearance
+   from `.panel > .actions:first-child`, which it stops being the moment the
+   navigation moves in above it. */
+.panel > .tab-list {
+    margin-bottom: 14px;
 }
 
 /* .stack's display:grid would override the UA [hidden] rule. */

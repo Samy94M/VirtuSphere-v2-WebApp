@@ -230,4 +230,12 @@ $progressWatchSince = $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDIN
     ? (string) ($vm['mecm_pending_since'] ?? '')
     : (string) ($vm['os_install_watch_started_at'] ?? '');
 $showProgressWatch = $progressAttention !== null || $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING;
-$title = $vmId > 0 ? __t('vm_edit.title_edit') : __t('vm_edit.title_add');
+// One title per page, rendered by layout_header() into both the browser tab and
+// the visible heading. An edit names the VM it is about: the mission's VM list
+// and every editor opened from it used to carry the same three words, so a row
+// of browser tabs said nothing about which machine each one held. Adding has no
+// name yet and stays generic.
+$editedVmName = trim((string) ($vm['vm_name'] ?? ''));
+$title = $vmId > 0 && $editedVmName !== ''
+    ? __t('vm_edit.title_edit') . ': ' . $editedVmName
+    : ($vmId > 0 ? __t('vm_edit.title_edit') : __t('vm_edit.title_add'));

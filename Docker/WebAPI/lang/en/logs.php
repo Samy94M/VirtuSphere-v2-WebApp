@@ -40,6 +40,7 @@ return [
     'th_ip' => 'IP',
     'th_message' => 'Message',
     'retention_note' => 'Entries in this section are kept for :days days and are deleted automatically afterwards.',
+    'timezone_note' => 'Times shown in :tz.',
     'export_truncated_note' => 'The CSV export contains the first :limit of :total matches. Narrow the filter to obtain the remaining rows.',
     'empty_filtered' => 'No logs match the current filter.',
     'empty' => 'No logs found.',

@@ -5,6 +5,8 @@ declare(strict_types=1);
 return [
     'title_template' => 'Template Details',
     'title_mission' => 'Mission Details',
+    'heading_settings_mission' => 'Mission settings',
+    'heading_settings_template' => 'Template settings',
     'open_deploy' => 'Deploy',
     'label_wds_vlan' => 'WDS port group (PXE)',
     'wds_vlan_hint' => 'Port group used by mission VMs to boot through WDS/PXE. For Full pipeline, Power-Cycle + Export MACs and Export MACs, every affected VM must have exactly one network adapter with this exact port group name. These modes cannot be queued without a WDS port group.',

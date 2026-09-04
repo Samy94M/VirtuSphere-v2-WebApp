@@ -49,10 +49,12 @@ $searchRows = $view === VIRTUSPHERE_USERS_VIEW_DIRECTORY
 layout_header(__t('users.title'), $user, 'users', 'users');
 ?>
 <div class="stack">
-    <nav class="tab-list" aria-label="<?php echo h(__t('users.tabs_label')); ?>">
-        <a class="tab" href="<?php echo h(users_url(VIRTUSPHERE_USERS_VIEW_ACCOUNTS)); ?>"<?php echo $view === VIRTUSPHERE_USERS_VIEW_ACCOUNTS ? ' aria-current="page"' : ''; ?>><?php echo h(__t('directory.tab_accounts')); ?></a>
-        <a class="tab" href="<?php echo h(users_url(VIRTUSPHERE_USERS_VIEW_DIRECTORY)); ?>"<?php echo $view === VIRTUSPHERE_USERS_VIEW_DIRECTORY ? ' aria-current="page"' : ''; ?>><?php echo h(__t('directory.tab_directory')); ?></a>
-    </nav>
+    <?php // Two views, two addresses: the same page navigation the mission and
+          // log pages render, through the one helper. ?>
+    <?php echo portal_page_nav(__t('users.tabs_label'), [
+        ['href' => users_url(VIRTUSPHERE_USERS_VIEW_ACCOUNTS), 'label' => __t('directory.tab_accounts'), 'current' => $view === VIRTUSPHERE_USERS_VIEW_ACCOUNTS],
+        ['href' => users_url(VIRTUSPHERE_USERS_VIEW_DIRECTORY), 'label' => __t('directory.tab_directory'), 'current' => $view === VIRTUSPHERE_USERS_VIEW_DIRECTORY],
+    ]); ?>
     <?php if ($view === VIRTUSPHERE_USERS_VIEW_DIRECTORY) {
         users_render_directory($connection, $user, $searchRows);
     } else {

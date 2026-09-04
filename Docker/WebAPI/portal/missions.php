@@ -12,6 +12,7 @@ require_once __DIR__ . '/../lib/mission_transfer.php';
 require_once __DIR__ . '/../lib/mission_import_portal.php';
 require_once __DIR__ . '/../lib/missions_import_panel.php';
 require_once __DIR__ . '/../lib/portal_export.php';
+require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -324,12 +325,17 @@ layout_header($title, $user, $active, 'missions');
     <?php } ?>
 
     <section class="panel">
+        <?php // Two lists, two addresses: page navigation (lib/mission_nav.php).
+              // The reset and the export act on the list and stay in the action
+              // row, which is rendered only when it holds something: an empty
+              // one still occupies its gap above the table. ?>
+        <?php echo mission_list_nav($type); ?>
+        <?php if ($attentionOnly || $rows !== []) { ?>
         <div class="actions">
-            <a class="button <?php echo $type === 'missions' ? '' : 'button-secondary'; ?>" href="missions.php?type=missions"><?php echo h(__t('missions.tab_missions')); ?></a>
-            <a class="button <?php echo $type === 'templates' ? '' : 'button-secondary'; ?>" href="missions.php?type=templates"><?php echo h(__t('missions.tab_templates')); ?></a>
             <?php if ($attentionOnly) { ?><a class="button button-secondary" href="missions.php?type=missions"><?php echo h(__t('missions.attention_clear')); ?></a><?php } ?>
             <?php if ($rows !== []) { ?><a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?><?php echo $attentionOnly ? '&attention=1' : ''; ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
         </div>
+        <?php } ?>
         <?php if ($attentionOnly) { ?><p class="muted"><?php echo h(__t('missions.attention_filter_hint')); ?></p><?php } ?>
         <div class="table-wrap" tabindex="0">
             <table>
