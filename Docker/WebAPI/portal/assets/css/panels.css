@@ -268,7 +268,7 @@ a.card {
 
 a.card:hover {
     border-color: var(--accent);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    box-shadow: var(--shadow-lift);
     transform: translateY(-2px);
     text-decoration: none;
 }
@@ -663,11 +663,12 @@ a.card:hover {
     overflow: hidden;
     background: linear-gradient(92deg, var(--accent-strong), var(--accent));
     border-color: transparent;
-    color: #ffffff;
-}
-
-:root[data-theme="dark"] .login-panel form .button {
-    color: #06181b;
+    /* The same token every other solid button uses. This spelled out #ffffff
+       here and #06181b in a dark-theme override, which is what the token pair
+       exists to decide; the override is gone because the token already knows
+       both answers, and it is the better one on both ends of the gradient
+       (7.73 and 10.81 against the two accent stops, versus 7.54 and 10.54). */
+    color: var(--btn-fg);
 }
 
 .login-panel form .button::after {
@@ -677,7 +678,7 @@ a.card:hover {
     left: -60%;
     width: 40%;
     height: 100%;
-    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    background: linear-gradient(100deg, transparent, var(--sheen), transparent);
     transform: skewX(-18deg);
     transition: left 0.5s ease;
 }

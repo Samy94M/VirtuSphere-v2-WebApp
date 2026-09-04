@@ -21,6 +21,16 @@
     --glass-border: color-mix(in srgb, #ffffff 45%, var(--border));
     --glass-blur: 12px;
     --glass-shadow: var(--shadow);
+    /* The four effect colours the component sheets used to spell out. They are
+       declared here for the same reason every other colour is: base.css is the
+       one file allowed to name a colour, and a shadow, a dim layer and a sheen
+       are colours whatever else they also are. Keeping them out here is what
+       let a hard black shadow sit on a light page and two near-identical
+       near-blacks describe the same button text. */
+    --shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.28);
+    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.35);
+    --modal-backdrop: color-mix(in srgb, #02141a 72%, transparent);
+    --sheen: rgba(255, 255, 255, 0.4);
     --bg-accent-glow:
         radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
         radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 10%, transparent), transparent 55%);

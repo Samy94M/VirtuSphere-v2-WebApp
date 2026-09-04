@@ -183,7 +183,7 @@ textarea.is-invalid {
     border: 0;
     padding: 16px;
     overflow: auto;
-    background: color-mix(in srgb, #02141a 72%, transparent);
+    background: var(--modal-backdrop);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
     color: var(--text);
@@ -224,7 +224,7 @@ textarea.is-invalid {
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
     color: var(--text);
     text-align: center;
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow-modal);
 }
 
 .modal-icon {
