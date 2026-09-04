@@ -43,7 +43,11 @@ if (!in_array($statusFilter, VIRTUSPHERE_CATALOG_FILTERS, true)) {
 }
 
 $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
-$rows = array_values(array_filter(getOS($connection, true), static function (array $row) use ($statusFilter, $retired): bool {
+// One query, then filtered in PHP: the unfiltered set is what tells an empty
+// filter result apart from an empty catalog, and asking twice for the same
+// table to learn that would be a second query per render.
+$allRows = getOS($connection, true);
+$rows = array_values(array_filter($allRows, static function (array $row) use ($statusFilter, $retired): bool {
     $isRetired = (string) ($row['os_status'] ?? '') === $retired;
 
     return match ($statusFilter) {
@@ -98,7 +102,11 @@ layout_header(__t('os.title'), $user, 'os', 'packages');
                     <?php } ?>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td colspan="<?php echo $canWrite ? '5' : '4'; ?>"><?php echo h(__t('os.empty')); ?></td></tr><?php } ?>
+            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="<?php echo $canWrite ? '5' : '4'; ?>"><?php echo portal_catalog_empty_state('os.php', $statusFilter, $allRows !== [], [
+                'empty' => __t('os.empty'),
+                'empty_filtered' => __t('os.empty_filtered'),
+                'show_all' => __t('os.show_all'),
+            ]); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
     </section>

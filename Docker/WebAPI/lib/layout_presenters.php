@@ -250,6 +250,36 @@ function portal_catalog_status_filter(string $action, string $current, array $la
 }
 
 /**
+ * What an empty catalog table says, which depends on WHY it is empty.
+ *
+ * The three catalogs printed one sentence for both cases, and the two cases are
+ * opposite instructions. A genuinely empty catalog is waiting for its source:
+ * MECM has not synced a Task Sequence or a package yet, ESXi has not reported a
+ * portgroup, and the fix is at the other system. A catalog that holds rows and
+ * shows none is a FILTER result, and the fix is one click away on this page,
+ * which the old sentence ("no entries") not only failed to mention but actively
+ * contradicted. So the filtered case names the filter and carries the way out,
+ * and the empty case does not offer a link that would show the same nothing.
+ *
+ * The link keeps the current sort, because dropping it re-sorts the table under
+ * a reader who only asked to widen it.
+ *
+ * @param array<string,string> $labels 'empty', 'empty_filtered' and 'show_all'
+ * @param array<string,string> $keep query state to carry (sort/dir)
+ */
+function portal_catalog_empty_state(string $action, string $statusFilter, bool $catalogHasRows, array $labels, array $keep = []): string
+{
+    if (!$catalogHasRows || $statusFilter === 'all') {
+        return h($labels['empty'] ?? '');
+    }
+
+    $url = $action . '?' . http_build_query([...$keep, 'status' => 'all']);
+
+    return h($labels['empty_filtered'] ?? '')
+        . ' <a href="' . h($url) . '">' . h($labels['show_all'] ?? '') . '</a>';
+}
+
+/**
  * Server-side page navigation: a set of links of which exactly one is the page
  * currently open.
  *

@@ -103,6 +103,22 @@ function getPackages($connection, string $statusFilter = 'active')
     return repo_fetch_all($stmt->get_result());
 }
 
+/**
+ * How many package rows exist at all, ignoring every status filter.
+ *
+ * The page needs it for one decision only: an empty table is either a catalog
+ * MECM has not synced into yet or a filter that matched nothing, and those are
+ * opposite instructions to the reader. A COUNT answers it without pulling a
+ * catalog the render is not going to show.
+ */
+function repo_package_count(mysqli $db): int
+{
+    $stmt = $db->prepare('SELECT COUNT(*) AS total FROM deploy_packages');
+    $stmt->execute();
+
+    return (int) ((repo_fetch_all($stmt->get_result())[0] ?? ['total' => 0])['total']);
+}
+
 function getOS($connection, bool $includeRetired = false)
 {
     $sql = $includeRetired

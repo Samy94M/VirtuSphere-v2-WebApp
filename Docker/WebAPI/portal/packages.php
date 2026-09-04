@@ -17,6 +17,11 @@ if (!in_array($statusFilter, VIRTUSPHERE_CATALOG_FILTERS, true)) {
 }
 
 $rows = getPackages($connection, $statusFilter);
+// The package list is filtered in SQL, so "does the catalog hold anything at
+// all" needs its own answer. It is asked only when the view came back empty,
+// which is the one render where the answer changes what is said; a populated
+// table already proves it. One COUNT, never per row.
+$catalogHasRows = $rows !== [] || repo_package_count($connection) > 0;
 
 // Column sorting: version uses natural order; timestamps sort on the raw UTC
 // string, which is chronological for the DB datetime format.
@@ -62,7 +67,11 @@ layout_header(__t('packages.title'), $user, 'packages', 'packages');
                     <td><?php echo h(portal_format_timestamp((string) ($row['updated_at'] ?? ''))); ?></td>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td colspan="6"><?php echo h(__t('packages.empty')); ?></td></tr><?php } ?>
+            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="6"><?php echo portal_catalog_empty_state('packages.php', $statusFilter, $catalogHasRows, [
+                'empty' => __t('packages.empty'),
+                'empty_filtered' => __t('packages.empty_filtered'),
+                'show_all' => __t('packages.show_all'),
+            ], ['sort' => $sort, 'dir' => $dir]); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
     </section>

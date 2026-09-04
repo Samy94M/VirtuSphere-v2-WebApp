@@ -35,7 +35,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $statusFilter = request_string($_GET, 'status', 'active');
 $statusFilter = in_array($statusFilter, VIRTUSPHERE_CATALOG_FILTERS, true) ? $statusFilter : 'active';
 
-$rows = array_values(array_filter(getVLAN($connection), static function (array $row) use ($statusFilter): bool {
+// One query, then filtered in PHP: the unfiltered set is also what tells an
+// empty filter result apart from a catalog ESXi has not reported into yet.
+$allRows = getVLAN($connection);
+$rows = array_values(array_filter($allRows, static function (array $row) use ($statusFilter): bool {
     $retired = $row['retired_at'] !== null;
     return match ($statusFilter) {
         'retired' => $retired,
@@ -54,19 +57,19 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status');
 <div class="stack">
     <section class="panel">
         <p class="muted"><?php echo h(__t('vlans.catalog_hint')); ?></p>
-        <div class="actions">
-            <?php
-            // Static labels (not __t('vlans.status_'.$v)) so the lang catalog
-            // test sees the keys; tokens still come from the shared constant.
-            $filterLabels = [
-                'active' => __t('vlans.status_active'),
-                'retired' => __t('vlans.status_retired'),
-                'all' => __t('vlans.status_all'),
-            ];
-            foreach (VIRTUSPHERE_CATALOG_FILTERS as $filterValue) { ?>
-                <a class="button <?php echo $statusFilter === $filterValue ? '' : 'button-secondary'; ?>" href="vlans.php?status=<?php echo h($filterValue); ?>"><?php echo h($filterLabels[$filterValue]); ?></a>
-            <?php } ?>
-        </div>
+        <?php // The shared catalog filter, like os.php and packages.php. The row
+              // of buttons this replaces was a third implementation of one
+              // control: same tokens, a different shape, and the only one of the
+              // three that could not carry further query state.
+              // Static labels (not __t('vlans.status_'.$v)) so the lang catalog
+              // test sees the keys; the tokens come from the shared constant. ?>
+        <?php echo portal_catalog_status_filter('vlans.php', $statusFilter, [
+            'label' => __t('vlans.filter_label'),
+            'apply' => __t('vlans.filter_apply'),
+            'active' => __t('vlans.status_active'),
+            'retired' => __t('vlans.status_retired'),
+            'all' => __t('vlans.status_all'),
+        ]); ?>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr>
                 <th><?php echo h(__t('common.name')); ?></th>
@@ -152,7 +155,11 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status');
                     <?php } ?>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td colspan="<?php echo $canWrite ? 5 : 4; ?>"><?php echo h(__t('vlans.empty_catalog')); ?></td></tr><?php } ?>
+            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="<?php echo $canWrite ? 5 : 4; ?>"><?php echo portal_catalog_empty_state('vlans.php', $statusFilter, $allRows !== [], [
+                'empty' => __t('vlans.empty_catalog'),
+                'empty_filtered' => __t('vlans.empty_filtered'),
+                'show_all' => __t('vlans.show_all'),
+            ]); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
     </section>
