@@ -69,6 +69,14 @@ $passwordMinLength = password_policy_min_length(db());
                 <li><?php echo h(__t('help_users.usersmgmt_safety_4')); ?></li>
             </ul>
             <p><?php echo h(__t('help_users.usersmgmt_audit_p1')); ?></p>
+            <?php // Etappe 15: how the log page is searched. The retention
+                  // asymmetry is named here as well as on the page itself,
+                  // because this is where somebody reads BEFORE they look. ?>
+            <p><?php echo h(__t('help_users.usersmgmt_audit_filter')); ?></p>
+            <p><?php echo h(__t('help_users.usersmgmt_audit_correlation', [
+                'audit_days' => VIRTUSPHERE_LOG_RETENTION_DAYS,
+                'job_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
+            ])); ?></p>
         </section>
 
         <section class="panel">

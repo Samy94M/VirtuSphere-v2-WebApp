@@ -130,3 +130,57 @@ narrow by time, user and category and to keep the id only as evidence for a
 separately authorized database or file diagnosis. Etappe 15 implements the
 exact search, the display, the copy action and the scoped export, and may
 document the id as an operating path again only once those are green.
+
+## Amendment (Etappe 15): the id becomes an operating path
+
+The sentence above is now historical. Etappe 15 implemented what it named, and
+the runbook step it withdrew is restored.
+
+**The id is displayed, copyable and exported.** One presenter
+(`portal_correlation_id()`, `lib/correlation_display.php`) renders it in the
+audit table, in the header of a deploy job log and in the CSV export. The value
+is text first and the copy button is an accelerator on top of it: with
+JavaScript disabled, and on a plain-HTTP LAN portal where `navigator.clipboard`
+does not exist at all, the id stays visible and selectable. The button is a real
+`<button>` with a label, so it is reached with Tab and activated by the browser;
+the outcome is announced in a `role="status"` beside it, because a silent
+success looks exactly like a silent failure and the failure here is a normal
+branch, not an exception.
+
+**The search is exact, and only exact.** `virtusphere_correlation_id_is_valid()`
+already defined the accepted shape (8 to 32 lowercase hex); the filter reuses it
+and refuses anything else with a field error. A substring search was considered
+and rejected: it turns a diagnostic identity into free text, so `a1b2` would
+return the traces of a dozen unrelated requests and read as one chain. A refused
+value is not dropped and queried around either - `log_filter_is_usable()` stops
+the page from querying at all, and the export with it, because a page that
+answers a WIDER question while the field still shows the value the operator
+believes is filtering is worse than an error message.
+
+**One trace, one link.** `log_filter_correlation_url()` builds the jump and
+drops every other filter: a trace is read to see the whole request, and carrying
+the category or the date range that happened to be set would show a slice of it
+while looking like the complete answer. Inside a trace the id no longer links to
+itself.
+
+**The jobs of a traced request are listed beside its rows**, with the two
+permissions separate. `users.manage` decides the audit rows and therefore the
+job ids and statuses; `deploy.run` decides opening a job LOG, so only the link
+carries that condition. Hiding the row from a user-administrator would make a
+trace look incomplete; handing them the log would widen what `users.manage`
+grants. The list is bounded, says when it cut, and is ordered by job id alone,
+because a staggered batch is written inside one second and `created_at` would
+not decide it.
+
+**Retention is asymmetric and is said out loud.** Audit rows outlive job logs,
+and a mission-less system job is purged on its own schedule, so an older trace
+legitimately shows audit rows and no jobs. Without that sentence the empty list
+reads as "this request enqueued nothing", which is a different and wrong
+conclusion.
+
+**The id is now an indexed column.** Migration 0051 adds
+`(correlation_id, id)` to `deploy_logs` and `deploy_jobs`. Before it, the count
+behind the audit table was a full table scan and the page query a backwards walk
+of the primary key that stopped only at the LIMIT; the migration's docblock
+carries the measured `EXPLAIN` on both sides. It remains diagnostic: an index
+changes no wire field, and the id still authorizes nothing.

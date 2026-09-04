@@ -6,8 +6,10 @@ Dieses Runbook beginnt beim sichtbaren Symptom. Es ersetzt weder das Auftragspro
 
 1. Im Portal **Systemstatus** öffnen und die betroffene Komponente bestimmen.
 2. Bei einem Bereitstellungsauftrag dessen **Auftragsprotokoll** öffnen. Bei Portal-, MECM- oder Konfigurationsproblemen unter **Protokolle** den genannten Tab und die Kategorie wählen.
-3. Zeitpunkt, Benutzer und Kategorie eingrenzen. Die Korrelations-ID gehört auf den Befundzettel, weil Fehlerseite, Auftrag und gespeicherte Logzeile derselben Ausführung dieselbe ID tragen. Die Protokollseite kann sie derzeit weder suchen noch anzeigen, und die CSV enthält keine Korrelationsspalte. Bis Etappe 15 deshalb die sichtbare Beschreibung und den Zeitpunkt mit dem Auftragsprotokoll vergleichen; die ID bleibt Zusatzbeleg für eine berechtigte Datenbank- oder Dateidiagnose, aber noch kein Bedienweg im Portal. Exakte Suche, Anzeige, Kopieraktion und ein darauf begrenzter Export kommen erst mit Etappe 15.
-4. Erst die erste Maßnahme aus der Tabelle ausführen. Ein Neustart ohne vorherigen Nachweis löscht flüchtige Hinweise und ist keine Diagnose.
+3. Zeitpunkt, Benutzer und Kategorie eingrenzen. Die Korrelations-ID gehört auf den Befundzettel, weil Fehlerseite, Auftrag und gespeicherte Logzeile derselben Ausführung dieselbe ID tragen.
+4. Der Korrelations-ID folgen. Die ID aus der Fehlerseite oder aus dem Kopf des Auftragsprotokolls kopieren (Schaltfläche **Kopieren**) und unter **Protokolle** in **Diagnosefilter** ins Feld **Korrelations-ID** einsetzen. Die Suche ist ausschließlich exakt: eine gekürzte oder vertippte ID wird als Feldfehler abgewiesen und es wird nichts abgefragt, statt eine breitere Antwort zu liefern, die wie die enge aussieht. Der Filter zeigt alle Auditzeilen dieser einen Anfrage und darunter die Bereitstellungsaufträge, die sie eingereiht hat, mit Link ins jeweilige Auftragsprotokoll für Inhaber von `deploy.run`. Der CSV-Export dieser Ansicht enthält die Spalte **Korrelations-ID**.
+5. Aufbewahrung mitdenken. Auditzeilen leben länger als Auftragsprotokolle, und ein missionsloser Systemauftrag wird nach eigenem Zeitplan bereinigt. Zu einer älteren Anfrage stehen deshalb legitim Auditzeilen ohne zugehörigen Auftrag; die Protokollseite sagt das an dieser Stelle ausdrücklich. Das bedeutet nicht, dass die Anfrage nichts eingereiht hat.
+6. Erst die erste Maßnahme aus der Tabelle ausführen. Ein Neustart ohne vorherigen Nachweis löscht flüchtige Hinweise und ist keine Diagnose.
 
 ## Symptomtabelle
 
