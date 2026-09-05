@@ -38,11 +38,18 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] proven\s+\{2\}'"
     }
 
-    It 'reports every deterministic visual run before and after Playwright' {
-        $script:VisualRunner | Should -Match 'const total = contract\.themes\.length \* 2'
+    It 'reports every visual theme before and after, and every capture inside it' {
+        # Die Fortschrittseinheit ist seit Etappe 17 das Theme, nicht der
+        # einzelne Playwright-Lauf: wie viele Aufnahmen ein Theme braucht, haengt
+        # am Ergebnis (zwei Versuche immer, ein dritter nur fuer noch offene
+        # Bilder), und ein Gesamtwert, der nie erreicht wird, liest sich wie ein
+        # abgebrochener Lauf. Jede Aufnahme meldet sich weiterhin, als Unterzeile
+        # unter ihrem Theme.
+        $script:VisualRunner | Should -Match 'const total = contract\.themes\.length'
         $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] RUN visual-'
-        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] pass visual-'
-        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] fail visual-'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] \$\{state\} visual-'
+        $script:VisualRunner | Should -Match "const state = themes\[theme\]\.unmatched\.length === 0 \? 'pass' : 'fail'"
+        $script:VisualRunner | Should -Match '`  capture \$\{label\}'
     }
 
     It 'reports every effective VM around the worker network preflight' {

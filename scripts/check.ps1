@@ -138,25 +138,21 @@ foreach ($name in $requiredToolImages) {
 $phpContainer = 'virtusphere-v2-webapp-php-1'
 
 # --- QA-Wegwerf-Stack (Integration-/Release-Lane) ------------------------------
-# Eigenes Compose-Projekt aus docker-compose.yml + Docker/qa/docker-compose.qa.yml
-# mit Docker/qa/qa.env: eigene Wegwerf-DB, eigene ssl/conf-Volumes, Ports 8031ff.
-# Kein Integration-Gate laeuft gegen den Dev-Stack oder die Dev-Datenbank.
-$qaProject = 'virtusphere-qa'
-$qaPhpContainer = 'virtusphere-qa-php-1'
-$qaWebContainer = 'virtusphere-qa-webserver-1'
-$qaMysqlContainer = 'virtusphere-qa-mysql-1'
-$qaNetwork = 'virtusphere-qa_default'
-$qaPortalBase = 'http://127.0.0.1:8031'
-$qaDir = Join-Path (Join-Path $repoRoot 'Docker') 'qa'
-$qaEnvFile = Join-Path $qaDir 'qa.env'
-$qaComposeOverride = Join-Path $qaDir 'docker-compose.qa.yml'
-# ldap-* Dienste: hermetische LDAP-TLS-Fixture (Plan-Abschnitt 18.3, Etappe 7,
-# Docker/qa/docker-compose.qa.yml). Immer Teil der Integrationslane, damit
-# DirectoryLdapFixtureTest.php nie skippt (ADR-0015-Ergaenzung: kein Skip in
-# dieser Lane).
-$qaServices = @('webserver', 'php', 'mysql', 'deploy-worker', 'maintenance-worker',
-    'ldap-dc1', 'ldap-dc2', 'ldap-badcert-unknown-ca', 'ldap-badcert-expired',
-    'ldap-badcert-wrongname', 'ldap-dc-rotated', 'ldap-blackhole')
+# Die Werte gehoeren lib/check/qa-identity.ps1, damit der getrennte
+# Baseline-Updatebefehl exakt denselben Stack trifft; hier werden sie einmal
+# aufgeloest, weil der Runner die Initialisierung besitzt.
+. (Join-Path (Join-Path $scriptDir 'lib/check') 'qa-identity.ps1')
+$qaIdentity = Get-QaStackIdentity $repoRoot
+$qaProject = $qaIdentity.Project
+$qaPhpContainer = $qaIdentity.PhpContainer
+$qaWebContainer = $qaIdentity.WebContainer
+$qaMysqlContainer = $qaIdentity.MysqlContainer
+$qaNetwork = $qaIdentity.Network
+$qaPortalBase = $qaIdentity.PortalBase
+$qaDir = $qaIdentity.Dir
+$qaEnvFile = $qaIdentity.EnvFile
+$qaComposeOverride = $qaIdentity.ComposeOverride
+$qaServices = $qaIdentity.Services
 $script:qaStackStarted = $false
 
 # --- Fokussierte Runner-Module ----------------------------------------------

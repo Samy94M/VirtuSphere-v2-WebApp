@@ -49,4 +49,39 @@ echo 'JSON' . json_encode(['missionId' => $missionId, 'missionName' => '${MARK}'
 `, ['lib/repo/missions.php']);
 }
 
-module.exports = { MARK, assertVisualQaIsolation, cleanupVisualFixtures, seedVisualFixtures };
+/**
+ * A reviewed target image is a promise about what the page renders, and both
+ * captured pages render rows the fixture does not own: `missions.php` lists
+ * every mission and `deploy.php` lists every job of the selected one. So the
+ * capture has a data precondition, and it is stated rather than assumed.
+ *
+ * Etappe 11 could not see this, because it compared two runs of one session
+ * against each other and any residue was in both. The first run against a
+ * committed image found a mission that `field-roundtrip.spec.js` believed it had
+ * deleted, with a live wall-clock timestamp, in ten of twelve images.
+ *
+ * It reports and never deletes: a fixture that outlived its owner is that
+ * owner's defect, and removing it here would make the picture pretty while
+ * hiding the defect.
+ */
+function visualCaptureScopeConflicts() {
+  assertVisualQaIsolation();
+  return phpJson(`
+$db = db();
+$missions = [];
+$result = $db->query('SELECT id, mission_name FROM deploy_missions ORDER BY id');
+while ($row = $result->fetch_assoc()) {
+    if ($row['mission_name'] !== '${MARK}') { $missions[] = $row['id'] . ':' . $row['mission_name']; }
+}
+$jobs = (int) $db->query('SELECT COUNT(*) AS c FROM deploy_jobs')->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['missions' => $missions, 'jobs' => $jobs]) . 'JSON';
+`);
+}
+
+module.exports = {
+  MARK,
+  assertVisualQaIsolation,
+  cleanupVisualFixtures,
+  seedVisualFixtures,
+  visualCaptureScopeConflicts,
+};

@@ -58,10 +58,16 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
     contract.sessionRemainingSeconds % 60,
   ].map((part) => String(part).padStart(2, '0')).join(':');
 
-  const pages = [
-    { name: 'missions', url: 'missions.php' },
-    { name: 'deploy', url: `deploy.php?mission_id=${seeded.missionId}` },
-  ];
+  const pages = contract.pages.map((entry) => ({
+    name: entry.name,
+    url: entry.url.replace(':missionId', String(seeded.missionId)),
+  }));
+  // A mask covers a control the portal neither styles nor can regress. It must
+  // still be observed at least once: a selector that has stopped matching is a
+  // dead exemption, and a dead exemption is how a masked area silently grows to
+  // cover something we DO own.
+  const maskHits = new Map(contract.masks.map((entry) => [entry.selector, 0]));
+
   for (const viewport of contract.viewports) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     for (const target of pages) {
@@ -82,13 +88,26 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
       await page.evaluate(() => new Promise((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(resolve));
       }));
+      const mask = [];
+      for (const entry of contract.masks) {
+        const locator = page.locator(entry.selector);
+        const count = await locator.count();
+        maskHits.set(entry.selector, maskHits.get(entry.selector) + count);
+        if (count > 0) mask.push(locator);
+      }
       await page.screenshot({
         path: path.join(outputDir, `${target.name}-${viewport.name}.png`),
         fullPage: true,
         animations: contract.animations,
         caret: contract.caret,
         scale: contract.screenshotScale,
+        mask,
+        maskColor: contract.maskColor,
       });
     }
+  }
+
+  for (const [selector, hits] of maskHits) {
+    expect(hits, `the declared visual mask ${selector} matched nothing in this capture`).toBeGreaterThan(0);
   }
 });

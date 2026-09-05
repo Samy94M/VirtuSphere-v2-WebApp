@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
   "platform": "win32",
   "arch": "x64",
@@ -28,7 +28,12 @@
   "timezoneId": "Europe/Berlin",
   "viewports": [
     { "name": "desktop", "width": 1440, "height": 1000 },
+    { "name": "wrap", "width": 860, "height": 1000 },
     { "name": "mobile", "width": 390, "height": 844 }
+  ],
+  "pages": [
+    { "name": "missions", "url": "missions.php" },
+    { "name": "deploy", "url": "deploy.php?mission_id=:missionId" }
   ],
   "deviceScaleFactor": 1,
   "launchArgs": [
@@ -53,5 +58,18 @@
   "pixelComparison": {
     "channelThreshold": 0,
     "maxDiffPixelRatio": 0
+  },
+  "masks": [
+    {
+      "selector": "input[type=\"file\"]",
+      "reason": "Das native Datei-Auswahlfeld zeichnet der Browser selbst. Das Portal stylt dieses Bedienelement nicht, kann sein Antialiasing nicht beeinflussen und kann es folglich auch nicht regressieren; eine Sollbaseline darueber behauptet nichts ueber unseren Code und liefert nur Rauschen."
+    }
+  ],
+  "maskColor": "#ff00ff",
+  "baselines": {
+    "dir": "baselines",
+    "manifest": "manifest.json",
+    "maxAttempts": 3,
+    "minimumAttempts": 2
   }
 }

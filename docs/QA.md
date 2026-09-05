@@ -63,8 +63,8 @@ Successful blocker reads are intentionally read-only: the browser test compares
 the deploy audit-log count before and after. Machine API endpoints and fields are
 not part of this path. Run the canonical Fast and Integration lanes for final
 acceptance; Integration exercises the functional Chromium suite and the exact
-Etappe-11 deterministic light/dark visual harness. Etappe 12 does not create or
-update committed visual baselines; that remains the Etappe-17 release decision.
+deterministic light/dark visual harness. Etappe 12 does not create or update
+committed visual baselines; Etappe 17 introduced them and their update command.
 
 ### Etappe 14 form accessibility contract
 
@@ -880,9 +880,33 @@ The `visual` project is not a dev-stack screenshot command. It runs only as part
 powershell -NoProfile -File scripts\check.ps1 -Lane Integration -Gate qa-stack,e2e-portal -Json qa-artifacts/qa-visual.json
 ```
 
-The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, desktop/mobile viewports, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation and hidden caret. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS` and `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` are refused. Etappe 11 has no committed target PNGs and no update command: reviewed release baselines belong to Etappe 17.
+The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, the desktop/wrap/mobile viewports, the captured pages, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation, hidden caret and the mask list. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS`, `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` and `VIRTUSPHERE_VISUAL_BASELINE_UPDATE` are refused, and the gate clears all three before calling the harness.
 
-The runner proves exact QA Compose labels and zero queued/running/cancelling jobs before pausing workers. It restores only those that were originally running in `finally`; shared/dev/production labels fail before `stop`. The seed is namespaced `visuale11fixture`, cleans only its own rows and is guarded by the exact QA URL, containers and DB. Four screenshots per theme (mission list/deploy, desktop/mobile) are rendered twice. The harness decodes PNG pixels rather than comparing encoded bytes, writes metadata/comparison evidence and both runs below ignored `qa-artifacts/visual-etappe11-*`, and requires zero pixel drift. No status badge is masked; this stage uses no masks at all.
+The runner proves exact QA Compose labels and zero queued/running/cancelling jobs before pausing workers. It restores only those that were originally running in `finally`; shared/dev/production labels fail before `stop`. The seed is namespaced `visuale11fixture`, cleans only its own rows and is guarded by the exact QA URL, containers and DB. The harness decodes PNG pixels rather than comparing encoded bytes and writes metadata, comparison and diff evidence below ignored `qa-artifacts/visual-baselines-*`.
+
+#### Reviewed target baselines (Etappe 17)
+
+Comparing two runs of the same build proves the harness is deterministic and nothing else: a build whose every page had turned magenta would have passed it twice. Since Etappe 17 the pass criterion is the committed, reviewed PNG under `tests/e2e/visual/baselines/<theme>/<page>-<viewport>.png` — six images per theme, from `missions` and `deploy` across the desktop (1440), wrap (860, the shell's own `max-width` breakpoint, where the sidebar becomes a flat area) and mobile (390) viewports. The expected set is derived from the contract, so a capture that silently stopped being taken is a failure and not "nothing to report". `baselines/manifest.json` binds the set to the runner that produced it and carries a SHA-256 per file, a reason and a timestamp; a hand-swapped PNG or a set taken on another Chromium is caught before the first pixel comparison. A runner mismatch is `infrastructure_error`, a missing or altered image is a failure that a person has to answer.
+
+Updating is a separate command, never a gate:
+
+```powershell
+powershell -NoProfile -File scripts\check.ps1 -Lane Integration -Gate qa-stack -KeepArtifacts
+powershell -NoProfile -File scripts\update-visual-baselines.ps1 -Reason "<why this image changed>"
+```
+
+It shares the QA stack identity (`scripts/lib/check/qa-identity.ps1`) and the worker pause with the lanes, so a target image is taken under exactly the conditions that later reproduce it. It refuses without the reason and without `VIRTUSPHERE_VISUAL_BASELINE_UPDATE=1`, refuses on a runner or font mismatch before overwriting anything, and writes the previous image plus a diff image (changed pixels red, everything else dimmed) and a bounding box per change into `qa-artifacts/visual-baseline-review-*`. Those are audit artifacts of what was replaced; they never become a second baseline. Review every diff image, then commit the changed PNGs deliberately.
+
+Two decisions keep the tolerance at zero while the harness stays usable:
+
+- **Mask.** The native file-input in the mission import form is the one control the portal does not style. Its antialiased edges changed between otherwise identical captures across Etappen 14D, 15 and 16 (29 pixels on `missions-desktop`, maximum channel deviation 1 to 2, both themes, same place). The portal cannot influence how the browser rasterises its own widget and therefore cannot regress it, so a target image over it asserts nothing about our code. It is masked with its reason in the contract, the mask is painted in the image so a reviewer sees the excluded area, and a mask that stops matching fails the capture: a dead exemption is how a masked area silently grows over something we do own.
+- **Bounded retry.** A design regression is deterministic and is in every capture, so no number of attempts produces one that equals the target. Rasterisation noise is not. A file therefore passes when at least one attempt is byte-identical to the reviewed image, within `baselines.maxAttempts`; two attempts always run, further ones only for files still unmatched. A retry that was needed is named in the run output and in `comparison.json` — a harness that quietly retries is a harness nobody can judge.
+
+Both captured pages render rows the fixture does not own: `missions.php` lists every mission, `deploy.php` lists every job of the selected one. That data precondition is stated rather than assumed. Before the first capture the harness checks that the QA database holds no mission besides its own fixture and no deploy job at all, and refuses as `infrastructure_error` naming the offending rows. It reports and never deletes: a fixture that outlived its owner is that owner's defect, and removing it here would make the picture pretty while hiding the defect. Etappe 11 could not see this class at all, because it compared two runs of one session and any residue was in both.
+
+That check found one on its first run, and the leftover had a cause worth knowing. `field-roundtrip.spec.js` cleaned up with `DELETE ... WHERE mission_name LIKE 'e2ert-%'`, which silently left its emoji probe behind on every run: `mission_name` is `utf8mb4_unicode_ci` with a unique index, and MySQL plans that DELETE as an index **range** while planning the equivalent SELECT as a full index scan. A supplementary character (U+10000 and above) carries an implicit collation weight the range endpoints do not represent, so the row falls outside the computed range. `SELECT ... LIKE 'e2ert-%'` finds it, the DELETE reports zero affected rows and throws nothing; BMP characters such as an umlaut or a combining accent are unaffected. The cleanup now compares with `LEFT(mission_name, CHAR_LENGTH(?))`, which defeats the index so the predicate is evaluated per row.
+
+`node --test "tests/*.test.js"` in `tests/e2e` is the static half and runs as the Integration/Release gate `visual-contract`: browser resolver, metadata mismatch, the update refusal on all three variables, the mask declaration, the derived image set, the wrap viewport against `layout.css`, the manifest and the diff image. The `visual-contract` gate runs `tests/*.test.js` as a pattern, not the directory: node 24 resolves a bare `tests/` as a module path and exits with `MODULE_NOT_FOUND` instead of running the file inside it.
 
 This harness touches no portal-visible string or product PHP/JS/CSS. Portal help, audit/event persistence, deploy-job/job-log semantics, shipped container configuration and machine endpoints/wire fields are therefore outside its write set. Their existing contract suites remain part of the unchanged Fast/Integration lanes and are explicitly re-run for acceptance.
 

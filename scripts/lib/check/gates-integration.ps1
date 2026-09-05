@@ -47,12 +47,12 @@ function Invoke-PlaywrightSuite {
     Format-ToolResult $r $OkDetail $FailDetail
 }
 
-function Invoke-VisualDeterminism {
+function Invoke-VisualBaselines {
     if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
     $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
     $harness = Join-Path (Join-Path $e2eDir 'visual') 'harness.js'
     if (-not (Test-Path $harness)) { return New-InfraResult 'Visual-Harness fehlt unter tests/e2e/visual' }
-    $visualArtifactDir = Join-Path (Join-Path $repoRoot 'qa-artifacts') ('visual-etappe11-' + $runStamp)
+    $visualArtifactDir = Join-Path (Join-Path $repoRoot 'qa-artifacts') ('visual-baselines-' + $runStamp)
 
     $previous = @{}
     $visualEnv = @{
@@ -65,6 +65,13 @@ function Invoke-VisualDeterminism {
         VIRTUSPHERE_VISUAL_QA_ALLOWED   = '1'
         VIRTUSPHERE_VISUAL_ARTIFACT_DIR = $visualArtifactDir
         DB_NAME                         = (Get-QaEnvValue 'DB_NAME')
+        # Keine Lane darf Sollbilder erzeugen (Etappe 17). Der Harness lehnt jede
+        # dieser Variablen ab; hier werden sie zusaetzlich geleert, damit eine
+        # geerbte Shell-Variable gar nicht erst bei ihm ankommt und der Lauf als
+        # infrastructure_error endet, statt zu pruefen.
+        UPDATE_SNAPSHOTS                    = ''
+        VIRTUSPHERE_UPDATE_VISUAL_BASELINES = ''
+        VIRTUSPHERE_VISUAL_BASELINE_UPDATE  = ''
     }
     foreach ($key in $visualEnv.Keys) {
         $previous[$key] = [Environment]::GetEnvironmentVariable($key)
@@ -73,9 +80,9 @@ function Invoke-VisualDeterminism {
     try {
         return Invoke-WithPausedQaWorkers {
             $run = Invoke-Tool 'node' @($harness)
-            if ($run.ExitCode -eq 0) { return New-PassResult ('Visual-Harness beider Themes deterministisch; Artefakte: ' + $visualArtifactDir) $run.Output }
+            if ($run.ExitCode -eq 0) { return New-PassResult ('reviewte Sollbaselines beider Themes bei Nulltoleranz getroffen; Artefakte: ' + $visualArtifactDir) $run.Output }
             if ($run.ExitCode -eq 2) { return New-InfraResult 'Visual-Harness meldet infrastructure_error' $run.Output }
-            return New-FailResult 'Visual-Harness meldet Pixeldrift oder einen fachlichen Browserfehler' $run.Output
+            return New-FailResult 'Visual-Harness meldet Abweichung von den reviewten Sollbaselines oder einen fachlichen Browserfehler' $run.Output
         }
     } finally {
         foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key]) }
@@ -231,9 +238,25 @@ function Register-IntegrationCheckGates {
         # nur ein Browser beweisen kann. Netzabhaengig wegen npm ci beim Erstlauf.
         $functional = Invoke-PlaywrightSuite @('chromium') 'Playwright-Chromium-Suite gruen (QA-Stack)' 'Playwright-Suite rot'
         if ($functional.class -ne 'pass') { return $functional }
-        $visual = Invoke-VisualDeterminism
+        $visual = Invoke-VisualBaselines
         if ($visual.class -ne 'pass') { return $visual }
         New-PassResult ($functional.detail + '; ' + $visual.detail) (@($functional.output) + @($visual.output))
+    }
+
+    Add-Gate -Name 'visual-contract' -Lanes $intRel -Kind 'native' -Body {
+        # Die statische Haelfte des Visualvertrags (Etappe 17): Browserresolver,
+        # Metadatenvergleich, Update-Verweigerung, Maskendeklaration und Manifest.
+        # Sie lief bisher nur von Hand. Ein Vertrag, den keine Lane ausfuehrt, ist
+        # genau so viel wert wie kein Vertrag; er laeuft nach e2e-portal, weil der
+        # das fehlende node_modules per npm ci herstellt.
+        if (-not (Test-Command 'node')) { return New-InfraResult 'node nicht gefunden' }
+        $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
+        if (-not (Test-Path (Join-Path $e2eDir 'node_modules'))) { return New-InfraResult 'tests/e2e/node_modules fehlt (Gate e2e-portal zuerst)' }
+        Push-Location $e2eDir
+        # Muster statt Verzeichnis: node 24 loest 'tests/' als Modulpfad auf und
+        # bricht mit MODULE_NOT_FOUND ab, statt die Datei darin zu fahren.
+        try { $r = Invoke-Tool 'node' @('--test', 'tests/*.test.js') } finally { Pop-Location }
+        Format-ToolResult $r 'Visual-/Resolververtraege gruen' 'Visual-/Resolververtraege rot'
     }
 
     Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {

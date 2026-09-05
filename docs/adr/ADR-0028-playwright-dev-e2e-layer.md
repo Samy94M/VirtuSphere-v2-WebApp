@@ -1,7 +1,7 @@
 # ADR-0028: Playwright as a Dev-only E2E Layer
 
 Date: 2026-07-12
-Status: Accepted; revised 2026-07-16 and 2026-08-27 (lane gates and deterministic visual harness, see below)
+Status: Accepted; revised 2026-07-16, 2026-08-27 and 2026-09-05 (lane gates, deterministic visual harness, reviewed baselines and release gating, see below)
 
 ## Context
 
@@ -44,8 +44,18 @@ An Integration-lane run without a usable browser or QA stack is `infrastructure_
 
 The existing configuration gains exactly one pixel-owning Chromium project, `visual`. Firefox, WebKit and Edge remain functional release projects and never share its pixel expectations. The visual project reuses the existing base URL, setup authentication and reporters, but it may run only against the synthetic `virtusphere-qa` throwaway Compose project. Its seed guard requires the exact loopback URL, QA container names, database name and an explicit allowance set by the canonical runner.
 
-The committed runner contract fixes Windows build and architecture, Playwright version, Chromium revision/version, Segoe UI font files and SHA-256 hashes, locale, portal timezone, both viewports, device scale and CSS screenshot scale, fixed clock and pseudo-random seed, light/dark themes, reduced motion, disabled animations and hidden caret. The harness validates these values before taking an image. A mismatch exits as `infrastructure_error`; it never updates an expectation. Etappe 11 intentionally commits no approved screenshot baseline. Each theme is rendered twice, PNGs are decoded and compared pixel by pixel with the committed zero-drift tolerance, and the ignored evidence plus actual metadata is written below `qa-artifacts/` for review. Baseline review and release gating remain owned by Etappe 17.
+The committed runner contract fixes Windows build and architecture, Playwright version, Chromium revision/version, Segoe UI font files and SHA-256 hashes, locale, portal timezone, both viewports, device scale and CSS screenshot scale, fixed clock and pseudo-random seed, light/dark themes, reduced motion, disabled animations and hidden caret. The harness validates these values before taking an image. A mismatch exits as `infrastructure_error`; it never updates an expectation. Etappe 11 intentionally commits no approved screenshot baseline. Each theme is rendered twice, PNGs are decoded and compared pixel by pixel with the committed zero-drift tolerance, and the ignored evidence plus actual metadata is written below `qa-artifacts/` for review. Baseline review and release gating were owned by Etappe 17 and are described in the 2026-09-05 revision below.
 
 Before the four visual runs, the runner proves the exact Compose project/service labels and that the QA database has no queued, running or cancelling jobs. It stops only workers that were running and restores precisely that state in `finally`, even after a failed visual run. A shared, dev or production stack therefore cannot be paused by this path. Visual fixtures use only the `visuale11fixture` namespace, are deleted idempotently before seeding and cleaned afterward; no screenshot may contain ambient or real data.
 
 This revision changes QA tooling only. Portal help and runtime rendering code, audit/event writers, deploy-job persistence, container runtime configuration and every machine-API wire shape remain untouched.
+
+## Revision 2026-09-05: Reviewed Target Baselines and Release Gating
+
+Comparing two runs of one build proves the harness deterministic and nothing else; a build whose every page had turned magenta would have passed it twice. The visual project therefore gains committed target PNGs under `tests/e2e/visual/baselines/`, reviewed by a person, and equality with them at the same zero tolerance becomes the pass criterion in the Integration and Release lanes. The set is derived from the runner contract (both themes across the desktop, wrap and mobile viewports, for each captured page), never from what happens to lie in the directory, and it is bound to its runner by a manifest carrying a SHA-256 per file, so a swapped image or a set taken on another browser build is refused before any comparison.
+
+Only `scripts/update-visual-baselines.ps1` writes that directory. It is not a gate and belongs to no lane: it demands an explicit allowance and a written reason, refuses on runner or font drift before overwriting anything, and keeps the replaced image plus a diff image as audit artifacts. Every lane clears the three variables that could enable an update, and the harness refuses to start while any of them is set, so no gate can reach the writer through an inherited environment.
+
+Two decisions preserve the zero tolerance against the sub-pixel drift carried as an open finding since Etappe 14D. A control the portal does not style, the browser-drawn file input, is masked with its recorded reason: the portal cannot influence its rasterisation and therefore cannot regress it, and a mask that stops matching fails the capture so the exemption cannot silently grow. Everything the portal does own stays unmasked and is retried within a bounded number of attempts, because a design regression appears in every capture while rasterisation noise does not; a retry that was needed is reported rather than absorbed. Raising the threshold was rejected: a softened determinism contract admits exactly the drift it exists to catch.
+
+This revision changes QA tooling and its documentation only. Portal rendering code, help text, audit writers, deploy-job persistence, container runtime configuration and every machine-API wire shape remain untouched.

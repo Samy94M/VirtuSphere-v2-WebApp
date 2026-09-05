@@ -57,15 +57,28 @@ echo 'V_START' . ($row ? $row['v'] : '') . 'V_END';
   return m ? m[1] : null;
 }
 
+// The prefix comparison must not reach the index, which is why it is written as
+// a function on the column instead of `LIKE 'e2ert-%'`.
+//
+// The LIKE form silently left the emoji probe behind on every run, and it took a
+// reviewed visual baseline to notice: `mission_name` is `utf8mb4_unicode_ci` with
+// a unique index, and for that predicate MySQL plans a DELETE as an index RANGE
+// while it plans the equivalent SELECT as a full index scan. A supplementary
+// character (U+10000 and above, so exactly this file's emoji probe) carries an
+// implicit collation weight the range endpoints do not represent, so the row sits
+// outside the computed range: `SELECT ... LIKE 'e2ert-%'` finds it, `DELETE ...
+// LIKE 'e2ert-%'` reports zero affected rows and throws nothing. BMP characters
+// such as an umlaut or a combining accent are unaffected. `LEFT()` defeats the
+// index, the plan becomes a scan, and the predicate is then evaluated per row.
 function cleanup() {
   runPhp(`
 $db = db();
-$like = '${PREFIX}%';
-$stmt = $db->prepare('DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE ?)');
-$stmt->bind_param('s', $like);
+$prefix = '${PREFIX}';
+$stmt = $db->prepare('DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM (SELECT id FROM deploy_missions WHERE LEFT(mission_name, CHAR_LENGTH(?)) = ?) AS doomed)');
+$stmt->bind_param('ss', $prefix, $prefix);
 $stmt->execute();
-$stmt = $db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
-$stmt->bind_param('s', $like);
+$stmt = $db->prepare('DELETE FROM deploy_missions WHERE LEFT(mission_name, CHAR_LENGTH(?)) = ?');
+$stmt->bind_param('ss', $prefix, $prefix);
 $stmt->execute();
 echo 'CLEANED';
 `);

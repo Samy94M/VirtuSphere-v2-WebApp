@@ -7,7 +7,8 @@
     "test": "playwright test --project=chromium",
     "test:headed": "playwright test --headed --project=chromium",
     "test:matrix": "playwright test --project=firefox --project=webkit --project=msedge",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "visual:update": "node visual/update-baselines.js"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-09-05T08:36:36.542Z",
+  "reason": "Etappe 17: Sollbaselines nach dem Slate-/Indigo-Refresh; light/deploy-desktop neu aufgenommen, weil die Erstaufnahme als einzige von fuenf Sitzungen 14 Subpixel an den runden Ecken des Session-Buttons abwich",
+  "runner": {
+    "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
+    "platform": "win32",
+    "arch": "x64",
+    "osRelease": "10.0.26200",
+    "browser": {
+      "engine": "chromium",
+      "revision": "1228",
+      "version": "149.0.7827.55"
+    },
+    "playwrightVersion": "1.61.1",
+    "fonts": [
+      {
+        "file": "segoeui.ttf",
+        "sha256": "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd"
+      },
+      {
+        "file": "seguisb.ttf",
+        "sha256": "2d9b22d71f72de2823fee5d9c8bc1b0fc32b2577c4c27b9ec6abdbb8df0e1731"
+      },
+      {
+        "file": "segoeuib.ttf",
+        "sha256": "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e"
+      }
+    ],
+    "locale": "de-DE",
+    "timezoneId": "Europe/Berlin",
+    "viewports": [
+      {
+        "name": "desktop",
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "name": "wrap",
+        "width": 860,
+        "height": 1000
+      },
+      {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "deviceScaleFactor": 1,
+    "launchArgs": [
+      "--no-sandbox",
+      "--disable-gpu",
+      "--run-all-compositor-stages-before-draw",
+      "--force-color-profile=srgb",
+      "--force-device-scale-factor=1",
+      "--disable-lcd-text",
+      "--disable-threaded-animation",
+      "--disable-threaded-scrolling",
+      "--disable-checker-imaging"
+    ],
+    "screenshotScale": "css",
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "pages": [
+      {
+        "name": "missions",
+        "url": "missions.php"
+      },
+      {
+        "name": "deploy",
+        "url": "deploy.php?mission_id=:missionId"
+      }
+    ],
+    "masks": [
+      {
+        "selector": "input[type=\"file\"]",
+        "reason": "Das native Datei-Auswahlfeld zeichnet der Browser selbst. Das Portal stylt dieses Bedienelement nicht, kann sein Antialiasing nicht beeinflussen und kann es folglich auch nicht regressieren; eine Sollbaseline darueber behauptet nichts ueber unseren Code und liefert nur Rauschen."
+      }
+    ],
+    "maskColor": "#ff00ff"
+  },
+  "files": {
+    "dark/deploy-desktop.png": "7d49535da7b18eb576a76fe55bb2f41024bd10d532413adf28ea5554868b0469",
+    "dark/deploy-mobile.png": "0c606b07c245c90190cb9c2f7e94e8986d5eff71785b2fefffc28389757c6425",
+    "dark/deploy-wrap.png": "9cecff17de3ea05478ea74ccf0fca8288b55edabcd7e1a28926f9775c4ef4440",
+    "dark/missions-desktop.png": "bbf5e7b4d7aaf28c87e52aa13282eb4f00b171fbbe727df2b3b4b6e4f922082c",
+    "dark/missions-mobile.png": "608cb7d8feb96fdbf026de33369a3ac20e632f655d9818526bb1cc9623f51a86",
+    "dark/missions-wrap.png": "aa9f890240fbb9be21b722c39f19d368d5697d904c6ff35962d015f973af7aee",
+    "light/deploy-desktop.png": "9608ed3d952c8f4a89d1f8254282e0d1d515b39bd6be82d8d640a1bca9cae2ea",
+    "light/deploy-mobile.png": "391a0f3370e6b5dce6bea96c494aed7161f421be2ac94f719a5848ca41f64695",
+    "light/deploy-wrap.png": "a6cf397ef9387ce93b7446adc7b7a519c026c07ed9ba777226732c6eea32e143",
+    "light/missions-desktop.png": "8cfb9ef5c7f90b4b72851adcc925375e0cdcf4791409a3c522249929377013aa",
+    "light/missions-mobile.png": "631bf9c5bde3d25aaa4d60dc3a71880aa67a4d382911508bb6307f3316009c13",
+    "light/missions-wrap.png": "df2236f1b26a8149a5fcaa53c81548d75edc4adccf3abf810618b1dcc7c094f6"
+  }
+}

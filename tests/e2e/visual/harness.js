@@ -1,11 +1,48 @@
 'use strict';
 
+// The read-only half of the visual contract, and the only half the QA lanes run.
+//
+// Etappe 11 compared two runs of the same build to each other. That proves the
+// harness is deterministic and nothing else: a build whose every page had turned
+// magenta would have passed it twice. Etappe 17 makes the committed, reviewed PNG
+// the pass criterion. The tolerance stays at zero in both directions.
+//
+// The retry is the answer to the flake carried through Etappen 14D, 15 and 16 and
+// it does not soften anything. A design regression is deterministic: it is in
+// every capture, so no number of attempts will ever produce one that equals the
+// baseline. Sub-pixel rasterisation noise is not: it disappears on the next
+// capture. So "at least one attempt is byte-identical to the reviewed image"
+// detects every regression while ignoring exactly the noise, without moving the
+// threshold off zero. A retry that was needed is reported, counted and kept as an
+// artifact - a harness that quietly retries is a harness nobody can judge.
+
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 const contract = require('./runner-contract.json');
 const { validateMetadata } = require('./metadata');
-const { assertVisualQaIsolation } = require('../lib/visual-seed');
+const { assertVisualQaIsolation, visualCaptureScopeConflicts } = require('../lib/visual-seed');
+const { assertRunIsComplete, runCapture } = require('./capture');
+const {
+  baselineRoot,
+  expectedRunFiles,
+  verifyBaselineSet,
+  writeDiffImage,
+} = require('./baselines');
+
+// The three names an update path could arrive under. The harness refuses all of
+// them, so
+// no lane can reach an update through an inherited environment variable; the
+// update command lives in its own entrypoint and is invoked by a person.
+const UPDATE_ENV_NAMES = ['UPDATE_SNAPSHOTS', 'VIRTUSPHERE_UPDATE_VISUAL_BASELINES', 'VIRTUSPHERE_VISUAL_BASELINE_UPDATE'];
+
+function refuseUpdateRequest(env = process.env) {
+  for (const name of UPDATE_ENV_NAMES) {
+    if (env[name]) {
+      throw new Error(`infrastructure_error: the visual QA harness never updates baselines (${name} is set)`);
+    }
+  }
+  return true;
+}
 
 function validateHarnessEnvironment(env = process.env) {
   try {
@@ -23,22 +60,37 @@ function requireMatchingMetadata(metadata) {
   return metadata.actual;
 }
 
-function pngDecoder() {
-  const coreRoot = path.dirname(require.resolve('playwright-core'));
-  return require(path.join(coreRoot, 'lib', 'utilsBundle.js')).PNG;
+/**
+ * The captured pages must show only rows the fixture owns. Naming the offending
+ * rows turns ten unexplainable pixel diffs into one sentence that points at the
+ * spec that left them behind.
+ */
+function requireCleanCaptureScope(conflicts) {
+  const problems = [];
+  if (conflicts.missions.length > 0) {
+    problems.push(`missions the visual fixture does not own: ${conflicts.missions.join(', ')}`);
+  }
+  if (conflicts.jobs > 0) problems.push(`${conflicts.jobs} deploy job(s) in the QA database`);
+  if (problems.length === 0) return true;
+  throw new Error(
+    'infrastructure_error: the QA database holds rows the captured pages render\n'
+      + `${problems.join('\n')}\n`
+      + 'a reviewed target image cannot describe another spec\'s leftovers; clean them up in the spec that created them'
+  );
 }
 
-function pngFiles(root) {
-  const found = [];
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      if (entry.isFile() && entry.name.endsWith('.png')) found.push(path.relative(root, full).replace(/\\/g, '/'));
-    }
-  };
-  walk(root);
-  return found.sort();
+function requireUsableBaselines(verification) {
+  if (verification.ok) return verification.manifest;
+  const infrastructure = verification.problems.filter((problem) => problem.kind === 'infrastructure');
+  const messages = verification.problems.map((problem) => problem.message).join('\n');
+  const hint = 'run `npm run visual:update -- --reason "<review reason>"` after reviewing the change';
+  if (infrastructure.length > 0) throw new Error(`infrastructure_error: reviewed visual baselines unusable\n${messages}`);
+  throw new Error(`reviewed visual baselines unusable\n${messages}\n${hint}`);
+}
+
+function pngDecoder() {
+  const { pngLibrary } = require('./baselines');
+  return pngLibrary();
 }
 
 function comparePngs(firstFile, secondFile, policy) {
@@ -70,49 +122,65 @@ function comparePngs(firstFile, secondFile, policy) {
   };
 }
 
-function runPlaywright(e2eDir, artifactDir, theme, iteration, position, total) {
-  const outputDir = path.join(artifactDir, theme, `run-${iteration}`);
-  fs.mkdirSync(outputDir, { recursive: true });
-  process.stdout.write(`[${position}/${total}] RUN visual-${theme}-${iteration}\n`);
-  const cli = require.resolve('@playwright/test/cli');
-  const result = spawnSync(process.execPath, [cli, 'test', '--project=visual'], {
-    cwd: e2eDir,
-    env: {
-      ...process.env,
-      VIRTUSPHERE_VISUAL_THEME: theme,
-      VIRTUSPHERE_VISUAL_OUTPUT_DIR: outputDir,
-    },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  process.stdout.write(result.stdout || '');
-  process.stderr.write(result.stderr || '');
-  if (result.error) process.stderr.write(`visual spawn failed: ${result.error.message}\n`);
-  if (result.status !== 0) {
-    process.stdout.write(`[${position}/${total}] fail visual-${theme}-${iteration}\n`);
-    throw new Error(`visual Playwright run failed: ${theme} run ${iteration}`);
-  }
-  process.stdout.write(`[${position}/${total}] pass visual-${theme}-${iteration}\n`);
-}
+/**
+ * One theme, attempt by attempt. `minimumAttempts` keeps the two stable runs that
+ * Etappe 11 established as evidence even when the first one already matched;
+ * further attempts are taken only for the files that have not matched yet.
+ */
+function verifyTheme(artifactDir, theme, progress) {
+  const runFiles = expectedRunFiles(contract);
+  const pending = new Set(runFiles);
+  const results = new Map(runFiles.map((file) => [file, { file, matchedOnAttempt: null, attempts: [] }]));
+  const { maxAttempts, minimumAttempts } = contract.baselines;
+  let attemptsUsed = 0;
 
-function compareRuns(artifactDir, theme) {
-  const firstRoot = path.join(artifactDir, theme, 'run-1');
-  const secondRoot = path.join(artifactDir, theme, 'run-2');
-  const firstFiles = pngFiles(firstRoot);
-  const secondFiles = pngFiles(secondRoot);
-  if (firstFiles.length === 0 || JSON.stringify(firstFiles) !== JSON.stringify(secondFiles)) {
-    throw new Error(`visual screenshot set mismatch for ${theme}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > minimumAttempts && pending.size === 0) break;
+    const outputDir = path.join(artifactDir, theme, `run-${attempt}`);
+    const label = `visual-${theme}-${attempt}`;
+    progress(label);
+    runCapture(outputDir, theme, label);
+    assertRunIsComplete(outputDir, runFiles, label);
+    attemptsUsed = attempt;
+
+    // Every file of every attempt is compared, including the ones that already
+    // matched: an attempt that is captured but never looked at is an attempt
+    // that proves nothing, and the second run is exactly where the noise this
+    // harness has to stay honest about shows up.
+    for (const file of runFiles) {
+      const actual = path.join(outputDir, file);
+      const baseline = path.join(baselineRoot(contract), theme, file);
+      const comparison = comparePngs(baseline, actual, contract.pixelComparison);
+      if (comparison.ok) {
+        pending.delete(file);
+        if (results.get(file).matchedOnAttempt === null) results.get(file).matchedOnAttempt = attempt;
+        results.get(file).attempts.push({ attempt, diffPixels: 0 });
+        continue;
+      }
+      const diffFile = path.join(artifactDir, theme, 'diff', `${path.basename(file, '.png')}-attempt-${attempt}.png`);
+      const diff = writeDiffImage(baseline, actual, diffFile);
+      results.get(file).attempts.push({
+        attempt,
+        diffPixels: comparison.diffPixels === null ? diff.diffPixels : comparison.diffPixels,
+        box: diff.box,
+        reason: comparison.reason || null,
+        diffImage: path.relative(artifactDir, diffFile).replace(/\\/g, '/'),
+        actual: path.relative(artifactDir, actual).replace(/\\/g, '/'),
+      });
+    }
+    if (attempt >= minimumAttempts && pending.size === 0) break;
   }
-  return firstFiles.map((relative) => ({
-    file: relative,
-    ...comparePngs(path.join(firstRoot, relative), path.join(secondRoot, relative), contract.pixelComparison),
-  }));
+
+  return {
+    theme,
+    attemptsUsed,
+    unmatched: [...pending].sort(),
+    files: runFiles.map((file) => results.get(file)),
+  };
 }
 
 async function main() {
-  if (process.env.UPDATE_SNAPSHOTS || process.env.VIRTUSPHERE_UPDATE_VISUAL_BASELINES) {
-    throw new Error('infrastructure_error: Etappe 11 never updates visual baselines');
-  }
+  refuseUpdateRequest();
   validateHarnessEnvironment();
   const artifactDir = process.env.VIRTUSPHERE_VISUAL_ARTIFACT_DIR;
   if (!artifactDir) throw new Error('infrastructure_error: VIRTUSPHERE_VISUAL_ARTIFACT_DIR is required');
@@ -121,26 +189,74 @@ async function main() {
   const metadata = await validateMetadata(contract);
   fs.writeFileSync(path.join(artifactDir, 'metadata.actual.json'), JSON.stringify(metadata.actual, null, 2) + '\n');
   requireMatchingMetadata(metadata);
+  const manifest = requireUsableBaselines(verifyBaselineSet(contract, metadata.actual));
+  requireCleanCaptureScope(visualCaptureScopeConflicts());
 
-  const e2eDir = path.resolve(__dirname, '..');
+  // The progress unit is the theme, not the attempt: how many attempts a theme
+  // needs is not known in advance, and a total that is never reached reads as an
+  // aborted run. Each attempt still announces itself on its own line.
+  const perFile = contract.pages.length * contract.viewports.length;
+  const total = contract.themes.length;
   let position = 0;
-  const total = contract.themes.length * 2;
+  const themes = {};
   for (const theme of contract.themes) {
-    for (const iteration of [1, 2]) {
-      runPlaywright(e2eDir, artifactDir, theme, iteration, ++position, total);
+    position += 1;
+    process.stdout.write(`[${position}/${total}] RUN visual-${theme} (${perFile} reviewed images)\n`);
+    themes[theme] = verifyTheme(artifactDir, theme, (label) => {
+      process.stdout.write(`  capture ${label}\n`);
+    });
+    const state = themes[theme].unmatched.length === 0 ? 'pass' : 'fail';
+    process.stdout.write(`[${position}/${total}] ${state} visual-${theme} (${themes[theme].attemptsUsed} attempt(s))\n`);
+  }
+
+  // "Noise" is any file that failed at least one attempt while matching another:
+  // the design is right and the rasteriser was not reproducible. It never fails
+  // the run and it is never silent either.
+  const noise = [];
+  const failed = [];
+  for (const theme of contract.themes) {
+    for (const entry of themes[theme].files) {
+      if (entry.matchedOnAttempt === null) {
+        failed.push(`${theme}/${entry.file}`);
+        continue;
+      }
+      const missed = entry.attempts.filter((attempt) => attempt.diffPixels !== 0);
+      if (missed.length > 0) {
+        noise.push(
+          `${theme}/${entry.file} (matched on attempt ${entry.matchedOnAttempt}; `
+            + `${missed.map((attempt) => `attempt ${attempt.attempt}: ${attempt.diffPixels} px`).join(', ')})`
+        );
+      }
     }
   }
 
-  const comparisons = {};
-  for (const theme of contract.themes) {
-    comparisons[theme] = compareRuns(artifactDir, theme);
+  fs.writeFileSync(
+    path.join(artifactDir, 'comparison.json'),
+    JSON.stringify(
+      {
+        contract: contract.pixelComparison,
+        baselineManifest: { updatedAt: manifest.updatedAt, reason: manifest.reason },
+        imagesPerTheme: perFile,
+        rasterisationNoise: noise,
+        themes,
+      },
+      null,
+      2
+    ) + '\n'
+  );
+
+  if (failed.length > 0) {
+    throw new Error(
+      `visual baseline mismatch in every attempt: ${failed.join(', ')}\n` +
+        `diff images and the actual captures are below ${artifactDir}`
+    );
   }
-  fs.writeFileSync(path.join(artifactDir, 'comparison.json'), JSON.stringify({ contract: contract.pixelComparison, themes: comparisons }, null, 2) + '\n');
-  const mismatchedThemes = contract.themes.filter((theme) => comparisons[theme].some((entry) => !entry.ok));
-  if (mismatchedThemes.length > 0) {
-    throw new Error(`visual pixel mismatch outside tolerance for ${mismatchedThemes.join(', ')}`);
+  if (noise.length > 0) {
+    process.stdout.write(`visual baselines: rasterisation noise observed, not a mismatch: ${noise.join('; ')}\n`);
   }
-  process.stdout.write('visual determinism: light and dark runs are pixel-identical\n');
+  process.stdout.write(
+    `visual baselines: ${contract.themes.length * perFile} reviewed images matched at zero tolerance\n`
+  );
 }
 
 if (require.main === module) {
@@ -150,4 +266,14 @@ if (require.main === module) {
   });
 }
 
-module.exports = { comparePngs, compareRuns, main, pngFiles, requireMatchingMetadata, validateHarnessEnvironment };
+module.exports = {
+  UPDATE_ENV_NAMES,
+  comparePngs,
+  main,
+  refuseUpdateRequest,
+  requireCleanCaptureScope,
+  requireMatchingMetadata,
+  requireUsableBaselines,
+  validateHarnessEnvironment,
+  verifyTheme,
+};
