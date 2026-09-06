@@ -77,6 +77,34 @@ function migrate_0050_mecm_rollout_hostname(mysqli $db): void
 }
 
 /**
+ * Why the template prefix is compared with LEFT() and never with LIKE.
+ *
+ * `deploy_missions.mission_name` is utf8mb4_unicode_ci with a unique index, and
+ * MySQL 8.4 plans `LIKE 'prefix%'` on it as an index RANGE as soon as the table
+ * is big enough. A row whose character immediately after the prefix lies in a
+ * supplementary plane (U+10000 and above) sorts outside the computed range
+ * endpoints and is silently missed: no error, no warning, just fewer rows.
+ * Measured on this server, 36 rows, `utf8mb4_unicode_ci`: the range answers 19
+ * of 21, `IGNORE INDEX` and `LEFT()` both answer 21, and the two missing values
+ * are exactly the ones carrying U+1F680 and U+20000 at that position.
+ *
+ * Three details matter and none of them is obvious:
+ *
+ * - It is NOT a property of DELETE. A SELECT taking the same range loses the
+ *   same rows; a small fixture merely gets a full index scan and looks healthy,
+ *   which is why this survived until a reviewed screenshot showed the leftovers.
+ * - The position decides. `_Vorlage<emoji>` stays inside the range because the
+ *   second character already settles the comparison; `_<emoji>Vorlage` does not.
+ * - `utf8mb4_bin` behaves the same, so the binary ESXi name columns would be no
+ *   safer.
+ *
+ * `LEFT(col, CHAR_LENGTH(?)) = ?` cannot use the index, so the predicate is
+ * evaluated per row and answers correctly. It also removes the LIKE-escaping of
+ * `_` and `%` that the prefix needed, which was a second subtlety in a place
+ * that runs exactly once per database.
+ */
+
+/**
  * Blocks on a collision of two VALID hostnames and merely names the rest.
  *
  * An invalid legacy value is deliberately not a blocker: it is allowed to
@@ -96,12 +124,10 @@ function migrate_0050_preflight(mysqli $db): void
         'SELECT v.id, v.vm_name, v.vm_hostname, m.mission_name
            FROM deploy_vms v
            JOIN deploy_missions m ON m.id = v.mission_id
-          WHERE m.mission_name NOT LIKE CONCAT(?, ?)
+          WHERE LEFT(m.mission_name, CHAR_LENGTH(?)) <> ?
           ORDER BY v.id'
     );
-    $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix);
-    $wildcard = '%';
-    $stmt->bind_param('ss', $escaped, $wildcard);
+    $stmt->bind_param('ss', $prefix, $prefix);
     $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
@@ -183,8 +209,6 @@ function migrate_0050_preflight(mysqli $db): void
 function migrate_0050_backfill(mysqli $db): void
 {
     $prefix = VIRTUSPHERE_TEMPLATE_PREFIX;
-    $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix);
-    $wildcard = '%';
     $initialRevision = VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL;
 
     $stmt = $db->prepare(
@@ -194,10 +218,10 @@ function migrate_0050_backfill(mysqli $db): void
                 v.mecm_rollout_revision = ?,
                 v.mecm_previous_id = NULL,
                 v.updated_at = v.updated_at
-          WHERE m.mission_name NOT LIKE CONCAT(?, ?)
+          WHERE LEFT(m.mission_name, CHAR_LENGTH(?)) <> ?
             AND v.mecm_rollout_revision IS NULL'
     );
-    $stmt->bind_param('iss', $initialRevision, $escaped, $wildcard);
+    $stmt->bind_param('iss', $initialRevision, $prefix, $prefix);
     $stmt->execute();
     $adopted = $stmt->affected_rows;
 
@@ -210,9 +234,9 @@ function migrate_0050_backfill(mysqli $db): void
                 v.mecm_rollout_revision = NULL,
                 v.mecm_previous_id = NULL,
                 v.updated_at = v.updated_at
-          WHERE m.mission_name LIKE CONCAT(?, ?)'
+          WHERE LEFT(m.mission_name, CHAR_LENGTH(?)) = ?'
     );
-    $stmt->bind_param('ss', $escaped, $wildcard);
+    $stmt->bind_param('ss', $prefix, $prefix);
     $stmt->execute();
 
     // Claims for everything that can actually start a rollout. Desired and
