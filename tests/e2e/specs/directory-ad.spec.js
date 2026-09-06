@@ -17,6 +17,7 @@
 // functions the successful admin flow itself would have called), exactly
 // like DirectoryLdapFixtureFailoverTest.php's PHPUnit-level fixture setup.
 
+const tls = require('node:tls');
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
@@ -364,21 +365,36 @@ test.describe('AD sign-in, own session, over HTTPS', () => {
     httpsBaseUrl = `https://${url.hostname}:8032/portal/`;
   });
 
-  test.beforeEach(async ({ request }) => {
-    const revision = seedDraftConfig().revision;
-    seedValidatedController(FIXTURE_HOST_DC1, revision);
-    enableDirectory();
-    runPhp(`
-require_once '/var/www/html/lib/directory_service.php';
-require_once '/var/www/html/lib/repo/directory_users.php';
-$entry = directory_find_user_by_upn(db(), '${ALICE_UPN}');
-repo_directory_import_user(db(), $entry, VIRTUSPHERE_ROLE_USER);
+  // The throwaway HTTPS listener is set up ONCE for this block, not per test.
+  //
+  // It used to be written and torn down around every test, and that is what the
+  // long-open `SEC_ERROR_UNKNOWN` in Firefox actually was. Nothing about it was
+  // a Firefox incompatibility: the same test passes in Firefox when it runs
+  // alone, three times over, and both a certificate serial of 0 and the `http2
+  // on` listener were measured against all three engines and cleared. What the
+  // engines were hitting is an nginx reload boundary. `Docker/nginx/init.sh`
+  // polls the generated material every 5s, so writing a new certificate makes
+  // the running listener stale for up to that long, while the previous test's
+  // teardown deletes the material without waiting for the removal to land
+  // either. A browser connecting across that window gets a TLS session whose
+  // certificate no longer matches, which NSS reports as "the authenticity of
+  // the received data could not be verified".
+  //
+  // The wait was unable to see any of it, because it asked the wrong question:
+  // `health.php` answers 200 from the OLD listener just as happily as from the
+  // new one, so the poll returned before the certificate it had just written
+  // was being served. It now compares the fingerprint of the certificate nginx
+  // actually presents against the one this block wrote, which is the condition
+  // the tests below depend on.
+  let expectedFingerprint;
+
+  test.beforeAll(async () => {
+    expectedFingerprint = runPhp(`
 $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
 // The throwaway certificate carries a Subject Alternative Name, not just a
 // common name: every current browser requires one, and this fixture predates
-// that rule. Stated honestly, it did NOT fix the Firefox failure it was tried
-// for - that test still ends in SEC_ERROR_UNKNOWN and its cause is still open.
-// The SAN stays because a CN-only certificate is wrong regardless.
+// that rule. It is not what fixed the failure above, but a CN-only certificate
+// is wrong regardless.
 $sanConf = tempnam(sys_get_temp_dir(), 'vs-san-');
 file_put_contents($sanConf, implode(PHP_EOL, [
     '[req]',
@@ -397,28 +413,34 @@ openssl_pkey_export($key, $keyPem);
 https_write_material($certPem, '', $keyPem);
 repo_set_setting(db(), VIRTUSPHERE_SETTING_HTTPS_ENABLED, '1');
 https_apply_state(db());
-echo 'OK';
-`, [...DIRECTORY_LIBS, ...HTTPS_LIBS], { user: 'www-data' });
-    // Docker/nginx/init.sh's watcher polls the generated conf/material every
-    // 5s and only then reloads nginx; https_apply_state() above only writes
-    // the files (https_listener_live() would go true immediately from that
-    // alone). Poll the real port so the tests below never race the reload.
+echo strtolower(str_replace(':', '', openssl_x509_fingerprint($cert, 'sha256')));
+`, HTTPS_LIBS, { user: 'www-data' }).trim();
+
     await expect
-      .poll(
-        async () => {
-          try {
-            const response = await request.get(httpsBaseUrl + 'health.php', { ignoreHTTPSErrors: true, timeout: 3000 });
-            return response.status();
-          } catch {
-            return 0;
-          }
-        },
-        { message: 'nginx never picked up the generated HTTPS listener', timeout: 20000, intervals: [500] }
-      )
-      .toBe(200);
+      .poll(() => servedFingerprint(), {
+        message: 'nginx never served the certificate this block generated',
+        timeout: 30000,
+        intervals: [500],
+      })
+      .toBe(expectedFingerprint);
   });
 
-  test.afterEach(() => {
+  test.beforeEach(() => {
+    const revision = seedDraftConfig().revision;
+    seedValidatedController(FIXTURE_HOST_DC1, revision);
+    enableDirectory();
+    runPhp(`
+require_once '/var/www/html/lib/directory_service.php';
+require_once '/var/www/html/lib/repo/directory_users.php';
+$entry = directory_find_user_by_upn(db(), '${ALICE_UPN}');
+repo_directory_import_user(db(), $entry, VIRTUSPHERE_ROLE_USER);
+echo 'OK';
+`, DIRECTORY_LIBS, { user: 'www-data' });
+  });
+
+  // Torn down once, for the same reason it is set up once. The redirect setting
+  // was never turned on, so the shared http baseURL kept serving throughout.
+  test.afterAll(() => {
     runPhp(`
 repo_set_setting(db(), VIRTUSPHERE_SETTING_HTTPS_ENABLED, '0');
 https_apply_state(db());
@@ -427,6 +449,27 @@ https_apply_state(db());
 echo 'OK';
 `, HTTPS_LIBS);
   });
+
+  /**
+   * The SHA-256 fingerprint nginx presents on the HTTPS port right now, or ''
+   * while nothing answers. A TLS handshake is the only thing that can tell the
+   * new listener from the old one; an HTTP status cannot.
+   */
+  function servedFingerprint() {
+    return new Promise((resolve) => {
+      const url = new URL(httpsBaseUrl);
+      const socket = tls.connect(
+        { host: url.hostname, port: Number(url.port), servername: url.hostname, rejectUnauthorized: false, timeout: 3000 },
+        () => {
+          const peer = socket.getPeerCertificate();
+          socket.end();
+          resolve(peer && peer.fingerprint256 ? peer.fingerprint256.replace(/:/g, '').toLowerCase() : '');
+        }
+      );
+      socket.on('timeout', () => { socket.destroy(); resolve(''); });
+      socket.on('error', () => resolve(''));
+    });
+  }
 
   function csrfFrom(html) {
     const match = html.match(/name="_csrf" value="([^"]+)"/);

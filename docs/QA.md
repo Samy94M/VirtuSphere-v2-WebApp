@@ -249,6 +249,37 @@ Re-running the whole matrix until it is green would prove nothing and was not
 done; the isolated re-run is the evidence, and the timeout change is the
 mitigation whose effect the next Release lane will show.
 
+**Follow-up, 2026-09-06: the `directory-ad.spec.js` half of that was not timing
+after all, and the diagnosis above was wrong about it.** The failure reproduces
+deterministically inside the file (the fourth test of the HTTPS block) while the
+same test passes three times in a row when run alone, so the cause is state, not
+the clock. Two suspects were measured and both cleared: a fixture certificate
+with serial number 0, which RFC 5280 forbids, loads fine in all three engines
+under `ignoreHTTPSErrors`, and so does the same certificate served over ALPN
+`h2` like the generated listener does. What was left is the listener itself.
+There is exactly ONE HTTPS listener on the QA stack, `Docker/nginx/init.sh`
+picks up generated material on a 5 s poll, and the block was writing a fresh
+certificate before every test and deleting it afterwards without waiting for
+either change to land. A browser connecting across that reload gets a TLS
+session whose certificate no longer matches, which NSS words as "the
+authenticity of the received data could not be verified" (`SEC_ERROR_UNKNOWN`).
+
+The wait could not see it because it asked the wrong question: `health.php`
+answers 200 from the old listener exactly as happily as from the new one. It now
+opens a TLS connection and compares the served `fingerprint256` against the
+certificate the block wrote, and the listener is set up and torn down once per
+block instead of once per test. Afterwards `directory-ad.spec.js` is 16/16 on
+Firefox, WebKit and Chromium.
+
+Two things follow for anyone touching these specs. **`directory-ad.spec.js` and
+`https-flow.spec.js` share that single listener**, so a test that leaves HTTPS
+material in flux can fail the other file; the WebKit `waitForResponse` timeout
+reported in `https-flow.spec.js` stopped reproducing once the churn was gone
+(both files together, WebKit, 17/17 twice), and that file was deliberately left
+unchanged rather than edited on a suspicion. And **repeated local runs of the AD
+spec trip the sign-in throttle**, which then looks like an AD failure; clear
+`deploy_login_attempts` between runs.
+
 ### Etappe 14B baseline: what the create path looks like before the repair
 
 The create repair (`docs/audits/2026-08-13-create-flow-reliability-implementation-plan.md`)
