@@ -201,6 +201,10 @@ further both change what every future visual gate means, and reviewed visual
 targets belong to Etappe 17, so neither was done here. The gate stays red and
 named rather than silently retried until green.
 
+That finding is closed. Etappe 17 decided it without moving the threshold: see
+"Reviewed target baselines" below for the mask, the bounded retry and how to read
+a red visual gate today.
+
 The Release lane on the Etappe-14A commit answered
 `42 pass, 2 fail, 0 infrastructure_error, 0 not_applicable, 0 skip`. Every
 non-browser gate is green, including `restore-drill`, `secret-scan` over the
