@@ -67,9 +67,22 @@ echo 'CLEANED';
 test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
-test('the audit table shows the correlation id and copies it on demand', async ({ page, context }) => {
+test('the audit table shows the correlation id and copies it on demand', async ({ page, context, browserName }) => {
   seed();
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // `clipboard-read`/`clipboard-write` are Chromium permission names; Firefox
+  // and WebKit refuse them outright ("Unknown permission"), which failed this
+  // test on both engines for a reason that had nothing to do with the portal.
+  //
+  // The split is deliberate rather than a skip. What every engine must show is
+  // the contract from the portal rules: the copy control is a real button, it
+  // is keyboard-operable, and it announces its outcome either way, because a
+  // plain-HTTP LAN portal has no `navigator.clipboard` at all and the failure
+  // is a normal branch. Reading the clipboard BACK is the one assertion that
+  // needs the Chromium permission model, so only that part is conditional.
+  const canReadClipboard = browserName === 'chromium';
+  if (canReadClipboard) {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  }
   await page.goto(`logs.php?tab=security&ip=${IP}`);
 
   const row = page.locator('tbody tr', { hasText: 'e2e correlation fixture two' }).first();
@@ -83,9 +96,20 @@ test('the audit table shows the correlation id and copies it on demand', async (
   await expect(copy).toBeFocused();
   await copy.press('Enter');
 
+  // Announced on every engine: either the copy worked or it did not, and the
+  // operator is told which. An empty status would be the silent catch the
+  // portal rules forbid.
   await expect(row.locator('[data-copy-status]'), 'the copy is confirmed visibly').toBeVisible();
   await expect(row.locator('[data-copy-status]')).not.toBeEmpty();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(TRACE);
+
+  // The value itself is verifiable only where the clipboard can be read back.
+  if (canReadClipboard) {
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(TRACE);
+  }
+
+  // And the id stays selectable text regardless, which is the fallback the
+  // help promises for a browser without clipboard access.
+  await expect(row.locator('.correlation-id code')).toHaveText(TRACE);
 });
 
 test('an exact correlation filter shows one request and the jobs it enqueued', async ({ page }) => {
