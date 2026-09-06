@@ -37,12 +37,43 @@ function Invoke-PlaywrightSuite {
     }
     $projectArgs = @()
     foreach ($p in $Projects) { $projectArgs += ('--project=' + $p) }
+
+    # Dieselbe Quieszierung wie vor phpunit-full, und aus demselben Grund. Die
+    # Specs legen absichtlich Deployjobs an und loeschen ihre Fixtures wieder;
+    # ein gleichzeitig claimender Deploy-Worker oder reapender
+    # Maintenance-Worker ist dann ein zweiter Besitzer derselben Wegwerfzeilen.
+    # Das ist hier keine Vermutung: `e2e-portal` fiel in der Release-Lane vom
+    # 06.09.2026 mit "Deadlock found when trying to get lock" im
+    # beforeEach-Cleanup von deploy-actions.spec.js, unmittelbar nachdem dessen
+    # Retry-Test den einen Job erzeugt hatte, den der Worker laut Dateikopf
+    # claimen darf. Die Abhilfe stand seit dem Etappe-8-Rest an phpunit-full und
+    # war nie auf die Playwrightgates uebertragen worden, obwohl die Begruendung
+    # woertlich gilt.
+    #
+    # Kein Spec braucht einen laufenden Worker: die vollstaendige Chromium-Suite
+    # ist mit gestoppten Workern 259/259 gruen und dabei schneller als mit.
+    # Produktionslocking bleibt unveraendert, und das finally stellt beide auch
+    # nach einem roten oder werfenden Lauf health-geprueft wieder her.
+    $qaTestWorkers = @('deploy-worker', 'maintenance-worker')
+    $stopped = Invoke-QaCompose (@('stop', '--timeout', '30') + $qaTestWorkers)
+    if ($stopped.ExitCode -ne 0) {
+        foreach ($k in $prevEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $prevEnv[$k]) }
+        return New-InfraResult 'QA-Worker vor dem Playwrightlauf nicht quieszierbar' $stopped.Output
+    }
+
     Push-Location $e2eDir
+    $r = $null
+    $restarted = $null
     try {
         $r = Invoke-Tool 'npx' (@('playwright', 'test') + $projectArgs)
     } finally {
         Pop-Location
+        $restarted = Invoke-QaCompose (@('up', '-d', '--wait') + $qaTestWorkers)
         foreach ($k in $prevEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $prevEnv[$k]) }
+    }
+    if ($null -eq $restarted -or $restarted.ExitCode -ne 0) {
+        $restartOutput = if ($null -eq $restarted) { @('worker restart did not return a result') } else { @($restarted.Output) }
+        return New-InfraResult 'QA-Worker nach dem Playwrightlauf nicht wieder healthy' (@($r.Output) + $restartOutput)
     }
     Format-ToolResult $r $OkDetail $FailDetail
 }
