@@ -62,14 +62,22 @@ echo 'V_START' . ($row ? $row['v'] : '') . 'V_END';
 //
 // The LIKE form silently left the emoji probe behind on every run, and it took a
 // reviewed visual baseline to notice: `mission_name` is `utf8mb4_unicode_ci` with
-// a unique index, and for that predicate MySQL plans a DELETE as an index RANGE
-// while it plans the equivalent SELECT as a full index scan. A supplementary
-// character (U+10000 and above, so exactly this file's emoji probe) carries an
-// implicit collation weight the range endpoints do not represent, so the row sits
-// outside the computed range: `SELECT ... LIKE 'e2ert-%'` finds it, `DELETE ...
-// LIKE 'e2ert-%'` reports zero affected rows and throws nothing. BMP characters
-// such as an umlaut or a combining accent are unaffected. `LEFT()` defeats the
-// index, the plan becomes a scan, and the predicate is then evaluated per row.
+// a unique index, and MySQL plans `LIKE 'e2ert-%'` on it as an index RANGE once
+// the table is big enough. A supplementary character (U+10000 and above) carries
+// an implicit collation weight the range endpoints do not represent, so the row
+// sits outside the computed range and is silently missed.
+//
+// Two things about that are easy to get wrong, and the first version of this
+// comment got both wrong. It is NOT a property of DELETE: a SELECT taking the
+// same range loses the same rows, and a small table merely gets a full index
+// scan instead, which is what made it look statement-specific. And the POSITION
+// decides: the emoji has to sit immediately after the prefix, where it takes
+// part in the boundary comparison. That is why exactly one of the seven probes
+// below was affected while the umlaut, HTML, XSS, SQL and YAML probes, which all
+// continue with a BMP character, were deleted fine.
+//
+// `LEFT()` defeats the index, the plan becomes a scan, and the predicate is then
+// evaluated per row.
 function cleanup() {
   runPhp(`
 $db = db();
