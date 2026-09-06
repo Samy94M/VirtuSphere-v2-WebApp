@@ -321,15 +321,31 @@ test('a re-imported template reports the prefix at the field and still lets the 
     .toHaveValue(template.name);
   // Two independent name findings stack here on purpose: the file carries the
   // reserved template prefix AND that exact name already exists (it is the
-  // template this export came from). The prefix rule is the one under test.
+  // template this export came from). Both are named, in ONE error output: the
+  // control owns exactly one error id, and the second span this form used to
+  // render was referenced by nothing.
   const fieldErrors = confirmForm.locator('.field-error');
+  await expect(fieldErrors, 'the two findings share the one error output of this control').toHaveCount(1);
   await expect(fieldErrors.first(), 'the name problem is reported at the field it is fixed in').toBeVisible();
   const fieldErrorText = (await fieldErrors.allTextContents()).join('\n');
-  const prefixVariants = messageVariants('validate.mission_import_no_template');
+  for (const key of ['validate.mission_import_no_template', 'missions.import_name_conflict']) {
+    const variants = messageVariants(key);
+    expect(variants.length, `the catalog has no text for ${key}`).toBeGreaterThan(0);
+    expect(
+      variants.some((variant) => fieldErrorText.includes(variant)),
+      `${key} is not named at the field; it said: ${fieldErrorText}`,
+    ).toBe(true);
+  }
+  // The wiring the hand-written spans never had: a screen reader has to reach
+  // this text from the control, not find it lying next to it.
+  const nameField = confirmForm.locator('input[name="mission_name"]');
+  await expect(nameField, 'the invalid control says so').toHaveAttribute('aria-invalid', 'true');
+  const errorId = await fieldErrors.first().getAttribute('id');
+  expect(errorId, 'the error output carries a generated id').toBeTruthy();
   expect(
-    prefixVariants.some((variant) => fieldErrorText.includes(variant)),
-    `the template prefix rule is not named at the field; it said: ${fieldErrorText}`,
-  ).toBe(true);
+    ((await nameField.getAttribute('aria-describedby')) || '').split(/\s+/),
+    'the control describes itself with its own error',
+  ).toContain(errorId);
   await expect(
     confirmForm.locator('button[type="submit"]'),
     'a name problem must not disable the button that submits the corrected name',

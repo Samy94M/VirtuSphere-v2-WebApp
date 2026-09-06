@@ -18,7 +18,9 @@ Zielkonvention:
 
 Abschlussstand: Sämtliche unten mit dem historischen Erfassungsstatus `offen`
 geführten Zeilen sind migriert. Die Spalte bleibt bewusst als Vorher-Nachweis
-stehen; die Abnahme und ihre Negativbeweise stehen in Abschnitt E.
+stehen; die Abnahme und ihre Negativbeweise stehen in Abschnitt E. Eine Zeile
+trägt `nachgetragen`: sie fehlte in der Ersterfassung und wurde am 06.09.2026
+beim Soll/Ist-Abgleich gefunden, siehe Abschnitt E.
 
 ## A. Fehlerfähige Controls
 
@@ -51,6 +53,7 @@ stehen; die Abnahme und ihre Negativbeweise stehen in Abschnitt E.
 | gleich | `clone` | `target_mission_name` | Wrap-Label Zielmission | keine | nein | Controlattribute + stabile Error-ID | offen |
 | gleich | `save_template` | `target_template_name` | Wrap-Label Template | keine | nein | Controlattribute + stabile Error-ID | offen |
 | `portal/missions.php` | `create` | `mission_name` | Wrap-Label Name | keine | nein | Controlattribute + stabile Error-ID | offen |
+| `lib/missions_import_panel.php` / Missionen | `import_confirm` | `mission_name` | Wrap-Label Name | keine | nein | Controlattribute + stabile Error-ID, eigener Formularname | nachgetragen 06.09.2026 |
 | `lib/deploy_queue_panel.php` / Deploy | `schedule` | `credential_esxi_id` | Wrap-Label ESXi-Zugang | keine | nein | Controlattribute + stabile Error-ID | offen |
 | gleich | `schedule` | `scheduled_at` | Wrap-Label Zeitpunkt | keine | bedingt sichtbar | Controlattribute + stabile Error-ID | offen |
 | gleich | `schedule` | `stagger_minutes` | Wrap-Label Staffelung | keine | dynamischer Lock | Hint und Fehler gemeinsam beschreiben | offen |
@@ -170,6 +173,27 @@ Checkboxgruppen einsortiert; die Korrektur erfolgte vor der Implementierung.
   Damit ist die aktuelle Abnahmemenge aller 36 Integration-Gates grün; die
   Änderung zwischen Komplett- und Wiederholungslauf betraf ausschließlich den
   E2E-Selektor des vollständig wiederholten Gates.
+- **Nachtrag vom 06.09.2026, gefunden beim Soll/Ist-Abgleich für die
+  Abnahmezeile:** Das Bestätigungsformular der Missions-Vorschau
+  (`lib/missions_import_panel.php`) fehlte in Abschnitt A und war weder
+  migriert noch als ausgeschlossen begründet. Sein `mission_name` trug zwei von
+  Hand geschriebene `.field-error`-Spans ohne ID, das Control hatte keine ID,
+  kein `aria-invalid` und kein `aria-describedby`. Die Datei entstand am
+  19.08.2026, zwölf Tage vor dieser Etappe. Der Grund, warum kein Wächter
+  anschlug, ist die Zeile darüber: `FormAccessibilityContractTest` prüfte die
+  Negativregeln nur über eine handgepflegte Liste von fünfzehn Pfaden, während
+  beide VM-Registries in beide Richtungen gegen `glob()` laufen. Die Liste ist
+  jetzt nur noch das positive Netz; die Negativregeln laufen über einen
+  abgeleiteten Glob (`lib/*.php`, `lib/*/*.php`, `portal/*.php`), der auch leer
+  nicht durchgeht, und die Mitgliedschaft im positiven Netz wird aus dem
+  tatsächlichen Gebrauch von `form_error_html()`/`form_error_id()` abgeleitet.
+  Die beiden Owner, die seit Etappe 14 dazukamen (`lib/logs_filter_form.php`
+  aus 15, `lib/vm_edit_names.php` aus 14D), sind damit ebenfalls erfasst; beide
+  waren inhaltlich bereits korrekt. Die zwei unabhängigen Namensbefunde
+  (`name_invalid`, `name_conflict`, gleichzeitig möglich) werden zu EINER
+  Fehlerausgabe verbunden, weil das Control genau eine Error-ID besitzt.
+  Negativkontrolle gefahren: der alte Dateistand macht den neuen Wächter mit
+  zwei Fehlern rot.
 - Audit-SSoT, persistierte Joblogs, Container-/Health-Vertrag, Datenbankschema
   und Machine-API-Wire sind fachlich nicht betroffen: Etappe 14 ändert
   Portal-Markup, Formularhelfer und Portal-JavaScript, führt keine Migration

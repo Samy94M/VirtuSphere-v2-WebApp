@@ -35,6 +35,18 @@ function missions_render_import_preview(array $importPreview, array $user): void
     // The subset of file findings that has no link to a page that fixes it, and
     // therefore carries the "correct the file and upload again" sentence.
     $fileErrors = $report['vm_name_duplicates'] !== [] || $report['mission_field_errors'] !== [] || $report['vm_field_errors'] !== [];
+    // The name field carries the only field error of this form, and the two
+    // report flags are independent: a re-imported, already existing template is
+    // both invalid and taken. They are joined into ONE message because the
+    // control owns exactly one error id; two spans would leave the second one
+    // unreferenced by aria-describedby, which is what this form did before.
+    // The form name is deliberately not `create`: the create panel above renders
+    // its own `mission_name` on the same page, and a shared name would generate
+    // the same control id twice.
+    $nameError = trim(implode(' ', array_filter([
+        $report['name_invalid'] ? (string) $report['name_invalid_message'] : '',
+        $report['name_conflict'] ? __t('missions.import_name_conflict') : '',
+    ], static fn (string $message): bool => $message !== '')));
     ?>
     <section class="panel">
         <h2><?php echo h(__t('missions.import_preview_heading')); ?></h2>
@@ -108,11 +120,7 @@ function missions_render_import_preview(array $importPreview, array $user): void
             <input type="hidden" name="action" value="import_confirm">
             <input type="hidden" name="import_token" value="<?php echo h($importPreview['token']); ?>">
             <label><?php echo h(__t('missions.import_new_name_label')); ?>
-                <input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h((string) $importPreview['suggested_name']); ?>" required>
-                <?php // Independent flags: a re-imported, already existing template
-                      // is both invalid and taken, and both errors stack here. ?>
-                <?php if ($report['name_invalid']) { ?><span class="field-error"><?php echo h($report['name_invalid_message']); ?></span><?php } ?>
-                <?php if ($report['name_conflict']) { ?><span class="field-error"><?php echo h(__t('missions.import_name_conflict')); ?></span><?php } ?>
+                <input name="mission_name"<?php echo form_control_attrs('import_confirm', 'mission_name', null, false, $nameError); ?> maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h((string) $importPreview['suggested_name']); ?>" required><?php echo form_error_html('import_confirm', 'mission_name', null, $nameError); ?>
             </label>
             <div class="actions">
                 <button class="button" type="submit" data-busy-label="<?php echo h(__t('missions.import_confirm_busy')); ?>" <?php echo $blockedInFile ? 'disabled' : ''; ?>><?php echo h(__t('missions.import_confirm_btn')); ?></button>
