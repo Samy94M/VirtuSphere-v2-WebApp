@@ -63,7 +63,7 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 | `restore-drill` | Backup + Restore in isolierten Containern: Hash/Manifest, Rowcounts, Schemafingerprint, Invarianten, App-Smoke, Credential-Entschlüsselung mit richtigem und Scheitern mit falschem `APP_KEY` (ADR-0017) | containerisiert | Restore-Pfad oder Schlüsselmaterial-Handling gebrochen |
 | `secret-scan` | Kein Secret in der vollständigen Git-Historie | containerisiert, Netz | Neues Secret committet: rotieren, nicht nur löschen |
 | `sbom` | SPDX-SBOM je Runtime-Image | containerisiert, Netz | Toolfehler; SBOM gehört ins Artefakt |
-| `image-cve` | Trivy-Scan, blockend nur bei fixbaren Critical/High; Ausnahmen in `.trivyignore.yaml` mit ID, Grund, Owner, Ablauf, und eine abgelaufene Ausnahme bricht wie eine fehlende | containerisiert, Netz | Neues fixbares CVE oder abgelaufene Ausnahme |
+| `image-cve` | Trivy-Scan, blockend nur bei fixbaren Critical/High; Ausnahmen in `.trivyignore.yaml` mit ID, Grund, Owner, Ablauf, und eine abgelaufene Ausnahme bricht wie eine fehlende. Die Liste ist seit 2026-09-07 leer: ein Fund mit verfügbarem Fix gehört in das Image, nicht hierher | containerisiert, Netz | Neues fixbares CVE oder abgelaufene Ausnahme; erst prüfen, ob es einen Fix gibt, dann erst über eine Ausnahme reden |
 | `offline-bundle` | Bundle (Images, vendor, Collections, SBOM, CVE-Bericht, Quelle, `SHA256SUMS`) verifiziert sich selbst offline | containerisiert, Netz beim Bau | Bundle unvollständig; `verify.sh`-Ausgabe lesen |
 | `npm-audit` | Advisories des E2E-Dev-Tooling (`tests/e2e`), blockend ab high | nativ, Netz | Dev-Tooling-Advisory; Update oder begründete Ausnahme |
 

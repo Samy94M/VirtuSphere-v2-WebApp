@@ -13,143 +13,25 @@
 # Eine Ausnahme ohne Ablaufdatum ist keine Ausnahme, sondern ein Ignorieren;
 # solche Eintraege sind in Reviews abzulehnen.
 #
-# Stand 2026-09-01 (Owner aller Eintraege: Samy):
-# - mysql:8.4.11 (aktuellster Oracle-Build b3b90af): gosu ist weiterhin mit
-#   alter Go-stdlib gebaut, mysqlsh buendelt trotz aktualisierter
-#   Paketversionen dieselben 4 offenen Advisories. Beheben kann das nur ein
-#   neuer Oracle-Image-Build; gosu laeuft nur beim Containerstart als
-#   Privilege-Dropper, mysqlsh ist kein Netzdienst.
-# - phpmyadmin:5.2.3 (aktuellster Library-Build b68f318, identisch mit
-#   latest/5.2): buendelt twig 3.11 und symfony/cache 5.4 im eigenen vendor;
-#   behebt nur ein neues phpMyAdmin-Release, upstream existiert keins.
-#   Das Tool liegt im tools-Profil, loopback-only, und laeuft nicht im
-#   Runtime-Stack.
-vulnerabilities:
-  # --- mysql:8.4 / usr/local/bin/gosu (Go stdlib 1.24.6) ---
-  - id: CVE-2025-68121
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; nur Startup-Privilege-Dropper, kein Netzdienst; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2025-61726
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2025-61729
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-25679
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-27145
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-32280
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-32281
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-32283
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-33811
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-33814
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-39820
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-39822
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-39836
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-42499
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-42504
-    statement: "gosu im Oracle-Build mit alter Go-stdlib; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-33818
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; nur Startup-Privilege-Dropper, kein Netzdienst; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-39821
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-56853
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-56858
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-56859
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-56860
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-56862
-    statement: "gosu im Oracle-8.4.11-Build mit Go 1.24.6; Owner: Samy"
-    expired_at: 2026-09-30
-  # --- mysql:8.4 / mysqlsh-Python-Pakete ---
-  - id: GHSA-537c-gmf6-5ccf
-    statement: "cryptography im mysqlsh-Bundle des Oracle-Builds; mysqlsh ist kein Netzdienst; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-27459
-    statement: "pyOpenSSL im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-44431
-    statement: "urllib3 im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-44432
-    statement: "urllib3 im mysqlsh-Bundle des Oracle-Builds; Owner: Samy"
-    expired_at: 2026-09-30
-  # --- phpmyadmin:5.2.3 / gebuendeltes vendor (twig, symfony/cache) ---
-  - id: CVE-2026-24425
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; tools-Profil, loopback-only, nur Admin-Nutzung; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-46633
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-46634
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-46638
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-49981
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
-    expired_at: 2026-09-30
-  # Neu 2026-07-27: vier weitere twig-CVEs (Fix erst in twig 3.27.0);
-  # phpMyAdmin liefert kein Release damit, latest/5.2/5.2.3 sind derselbe
-  # Build wie unser Pin. Gleiche Risikolage wie oben: tools-Profil,
-  # loopback-only, kein Runtime-Stack.
-  - id: CVE-2026-48805
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; tools-Profil, loopback-only; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-48806
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-48807
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-48808
-    statement: "twig 3.11 im phpMyAdmin-5.2.3-Bundle, kein Upstream-Build mit twig >= 3.27.0; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-45073
-    statement: "symfony/cache 5.4 im phpMyAdmin-5.2.3-Bundle; Owner: Samy"
-    expired_at: 2026-09-30
-  # --- Debian-Basis / linux-libc-dev (Kernel-Header, Build-Zeit) ---
-  # Stand 2026-07-24: linux-libc-dev sind die Kernel-Header, gegen die gebaut
-  # wird, kein laufender Kernel. Alle Container nutzen den Host-Kernel, nicht
-  # ihren eigenen; nfsd- und XFS-Bugs sind im Container zur Laufzeit nicht
-  # ausnutzbar. Betrifft baugleich mysql, phpmyadmin und die drei
-  # VirtuSphere-Images (gemeinsame Debian-Basis). Der Fix kommt mit dem
-  # naechsten Basis-Image-Refresh (linux-libc-dev >= 6.12.96-1). Owner: Samy.
-  - id: CVE-2026-53399
-    statement: "linux-libc-dev Kernel-Header (Build-Zeit); Container nutzt Host-Kernel, nfsd nicht im Container aktiv; Fix mit naechstem Basis-Image-Refresh; Owner: Samy"
-    expired_at: 2026-09-30
-  - id: CVE-2026-64600
-    statement: "linux-libc-dev Kernel-Header (Build-Zeit); Container nutzt Host-Kernel, XFS-Reflink im Container nicht relevant; Fix mit naechstem Basis-Image-Refresh; Owner: Samy"
-    expired_at: 2026-09-30
+# Ein Eintrag hier ist immer die ZWEITE Wahl. Gibt es eine gefixte Version, ist
+# sie in das Image zu ziehen, so wie es Docker/nginx/Dockerfile, Docker/mysql/
+# Dockerfile und Docker/phpmyadmin/Dockerfile jeweils in einer eigenen Zeile
+# tun. Ein Digest-Bump des Basisimages ist die dritte Moeglichkeit und hilft oft
+# gerade nicht: pruefen, nicht annehmen.
+#
+# Stand 2026-09-07: KEINE aktive Ausnahme. Gemessen ueber alle sechs Image-
+# Referenzen aus `docker compose --profile "*" config --images` meldet trivy
+# ohne diese Datei null fixbare Critical/High.
+#
+# Die Liste war bis hierher 38 Eintraege lang, alle mit expired_at 2026-09-30.
+# Beim Aufraeumen vor diesem Ablauf zeigte die Messung, dass keiner davon
+# vertragsgemaess war: 32 trugen aktiv, aber trivy meldete fuer jeden eine
+# gefixte Version (Status "fixed") - es waren also Fixfaelle, keine Ausnahme-
+# faelle. Die restlichen 6 (die vier mysqlsh-Bundle-Eintraege und die zwei
+# linux-libc-dev-Eintraege) kamen in keinem Image mehr vor. Beide Gruppen sind
+# in den Dockerfiles beantwortet, nicht hier.
+#
+# Diese Datei bleibt bestehen, auch wenn sie leer ist: das Gate wertet ihr
+# Fehlen als Infrastrukturfehler, weil ein verschwundener Vertrag sonst wie
+# eine bestandene Pruefung aussaehe.
+vulnerabilities: []
