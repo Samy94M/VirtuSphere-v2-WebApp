@@ -167,6 +167,37 @@ function repo_vm_name_exists(mysqli $db, int $missionId, string $vmName, int $ex
     return $row !== null;
 }
 
+/**
+ * A template may contain VM names that already exist in real missions. Turning
+ * it into a real mission by renaming it must therefore run the same global-name
+ * decision that a normal VM save runs. Per-mission duplicates remain owned by
+ * the existing mission_vm_unique database constraint.
+ * The caller already owns the mission lock; locking its VM rows here keeps the
+ * check and the subsequent mission update in the same transaction.
+ */
+function repo_mission_assert_vm_names_unique_for_activation(mysqli $db, int $missionId): void
+{
+    $stmt = $db->prepare('SELECT id, vm_name FROM deploy_vms WHERE mission_id = ? ORDER BY BINARY vm_name, id FOR UPDATE');
+    $stmt->bind_param('i', $missionId);
+    $stmt->execute();
+    $vms = repo_fetch_all($stmt->get_result());
+
+    foreach ($vms as $vm) {
+        $vmId = (int) $vm['id'];
+        $vmName = (string) $vm['vm_name'];
+        $conflict = repo_vm_name_conflict_global($db, $vmName, $vmId);
+
+        if ($conflict !== null) {
+            $message = validator_text(
+                'validate.mission_activation_vm_name_conflict',
+                'Template cannot become a mission: VM name ":vm" is already used in mission ":mission".',
+                ['vm' => $vmName, 'mission' => (string) $conflict['mission_name']]
+            );
+            throw new ValidationException(['mission_name' => $message], $message);
+        }
+    }
+}
+
 function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, array $interfaces, array $disks, array $packages, string $expectedUpdatedAt, ?int $userId = null): int
 {
     if ($missionId <= 0) {

@@ -59,6 +59,7 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_get_vm_bundle',
         'repo_vm_name_conflict_global',
         'repo_vm_name_exists',
+        'repo_mission_assert_vm_names_unique_for_activation',
         'repo_save_vm',
     ];
 

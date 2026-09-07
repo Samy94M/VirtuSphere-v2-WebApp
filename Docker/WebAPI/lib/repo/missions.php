@@ -303,6 +303,13 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
             throw new ValidationException(['mission_name' => $message], $message);
         }
         $values = repo_validate_mission_values($db, $values, $missionId, false, $requireLocation);
+        if (array_key_exists('mission_name', $values)) {
+            $wasTemplate = mission_name_is_template((string) $mission['mission_name']);
+            $isTemplate = mission_name_is_template((string) $values['mission_name']);
+            if ($wasTemplate && !$isTemplate) {
+                repo_mission_assert_vm_names_unique_for_activation($db, $missionId);
+            }
+        }
         if (array_key_exists('wds_vlan', $values)
             && (string) $values['wds_vlan'] !== (string) ($mission['wds_vlan'] ?? '')) {
             repo_vm_network_assert_scope_idle($db, $missionId, []);
@@ -319,17 +326,10 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
         $stmt->bind_param($types, ...$params);
         $written = $stmt->execute();
 
-        // Crossing the template boundary by RENAME (Etappe 14D). Nothing stops
-        // `_Vorlage` from becoming `Vorlage`, and that turns a shelf of parked
-        // configurations into live VMs in one edit. Before 14D that already
-        // bypassed the global vm_name check, which only ever runs at VM save
-        // time and reads the mission's name AT THAT MOMENT; from 14D on it would
-        // equally bypass the hostname claim, and the estate would hold two
-        // machines with one Windows name without a single failed write.
-        //
-        // So the claims follow the rename inside the same transaction: becoming
-        // a template releases them, becoming a real mission acquires them, and a
-        // collision refuses the RENAME rather than leaving it half applied.
+        // Crossing the template boundary by RENAME changes parked rows into live
+        // VMs. The global ESXi-name preflight above and the hostname-claim sync
+        // below are part of this same transaction, so neither policy can be
+        // bypassed by changing the mission name after its VMs were saved.
         if (array_key_exists('mission_name', $values)) {
             $wasTemplate = mission_name_is_template((string) $mission['mission_name']);
             $isTemplate = mission_name_is_template((string) $values['mission_name']);

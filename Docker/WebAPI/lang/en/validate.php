@@ -91,6 +91,7 @@ return [
     'vm_hostname_taken_global' => 'Windows hostname is already used by VM ":vm" in mission ":mission". A Windows computer name has to be unique, because MECM imports it as the device name.',
     'vm_hostname_active_job' => 'The Windows hostname cannot be changed while a deploy job of this mission is running.',
     'mission_rename_mecm_locked' => 'Mission cannot be renamed: its name is the MECM collection name and VMs of this mission are already registered in MECM.',
+    'mission_activation_vm_name_conflict' => 'Template cannot become a mission: VM name ":vm" is already used in mission ":mission".',
     'template_clone_name_conflicts' => 'Cannot clone template: these VM names already exist in other missions: :names',
     'mission_name_invalid' => 'Enter a valid mission name (no spaces, max 255 characters).',
     'mission_import_no_template' => 'Imported missions must not start with the template prefix.',

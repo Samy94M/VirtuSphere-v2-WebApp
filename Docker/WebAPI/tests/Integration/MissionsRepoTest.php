@@ -119,6 +119,37 @@ final class MissionsRepoTest extends TestCase
         self::assertFalse(repo_mission_name_exists($this->db, self::PREFIX . 'clone_target'));
     }
 
+    public function testTemplateRenameToMissionRejectsANameUsedByAnotherMission(): void
+    {
+        $templateName = VIRTUSPHERE_TEMPLATE_PREFIX . self::PREFIX . 'rename_conflict';
+        $templateId = repo_create_mission($this->db, ['mission_name' => $templateName]);
+        $this->insertVm($templateId, 'PHPUNITRENAME1', VIRTUSPHERE_MECM_SYNC_NOT_READY);
+
+        $otherId = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'rename_other']);
+        $this->insertVm($otherId, 'PHPUNITRENAME1', VIRTUSPHERE_MECM_SYNC_NOT_READY);
+
+        try {
+            repo_update_mission_checked($this->db, $templateId, ['mission_name' => self::PREFIX . 'rename_target'], '');
+            self::fail('Expected the template activation to reject the global VM-name conflict.');
+        } catch (ValidationException $exception) {
+            self::assertStringContainsString('PHPUNITRENAME1', $exception->getMessage());
+            self::assertStringContainsString(self::PREFIX . 'rename_other', $exception->getMessage());
+        }
+
+        self::assertSame($templateName, (string) repo_scalar($this->db, 'SELECT mission_name FROM deploy_missions WHERE id = ?', 'i', [$templateId]));
+    }
+
+    public function testTemplateRenameToMissionActivatesUniqueVmNames(): void
+    {
+        $templateId = repo_create_mission($this->db, ['mission_name' => VIRTUSPHERE_TEMPLATE_PREFIX . self::PREFIX . 'rename_unique']);
+        $this->insertVm($templateId, 'PHPUNITRENAME3', VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $this->insertVm($templateId, 'PHPUNITRENAME4', VIRTUSPHERE_MECM_SYNC_NOT_READY);
+
+        $targetName = self::PREFIX . 'rename_unique_target';
+        self::assertTrue(repo_update_mission_checked($this->db, $templateId, ['mission_name' => $targetName], ''));
+        self::assertSame($targetName, (string) repo_scalar($this->db, 'SELECT mission_name FROM deploy_missions WHERE id = ?', 'i', [$templateId]));
+    }
+
     private function insertVm(int $missionId, string $name, string $mecmState): void
     {
         $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_sync_state) VALUES (?, ?, ?, ?)');
