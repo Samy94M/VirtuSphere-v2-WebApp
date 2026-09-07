@@ -185,7 +185,7 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
  */
 function ansible_probe_opener_source(): string
 {
-    return <<<'PY'
+    $source = <<<'PY'
 import hashlib, os, ssl, urllib.request, urllib.error
 
 def vs_build_opener():
@@ -219,6 +219,8 @@ def vs_build_opener():
 
 vs_urlopen = vs_build_opener()
 PY;
+
+    return str_replace("\r", '', $source);
 }
 
 /**
@@ -250,6 +252,8 @@ except urllib.error.HTTPError as error:
 except Exception:
     print("{marker} unknown")
 PY;
+
+    $source = str_replace("\r", '', $source);
 
     return ansible_probe_opener_source() . "\n" . str_replace('{marker}', VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER, $source);
 }
