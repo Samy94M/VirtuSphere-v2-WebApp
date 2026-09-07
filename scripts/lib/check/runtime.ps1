@@ -123,12 +123,16 @@ function New-NaResult    { param([string]$Detail = '') New-GateOutcome 'not_appl
 # Native Kommandos so ausfuehren, dass stderr unter PS 5.1 nicht als
 # NativeCommandError terminiert und der Exitcode erhalten bleibt.
 function Invoke-Tool {
-    param([string]$Exe, [string[]]$Arguments = @())
+    param([string]$Exe, [string[]]$Arguments = @(), [switch]$Live)
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $lines = @()
     try {
-        $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
+        $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            if ($Live) { Write-Host $line }
+            $line
+        })
         $code = $LASTEXITCODE
     } catch {
         $lines = @("$($_.Exception.Message)")
@@ -258,16 +262,31 @@ function Invoke-AppComposer {
     return $null
 }
 
-# Dateien unter dem Pruef-Root sammeln; vendor/node_modules/.git/var und den
-# C#-Build-Output (bin/obj/.vs kopiert die Playbooks nach bin/Debug) ausnehmen.
+# Dateien unter dem Pruef-Root sammeln. Ausgabebaeume werden schon bei der
+# Traversierung abgeschnitten, damit kopierte Quellen darin weder geparst noch
+# als eigener Produktumfang gezaehlt werden.
 function Get-CheckFiles {
     param([string[]]$Patterns)
-    $excludeRe = '[\\/](vendor|node_modules|\.git|\.vs|var|bin|obj)[\\/]'
+    $excludedDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @('vendor', 'node_modules', '.git', '.vs', 'var', 'bin', 'obj', 'qa-artifacts')) {
+        [void]$excludedDirectories.Add($name)
+    }
+    $pending = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $pending.Push((Get-Item -LiteralPath $repoRoot -Force -ErrorAction Stop))
     $found = @()
-    foreach ($pattern in $Patterns) {
-        $found += @(Get-ChildItem -Path $repoRoot -Recurse -File -Filter $pattern -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch $excludeRe } |
-            ForEach-Object { $_.FullName })
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        foreach ($file in @(Get-ChildItem -LiteralPath $directory.FullName -File -Force -ErrorAction SilentlyContinue)) {
+            foreach ($pattern in $Patterns) {
+                if ($file.Name -like $pattern) {
+                    $found += $file.FullName
+                    break
+                }
+            }
+        }
+        foreach ($child in @(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction SilentlyContinue)) {
+            if (-not $excludedDirectories.Contains($child.Name)) { $pending.Push($child) }
+        }
     }
     return @($found | Sort-Object -Unique)
 }

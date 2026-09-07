@@ -179,47 +179,200 @@ Describe 'Get-VsMembershipPlan (gemeinsame Vektoren mit PHP, ADR-0034)' {
                 Should -Be ((@($expected.$bucket) | Sort-Object) -join '|') -Because ($bucket + ': ' + $why)
         }
     }
+
+    It 'reichert Removes jeder Typklasse aus der autoritativen Provenienz an' {
+        $removes = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $owned = @(
+                @{ collection_id = 'VS1'; collection_name = 'Old OS'; type = 'os' },
+                @{ collection_id = 'VS2'; collection_name = 'Old package'; type = 'package' },
+                @{ collection_id = 'VS3'; collection_name = 'Old mission'; type = 'mission' }
+            )
+            $present = @(
+                @{ collection_id = 'VS1'; collection_name = 'Observed OS without type' },
+                @{ collection_id = 'VS2'; collection_name = 'Observed package without type' },
+                @{ collection_id = 'VS3'; collection_name = 'Observed mission without type' }
+            )
+            $plan = Get-VsMembershipPlan -Desired @() -Owned $owned -Present $present
+            @($plan.remove | ForEach-Object { '{0}|{1}|{2}' -f $_.collection_id, $_.collection_name, $_.type })
+        }
+        $removes | Should -Be @('VS1|Old OS|os', 'VS2|Old package|package', 'VS3|Old mission|mission')
+    }
+
+    It 'weist einen unvollstaendig meldbaren Plan vor der Remote-Mutation ab' {
+        $valid = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $bad = @{ add = @(); remove = @(@{ collection_id = 'VS1'; collection_name = 'Old'; type = '' }) }
+            $good = @{ add = @(@{ name = 'New'; type = 'package' }); remove = @(@{ collection_id = 'VS1'; collection_name = 'Old'; type = 'os' }) }
+            @((Test-VsMembershipPlanOperations -Plan $bad), (Test-VsMembershipPlanOperations -Plan $good))
+        }
+        $valid | Should -Be @($false, $true)
+
+        $source = Get-Content -Path $script:DeviceSync -Raw
+        $validation = $source.IndexOf('Test-VsMembershipPlanOperations -Plan $plan')
+        $firstWrite = $source.IndexOf('Add-CMDeviceCollectionDirectMembershipRule', $validation)
+        $validation | Should -BeGreaterOrEqual 0
+        $firstWrite | Should -BeGreaterThan $validation
+        $source | Should -Match 'membership_provenance_invalid'
+    }
+
+    It 'blockiert denselben exakten Collectionnamen mit widerspruechlichen Typen' {
+        $valid = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            @(
+                (Test-VsDesiredMembershipTargets -Desired @(@{ name = 'Same'; type = 'os' }, @{ name = 'Same'; type = 'package' })),
+                (Test-VsDesiredMembershipTargets -Desired @(@{ name = 'Case'; type = 'os' }, @{ name = 'case'; type = 'package' }))
+            )
+        }
+        $valid | Should -Be @($false, $true)
+    }
+
+    It 'der Collection-Cache markiert exakte Namensduplikate statt last-wins' {
+        $source = Get-Content -Path $script:DeviceSync -Raw
+        $source | Should -Match 'Dictionary\[string,object\].*StringComparer\]::Ordinal'
+        $source | Should -Match 'ambiguousCollectionNames\.Add'
+        $source | Should -Match 'membership_identity_ambiguous'
+    }
+}
+
+Describe 'Get-VsDirectMembershipState trennt absent von Providerfehlern' {
+    It '<expected>' -ForEach @(
+        @{ expected = 'present'; mode = 'present' }
+        @{ expected = 'absent'; mode = 'absent' }
+        @{ expected = 'unknown'; mode = 'error' }
+    ) {
+        $state = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($mode) -Body {
+            param($m)
+            $script:membershipMode = $m
+            function Get-CMDeviceCollectionDirectMembershipRule {
+                param($CollectionId, $ResourceId, [string]$ErrorAction)
+                if ($ErrorAction -ne 'Stop') { throw 'adapter did not request terminating errors' }
+                if ($script:membershipMode -eq 'error') { throw 'provider unavailable' }
+                if ($script:membershipMode -eq 'present') { return [pscustomobject]@{ RuleName = 'Direct' } }
+                return @()
+            }
+            Get-VsDirectMembershipState -CollectionId 'VS1' -ResourceId 42
+        }
+        $state.State | Should -Be $expected
+    }
+
+    It 'der Device-Sync blockiert die VM vor dem Plan und vor jedem Membership-Write' {
+        $source = Get-Content -Path $script:DeviceSync -Raw
+        $adapter = $source.IndexOf('Get-VsDirectMembershipState')
+        $unknownGuard = $source.IndexOf('if ($membershipReadUnknown)', $adapter)
+        $plan = $source.IndexOf('Get-VsMembershipPlan', $adapter)
+        $write = $source.IndexOf('Add-CMDeviceCollectionDirectMembershipRule', $adapter)
+        $adapter | Should -BeGreaterOrEqual 0
+        $unknownGuard | Should -BeGreaterThan $adapter
+        $plan | Should -BeGreaterThan $unknownGuard
+        $write | Should -BeGreaterThan $unknownGuard
+        $source | Should -Match 'membership_query_failed'
+    }
 }
 
 Describe 'Get-VsContentDistributionState (B7: mehrwertig statt Ja/Nein)' {
 
     It '<name>' -ForEach @(
         @{ name = 'keine Statuszeile -> not_started'; entries = @(); expected = 'not_started' }
-        @{ name = 'Targeted 0 -> not_started'; entries = @(@{ Targeted = 0; NumberInstalled = 0; NumberErrors = 0 }); expected = 'not_started' }
-        @{ name = 'Fehler auf einem DP -> failed, egal wie viel installiert ist'; entries = @(@{ Targeted = 2; NumberInstalled = 2; NumberErrors = 1 }); expected = 'failed' }
-        @{ name = 'angestossen, unfertig -> in_progress'; entries = @(@{ Targeted = 3; NumberInstalled = 1; NumberErrors = 0 }); expected = 'in_progress' }
-        @{ name = 'vollstaendige Zielverteilung -> succeeded'; entries = @(@{ Targeted = 2; NumberInstalled = 2; NumberErrors = 0 }); expected = 'succeeded' }
-        @{ name = 'mehrere Eintraege werden aggregiert'; entries = @(@{ Targeted = 1; NumberInstalled = 1; NumberErrors = 0 }, @{ Targeted = 1; NumberInstalled = 0; NumberErrors = 0 }); expected = 'in_progress' }
+        @{ name = 'Targeted 0 -> not_started'; entries = @(@{ Targeted = 0; NumberSuccess = 0; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }); expected = 'not_started' }
+        @{ name = 'Fehler auf einem DP -> failed, egal wie viel erfolgreich ist'; entries = @(@{ Targeted = 2; NumberSuccess = 1; NumberErrors = 1; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }); expected = 'failed' }
+        @{ name = 'angestossen, unfertig -> in_progress'; entries = @(@{ Targeted = 3; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 2; NumberUnknown = 0; SourceVersion = 7 }); expected = 'in_progress' }
+        @{ name = 'unbekanntes Ziel -> in_progress'; entries = @(@{ Targeted = 3; NumberSuccess = 2; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 1; SourceVersion = 7 }); expected = 'in_progress' }
+        @{ name = 'vollstaendige Zielverteilung -> succeeded'; entries = @(@{ Targeted = 2; NumberSuccess = 2; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }); expected = 'succeeded' }
+        @{ name = 'mehrere Eintraege werden aggregiert'; entries = @(@{ Targeted = 1; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }, @{ Targeted = 1; NumberSuccess = 0; NumberErrors = 0; NumberInProgress = 1; NumberUnknown = 0; SourceVersion = 7 }); expected = 'in_progress' }
     ) {
         # Die alte boolesche Frage las Targeted > 0 als erledigt und NumberErrors
         # las niemand: eine ueberall gescheiterte Verteilung galt als fertig.
         $state = Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $entries) -Body {
             param($e)
-            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) $e }
-            Get-VsContentDistributionState -ApplicationName 'App'
+            $script:distributionEntries = @($e | ForEach-Object { [pscustomobject]$_ })
+            function Get-CMDistributionStatus { param($InputObject, [string]$ErrorAction) $script:distributionEntries }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            Get-VsContentDistributionState -ApplicationName 'App' -Application $app
         }
         $state | Should -Be $expected
     }
 
     It 'eine werfende Abfrage ist unknown, nie ein erfundener Zustand' {
         $state = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) throw 'kein Site-Drive' }
-            Get-VsContentDistributionState -ApplicationName 'App'
+            function Get-CMDistributionStatus { param($InputObject, [string]$ErrorAction) throw 'kein Site-Drive' }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            Get-VsContentDistributionState -ApplicationName 'App' -Application $app
         }
         $state | Should -Be 'unknown'
     }
 
-    It 'mit ApplicationId fragt sie per -Id ab, nicht per -Name' {
-        # -Name trifft bei Namensgleichheit das falsche Objekt (B7); wo der
-        # Aufrufer das Application-Objekt hat, gewinnt die CI_ID.
+    It 'fragt mit dem eindeutig aufgeloesten Application-Objekt per -InputObject ab' {
         $probe = Invoke-InFileScope -Path $script:MecmCommon -Body {
             $captured = @{}
-            function Get-CMDistributionStatus { param($Name, $Id, [string]$ErrorAction) $captured.Name = $Name; $captured.Id = $Id; @() }
-            Get-VsContentDistributionState -ApplicationName 'App' -ApplicationId 4711 | Out-Null
+            function Get-CMDistributionStatus { param($InputObject, [string]$ErrorAction) $captured.InputObject = $InputObject; @() }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            Get-VsContentDistributionState -ApplicationName 'App' -Application $app | Out-Null
             $captured
         }
-        $probe.Id | Should -Be 4711
-        $probe.Name | Should -BeNullOrEmpty
+        $probe.InputObject.PackageID | Should -Be 'ABC00001'
+    }
+
+    It 'loest ohne Objekt genau eine Application auf und blockiert Mehrdeutigkeit' {
+        $states = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMDistributionStatus { param($InputObject, [string]$ErrorAction) @() }
+            function Get-CMApplication {
+                param($Name, [switch]$Fast, [string]$ErrorAction)
+                if ($script:ambiguous) {
+                    return @(
+                        [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 1; PackageID = 'ABC00001' },
+                        [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 2; PackageID = 'ABC00002' }
+                    )
+                }
+                return [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 1; PackageID = 'ABC00001' }
+            }
+            $script:ambiguous = $false
+            $one = Get-VsContentDistributionState -ApplicationName 'App'
+            $script:ambiguous = $true
+            $many = Get-VsContentDistributionState -ApplicationName 'App'
+            @($one, $many)
+        }
+        $states | Should -Be @('not_started', 'unknown')
+    }
+
+    It 'fehlende oder ungueltige Schemafelder sind unknown' {
+        $state = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMDistributionStatus {
+                param($InputObject, [string]$ErrorAction)
+                [pscustomobject]@{ Targeted = 1; NumberSuccess = 'x'; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }
+            }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            Get-VsContentDistributionState -ApplicationName 'App' -Application $app
+        }
+        $state | Should -Be 'unknown'
+    }
+
+    It 'eine alte SourceVersion kann den aktuellen Content nicht erfolgreich melden' {
+        $state = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMDistributionStatus {
+                param($InputObject, [string]$ErrorAction)
+                [pscustomobject]@{ Targeted = 1; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 6 }
+            }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            Get-VsContentDistributionState -ApplicationName 'App' -Application $app -ExpectedSourceVersion 7
+        }
+        $state | Should -Be 'in_progress'
+    }
+
+    It 'liefert die einheitliche SourceVersion mit dem Zustand und verweigert eine gemischte Version' {
+        $snapshots = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMDistributionStatus { param($InputObject, [string]$ErrorAction) $script:distributionEntries }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'App'; CI_ID = 4711; PackageID = 'ABC00001' }
+            $script:distributionEntries = @([pscustomobject]@{ Targeted = 1; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 8 })
+            $one = Get-VsContentDistributionSnapshot -ApplicationName 'App' -Application $app
+            $script:distributionEntries = @(
+                [pscustomobject]@{ Targeted = 1; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 7 }
+                [pscustomobject]@{ Targeted = 1; NumberSuccess = 1; NumberErrors = 0; NumberInProgress = 0; NumberUnknown = 0; SourceVersion = 8 }
+            )
+            $mixed = Get-VsContentDistributionSnapshot -ApplicationName 'App' -Application $app
+            @($one, $mixed)
+        }
+        $snapshots[0].State | Should -Be 'succeeded'
+        $snapshots[0].SourceVersion | Should -Be 8
+        $snapshots[1].State | Should -Be 'in_progress'
+        $snapshots[1].SourceVersion | Should -BeNullOrEmpty
     }
 }
 
@@ -274,17 +427,21 @@ Describe 'Initialize-VsTls (TLS-Kontrakt des Clients)' {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
     }
 
-    It 'ueberbrueckt die Zertifikatspruefung auch bei https NICHT ohne Opt-in' {
-        # $VsAllowSelfSignedTls ist bewusst ein Schalter und kein Default:
-        # eine dauerhaft blinde TLS-Pruefung waere schlechter als ehrliches
-        # HTTP. Dieser Test pinnt das Opt-in.
+    It 'setzt bei https ohne Registry-Fingerabdruck keinen Callback' {
         Invoke-InFileScope -Path $script:ClientCommon -Body {
             $script:VsRegistryBase = 'HKCU:\Software\_vs_pester_missing_' + [guid]::NewGuid().ToString('N')
             $script:VsDefaultScheme = 'https'
-            $script:VsAllowSelfSignedTls = $false
             Initialize-VsTls
         }
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
+    }
+
+    It 'installiert niemals einen Accept-all-Callback und liest den engen Pin aus der Registry' {
+        $source = Get-Content -LiteralPath $script:ClientCommon -Raw
+        $source | Should -Not -Match 'ServerCertificateValidationCallback\s*=\s*\{\s*\$true\s*\}'
+        $source | Should -Match "Get-ItemProperty.*CertThumbprint"
+        $source | Should -Match 'GetCertHashString'
+        $source | Should -Match 'SslPolicyErrors\]::None'
     }
 }
 
@@ -295,10 +452,8 @@ Describe 'Resolve-VsApi trennt Adresswahl von Gesundheit' {
     # Client-Skript auf JEDER VM als unerreichbar. Ein einzelner haengender
     # Bereitstellungsauftrag konnte die ganze Client-Kette stilllegen.
     #
-    # Die Regel, die das dauerhaft verhindert, liegt auf der Client-Seite und gilt
-    # unabhaengig davon, was health.php kuenftig sendet: ein Statuscode beweist,
-    # dass die Adresse stimmt. Nur ein Transportfehler (kein Statuscode) ist ein
-    # Grund, die naechste Adresse zu probieren.
+    # Ein Statuscode belegt Erreichbarkeit, die Auswahl akzeptiert die Adresse
+    # aber erst zusammen mit dem engen VirtuSphere-Health-Schema.
 
     It 'wertet HTTP <code> als "Adresse stimmt"' -ForEach @(
         @{ code = 503 }   # health.php "degraded" vor dem Fix: der Ausgangsbefund
@@ -332,6 +487,18 @@ Describe 'Resolve-VsApi trennt Adresswahl von Gesundheit' {
         # Schleife, und der Test oben prueft eine Funktion, die niemand aufruft.
         $source = Get-Content -Path $script:ClientCommon -Raw
         $source | Should -Match 'function Resolve-VsApi[\s\S]*?Test-VsApiAnswered -ErrorRecord \$_'
+        $source | Should -Match 'function Resolve-VsApi[\s\S]*?Test-VsHealthDocument -Document \$health'
+    }
+
+    It 'unterscheidet das VirtuSphere-Health-Dokument von beliebigen HTTP-Antworten' {
+        $states = Invoke-InFileScope -Path $script:ClientCommon -Body {
+            @(
+                (Test-VsHealthDocument ([pscustomobject]@{ status = 'degraded'; db = 'ok'; php = '8.4' })),
+                (Test-VsHealthDocument ([pscustomobject]@{ status = 'ok' })),
+                (Test-VsHealthDocument ([pscustomobject]@{ status = 'welcome'; db = 'ok'; php = '8.4' }))
+            )
+        }
+        $states | Should -Be @($true, $false, $false)
     }
 
     It 'hat Get-VsErrorStatusCode als Zwilling der MECM-Seite (ADR-0029)' {
@@ -367,7 +534,7 @@ Describe 'Invoke-VsApi serialisiert eine Liste immer als JSON-Array' {
                 $script:captured = $null
                 function Invoke-RestMethod {
                     param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType)
-                    $script:captured = [string]$Body
+                    $script:captured = [Text.Encoding]::UTF8.GetString([byte[]]$Body)
                 }
                 $cfg = [pscustomobject]@{ WebApi = 'host:1'; Scheme = 'http'; ReportToken = '' }
                 Invoke-VsApi -Config $cfg -Path '/p' -Method POST -Body $b | Out-Null
@@ -389,6 +556,21 @@ Describe 'Invoke-VsApi serialisiert eine Liste immer als JSON-Array' {
     It 'laesst eine Hashtable ein Objekt bleiben' {
         # Der Device-Sync sendet Hashtables. Der Fix darf sie nicht umdrehen.
         (Get-SentBody -Body @{ deviceid = 1 }).TrimStart() | Should -Match '^\{'
+    }
+
+    It 'sendet Unicode in PS 5.1 als explizite UTF-8-Bytes mit Charset' {
+        $capture = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $script:captured = $null
+            function Invoke-RestMethod {
+                param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType)
+                $script:captured = [pscustomobject]@{ Bytes = [byte[]]$Body; ContentType = $ContentType }
+            }
+            $cfg = [pscustomobject]@{ WebApi = 'host:1'; Scheme = 'http'; ReportToken = '' }
+            Invoke-VsApi -Config $cfg -Path '/p' -Method POST -Body @{ name = 'München 東京' } | Out-Null
+            $script:captured
+        }
+        [Text.Encoding]::UTF8.GetString($capture.Bytes) | Should -Match 'München 東京'
+        $capture.ContentType | Should -Be 'application/json; charset=utf-8'
     }
 }
 
@@ -563,7 +745,7 @@ Describe 'Jede powershell.exe-Aufrufstelle laeuft ohne Profil und nicht interakt
         foreach ($file in @(Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse -File)) {
             if ($script:NoProfileExempt.ContainsKey($file.Name)) { continue }
             foreach ($line in ((Remove-PsComments -Path $file.FullName) -split "`r?`n")) {
-                if ($line -notmatch '(?i)powershell\.exe') { continue }
+                if ($line -notmatch '(?i)(?:^|[;&|({]\s*)&?\s*powershell\.exe(?:\s|$)') { continue }
                 $seen++
                 if ($line -match '(?i)-NoProfile' -and $line -match '(?i)-NonInteractive') { continue }
                 if ($line -match 'VsPowerShellArgs' -or $line -match 'Get-VsPowerShellCommandLine') { continue }
@@ -895,7 +1077,7 @@ Describe 'Waechter 3: kein unbedingter Erfolgssatz' {
         # Aequivalent des Erfolgssatzes ist der Registry-Wert, den MECM als
         # Erkennung liest. Textpruefung, weil die Datei allein ausgeliefert wird.
         $text = Get-Content -Raw -Path (Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1')
-        $text | Should -Match '(?s)if\s*\(\s*\$Fullsuccess\s*\)\s*\{\s*Set-ItemProperty[^\r\n]*Version'
+        $text | Should -Match '(?s)if\s*\(\s*\$Fullsuccess\s+-and\s+-not\s+\$restartInitiated\s+-and\s+\$completedSteps\s+-eq\s+\$dir_script\.Count\s*\).*?Set-ItemProperty[^\r\n]*Version[^\r\n]*-ErrorAction Stop'
         # Und der Schluss-Exit liest dasselbe Ergebnis, statt immer 0 zu liefern.
         $text | Should -Match '(?s)if \(-not \$Fullsuccess\) \{[^}]*exit 1'
     }
@@ -1155,24 +1337,73 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match 'Formatierung unvollstaendig'
     }
 
+    It 'Set-VMDisksOnline schreibt den Intent vor dem ersten irreversiblen RAW-Schritt' {
+        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $intent = $text.IndexOf('$operation = New-DiskOperation -Disk $disk -Identity $identity')
+        $write = $text.IndexOf('Invoke-OwnedRawDiskOperation -Operation $operation -Disk $disk', $intent)
+        $intent | Should -BeGreaterThan -1
+        $write | Should -BeGreaterThan $intent
+        $text | Should -Match "ValidateSet\('intent', 'online', 'initialized', 'partitioned', 'formatted', 'complete'\)"
+        $text | Should -Match 'Set-ItemProperty -Path \$Operation\.Path -Name ''State''.*-ErrorAction Stop'
+    }
+
+    It 'Set-VMDisksOnline nimmt offene eigene Operationen unabhaengig vom Offlinefilter wieder auf' {
+        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $resume = $text.IndexOf('foreach ($operation in $openOperations)')
+        $offline = $text.IndexOf('Where-Object { [string]$_.OperationalStatus -eq ''Offline'' }')
+        $resume | Should -BeGreaterThan -1
+        $offline | Should -BeGreaterThan $resume
+        $text | Should -Match 'Offene Disk-Operation.*trifft.*Datentraeger'
+        $text | Should -Match 'abweichende Groesse'
+    }
+
+    It 'Set-VMDisksOnline formatiert keine unbekannte online-RAW-Platte' {
+        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text | Should -Match 'Online-RAW-Datentraeger.*keiner VirtuSphere-Operation zugeordnet.*nicht formatiert'
+        $text | Should -Match "PartitionStyle -eq 'RAW'"
+        $text | Should -Match 'New-DiskOperation -Disk \$disk -Identity \$identity'
+        $text | Should -Not -Match 'Get-Disk[^\r\n]+Where-Object[^\r\n]+PartitionStyle[^\r\n]+RAW[^\r\n]+Initialize-Disk'
+    }
+
+    It 'Set-VMDisksOnline verifiziert Disk, Partition, Volume und erforderliche Marker' {
+        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text | Should -Match 'Get-VsDiskStableIdentity'
+        $text | Should -Match 'Get-OwnedDataPartition'
+        $text | Should -Match 'FileSystemLabel -cne'
+        $text | Should -Match 'Abschlusspruefung'
+        $text | Should -Match "Set-DiskStatus -Status 'Running'"
+        $text | Should -Match "Set-DiskStatus -Status 'Success'"
+        $text | Should -Match 'optional: no disk work required'
+    }
+
     It 'client_staticip wertet null konfigurierte Adapter als Fehlschlag' {
         $text = Get-ClientText -Name 'client_staticip.ps1'
-        $text | Should -Match '\$success = \(\$failed -eq 0 -and \$applied -gt 0\)'
-        $text | Should -Match 'no matching adapter'
+        $text | Should -Match '\$success = \(\$failed -eq 0 -and \$applied -eq \$targets\.Count -and \$targets\.Count -gt 0\)'
+        $text | Should -Match 'validation failed'
     }
 
     It 'client_staticip prueft die gesetzte Adresse nach' {
         $text = Get-ClientText -Name 'client_staticip.ps1'
         $text | Should -Match 'Get-NetIPAddress -InterfaceIndex'
-        $text | Should -Match 'liegt nach dem Setzen nicht auf der Schnittstelle'
+        $text | Should -Match 'blieb 15 Sekunden Tentative oder wurde nicht sichtbar'
     }
 
     It 'client_staticip setzt genau eine Standardroute pro VM' {
         # Zwei Default-Gateways sind kein Ausfall, aber eine Wette darauf, welche
         # Schnittstelle Windows nach Metrik waehlt.
         $text = Get-ClientText -Name 'client_staticip.ps1'
-        $text | Should -Match '\$gatewaySet'
-        $text | Should -Match 'schon eine Standardroute'
+        $text | Should -Match 'New-VsClientNetworkPlan'
+        $text | Should -Not -Match '\$gatewaySet'
+        $common = Get-Content -Raw -Path $script:ClientCommon
+        $common | Should -Match 'Mehrere Sollschnittstellen definieren ein Default-Gateway'
+    }
+
+    It 'client_staticip entfernt nur nachweislich verwaltete IPv4-Werte' {
+        $text = Get-ClientText -Name 'client_staticip.ps1'
+        $text | Should -Not -Match 'Remove-NetIPAddress -InterfaceIndex \$adapter\.ifIndex -Confirm'
+        $text | Should -Match 'Remove-NetIPAddress -InterfaceIndex \$adapter\.ifIndex -AddressFamily IPv4 -IPAddress'
+        $text | Should -Match 'Remove-NetRoute -InterfaceIndex \$adapter\.ifIndex -AddressFamily IPv4[^\r\n]*-NextHop'
+        $text | Should -Match 'zwischenzeitliche Fremdaenderungen werden nicht entfernt'
     }
 
     It 'client_staticip stellt eine Karte auch auf DHCP zurueck' {
@@ -1194,7 +1425,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Kein stilles $applied++ mehr fuer einen Adapter, an dem nichts
         # geschehen ist.
         $text = Get-ClientText -Name 'client_staticip.ps1'
-        $text | Should -Match "unbekannter Modus"
+        (Get-Content -Raw -Path $script:ClientCommon) | Should -Match "unbekannten Modus"
 
         # $applied darf nur in einem Zweig hochgezaehlt werden, der auch etwas
         # verifiziert hat: kein $applied++ ausserhalb der beiden Modus-Zweige.
@@ -1323,10 +1554,25 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
 
     It 'client_getinfo raeumt den Erfolgs-Marker vor jeder Abbruchmoeglichkeit weg' {
         # Der Stale-Fix muss VOR dem API-Aufruf laufen: sonst ueberlebt ein
-        # SetupState=complete des Vorlaufs einen Abbruch, und client_staticip
-        # arbeitet mit den Interfaces der vorigen VM.
+        # SetupState=complete des Vorlaufs einen Abbruch, und die Folgeskripte
+        # wuerden den alten Snapshot erneut als aktuell lesen.
         $text = Get-ClientText -Name 'client_getinfo.ps1'
         $text | Should -Match "(?s)Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*Resolve-VsApi"
+    }
+
+    It 'client_getinfo publiziert einen vollstaendigen Snapshot ueber einen finalen Zeiger' {
+        $getInfo = Get-ClientText -Name 'client_getinfo.ps1'
+        $common = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
+        $hostname = Get-ClientText -Name 'client_hostname.ps1'
+        $staticIp = Get-ClientText -Name 'client_staticip.ps1'
+
+        $getInfo | Should -Match "SnapshotState' -Value 'preparing'"
+        $getInfo | Should -Match "(?s)SnapshotState' -Value 'published'.*ActiveSnapshot' -Value \`$snapshotId.*Confirm-VsClientReady.*SetupState' -Value 'complete'"
+        $getInfo | Should -Match 'Get-ItemProperty -Path \$snapshotRoot.*InterfaceCount'
+        $common | Should -Match 'function Get-VsActiveSnapshotRoot'
+        $common | Should -Match "SetupState -ne 'complete'"
+        $hostname | Should -Match "Get-VsSnapshotValue -Name 'vm_hostname'"
+        $staticIp | Should -Match 'Get-VsSnapshotInterfacesRoot'
     }
 
     It 'client_getinfo bestaetigt Client-Ready explizit und macht einen fehlgeschlagenen ACK wiederholbar' {
@@ -1349,6 +1595,17 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
             (Get-VsApiUrl -Api 'virtusphere.lan:8021' -Path '/mecm_client_ack.php') |
                 Should -Be 'http://virtusphere.lan:8021/mecm_client_ack.php'
         }
+    }
+
+    It 'Client-Bootstrap schreibt fehlende Registrywerte vor der ersten Adressaufloesung ohne Quelltextpatch' {
+        $common = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
+        $getInfo = Get-ClientText -Name 'client_getinfo.ps1'
+        $installer = Get-Content -LiteralPath (Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1') -Raw
+        $getInfo | Should -Match "(?s)Initialize-VsClientBootstrap.*Resolve-VsApi"
+        $common | Should -Match 'function Initialize-VsClientBootstrap'
+        $common | Should -Match "if \(-not \`$raw\.PSObject\.Properties\['Scheme'\]\)"
+        $installer | Should -Match "Copy-VsClientContent.*-Bootstrap \`$bootstrap"
+        $installer | Should -Not -Match 'Set-Content.*VirtuSphere-Client-Common'
     }
 
     It 'kein ausgeliefertes PowerShell-Skript ruft die pensionierte MissionName-Action auf' {

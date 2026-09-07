@@ -162,7 +162,9 @@ function Register-FastCheckGates {
     Add-Gate -Name 'powershell-tests' -Lanes $allLanes -Kind 'native' -Body {
         $hostExe = 'powershell'
         if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
-        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'run-pester.ps1'))
+        # Pester can run for minutes. Stream each child line while retaining the
+        # complete output for the gate artifact and exit-code classification.
+        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'run-pester.ps1')) -Live
         # Exitcode-Vertrag von run-pester.ps1 (3 = Modul fehlt), niemals ein
         # Textmuster: der CI-Lauf 2026-07-16 klassifizierte 44 rote Tests als
         # "Module fehlen", weil ein Testname das Wort "fehlt" enthielt.

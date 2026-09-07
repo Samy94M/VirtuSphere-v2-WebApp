@@ -273,3 +273,16 @@ send a request. It is diagnostic metadata, not authentication, and it never
 causes a request of its own. Pester pins the legacy heartbeat JSON and the
 client phase/ready-ACK JSON independently from that header; the audit contract
 continues to pin that routine heartbeat and `reportRun` traffic is audit-free.
+
+## Amendment (2026-09-07): exact site identity and bounded timing
+
+The site-health task now reports only the exact `MECM_SiteCode` persisted by
+the installer. A missing configured code, no exact row, duplicate exact rows or
+an unreadable status is `unknown`; no visible namespace, PSDrive or first row is
+allowed to stand in for the configured site. Only raw status 2 is red.
+
+All four PowerShell loops compute and clamp their duration before converting it
+to the report contract's integer. A clock step backwards yields zero and a run
+longer than the one-day wire bound yields the bound, so the diagnostic path
+cannot overflow while reporting the original fault. The interval remains a
+cadence setting plus the run time, not a promise of exact wall-clock spacing.

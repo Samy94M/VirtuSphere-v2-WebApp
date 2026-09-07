@@ -21,6 +21,7 @@
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
 Initialize-VsClientLog -Component 'getinfo'
 Write-VsClientLog 'Starte getinfo'
+Initialize-VsClientBootstrap -ManifestPath (Join-Path $PSScriptRoot 'bootstrap.json')
 
 $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 # Nur diese Felder werden aus der API-Antwort persistiert.
@@ -39,9 +40,8 @@ $allowedFields = @('vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'mission_id',
 
 function Save-VsValue {
     param([string]$Path, [string]$Name, [string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return }
-    if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
-    New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null
+    if (-not (Test-Path $Path)) { New-Item -Path $Path -Force -ErrorAction Stop | Out-Null }
+    New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force -ErrorAction Stop | Out-Null
 }
 
 # --- Erfolgs-Marker eines Vorlaufs SOFORT entfernen -------------------------
@@ -54,8 +54,6 @@ function Save-VsValue {
 # gruenen Phase. Ein Marker darf nur eine Aussage ueber DIESEN Lauf sein.
 if (Test-Path $registryBase) {
     Remove-ItemProperty -Path $registryBase -Name 'SetupState' -ErrorAction SilentlyContinue
-    $stalePath = Join-Path $registryBase 'Interfaces'
-    if (Test-Path $stalePath) { Remove-Item -Path $stalePath -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # --- API-Adresse aufloesen (mit Retry) --------------------------------------
@@ -113,6 +111,29 @@ if (-not $data) {
 Write-VsClientLog "Treffer mit MAC $usedMac (VM $($data.vm_name))"
 Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'started' -Detail "match $usedMac"
 
+# Validate the complete response before the first snapshot write. Optional
+# strings may be empty, but the fenced identity and every interface must be
+# structurally usable by the following phases.
+$revision = 0
+if ([string]::IsNullOrWhiteSpace([string]$data.vm_name) -or
+    [string]::IsNullOrWhiteSpace([string]$data.vm_hostname) -or
+    -not [int]::TryParse([string]$data.rollout_revision, [ref]$revision) -or $revision -le 0 -or
+    $null -eq $data.interfaces) {
+    Write-VsClientLog -Level ERROR 'getDeviceInfos-Antwort ist unvollstaendig; kein Snapshot wird publiziert.'
+    Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'failed' -Detail 'invalid response schema'
+    exit 1
+}
+$seenMacs = @{}
+foreach ($iface in @($data.interfaces)) {
+    $normalizedMac = ConvertTo-VsNormalizedMac ([string]$iface.mac)
+    if (-not $normalizedMac -or $seenMacs.ContainsKey($normalizedMac) -or [string]$iface.mode -notin @('dhcp', 'static')) {
+        Write-VsClientLog -Level ERROR 'getDeviceInfos-Antwort enthaelt eine ungueltige oder doppelte Interface-Identitaet; kein Snapshot wird publiziert.'
+        Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'failed' -Detail 'invalid interface schema'
+        exit 1
+    }
+    $seenMacs[$normalizedMac] = $true
+}
+
 try {
     # Der Stale-Fix ist oben schon gelaufen, vor jeder Abbruchmoeglichkeit; hier
     # bleibt nur, den Schluessel anzulegen, falls es ihn noch nicht gibt.
@@ -120,27 +141,49 @@ try {
         New-Item -Path $registryBase -Force | Out-Null
     }
 
+    # --- Versionierten Snapshot vorbereiten --------------------------------
+    $snapshotId = [guid]::NewGuid().ToString('N')
+    $snapshotsRoot = Join-Path $registryBase 'Snapshots'
+    $snapshotRoot = Join-Path $snapshotsRoot $snapshotId
+    New-Item -Path $snapshotRoot -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $snapshotRoot -Name 'SnapshotSchema' -Value $script:VsClientSnapshotSchema -PropertyType DWORD -Force -ErrorAction Stop | Out-Null
+    Save-VsValue -Path $snapshotRoot -Name 'SnapshotState' -Value 'preparing'
+
     # --- Whitelist-Felder schreiben ----------------------------------------
     foreach ($field in $allowedFields) {
         $value = $data.$field
-        if ($null -ne $value) { Save-VsValue -Path $registryBase -Name $field -Value ([string]$value) }
+        Save-VsValue -Path $snapshotRoot -Name $field -Value $(if ($null -eq $value) { '' } else { [string]$value })
     }
 
     # --- Interfaces schreiben ----------------------------------------------
-    $ifPath = Join-Path $registryBase 'Interfaces'
-    New-Item -Path $ifPath -Force | Out-Null
+    $ifPath = Join-Path $snapshotRoot 'Interfaces'
+    New-Item -Path $ifPath -Force -ErrorAction Stop | Out-Null
     $index = 0
     foreach ($iface in @($data.interfaces)) {
         $entryPath = Join-Path $ifPath ("Interface{0}" -f $index)
-        New-Item -Path $entryPath -Force | Out-Null
+        New-Item -Path $entryPath -Force -ErrorAction Stop | Out-Null
         foreach ($prop in 'vlan', 'mac', 'mode', 'ip', 'subnet', 'gateway', 'dns1', 'dns2', 'type') {
             $val = $iface.$prop
-            if ($null -ne $val) { Save-VsValue -Path $entryPath -Name $prop -Value ([string]$val) }
+            Save-VsValue -Path $entryPath -Name $prop -Value $(if ($null -eq $val) { '' } else { [string]$val })
         }
         $index++
     }
 
-    Write-VsClientLog "Registry geschrieben ($index Interface(s))."
+    New-ItemProperty -Path $snapshotRoot -Name 'InterfaceCount' -Value $index -PropertyType DWORD -Force -ErrorAction Stop | Out-Null
+
+    # Read back the material identity and the exact interface cardinality.
+    $stored = Get-ItemProperty -Path $snapshotRoot -Name 'SnapshotSchema', 'vm_name', 'vm_hostname', 'rollout_revision', 'InterfaceCount' -ErrorAction Stop
+    $storedInterfaces = @(Get-ChildItem -Path $ifPath -ErrorAction Stop)
+    if ([int]$stored.SnapshotSchema -ne $script:VsClientSnapshotSchema -or
+        [string]$stored.vm_name -ne [string]$data.vm_name -or
+        [string]$stored.vm_hostname -ne [string]$data.vm_hostname -or
+        [int]$stored.rollout_revision -ne $revision -or
+        [int]$stored.InterfaceCount -ne $index -or $storedInterfaces.Count -ne $index) {
+        throw 'Nachlesen des vorbereiteten Client-Snapshots ist fehlgeschlagen.'
+    }
+    Save-VsValue -Path $snapshotRoot -Name 'SnapshotState' -Value 'published'
+    Save-VsValue -Path $registryBase -Name 'ActiveSnapshot' -Value $snapshotId
+    Write-VsClientLog "Snapshot $snapshotId publiziert ($index Interface(s))."
     # Verbindlich nach allen Nutzdaten: ein GET beweist nur, dass Daten gelesen
     # wurden. Erst dieser POST darf die VM im Portal auf 5/5 setzen.
     # Die Rolloutrevision faehrt mit (Etappe 14D). Sie stammt aus DIESER Antwort
@@ -153,6 +196,13 @@ try {
     # einen gruenen Detection-State ohne bestaetigten Serverzustand hinterlaesst.
     # ACK erfolgreich + Marker-Schreibfehler ist sicher: der Retry dedupliziert.
     Save-VsValue -Path $registryBase -Name 'SetupState' -Value 'complete'
+
+    # Only the selected snapshot belongs to this rollout. Remove older
+    # snapshots after success; bootstrap, logging and foreign registry values
+    # live outside Snapshots and are never touched.
+    foreach ($oldSnapshot in @(Get-ChildItem -Path $snapshotsRoot -ErrorAction SilentlyContinue)) {
+        if ($oldSnapshot.PSChildName -ne $snapshotId) { Remove-Item -Path $oldSnapshot.PSPath -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'finished' -Detail "$index interfaces"
 } catch {
     # ACK kann serverseitig angekommen sein, waehrend die Antwort verloren ging.

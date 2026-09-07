@@ -60,6 +60,10 @@ $projectName     = $config.ProjectName
 #   "Stop"     - Bricht die gesamte Installation ab sobald ein Skript fehlschlaegt
 #   "Continue" - Faehrt mit dem naechsten Skript fort auch wenn eines fehlschlaegt
 $ErrorAction = $config.ErrorAction
+if ([string]$ErrorAction -notin @('Stop', 'Continue')) {
+    Write-Host 'config.json: ErrorAction muss Stop oder Continue sein. Installation abgebrochen.' -ForegroundColor Red
+    exit 1
+}
 
 # Registrierungspfad je nach Installationstyp setzen
 # Erlaubt sind genau zwei Werte (SSoT: $script:VsInstallationBehaviorTypes in
@@ -80,9 +84,13 @@ if($config.InstallationBehaviorType -eq "InstallForUser"){
     $registryPath = "HKLM:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
 }
 
-# Verzeichnis fuer Log-Dateien der einzelnen Teilskripte
-# $env:ProgramFiles: Umgebungsvariable - zeigt auf C:\Program Files
-$logDirectory = "$($env:ProgramFiles)\VirtuSphere\Logs\"
+# Benutzerinstallationen schreiben in den eigenen Profilbereich; SYSTEM-
+# Installationen in den geschuetzten Maschinenbereich.
+if ($config.InstallationBehaviorType -eq 'InstallForUser') {
+    $logDirectory = Join-Path $env:LOCALAPPDATA 'VirtuSphere\Logs'
+} else {
+    $logDirectory = Join-Path $env:ProgramData 'VirtuSphere\Logs'
+}
 
 ############ Ab hier nichts aendern
 
@@ -112,6 +120,8 @@ $rebootCode = 0
 # Startet als $true. Wird auf $false gesetzt sobald ein Teilskript fehlschlaegt.
 # Entscheidet am Ende ob der MECM-Detection-Key (Version) in die Registry geschrieben wird.
 $Fullsuccess = $true
+$restartInitiated = $false
+$completedSteps = 0
 
 Write-Host @"
 
@@ -137,13 +147,13 @@ write-host "----------------------------" -ForegroundColor Magenta
 # New-Item: Erstellt einen neuen Eintrag - hier einen Registry-Schluessel.
 # -Force: Erstellt auch fehlende uebergeordnete Schluessel automatisch mit.
 if (!(Test-Path $registryPath)) {
-    New-Item -Path $registryPath -Force
+    New-Item -Path $registryPath -Force -ErrorAction Stop
 }
 
 # Log-Verzeichnis erstellen falls nicht vorhanden
 # -ItemType Directory: Gibt an dass ein Ordner erstellt werden soll, kein Schluessel oder Datei.
 if (!(Test-Path $logDirectory)) {
-    New-Item -Path $logDirectory -ItemType Directory -Force
+    New-Item -Path $logDirectory -ItemType Directory -Force -ErrorAction Stop
 }
 
 # Alle PowerShell-Skripte im powershell-Unterordner alphabetisch abarbeiten
@@ -152,7 +162,11 @@ if (!(Test-Path $logDirectory)) {
 # Sort-Object Name: Sortiert die Ergebnisse alphabetisch nach Dateiname.
 #   Wichtig: 01.check-dcready.ps1 muss vor 02.dc-dns-konfig.ps1 laufen.
 #   Die Nummerierung im Dateinamen steuert die Reihenfolge.
-$dir_script = Get-ChildItem $scriptDirectory -Filter *.ps1 | Sort-Object Name
+$dir_script = @(Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction Stop | Sort-Object Name)
+if ($dir_script.Count -eq 0) {
+    Write-Host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
+    exit 1
+}
 
 # foreach-Statement statt "| ForEach-Object": beide teilen sich zwar denselben
 # Scope (das Setzen von $Fullsuccess wirkt in beiden Varianten nach aussen), aber
@@ -177,6 +191,13 @@ foreach ($scriptFile in $dir_script) {
     # Beispiel: "DC-Setup-01.check-dcready.ps1"
     $registryValueName = "$projectName-$scriptName"
 
+    # Ein Erfolg gilt nur fuer exakt diesen Skriptinhalt. Der Registry-Pfad ist
+    # bereits an die Paketversion gebunden; der Hash verhindert zusaetzlich,
+    # dass ein nachtraeglich unter derselben Version geaendertes Teilskript nach
+    # einem Reboot oder Reparaturlauf blind uebersprungen wird.
+    $scriptHash = (Get-FileHash -LiteralPath $scriptFullPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    $successMarkerPrefix = "Erfolg:$scriptHash - "
+
     # Pruefen ob das Skript bereits erfolgreich ausgefuehrt wurde
     # Get-ItemPropertyValue: Liest den Wert eines Registry-Eintrags.
     # -ea 0: Kurzform fuer -ErrorAction SilentlyContinue - Fehler werden still ignoriert.
@@ -196,11 +217,13 @@ foreach ($scriptFile in $dir_script) {
     write-host "Status $scriptName : $status" -ForegroundColor Gray
 
     # Skript ausfuehren wenn es noch nicht erfolgreich war
-    # -notlike "Erfolg*": Der *-Platzhalter steht fuer beliebige Zeichen.
-    # Prueft ob der gespeicherte Status NICHT mit "Erfolg" beginnt.
-    # Gespeichertes Format ist "Erfolg - 2025-04-08 14:30:00" - daher der Platzhalter.
-    if ($status -eq "not installed" -or $status -notlike "Erfolg*") {
+    # Nur ein Erfolg fuer denselben SHA-256-Inhalt darf uebersprungen werden.
+    # Alte Marker ohne Hash werden einmalig erneut ausgefuehrt.
+    if ($status -eq "not installed" -or -not ([string]$status).StartsWith($successMarkerPrefix, [System.StringComparison]::Ordinal)) {
 
+        $success = 'Fehler'
+        $stepFailed = $false
+        $childExitCode = $null
         try {
             Write-Host "Fuehre Skript aus." -ForegroundColor Green
 
@@ -223,19 +246,21 @@ foreach ($scriptFile in $dir_script) {
             # *> $logPath: Leitet alle Ausgaben (stdout und stderr) in die Log-Datei um.
             & PowerShell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File $scriptFullPath *> $logPath
 
+            $childExitCode = $LASTEXITCODE
+
             # $LASTEXITCODE: Automatische Variable - enthaelt den Exit-Code des zuletzt
             # ausgefuehrten externen Prozesses (hier: PowerShell.exe).
             # Die Erfolgscodes stehen als $successExitCodes am Kopf der Datei,
             # samt ihrer Bedeutung - genau einmal.
-            if ($successExitCodes -contains $LASTEXITCODE) {
+            if ($successExitCodes -contains $childExitCode) {
                 $success = "Erfolg"
-                Write-Host "Skript $scriptName wurde erfolgreich durchgelaufen. Exit-Code: $LASTEXITCODE" -ForegroundColor Green
+                Write-Host "Skript $scriptName wurde erfolgreich durchgelaufen. Exit-Code: $childExitCode" -ForegroundColor Green
                 # Neustartwunsch merken. Nur der HOECHSTRANGIGE gewinnt, und nur
                 # aus einem tatsaechlich gelaufenen Teilskript: ein Paket, das
                 # beim ersten Lauf 3010 lieferte und beim zweiten uebersprungen
                 # wird (Skip-Zweig unten), darf nicht ewig Neustarts anfordern.
                 foreach ($code in $rebootExitCodes) {
-                    if ($LASTEXITCODE -eq $code) {
+                    if ($childExitCode -eq $code) {
                         if ($rebootCode -eq 0 -or ($rebootExitCodes.IndexOf($code) -lt $rebootExitCodes.IndexOf($rebootCode))) {
                             $rebootCode = $code
                         }
@@ -243,21 +268,9 @@ foreach ($scriptFile in $dir_script) {
                     }
                 }
             } else {
-                $success = "Fehler"
+                $stepFailed = $true
                 $Fullsuccess = $false
-                Write-Host "Fehler beim Ausfuehren von Skript $scriptName. Exit-Code: $LASTEXITCODE" -ForegroundColor Red
-
-                # Verhalten bei Fehler abhaengig von ErrorAction in config.json
-                if($ErrorAction -eq "Stop"){
-                    $Fullsuccess = $false
-                    write-host "ErrorAction ist auf $ErrorAction. Exit" -ForegroundColor DarkYellow
-                    # exit 1: Beendet install.ps1 sofort mit Fehlercode 1.
-                    # MECM wertet jeden Exit-Code ungleich 0 als fehlgeschlagene Installation.
-                    # Die Detection Clause wird nicht erfuellt - MECM zeigt "Fehler" an.
-                    exit 1
-                } else {
-                    write-host "ErrorAction ist auf $ErrorAction. Fahre mit naechstem Skript fort..." -ForegroundColor DarkYellow
-                }
+                Write-Host "Fehler beim Ausfuehren von Skript $scriptName. Exit-Code: $childExitCode" -ForegroundColor Red
             }
 
             write-host "Log: $logPath" -ForegroundColor Cyan
@@ -266,32 +279,47 @@ foreach ($scriptFile in $dir_script) {
             # catch: Faengt Fehler ab die PowerShell selbst ausloest (z.B. Datei nicht gefunden).
             # Wird nicht ausgeloest durch exit-Codes der Teilskripte - nur durch echte PS-Exceptions.
             $success = "Fehler"
+            $stepFailed = $true
             $Fullsuccess = $false
+            Write-Host "Ausnahme beim Ausfuehren von Skript $scriptName`: $($_.Exception.Message)" -ForegroundColor Red
         }
 
         # Ergebnis des Skripts in der Registry speichern
         # Set-ItemProperty: Schreibt einen Wert in einen Registry-Schluessel.
-        # Format: "Erfolg - 2025-04-08 14:30:00" oder "Fehler - 2025-04-08 14:30:00"
+        # Format: "Erfolg:<sha256> - 2025-04-08 14:30:00" oder
+        # "Fehler:<sha256> - 2025-04-08 14:30:00"
         # Beim naechsten Aufruf von install.ps1 wird dieser Wert gelesen.
-        # Skripte mit Status "Erfolg*" werden uebersprungen (Skip-Logik oben).
+        # Nur ein Erfolg fuer denselben Inhalt wird uebersprungen (Skip-Logik oben).
         $currentDateTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        Set-ItemProperty -Path $registryPath -Name $registryValueName -Value "$success - $currentDateTime"
+        try {
+            Set-ItemProperty -Path $registryPath -Name $registryValueName -Value "${success}:$scriptHash - $currentDateTime" -ErrorAction Stop
+        } catch {
+            Write-Host "Schrittstatus fuer $scriptName konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+
+        if ($stepFailed) {
+            if ($ErrorAction -eq 'Stop') {
+                Write-Host "ErrorAction ist auf Stop. Exit" -ForegroundColor DarkYellow
+                exit 1
+            }
+            Write-Host "ErrorAction ist auf Continue. Fahre mit naechstem Skript fort..." -ForegroundColor DarkYellow
+            continue
+        }
+
+        $completedSteps++
+        if ($childExitCode -eq 1641) {
+            # Der Neustart laeuft bereits. Keine weitere Nutzlast starten und
+            # den finalen Detection-Marker erst im Folgelauf setzen.
+            $restartInitiated = $true
+            Write-Host 'Exit-Code 1641: Neustart wurde eingeleitet. Weitere Schritte warten bis zum Folgelauf.' -ForegroundColor Yellow
+            break
+        }
 
     } else {
         write-host "Skript $scriptFullPath wurde bereits erfolgreich ausgefuehrt. Skip" -ForegroundColor Gray
+        $completedSteps++
     }
-}
-
-# Ein leerer powershell-Ordner ist ein FEHLSCHLAG, keine Warnung.
-#
-# Vorher wurde nur rot geschrieben und danach trotzdem der Detection-Wert
-# gesetzt: MECM meldete das Paket als installiert, obwohl nichts installiert
-# wurde. Genau die Lage, in die ein Paket geraet, dessen Inhalt beim Kopieren
-# fehlte oder dessen Content-Verteilung nicht durchlief - und weil die Erkennung
-# erfuellt war, versuchte MECM es nie erneut.
-if((Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction SilentlyContinue).count -eq 0){
-    write-host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
-    $Fullsuccess = $false
 }
 
 # MECM Detection Clause schreiben
@@ -301,8 +329,13 @@ if((Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction SilentlyContinue).
 #   Wert:  Version = "{version}"
 # Existiert dieser Wert, markiert MECM die Application als "Installiert".
 # Fehlt er (weil $Fullsuccess = $false), zeigt MECM "Fehler" an.
-if($Fullsuccess){
-    Set-ItemProperty -Path $registryPath -Name "Version" -Value $config.version
+if ($Fullsuccess -and -not $restartInitiated -and $completedSteps -eq $dir_script.Count) {
+    try {
+        Set-ItemProperty -Path $registryPath -Name "Version" -Value $config.version -ErrorAction Stop
+    } catch {
+        Write-Host "Detection-Marker konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
 
 write-host "----------------------------" -ForegroundColor Magenta
@@ -322,6 +355,10 @@ write-host "install.ps1 finish" -ForegroundColor Magenta
 if (-not $Fullsuccess) {
     write-host "Mindestens ein Teilskript ist fehlgeschlagen - Exit-Code 1." -ForegroundColor Red
     exit 1
+}
+if ($restartInitiated) {
+    Write-Host 'Neustart wurde bereits eingeleitet - Exit-Code 1641 wird an MECM weitergereicht.' -ForegroundColor Yellow
+    exit 1641
 }
 if ($rebootCode -ne 0) {
     write-host "Alle Teilskripte erfolgreich, ein Neustart ist noetig - Exit-Code $rebootCode wird an MECM weitergereicht." -ForegroundColor Yellow

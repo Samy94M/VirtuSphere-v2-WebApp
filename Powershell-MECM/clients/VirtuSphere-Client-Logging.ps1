@@ -92,14 +92,25 @@ function Protect-VsClientLogText {
     return $value
 }
 
+function Remove-VsClientLogTerminalSequences {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return '' }
+    $value = [string]$Text
+    $esc = [regex]::Escape([string][char]27)
+    $value = [regex]::Replace($value, ($esc + '\][^\x07]*(?:\x07|' + $esc + '\\)'), '')
+    $value = [regex]::Replace($value, ($esc + '\][^\x07]*$'), '')
+    $value = [regex]::Replace($value, ($esc + '\[[0-?]*[ -/]*[@-~]'), '')
+    $value = [regex]::Replace($value, ($esc + '\[[0-?]*[ -/]*$'), '')
+    return $value.Replace([string][char]27, '')
+}
+
 function ConvertTo-VsClientLogField {
     param(
         [AllowNull()][string]$Text,
         [Parameter(Mandatory)][int]$MaxBytes
     )
-    $value = Protect-VsClientLogText -Text $Text
-    $escapePattern = ([string][char]27) + '\[[0-?]*[ -/]*[@-~]'
-    $value = [regex]::Replace($value, $escapePattern, '')
+    $value = Remove-VsClientLogTerminalSequences -Text $Text
+    $value = Protect-VsClientLogText -Text $value
     $value = $value -replace '\r\n?|\n', ' '
     $value = $value -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', ' '
     $value = $value.Replace('|', ';').Trim()
@@ -151,7 +162,7 @@ function Write-VsClientLogSinkFailure {
         $script:VsClientLogSinkFailed = $true
         Write-Warning ('Log-Sink gest{0}rt.' -f [char]0x00F6)
     }
-    if ($Detail) { Write-Debug ('Log-Sink-Detail: {0}' -f (Protect-VsClientLogText -Text $Detail)) }
+    if ($Detail) { Write-Debug ('Log-Sink-Detail: {0}' -f (ConvertTo-VsClientLogField -Text $Detail -MaxBytes $script:VsClientLogMessageMaxBytes)) }
 }
 
 function Write-VsClientLogSinkRecovery {
@@ -185,7 +196,9 @@ function Write-VsClientLog {
         [string]$Context = '-'
     )
     $line = Format-VsClientLogLine -Message $Message -Level $Level -Context $Context
-    Write-Output $line
+    # A logger is diagnostic output. Keeping Stream 1 empty is load-bearing for
+    # helpers such as Resolve-VsApi, whose sole return value is an address.
+    Write-Host $line
     try {
         $file = Join-Path $script:VsClientLogRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), (Get-VsClientLogComponentName -Component $script:VsClientLogComponent))
         Add-Content -Path $file -Value $line -Encoding UTF8 -ErrorAction Stop
@@ -225,7 +238,7 @@ function Invoke-VsClientLogRetention {
                     $script:VsClientLogRetentionNextCheck = $last.AddHours($script:VsClientLogRetentionCheckHours)
                 }
             } catch {
-                Write-Debug ('Log-Retention-Marker ungueltig, wird ersetzt: {0}' -f (Protect-VsClientLogText -Text $_.Exception.Message))
+                Write-Debug ('Log-Retention-Marker ungueltig, wird ersetzt: {0}' -f (ConvertTo-VsClientLogField -Text $_.Exception.Message -MaxBytes $script:VsClientLogMessageMaxBytes))
             }
         }
         if (-not $due) {

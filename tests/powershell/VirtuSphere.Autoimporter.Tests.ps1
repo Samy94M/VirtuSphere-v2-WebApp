@@ -136,10 +136,10 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         # die Application danach, der naechste Durchlauf war nicht mehr "neu",
         # und die Verteilung wurde nie wiederholt: das Paket schlaegt auf jedem
         # Client fehl, waehrend die Karte gruen ist. Seit B7 ist die Frage
-        # mehrwertig (Get-VsContentDistributionState), und nur `succeeded`
+        # mehrwertig (Get-VsContentDistributionSnapshot), und nur `succeeded`
         # laesst den Stamp zu.
         $source = Get-Content -Path $script:Importer -Raw
-        $source | Should -Match 'Get-VsContentDistributionState'
+        $source | Should -Match 'Get-VsContentDistributionSnapshot'
         $source | Should -Not -Match 'Test-VsContentDistributed'
         $source | Should -Match 'Test-VsInOrgFolder'
         $source | Should -Match 'Test-VsTemplateScriptCurrent'
@@ -156,13 +156,58 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         }
         # Der Stamp umfasst das Vorlagen-Skript: eine neue Vorlage loest den
         # Scan aus, nicht erst die naechste config.json.
-        $source | Should -Match 'Get-VsFilesStamp -Path \$basePath -TemplateScript'
+        $source | Should -Match 'Get-VsFilesManifestStamp -Path \$basePath -TemplateScript'
     }
 
     It 'das Vorlagen-Skript wird ausserhalb des $isNew-Zweigs abgeglichen' {
         $if = Get-IfByCondition -Path $script:Importer -ConditionText '$isNew'
         $if | Should -Not -BeNullOrEmpty
         $if.Clauses[0].Item2.Extent.Text | Should -Not -Match 'Test-VsTemplateScriptCurrent'
+    }
+}
+
+Describe 'Autoimporter A13: Manifest, Intent und SourceVersion bilden eine Zustandsmaschine' {
+    BeforeAll {
+        $script:A13Source = Get-Content -Path $script:Importer -Raw
+        $script:A13Common = Get-Content -Path $script:MecmCommon -Raw
+    }
+
+    It 'fordert bestehende DT-Inhalte explizit an und speichert Intent davor, pending danach' {
+        $intent = $script:A13Source.IndexOf('Set-VsPackageContentTracking -ApplicationName $fullName -State intent')
+        $update = $script:A13Source.IndexOf('Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName')
+        $pending = $script:A13Source.IndexOf('Set-VsPackageContentTracking -ApplicationName $fullName -State pending')
+        $intent | Should -BeGreaterOrEqual 0
+        $update | Should -BeGreaterThan $intent
+        $pending | Should -BeGreaterThan $update
+    }
+
+    It 'verteilt unabhaengig von der optionalen eigenen Collection' {
+        $ownCollectionIf = Get-IfByCondition -Path $script:Importer -ConditionText '"$($cfg.generateOwnDeviceColletion)" -eq ''true'''
+        $ownCollectionIf | Should -Not -BeNullOrEmpty
+        $body = $ownCollectionIf.Clauses[0].Item2.Extent.Text
+        $body | Should -Not -Match 'Start-CMContentDistribution|Update-CMDistributionPoint|Get-VsContentDistributionSnapshot'
+        $script:A13Source | Should -Match 'Start-CMContentDistribution'
+        $script:A13Source | Should -Match 'Update-CMDistributionPoint'
+    }
+
+    It 'bestaetigt ein Manifest nur mit succeeded und einer SourceVersion oberhalb der Baseline' {
+        $script:A13Source | Should -Match "(?s)State -eq 'succeeded'.*SourceVersion -gt \[int\]\`$tracking\.BaselineSourceVersion.*-State complete"
+        $script:A13Source | Should -Match 'Get-VsFilesManifestStamp -Path \$pkgFolder'
+    }
+
+    It 'schreibt den Tracking-State als letzten Commit-Marker und akzeptiert nur geschlossene States' {
+        $functionText = [regex]::Match($script:A13Common, '(?s)function Set-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $functionText | Should -Match "ValidateSet\('intent', 'pending', 'complete'\)"
+        $writes = @([regex]::Matches($functionText, 'New-ItemProperty[^\r\n]+-Name State[^\r\n]+'))
+        $writes.Count | Should -Be 2
+        $writes[0].Value | Should -Match "-Value 'invalid'"
+        $writes[1].Value | Should -Match '-Value \$State'
+    }
+
+    It 'blockiert mehrdeutige Applications und Deployment Types vor Contentwrites' {
+        $script:A13Source | Should -Match '\$appMatches\.Count -gt 1'
+        $script:A13Source | Should -Match '\$deploymentTypes\.Count -ne 1'
+        $script:A13Source | Should -Match 'package_definition_drift'
     }
 }
 
@@ -254,16 +299,58 @@ Describe 'Test-VsTemplateScriptCurrent (Inhalt, nicht Zeitstempel)' {
         } | Should -BeFalse
     }
 
-    It 'ein Paket ohne eigene install.ps1 gilt als aktuell' {
-        # Die Vorlage ueberschreibt eine vorhandene Datei; sie legt keine an, wo
-        # das Paket bewusst keine hat.
+    It 'ein Paket ohne erwartete install.ps1 verlangt einen neuen Versuch' {
         Set-Content -Path $script:TemplateFile -Value 'exit 0' -Encoding UTF8
         $absent = Join-Path $script:Sandbox 'fehlt.ps1'
 
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @($script:TemplateFile, $absent) -Body {
             param($t, $p)
             Test-VsTemplateScriptCurrent -TemplateFile $t -PackageFile $p
-        } | Should -BeTrue
+        } | Should -BeFalse
+    }
+}
+
+Describe 'Get-VsFilesManifestStamp (Inhalt statt mtime)' {
+    BeforeAll {
+        function script:Get-ManifestStampForTest {
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($script:ManifestRoot, $script:Template) -Body {
+                param($root, $template) Get-VsFilesManifestStamp -Path $root -TemplateScript $template
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:ManifestRoot = Join-Path $TestDrive 'files'
+        New-Item -Path (Join-Path $script:ManifestRoot 'Pkg') -ItemType Directory -Force | Out-Null
+        $script:Payload = Join-Path (Join-Path $script:ManifestRoot 'Pkg') 'payload.bin'
+        $script:Template = Join-Path $TestDrive 'template.ps1'
+        Set-Content -Path $script:Payload -Value 'eins' -Encoding UTF8
+        Set-Content -Path $script:Template -Value 'exit 0' -Encoding UTF8
+    }
+
+    It 'bleibt bei rein geaenderter mtime stabil' {
+        $before = Get-ManifestStampForTest
+        (Get-Item $script:Payload).LastWriteTimeUtc = (Get-Item $script:Payload).LastWriteTimeUtc.AddDays(-1)
+        Get-ManifestStampForTest | Should -Be $before
+    }
+
+    It 'erkennt Payloadinhalt auch bei wiederhergestellter mtime' {
+        $before = Get-ManifestStampForTest
+        $stamp = (Get-Item $script:Payload).LastWriteTimeUtc
+        Set-Content -Path $script:Payload -Value 'zwei' -Encoding UTF8
+        (Get-Item $script:Payload).LastWriteTimeUtc = $stamp
+        Get-ManifestStampForTest | Should -Not -Be $before
+    }
+
+    It 'erkennt geloeschte und neu hinzugefuegte Dateien sowie die Vorlage' {
+        $before = Get-ManifestStampForTest
+        Set-Content -Path (Join-Path (Split-Path $script:Payload -Parent) 'neu.txt') -Value 'neu' -Encoding UTF8
+        $withNew = Get-ManifestStampForTest
+        $withNew | Should -Not -Be $before
+        Remove-Item -LiteralPath $script:Payload -Force
+        Get-ManifestStampForTest | Should -Not -Be $withNew
+        Set-Content -Path $script:Template -Value 'exit 2' -Encoding UTF8
+        Get-ManifestStampForTest | Should -Not -Be $withNew
     }
 }
 
@@ -330,6 +417,63 @@ Describe 'Installer: die vier Aufgaben ueberleben ihren eigenen Neustartzaehler'
     }
 }
 
+Describe 'Installer A11: gemeinsame Aktivierungs- und Rollbackgrenze' {
+    BeforeAll {
+        $script:A11Text = Get-Content -Path $script:Installer -Raw
+        $script:A11Lines = Get-Content -Path $script:Installer
+    }
+
+    It 'serialisiert konkurrierende Installer und akzeptiert nur den festen lokalen Installationspfad' {
+        $script:A11Text | Should -Match "Global\\VirtuSphere\.MECMInstaller"
+        $script:A11Text | Should -Match 'Assert-VsOwnedInstallDirectory'
+        $script:A11Text | Should -Match "StringComparison\]::OrdinalIgnoreCase"
+        $script:A11Text | Should -Match 'FileAttributes\]::ReparsePoint'
+    }
+
+    It 'sichert Registrywerte mit Typ und ACL sowie Task-XML und Laufzustand vor dem ersten Write' {
+        $registrySnapshot = ($script:A11Lines | Select-String -SimpleMatch '$registryRollback = New-VsRegistryRollbackSnapshot').LineNumber
+        $taskSnapshot = ($script:A11Lines | Select-String -SimpleMatch '$taskRollbacks = @(New-VsTaskRollbackSnapshots').LineNumber
+        $registryWrite = ($script:A11Lines | Select-String -SimpleMatch "Write-Step 'Lege Registry-Schluessel").LineNumber
+        $registrySnapshot | Should -BeLessThan $registryWrite
+        $taskSnapshot | Should -BeLessThan $registryWrite
+        $script:A11Text | Should -Match 'GetValueKind'
+        $script:A11Text | Should -Match 'Get-Acl -LiteralPath \$Path -ErrorAction Stop'
+        $script:A11Text | Should -Match 'Export-ScheduledTask'
+        $script:A11Text | Should -Match 'WasRunning'
+    }
+
+    It 'haelt den Alt-Dateisatz bis nach Registrymarker und Aufgabenstart rollbackfaehig' {
+        $backupCreate = ($script:A11Lines | Select-String -SimpleMatch "New-Item -ItemType Directory -Path `$installBackup").LineNumber
+        $marker = ($script:A11Lines | Select-String -SimpleMatch "New-ItemProperty -Path `$registryPath -Name 'SetupCompleted'").LineNumber
+        $successCleanup = ($script:A11Lines | Select-String -SimpleMatch "Remove-Item -LiteralPath `$installBackup -Recurse -Force -ErrorAction Stop").LineNumber | Select-Object -First 1
+        $backupCreate | Should -BeLessThan $marker
+        $successCleanup | Should -BeGreaterThan $marker
+        $script:A11Text | Should -Match 'ActivatedFiles'
+    }
+
+    It 'stoppt neue Prozesse vor dem Datei-Rollback und startet alte Tasks nur nach vollstaendigem Rueckfall' {
+        $restore = [regex]::Match($script:A11Text, '(?s)function Restore-VsInstallTransaction \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $disable = $restore.IndexOf('Disable-ScheduledTask')
+        $wait = $restore.IndexOf('Wait-VsScheduledScriptStopped')
+        $fileRestore = $restore.IndexOf('foreach ($name in @($ActivatedFiles))')
+        $taskStart = $restore.IndexOf('Start-ScheduledTask')
+        $disable | Should -BeGreaterThan -1
+        $wait | Should -BeGreaterThan $disable
+        $fileRestore | Should -BeGreaterThan $wait
+        $taskStart | Should -BeGreaterThan $fileRestore
+        $restore | Should -Match '\$quiesced -and \$filesRestored -and \$registryRestored'
+        $restore | Should -Match 'Aufgaben bleiben deaktiviert'
+    }
+
+    It 'stellt exakte Registrywerte und alte Aufgaben wieder her und entfernt nur neu angelegte eigene Tasks' {
+        $script:A11Text | Should -Match 'Remove-ItemProperty -LiteralPath \$registryPath'
+        $script:A11Text | Should -Match 'New-ItemProperty -Path \$registryPath -Name \$value\.Name.*-PropertyType \$value\.Kind.*-ErrorAction Stop'
+        $script:A11Text | Should -Match 'Set-Acl -LiteralPath \$registryPath -AclObject \$RegistrySnapshot\.Acl -ErrorAction Stop'
+        $script:A11Text | Should -Match 'Register-ScheduledTask -TaskName \$snapshot\.Name -Xml \$snapshot\.Xml -Force -ErrorAction Stop'
+        $script:A11Text | Should -Match 'Unregister-ScheduledTask -TaskName \$snapshot\.Name -Confirm:\$false -ErrorAction Stop'
+    }
+}
+
 Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert' {
     BeforeAll {
         $script:InstallerAst = Get-Ast -Path $script:Installer
@@ -345,16 +489,19 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
             $assignment.Right.Expression.KeyValuePairs | ForEach-Object { $_.Item1.Extent.Text }
         }
 
-        # Die Schluessel der Erhaltungs-Tabelle: Parametername -> Settingname.
+        # Die Schluessel des zentralen Resolver-Aufrufs: Parameter -> Setting.
         function Get-PreservedMap {
             $assignment = $script:InstallerAst.FindAll({ param($n)
                 $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-                $n.Left.Extent.Text -eq '$parameterToSetting'
+                $n.Left.Extent.Text -eq '$textSettingMap'
             }, $true) | Select-Object -First 1
             $map = @{}
             foreach ($pair in $assignment.Right.Expression.KeyValuePairs) {
-                $map[$pair.Item1.Extent.Text] = $pair.Item2.Extent.Text.Trim("'")
+                $parameterName = $pair.Item1.Extent.Text
+                if ($parameterName -eq 'ProviderMachine') { continue } # eigene Clear-/Omit-Semantik
+                $map[$parameterName] = $pair.Item2.Extent.Text.Trim("'")
             }
+            $map['ReportToken'] = 'ReportToken' # interaktive Quelle, derselbe Resolver
             $map
         }
 
@@ -374,22 +521,18 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
     }
 
     It 'ein ausdruecklich leerer ReportToken loescht ihn' {
-        # Der ReportToken hat eine Sonderbehandlung VOR der Erhaltungstabelle,
-        # genau wie MECM_ProviderMachine. Sie stellte den alten Wert wieder her,
-        # sobald der neue leer war - ohne zu pruefen, ob '' ausdruecklich kam.
-        # Die Tabelle unten prueft $PSBoundParameters zwar korrekt, kommt aber zu
-        # spaet: $ReportToken trug da laengst wieder den alten Wert. Ein einmal
-        # gesetzter Token liess sich damit nur noch durch Loeschen des
-        # Registry-Werts entfernen, waehrend der Kommentar das Gegenteil zusagte.
-        #
-        # Per AST, nicht per Textsuche: getroffen werden muss die Bedingung, in
-        # der die Wiederherstellung haengt, nicht irgendein Vorkommen des Namens.
-        $restore = @($script:InstallerAst.FindAll({
-            param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
-                      $n.Extent.Text -match '\$ReportToken\s*=\s*\$existingToken'
-        }, $true) | Sort-Object { $_.Extent.Text.Length })
-        $restore.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $restore[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+        # Der zentrale Resolver erhaelt die Herkunft explizit. Dadurch kann eine
+        # interaktive Eingabe nicht mehr von einer spaeteren Erhaltungsschleife
+        # ueberschrieben werden und ein gebundenes Leer bleibt "cleared".
+        $resolution = @($script:InstallerAst.FindAll({
+            param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                      $n.Left.Extent.Text -eq '$tokenResolution'
+        }, $true))
+        $resolution.Count | Should -Be 1
+        $resolution[0].Extent.Text | Should -Match 'Resolve-VsInstallerSetting'
+        $resolution[0].Extent.Text | Should -Match 'PSBoundParameters'
+        $resolution[0].Extent.Text | Should -Match 'ExplicitEmptyClears'
+        $resolution[0].Extent.Text | Should -Match 'InteractiveEmptyKeepsExisting'
 
         # Dieselbe Frage an der interaktiven Abfrage: -ReportToken '' fiel dort
         # in den Read-Host, obwohl der Aufrufer den Parameter genannt hat.
@@ -428,6 +571,25 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         # Der Test darf nicht daran haengen, dass die Datei irgendwo 'cmd.exe'
         # nennt: geprueft wird die Zuweisung, und dass $dtParams noch da ist.
         $text | Should -Match '\$dtParams\s*=\s*@\{'
+    }
+
+    It 'A14a behaelt erkannte Alt-Versionen und fuehrt im Cleanup-Zweig keine MECM-Loeschung aus' {
+        $text = Get-Content -Path $script:Importer -Raw
+        $text | Should -Match 'Alt-Version bleibt erhalten'
+        $text | Should -Match 'Eigentums-, Referenz- und Ersatznachweis'
+
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Importer, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+        $cleanupIf = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.IfStatementAst] -and
+                $node.Extent.Text -match 'removeOldVersion' -and
+                $node.Extent.Text -match 'Alt-Version bleibt erhalten'
+        }, $true) | Sort-Object { $_.Extent.Text.Length } | Select-Object -First 1)
+        $cleanupIf.Count | Should -Be 1
+        $cleanupIf[0].Extent.Text | Should -Not -Match 'Remove-CM(?:Application|ApplicationDeployment|DeviceCollection)'
     }
 
     It 'jeder erhaltene Settingname ist ein echter Installer-Parameter' {
@@ -535,7 +697,7 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
                       $n.Value -is [int] -and $n.Value -eq 1707
         }, $true))
         $literals.Count | Should -Be 1 -Because '1707 kommt nur in der Erfolgscodeliste vor'
-        $script:TemplateText | Should -Match '\$successExitCodes\s+-contains\s+\$LASTEXITCODE'
+        $script:TemplateText | Should -Match '\$successExitCodes\s+-contains\s+\$childExitCode'
     }
 
     It 'kann einen Neustartcode an MECM weiterreichen' {

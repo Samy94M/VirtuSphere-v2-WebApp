@@ -285,7 +285,6 @@ Describe 'Get-VsProviderMachine (feste Aufloesungsreihenfolge)' {
 Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
     It 'ohne Site-Code sofort unknown/query_failed (keine Abfrage moeglich)' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-VsSiteCode { param($Config) $null }
             Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01' }) -ProviderMachine 'CM01'
         }
         $h.Outcome | Should -Be 'unknown'
@@ -294,9 +293,8 @@ Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
 
     It 'Zugriff verweigert -> unknown/provider_access_denied' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-VsSiteCode { param($Config) 'P01' }
             function Get-CimInstance { throw 'Access is denied' }
-            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01' }) -ProviderMachine 'CM01'
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = 'P01' }) -ProviderMachine 'CM01'
         }
         $h.Outcome | Should -Be 'unknown'
         $h.ErrorCategory | Should -Be 'provider_access_denied'
@@ -304,9 +302,8 @@ Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
 
     It 'RPC-Server nicht verfuegbar -> unknown/provider_unreachable' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-VsSiteCode { param($Config) 'P01' }
             function Get-CimInstance { throw 'The RPC server is unavailable' }
-            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01' }) -ProviderMachine 'CM01'
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = 'P01' }) -ProviderMachine 'CM01'
         }
         $h.Outcome | Should -Be 'unknown'
         $h.ErrorCategory | Should -Be 'provider_unreachable'
@@ -314,9 +311,8 @@ Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
 
     It 'sonstiger Fehler -> unknown/query_failed' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-VsSiteCode { param($Config) 'P01' }
             function Get-CimInstance { throw 'weird boom' }
-            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01' }) -ProviderMachine 'CM01'
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = 'P01' }) -ProviderMachine 'CM01'
         }
         $h.Outcome | Should -Be 'unknown'
         $h.ErrorCategory | Should -Be 'query_failed'
@@ -324,14 +320,52 @@ Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
 
     It 'gesunder Status 0 -> ok, mit Rohstatus und Provider im Ergebnis' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            function Get-VsSiteCode { param($Config) 'P01' }
             function Get-CimInstance { param($Namespace, $ClassName, $Query, $ComputerName, $ErrorAction) [pscustomobject]@{ SiteCode = 'P01'; Status = 0 } }
-            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01' }) -ProviderMachine 'CM01'
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = 'P01' }) -ProviderMachine 'CM01'
         }
         $h.Outcome | Should -Be 'ok'
         $h.RawStatus | Should -Be 0
         $h.SiteCode | Should -Be 'P01'
         $h.Provider | Should -Be 'CM01'
+    }
+
+    It '<name> -> unknown ohne erfundenen Rohstatus' -ForEach @(
+        @{ name = 'nur fremde Site'; rows = @([pscustomobject]@{ SiteCode = 'X99'; Status = 0 }) }
+        @{ name = 'konfigurierte Site mehrfach'; rows = @([pscustomobject]@{ SiteCode = 'P01'; Status = 0 }, [pscustomobject]@{ SiteCode = 'P01'; Status = 1 }) }
+        @{ name = 'Status fehlt'; rows = @([pscustomobject]@{ SiteCode = 'P01' }) }
+        @{ name = 'Status unlesbar'; rows = @([pscustomobject]@{ SiteCode = 'P01'; Status = 'green' }) }
+    ) {
+        $h = Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $rows) -Body {
+            param($items)
+            $script:siteRows = $items
+            function Get-CimInstance { param($Namespace, $ClassName, $Query, $ComputerName, $ErrorAction) $script:siteRows }
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = 'P01' }) -ProviderMachine 'CM01'
+        }
+        $h.Outcome | Should -Be 'unknown'
+        $h.ErrorCategory | Should -Be 'query_failed'
+        $h.RawStatus | Should -BeNullOrEmpty
+    }
+
+    It 'Device-Sync setzt den Providerfehlerzaehler erst nach dem vollstaendigen Abschnitt zurueck' {
+        $source = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        $read = $source.IndexOf('$deviceResponse = Invoke-VsApi')
+        $reset = $source.IndexOf('$consecutiveErrors = 0', $read)
+        $membership = $source.IndexOf('Get-VsDirectMembershipState', $read)
+        $catch = $source.IndexOf('$consecutiveErrors++', $membership)
+        $reset | Should -BeGreaterThan $membership
+        $reset | Should -BeLessThan $catch
+        $source.Substring($read, $membership - $read) | Should -Not -Match '\$consecutiveErrors\s*=\s*0'
+    }
+
+    It 'begrenzt sehr lange oder negative Laufzeiten vor dem Int32-Cast' {
+        $values = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            @(
+                (Get-VsRunDurationMilliseconds -StartedAt ([datetime]'2026-01-01T00:00:00Z') -Now ([datetime]'2026-01-03T00:00:00Z')),
+                (Get-VsRunDurationMilliseconds -StartedAt ([datetime]'2026-01-02T00:00:00Z') -Now ([datetime]'2026-01-01T00:00:00Z'))
+            )
+        }
+        $values[0] | Should -Be 86400000
+        $values[1] | Should -Be 0
     }
 }
 

@@ -19,7 +19,6 @@
 Initialize-VsClientLog -Component 'hostname'
 Write-VsClientLog 'Starte Hostname-Update'
 
-$registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $detectionPath = 'HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate'
 $reportMac = Get-VsReportMac
 
@@ -54,7 +53,7 @@ try {
     $newHostname = $null
     for ($waited = 0; $waited -lt 60; $waited += 5) {
         try {
-            $val = (Get-ItemProperty -Path $registryBase -Name 'vm_hostname' -ErrorAction Stop).vm_hostname
+            $val = Get-VsSnapshotValue -Name 'vm_hostname'
             if (-not [string]::IsNullOrWhiteSpace($val)) { $newHostname = [string]$val; break }
         } catch { Write-Debug $_ }
         Start-Sleep -Seconds 5

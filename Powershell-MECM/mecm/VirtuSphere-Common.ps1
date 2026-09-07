@@ -62,6 +62,24 @@ function Get-VsPowerShellCommandLine {
     return ('powershell.exe {0} -File "{1}"' -f $script:VsPowerShellArgs, $ScriptPath)
 }
 
+function Get-VsDangerousFileSystemAclEntries {
+    param([Parameter(Mandatory)]$Acl)
+    $broadSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+    $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    return @($Acl.Access | Where-Object {
+        $entry = $_
+        if ($entry.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { return $false }
+        try { $sid = $entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$entry.IdentityReference }
+        return $broadSids -contains $sid -and (([int64]$entry.FileSystemRights -band [int64]$writeMask) -ne 0)
+    })
+}
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------
@@ -136,6 +154,12 @@ function Get-VsApiHeaders {
     }
     $headers['X-VirtuSphere-Correlation'] = (Get-VsCorrelationId)
     $headers
+}
+
+function ConvertTo-VsUtf8JsonBytes {
+    param([Parameter(Mandatory)]$Value, [int]$Depth = 6)
+    $json = ConvertTo-Json -InputObject $Value -Depth $Depth
+    return [Text.Encoding]::UTF8.GetBytes($json)
 }
 
 # Baut die Basis-URL. Das Schema kommt aus der Registry (Scheme=https), Default
@@ -234,14 +258,18 @@ function Get-VsErrorDetail {
     if ($ErrorRecord.Exception.PSObject.Properties['Response']) {
         $response = $ErrorRecord.Exception.Response
     }
-    if (-not $response) { return $detail }
-
     $body = $null
+    try {
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            $body = [string]$ErrorRecord.ErrorDetails.Message
+        }
+    } catch { Write-Debug $_ }
+    if (-not $response -and [string]::IsNullOrWhiteSpace($body)) { return $detail }
     try {
         # PS 5.1 / .NET Framework: HttpWebResponse mit Stream. Kein Vorab-Check auf
         # die Methode: sie kann als ScriptMethod, Methode oder gar nicht da sein,
         # und der try/catch faengt jeden dieser Faelle ohnehin ab.
-        $stream = $response.GetResponseStream()
+        $stream = if ($response -and [string]::IsNullOrWhiteSpace($body)) { $response.GetResponseStream() } else { $null }
         if ($stream) {
             $reader = New-Object System.IO.StreamReader($stream)
             try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
@@ -258,7 +286,8 @@ function Get-VsErrorDetail {
         $parsed = $body | ConvertFrom-Json -ErrorAction Stop
         foreach ($field in 'error', 'message') {
             if ($parsed.PSObject.Properties[$field] -and -not [string]::IsNullOrWhiteSpace([string]$parsed.$field)) {
-                return ('{0} | WebApp: {1}' -f $detail, [string]$parsed.$field)
+                $message = Get-VsTruncatedUtf8 -Text ([string]$parsed.$field) -MaxBytes 512
+                return ('{0} | WebApp: {1}' -f $detail, $message)
             }
         }
     } catch {
@@ -306,8 +335,8 @@ function Invoke-VsApi {
         # ueber die Werte des Objekts iteriert und Strings statt Eintraege
         # findet. Dieselbe 5.1-Eigenart ist in mecm_new-device-sync.ps1 fuer die
         # Empfangsrichtung dokumentiert; hier ist die Senderichtung.
-        $params['Body'] = (ConvertTo-Json -InputObject $Body -Depth 6)
-        $params['ContentType'] = 'application/json'
+        $params['Body'] = ConvertTo-VsUtf8JsonBytes -Value $Body -Depth 6
+        $params['ContentType'] = 'application/json; charset=utf-8'
     }
 
     Invoke-RestMethod @params
@@ -475,6 +504,11 @@ $script:VsRunCauseVocabulary = @(
     'collection_update_failed',  # Invoke-CMCollectionUpdate fehlgeschlagen
     'collection_folder_failed',  # Ordner/Verschieben fehlgeschlagen
     'collection_remove_failed',  # Remove der EIGENEN Regel fehlgeschlagen (ADR-0034)
+    'membership_provenance_invalid', # Owned-Regel ohne vollstaendige ID/Name/Typ-Provenienz
+    'membership_identity_ambiguous', # Collectionname/Desired-Typ nicht eindeutig
+    'membership_query_failed',  # Live-Membership konnte nicht sicher gelesen werden
+    'membership_operation_uncertain', # Journal-Intent ohne sicher quittiertes Remote-Ergebnis
+    'membership_report_pending', # Bestaetigtes Remote-Ergebnis wurde replayt; Portalbestand neu lesen
     'membership_report_failed',  # Provenienz-Meldung ans Portal fehlgeschlagen (ADR-0034)
     'resource_id_pending',       # MECM hat noch keine ResourceID vergeben
     'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
@@ -482,6 +516,7 @@ $script:VsRunCauseVocabulary = @(
     'package_content_failed',    # Content-Verteilung fehlgeschlagen oder auf DPs mit Fehlern
     'package_content_in_progress', # Verteilung laeuft noch; Stamp wartet (B7)
     'package_content_unknown',   # Verteilstatus nicht abfragbar; Stamp wartet (B7)
+    'package_definition_drift',  # Application/Deployment-Type nicht eindeutig oder vertragswidrig
     'package_source_missing',    # files-Pfad des Paketordners fehlt
     'package_deploy_failed',     # New-CMApplicationDeployment fehlgeschlagen
     'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
@@ -502,45 +537,85 @@ function New-VsRunCauseList {
 # der Aufrufer selbst; nur `succeeded` heisst "nichts zu tun UND der Stamp darf
 # gemerkt werden".
 #
-# Adressierung per CI_ID (-Id), wenn der Aufrufer das Application-Objekt hat:
-# -Name trifft bei Namensgleichheit das falsche Objekt. `unknown` bei jeder
-# Unsicherheit; der Aufrufer verteilt dann nicht (Start-CMContentDistribution
-# wirft fuer bereits verteilten Content selbst) und merkt keinen Stamp, der
-# naechste Lauf fragt erneut.
+# Adressierung ausschliesslich ueber das eindeutig aufgeloeste Application-
+# Objekt (-InputObject). Get-CMDistributionStatus -Id erwartet eine PackageID,
+# keine CI_ID; -Name kann bei Mehrdeutigkeit das falsche Objekt treffen.
+# `unknown` bei jeder Schema-/Identitaetsunsicherheit.
 #
 # Bewusst weiterhin die Summe ueber alle Verteilungspunkte, nicht "liegt er auf
 # genau dieser DP-Gruppe": Get-CMDistributionStatus kennt die Gruppe nicht, und
 # fuer die Installation, die genau eine DP-Gruppe anlegt, ist beides dasselbe
 # (benannte Grenze, unveraendert).
+function Get-VsContentDistributionSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$ApplicationName,
+        $Application = $null,
+        [AllowNull()]$ExpectedSourceVersion = $null
+    )
+    try {
+        if (-not $Application) {
+            $applicationMatches = @(Get-CMApplication -Name $ApplicationName -Fast -ErrorAction Stop)
+            if ($applicationMatches.Count -ne 1) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null } }
+            $Application = $applicationMatches[0]
+        }
+        $appName = if ($Application.PSObject.Properties['LocalizedDisplayName']) { [string]$Application.LocalizedDisplayName } else { '' }
+        $ciId = if ($Application.PSObject.Properties['CI_ID']) { $Application.CI_ID } else { $null }
+        $packageId = if ($Application.PSObject.Properties['PackageID']) { [string]$Application.PackageID } else { '' }
+        if ($appName -ne $ApplicationName -or $null -eq $ciId -or [string]::IsNullOrWhiteSpace($packageId)) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null } }
+        $status = @(Get-CMDistributionStatus -InputObject $Application -ErrorAction Stop)
+    } catch {
+        Write-Debug $_
+        return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null }
+    }
+    if (@($status).Count -eq 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $null } }
+
+    $targeted = 0
+    $success = 0
+    $distErrors = 0
+    $inProgress = 0
+    $unknown = 0
+    $sourceVersions = @{}
+    foreach ($entry in $status) {
+        foreach ($field in @('Targeted', 'NumberSuccess', 'NumberErrors', 'NumberInProgress', 'NumberUnknown', 'SourceVersion')) {
+            if (-not $entry.PSObject.Properties[$field]) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null } }
+        }
+        $values = @{}
+        foreach ($field in @('Targeted', 'NumberSuccess', 'NumberErrors', 'NumberInProgress', 'NumberUnknown', 'SourceVersion')) {
+            $parsed = 0
+            if (-not [int]::TryParse([string]$entry.$field, [ref]$parsed) -or $parsed -lt 0) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null } }
+            $values[$field] = $parsed
+        }
+        $sourceVersions[[int]$values.SourceVersion] = $true
+        if ($null -ne $ExpectedSourceVersion) {
+            $expected = 0
+            if (-not [int]::TryParse([string]$ExpectedSourceVersion, [ref]$expected) -or $expected -lt 0) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null } }
+        }
+        $targeted += $values.Targeted
+        $success += $values.NumberSuccess
+        $distErrors += $values.NumberErrors
+        $inProgress += $values.NumberInProgress
+        $unknown += $values.NumberUnknown
+    }
+    $uniformSourceVersion = if ($sourceVersions.Count -eq 1) { [int]@($sourceVersions.Keys)[0] } else { $null }
+    if ($null -ne $ExpectedSourceVersion -and ($null -eq $uniformSourceVersion -or $uniformSourceVersion -ne $expected)) {
+        return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion }
+    }
+    if ($distErrors -gt 0) { return [pscustomobject]@{ State = 'failed'; SourceVersion = $uniformSourceVersion } }
+    if ($sourceVersions.Count -gt 1) { return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $null } }
+    if ($targeted -le 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $uniformSourceVersion } }
+    $classified = $success + $distErrors + $inProgress + $unknown
+    if ($classified -gt $targeted) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $uniformSourceVersion } }
+    if ($success -eq $targeted -and $inProgress -eq 0 -and $unknown -eq 0) { return [pscustomobject]@{ State = 'succeeded'; SourceVersion = $uniformSourceVersion } }
+    return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion }
+}
+
 function Get-VsContentDistributionState {
     param(
         [Parameter(Mandatory)][string]$ApplicationName,
-        $ApplicationId = $null
+        $Application = $null,
+        [AllowNull()]$ExpectedSourceVersion = $null
     )
-    try {
-        if ($ApplicationId) {
-            $status = @(Get-CMDistributionStatus -Id $ApplicationId -ErrorAction Stop)
-        } else {
-            $status = @(Get-CMDistributionStatus -Name $ApplicationName -ErrorAction Stop)
-        }
-    } catch {
-        Write-Debug $_
-        return 'unknown'
-    }
-    if (@($status).Count -eq 0) { return 'not_started' }
-
-    $targeted = 0
-    $installed = 0
-    $distErrors = 0
-    foreach ($entry in $status) {
-        $targeted += [int]$entry.Targeted
-        $installed += [int]$entry.NumberInstalled
-        $distErrors += [int]$entry.NumberErrors
-    }
-    if ($distErrors -gt 0) { return 'failed' }
-    if ($targeted -le 0) { return 'not_started' }
-    if ($installed -ge $targeted) { return 'succeeded' }
-    return 'in_progress'
+    return (Get-VsContentDistributionSnapshot -ApplicationName $ApplicationName -Application $Application -ExpectedSourceVersion $ExpectedSourceVersion).State
 }
 
 # Liegt diese Collection schon im VirtuSphere-Ordner?
@@ -586,7 +661,7 @@ function Test-VsTemplateScriptCurrent {
         [Parameter(Mandatory)][string]$PackageFile
     )
     if (-not (Test-Path $TemplateFile)) { return $true }   # keine Vorlage, nichts zu tun
-    if (-not (Test-Path $PackageFile)) { return $true }    # Paket bringt keine install.ps1 mit
+    if (-not (Test-Path $PackageFile)) { return $false }   # erwartete generierte Datei fehlt
 
     try {
         $template = (Get-FileHash -Path $TemplateFile -Algorithm SHA256 -ErrorAction Stop).Hash
@@ -596,6 +671,91 @@ function Test-VsTemplateScriptCurrent {
         return $false
     }
     return ($template -eq $package)
+}
+
+function Get-VsFilesManifestStamp {
+    param([Parameter(Mandatory)][string]$Path, [string]$TemplateScript = '')
+    if (-not (Test-Path -LiteralPath $Path)) { return 'missing' }
+    $root = (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName.TrimEnd('\', '/')
+    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
+        Where-Object { $_.Name -notmatch '^(\.~|~\$)' -and $_.Extension -notin @('.tmp', '.partial') } |
+        Sort-Object FullName)
+    if ($files.Count -eq 0) { return 'empty' }
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $files) {
+        $relative = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
+        $beforeLength = $file.Length
+        $beforeTicks = $file.LastWriteTimeUtc.Ticks
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+        $after = Get-Item -LiteralPath $file.FullName -ErrorAction Stop
+        if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
+            throw ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative)
+        }
+        $parts.Add(('{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
+    }
+    $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
+        Where-Object { $_.Name -notmatch '^(\.~|~\$)' -and $_.Extension -notin @('.tmp', '.partial') } |
+        Sort-Object FullName | ForEach-Object { $_.FullName })
+    if ((@($files.FullName) -join "`n") -cne ($afterNames -join "`n")) { throw 'Paketdateiliste hat sich waehrend des Scans geaendert.' }
+
+    if ($TemplateScript) {
+        if (Test-Path -LiteralPath $TemplateScript) {
+            $templateHash = (Get-FileHash -LiteralPath $TemplateScript -Algorithm SHA256 -ErrorAction Stop).Hash
+            $parts.Add(('template|{0}' -f $templateHash))
+        } else { $parts.Add('template|absent') }
+    }
+    $payload = $parts -join "`n"
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($payload))).Replace('-', '')) } finally { $sha.Dispose() }
+}
+
+function Get-VsPackageContentTrackingKey {
+    param([Parameter(Mandatory)][string]$ApplicationName)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ApplicationName))).Replace('-', ''))
+    } finally { $sha.Dispose() }
+    return (Join-Path (Join-Path $script:VsRegistryPath 'ContentTracking') $hash)
+}
+
+function Get-VsPackageContentTracking {
+    param([Parameter(Mandatory)][string]$ApplicationName)
+    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
+    try { $raw = Get-ItemProperty -LiteralPath $key -ErrorAction Stop } catch { return $null }
+    $state = [string]$raw.State
+    $manifest = [string]$raw.Manifest
+    $baseline = -1
+    $sourceVersion = -1
+    if ([string]$raw.ApplicationName -cne $ApplicationName -or $state -notin @('intent', 'pending', 'complete') -or
+        $manifest -notmatch '^[A-F0-9]{64}$' -or
+        -not [int]::TryParse([string]$raw.BaselineSourceVersion, [ref]$baseline) -or $baseline -lt -1 -or
+        -not [int]::TryParse([string]$raw.SourceVersion, [ref]$sourceVersion) -or $sourceVersion -lt -1) {
+        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+    }
+    return [pscustomobject]@{
+        State = $state; Manifest = $manifest; BaselineSourceVersion = $baseline; SourceVersion = $sourceVersion
+    }
+}
+
+function Set-VsPackageContentTracking {
+    param(
+        [Parameter(Mandatory)][string]$ApplicationName,
+        [Parameter(Mandatory)][ValidateSet('intent', 'pending', 'complete')][string]$State,
+        [Parameter(Mandatory)][ValidatePattern('^[A-F0-9]{64}$')][string]$Manifest,
+        [ValidateRange(-1, [int]::MaxValue)][int]$BaselineSourceVersion = -1,
+        [ValidateRange(-1, [int]::MaxValue)][int]$SourceVersion = -1
+    )
+    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
+    if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force -ErrorAction Stop | Out-Null }
+    # State ist der Commit-Marker. Ein Abbruch waehrend der Einzelwrites ist
+    # unlesbar/unknown und darf nie einen Contentstand als komplett ausgeben.
+    New-ItemProperty -LiteralPath $key -Name State -Value 'invalid' -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name ApplicationName -Value $ApplicationName -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name Manifest -Value $Manifest -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name BaselineSourceVersion -Value ([string]$BaselineSourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name SourceVersion -Value ([string]$SourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name State -Value $State -PropertyType String -Force -ErrorAction Stop | Out-Null
 }
 
 # ---------------------------------------------------------------------------
@@ -782,39 +942,91 @@ function Get-VsMembershipPlan {
         [array]$Present = @()
     )
 
-    $ownedById = @{}
+    $ownedById = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::Ordinal)
     foreach ($rule in @($Owned)) { if ($null -ne $rule) { $ownedById[[string]$rule.collection_id] = $rule } }
-    $desiredByName = @{}
+    $desiredByName = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::Ordinal)
     foreach ($target in @($Desired)) { if ($null -ne $target) { $desiredByName[[string]$target.name] = $target } }
 
     $plan = @{ add = @(); preserve = @(); preserve_manual = @(); remove = @(); stale_owned = @(); foreign = @() }
-    $presentNames = @{}
-    $presentIds = @{}
+    $presentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $presentIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($rule in @($Present)) {
         if ($null -eq $rule) { continue }
         $id = [string]$rule.collection_id
         $name = [string]$rule.collection_name
-        $presentIds[$id] = $true
-        $presentNames[$name] = $true
+        [void]$presentIds.Add($id)
+        [void]$presentNames.Add($name)
         if ($desiredByName.ContainsKey($name)) {
             if ($ownedById.ContainsKey($id)) { $plan.preserve += , $rule } else { $plan.preserve_manual += , $rule }
         } elseif ($ownedById.ContainsKey($id)) {
-            $plan.remove += , $rule
+            # A remove is reported back with the authoritative provenance type
+            # and name. The observed rule only proves presence and deliberately
+            # carries no ownership metadata.
+            $plan.remove += , $ownedById[$id]
         } else {
             $plan.foreign += , $rule
         }
     }
-    foreach ($target in @($Desired)) {
-        if ($null -ne $target -and -not $presentNames.ContainsKey([string]$target.name)) { $plan.add += , $target }
+    $desiredNames = [string[]]@($desiredByName.Keys)
+    [Array]::Sort($desiredNames, [System.StringComparer]::Ordinal)
+    foreach ($name in $desiredNames) {
+        if (-not $presentNames.Contains($name)) { $plan.add += , $desiredByName[$name] }
     }
     # Owned, aber nicht mehr vorhanden: jemand hat unsere Regel direkt in MECM
     # entfernt. Die Provenienz ist verfallen und wird zurueckgemeldet, nie
     # zurueckgekaempft - MECM bleibt die Wahrheit (Entscheidung 1).
     foreach ($id in @($ownedById.Keys)) {
-        if (-not $presentIds.ContainsKey([string]$id)) { $plan.stale_owned += , $ownedById[$id] }
+        if (-not $presentIds.Contains([string]$id)) { $plan.stale_owned += , $ownedById[$id] }
     }
 
     return $plan
+}
+
+function Test-VsMembershipPlanOperations {
+    param([Parameter(Mandatory)]$Plan)
+    $validTypes = @('os', 'package', 'mission')
+    foreach ($target in @($Plan.add)) {
+        if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.name) -or [string]$target.type -notin $validTypes) {
+            return $false
+        }
+    }
+    foreach ($rule in @($Plan.remove)) {
+        if ($null -eq $rule -or [string]::IsNullOrWhiteSpace([string]$rule.collection_id) -or
+            [string]::IsNullOrWhiteSpace([string]$rule.collection_name) -or [string]$rule.type -notin $validTypes) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Test-VsDesiredMembershipTargets {
+    param([array]$Desired = @())
+    $typesByName = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::Ordinal)
+    foreach ($target in @($Desired)) {
+        $name = [string]$target.name
+        $type = [string]$target.type
+        if ([string]::IsNullOrWhiteSpace($name) -or $type -notin @('os', 'package', 'mission')) { return $false }
+        if ($typesByName.ContainsKey($name) -and $typesByName[$name] -ne $type) { return $false }
+        $typesByName[$name] = $type
+    }
+    return $true
+}
+
+function Get-VsDirectMembershipState {
+    param(
+        [Parameter(Mandatory)][string]$CollectionId,
+        [Parameter(Mandatory)]$ResourceId
+    )
+    try {
+        $rules = @(Get-CMDeviceCollectionDirectMembershipRule -CollectionId $CollectionId -ResourceId $ResourceId -ErrorAction Stop)
+        if ($rules.Count -eq 0) {
+            return [pscustomobject]@{ State = 'absent'; Rule = $null }
+        }
+        return [pscustomobject]@{ State = 'present'; Rule = $rules[0] }
+    } catch {
+        Write-Debug $_
+        return [pscustomobject]@{ State = 'unknown'; Rule = $null }
+    }
 }
 
 # Haengt eine Ursache an die Liste eines Laufs. ValidateSet statt eines freien
@@ -829,10 +1041,11 @@ function Add-VsRunCause {
             'device_name_invalid', 'device_identity_ambiguous', 'previous_resource_present',
             'resource_id_missing', 'resource_mac_conflict', 'stale_rollout_revision',
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',
-            'collection_folder_failed', 'collection_remove_failed', 'membership_report_failed',
+            'collection_folder_failed', 'collection_remove_failed', 'membership_provenance_invalid', 'membership_identity_ambiguous',
+            'membership_query_failed', 'membership_operation_uncertain', 'membership_report_pending', 'membership_report_failed',
             'resource_id_pending', 'resource_update_failed',
             'package_config_invalid', 'package_content_failed', 'package_content_in_progress',
-            'package_content_unknown', 'package_source_missing',
+            'package_content_unknown', 'package_definition_drift', 'package_source_missing',
             'package_deploy_failed', 'package_cleanup_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',
@@ -1063,6 +1276,17 @@ function Get-VsSiteHealthReportCategory {
     return $Category
 }
 
+# A run can legally outlive the report contract's one-day duration bound.
+# Convert and clamp before casting to Int32; casting a larger TotalMilliseconds
+# value directly would make the error reporter itself throw on a very long run.
+function Get-VsRunDurationMilliseconds {
+    param([Parameter(Mandatory)][datetime]$StartedAt, [datetime]$Now = (Get-Date))
+    $milliseconds = ($Now - $StartedAt).TotalMilliseconds
+    if ($milliseconds -lt 0) { return 0 }
+    if ($milliseconds -gt $script:VsRunDurationMsMax) { return [int]$script:VsRunDurationMsMax }
+    return [int][Math]::Floor($milliseconds)
+}
+
 # Kategorisiert einen Provider-Fehler sprachunabhaengig ueber den HRESULT und
 # best-effort ueber den Meldungstext. NIE wird die volle MECM-Meldung uebernommen;
 # der Aufrufer meldet nur die Kategorie.
@@ -1121,7 +1345,11 @@ function Get-VsProviderMachine {
 function Get-VsMecmSiteHealth {
     param($Config, [string]$ProviderMachine)
 
-    $siteCode = Get-VsSiteCode -Config $Config
+    # Health is about the configured Site, never the first site namespace or
+    # PSDrive that happens to be visible. Missing configuration is unknown.
+    $siteCode = if ($Config -and -not [string]::IsNullOrWhiteSpace($Config.SiteCodeFallback)) {
+        ([string]$Config.SiteCodeFallback).Trim()
+    } else { $null }
     $provider = Get-VsProviderMachine -Config $Config -ProviderMachine $ProviderMachine
 
     $result = [pscustomobject]@{
@@ -1148,14 +1376,16 @@ function Get-VsMecmSiteHealth {
         }
 
         $all = @(Get-CimInstance @cimParams)
-        $status = $all | Where-Object { [string]$_.SiteCode -eq $siteCode } | Select-Object -First 1
-        if (-not $status) { $status = $all | Select-Object -First 1 }
-        if (-not $status) {
+        $matching = @($all | Where-Object { [string]$_.SiteCode -eq $siteCode })
+        if ($matching.Count -ne 1) {
             $result.ErrorCategory = 'query_failed'
             return $result
         }
+        $status = $matching[0]
+        if (-not $status.PSObject.Properties['Status']) { return $result }
 
-        $raw = [int]$status.Status
+        $raw = 0
+        if (-not [int]::TryParse([string]$status.Status, [ref]$raw)) { return $result }
         $mapped = Get-VsSiteHealthOutcome -RawStatus $raw
         $result.RawStatus     = $raw
         $result.Outcome       = $mapped.Outcome
@@ -1270,6 +1500,183 @@ function Read-VsPackageConfig {
 function Get-VsSupersededNamePattern {
     param([Parameter(Mandatory)][string]$AppName)
     return ('^{0}-[^-]+$' -f [Regex]::Escape($AppName))
+}
+
+# A14b deliberately uses a narrower version language than the portal catalog.
+# The portal has to display imported legacy/free-form versions and therefore
+# uses PHP version_compare().  Automatic MECM deletion needs a total,
+# reviewable order without PHP/PowerShell drift, so it accepts canonical
+# unsigned dotted decimals only.  Anything else remains visible and blocks the
+# cleanup plan instead of being guessed into an order.
+$script:VsManagedPackageApplicationMarker = 'VirtuSphere managed package application contract v1'
+$script:VsManagedPackageCollectionMarker = 'VirtuSphere managed package collection contract v1'
+
+function ConvertTo-VsPackageVersionParts {
+    param([Parameter(Mandatory)][string]$Version)
+    if ($Version -cnotmatch '^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))*$') { return $null }
+    return @($Version.Split('.') | ForEach-Object { [string]$_ })
+}
+
+function Compare-VsPackageVersion {
+    param(
+        [Parameter(Mandatory)][string]$Left,
+        [Parameter(Mandatory)][string]$Right
+    )
+    $leftRaw = ConvertTo-VsPackageVersionParts -Version $Left
+    $rightRaw = ConvertTo-VsPackageVersionParts -Version $Right
+    if ($null -eq $leftRaw -or $null -eq $rightRaw) {
+        throw "Nicht interpretierbare Paketversion: '$Left' / '$Right'."
+    }
+    $leftParts = @($leftRaw)
+    $rightParts = @($rightRaw)
+    $count = [Math]::Max($leftParts.Count, $rightParts.Count)
+    for ($i = 0; $i -lt $count; $i++) {
+        $l = if ($i -lt $leftParts.Count) { $leftParts[$i] } else { '0' }
+        $r = if ($i -lt $rightParts.Count) { $rightParts[$i] } else { '0' }
+        if ($l.Length -lt $r.Length) { return -1 }
+        if ($l.Length -gt $r.Length) { return 1 }
+        $cmp = [string]::CompareOrdinal($l, $r)
+        if ($cmp -lt 0) { return -1 }
+        if ($cmp -gt 0) { return 1 }
+    }
+    return 0
+}
+
+function Get-VsPackageSourceSelections {
+    param([Parameter(Mandatory)]$Packages)
+    $groups = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[object]]' ([StringComparer]::Ordinal)
+    foreach ($package in @($Packages)) {
+        $product = [string]$package.ProjectName
+        if (-not $groups.ContainsKey($product)) { $groups[$product] = New-Object 'System.Collections.Generic.List[object]' }
+        $groups[$product].Add($package)
+    }
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($product in @($groups.Keys | Sort-Object)) {
+        $items = @($groups[$product])
+        $versions = @($items | ForEach-Object { [string]$_.version })
+        $unsupported = @($versions | Where-Object { $null -eq (ConvertTo-VsPackageVersionParts -Version $_) })
+        $duplicates = @($versions | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
+        if ($unsupported.Count -gt 0 -or $duplicates.Count -gt 0) {
+            $result.Add([pscustomobject]@{
+                ProductName = $product; State = 'blocked'; TargetVersion = ''; TargetName = ''
+                SourceVersions = $versions; Blockers = @(
+                    @($unsupported | ForEach-Object { "unsupported_version:$($_)" }) +
+                    @($duplicates | ForEach-Object { "duplicate_version:$($_)" })
+                )
+            })
+            continue
+        }
+        $target = $versions[0]
+        foreach ($candidate in $versions) {
+            if ((Compare-VsPackageVersion -Left $candidate -Right $target) -gt 0) { $target = $candidate }
+        }
+        $result.Add([pscustomobject]@{
+            ProductName = $product; State = 'ready'; TargetVersion = $target
+            TargetName = ('{0}-{1}' -f $product, $target); SourceVersions = $versions; Blockers = @()
+        })
+    }
+    return $result.ToArray()
+}
+
+function Get-VsPackageRetirementPlan {
+    param(
+        [Parameter(Mandatory)]$Selection,
+        [Parameter(Mandatory)]$Applications,
+        [Parameter(Mandatory)]$Collections,
+        [Parameter(Mandatory)]$Replacement,
+        [Parameter(Mandatory)]$References,
+        [Parameter(Mandatory)][bool]$ReferenceScanComplete
+    )
+    $blockers = New-Object System.Collections.Generic.List[string]
+    $items = New-Object System.Collections.Generic.List[object]
+    if ([string]$Selection.State -ne 'ready') {
+        foreach ($reason in @($Selection.Blockers)) { $blockers.Add([string]$reason) }
+    }
+    if (-not $ReferenceScanComplete) { $blockers.Add('reference_scan_incomplete') }
+    if ([string]$Replacement.Name -cne [string]$Selection.TargetName -or
+        -not [bool]$Replacement.Owned -or [int]$Replacement.DeploymentTypeCount -ne 1 -or
+        [string]$Replacement.ContentState -cne 'complete' -or
+        [string]$Replacement.DistributionState -cne 'succeeded' -or
+        -not [bool]$Replacement.DeploymentReady) {
+        $blockers.Add('replacement_not_ready')
+    }
+    $sourceVersions = @($Selection.SourceVersions)
+    $prefix = ([string]$Selection.ProductName) + '-'
+    foreach ($application in @($Applications)) {
+        $name = [string]$application.LocalizedDisplayName
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$application.Name }
+        if (-not $name.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+        $version = $name.Substring($prefix.Length)
+        if ($null -eq (ConvertTo-VsPackageVersionParts -Version $version)) {
+            $blockers.Add(('candidate_version_unsupported:{0}' -f $name)); continue
+        }
+        if ($sourceVersions -ccontains $version -or (Compare-VsPackageVersion -Left $version -Right ([string]$Selection.TargetVersion)) -ge 0) { continue }
+        $id = [string]$application.CI_ID
+        if ([string]::IsNullOrWhiteSpace($id) -or [string]$application.LocalizedDescription -cne $script:VsManagedPackageApplicationMarker) {
+            $blockers.Add(('application_not_owned:{0}' -f $name)); continue
+        }
+        if (@($References | Where-Object { [string]$_.TargetType -ceq 'application' -and [string]$_.TargetId -ceq $id }).Count -gt 0) {
+            $blockers.Add(('application_referenced:{0}' -f $name)); continue
+        }
+        $items.Add([pscustomobject]@{ Kind = 'application'; Id = $id; Name = $name; Version = $version })
+    }
+    foreach ($collection in @($Collections)) {
+        $name = [string]$collection.Name
+        if (-not $name.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+        $version = $name.Substring($prefix.Length)
+        if ($null -eq (ConvertTo-VsPackageVersionParts -Version $version)) {
+            $blockers.Add(('candidate_version_unsupported:{0}' -f $name)); continue
+        }
+        if ($sourceVersions -ccontains $version -or (Compare-VsPackageVersion -Left $version -Right ([string]$Selection.TargetVersion)) -ge 0) { continue }
+        $id = [string]$collection.CollectionID
+        if ([string]::IsNullOrWhiteSpace($id) -or [string]$collection.Comment -cne $script:VsManagedPackageCollectionMarker) {
+            $blockers.Add(('collection_not_owned:{0}' -f $name)); continue
+        }
+        if (@($References | Where-Object { [string]$_.TargetType -ceq 'collection' -and [string]$_.TargetId -ceq $id }).Count -gt 0) {
+            $blockers.Add(('collection_referenced:{0}' -f $name)); continue
+        }
+        $items.Add([pscustomobject]@{ Kind = 'collection'; Id = $id; Name = $name; Version = $version })
+    }
+    $orderedItems = @($items | Sort-Object Kind, Name, Id)
+    $orderedBlockers = @($blockers | Sort-Object -Unique)
+    $state = if ($orderedBlockers.Count -eq 0) { 'ready' } else { 'blocked' }
+    $canonical = [ordered]@{ Schema = 1; ProductName = [string]$Selection.ProductName; TargetName = [string]$Selection.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers }
+    $json = ConvertTo-Json -InputObject $canonical -Depth 6 -Compress
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))).Replace('-', '').ToLowerInvariant()) } finally { $sha.Dispose() }
+    return [pscustomobject]@{ Schema = 1; ProductName = $canonical.ProductName; TargetName = $canonical.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers; PlanHash = $hash }
+}
+
+function Invoke-VsPackageRetirementPlan {
+    param(
+        [Parameter(Mandatory)]$ApprovedPlan,
+        [Parameter(Mandatory)]$CurrentPlan,
+        [Parameter(Mandatory)][scriptblock]$RemoveApplication,
+        [Parameter(Mandatory)][scriptblock]$RemoveCollection
+    )
+    if ([string]$ApprovedPlan.State -cne 'ready' -or [string]$CurrentPlan.State -cne 'ready' -or
+        [string]$ApprovedPlan.PlanHash -cne [string]$CurrentPlan.PlanHash) {
+        throw 'Bereinigungsplan ist blockiert oder veraltet; es wurde nichts entfernt.'
+    }
+    $results = New-Object System.Collections.Generic.List[object]
+    $total = @($CurrentPlan.Items).Count
+    $position = 0
+    foreach ($item in @($CurrentPlan.Items)) {
+        $position++
+        Write-Host ("[{0}/{1}] RUN cleanup {2}:{3}" -f $position, $total, $item.Kind, $item.Id)
+        try {
+            if ([string]$item.Kind -ceq 'application') { & $RemoveApplication $item }
+            elseif ([string]$item.Kind -ceq 'collection') { & $RemoveCollection $item }
+            else { throw ("Unbekannter Bereinigungstyp: {0}" -f $item.Kind) }
+            $results.Add([pscustomobject]@{ Kind = $item.Kind; Id = $item.Id; Name = $item.Name; State = 'removed' })
+            Write-Host ("[{0}/{1}] pass cleanup {2}:{3}" -f $position, $total, $item.Kind, $item.Id)
+        } catch {
+            $results.Add([pscustomobject]@{ Kind = $item.Kind; Id = $item.Id; Name = $item.Name; State = 'failed'; Error = $_.Exception.Message })
+            Write-Host ("[{0}/{1}] fail cleanup {2}:{3}" -f $position, $total, $item.Kind, $item.Id)
+            break
+        }
+    }
+    return $results.ToArray()
 }
 
 # ---------------------------------------------------------------------------

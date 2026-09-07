@@ -96,14 +96,32 @@ function Protect-VsLogText {
     return $value
 }
 
+function Remove-VsLogTerminalSequences {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return '' }
+    $value = [string]$Text
+    $esc = [regex]::Escape([string][char]27)
+
+    # OSC may end in BEL or ST (ESC + backslash). Remove complete sequences
+    # before CSI. An unterminated OSC is discarded from its introducer to the
+    # field end: retaining its printable payload could reassemble a secret only
+    # after the redaction pass.
+    $value = [regex]::Replace($value, ($esc + '\][^\x07]*(?:\x07|' + $esc + '\\)'), '')
+    $value = [regex]::Replace($value, ($esc + '\][^\x07]*$'), '')
+    $value = [regex]::Replace($value, ($esc + '\[[0-?]*[ -/]*[@-~]'), '')
+    $value = [regex]::Replace($value, ($esc + '\[[0-?]*[ -/]*$'), '')
+    return $value.Replace([string][char]27, '')
+}
+
 function ConvertTo-VsLogField {
     param(
         [AllowNull()][string]$Text,
         [Parameter(Mandatory)][int]$MaxBytes
     )
-    $value = Protect-VsLogText -Text $Text
-    $escapePattern = ([string][char]27) + '\[[0-?]*[ -/]*[@-~]'
-    $value = [regex]::Replace($value, $escapePattern, '')
+    # Terminal markup is attacker-controlled text too. Normalize it first so it
+    # cannot split a known key (for example pass<CSI>word) until after redaction.
+    $value = Remove-VsLogTerminalSequences -Text $Text
+    $value = Protect-VsLogText -Text $value
     $value = $value -replace '\r\n?|\n', ' '
     $value = $value -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', ' '
     # Ein Feld darf den sechs Spalten des Wire-aehnlichen Dateiformats keine
@@ -157,7 +175,7 @@ function Write-VsLogSinkFailure {
         $script:VsLogSinkFailed = $true
         Write-Warning ('Log-Sink gest{0}rt.' -f [char]0x00F6)
     }
-    if ($Detail) { Write-Debug ('Log-Sink-Detail: {0}' -f (Protect-VsLogText -Text $Detail)) }
+    if ($Detail) { Write-Debug ('Log-Sink-Detail: {0}' -f (ConvertTo-VsLogField -Text $Detail -MaxBytes $script:VsLogMessageMaxBytes)) }
 }
 
 function Write-VsLogSinkRecovery {
@@ -243,7 +261,7 @@ function Invoke-VsLogRetention {
             } catch {
                 # Teilwrite/Stromausfall: ein kaputter Marker ist kein ewiger
                 # Retention-Blocker. Jetzt bereinigen und ihn unten ersetzen.
-                Write-Debug ('Log-Retention-Marker ungueltig, wird ersetzt: {0}' -f (Protect-VsLogText -Text $_.Exception.Message))
+                Write-Debug ('Log-Retention-Marker ungueltig, wird ersetzt: {0}' -f (ConvertTo-VsLogField -Text $_.Exception.Message -MaxBytes $script:VsLogMessageMaxBytes))
             }
         }
         if (-not $due) {

@@ -205,6 +205,55 @@ Describe 'PowerShell-Loggingvertrag: Zeile, Unicode, Bounds und Redigierung' {
             (@($line -split '\s+\|\s+'))[5] | Should -Match '^[0-9a-f]{16}$'
         }
     }
+
+    It 'normalisiert Terminalsequenzen vor der Redigierung in beiden Modulen' {
+        $esc = [string][char]27
+        $bel = [string][char]7
+        $secret = 'AuditSentinel_OnlySynthetic'
+        $messages = @(
+            ('pass{0}[31mword={1}' -f $esc, $secret)
+            ('X-VirtuSphere-{0}]0;colour{1}Token: {2}' -f $esc, $bel, $secret)
+            ('password="{0}[32m{1}{0}[0m"' -f $esc, $secret)
+            ("password={0}`r`nAuthorization: Bearer {0}" -f $secret)
+            ('pass{0}word={1}' -f $esc, $secret)
+            ('password={0}{1}]unterminated' -f $secret, $esc)
+        )
+
+        $fields = @()
+        $fields += Invoke-InLoggingScope -Path $script:ServerLogging -Arguments @(, $messages) -Body {
+            param($inputs)
+            foreach ($message in $inputs) { ConvertTo-VsLogField -Text $message -MaxBytes 3072 }
+        }
+        $fields += Invoke-InLoggingScope -Path $script:ClientLogging -Arguments @(, $messages) -Body {
+            param($inputs)
+            foreach ($message in $inputs) { ConvertTo-VsClientLogField -Text $message -MaxBytes 3072 }
+        }
+
+        $fields.Count | Should -Be 12
+        foreach ($field in $fields) {
+            $field | Should -Not -Match $secret
+            $field | Should -Not -Match ([regex]::Escape($esc))
+            $field | Should -Match '\[redacted\]'
+        }
+    }
+}
+
+Describe 'Clientlogger haelt strukturierte Rueckgaben auf Stream 1 rein' {
+    It 'Resolve-VsApi liefert bei beantwortetem HTTP-Fehler genau einen String' {
+        $result = Invoke-InLoggingScope -Path $script:ClientCommon -Body {
+            $script:VsResolvedApi = $null
+            function Get-VsApiCandidates { return @('virtusphere.lan:8021') }
+            function Invoke-RestMethod { throw [System.Net.WebException]::new('HTTP 503') }
+            function Test-VsApiAnswered { return $true }
+            function Get-VsHealthDocumentFromError { return [pscustomobject]@{ status = 'error'; db = 'error'; php = '8.4' } }
+            function Get-VsErrorStatusCode { return 503 }
+            Resolve-VsApi
+        }
+
+        @($result).Count | Should -Be 1
+        $result | Should -BeOfType [string]
+        $result | Should -Be 'virtusphere.lan:8021'
+    }
 }
 
 Describe 'PowerShell-Loggingvertrag: Retention und parallele Prozesse' {
@@ -439,7 +488,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
             $dest = Invoke-InLoggingScope -Path $script:Packaging -Arguments @($script:ClientDir, $root) -Body {
                 param($source, $target)
                 $spec = Get-VsClientAppSpecs | Select-Object -First 1
-                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target
+                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
             foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
                 Test-Path (Join-Path $dest $name) | Should -BeTrue
@@ -458,7 +507,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
             $dest = Invoke-InLoggingScope -Path $script:Packaging -Arguments @($script:ClientDir, $root) -Body {
                 param($source, $target)
                 $spec = Get-VsClientAppSpecs | Select-Object -First 1
-                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target
+                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
             foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
                 Set-Content -Path (Join-Path $dest $name) -Value 'stale upgrade content'
@@ -466,7 +515,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
             $upgradeDest = Invoke-InLoggingScope -Path $script:Packaging -Arguments @($script:ClientDir, $root) -Body {
                 param($source, $target)
                 $spec = Get-VsClientAppSpecs | Select-Object -First 1
-                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target
+                Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
             $upgradeDest | Should -Be $dest
             foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
@@ -506,7 +555,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 }
                 $errorText = ''
                 try {
-                    Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target | Out-Null
+                    Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' } | Out-Null
                 } catch {
                     $errorText = $_.Exception.Message
                 }
@@ -632,7 +681,7 @@ Describe 'Client-Reportkorrelation bleibt additiv zum unveraenderten JSON' {
             Send-VsPhase -Mac '00:50:56:AA:BB:CC' -Phase getinfo -PhaseEvent finished -Detail 'two'
             [pscustomobject]@{ First = $first; Second = $script:capture }
         }
-        $body = $captured.First.Body | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString([byte[]]$captured.First.Body) | ConvertFrom-Json
         ($body.PSObject.Properties.Name | Sort-Object) | Should -Be @('detail', 'event', 'mac', 'phase')
         $body.mac | Should -Be '00:50:56:AA:BB:CC'
         $captured.First.Headers['X-VirtuSphere-Correlation'] | Should -Match '^[0-9a-f]{16}$'
@@ -650,7 +699,7 @@ Describe 'Client-Reportkorrelation bleibt additiv zum unveraenderten JSON' {
             Confirm-VsClientReady -Api 'virtusphere.lan:8021' -Mac '00:50:56:AA:BB:CC'
             $script:capture
         }
-        $body = $captured.Body | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString([byte[]]$captured.Body) | ConvertFrom-Json
         @($body.PSObject.Properties.Name) | Should -Be @('mac')
         $captured.Headers['X-VirtuSphere-Correlation'] | Should -Match '^[0-9a-f]{16}$'
     }
@@ -674,7 +723,7 @@ Describe 'Server-Heartbeat bleibt unveraendert und erzeugt keinen Zusatzverkehr'
         $captured[0].Uri | Should -Be 'http://virtusphere.lan:8021/mecm_report.php?action=heartbeat'
         $captured[0].Method | Should -Be 'POST'
         $captured[0].TimeoutSec | Should -Be 5
-        $body = $captured[0].Body | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString([byte[]]$captured[0].Body) | ConvertFrom-Json
         ($body.PSObject.Properties.Name | Sort-Object) | Should -Be @('detail', 'interval_seconds', 'source')
         $body.source | Should -Be 'device-sync'
         $body.interval_seconds | Should -Be 60

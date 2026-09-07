@@ -61,7 +61,10 @@ function mecm_membership_plan(array $desired, array $owned, array $present): arr
         if ($isDesired) {
             $plan[$isOwned ? 'preserve' : 'preserve_manual'][] = $rule;
         } elseif ($isOwned) {
-            $plan['remove'][] = $rule;
+            // Presence carries no type. A removal report must use the
+            // authoritative provenance row or PHP will correctly reject the
+            // incomplete PowerShell payload before writing anything.
+            $plan['remove'][] = $ownedById[$id];
         } else {
             $plan['foreign'][] = $rule;
         }

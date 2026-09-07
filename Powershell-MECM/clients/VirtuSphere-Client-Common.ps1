@@ -7,9 +7,11 @@
 # Dot-Source:  . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
 #
 # Adressfindung (Fallback-Kette):
-#   1) Registry-Override  HKLM:\SOFTWARE\VirtuSphere\WebAPI
-#   2) DNS-Name           $script:VsDefaultDnsApi  (unten anpassen/DNS anlegen)
-#   3) hartkodierte IP    $script:VsFallbackIpApi  (letzte Rettung)
+#   1) Registry-SSoT      HKLM:\SOFTWARE\VirtuSphere\WebAPI
+#   2) Paket-Notfall-DNS  $script:VsDefaultDnsApi
+#   3) Paket-Notfall-IP   $script:VsFallbackIpApi
+# Standortwerte werden durch bootstrap.json/Installer in die Registry gelegt;
+# ausgelieferter Quelltext wird nicht angepasst.
 # client_getinfo schreibt die funktionierende Adresse in die Registry, sodass
 # die Folge-Skripte die Kette nicht erneut durchprobieren muessen.
 # ============================================================================
@@ -23,7 +25,7 @@
 # Begruendung in mecm\VirtuSphere-Common.ps1.
 Set-StrictMode -Version 1.0
 
-# --- Standardadressen (beim Ausrollen an die Umgebung anpassen) -------------
+# --- Eingebaute Notfalladressen (Laufzeitwerte kommen aus der Registry) ------
 $script:VsDefaultDnsApi = 'virtusphere.lan:8021'   # DNS-Alias im Deploy-Netz
 $script:VsFallbackIpApi = ''                        # z. B. '10.0.0.5:8021' (optional)
 
@@ -38,14 +40,8 @@ $script:VsFallbackIpApi = ''                        # z. B. '10.0.0.5:8021' (opt
 # mit ab - und das faellt erst beim naechsten PXE-Deploy auf.
 $script:VsDefaultScheme = 'http'
 
-# Selbstsignierte Zertifikate sind im LAN der Normalfall, und Windows
-# PowerShell 5.1 kennt kein -SkipCertificateCheck. Auf $true setzen, wenn das
-# Portal ein selbstsigniertes Zertifikat traegt; dann akzeptiert der Client es.
-# Bewusst ein Schalter und kein Default: eine dauerhaft blinde TLS-Pruefung ist
-# schlechter als ehrliches HTTP.
-$script:VsAllowSelfSignedTls = $false
-
 $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
+$script:VsClientSnapshotSchema = 1
 $script:VsResolvedApi = $null
 
 # Die Client-Loggingdomaene wird gemeinsam mit jeder Phase paketiert. Common
@@ -104,15 +100,51 @@ function Get-VsApiUrl {
     return ('{0}://{1}{2}' -f (Get-VsApiScheme), $Api, $Path)
 }
 
+function Initialize-VsClientBootstrap {
+    param([Parameter(Mandatory)][string]$ManifestPath)
+    try {
+        $current = Get-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace([string]$current.WebAPI)) { return }
+    } catch { Write-Debug $_ }
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { return }
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $webApi = Convert-VsWebApi ([string]$manifest.WebAPI)
+        $scheme = ([string]$manifest.Scheme).ToLowerInvariant()
+        $thumbprint = ([string]$manifest.CertThumbprint -replace '\s', '').ToUpperInvariant()
+        if ($scheme -notin @('http', 'https')) { throw 'ungueltiges Scheme' }
+        if ($thumbprint -and $thumbprint -notmatch '^[0-9A-F]{40}$') { throw 'ungueltiger Zertifikatfingerabdruck' }
+        if (-not (Test-Path $script:VsRegistryBase)) { New-Item -Path $script:VsRegistryBase -Force -ErrorAction Stop | Out-Null }
+        New-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -Value $webApi -PropertyType String -Force -ErrorAction Stop | Out-Null
+        $raw = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
+        if (-not $raw.PSObject.Properties['Scheme']) {
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'Scheme' -Value $scheme -PropertyType String -ErrorAction Stop | Out-Null
+        }
+        if ($thumbprint -and -not $raw.PSObject.Properties['CertThumbprint']) {
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'CertThumbprint' -Value $thumbprint -PropertyType String -ErrorAction Stop | Out-Null
+        }
+    } catch {
+        throw ("Client-Bootstrapmanifest ist ungueltig oder nicht schreibbar: {0}" -f $_.Exception.Message)
+    }
+}
+
 # Additiver Diagnoseheader (ADR-0032). Er aendert kein JSON-Feld und keine
 # Authentisierung: der Client bleibt ueber seine bekannte MAC autorisiert.
 function Get-VsClientApiHeaders {
     return @{ 'X-VirtuSphere-Correlation' = (Get-VsClientCorrelationId) }
 }
 
-# TLS-Vorbereitung fuer PS 5.1: das Framework spricht per Default noch SSL3/TLS1,
-# viele Server nicht mehr. Und bei selbstsignierten Zertifikaten muss die
-# Validierung explizit ueberbrueckt werden, weil 5.1 kein -SkipCertificateCheck hat.
+function ConvertTo-VsUtf8JsonBytes {
+    param([Parameter(Mandatory)]$Value, [int]$Depth = 6)
+    $json = ConvertTo-Json -InputObject $Value -Depth $Depth
+    return [Text.Encoding]::UTF8.GetBytes($json)
+}
+
+# TLS-Vorbereitung fuer PS 5.1. Ein leerer Fingerabdruck bedeutet normale PKI-
+# Pruefung. Ein gesetzter Fingerabdruck ist ausschliesslich eine enge Trust-
+# Ausnahme fuer genau dieses Zertifikat; ein bereits PKI-gueltiges Zertifikat
+# bleibt gueltig und wird nicht zusaetzlich gepinnt.
 function Initialize-VsTls {
     if ((Get-VsApiScheme) -ne 'https') { return }
 
@@ -120,11 +152,18 @@ function Initialize-VsTls {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     } catch { Write-Debug $_ }
 
-    if ($script:VsAllowSelfSignedTls) {
-        try {
-            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-        } catch { Write-Debug $_ }
-    }
+    $pinned = ''
+    try { $pinned = ([string](Get-ItemProperty -Path $script:VsRegistryBase -Name 'CertThumbprint' -ErrorAction Stop).CertThumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant() } catch { Write-Debug $_ }
+    if ([string]::IsNullOrWhiteSpace($pinned)) { return }
+    try {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
+            param($senderObject, $certificate, $chain, $sslPolicyErrors)
+            $null = $senderObject, $chain
+            if ($sslPolicyErrors -eq [Net.Security.SslPolicyErrors]::None) { return $true }
+            if (-not $certificate) { return $false }
+            try { return $certificate.GetCertHashString().ToUpperInvariant() -eq $pinned } catch { return $false }
+        }.GetNewClosure()
+    } catch { Write-Debug $_ }
 }
 
 # Ermittelt eine erreichbare API-Adresse (health-Probe). $null wenn keine geht.
@@ -146,12 +185,17 @@ function Resolve-VsApi {
     Initialize-VsTls
     foreach ($candidate in Get-VsApiCandidates) {
         try {
-            Invoke-RestMethod -Uri (Get-VsApiUrl -Api $candidate -Path '/portal/health.php') -TimeoutSec 5 | Out-Null
+            $health = Invoke-RestMethod -Uri (Get-VsApiUrl -Api $candidate -Path '/portal/health.php') -TimeoutSec 5
+            if (-not (Test-VsHealthDocument -Document $health)) {
+                Write-VsClientLog -Level WARN -Context $candidate -Message 'Adresse antwortet, liefert aber nicht das VirtuSphere-Health-Schema.'
+                continue
+            }
             Set-VsResolvedApi -Api $candidate
             return $candidate
         } catch {
             $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
-            if (Test-VsApiAnswered -ErrorRecord $_) {
+            $health = Get-VsHealthDocumentFromError -ErrorRecord $_
+            if ((Test-VsApiAnswered -ErrorRecord $_) -and (Test-VsHealthDocument -Document $health)) {
                 Write-VsClientLog -Level WARN ("Portal unter {0} antwortet mit HTTP {1}; Adresse wird trotzdem benutzt: {2}" -f $candidate, $statusCode, (Get-VsErrorDetail -ErrorRecord $_))
                 Set-VsResolvedApi -Api $candidate
                 return $candidate
@@ -188,6 +232,31 @@ function Test-VsApiAnswered {
     return $null -ne (Get-VsErrorStatusCode -ErrorRecord $ErrorRecord)
 }
 
+function Test-VsHealthDocument {
+    param($Document)
+    if (-not $Document) { return $false }
+    return $Document.PSObject.Properties['status'] -and [string]$Document.status -in @('ok', 'degraded', 'error') -and
+        $Document.PSObject.Properties['db'] -and [string]$Document.db -in @('ok', 'error') -and
+        $Document.PSObject.Properties['php'] -and [string]$Document.php -match '^\d+\.\d+$'
+}
+
+function Get-VsHealthDocumentFromError {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $body = ''
+    try { if ($ErrorRecord.ErrorDetails) { $body = [string]$ErrorRecord.ErrorDetails.Message } } catch { Write-Debug $_ }
+    if ([string]::IsNullOrWhiteSpace($body)) {
+        try {
+            $stream = $ErrorRecord.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = New-Object IO.StreamReader($stream)
+                try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            }
+        } catch { Write-Debug $_ }
+    }
+    if ([string]::IsNullOrWhiteSpace($body)) { return $null }
+    try { return ($body | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+}
+
 # Liest den Antwort-Body aus einer fehlgeschlagenen Anfrage (siehe die
 # gleichnamige Funktion in mecm\VirtuSphere-Common.ps1): Invoke-RestMethod wirft
 # in PS 5.1 bei 4xx/5xx und verwirft dabei den Body, in dem die WebApp ihren
@@ -201,11 +270,15 @@ function Get-VsErrorDetail {
     if ($ErrorRecord.Exception.PSObject.Properties['Response']) {
         $response = $ErrorRecord.Exception.Response
     }
-    if (-not $response) { return $detail }
-
     $body = $null
     try {
-        $stream = $response.GetResponseStream()
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            $body = [string]$ErrorRecord.ErrorDetails.Message
+        }
+    } catch { Write-Debug $_ }
+    if (-not $response -and [string]::IsNullOrWhiteSpace($body)) { return $detail }
+    try {
+        $stream = if ($response -and [string]::IsNullOrWhiteSpace($body)) { $response.GetResponseStream() } else { $null }
         if ($stream) {
             $reader = New-Object System.IO.StreamReader($stream)
             try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
@@ -219,7 +292,14 @@ function Get-VsErrorDetail {
         $parsed = $body | ConvertFrom-Json -ErrorAction Stop
         foreach ($field in 'error', 'message') {
             if ($parsed.PSObject.Properties[$field] -and -not [string]::IsNullOrWhiteSpace([string]$parsed.$field)) {
-                return ('{0} | WebApp: {1}' -f $detail, [string]$parsed.$field)
+                $message = [string]$parsed.$field
+                if ([Text.Encoding]::UTF8.GetByteCount($message) -gt 512) {
+                    $bytes = [Text.Encoding]::UTF8.GetBytes($message)
+                    $count = 512
+                    while ($count -gt 0 -and ($bytes[$count] -band 0xC0) -eq 0x80) { $count-- }
+                    $message = [Text.Encoding]::UTF8.GetString($bytes, 0, $count)
+                }
+                return ('{0} | WebApp: {1}' -f $detail, $message)
             }
         }
     } catch {
@@ -253,9 +333,9 @@ function Confirm-VsClientReady {
     if ($null -ne $RolloutRevision -and "$RolloutRevision" -match '^\d+$' -and [int]$RolloutRevision -gt 0) {
         $payload['rollout_revision'] = [int]$RolloutRevision
     }
-    $body = $payload | ConvertTo-Json
+    $body = ConvertTo-VsUtf8JsonBytes -Value $payload
     $response = Invoke-RestMethod -Uri (Get-VsApiUrl -Api $Api -Path '/mecm_client_ack.php') -Method Post `
-        -ContentType 'application/json' -Body $body -Headers (Get-VsClientApiHeaders) -TimeoutSec 10
+        -ContentType 'application/json; charset=utf-8' -Body $body -Headers (Get-VsClientApiHeaders) -TimeoutSec 10
     if (-not $response -or -not $response.success) {
         throw 'Client-Ready-ACK wurde von der WebApp nicht bestaetigt.'
     }
@@ -281,7 +361,7 @@ function Send-VsPhase {
         $body = @{ mac = $Mac; phase = $Phase; event = $PhaseEvent }
         if ($Detail) { $body['detail'] = $Detail }
         Invoke-RestMethod -Uri (Get-VsApiUrl -Api $api -Path '/mecm_report.php?action=reportPhase') -Method Post `
-            -ContentType 'application/json' -Body ($body | ConvertTo-Json) -Headers (Get-VsClientApiHeaders) -TimeoutSec 5 | Out-Null
+            -ContentType 'application/json; charset=utf-8' -Body (ConvertTo-VsUtf8JsonBytes -Value $body) -Headers (Get-VsClientApiHeaders) -TimeoutSec 5 | Out-Null
     } catch {
         # Rueckkanal ist best effort - Client kann durch VLAN-Wechsel offline sein.
         # Trotzdem ins Dateilog, sonst ist ein dauerhaft stiller Rueckkanal
@@ -349,11 +429,205 @@ function Convert-VsSubnetMaskToPrefix {
     return ($bits.ToCharArray() | Where-Object { $_ -eq '1' }).Count
 }
 
+function Test-VsIpv4Literal {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    $parsed = [ipaddress]::Any
+    return ([ipaddress]::TryParse($Value.Trim(), [ref]$parsed) -and
+        $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork)
+}
+
+# Builds the complete desired/actual mapping without changing Windows. The
+# caller must refuse every write when Valid is false, so one missing second NIC
+# cannot leave the first NIC half configured under a green phase.
+function New-VsClientNetworkPlan {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][array]$Targets,
+        [Parameter(Mandatory)][AllowEmptyCollection()][array]$Adapters
+    )
+
+    $errors = New-Object System.Collections.ArrayList
+    $items = New-Object System.Collections.ArrayList
+    $targetByMac = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
+    $adapterByMac = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.ArrayList]' ([System.StringComparer]::Ordinal)
+    $gatewayTargets = New-Object System.Collections.ArrayList
+
+    foreach ($adapter in @($Adapters)) {
+        $mac = ConvertTo-VsNormalizedMac ([string]$adapter.MacAddress)
+        if (-not $mac) { continue }
+        if (-not $adapterByMac.ContainsKey($mac)) { $adapterByMac[$mac] = New-Object System.Collections.ArrayList }
+        [void]$adapterByMac[$mac].Add($adapter)
+    }
+
+    if (@($Targets).Count -eq 0) { [void]$errors.Add('Der publizierte Snapshot enthaelt keine Sollschnittstelle.') }
+    foreach ($target in @($Targets)) {
+        $mac = ConvertTo-VsNormalizedMac ([string]$target.Mac)
+        if (-not $mac) {
+            [void]$errors.Add('Eine Sollschnittstelle hat keine gueltige MAC-Adresse.')
+            continue
+        }
+        if ($targetByMac.ContainsKey($mac)) {
+            [void]$errors.Add("Soll-MAC $mac ist mehrfach vorhanden.")
+            continue
+        }
+        $targetByMac[$mac] = $target
+    }
+
+    foreach ($mac in @($targetByMac.Keys | Sort-Object)) {
+        $target = $targetByMac[$mac]
+        $mode = ([string]$target.Mode).Trim().ToLowerInvariant()
+        $prefix = $null
+        $dns = @([string]$target.Dns1, [string]$target.Dns2) |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+        if ($mode -notin @('static', 'dhcp')) {
+            [void]$errors.Add("Soll-MAC $mac hat den unbekannten Modus '$($target.Mode)'.")
+        }
+        if ($mode -eq 'static') {
+            if (-not (Test-VsIpv4Literal ([string]$target.Ip))) {
+                [void]$errors.Add("Soll-MAC $mac hat keine gueltige statische IPv4-Adresse.")
+            }
+            $prefix = Convert-VsSubnetMaskToPrefix ([string]$target.Subnet)
+            if ($null -eq $prefix) { [void]$errors.Add("Soll-MAC $mac hat keine gueltige Subnetzmaske.") }
+            if (-not [string]::IsNullOrWhiteSpace([string]$target.Gateway)) {
+                if (-not (Test-VsIpv4Literal ([string]$target.Gateway))) {
+                    [void]$errors.Add("Soll-MAC $mac hat kein gueltiges IPv4-Gateway.")
+                } else { [void]$gatewayTargets.Add($mac) }
+            }
+            foreach ($server in $dns) {
+                if (-not (Test-VsIpv4Literal $server)) { [void]$errors.Add("Soll-MAC $mac hat einen ungueltigen IPv4-DNS-Server.") }
+            }
+        }
+
+        if (-not $adapterByMac.ContainsKey($mac)) {
+            [void]$errors.Add("Soll-MAC $mac fehlt auf diesem Client.")
+            continue
+        }
+        $adapterMatches = @($adapterByMac[$mac])
+        if ($adapterMatches.Count -ne 1) {
+            [void]$errors.Add("Soll-MAC $mac ist auf diesem Client mehrdeutig ($($adapterMatches.Count) Adapter).")
+            continue
+        }
+        $adapter = $adapterMatches[0]
+        if ([string]$adapter.PhysicalMediaType -eq 'Wireless') {
+            [void]$errors.Add("Soll-MAC $mac gehoert zu einem nicht verwalteten Wireless-Adapter.")
+        }
+        if ([string]$adapter.Status -ne 'Up') {
+            [void]$errors.Add("Soll-MAC $mac ist nicht nutzbar (Status $($adapter.Status)).")
+        }
+        [void]$items.Add([pscustomobject]@{
+            Mac = $mac
+            Target = $target
+            Adapter = $adapter
+            Mode = $mode
+            Prefix = $prefix
+            Dns = @($dns)
+        })
+    }
+
+    if ($gatewayTargets.Count -gt 1) {
+        [void]$errors.Add("Mehrere Sollschnittstellen definieren ein Default-Gateway ($($gatewayTargets -join ', ')); vor Aenderungen blockiert.")
+    }
+
+    $desiredNames = @{}
+    foreach ($item in @($items)) {
+        $desiredName = ([string]$item.Target.Name).Trim()
+        if ($desiredName -eq '') { continue }
+        if ($desiredNames.ContainsKey($desiredName)) {
+            [void]$errors.Add("Adaptername '$desiredName' ist fuer mehrere Sollschnittstellen vorgesehen.")
+        } else { $desiredNames[$desiredName] = [int]$item.Adapter.ifIndex }
+        foreach ($adapter in @($Adapters)) {
+            if ([string]$adapter.Name -eq $desiredName -and [int]$adapter.ifIndex -ne [int]$item.Adapter.ifIndex) {
+                [void]$errors.Add("Adaptername '$desiredName' ist bereits einer anderen Schnittstelle zugeordnet.")
+            }
+        }
+    }
+    return [pscustomobject]@{ Valid = ($errors.Count -eq 0); Errors = @($errors); Items = @($items) }
+}
+
+# Eine Disknummer ist nur die aktuelle Buszuordnung und kann sich nach einem
+# Neustart aendern. Fuer das Disk-Journal wird deshalb zuerst die vom Storage-
+# Stack gelieferte UniqueId verwendet. Fehlt sie, ist nur die Kombination aus
+# Seriennummer, LocationPath und Groesse ausreichend. Freundlicher Name und
+# Nummer sind bewusst keine Fallbacks: beide koennen fuer mehrere VMDKs/VHDXs
+# gleich sein oder sich zwischen zwei Laeufen aendern.
+function Get-VsDiskStableIdentity {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Disk)
+
+    $uniqueId = [string]$Disk.UniqueId
+    if (-not [string]::IsNullOrWhiteSpace($uniqueId) -and $uniqueId.Trim() -notmatch '^0+$') {
+        return [pscustomobject]@{ Valid = $true; Identity = ('unique:{0}' -f $uniqueId.Trim()); Reason = '' }
+    }
+
+    $serial = [string]$Disk.SerialNumber
+    $location = [string]$Disk.LocationPath
+    $size = 0L
+    try { $size = [long]$Disk.Size } catch { $size = 0L }
+    if (-not [string]::IsNullOrWhiteSpace($serial) -and
+        -not [string]::IsNullOrWhiteSpace($location) -and $size -gt 0) {
+        return [pscustomobject]@{
+            Valid = $true
+            Identity = ('serial-location-size:{0}|{1}|{2}' -f $serial.Trim(), $location.Trim(), $size)
+            Reason = ''
+        }
+    }
+
+    return [pscustomobject]@{
+        Valid = $false
+        Identity = ''
+        Reason = 'Keine stabile Datentraegeridentitaet (UniqueId oder Seriennummer + LocationPath + Groesse).'
+    }
+}
+
+function Get-VsSha256Hex {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Value)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 # Erste MAC der Registry-Interfaces (von client_getinfo geschrieben) fuer die
 # reportPhase-Aufrufe der Folge-Skripte.
+function Get-VsActiveSnapshotRoot {
+    try {
+        $base = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
+        if ([string]$base.SetupState -ne 'complete' -or [string]::IsNullOrWhiteSpace([string]$base.ActiveSnapshot)) { return $null }
+        $root = Join-Path (Join-Path $script:VsRegistryBase 'Snapshots') ([string]$base.ActiveSnapshot)
+        $meta = Get-ItemProperty -Path $root -Name 'SnapshotSchema', 'SnapshotState', 'InterfaceCount' -ErrorAction Stop
+        if ([int]$meta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or [string]$meta.SnapshotState -ne 'published' -or [int]$meta.InterfaceCount -lt 0) { return $null }
+        return $root
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+function Get-VsSnapshotValue {
+    param([Parameter(Mandatory)][string]$Name)
+    $root = Get-VsActiveSnapshotRoot
+    if (-not $root) { return $null }
+    try { return (Get-ItemProperty -Path $root -Name $Name -ErrorAction Stop).$Name } catch { Write-Debug $_; return $null }
+}
+
+function Get-VsSnapshotInterfacesRoot {
+    $root = Get-VsActiveSnapshotRoot
+    if (-not $root) { return $null }
+    $interfaces = Join-Path $root 'Interfaces'
+    if (-not (Test-Path -Path $interfaces)) { return $null }
+    return $interfaces
+}
+
 function Get-VsReportMac {
     try {
-        $ifRoot = Join-Path $script:VsRegistryBase 'Interfaces'
+        $ifRoot = Get-VsSnapshotInterfacesRoot
+        if (-not $ifRoot) { throw 'Kein vollstaendig publizierter Client-Snapshot.' }
         foreach ($entry in @(Get-ChildItem -Path $ifRoot -ErrorAction Stop)) {
             $mac = $entry.GetValue('mac')
             if (-not [string]::IsNullOrWhiteSpace($mac)) { return [string]$mac }

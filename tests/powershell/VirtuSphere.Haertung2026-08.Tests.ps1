@@ -392,13 +392,13 @@ Describe 'E8 - Ein vorhandener ReportToken laesst sich nicht entfernen' -Tag 'Ha
     BeforeAll { $script:InstAst = Get-PsAst -Path $script:InstMecm }
 
     It 'E8 - die Wiederherstellung prueft PSBoundParameters' {
-        # Sonst stellt Zeile 144 den alten Token wieder her, bevor die
-        # Erhaltungslogik ueberhaupt nachschaut, ob '' ausdruecklich kam.
-        $ifs = Find-Ast -Ast $script:InstAst `
-            -Type ([System.Management.Automation.Language.IfStatementAst]) `
-            -Where { $_.Extent.Text -match '\$ReportToken\s*=\s*\$existingToken' }
-        $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $ifs[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+        $assignments = Find-Ast -Ast $script:InstAst `
+            -Type ([System.Management.Automation.Language.AssignmentStatementAst]) `
+            -Where { $_.Left.Extent.Text -eq '$tokenResolution' }
+        $assignments.Count | Should -Be 1
+        $assignments[0].Extent.Text | Should -Match 'Resolve-VsInstallerSetting'
+        $assignments[0].Extent.Text | Should -Match 'PSBoundParameters'
+        $assignments[0].Extent.Text | Should -Match 'ExplicitEmptyClears'
     }
 
     It 'E8 - die interaktive Abfrage prueft PSBoundParameters' {

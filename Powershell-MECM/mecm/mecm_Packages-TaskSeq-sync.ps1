@@ -175,7 +175,7 @@ while ($true) {
         }
     } finally {
         # Genau EINE Abschlussmeldung pro Iteration.
-        $durationMs = [int]((Get-Date) - $cycleStart).TotalMilliseconds
+        $durationMs = Get-VsRunDurationMilliseconds -StartedAt $cycleStart
         $summary = @{
             packages       = $packagesCount
             task_sequences = $tsCount

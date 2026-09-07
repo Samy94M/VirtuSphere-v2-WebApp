@@ -11,6 +11,12 @@
     (SYSTEM, hoechste Rechte, ohne Profil, beim Systemstart UND stuendlich,
     ohne Laufzeitlimit) und verifiziert die Erstinstallation.
 
+    Upgrade und Re-Run sind transaktional fuer die verwaltete Registry-
+    Konfiguration, den vollstaendigen Serverdateisatz und die vier Aufgaben.
+    Ein Fehler stellt den vorherigen Stand wieder her. Kann ein Prozess oder
+    Rollback nicht vollstaendig bestaetigt werden, bleiben die Aufgaben
+    deaktiviert, damit keine gemischte Skriptgeneration startet.
+
     Idempotent: erneutes Ausfuehren aktualisiert Konfiguration und Skripte; die
     vier Intervalle behalten dabei ihren eingestellten Wert, wenn der jeweilige
     Parameter nicht angegeben wird (siehe .NOTES).
@@ -175,6 +181,58 @@ function Get-VsDeclaredScriptInteger {
     return [int]$literal.Value
 }
 
+function Resolve-VsInstallerSetting {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()]$SuppliedValue,
+        [AllowNull()]$ExistingValue,
+        [Parameter(Mandatory)][bool]$ParameterBound,
+        [Parameter(Mandatory)][bool]$InteractiveSupplied,
+        [AllowNull()]$InteractiveValue,
+        [switch]$ExplicitEmptyClears,
+        [switch]$InteractiveEmptyKeepsExisting
+    )
+
+    if ($InteractiveSupplied) {
+        if (-not [string]::IsNullOrEmpty([string]$InteractiveValue)) {
+            return [pscustomobject]@{ Name = $Name; Value = $InteractiveValue; Source = 'interactive' }
+        }
+        if ($InteractiveEmptyKeepsExisting -and -not [string]::IsNullOrEmpty([string]$ExistingValue)) {
+            return [pscustomobject]@{ Name = $Name; Value = $ExistingValue; Source = 'kept' }
+        }
+        return [pscustomobject]@{ Name = $Name; Value = $SuppliedValue; Source = 'default' }
+    }
+
+    if ($ParameterBound) {
+        if ($ExplicitEmptyClears -and [string]::IsNullOrEmpty([string]$SuppliedValue)) {
+            return [pscustomobject]@{ Name = $Name; Value = ''; Source = 'cleared' }
+        }
+        return [pscustomobject]@{ Name = $Name; Value = $SuppliedValue; Source = 'parameter' }
+    }
+
+    if ($null -ne $ExistingValue -and -not [string]::IsNullOrWhiteSpace([string]$ExistingValue)) {
+        return [pscustomobject]@{ Name = $Name; Value = $ExistingValue; Source = 'kept' }
+    }
+    return [pscustomobject]@{ Name = $Name; Value = $SuppliedValue; Source = 'default' }
+}
+
+# Read the complete old configuration once, before any validation-dependent
+# probe or write. Every optional setting is resolved once below and is never
+# restored by a later loop.
+$existingConfig = if (Test-Path $registryPath) {
+    Get-ItemProperty -Path $registryPath -ErrorAction Stop
+} else {
+    $null
+}
+
+function Get-VsExistingInstallerValue {
+    param([Parameter(Mandatory)][string]$Name)
+    if ($existingConfig -and $existingConfig.PSObject.Properties[$Name]) {
+        return $existingConfig.$Name
+    }
+    return $null
+}
+
 # --- WebApi normalisieren (host:port, kein Schema/Pfad) ---------------------
 $WebApi = Convert-VsWebApi $WebApi
 $webApiHost = ($WebApi -split ':', 2)[0]
@@ -187,11 +245,10 @@ $webApiIsIp = [System.Net.IPAddress]::TryParse($webApiHost, [ref]$ipRef)
 # wischte New-Item -Force die Werte, und ein leerer Parameter ueberschrieb den
 # Token mit Leer - ein Re-Run zum Aendern eines Intervalls kappte still den
 # Rueckkanal.)
-$existingToken = ''
-if (Test-Path $registryPath) {
-    try { $existingToken = [string](Get-ItemProperty -Path $registryPath -Name 'ReportToken' -ErrorAction Stop).ReportToken } catch { Write-Debug $_ }
-}
+$existingToken = [string](Get-VsExistingInstallerValue -Name 'ReportToken')
 $tokenExists = -not [string]::IsNullOrEmpty($existingToken)
+$reportTokenPrompted = $false
+$reportTokenInteractiveValue = $null
 
 # Sichere interaktive Eingabe statt Klartext-CLI-Argument (History/Prozessliste).
 #
@@ -199,11 +256,12 @@ $tokenExists = -not [string]::IsNullOrEmpty($existingToken)
 # die Abfrage, obwohl der Aufrufer den Parameter ausdruecklich genannt hat.
 if (-not $PSBoundParameters.ContainsKey('ReportToken')) {
     if ([Environment]::UserInteractive) {
+        $reportTokenPrompted = $true
         $tokenPrompt = if ($tokenExists) { 'Rueckkanal-Token (leer lassen = bestehenden behalten)' } else { 'Rueckkanal-Token (im Portal generiert, leer lassen fuer ohne Token)' }
         $secureToken = Read-Host -AsSecureString $tokenPrompt
         $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
         try {
-            $ReportToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+            $reportTokenInteractiveValue = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
         } finally {
             [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
         }
@@ -212,45 +270,71 @@ if (-not $PSBoundParameters.ContainsKey('ReportToken')) {
     Write-Warning 'ReportToken wurde als Kommandozeilen-Argument uebergeben und ist damit in der PowerShell-History und Prozessliste sichtbar. Fuer Produktivumgebungen das Skript ohne -ReportToken starten und den Token interaktiv eingeben.'
 }
 
-# Effektiver Token. Drei Ausgaenge, und alle drei werden protokolliert, nie der
-# Wert selbst:
-#
-#   behalten  - der Parameter wurde nicht genannt und es gibt einen Token.
-#   ersetzt   - ein neuer Wert kam (per Parameter oder aus der Abfrage).
-#   geloescht - der Parameter wurde ausdruecklich leer uebergeben.
-#
-# Die Bedingung liest $PSBoundParameters, nicht nur den Wert. Vorher stellte
-# diese Zeile den alten Token schon wieder her, bevor die Erhaltungslogik weiter
-# unten ueberhaupt nachschauen konnte, ob '' ausdruecklich kam: ein einmal
-# gesetzter Token liess sich nur noch durch Loeschen des Registry-Werts
-# entfernen, waehrend der Kommentar dort das Gegenteil zusagte.
-#
-# Die Loeschung ist auf WARN-Ebene sichtbar: ein still verschwindender
-# Rueckkanal ist genau der Fehler, den die Erhaltungslogik urspruenglich behoben
-# hat, also muss auch die GEWOLLTE Loeschung im Tageslog stehen. Sie geht
-# bewusst nicht ueber Write-Warn: sie ist eine ausdrueckliche Bedienhandlung und
-# kein offener Punkt, und ein Blocker wuerde den Installer dafuer mit 1 enden
-# lassen.
-if (-not $PSBoundParameters.ContainsKey('ReportToken') -and [string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
-    $ReportToken = $existingToken
+$tokenResolution = Resolve-VsInstallerSetting -Name 'ReportToken' -SuppliedValue $ReportToken `
+    -ExistingValue $existingToken -ParameterBound ($PSBoundParameters.ContainsKey('ReportToken')) `
+    -InteractiveSupplied $reportTokenPrompted -InteractiveValue $reportTokenInteractiveValue `
+    -ExplicitEmptyClears -InteractiveEmptyKeepsExisting
+$ReportToken = [string]$tokenResolution.Value
+if ($tokenResolution.Source -eq 'kept') {
     Write-Ok 'Bestehenden Rueckkanal-Token behalten (kein neuer uebergeben).'
-} elseif ($PSBoundParameters.ContainsKey('ReportToken') -and [string]::IsNullOrEmpty($ReportToken) -and $tokenExists) {
+} elseif ($tokenResolution.Source -eq 'cleared' -and $tokenExists) {
     Write-VsLog -Level WARN -Context 'setup' -Message '    !!  Rueckkanal-Token wird GELOESCHT (-ReportToken ausdruecklich leer uebergeben). Die Sync-Tasks melden ab sofort ohne Authentisierung.' -Color Yellow
-} elseif (-not [string]::IsNullOrEmpty($ReportToken)) {
+} elseif ($tokenResolution.Source -in @('parameter', 'interactive') -and -not [string]::IsNullOrEmpty($ReportToken)) {
     Write-Ok 'Rueckkanal-Token gesetzt.'
 }
 
-# Provider-Rechner ebenso behandeln wie den Token: ein Re-Run ohne
-# -ProviderMachine soll einen zuvor gesetzten Wert BEHALTEN, nicht mit Leer
-# ueberschreiben. Nur schreiben, wenn ein Wert vorliegt (create-if-missing).
-$existingProvider = ''
-if (Test-Path $registryPath) {
-    try { $existingProvider = [string](Get-ItemProperty -Path $registryPath -Name 'MECM_ProviderMachine' -ErrorAction Stop).MECM_ProviderMachine } catch { Write-Debug $_ }
+# Resolve every remaining optional value through the same owner. Explicitly
+# empty ProviderMachine now means remove the override; omission keeps it.
+$textSettingMap = @{
+    Scheme         = 'Scheme'
+    CertThumbprint = 'CertThumbprint'
+    PackagesRoot   = 'PackagesRoot'
+    DpGroupName    = 'DpGroupName'
+    ProviderMachine = 'MECM_ProviderMachine'
 }
-if ([string]::IsNullOrWhiteSpace($ProviderMachine) -and -not [string]::IsNullOrWhiteSpace($existingProvider)) {
-    $ProviderMachine = $existingProvider
-    Write-Ok 'Bestehenden SMS-Provider-Rechner behalten (kein neuer uebergeben).'
+$configurationSources = @{ ReportToken = $tokenResolution.Source }
+foreach ($parameterName in $textSettingMap.Keys) {
+    $settingName = $textSettingMap[$parameterName]
+    $resolutionParams = @{
+        Name = $settingName
+        SuppliedValue = (Get-Variable -Name $parameterName -ValueOnly)
+        ExistingValue = (Get-VsExistingInstallerValue -Name $settingName)
+        ParameterBound = ($PSBoundParameters.ContainsKey($parameterName))
+        InteractiveSupplied = $false
+        InteractiveValue = $null
+    }
+    if ($parameterName -eq 'ProviderMachine') { $resolutionParams['ExplicitEmptyClears'] = $true }
+    $resolution = Resolve-VsInstallerSetting @resolutionParams
+    Set-Variable -Name $parameterName -Value $resolution.Value -Scope Script
+    $configurationSources[$settingName] = $resolution.Source
 }
+if ($configurationSources['MECM_ProviderMachine'] -eq 'kept') {
+    Write-Ok 'Bestehenden SMS-Provider-Rechner behalten (Parameter nicht angegeben).'
+}
+
+$intervalBounds = @{
+    DeviceSyncIntervalSeconds = @(5, 3600)
+    PackagesSyncIntervalSeconds = @(10, 3600)
+    ImporterIntervalSeconds = @(30, 3600)
+    SiteHealthIntervalSeconds = @(60, 3600)
+}
+foreach ($intervalName in $intervalBounds.Keys) {
+    $resolution = Resolve-VsInstallerSetting -Name $intervalName `
+        -SuppliedValue (Get-Variable -Name $intervalName -ValueOnly) `
+        -ExistingValue (Get-VsExistingInstallerValue -Name $intervalName) `
+        -ParameterBound ($PSBoundParameters.ContainsKey($intervalName)) `
+        -InteractiveSupplied $false -InteractiveValue $null
+    $parsed = 0
+    $bounds = $intervalBounds[$intervalName]
+    if (-not [int]::TryParse([string]$resolution.Value, [ref]$parsed) -or $parsed -lt $bounds[0] -or $parsed -gt $bounds[1]) {
+        throw ('Vorhandener oder angegebener Wert fuer {0} liegt ausserhalb {1}..{2}; es wurde nichts geschrieben.' -f $intervalName, $bounds[0], $bounds[1])
+    }
+    Set-Variable -Name $intervalName -Value $parsed -Scope Script
+    $configurationSources[$intervalName] = $resolution.Source
+}
+
+if ($Scheme -notin @('http', 'https')) { throw 'Vorhandenes Scheme muss http oder https sein; es wurde nichts geschrieben.' }
+if ([string]$CertThumbprint -notmatch '^([0-9A-Fa-f]{40})?$') { throw 'Vorhandener CertThumbprint ist ungueltig; es wurde nichts geschrieben.' }
 
 # --- Voraussetzungen --------------------------------------------------------
 Write-Step 'Pruefe Voraussetzungen'
@@ -310,6 +394,167 @@ if ($webApiIsIp) {
     else { Write-Hint ("DNS-Name '{0}' loest vom MECM-Server NICHT auf. Im Deploy-VLAN-DNS einen Eintrag anlegen, sonst finden die Clients die WebAPI nicht (ihr DNS kommt per DHCP)." -f $webApiHost) }
 }
 
+# --- Transaktionskontext ----------------------------------------------------
+# Diese Namen sind zugleich der vollstaendige Ownership-Rahmen des Installers.
+# Fremde Aufgaben werden weder gesichert noch ersetzt.
+$tasks = @(
+    @{ Name = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
+    @{ Name = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
+    @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
+    @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
+)
+
+function Assert-VsOwnedInstallDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    $expected = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'VirtuSphere\mecm')).TrimEnd('\')
+    $actual = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if (-not [string]::Equals($actual, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Nicht erlaubter Installationspfad: '{0}', erwartet '{1}'." -f $actual, $expected)
+    }
+    if (Test-Path -LiteralPath $actual) {
+        $item = Get-Item -LiteralPath $actual -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ("Installationspfad ist kein echtes lokales Verzeichnis: {0}" -f $actual)
+        }
+    }
+    return $actual
+}
+
+function New-VsRegistryRollbackSnapshot {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{ Existed = $false; Values = @(); Acl = $null }
+    }
+    $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $values = New-Object System.Collections.Generic.List[object]
+    foreach ($name in @($key.GetValueNames())) {
+        [void]$values.Add([pscustomobject]@{
+            Name = [string]$name
+            Value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            Kind = [string]$key.GetValueKind($name)
+        })
+    }
+    return [pscustomobject]@{ Existed = $true; Values = @($values); Acl = (Get-Acl -LiteralPath $Path -ErrorAction Stop) }
+}
+
+function New-VsTaskRollbackSnapshots {
+    param([Parameter(Mandatory)][array]$TaskSpecs)
+    $snapshots = New-Object System.Collections.Generic.List[object]
+    foreach ($task in $TaskSpecs) {
+        $existing = Get-ScheduledTask -TaskName $task.Name -ErrorAction SilentlyContinue
+        if ($existing) {
+            [void]$snapshots.Add([pscustomobject]@{
+                Name = $task.Name
+                Script = $task.Script
+                Existed = $true
+                Xml = (Export-ScheduledTask -TaskName $task.Name -ErrorAction Stop)
+                WasRunning = ([string]$existing.State -eq 'Running')
+            })
+        } else {
+            [void]$snapshots.Add([pscustomobject]@{ Name = $task.Name; Script = $task.Script; Existed = $false; Xml = ''; WasRunning = $false })
+        }
+    }
+    return @($snapshots)
+}
+
+function Restore-VsInstallTransaction {
+    param(
+        [Parameter(Mandatory)][object]$RegistrySnapshot,
+        [Parameter(Mandatory)][array]$TaskSnapshots,
+        [AllowNull()][string]$BackupPath,
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$ActivatedFiles
+    )
+    $errors = New-Object System.Collections.Generic.List[string]
+    $quiesced = $true
+    $filesRestored = $false
+    $registryRestored = $false
+
+    # Auch ein Fehler waehrend Registrierung oder Start kann bereits neue
+    # Prozesse erzeugt haben. Vor dem Datei-Rollback alle eigenen Trigger und
+    # Prozesse erneut fail-closed stilllegen.
+    foreach ($snapshot in $TaskSnapshots) {
+        try {
+            $current = Get-ScheduledTask -TaskName $snapshot.Name -ErrorAction SilentlyContinue
+            if ($current) {
+                Disable-ScheduledTask -TaskName $snapshot.Name -ErrorAction Stop | Out-Null
+                $current = Get-ScheduledTask -TaskName $snapshot.Name -ErrorAction Stop
+                if ([string]$current.State -eq 'Running') { Stop-ScheduledTask -TaskName $snapshot.Name -ErrorAction Stop }
+                Wait-VsScheduledScriptStopped -ScriptPath (Join-Path $installDir $snapshot.Script)
+            }
+        } catch {
+            $quiesced = $false
+            [void]$errors.Add("Rollback konnte Task '$($snapshot.Name)' nicht sicher beenden: $($_.Exception.Message)")
+        }
+    }
+
+    if ($quiesced) { try {
+        foreach ($name in @($ActivatedFiles)) {
+            $livePath = Join-Path $installDir $name
+            if (Test-Path -LiteralPath $livePath) { Remove-Item -LiteralPath $livePath -Force -ErrorAction Stop }
+        }
+        if ($BackupPath -and (Test-Path -LiteralPath $BackupPath)) {
+            foreach ($old in @(Get-ChildItem -LiteralPath $BackupPath -File -ErrorAction Stop)) {
+                Move-Item -LiteralPath $old.FullName -Destination (Join-Path $installDir $old.Name) -Force -ErrorAction Stop
+            }
+        }
+        $filesRestored = $true
+    } catch { [void]$errors.Add("Datei-Rollback: $($_.Exception.Message)") } }
+
+    try {
+        if (-not $RegistrySnapshot.Existed) {
+            if (Test-Path -LiteralPath $registryPath) { Remove-Item -LiteralPath $registryPath -Recurse -Force -ErrorAction Stop }
+        } else {
+            if (-not (Test-Path -LiteralPath $registryPath)) { New-Item -Path $registryPath -Force -ErrorAction Stop | Out-Null }
+            $key = Get-Item -LiteralPath $registryPath -ErrorAction Stop
+            $wantedNames = @($RegistrySnapshot.Values | ForEach-Object { [string]$_.Name })
+            foreach ($name in @($key.GetValueNames())) {
+                if ([string]$name -cnotin $wantedNames) { Remove-ItemProperty -LiteralPath $registryPath -Name $name -ErrorAction Stop }
+            }
+            foreach ($value in $RegistrySnapshot.Values) {
+                New-ItemProperty -Path $registryPath -Name $value.Name -Value $value.Value -PropertyType $value.Kind -Force -ErrorAction Stop | Out-Null
+            }
+            Set-Acl -LiteralPath $registryPath -AclObject $RegistrySnapshot.Acl -ErrorAction Stop
+        }
+        $registryRestored = $true
+    } catch { [void]$errors.Add("Registry-Rollback: $($_.Exception.Message)") }
+
+    if ($quiesced -and $filesRestored -and $registryRestored) { foreach ($snapshot in $TaskSnapshots) {
+        try {
+            $current = Get-ScheduledTask -TaskName $snapshot.Name -ErrorAction SilentlyContinue
+            if ($snapshot.Existed) {
+                Register-ScheduledTask -TaskName $snapshot.Name -Xml $snapshot.Xml -Force -ErrorAction Stop | Out-Null
+                if ($snapshot.WasRunning) { Start-ScheduledTask -TaskName $snapshot.Name -ErrorAction Stop }
+            } elseif ($current) {
+                Unregister-ScheduledTask -TaskName $snapshot.Name -Confirm:$false -ErrorAction Stop
+            }
+        } catch { [void]$errors.Add("Task-Rollback '$($snapshot.Name)': $($_.Exception.Message)") }
+    } } elseif ($TaskSnapshots.Count -gt 0) {
+        [void]$errors.Add('Aufgaben bleiben deaktiviert, weil Prozess-, Datei- oder Registry-Rollback nicht vollstaendig belegt ist.')
+    }
+    return @($errors)
+}
+
+$installMutex = $null
+$installMutexHeld = $false
+$transactionStarted = $false
+$taskMutationStarted = $false
+$registryRollback = $null
+$taskRollbacks = @()
+$installBackup = $null
+$installStage = $null
+$activatedNames = New-Object System.Collections.Generic.List[string]
+$finalExitCode = 0
+
+try {
+    $installMutex = New-Object System.Threading.Mutex($false, 'Global\VirtuSphere.MECMInstaller')
+    try { $installMutexHeld = $installMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $installMutexHeld = $true }
+    if (-not $installMutexHeld) { throw 'Ein anderer VirtuSphere-MECM-Installer ist bereits aktiv.' }
+
+    $installDir = Assert-VsOwnedInstallDirectory -Path $installDir
+    $registryRollback = New-VsRegistryRollbackSnapshot -Path $registryPath
+    $taskRollbacks = @(New-VsTaskRollbackSnapshots -TaskSpecs $tasks)
+    $transactionStarted = $true
+
 # --- Registry ---------------------------------------------------------------
 # Key nur anlegen, wenn er fehlt - NICHT per New-Item -Force. Force wischt auf
 # einem bestehenden Key alle Werte weg und setzt die ACL zurueck (in einem
@@ -331,6 +576,11 @@ if (-not (Test-Path $registryPath)) {
 # und Administratoren begrenzen (idempotent bei Re-Run).
 $acl = Get-Acl -Path $registryPath
 $acl.SetAccessRuleProtection($true, $false)
+# Der Key ist vollstaendig VirtuSphere-owned. SetAccessRuleProtection entfernt
+# nur geerbte Regeln; vorhandene breite explizite ACEs blieben sonst erhalten.
+foreach ($existingRule in @($acl.Access)) {
+    $acl.RemoveAccessRuleSpecific($existingRule)
+}
 # Well-Known-SIDs statt lokalisierter Kontonamen: auf einem deutschen Server
 # heissen die Anzeigenamen z. B. NT-AUTORITAET\SYSTEM und
 # VORDEFINIERT\Administratoren. LookupAccountName auf die englischen Namen
@@ -359,59 +609,14 @@ $settings = @{
     ImporterIntervalSeconds     = $ImporterIntervalSeconds
     SiteHealthIntervalSeconds   = $SiteHealthIntervalSeconds
 }
-# Ein Re-Run ohne den Parameter BEHAELT das eingestellte Intervall (wie
-# -ProviderMachine eine Zeile tiefer). Sonst setzt jedes Skript-Update einen
-# bewusst getunten Takt stillschweigend auf den Standard zurueck, und die
-# Statusseite meldet den neuen Wert als Tatsache. Wer zurueck auf den Standard
-# will, gibt den Parameter ausdruecklich an.
-$existingConfig = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue
-# Die Namen kommen aus $settings, nicht aus einer zweiten Liste: ein kuenftiges
-# fuenftes Intervall waere sonst genau hier vergessen.
-foreach ($intervalName in @($settings.Keys | Where-Object { $_ -like '*IntervalSeconds' })) {
-    if ($PSBoundParameters.ContainsKey($intervalName)) { continue }
-    $keep = if ($existingConfig) { $existingConfig.$intervalName } else { $null }
-    if ($null -eq $keep -or [int]$keep -eq $settings[$intervalName]) { continue }
-    $settings[$intervalName] = [int]$keep
-    Write-Ok ('{0}: eingestellte {1} s behalten (Parameter nicht angegeben)' -f $intervalName, [int]$keep)
-}
-# Dieselbe Regel fuer die Textwerte, die ein Administrator bewusst setzt. Nur die
-# vier Intervalle und -ProviderMachine ueberlebten einen Re-Run: ein
-# Skript-Update mit dem Pflichtminimum an Parametern setzte damit stillschweigend
-# das Schema auf http zurueck (und schaltete auf einem TLS-Portal die ganze
-# Integration ab), ebenso den Fingerabdruck, die DP-Gruppe und den Paketpfad.
-# Ein Wert, den man einstellen kann, muss ein Update ueberleben, das ihn nicht
-# nennt - genau wie ein Intervall.
-$parameterToSetting = @{
-    Scheme         = 'Scheme'
-    CertThumbprint = 'CertThumbprint'
-    DpGroupName    = 'DpGroupName'
-    PackagesRoot   = 'PackagesRoot'
-    # Ein Re-Run ohne -ReportToken loeschte den Token: der Meldekanal verlor
-    # damit still seine Authentisierung. Die Sonderbehandlung weiter oben (beim
-    # Einlesen des bestehenden Werts) liest inzwischen ebenfalls
-    # $PSBoundParameters, weshalb ein ausdrueckliches -ReportToken '' den Token
-    # tatsaechlich leert. Vorher stellte jene Zeile den alten Wert wieder her,
-    # bevor diese Tabelle ueberhaupt drankam.
-    ReportToken    = 'ReportToken'
-}
-foreach ($parameterName in $parameterToSetting.Keys) {
-    if ($PSBoundParameters.ContainsKey($parameterName)) { continue }
-    $settingName = $parameterToSetting[$parameterName]
-    $keep = if ($existingConfig) { [string]$existingConfig.$settingName } else { '' }
-    if ([string]::IsNullOrWhiteSpace($keep) -or $keep -eq [string]$settings[$settingName]) { continue }
-    $settings[$settingName] = $keep
-    # Den Token nicht ins Log schreiben.
-    $shown = if ($settingName -eq 'ReportToken') { '[vorhanden]' } else { $keep }
-    Write-Ok ('{0}: eingestellten Wert "{1}" behalten (Parameter nicht angegeben)' -f $settingName, $shown)
-    # Die Variablen nachziehen, die der Rest des Skripts benutzt (Verzeichnisse
-    # unter PackagesRoot, die Portal-Probe mit Scheme). Sonst schreibt die
-    # Registry den behaltenen Wert, waehrend das Skript mit dem Default weiterlaeuft.
-    Set-Variable -Name $parameterName -Value $keep -Scope Script
-}
 if ($siteCode) { $settings['MECM_SiteCode'] = $siteCode }
 # Nur schreiben, wenn ein Provider vorliegt: ein leerer Wert wuerde die lokale
 # WMI/PSDrive-Erkennung des Site-Health-Skripts aushebeln.
 if (-not [string]::IsNullOrWhiteSpace($ProviderMachine)) { $settings['MECM_ProviderMachine'] = $ProviderMachine.Trim() }
+elseif ($configurationSources['MECM_ProviderMachine'] -eq 'cleared') {
+    Remove-ItemProperty -Path $registryPath -Name 'MECM_ProviderMachine' -ErrorAction SilentlyContinue
+    Write-Ok 'SMS-Provider-Override ausdruecklich entfernt; Laufzeiterkennung ist wieder aktiv.'
+}
 foreach ($key in $settings.Keys) {
     $type = if ($settings[$key] -is [int]) { 'DWord' } else { 'String' }
     New-ItemProperty -Path $registryPath -Name $key -Value $settings[$key] -PropertyType $type -Force | Out-Null
@@ -429,11 +634,7 @@ foreach ($dir in @($installDir, $logRoot, (Join-Path $PackagesRoot 'files'), (Jo
 # beschreibbar, waere das Codeausfuehrung als SYSTEM. Nur warnen (den DP-Zugriff
 # nicht durch automatische ACL-Aenderungen gefaehrden).
 $filesDir = Join-Path $PackagesRoot 'files'
-$writableByUsers = (Get-Acl -Path $filesDir).Access | Where-Object {
-    $_.AccessControlType -eq 'Allow' -and
-    $_.FileSystemRights -match 'Write|Modify|FullControl' -and
-    $_.IdentityReference -match 'Users|Everyone|Authenticated Users'
-}
+$writableByUsers = Get-VsDangerousFileSystemAclEntries -Acl (Get-Acl -Path $filesDir)
 if ($writableByUsers) {
     Write-Hint ('Paket-Ordner {0} ist fuer normale Benutzer beschreibbar. Paket-Skripte laufen als SYSTEM: Schreibrechte auf Administratoren/SYSTEM begrenzen.' -f $filesDir)
 }
@@ -459,21 +660,31 @@ try {
     Remove-Item -Path $localProbe -Force -ErrorAction SilentlyContinue
 }
 
-# Die Aufgabenliste steht VOR dem Kopieren, weil die laufenden Instanzen erst
-# beendet werden muessen (siehe unten) und beides denselben Namen braucht.
-$tasks = @(
-    @{ Name = 'VirtuSphere MECM Devices Sync';   Script = 'mecm_new-device-sync.ps1' }
-    @{ Name = 'VirtuSphere MECM Packages Sync';  Script = 'mecm_Packages-TaskSeq-sync.ps1' }
-    @{ Name = 'VirtuSphere MECM Package Import'; Script = 'mecm_autoimporter.ps1' }
-    @{ Name = 'VirtuSphere MECM Site Health';    Script = 'mecm_site-health.ps1' }
-)
+function Get-VsScheduledScriptProcesses {
+    param([Parameter(Mandatory)][string]$ScriptPath)
+    $escaped = [regex]::Escape($ScriptPath)
+    return @(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop |
+        Where-Object { [string]$_.CommandLine -match ('(?i)(^|[\s\"''])' + $escaped + '([\s\"'']|$)') })
+}
+
+function Wait-VsScheduledScriptStopped {
+    param([Parameter(Mandatory)][string]$ScriptPath, [int]$TimeoutSeconds = 30)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $running = @(Get-VsScheduledScriptProcesses -ScriptPath $ScriptPath)
+        if ($running.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    $pids = @($running | ForEach-Object { [string]$_.ProcessId }) -join ','
+    throw ("Alter Aufgabenprozess fuer '{0}' ist nach {1}s noch aktiv (PID {2}); Aktivierung abgebrochen." -f $ScriptPath, $TimeoutSeconds, $pids)
+}
 
 # Den vollstaendigen Satz VOR dem Stoppen der laufenden Aufgaben in ein lokales
 # Stagingverzeichnis kopieren und bytegenau pruefen. So beendet ein fehlendes
 # oder versionsfalsches Loggingmodul die Installation sichtbar, ohne zuerst die
 # funktionierende Altinstallation anzuhalten.
 $sourceDir = Join-Path $PSScriptRoot 'mecm'
-$requiredServerFiles = @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1') + @($tasks | ForEach-Object { $_.Script })
+$requiredServerFiles = @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1', 'VirtuSphere-MembershipJournal.ps1') + @($tasks | ForEach-Object { $_.Script })
 foreach ($name in $requiredServerFiles) {
     $requiredPath = Join-Path $sourceDir $name
     if (-not (Test-Path $requiredPath)) { throw ('MECM-Serverpaket unvollstaendig: {0} fehlt.' -f $requiredPath) }
@@ -515,6 +726,7 @@ try {
 # ab; ein gemischter Satz darf niemals unter einer weiterlaufenden Aufgabe
 # sichtbar werden. Unten werden alle Aufgaben vollstaendig neu registriert.
 Write-Step 'Deaktiviere und beende laufende Aufgaben'
+$taskMutationStarted = $true
 foreach ($task in $tasks) {
     $existing = Get-ScheduledTask -TaskName $task.Name -ErrorAction SilentlyContinue
     if (-not $existing) { continue }
@@ -528,19 +740,17 @@ foreach ($task in $tasks) {
             Stop-ScheduledTask -TaskName $task.Name -ErrorAction Stop
             Write-Ok ("Aufgabe beendet: {0}" -f $task.Name)
         }
+        Wait-VsScheduledScriptStopped -ScriptPath (Join-Path $installDir $task.Script)
     } catch {
         throw ("Aufgabe '{0}' konnte vor dem sicheren Skriptaustausch nicht deaktiviert und beendet werden: {1}" -f $task.Name, $_.Exception.Message)
     }
 }
-# Der Scheduler meldet 'Ready' bevor der powershell.exe-Prozess weg ist. Ohne
-# diese kurze Wartezeit kopieren wir in genau das Fenster hinein, das wir
-# gerade geschlossen haben.
-Start-Sleep -Seconds 2
-
 # Das Loggingmodul kommt zuerst, Common als versionspruefende Fassade zuletzt.
 # Die Tasks sind gestoppt und werden erst nach der Live-Verifikation gestartet;
 # ein Abbruch mitten im Satz fuehrt daher beim naechsten Laden fail-closed statt
 # zu einer gemischten, weiterlaufenden Version.
+$installBackup = Join-Path $installDir ('.virtusphere-backup-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $installBackup -Force -ErrorAction Stop | Out-Null
 try {
     $orderedNames = @($serverSources.Name | Sort-Object @{ Expression = {
         if ($_ -eq 'VirtuSphere-Logging.ps1') { 0 }
@@ -548,7 +758,14 @@ try {
         else { 1 }
     } }, @{ Expression = { $_ } })
     foreach ($name in $orderedNames) {
+        $livePath = Join-Path $installDir $name
+        if (Test-Path -LiteralPath $livePath) {
+            $liveItem = Get-Item -LiteralPath $livePath -Force -ErrorAction Stop
+            if ($liveItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw ("Installationsdatei ist ein Reparse Point: {0}" -f $livePath) }
+            Move-Item -LiteralPath $livePath -Destination (Join-Path $installBackup $name) -ErrorAction Stop
+        }
         Move-Item -Path (Join-Path $installStage $name) -Destination (Join-Path $installDir $name) -Force -ErrorAction Stop
+        $activatedNames.Add($name)
     }
 } finally {
     if (Test-Path $installStage) { Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue }
@@ -573,6 +790,17 @@ if (Test-Path (Join-Path $templateSource 'install.ps1')) {
 }
 
 # --- Geplante Aufgaben ------------------------------------------------------
+$logComponents = @('device-sync', 'packages-sync', 'autoimporter', 'site-health')
+$logPaths = @{}
+$logBaselines = @{}
+$logSeen = @{}
+foreach ($comp in $logComponents) {
+    $p = Join-Path $logRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), $comp)
+    $logPaths[$comp] = $p
+    $logBaselines[$comp] = if (Test-Path $p) { (Get-Item $p).LastWriteTimeUtc } else { [datetime]::MinValue }
+    $logSeen[$comp] = $false
+}
+
 Write-Step 'Registriere geplante Aufgaben'
 # Auch der Task-Principal verwendet die sprachunabhaengige SYSTEM-SID.
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
@@ -671,16 +899,6 @@ Write-Step 'Pruefe Log-Aktivitaet aller vier Tasks (bis zu 40s)'
 # Ein laufender Task beweist noch keinen gelungenen Lauf. Nur ein NEUER
 # Schreibvorgang je Tageslog zeigt, dass die Schleife tatsaechlich arbeitet;
 # die blosse Existenz der Datei (Re-Run am selben Tag) reicht nicht.
-$logComponents = @('device-sync', 'packages-sync', 'autoimporter', 'site-health')
-$logPaths = @{}
-$logBaselines = @{}
-$logSeen = @{}
-foreach ($comp in $logComponents) {
-    $p = Join-Path $logRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), $comp)
-    $logPaths[$comp] = $p
-    $logBaselines[$comp] = if (Test-Path $p) { (Get-Item $p).LastWriteTimeUtc } else { [datetime]::MinValue }
-    $logSeen[$comp] = $false
-}
 for ($i = 0; $i -lt 8; $i++) {
     Start-Sleep -Seconds 5
     $allSeen = $true
@@ -695,11 +913,15 @@ for ($i = 0; $i -lt 8; $i++) {
 }
 foreach ($comp in $logComponents) {
     if ($logSeen[$comp]) { Write-Ok ("Log aktiv: {0}" -f $comp) }
-    else { Write-Warn ("Noch kein frisches Log: {0} - Aufgabenplanung und Portal-Statusseite pruefen." -f $comp) }
+    else { Write-Hint ("Noch kein frisches Log innerhalb des kurzen Installerfensters: {0}. Das ist bei langer/idle Cadence eine ausstehende Bestaetigung; Aufgabenplanung, Tageslog und Portal-Statusseite spaeter pruefen." -f $comp) }
 }
 
 # --- Abschluss-Marker -------------------------------------------------------
-New-ItemProperty -Path $registryPath -Name 'SetupCompleted' -Value (Get-Date -Format 'o') -PropertyType String -Force | Out-Null
+if ($script:VsInstallBlockers -eq 0) {
+    New-ItemProperty -Path $registryPath -Name 'SetupCompleted' -Value (Get-Date -Format 'o') -PropertyType String -Force -ErrorAction Stop | Out-Null
+} else {
+    Remove-ItemProperty -Path $registryPath -Name 'SetupCompleted' -ErrorAction SilentlyContinue
+}
 
 Write-Host ''
 # Die Schlusszeile haengt an ALLEN Blockern, nicht mehr allein an $allRunning.
@@ -722,10 +944,37 @@ Write-Host '  2. Auch die IP des ANSIBLE-Hosts freischalten - sonst laeuft ein D
 if (-not $webApiIsIp) {
     Write-Host ('  3. DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $webApiHost) -ForegroundColor Gray
 }
-Write-Host ('  4. Client-Paritaet: die Client-Skripte lesen den WebAPI-Namen aus $VsDefaultDnsApi in VirtuSphere-Client-Common.ps1. Beim Default "virtusphere.lan:8021" ist nichts zu tun; weicht euer Name ab, dort denselben Wert wie hier (-WebApi "{0}") setzen.' -f $WebApi) -ForegroundColor Gray
+Write-Host ('  4. Client-Bootstrap: install-VirtuSphere-Clients.ps1 mit -WebApi "{0}" und demselben -Scheme ausfuehren. Der Client-Installer erzeugt bootstrap.json; Clientquelltext wird nicht bearbeitet.' -f $WebApi) -ForegroundColor Gray
 Write-Host '  5. Seite "Systemstatus" im Portal beobachten - die Ampeln werden gruen.' -ForegroundColor Gray
 
 # Exit-Code als maschinenlesbare Fassung der Schlusszeile: Voraussetzung dafuer,
 # dass ein Rollout-Skript den Installer je pruefen kann.
-if ($script:VsInstallBlockers -gt 0) { exit 1 }
-exit 0
+if ($script:VsInstallBlockers -gt 0) { $finalExitCode = 1 }
+
+# Erst hier ist Registry, Dateisatz und Aufgabenregistrierung gemeinsam
+# bestaetigt. Bis zu dieser Grenze bleibt der Alt-Dateisatz rollbackfaehig.
+if ($installBackup -and (Test-Path -LiteralPath $installBackup)) {
+    try { Remove-Item -LiteralPath $installBackup -Recurse -Force -ErrorAction Stop }
+    catch { Write-Hint ("Altdatei-Backup konnte nach erfolgreicher Aktivierung nicht entfernt werden: {0}" -f $_.Exception.Message) }
+}
+} catch {
+    $installError = $_
+    $rollbackErrors = @()
+    if ($transactionStarted) {
+        $tasksToRestore = if ($taskMutationStarted) { $taskRollbacks } else { @() }
+        $rollbackErrors = @(Restore-VsInstallTransaction -RegistrySnapshot $registryRollback -TaskSnapshots $tasksToRestore -BackupPath $installBackup -ActivatedFiles $activatedNames)
+    }
+    if ($installStage -and (Test-Path -LiteralPath $installStage)) { Remove-Item -LiteralPath $installStage -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($installBackup -and (Test-Path -LiteralPath $installBackup) -and $rollbackErrors.Count -eq 0) { Remove-Item -LiteralPath $installBackup -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($rollbackErrors.Count -gt 0) {
+        throw ("Installation fehlgeschlagen: {0} Rollback unvollstaendig: {1}" -f $installError.Exception.Message, ($rollbackErrors -join ' | '))
+    }
+    throw ("Installation fehlgeschlagen; vorheriger Registry-, Datei- und Aufgabenstand wurde wiederhergestellt: {0}" -f $installError.Exception.Message)
+} finally {
+    if ($installMutexHeld -and $installMutex) {
+        try { $installMutex.ReleaseMutex() } catch { Write-Debug $_ }
+    }
+    if ($installMutex) { $installMutex.Dispose() }
+}
+
+exit $finalExitCode

@@ -1,5 +1,56 @@
 # ADR-0034: MECM-Provenienz und sichere Reconciliation
 
+## Amendment 2 (07.09.2026): schemagetreue Verteilung und konservative Membership-Leser
+
+Der Device-Sync behandelt eine Direct-Membership-Abfrage nun als dreiwertig:
+`present`, `absent` oder `unknown`. Ein Providerfehler ist `unknown` und blockiert
+alle Membership-Mutationen sowie den Provenienzrückzug der betroffenen VM. Ein
+leeres, erfolgreich gelesenes Ergebnis bleibt dagegen `absent`. Collectionnamen
+werden ordinal und nur bei eindeutiger Auflösung verwendet; mehrere exakte
+Treffer oder derselbe gewünschte Name mit widersprüchlichen Typen blockieren.
+
+Ein Remove übernimmt ID, Namen und Typ aus der autoritativen Provenienzzeile,
+nicht aus der typfreien Live-Beobachtung. Der vollständige Add-/Remove-Plan wird
+vor dem ersten MECM-Write auf meldbare Namen, IDs und Typen validiert. Der
+Transport- und Crashvertrag zwischen MECM-Write und Portal-ACK bleibt davon
+unberührt und wird erst mit dem separaten Journal-Amendment aus A04 ersetzt.
+
+`Get-VsContentDistributionState` adressiert den eindeutig gelesenen
+Application-Datensatz über `Get-CMDistributionStatus -InputObject`. Es wertet
+die tatsächlichen Zähler `Targeted`, `NumberSuccess`, `NumberErrors`,
+`NumberInProgress`, `NumberUnknown` und `SourceVersion` aus. Fehlende oder
+ungültige Identität beziehungsweise Schemainformation ist `unknown`; nur ein
+vollständig klassifizierter, fehlerfreier Stand ist `succeeded`. Die bestehende
+Grenze bleibt: diese Abfrage ist ein globales Application-Aggregat und kein
+Beweis für eine einzelne DP-Gruppe.
+
+## Amendment 3 (07.09.2026): lokales Membership-Journal
+
+Jede vom Device-Sync beabsichtigte Add-/Remove-Mutation erhält vor dem
+MECM-Write einen dauerhaften `intent`-Eintrag. Sein stabiler Schlüssel bindet
+VM, Rolloutrevision, ResourceID, CollectionID, Typ und Operation. Erst nach
+erfolgreicher Rückkehr des MECM-Cmdlets wechselt er zu `remote_confirmed`.
+Dieser Zustand darf idempotent an `reportMembership` replayt werden und wird
+erst nach einer 200-Antwort entfernt. Der bestehende Endpoint bleibt dabei
+unverändert: Fence und Provenienzwrites sind bereits transaktional, identische
+Adds/Removes idempotent.
+
+Ein beim Neustart verbliebener `intent` ist ausdrücklich `uncertain`. Der
+aktuelle Live-Bestand beweist nicht, ob genau dieser Prozess die Regel schrieb;
+deshalb erfolgen weder Adoption noch erneuter Remote-Write noch ResourceID-
+Registrierung. Alte Revisionen, andere ResourceIDs sowie 404/409 beim Replay
+werden ebenfalls ungeklärt gehalten. Unlesbare Dateien werden unter eindeutigem
+Quarantänenamen erhalten und blockieren den mutierenden Lauf. Kapazitäts- oder
+Schreibfehler blockieren vor dem Remote-Write. Ungeklärte Evidenz besitzt keine
+zeitbasierte automatische Löschung.
+
+Das versionierte JSON liegt neben den installierten Servermodulen, enthält
+keine Secrets und erbt deren geschützte Program-Files-ACL. Eine exklusive,
+prozesslang gehaltene Dateisperre verhindert zwei mutierende Device-Sync-
+Instanzen. `VirtuSphere-MembershipJournal.ps1` besitzt Schema, Bounds,
+Validierung, atomare Ersetzung und Quarantäne; Caller leiten diese Regeln nicht
+neu ab.
+
 Status: accepted (2026-07-27). Entscheidungen 1-3 der Härtungskampagne 2026-07.
 
 ## Kontext
@@ -75,3 +126,41 @@ sogar „bestehende Mitgliedschaften werden nie entfernt".
 - Das MECM-Hardware-Gate bleibt ausdrücklich offen: OS-Wechsel A→B mit
   überlebender Hand-Regel, wiederholter Device-Sync idempotent, Verteilung
   erfolgreich/in Arbeit/fehlgeschlagen korrekt gemeldet (Air-Gap-Checkliste).
+
+## Amendment 1 (2026-09-07): kein namensbasierter Autoimporter-Cleanup
+
+`removeOldVersion` autorisiert im normalen Importlauf keine MECM-Loeschung mehr.
+Ein passender Name oder Paketordner beweist weder VirtuSphere-Eigentum noch, dass
+die neue Application samt Deployment Type, aktuellem Content, Verteilung und
+Referenzen als Ersatz bereitsteht. Der Autoimporter erkennt exakte Kandidaten,
+laesst Deployment, Collection und Application unveraendert und meldet den
+offenen Bereinigungsbedarf. Ein spaeterer A14b-Executor benoetigt einen vor der
+Ausfuehrung erneut validierten Plan mit stabilen IDs, Ownership, Referenzen und
+Ersatznachweis. Portal-Retirement und MECM-Loeschung bleiben getrennte Vorgaenge.
+
+## Amendment 4 (2026-09-07): versionierter, revalidierter Bereinigungsplan
+
+Die Bereinigungsplanung liest zuerst alle Paketquellen und gruppiert sie mit
+ordinalem Produktnamen. Für Löschentscheidungen gilt absichtlich eine engere
+Versionssprache als im Portal: nur kanonische, nichtnegative, punktgetrennte
+Dezimalfolgen werden segmentweise geordnet. Dadurch gilt `1.10 > 1.9` und
+`10 > 2`, ohne Integerüberlauf. Freie, doppelte oder nicht interpretierbare
+Versionen blockieren. Das Portal darf solche Altwerte weiterhin über seine
+breitere `version_compare`-Semantik anzeigen; Anzeige und destruktive Freigabe
+haben nicht dieselbe Fachbedeutung.
+
+Neue Autoimporter-Applications und -Collections tragen je einen exakten,
+versionierten Ownership-Marker. Ein Name, ein Ordner oder ein Altbestand ohne
+Marker wird niemals nachträglich als Eigentum angenommen. Weiterhin in der
+Quelle liegende Versionen und vorhandene höhere Versionen bleiben erhalten.
+`Get-VsPackageRetirementPlan` verlangt für den eindeutigen Ersatz genau einen
+Deployment Type, bestätigtes Content-Tracking, vollständig erfolgreiche
+Verteilung und ein geprüftes Deployment. Kandidaten brauchen stabile CI- bzw.
+Collection-IDs, den passenden Marker und dürfen keine Referenz besitzen.
+
+Der Plan besitzt einen SHA-256-Fingerabdruck über seine kanonische Form.
+`Invoke-VsPackageRetirementPlan` akzeptiert nur einen unmittelbar erneut
+erhobenen Plan mit identischem Fingerabdruck und bricht beim ersten
+Einzelfehler mit einem expliziten Ergebnis ab. Der normale Autoimporter ruft
+diesen Executor nicht auf. Ein späterer operativer Aufruf bleibt eine gesondert
+freizugebende MECM-Handlung; Portal-Retirement löst ihn nicht aus.

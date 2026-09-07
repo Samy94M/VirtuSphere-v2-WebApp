@@ -61,4 +61,22 @@ final class MecmPlanVectorsTest extends TestCase
         self::assertNotSame($base, mecm_transfer_revision([['name' => 'Win11-25H1', 'type' => 'os']], $owned));
         self::assertNotSame($base, mecm_transfer_revision($desired, []));
     }
+
+    public function testRemoveCarriesTheAuthoritativeOwnedNameAndType(): void
+    {
+        $owned = [
+            ['collection_id' => 'VS1', 'collection_name' => 'Owned OS', 'type' => 'os'],
+            ['collection_id' => 'VS2', 'collection_name' => 'Owned package', 'type' => 'package'],
+            ['collection_id' => 'VS3', 'collection_name' => 'Owned mission', 'type' => 'mission'],
+        ];
+        $present = [
+            ['collection_id' => 'VS1', 'collection_name' => 'Observed OS'],
+            ['collection_id' => 'VS2', 'collection_name' => 'Observed package'],
+            ['collection_id' => 'VS3', 'collection_name' => 'Observed mission'],
+        ];
+
+        $plan = mecm_membership_plan([], $owned, $present);
+
+        self::assertSame($owned, $plan['remove']);
+    }
 }

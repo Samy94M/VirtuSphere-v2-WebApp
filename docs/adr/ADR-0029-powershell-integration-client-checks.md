@@ -20,6 +20,60 @@ The 2026-07-13 review found what that blind spot had been hiding:
 
 Treat the PowerShell integration clients as first-class code with the same discipline as the rest: a linter, tests, CI, and a shared source of truth across the language boundary.
 
+## Amendment 3 (2026-09-07): diagnostic streams and terminal-safe redaction
+
+The server and client logging twins normalize bounded ANSI CSI and OSC terminal
+sequences before applying their named-secret redactor. Any incomplete escape
+introducer is removed or discarded conservatively before redaction, and field
+separators, controls and UTF-8 byte limits are applied afterwards. This order is
+part of the mirrored contract: formatting must not reassemble `password` or a
+token header only after the last security check. The documented guarantee covers
+known labelled header, query and key forms, not arbitrary unlabelled free text.
+
+Logging is diagnostic output and therefore never uses PowerShell's success
+stream. Structured helpers keep stream 1 exclusively for their return value;
+sink warnings remain local, throttled and non-fatal and never create report or
+audit traffic. Contract version 1 remains wire-compatible because file schema,
+bounds, levels, packaging and public function signatures do not change.
+
+## Amendment 4 (2026-09-07): complete client network plan and owned rollback
+
+`client_staticip` no longer mutates the first matching adapter while later
+targets can still prove missing or ambiguous. A pure Common helper validates the
+complete snapshot against all local adapters first, including normalized MAC
+uniqueness, link state, name collisions, IPv4 values and the single-default-
+gateway policy. Empty target sets fail explicitly.
+
+The writer preserves IPv6 and unknown manual IPv4 configuration. It removes an
+IPv4 address or default route only when the previous successful VirtuSphere run
+recorded that exact value for the same MAC. Matching values are not rebuilt.
+Static empty DNS means preserve; DHCP resets DNS to automatic discovery.
+Address verification waits at most 15 seconds for `Tentative` to clear and
+rejects `Duplicate` and `Invalid`. Best-effort rollback is limited to values
+this run can still prove it wrote, so a concurrent foreign change is not erased.
+Local configuration success and delivery of the portal phase report remain
+separate facts.
+
+## Amendment 5 (2026-09-07): durable ownership for client disk setup
+
+`Set-VMDisksOnline` no longer equates an empty offline selection with completed
+work. Before the first write to a new offline RAW disk it persists a versioned
+registry operation containing stable storage identity, expected size and the
+states `intent`, `online`, `initialized`, `partitioned`, `formatted`, and
+`complete`. Disk number and friendly name are deliberately excluded as durable
+identity. `UniqueId` is preferred; only the complete serial-number,
+LocationPath and size tuple is an accepted fallback.
+
+Every run resolves all incomplete operations against the complete disk
+inventory before any storage write. A uniquely owned operation may resume after
+online, initialize, partition or format, including after renumbering. It reads
+back disk, the single GPT basic-data partition, drive letter, NTFS volume and
+the operation label. Unknown online RAW disks and any ambiguous, resized,
+foreign-partitioned, boot/system, read-only, clustered or sizeless target fail
+closed. Existing GPT/MBR data disks are only brought online. A named global
+mutex prevents concurrent writers. Missing optional extra storage is a distinct
+successful no-work result; an unresolved owned operation is not.
+
 - **PSScriptAnalyzer + Pester**, run by `scripts/run-pester.ps1` and **in CI** (`.github/workflows/ci.yml`). `pwsh` is preinstalled on `ubuntu-latest`; the two modules come from the PSGallery and are **not vendored** — the same dev-tooling rule ADR-0028 set for Playwright and Infection. The air-gap rule governs the shipped runtime artifact, not the build host.
 - **The MAC canonicalization gets a cross-language SSoT**: `Docker/WebAPI/tests/fixtures/mac-vectors.json`. PHPUnit (`MacNormalizeTest`) checks `virtusphere_normalize_mac()` against it; Pester checks both PowerShell twins against it; a further Pester test asserts the two twins are textually identical. Three implementations, one table, and a build fails when any of them drifts. They cannot share a file — they are deployed to three different machines — so the table is the only honest way to hold them together.
 - **Pure logic moves out of the endless loops** into the shared modules (`Read-VsPackageConfig`, `Get-VsSupersededNamePattern`, `Convert-VsSubnetMaskToPrefix`, `Get-VsErrorDetail`). What lives inside a `while ($true)` cannot be called by a test without starting it. This mirrors the portal rule that a page's helpers live in a `lib/<page>_*.php` module.
@@ -88,3 +142,26 @@ unchanged; the per-process correlation ID is an additive diagnostic header only.
 - **Merge the two PowerShell MAC twins into one shared file.** Rejected: the MECM scripts are installed to `%ProgramFiles%\VirtuSphere\mecm` on the SCCM server, the client scripts are packaged into MECM applications and shipped to the VMs. They have no common deployment root. The vector table plus a textual twin-check gives the same guarantee without inventing a shared deployment path.
 - **`Set-StrictMode -Version Latest`.** Rejected above: it would turn a legitimately absent JSON field into a crash inside an endless loop on the customer's server.
 - **Rewrite `install.ps1` (Package_Vorlage) for PS 7.** Rejected: MECM 2509 hosts and the PXE clients run Windows PowerShell 5.1, which stays the target (`#Requires -Version 5.1`).
+
+## Amendment (2026-09-07): UTF-8 transport, TLS trust exception and ACLs
+
+Server and client JSON writers now pass explicit UTF-8 byte arrays to Windows
+PowerShell 5.1 with `application/json; charset=utf-8`. Root arrays and wire
+fields remain unchanged. HTTP error diagnostics prefer
+`ErrorRecord.ErrorDetails.Message` before attempting to consume the response
+stream, and bound extracted envelope text before it reaches logging.
+
+For HTTPS, an empty certificate fingerprint keeps normal PKI validation. A
+configured fingerprint is a narrow trust exception for exactly that
+certificate when chain validation fails; it is not mandatory pinning of an
+otherwise valid PKI certificate. No accept-all callback is installed. The
+client reads the installer-provided fingerprint from the registry. Its address
+resolver accepts a responding endpoint only if it also returns the bounded
+VirtuSphere health document (`status`, `db`, PHP major/minor), so an arbitrary
+web server is not selected merely because it returns an HTTP status.
+
+Package-source ACL diagnostics translate identities to Well-Known SIDs instead
+of matching localized account names. The fully owned secret registry key is
+rebuilt from SYSTEM and Administrators ACEs, including removal of pre-existing
+explicit rules; unrelated shares remain diagnostic-only and are never
+recursively rewritten.

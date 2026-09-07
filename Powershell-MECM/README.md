@@ -4,6 +4,19 @@ Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
 laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
 MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
 
+Der normale Paketimport löscht keine Altversion. Eine Bereinigung braucht einen
+separat geprüften Plan mit eindeutigem numerischem Zielstand, stabilen IDs,
+VirtuSphere-Ownership, fehlenden Referenzen und vollständig bereitem Ersatz.
+Freie oder doppelte Versionsstrings, parallele Quellversionen und Altobjekte
+ohne Marker bleiben erhalten. Ein Portal-Retirement ist kein MECM-Löschauftrag.
+
+JSON wird unter Windows PowerShell 5.1 explizit als UTF-8 gesendet. Bei HTTPS
+bedeutet ein leerer Fingerabdruck normale PKI-Prüfung; ein gesetzter Abdruck ist
+nur die enge Vertrauensausnahme für genau dieses selbstsignierte Zertifikat.
+Ein allgemeiner Accept-all-Pfad existiert nicht. Die Paketpfadprüfung arbeitet
+mit SIDs und erkennt deshalb dieselben breiten Schreibrechte auf deutschem und
+englischem Windows.
+
 Alle umgebungsspezifischen Werte der **Server-Skripte** (Adresse der WebApp,
 Pfade, Site-Code) kommen aus der Registry
 `HKLM:\SOFTWARE\VirtuSphere\MECM` und stehen **nicht** im Server-Code. Diese
@@ -43,8 +56,9 @@ beide Installer und die Abnahmecheckliste.
 
 Ist noch kein DNS-Eintrag verfügbar, darf der Server-Installer vorläufig eine
 feste IP als `-WebApi '<WEBAPP-IP>:8021'` erhalten. Vor dem Client-Installer muss
-dann zusätzlich `$VsFallbackIpApi` in
-`clients/VirtuSphere-Client-Common.ps1` gesetzt werden. Die vollständige
+diese Adresse mit dessen `-WebApi`-Parameter in das ausgelieferte
+`bootstrap.json` geschrieben werden. `client_getinfo` übernimmt sie vor der
+ersten Auflösung einmalig in die Registry; Quelltext wird nicht angepasst. Die vollständige
 Übergangs- und spätere DNS-Wechselprozedur steht im Admin-Runbook.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
@@ -60,9 +74,11 @@ Content oder die Vorlage fehlt. Die Schlusszeile nennt dann die Zahl der offenen
 Punkte, und der Prozess endet mit Exit-Code 1. Ein **Hinweis** (`~~`) berührt das
 Ergebnis nicht: die DP-Gruppe darf legitim erst nach der Installation entstehen,
 DNS löst auf dem MECM-Server anders auf als im Deploy-VLAN, der Paketordner ist
-für Benutzer beschreibbar (eine ACL-Entscheidung), der Site-Health-Provider ist
-nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“), und die
-Abhängigkeitskette der Client-Apps wird bewusst nur best effort gesetzt. Ohne
+für Benutzer beschreibbar (eine ACL-Entscheidung), oder der Site-Health-Provider
+ist nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“). Die
+Abhängigkeitskette der Client-Apps wird bei jedem Re-Run geprüft; ein
+fehlender verwalteter Deployment Type oder eine nicht eindeutig nachweisbare
+notwendige Abhängigkeit ist ein Blocker. Ohne
 offene Punkte endet der Installer mit 0. Beide Klassen stehen zusätzlich im
 Tageslog unter `Logs`, weil das Konsolenfenster den Feierabend nicht überlebt.
 
@@ -88,6 +104,18 @@ Installer deaktiviert ihre Trigger, beendet laufende Aufgaben, bevor er die
 Skripte ersetzt, und registriert und startet sie danach neu. Ein Fehler beim
 Deaktivieren oder Stoppen bricht den Austausch sichtbar und fail-closed ab.
 
+Upgrade und Re-Run halten dafür einen gemeinsamen Rollbackkontext. Ein globaler
+Mutex verhindert konkurrierende Installer; der Installationspfad muss exakt das
+lokale, reparse-freie `%ProgramFiles%\VirtuSphere\mecm` sein. Vor dem ersten
+Write sichert der Installer alle Registrywerte samt Typ und ACL sowie XML und
+Laufzustand der vier eigenen Aufgaben. Der alte vollständige Dateisatz bleibt
+bis nach Registrierung, Start, Verifikation und Abschlussmarker erhalten. Bei
+einem Fehler werden zunächst alle eventuell neuen Aufgabenprozesse beendet,
+dann Dateien und Registry und zuletzt die vorherigen Taskdefinitionen
+wiederhergestellt. Zuvor laufende alte Aufgaben werden nur neu gestartet, wenn
+Prozessende, Datei- und Registry-Rollback vollständig belegt sind; andernfalls
+bleiben sie deaktiviert und die Fehlermeldung nennt den unvollständigen Teil.
+
 Die Intervalle sind Registry-owned (Installerparameter, Spalte oben = Standard)
 und je Aufgabe auf 5/10/30/60 s bis 3600 s begrenzt; die Spanne steht in
 `$script:VsIntervalBounds` (`mecm\VirtuSphere-Common.ps1`), der Installer
@@ -111,6 +139,13 @@ Server und Clients verwenden denselben versionierten Sechs-Feld-Vertrag:
 Level `DEBUG`/`INFO`/`WARN`/`ERROR`, UTF-8-sichere Grenzen, Redigierung benannter
 Secrets und 30 Tage Aufbewahrung. Eine Korrelations-ID gilt für genau einen
 PowerShell-Prozess und wird als reiner Diagnoseheader an die WebApp gegeben. Ein
+nicht vertrauenswuerdiger Logtext wird zuerst von ANSI-/OSC-Terminalsequenzen
+bereinigt und erst danach redigiert; dadurch kann eine Escape-Sequenz einen
+bekannten Secret-Schluessel nicht in zwei scheinbar harmlose Teile zerlegen.
+Die Zusage gilt fuer die dokumentierten benannten Header-, Parameter- und
+Schluesselformen, nicht fuer unbeschriftete Geheimnisse in beliebigem Freitext.
+Logger schreiben Diagnosen nicht auf den Success-Stream; datengebende Helfer
+liefern dort deshalb nur ihren Fachwert. Ein
 nicht schreibbarer Log-Sink stoppt die Aufgabe nicht: lokal erscheint höchstens
 eine Warnung pro Störung und eine Meldung bei Erholung. Das erzeugt weder einen
 zusätzlichen Heartbeat noch einen Auditeintrag. Site Health schreibt
@@ -143,6 +178,11 @@ zustandsbehafteten Stagingdateien auszuführen. Erst danach deaktiviert und
 beendet er die laufenden Aufgaben und tauscht Loggingmodul, Laufzeitskripte und
 Common-Fassade als einen Paketsatz aus.
 
+Dieser Satz bildet zusammen mit dem Registry- und Taskzustand eine
+Installertransaktion: Bis zum Abschlussmarker bleibt der vollständige Altstand
+verfügbar. Ein Rollback startet alte Aufgaben erst wieder, nachdem neue Prozesse
+beendet und Dateien sowie Registry vollständig wiederhergestellt wurden.
+
 Common stellt bereit:
 
 | Funktion | Zweck |
@@ -153,10 +193,10 @@ Common stellt bereit:
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
 | `Resolve-VsInterval` | löst das konfigurierte Intervall **einmal** auf, für den Sleep und den Report: Untergrenze je Aufgabe aus `$script:VsIntervalBounds`, Obergrenze aus dem Wire-Contract, und eine WARN-Zeile, wenn geklemmt wurde. Die Statusseite färbt die Zeile nach dem *gemeldeten* Takt, also darf keine Aufgabe in einem anderen laufen |
 | `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
-| `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM abfragen; reine Statusabbildung `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
+| `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM für exakt den konfigurierten Site-Code abfragen; fehlende, mehrdeutige oder unlesbare Zeilen sind `unknown`, die reine Statusabbildung bleibt `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
 | `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); nur noch für Rückwärtskompatibilität, die aktuellen Skripte senden `reportRun` (ADR-0018) |
 | `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und MECM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
-| `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster für die Alt-Versions-Bereinigung (`^Name-<version>$`, exakt — der Wildcard `Name*` löschte früher auch `Firefox-ESR-*`). Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
+| `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster zum Erkennen namensähnlicher Alt-Versionen (`^Name-<version>$`, exakt). Das Muster ist kein Eigentumsnachweis und autorisiert keine Löschung. Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
 | `Get-VsSiteCode` / `Initialize-VsCmSite` | Site-Code dreistufig ermitteln (WMI-Namespace → CMSite-PSDrive → Registry-Fallback), ConfigurationManager-Modul laden, ins Site-Drive wechseln |
 
 Außerdem ist Common die SSoT für den MECM-Ordnernamen
@@ -248,6 +288,10 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
    - ResourceID beschaffen, notfalls per `Approve-CMDevice` nachhelfen;
      ohne ResourceID: nächster Scan.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
+     Vor jedem Remote-Write wird ein lokaler Journal-Intent dauerhaft
+     gespeichert. Nur ein bestätigtes Remote-Ergebnis wird idempotent ans
+     Portal nachgemeldet; ein beim Absturz offener Intent blockiert als
+     ungeklärter Ownership-Fall statt eine vorhandene Regel zu adoptieren.
    - Provenienz und ResourceID per `POST /mecm_updateid.php` zurückmelden,
      beides mit `rollout_revision`. Antwortet das Portal mit 409, arbeitet
      dieser Scan mit einem veralteten Rollout: eigener Code
@@ -290,10 +334,11 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   `version`) oder ein unbekanntes `InstallationBehaviorType` → Ordner wird
   übersprungen und protokolliert.
 - Je Paket (`Name-Version`):
-  - **Alt-Versions-Bereinigung** (bei `removeOldVersion: "true"`): entfernt
-    Deployment, Collection und Application alter Versionen, aber nur mit
-    exaktem Muster `^Name-<Version>$`. Das behebt den früheren Wildcard-Bug,
-    bei dem ein `Firefox`-Update auch `Firefox-ESR-*` löschte.
+  - **Alt-Versionen** (bei `removeOldVersion: "true"`): werden mit dem exakten
+    Muster `^Name-<Version>$` erkannt, aber vom normalen Importlauf nicht
+    gelöscht. Name und Ordner beweisen weder Eigentum noch Ersatzbereitschaft.
+    Der Lauf meldet deshalb `package_cleanup_failed` und hält den Stamp zurück,
+    bis ein gesonderter, sicherer Bereinigungsplan verfügbar ist.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
     Install-Kommando
     `powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "install.ps1"`
@@ -468,16 +513,33 @@ V23 trennt das read-only `getDeviceInfos` vom verbindlichen, idempotenten
 Default `http` funktionieren sie ohne CA, Zertifikat oder Thumbprint.
 
 `client_staticip` setzt beide Modi, die das Portal kennt: `static` konfiguriert
-Adresse, Präfix, Gateway und DNS, `dhcp` stellt eine zuvor statische Karte
-wieder auf DHCP zurück (samt Zurücksetzen der DNS-Server); vorher lief eine
-solche Karte ohne jede Aktion durch und wurde trotzdem als erfolgreich gezählt.
-Beide Zweige lesen den Sollzustand danach nach; gezählt wird nur, was
-verifiziert ist. Ein Modus, den das Skript nicht kennt, ist ein benannter
-Fehlschlag. Das Detail des Laufs nennt die Verteilung
+Adresse, Präfix, optional genau ein Gateway und bei nichtleerem Soll die DNS-
+Server; leeres statisches DNS erhält den vorhandenen Stand. `dhcp` stellt eine
+zuvor von VirtuSphere statisch verwaltete Karte wieder auf DHCP und automatische
+DNS-Ermittlung zurück. Vor dem ersten Write müssen alle Soll-MACs eindeutig auf
+aktive Adapter zeigen; doppelte MACs/Namen, fehlende oder Down-Adapter,
+ungültige IPv4-Werte und mehrere Gateways blockieren den ganzen Plan. IPv4-
+Adresse und Default-Route werden nur entfernt, wenn der vorherige erfolgreiche
+Lauf ihre Eigentümerschaft dokumentiert; IPv6 und fremde Werte bleiben erhalten.
+Beide Zweige lesen DHCP, Adresse, Route und DNS nach; `Tentative` hat ein
+15-Sekunden-Limit, `Duplicate`/`Invalid` scheitern. Ein Modus, den das Skript
+nicht kennt, ist ein benannter Fehlschlag. Das Detail des Laufs nennt die Verteilung
 (`applied=3 (static=2 dhcp=1)`), damit die Portalkarte mehr zeigt als eine Zahl.
 Die Modusnamen gehören `VIRTUSPHERE_INTERFACE_MODES` in
 `Docker/WebAPI/lib/defaults.php`; ein Pester-Test hält die beiden
 PowerShell-Literale dagegen.
+
+`Set-VMDisksOnline` trennt die aktuelle Offline-Auswahl von offenen eigenen
+Operationen. Für eine neue Offline-RAW-Platte wird vor `Set-Disk` ein
+versioniertes Registry-Journal mit stabiler Storage-Identität und erwarteter
+Größe geschrieben. Ein Retry findet diesen Eintrag unabhängig von Disknummer
+und Onlinezustand wieder, gleicht Disk, GPT-Basic-Data-Partition,
+Laufwerksbuchstabe, NTFS und das erwartete Label mit der tatsächlichen
+Storageansicht ab und setzt nur eindeutige eigene Arbeit fort. Unbekannte
+online-RAW-Platten werden nicht adoptiert oder formatiert. Vorhandene GPT-/MBR-
+Datenplatten werden ausschließlich online geschaltet. Boot-/System-, Read-only,
+Cluster-, größenlose oder mehrdeutige Datenträger sind benannte Fehler; eine VM
+ohne Zusatzplatte bleibt dagegen ein ausdrücklich optionaler Erfolgsfall.
 
 `client_hostname` kürzt und bereinigt den Namen nach den NetBIOS-Regeln und
 **meldet die Abweichung, bricht aber nicht ab**: die verbindliche Prüfung sitzt

@@ -6,6 +6,24 @@
 # dot-sourct und das ConfigurationManager-Modul braucht.
 Set-StrictMode -Version 1.0
 
+function Get-VsDangerousFileSystemAclEntries {
+    param([Parameter(Mandatory)]$Acl)
+    $broadSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+    $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    return @($Acl.Access | Where-Object {
+        $entry = $_
+        if ($entry.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { return $false }
+        try { $sid = $entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$entry.IdentityReference }
+        return $broadSids -contains $sid -and (([int64]$entry.FileSystemRights -band [int64]$writeMask) -ne 0)
+    })
+}
+
 # Die vier Client-Applikationen als Datentabelle - die SSoT fuer das
 # Paket-Skript. DetectionKey/-Name/-Values MUESSEN exakt das sein, was das
 # jeweilige Client-Skript zur Laufzeit in die Registry schreibt: stimmt es nicht,
@@ -26,6 +44,12 @@ function Get-VsClientAppSpecs {
             DetectionValues = @('complete')
             DetectionType   = 'String'
             DependsOn       = $null
+            ManagedMarker   = 'VirtuSphere managed client application contract v1'
+            ReturnCodes     = @(
+                [pscustomobject]@{ Value = 0; Type = 'Success' }
+                [pscustomobject]@{ Value = 1641; Type = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; Type = 'SoftReboot' }
+            )
         }
         [pscustomobject]@{
             AppName         = 'client_hostname'
@@ -39,6 +63,12 @@ function Get-VsClientAppSpecs {
             DetectionValues = @('Erfolgreich', 'Uebersprungen')
             DetectionType   = 'String'
             DependsOn       = 'client_getInfos'
+            ManagedMarker   = 'VirtuSphere managed client application contract v1'
+            ReturnCodes     = @(
+                [pscustomobject]@{ Value = 0; Type = 'Success' }
+                [pscustomobject]@{ Value = 1641; Type = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; Type = 'SoftReboot' }
+            )
         }
         [pscustomobject]@{
             AppName         = 'client_staticip'
@@ -53,6 +83,12 @@ function Get-VsClientAppSpecs {
             DetectionValues = @('1')
             DetectionType   = 'Int64'
             DependsOn       = 'client_hostname'
+            ManagedMarker   = 'VirtuSphere managed client application contract v1'
+            ReturnCodes     = @(
+                [pscustomobject]@{ Value = 0; Type = 'Success' }
+                [pscustomobject]@{ Value = 1641; Type = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; Type = 'SoftReboot' }
+            )
         }
         [pscustomobject]@{
             AppName         = 'client_VMDisksOnline'
@@ -63,8 +99,156 @@ function Get-VsClientAppSpecs {
             DetectionValues = @('Success')
             DetectionType   = 'String'
             DependsOn       = 'client_staticip'
+            ManagedMarker   = 'VirtuSphere managed client application contract v1'
+            ReturnCodes     = @(
+                [pscustomobject]@{ Value = 0; Type = 'Success' }
+                [pscustomobject]@{ Value = 1641; Type = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; Type = 'SoftReboot' }
+            )
         }
     )
+}
+
+function Assert-VsClientAppSpecGraph {
+    param([Parameter(Mandatory)][object[]]$Specs)
+    $byName = @{}
+    foreach ($spec in $Specs) {
+        $name = [string]$spec.AppName
+        if ([string]::IsNullOrWhiteSpace($name) -or $byName.ContainsKey($name)) {
+            throw ("Client-App-Graph enthaelt einen leeren oder doppelten Namen: '{0}'." -f $name)
+        }
+        $byName[$name] = $spec
+    }
+    foreach ($spec in $Specs) {
+        if ($spec.DependsOn -and -not $byName.ContainsKey([string]$spec.DependsOn)) {
+            throw ("Client-App-Graph verweist von '{0}' auf den unbekannten Vorgaenger '{1}'." -f $spec.AppName, $spec.DependsOn)
+        }
+        $seen = @{}
+        $cursor = $spec
+        while ($cursor -and $cursor.DependsOn) {
+            if ($seen.ContainsKey([string]$cursor.AppName)) {
+                throw ("Client-App-Graph enthaelt einen Zyklus bei '{0}'." -f $cursor.AppName)
+            }
+            $seen[[string]$cursor.AppName] = $true
+            $cursor = $byName[[string]$cursor.DependsOn]
+        }
+    }
+}
+
+function Get-VsClientContentManifest {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw ("Client-Contentpfad fehlt oder ist kein Verzeichnis: {0}" -f $Path)
+    }
+    $root = (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName.TrimEnd('\', '/')
+    $result = @()
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
+        $result += [pscustomobject]@{
+            Path   = $relative
+            Length = [long]$file.Length
+            Sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+        }
+    }
+    return @($result)
+}
+
+function Compare-VsClientContentManifest {
+    param(
+        [Parameter(Mandatory)][string]$StagedPath,
+        [Parameter(Mandatory)][string]$PublishedPath
+    )
+    $staged = @(Get-VsClientContentManifest -Path $StagedPath)
+    $published = @(Get-VsClientContentManifest -Path $PublishedPath)
+    if ($staged.Count -eq 0) { return @('staged:empty') }
+    $issues = @()
+    if ($staged.Count -ne $published.Count) {
+        $issues += ('file-count:{0}!={1}' -f $staged.Count, $published.Count)
+    }
+    $publishedByPath = @{}
+    foreach ($entry in $published) { $publishedByPath[[string]$entry.Path] = $entry }
+    foreach ($entry in $staged) {
+        if (-not $publishedByPath.ContainsKey([string]$entry.Path)) {
+            $issues += ('missing:{0}' -f $entry.Path)
+            continue
+        }
+        $other = $publishedByPath[[string]$entry.Path]
+        if ($entry.Length -ne $other.Length -or $entry.Sha256 -ne $other.Sha256) {
+            $issues += ('content:{0}' -f $entry.Path)
+        }
+        $publishedByPath.Remove([string]$entry.Path)
+    }
+    foreach ($extra in @($publishedByPath.Keys | Sort-Object)) { $issues += ('extra:{0}' -f $extra) }
+    return @($issues)
+}
+
+function Test-VsClientApplicationOwnership {
+    param(
+        [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)]$Spec,
+        [Parameter(Mandatory)][string]$AppFolder
+    )
+    $description = if ($Application.PSObject.Properties['LocalizedDescription']) { [string]$Application.LocalizedDescription } elseif ($Application.PSObject.Properties['Description']) { [string]$Application.Description } else { '' }
+    if ($description -eq [string]$Spec.ManagedMarker) { return $true }
+    # Legacy adoption is deliberately narrow: older installers moved their app
+    # into the dedicated folder before creating the DT. Name alone is never
+    # ownership evidence; a half-created app outside that folder stays foreign.
+    $objectPath = if ($Application.PSObject.Properties['ObjectPath']) { [string]$Application.ObjectPath } else { '' }
+    if ([string]::IsNullOrWhiteSpace($objectPath)) { return $false }
+    return (($objectPath.TrimEnd('\') -split '\\')[-1] -eq $AppFolder)
+}
+
+function Get-VsObjectPropertyText {
+    param([Parameter(Mandatory)]$Object, [Parameter(Mandatory)][string[]]$Names)
+    foreach ($name in $Names) {
+        if ($Object.PSObject.Properties[$name] -and $null -ne $Object.$name) { return [string]$Object.$name }
+    }
+    return ''
+}
+
+function Get-VsClientDeploymentTypeContractIssues {
+    param(
+        [Parameter(Mandatory)]$DeploymentType,
+        [Parameter(Mandatory)]$Spec,
+        [Parameter(Mandatory)][string]$ContentLocation,
+        [Parameter(Mandatory)][string]$InstallCommand,
+        [Parameter(Mandatory)][object[]]$ReturnCodes
+    )
+    $issues = @()
+    $expectedName = '{0} Deployment' -f $Spec.AppName
+    $actualName = Get-VsObjectPropertyText -Object $DeploymentType -Names @('LocalizedDisplayName', 'DeploymentTypeName')
+    if ($actualName -ne $expectedName) { $issues += 'deployment-type-name' }
+    $rawXml = Get-VsObjectPropertyText -Object $DeploymentType -Names @('SDMPackageXML')
+    if ([string]::IsNullOrWhiteSpace($rawXml)) { return @($issues + 'definition-unreadable') }
+    try { [xml]$xml = $rawXml } catch { return @($issues + 'definition-invalid-xml') }
+    $values = New-Object System.Collections.Generic.List[string]
+    foreach ($node in @($xml.SelectNodes('//*'))) {
+        if ($node.ChildNodes.Count -eq 1 -and $node.FirstChild.NodeType -in @([Xml.XmlNodeType]::Text, [Xml.XmlNodeType]::CDATA)) {
+            [void]$values.Add([string]$node.InnerText)
+        }
+        foreach ($attribute in @($node.Attributes)) { [void]$values.Add([string]$attribute.Value) }
+    }
+    $expectedValues = @($ContentLocation.TrimEnd('\'), $InstallCommand, [string]$Spec.DetectionKey, [string]$Spec.DetectionName, [string]$Spec.DetectionType, 'BasedOnExitCode')
+    $expectedValues += @($Spec.DetectionValues | ForEach-Object { [string]$_ })
+    foreach ($expected in $expectedValues) {
+        $matched = @($values | Where-Object { ([string]$_).TrimEnd('\') -eq $expected }).Count -gt 0
+        if (-not $matched) { $issues += ('definition:{0}' -f $expected) }
+    }
+    if (@($values | Where-Object { $_ -in @('InstallForSystem', 'System') }).Count -eq 0) { $issues += 'installation-context-system' }
+    if (@($Spec.DetectionValues).Count -gt 1 -and $rawXml -notmatch '(?i)\bOR\b') { $issues += 'detection-connector-or' }
+
+    foreach ($expectedCode in @($Spec.ReturnCodes)) {
+        $codeMatches = @($ReturnCodes | Where-Object {
+            (Get-VsObjectPropertyText -Object $_ -Names @('Value', 'ReturnCode', 'ExitCode', 'Code')) -eq [string]$expectedCode.Value
+        })
+        if ($codeMatches.Count -ne 1) {
+            $issues += ('return-code:{0}' -f $expectedCode.Value)
+            continue
+        }
+        $actualType = Get-VsObjectPropertyText -Object $codeMatches[0] -Names @('CodeType', 'Type')
+        if ($actualType -ne [string]$expectedCode.Type) { $issues += ('return-code-type:{0}' -f $expectedCode.Value) }
+    }
+    return @($issues)
 }
 
 # Liest eine einzelne ganzzahlige Vertragskonstante ueber den PowerShell-AST.
@@ -131,7 +315,8 @@ function Copy-VsClientContent {
     param(
         [Parameter(Mandatory)][pscustomobject]$Spec,
         [Parameter(Mandatory)][string]$SourceDir,
-        [Parameter(Mandatory)][string]$PackagesBase
+        [Parameter(Mandatory)][string]$PackagesBase,
+        [Parameter(Mandatory)][hashtable]$Bootstrap
     )
     $scriptSource = Join-Path $SourceDir $Spec.Script
     $commonSource = Join-Path $SourceDir 'VirtuSphere-Client-Common.ps1'
@@ -163,6 +348,8 @@ function Copy-VsClientContent {
                 throw ('Client-Content-Pruefsumme weicht ab: {0}' -f (Split-Path $src -Leaf))
             }
         }
+        $bootstrapJson = $Bootstrap | ConvertTo-Json -Depth 3
+        [IO.File]::WriteAllText((Join-Path $stage 'bootstrap.json'), $bootstrapJson, (New-Object Text.UTF8Encoding($false)))
         if ($hadDestination) {
             Move-Item -Path $dest -Destination $backup -ErrorAction Stop
             $destinationBackedUp = $true

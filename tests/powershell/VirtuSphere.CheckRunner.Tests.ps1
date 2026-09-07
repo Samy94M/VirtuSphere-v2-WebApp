@@ -101,6 +101,27 @@ Describe 'dot-sourced runner modules' {
             [Environment]::GetEnvironmentVariables().Count | Should -Be $beforeEnvironment
         }
     }
+
+    It 'Get-CheckFiles schneidet QA-Artefakte frueh ab und behaelt neue echte Quellen' {
+        $runtime = Join-Path $script:ModuleDir 'runtime.ps1'
+        $fixture = Join-Path $TestDrive 'scan-root'
+        $sourceDir = Join-Path $fixture 'source'
+        $artifactDir = Join-Path $fixture 'qa-artifacts\copy'
+        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $sourceDir 'new-untracked.ps1') -Value 'function Test-NewSource { return 1 }'
+        Set-Content -LiteralPath (Join-Path $artifactDir 'broken-copy.ps1') -Value 'this is { broken'
+
+        $files = & {
+            param($module, $root)
+            . $module
+            $repoRoot = $root
+            Get-CheckFiles @('*.ps1')
+        } $runtime $fixture
+
+        @($files).Count | Should -Be 1
+        @($files)[0] | Should -Be (Join-Path $sourceDir 'new-untracked.ps1')
+    }
 }
 
 Describe 'JavaScript visual contracts' {

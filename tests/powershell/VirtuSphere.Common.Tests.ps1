@@ -181,6 +181,92 @@ Describe 'Convert-VsSubnetMaskToPrefix' {
     }
 }
 
+Describe 'New-VsClientNetworkPlan (vollstaendige Vorabvalidierung)' {
+    BeforeAll {
+        $script:NetworkAdapter1 = [pscustomobject]@{ MacAddress = '00-11-22-33-44-55'; Status = 'Up'; PhysicalMediaType = '802.3'; ifIndex = 7; Name = 'Ethernet' }
+        $script:NetworkAdapter2 = [pscustomobject]@{ MacAddress = '00-11-22-33-44-66'; Status = 'Up'; PhysicalMediaType = '802.3'; ifIndex = 8; Name = 'Ethernet 2' }
+        $script:StaticTarget = [pscustomobject]@{ Mac = '00:11:22:33:44:55'; Name = 'Server'; Mode = 'static'; Ip = '10.0.0.10'; Subnet = '24'; Gateway = '10.0.0.1'; Dns1 = '10.0.0.2'; Dns2 = '' }
+        $script:DhcpTarget = [pscustomobject]@{ Mac = '00:11:22:33:44:66'; Name = 'Backup'; Mode = 'dhcp'; Ip = ''; Subnet = ''; Gateway = ''; Dns1 = ''; Dns2 = '' }
+
+        function script:Get-NetworkPlanForTest {
+            param([array]$Targets, [array]$Adapters)
+            $bundle = @{ Targets = @($Targets); Adapters = @($Adapters) }
+            Invoke-InFileScope -Path $script:ClientCommon -Arguments @($bundle) -Body {
+                param($b) New-VsClientNetworkPlan -Targets $b.Targets -Adapters $b.Adapters
+            }
+        }
+    }
+
+    It 'ordnet jede Soll-MAC genau einem nutzbaren Adapter zu' {
+        $plan = Get-NetworkPlanForTest -Targets @($script:DhcpTarget, $script:StaticTarget) -Adapters @($script:NetworkAdapter1, $script:NetworkAdapter2)
+        $plan.Valid | Should -BeTrue
+        @($plan.Items).Count | Should -Be 2
+        @($plan.Items | ForEach-Object Mac) | Should -Be @('00:11:22:33:44:55', '00:11:22:33:44:66')
+        $plan.Items[0].Prefix | Should -Be 24
+    }
+
+    It 'blockiert vor Writes wenn eine zweite Soll-NIC fehlt' {
+        $plan = Get-NetworkPlanForTest -Targets @($script:StaticTarget, $script:DhcpTarget) -Adapters @($script:NetworkAdapter1)
+        $plan.Valid | Should -BeFalse
+        $plan.Errors -join ' ' | Should -Match '00:11:22:33:44:66 fehlt'
+    }
+
+    It 'blockiert doppelte MACs, Down-Adapter und mehrere Gateways' {
+        $secondStatic = [pscustomobject]@{ Mac = '00:11:22:33:44:66'; Name = 'Backup'; Mode = 'static'; Ip = '10.0.1.10'; Subnet = '24'; Gateway = '10.0.1.1'; Dns1 = ''; Dns2 = '' }
+        $down = [pscustomobject]@{ MacAddress = '00-11-22-33-44-66'; Status = 'Down'; PhysicalMediaType = '802.3'; ifIndex = 8; Name = 'Ethernet 2' }
+        $plan = Get-NetworkPlanForTest -Targets @($script:StaticTarget, $secondStatic) -Adapters @($script:NetworkAdapter1, $down, $down)
+        $plan.Valid | Should -BeFalse
+        $text = $plan.Errors -join ' '
+        $text | Should -Match 'mehrdeutig'
+        $text | Should -Match 'Mehrere Sollschnittstellen definieren ein Default-Gateway'
+    }
+
+    It 'behandelt eine leere Sollmenge als Fehler' {
+        (Get-NetworkPlanForTest -Targets @() -Adapters @($script:NetworkAdapter1)).Valid | Should -BeFalse
+    }
+}
+
+Describe 'Get-VsDiskStableIdentity (A09 Wiederanlauf)' {
+    It 'bevorzugt die stabile UniqueId und ignoriert die veraenderliche Disknummer' {
+        $first = [pscustomobject]@{ Number = 2; UniqueId = ' 6000C29A-ABC '; SerialNumber = 'old'; LocationPath = 'slot-1'; Size = 10GB }
+        $renumbered = [pscustomobject]@{ Number = 7; UniqueId = '6000C29A-ABC'; SerialNumber = 'different'; LocationPath = 'slot-9'; Size = 10GB }
+        $bundle = @($first, $renumbered)
+        $ids = Invoke-InFileScope -Path $script:ClientCommon -Arguments @(,$bundle) -Body {
+            param($items) @($items | ForEach-Object { Get-VsDiskStableIdentity -Disk $_ })
+        }
+        $ids[0].Valid | Should -BeTrue
+        $ids[0].Identity | Should -Be 'unique:6000C29A-ABC'
+        $ids[1].Identity | Should -Be $ids[0].Identity
+    }
+
+    It 'verwendet nur den vollstaendigen Seriennummer-Location-Groesse-Fallback' {
+        $disk = [pscustomobject]@{ Number = 3; UniqueId = ''; SerialNumber = 'SER-1'; LocationPath = 'PCIROOT(0)#SLOT(4)'; Size = 20GB }
+        $id = Invoke-InFileScope -Path $script:ClientCommon -Arguments @($disk) -Body {
+            param($item) Get-VsDiskStableIdentity -Disk $item
+        }
+        $id.Valid | Should -BeTrue
+        $id.Identity | Should -Be "serial-location-size:SER-1|PCIROOT(0)#SLOT(4)|$([long](20GB))"
+    }
+
+    It 'verweigert Disknummer, FriendlyName oder einen unvollstaendigen Fallback als Eigentumsbeweis' {
+        $disk = [pscustomobject]@{ Number = 4; FriendlyName = 'VMware Virtual disk'; UniqueId = ''; SerialNumber = 'SER-1'; LocationPath = ''; Size = 20GB }
+        $id = Invoke-InFileScope -Path $script:ClientCommon -Arguments @($disk) -Body {
+            param($item) Get-VsDiskStableIdentity -Disk $item
+        }
+        $id.Valid | Should -BeFalse
+        $id.Identity | Should -BeNullOrEmpty
+        $id.Reason | Should -Match 'stabile Datentraegeridentitaet'
+    }
+
+    It 'bildet fuer dieselbe Identitaet einen deterministischen Journalschluessel' {
+        $hashes = Invoke-InFileScope -Path $script:ClientCommon -Arguments @('unique:disk-1') -Body {
+            param($value) @((Get-VsSha256Hex -Value $value), (Get-VsSha256Hex -Value $value))
+        }
+        $hashes[0] | Should -Be $hashes[1]
+        $hashes[0] | Should -Match '^[0-9a-f]{64}$'
+    }
+}
+
 Describe 'Get-VsSupersededNamePattern' {
 
     BeforeAll {
@@ -212,6 +298,110 @@ Describe 'Get-VsSupersededNamePattern' {
         'Node.js-20' | Should -Match $dotted
         # Ohne Escape wuerde der Punkt jedes Zeichen treffen.
         'NodeXjs-20' | Should -Not -Match $dotted
+    }
+}
+
+Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
+    BeforeAll { . $script:MecmCommon }
+
+    It 'ordnet numerische Segmente statt lexikalisch oder ueber begrenzte Integer' {
+        (Compare-VsPackageVersion -Left '1.9' -Right '1.10') | Should -Be -1
+        (Compare-VsPackageVersion -Left '2' -Right '10') | Should -Be -1
+        (Compare-VsPackageVersion -Left '999999999999999999999' -Right '10') | Should -Be 1
+        (Compare-VsPackageVersion -Left '1.0' -Right '1') | Should -Be 0
+        { Compare-VsPackageVersion -Left 'release-x' -Right '1' } | Should -Throw '*Nicht interpretierbare*'
+    }
+
+    It 'blockiert freie oder doppelte Quellversionen und waehlt sonst genau den hoechsten Zielstand' {
+        $selected = @(Get-VsPackageSourceSelections -Packages @(
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '1.9' },
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '1.10' },
+            [pscustomobject]@{ ProjectName = 'Free'; version = 'release-x' },
+            [pscustomobject]@{ ProjectName = 'Dup'; version = '2' },
+            [pscustomobject]@{ ProjectName = 'Dup'; version = '2' }
+        ))
+        ($selected | Where-Object ProductName -eq 'Agent').TargetName | Should -Be 'Agent-1.10'
+        ($selected | Where-Object ProductName -eq 'Free').State | Should -Be 'blocked'
+        ($selected | Where-Object ProductName -eq 'Dup').State | Should -Be 'blocked'
+    }
+
+    It 'plant nur nicht mehr gelieferte, markierte und unreferenzierte IDs bei belegtem Ersatz' {
+        $selection = (Get-VsPackageSourceSelections -Packages @(
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '1.10' },
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '1.9' }
+        ))[0]
+        $replacement = [pscustomobject]@{ Name = 'Agent-1.10'; Owned = $true; DeploymentTypeCount = 1; ContentState = 'complete'; DistributionState = 'succeeded'; DeploymentReady = $true }
+        $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @(
+            [pscustomobject]@{ LocalizedDisplayName = 'Agent-1.8'; CI_ID = '101'; LocalizedDescription = $script:VsManagedPackageApplicationMarker },
+            [pscustomobject]@{ LocalizedDisplayName = 'Agent-1.7'; CI_ID = '102'; LocalizedDescription = 'foreign' },
+            [pscustomobject]@{ LocalizedDisplayName = 'Agent-1.9'; CI_ID = '103'; LocalizedDescription = $script:VsManagedPackageApplicationMarker }
+        ) -Collections @(
+            [pscustomobject]@{ Name = 'Agent-1.8'; CollectionID = 'C01'; Comment = $script:VsManagedPackageCollectionMarker }
+        ) -Replacement $replacement -References @(
+            [pscustomobject]@{ TargetType = 'collection'; TargetId = 'C99' }
+        ) -ReferenceScanComplete $true
+        $plan.State | Should -Be 'blocked'
+        $plan.Blockers | Should -Contain 'application_not_owned:Agent-1.7'
+        @($plan.Items | Where-Object Name -eq 'Agent-1.8').Count | Should -Be 2
+        @($plan.Items | Where-Object Name -eq 'Agent-1.9').Count | Should -Be 0 -Because 'eine weiterhin gelieferte Quellversion wird nie bereinigt'
+        $plan.PlanHash | Should -Match '^[0-9a-f]{64}$'
+    }
+
+    It 'blockiert einen unvollstaendigen Referenzscan auch bei leerer Fundliste' {
+        $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
+        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; ContentState = 'complete'; DistributionState = 'succeeded'; DeploymentReady = $true }
+        $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @() -Collections @() -Replacement $replacement -References @() -ReferenceScanComplete $false
+        $plan.State | Should -Be 'blocked'
+        $plan.Blockers | Should -Contain 'reference_scan_incomplete'
+    }
+
+    It 'verweigert einen veralteten Plan vor dem ersten Remove' {
+        $calls = New-Object System.Collections.Generic.List[string]
+        $approved = [pscustomobject]@{ State = 'ready'; PlanHash = 'a'; Items = @([pscustomobject]@{ Kind = 'application'; Id = '1'; Name = 'A-1' }) }
+        $current = [pscustomobject]@{ State = 'ready'; PlanHash = 'b'; Items = $approved.Items }
+        { Invoke-VsPackageRetirementPlan -ApprovedPlan $approved -CurrentPlan $current -RemoveApplication { param($i) $calls.Add($i.Id) } -RemoveCollection { param($i) $calls.Add($i.Id) } } | Should -Throw '*veraltet*'
+        $calls.Count | Should -Be 0
+    }
+
+    It 'bricht nach einem Teilfehler ab und meldet jede ausgefuehrte Einheit' {
+        $items = @(
+            [pscustomobject]@{ Kind = 'application'; Id = '1'; Name = 'A-1' },
+            [pscustomobject]@{ Kind = 'collection'; Id = '2'; Name = 'A-1' },
+            [pscustomobject]@{ Kind = 'collection'; Id = '3'; Name = 'A-0' }
+        )
+        $plan = [pscustomobject]@{ State = 'ready'; PlanHash = 'same'; Items = $items }
+        $result = @(Invoke-VsPackageRetirementPlan -ApprovedPlan $plan -CurrentPlan $plan -RemoveApplication { param($i) } -RemoveCollection { param($i) if ($i.Id -eq '2') { throw 'provider' } })
+        $result.Count | Should -Be 2
+        $result[0].State | Should -Be 'removed'
+        $result[1].State | Should -Be 'failed'
+    }
+}
+
+Describe 'A16 sprachunabhaengige ACL-Pruefung' {
+    BeforeAll { . $script:MecmCommon }
+
+    It 'meldet breite Allow-Schreibrechte per SID und ignoriert Namen, Read, Deny und Administratoren' {
+        $allow = [Security.AccessControl.AccessControlType]::Allow
+        $deny = [Security.AccessControl.AccessControlType]::Deny
+        $acl = [pscustomobject]@{ Access = @(
+            [pscustomobject]@{ IdentityReference = 'S-1-5-32-545'; AccessControlType = $allow; FileSystemRights = [Security.AccessControl.FileSystemRights]::Modify },
+            [pscustomobject]@{ IdentityReference = 'S-1-1-0'; AccessControlType = $deny; FileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl },
+            [pscustomobject]@{ IdentityReference = 'S-1-5-11'; AccessControlType = $allow; FileSystemRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute },
+            [pscustomobject]@{ IdentityReference = 'S-1-5-32-544'; AccessControlType = $allow; FileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl }
+        ) }
+        $issues = @(Get-VsDangerousFileSystemAclEntries -Acl $acl)
+        $issues.Count | Should -Be 1
+        [string]$issues[0].IdentityReference | Should -Be 'S-1-5-32-545'
+    }
+
+    It 'haelt beide Installer auf dem SID-Adapter und leert explizite Regeln des eigenen Secret-Keys' {
+        $server = Get-Content -LiteralPath (Join-Path (Split-Path $script:MecmCommon -Parent | Split-Path -Parent) 'install-VirtuSphere-MECM.ps1') -Raw
+        $client = Get-Content -LiteralPath (Join-Path (Split-Path $script:MecmCommon -Parent | Split-Path -Parent) 'install-VirtuSphere-Clients.ps1') -Raw
+        $server | Should -Match 'Get-VsDangerousFileSystemAclEntries'
+        $client | Should -Match 'Get-VsDangerousFileSystemAclEntries'
+        $server | Should -Match 'RemoveAccessRuleSpecific\(\$existingRule\)'
+        $server | Should -Not -Match "IdentityReference\s+-match\s+'Users\|Everyone\|Authenticated Users'"
+        $client | Should -Not -Match "IdentityReference\s+-match\s+'Users\|Everyone\|Authenticated Users'"
     }
 }
 
@@ -406,6 +596,17 @@ Describe 'Get-VsErrorDetail' {
         $result | Should -BeLike '*502 Bad Gateway*'
         $result | Should -BeLike '*nginx*'
     }
+
+    It 'bevorzugt ErrorDetails.Message auch wenn der Response-Stream bereits leer ist' {
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $record = New-Object System.Management.Automation.ErrorRecord(
+                (New-Object System.Exception('HTTP 409')), 'id',
+                [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+            $record.ErrorDetails = New-Object System.Management.Automation.ErrorDetails('{"error":"veralteter Plan"}')
+            Get-VsErrorDetail -ErrorRecord $record
+        }
+        $detail | Should -Match 'WebApp: veralteter Plan'
+    }
 }
 
 Describe 'Get-VsApiBaseUrl' {
@@ -502,6 +703,29 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
         ($specs | Where-Object AppName -eq 'client_VMDisksOnline').DependsOn | Should -Be 'client_staticip'
     }
 
+    It 'validiert den deklarierten Graphen und blockiert unbekannte Kanten oder Zyklen' {
+        { Invoke-InFileScope -Path $script:Packaging -Body { Assert-VsClientAppSpecGraph -Specs (Get-VsClientAppSpecs) } } | Should -Not -Throw
+        { Invoke-InFileScope -Path $script:Packaging -Body {
+            Assert-VsClientAppSpecGraph -Specs @(
+                [pscustomobject]@{ AppName = 'a'; DependsOn = 'missing' }
+            )
+        } } | Should -Throw '*unbekannten Vorgaenger*'
+        { Invoke-InFileScope -Path $script:Packaging -Body {
+            Assert-VsClientAppSpecGraph -Specs @(
+                [pscustomobject]@{ AppName = 'a'; DependsOn = 'b' }
+                [pscustomobject]@{ AppName = 'b'; DependsOn = 'a' }
+            )
+        } } | Should -Throw '*Zyklus*'
+    }
+
+    It 'verlangt fuer jede Phase den Standard-Returncodevertrag' {
+        foreach ($spec in (Get-Specs)) {
+            @($spec.ReturnCodes.Value) | Should -Be @(0, 1641, 3010)
+            ($spec.ReturnCodes | Where-Object Value -eq 1641).Type | Should -Be 'HardReboot'
+            ($spec.ReturnCodes | Where-Object Value -eq 3010).Type | Should -Be 'SoftReboot'
+        }
+    }
+
     It 'jedes Spec-Skript existiert im clients-Ordner: <Script>' -ForEach @(
         @{ Script = 'client_getinfo.ps1' }
         @{ Script = 'client_hostname.ps1' }
@@ -539,11 +763,15 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             $result = Invoke-InFileScope -Path $script:Packaging -Arguments @($script:ClientsDir, $script:StageRoot) -Body {
                 param($srcDir, $base)
                 $spec = (Get-VsClientAppSpecs | Where-Object AppName -eq 'client_getInfos')
-                Copy-VsClientContent -Spec $spec -SourceDir $srcDir -PackagesBase $base
+                Copy-VsClientContent -Spec $spec -SourceDir $srcDir -PackagesBase $base -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
             Test-Path (Join-Path $result 'client_getinfo.ps1')               | Should -BeTrue
             Test-Path (Join-Path $result 'VirtuSphere-Client-Common.ps1')    | Should -BeTrue
             Test-Path (Join-Path $result 'VirtuSphere-Client-Logging.ps1')   | Should -BeTrue
+            Test-Path (Join-Path $result 'bootstrap.json')                    | Should -BeTrue
+            $bootstrap = Get-Content -LiteralPath (Join-Path $result 'bootstrap.json') -Raw | ConvertFrom-Json
+            $bootstrap.WebAPI | Should -Be 'virtusphere.test:8021'
+            $bootstrap.Scheme | Should -Be 'http'
             (Split-Path $result -Leaf) | Should -Be 'client_getInfos'
         }
 
@@ -551,8 +779,69 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             { Invoke-InFileScope -Path $script:Packaging -Arguments @($script:StageRoot, $script:StageRoot) -Body {
                 param($srcDir, $base)
                 $spec = (Get-VsClientAppSpecs | Where-Object AppName -eq 'client_getInfos')
-                Copy-VsClientContent -Spec $spec -SourceDir $srcDir -PackagesBase $base
+                Copy-VsClientContent -Spec $spec -SourceDir $srcDir -PackagesBase $base -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             } } | Should -Throw
+        }
+
+        It 'vergleicht am tatsaechlichen Share das vollstaendige Pfad-Laenge-Hash-Manifest' {
+            $left = Join-Path $script:StageRoot 'manifest-left'
+            $right = Join-Path $script:StageRoot 'manifest-right'
+            New-Item -Path $left -ItemType Directory -Force | Out-Null
+            New-Item -Path $right -ItemType Directory -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $left 'a.txt') -Value 'gleich' -Encoding UTF8
+            Copy-Item -LiteralPath (Join-Path $left 'a.txt') -Destination $right
+            @(Invoke-InFileScope -Path $script:Packaging -Arguments @($left, $right) -Body {
+                param($a, $b) Compare-VsClientContentManifest -StagedPath $a -PublishedPath $b
+            }).Count | Should -Be 0
+
+            Set-Content -LiteralPath (Join-Path $right 'a.txt') -Value 'anders' -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $right 'alt.txt') -Value 'alt' -Encoding UTF8
+            $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($left, $right) -Body {
+                param($a, $b) Compare-VsClientContentManifest -StagedPath $a -PublishedPath $b
+            })
+            $issues | Should -Contain 'content:a.txt'
+            $issues | Should -Contain 'extra:alt.txt'
+        }
+    }
+
+    Context 'bestehende MECM-Definitionen' {
+        It 'erkennt Eigentum nur am Marker oder am exakten Legacy-Ordner' {
+            $spec = (Get-Specs)[0]
+            $marked = [pscustomobject]@{ LocalizedDescription = $spec.ManagedMarker; ObjectPath = '' }
+            $legacy = [pscustomobject]@{ LocalizedDescription = ''; ObjectPath = 'Application\VirtuSphere_Core' }
+            $foreign = [pscustomobject]@{ LocalizedDescription = ''; ObjectPath = 'Application\Other' }
+            Invoke-InFileScope -Path $script:Packaging -Arguments @($marked, $spec) -Body {
+                param($app, $s) Test-VsClientApplicationOwnership -Application $app -Spec $s -AppFolder 'VirtuSphere_Core'
+            } | Should -BeTrue
+            Invoke-InFileScope -Path $script:Packaging -Arguments @($legacy, $spec) -Body {
+                param($app, $s) Test-VsClientApplicationOwnership -Application $app -Spec $s -AppFolder 'VirtuSphere_Core'
+            } | Should -BeTrue
+            Invoke-InFileScope -Path $script:Packaging -Arguments @($foreign, $spec) -Body {
+                param($app, $s) Test-VsClientApplicationOwnership -Application $app -Spec $s -AppFolder 'VirtuSphere_Core'
+            } | Should -BeFalse
+        }
+
+        It 'prueft DT, Detection, Content, Kontext und Returncodes ohne Drift zu reparieren' {
+            $spec = (Get-Specs)[0]
+            $command = 'powershell.exe -NoProfile -File client_getinfo.ps1'
+            $content = '\\server\share\client_getInfos'
+            $xml = '<DeploymentType><Name>client_getInfos Deployment</Name><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0]
+            $dt = [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos Deployment'; SDMPackageXML = $xml }
+            $codes = @(
+                [pscustomobject]@{ Value = 0; CodeType = 'Success' }
+                [pscustomobject]@{ Value = 1641; CodeType = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; CodeType = 'SoftReboot' }
+            )
+            $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $codes) -Body {
+                param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+            })
+            $issues.Count | Should -Be 0
+
+            $codes[1].CodeType = 'Success'
+            $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $codes) -Body {
+                param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+            })
+            $issues | Should -Contain 'return-code-type:1641'
         }
     }
 }

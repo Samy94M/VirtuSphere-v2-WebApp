@@ -4,3 +4,4 @@
 # scans the whole tree as "changed".
 * text=auto
 *.sh text eol=lf
+Ansible/runner/* text eol=lf

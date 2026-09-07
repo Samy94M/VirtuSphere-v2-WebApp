@@ -13,8 +13,8 @@
 #    statt 'Name*' (frueher loeschte ein 'Firefox'-Update auch 'Firefox-ESR-*')
 #  - config.json-Pflichtfeldpruefung (ProjectName, version) - fehlerhafte
 #    Ordner werden uebersprungen statt Apps wie '-1.0' zu erzeugen
-#  - Change-Detection ueber files-Verzeichnis (mtime) - Voll-Scan nur bei
-#    Aenderung, sonst Millisekunden-Leerlauf
+#  - Change-Detection ueber SHA-256-Manifest des files-Verzeichnisses -
+#    Voll-Scan nur bei Inhaltsaenderung, sonst Millisekunden-Leerlauf
 #  - LogonRequirementType korrigiert (WhetherOrNotUserLoggedOn)
 #  - kein Clear-Host (laeuft ohne Konsole), Heartbeat je Durchlauf
 #
@@ -72,28 +72,6 @@ $loop = 0
 # VirtuSphere-Common.ps1: dieses Skript ist eine Endlosschleife, was in ihm steht
 # kann kein Test aufrufen, ohne sie zu starten. Dort deckt Pester beide ab.
 
-# Fingerabdruck des files-Baums fuer Change-Detection.
-#
-# Zusaetzlich zur config.json-Menge geht das Vorlagen-install.ps1 in den Stamp
-# ein (B7): die Vorlage gewinnt laut Vertrag ueber die paketeigene Datei, aber
-# eine GEAENDERTE Vorlage loeste keinen Scan aus - der Abgleich lief erst, wenn
-# zufaellig eine config.json angefasst wurde. Ein fehlendes Vorlagen-Skript ist
-# ein eigener Zustandswert und kein Fehler: es gibt schlicht nichts abzugleichen.
-function Get-VsFilesStamp {
-    param([string]$Path, [string]$TemplateScript = '')
-    if (-not (Test-Path $Path)) { return 'missing' }
-    $items = Get-ChildItem -Path $Path -Recurse -File -Filter 'config.json' -ErrorAction SilentlyContinue
-    if (-not $items) { return 'empty' }
-    $parts = @($items | Sort-Object FullName | ForEach-Object { '{0}:{1}' -f $_.FullName, $_.LastWriteTimeUtc.Ticks })
-    if ($TemplateScript -and (Test-Path $TemplateScript)) {
-        $template = Get-Item -Path $TemplateScript -ErrorAction SilentlyContinue
-        if ($template) { $parts += ('template:{0}:{1}' -f $template.FullName, $template.LastWriteTimeUtc.Ticks) }
-    } elseif ($TemplateScript) {
-        $parts += 'template:absent'
-    }
-    $parts -join '|'
-}
-
 while ($true) {
     $loop++
     $cycleStart = Get-Date
@@ -144,7 +122,7 @@ while ($true) {
         # Change-Detection: nur bei geaendertem files-Baum voll scannen. Das
         # Vorlagen-Skript zaehlt mit (B7): eine neue Vorlage muss den Abgleich
         # in jeden Paketordner ausloesen, nicht erst die naechste config.json.
-        $stamp = Get-VsFilesStamp -Path $basePath -TemplateScript (Join-Path $templatePath 'install.ps1')
+        $stamp = Get-VsFilesManifestStamp -Path $basePath -TemplateScript (Join-Path $templatePath 'install.ps1')
         if ($stamp -eq $lastFilesStamp) {
             # Unveraendert: ein gelungener No-op-Lauf.
             $unchanged = 1
@@ -164,6 +142,10 @@ while ($true) {
             $appOrgFolder = "{0}:\Application\{1}" -f $siteCode, $appFolderName
             $collectionOrgFolder = "{0}:\DeviceCollection\{1}" -f $siteCode, $appFolderName
 
+            # A14b: erst den gesamten Quellenstand lesen, dann pro Produkt genau
+            # einen Zielstand bestimmen. So koennen zwei gleichzeitig gelieferte
+            # Versionen einander niemals im selben Scan als "alt" behandeln.
+            $packageEntries = New-Object System.Collections.Generic.List[object]
             foreach ($dir in @(Get-ChildItem -Path $basePath -Directory)) {
                 $cfg = Read-VsPackageConfig -Folder $dir.FullName
                 if (-not $cfg) {
@@ -175,6 +157,13 @@ while ($true) {
                     Add-VsRunCause -Causes $causes -Cause 'package_config_invalid' -Target $dir.Name
                     continue
                 }
+                $packageEntries.Add([pscustomobject]@{ Directory = $dir; Config = $cfg })
+            }
+            $sourceSelections = @(Get-VsPackageSourceSelections -Packages @($packageEntries | ForEach-Object { $_.Config }))
+
+            foreach ($entry in @($packageEntries)) {
+                $dir = $entry.Directory
+                $cfg = $entry.Config
                 $folders++
 
                 $appName = [string]$cfg.ProjectName
@@ -182,13 +171,22 @@ while ($true) {
                 $fullName = "{0}-{1}" -f $appName, $version
                 $folderName = $cfg.FolderName
 
-                # --- Alt-Versions-Bereinigung (EXAKTES Muster!) ----------------
+                # --- Alt-Versionen nur erkennen, niemals im Importlauf loeschen --
                 if ("$($cfg.removeOldVersion)" -eq 'true') {
-                    # Nur den exakten Stamm 'Name-<version>' entfernen, nicht die
-                    # aktuelle Version und keine Fremdpakete wie 'Name-ESR-*'.
-                    # Suche ueber Collections UND Applications, damit auch Pakete
-                    # ohne eigene Collection (generateOwnDeviceColletion=false)
-                    # bereinigt werden.
+                    # Der Name beweist weder Eigentum noch, dass $fullName ein
+                    # sicherer Ersatz ist. Der fruehere Inline-Cleanup entfernte
+                    # Deployment, Collection und Application noch bevor Content
+                    # und Verteilung des Ersatzes belegt waren. Bis A14b einen
+                    # geprueften Plan mit IDs, Ownership und Referenzen besitzt,
+                    # bleibt der Bestand deshalb unveraendert.
+                    $selection = @($sourceSelections | Where-Object { [string]$_.ProductName -ceq $appName })
+                    if ($selection.Count -ne 1 -or [string]$selection[0].State -ne 'ready') {
+                        Write-VsLog -Level WARN -Context $appName -Message 'Quellversionen sind nicht eindeutig und sicher numerisch ordnungsfaehig; automatische Bereinigungsplanung bleibt gesperrt.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $appName
+                    } elseif ([string]$selection[0].TargetName -cne $fullName) {
+                        Write-VsLog -Context $fullName -Message ("Parallele Quellversion bleibt erhalten; eindeutiger Zielstand dieses Produkts ist {0}." -f $selection[0].TargetName)
+                    }
                     $pattern = Get-VsSupersededNamePattern -AppName $appName
                     $oldNames = @{}
                     foreach ($c in @(Get-CMDeviceCollection -Name ("{0}-*" -f $appName) -ErrorAction SilentlyContinue)) {
@@ -199,21 +197,9 @@ while ($true) {
                         if ($n -match $pattern -and $n -ne $fullName) { $oldNames[$n] = $true }
                     }
                     foreach ($old in $oldNames.Keys) {
-                        Write-VsLog -Context $old -Message 'Entferne alte Version.'
-                        try {
-                            Get-CMApplicationDeployment -Name $old -ErrorAction SilentlyContinue | Remove-CMApplicationDeployment -Force -ErrorAction Stop
-                            if (Get-CMDeviceCollection -Name $old -ErrorAction SilentlyContinue) {
-                                Remove-CMDeviceCollection -Name $old -Force -ErrorAction Stop
-                            }
-                            if (Get-CMApplication -Name $old -Fast -ErrorAction SilentlyContinue) {
-                                Remove-CMApplication -Name $old -Force -ErrorAction Stop
-                            }
-                            $deletedCount++
-                        } catch {
-                            Write-VsLog -Level WARN -Context $old -Message ("Alt-Version nicht vollstaendig entfernt - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
-                            $scanWarnings++
-                            Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $old
-                        }
+                        Write-VsLog -Level WARN -Context $old -Message ("Alt-Version bleibt erhalten; automatische Bereinigung ist ohne Eigentums-, Referenz- und Ersatznachweis gesperrt (angeforderter Zielstand: {0})." -f $fullName)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $old
                     }
                 }
 
@@ -240,11 +226,18 @@ while ($true) {
                 # --- Application anlegen (falls neu) ---------------------------
                 # Das Objekt wird behalten: der Verteilstatus unten adressiert per
                 # CI_ID statt -Name, wo es eines gibt (B7).
-                $app = Get-CMApplication -Name $fullName -Fast -ErrorAction SilentlyContinue
-                $isNew = -not $app
+                $appMatches = @(Get-CMApplication -Name $fullName -Fast -ErrorAction Stop)
+                if ($appMatches.Count -gt 1) {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Applicationname ist mehrdeutig; keine Definition und kein Content werden veraendert.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_definition_drift' -Target $fullName
+                    continue
+                }
+                $app = if ($appMatches.Count -eq 1) { $appMatches[0] } else { $null }
+                $isNew = $null -eq $app
                 if ($isNew) {
                     Write-VsLog -Context $fullName -Message 'NEU: erstelle Application.'
-                    New-CMApplication -Name $fullName -ErrorAction Stop | Out-Null
+                    New-CMApplication -Name $fullName -Description $script:VsManagedPackageApplicationMarker -ErrorAction Stop | Out-Null
 
                     $registryDetection = "SOFTWARE\VirtuSphere\Packages\{0}-{1}" -f $appName, $version
                     $dtParams = @{
@@ -291,10 +284,120 @@ while ($true) {
                         throw
                     }
 
+                    # New-CMApplication/DT can return before the provider's
+                    # distribution projection is queryable. Re-read the exact
+                    # current object and fail closed if identity is ambiguous.
+                    $freshApps = @(Get-CMApplication -Name $fullName -Fast -ErrorAction Stop)
+                    if ($freshApps.Count -ne 1) {
+                        throw ("Application '{0}' nach Erstellung nicht eindeutig lesbar." -f $fullName)
+                    }
+                    $app = $freshApps[0]
+
                     Get-CMApplication -Name $fullName | Move-CMObject -FolderPath $appOrgFolder -ErrorAction SilentlyContinue | Out-Null
                     $newCount++
                 } else {
                     Write-Host ("  {0} bereits vorhanden" -f $fullName) -ForegroundColor DarkGray
+                }
+
+                $deploymentTypeName = '{0} Deployment' -f $fullName
+                $allDeploymentTypes = @(Get-CMDeploymentType -ApplicationName $fullName -ErrorAction Stop)
+                $deploymentTypes = @($allDeploymentTypes |
+                    Where-Object { [string]$_.LocalizedDisplayName -eq $deploymentTypeName -or [string]$_.DeploymentTypeName -eq $deploymentTypeName })
+                if ($deploymentTypes.Count -ne 1 -or $allDeploymentTypes.Count -ne 1) {
+                    Write-VsLog -Level WARN -Context $fullName -Message ("Deployment Type '{0}' fehlt, ist mehrdeutig oder ein fremder Deployment Type ist vorhanden; Contentversion wird nicht angefordert." -f $deploymentTypeName)
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_definition_drift' -Target $fullName
+                    continue
+                }
+
+                # --- Contentmanifest -> konkrete MECM-SourceVersion -----------
+                # Tracking wird vor dem Update als Intent gespeichert. Dadurch
+                # loest ein Crash zwischen Update-CMDistributionPoint und ACK
+                # keine blinde zweite Redistribution aus. Nur eine einheitliche,
+                # gegenueber der Baseline neue SourceVersion darf das Manifest
+                # auf complete setzen. Die Verteilung ist absichtlich NICHT an
+                # generateOwnDeviceColletion gekoppelt.
+                $packageManifest = Get-VsFilesManifestStamp -Path $pkgFolder
+                $tracking = Get-VsPackageContentTracking -ApplicationName $fullName
+                $snapshot = Get-VsContentDistributionSnapshot -ApplicationName $fullName -Application $app
+                if ($tracking -and $tracking.State -eq 'invalid') {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Content-Tracking ist unvollstaendig oder unlesbar; keine Redistribution ohne geklaerten Intent.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+
+                $needsContentRequest = $null -eq $tracking -or $tracking.Manifest -cne $packageManifest
+                if ($needsContentRequest -and $tracking -and $tracking.State -in @('intent', 'pending')) {
+                    $previousConfirmed = $snapshot.State -eq 'succeeded' -and $null -ne $snapshot.SourceVersion -and
+                        [int]$snapshot.SourceVersion -gt [int]$tracking.BaselineSourceVersion
+                    if (-not $previousConfirmed) {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Quelle hat sich waehrend einer noch nicht bestaetigten Contentaktualisierung erneut geaendert; zuerst den laufenden/unklaren Stand in MECM klaeren.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                        continue
+                    }
+                }
+
+                if ($needsContentRequest) {
+                    if ($snapshot.State -eq 'unknown') {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Verteilstatus/SourceVersion nicht sicher lesbar; Contentaktualisierung wird nicht blind angestossen.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                        continue
+                    }
+                    if ($snapshot.State -eq 'failed') {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Vorhandene Content-Verteilung ist fehlgeschlagen; zuerst in MECM reparieren, keine blinde Redistribution.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                        continue
+                    }
+                    $baselineSourceVersion = if ($null -eq $snapshot.SourceVersion) { -1 } else { [int]$snapshot.SourceVersion }
+                    Set-VsPackageContentTracking -ApplicationName $fullName -State intent -Manifest $packageManifest -BaselineSourceVersion $baselineSourceVersion
+                    try {
+                        if ($snapshot.State -eq 'not_started') {
+                            if ([string]::IsNullOrWhiteSpace($dpGroupName)) { throw 'DP-Gruppe fehlt; Erstverteilung kann nicht gestartet werden.' }
+                            Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
+                            Write-VsLog -Context $fullName -Message ("Contentversion/Erstverteilung an DP-Gruppe '{0}' angefordert." -f $dpGroupName)
+                        } else {
+                            Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName -ErrorAction Stop | Out-Null
+                            Write-VsLog -Context $fullName -Message ("Neue Contentversion fuer Deployment Type '{0}' angefordert." -f $deploymentTypeName)
+                        }
+                        Set-VsPackageContentTracking -ApplicationName $fullName -State pending -Manifest $packageManifest -BaselineSourceVersion $baselineSourceVersion
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                    } catch {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Contentversion konnte nicht sicher angefordert/bestaetigt werden; Intent bleibt zur manuellen Klaerung stehen: {0}" -f $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    }
+                    continue
+                }
+
+                if ($tracking.State -in @('intent', 'pending')) {
+                    if ($snapshot.State -eq 'succeeded' -and $null -ne $snapshot.SourceVersion -and [int]$snapshot.SourceVersion -gt [int]$tracking.BaselineSourceVersion) {
+                        Set-VsPackageContentTracking -ApplicationName $fullName -State complete -Manifest $packageManifest `
+                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion ([int]$snapshot.SourceVersion)
+                        Write-VsLog -Context $fullName -Message ("Contentversion {0} vollstaendig verteilt; Manifest bestaetigt." -f $snapshot.SourceVersion)
+                    } else {
+                        $contentCause = if ($snapshot.State -eq 'failed') { 'package_content_failed' } elseif ($snapshot.State -eq 'unknown') { 'package_content_unknown' } else { 'package_content_in_progress' }
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Contentversion noch nicht bestaetigt (Status {0}, SourceVersion {1}, Baseline {2})." -f $snapshot.State, $snapshot.SourceVersion, $tracking.BaselineSourceVersion)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause $contentCause -Target $fullName
+                        continue
+                    }
+                } elseif ($tracking.State -eq 'complete') {
+                    if ($snapshot.State -ne 'succeeded' -or $null -eq $snapshot.SourceVersion -or [int]$snapshot.SourceVersion -lt [int]$tracking.SourceVersion) {
+                        $contentCause = if ($snapshot.State -eq 'failed') { 'package_content_failed' } elseif ($snapshot.State -eq 'unknown') { 'package_content_unknown' } else { 'package_content_in_progress' }
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Verteilnachweis fuer gespeicherte SourceVersion {0} ist nicht mehr vollstaendig (Status {1}, gesehen {2})." -f $tracking.SourceVersion, $snapshot.State, $snapshot.SourceVersion)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause $contentCause -Target $fullName
+                        continue
+                    }
+                    if ([int]$snapshot.SourceVersion -gt [int]$tracking.SourceVersion) {
+                        Set-VsPackageContentTracking -ApplicationName $fullName -State complete -Manifest $packageManifest `
+                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion ([int]$snapshot.SourceVersion)
+                    }
                 }
 
                 # --- Collection + Deployments idempotent nachziehen -------------
@@ -303,7 +406,7 @@ while ($true) {
                 if ("$($cfg.generateOwnDeviceColletion)" -eq 'true') {
                     $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
                     if (-not $collection) {
-                        New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -ErrorAction SilentlyContinue | Out-Null
+                        New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -Comment $script:VsManagedPackageCollectionMarker -ErrorAction SilentlyContinue | Out-Null
                         Start-Sleep -Seconds 2
                         $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
                     }
@@ -329,55 +432,6 @@ while ($true) {
                             Write-VsLog -Level WARN -Context $fullName -Message ("Collection nicht in '{0}' verschoben - Wiederholung im naechsten Durchlauf: {1}" -f $collectionOrgFolder, $_.Exception.Message)
                             $scanWarnings++
                             Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection $fullName
-                        }
-                    }
-
-                    # Mehrwertiger Verteilzustand (B7): nur `succeeded` heisst
-                    # "nichts zu tun". Die alte Ja/Nein-Frage las Targeted > 0 als
-                    # fertig und niemand las NumberErrors: eine auf jedem DP
-                    # gescheiterte Verteilung galt als erledigt, der Stamp wurde
-                    # gemerkt, die Karte blieb gruen. Jetzt haelt jeder Zustand
-                    # ausser succeeded den Stamp zurueck, der naechste Lauf prueft
-                    # erneut. Per CI_ID adressiert, wenn das Objekt da ist ($isNew
-                    # hat es geladen); nur eine in diesem Lauf frisch angelegte
-                    # Application faellt auf den Namen zurueck.
-                    $distState = Get-VsContentDistributionState -ApplicationName $fullName -ApplicationId $(if ($app) { $app.CI_ID } else { $null })
-                    switch ($distState) {
-                        'succeeded' { }
-                        'not_started' {
-                            try {
-                                Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
-                                Write-VsLog -Context $fullName -Message ("Content-Verteilung an DP-Gruppe '{0}' angestossen." -f $dpGroupName)
-                                # Frisch angestossen ist noch nicht angekommen: der
-                                # Stamp wartet, bis ein Lauf `succeeded` sieht.
-                                $scanWarnings++
-                                Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
-                            } catch {
-                                Write-VsLog -Level WARN -Context $fullName -Message ("Content-Verteilung fehlgeschlagen - Wiederholung im naechsten Durchlauf (DP-Gruppe '{0}'): {1}" -f $dpGroupName, $_.Exception.Message)
-                                $scanWarnings++
-                                Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
-                            }
-                        }
-                        'in_progress' {
-                            Write-VsLog -Context $fullName -Message 'Content-Verteilung laeuft noch - der Stamp wartet auf die vollstaendige Zielverteilung.'
-                            $scanWarnings++
-                            Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
-                        }
-                        'failed' {
-                            # Benannte Grenze: eine fehlgeschlagene Verteilung wird
-                            # nicht blind neu angestossen (Start-CMContentDistribution
-                            # wirft fuer bereits verteilten Content, und eine
-                            # Redistribution je DP ist ohne MECM-Testumgebung nicht
-                            # pruefbar). Der Punkt bleibt offen und sichtbar, bis der
-                            # Operator in der Konsole neu verteilt.
-                            Write-VsLog -Level WARN -Context $fullName -Message 'Content-Verteilung meldet Fehler auf mindestens einem Verteilungspunkt - in der MECM-Konsole neu verteilen; der Punkt bleibt offen.'
-                            $scanWarnings++
-                            Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
-                        }
-                        'unknown' {
-                            Write-VsLog -Level WARN -Context $fullName -Message 'Verteilstatus nicht abfragbar - es wird nicht verteilt, der naechste Lauf fragt erneut.'
-                            $scanWarnings++
-                            Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
                         }
                     }
 
@@ -438,7 +492,7 @@ while ($true) {
         $sleepSeconds = 60
     } finally {
         # Genau EINE Abschlussmeldung pro Iteration, auch bei continue/throw.
-        $durationMs = [int]((Get-Date) - $cycleStart).TotalMilliseconds
+        $durationMs = Get-VsRunDurationMilliseconds -StartedAt $cycleStart
         $summary = @{
             folders     = $folders
             created     = $newCount

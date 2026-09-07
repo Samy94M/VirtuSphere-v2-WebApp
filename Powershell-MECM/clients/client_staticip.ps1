@@ -5,8 +5,8 @@
 # Interface-Registry. Dritte Phase der Client-Kette.
 #
 # Verbesserungen:
-#  - idempotent: vorhandene IP/Gateway werden vor dem Setzen entfernt, sodass
-#    ein Re-Run nicht mehr an "bereits vorhanden" stirbt (try/catch je Adapter)
+#  - idempotent: passende Werte bleiben stehen; nur exakt dokumentierte,
+#    vorher selbst verwaltete IPv4-Werte werden ersetzt
 #  - ehrlicher Status: Erfolg wird pro Adapter getrackt und real gemeldet
 #    (Registry VirtuSphere\staticip + reportPhase), nicht mehr hart auf $true
 #  - leeres Gateway / leere DNS-Liste sauber via Parameter-Splatting
@@ -19,7 +19,7 @@
 Initialize-VsClientLog -Component 'staticip'
 Write-VsClientLog 'Starte staticip'
 
-$interfacesRoot = 'HKLM:\SOFTWARE\VirtuSphere\Interfaces'
+$interfacesRoot = Get-VsSnapshotInterfacesRoot
 $statusBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $reportMac = Get-VsReportMac
 
@@ -46,17 +46,17 @@ function Set-StaticIpStatus {
 # getestet: Pester deckt Praefix-Grenzen und nicht zusammenhaengende Masken ab).
 
 # --- Interface-Konfiguration aus Registry laden -----------------------------
-if (-not (Test-Path $interfacesRoot)) {
+if (-not $interfacesRoot -or -not (Test-Path $interfacesRoot)) {
     Write-VsClientLog -Level ERROR 'Keine Interface-Registry (client_getinfo gelaufen?). Abbruch.'
     Set-StaticIpStatus -Success $false -Detail 'no interface registry'
     exit 1
 }
 
-$configByMac = @{}
+$targets = @()
 foreach ($entry in @(Get-ChildItem -Path $interfacesRoot)) {
     $mac = ConvertTo-VsNormalizedMac $entry.GetValue('mac')
-    if (-not $mac) { continue }
-    $configByMac[$mac] = [pscustomobject]@{
+    $targets += , [pscustomobject]@{
+        Mac     = $mac
         Name    = [string]$entry.GetValue('vlan')
         Mode    = [string]$entry.GetValue('mode')
         Ip      = [string]$entry.GetValue('ip')
@@ -67,8 +67,6 @@ foreach ($entry in @(Get-ChildItem -Path $interfacesRoot)) {
     }
 }
 
-if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'started' -Detail "$($configByMac.Count) target(s)" }
-
 # Die Modusnamen sind eine PHP-SSoT: VIRTUSPHERE_INTERFACE_MODES in
 # Docker\WebAPI\lib\defaults.php, dort KLEIN geschrieben ('dhcp', 'static').
 # Getroffen werden sie hier nur, weil -eq in PowerShell case-insensitiv
@@ -77,6 +75,22 @@ if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'st
 # PHP-Konstante.
 $modeStatic = 'Static'
 $modeDhcp = 'DHCP'
+
+try {
+    $adapters = @(Get-NetAdapter -ErrorAction Stop)
+    $plan = New-VsClientNetworkPlan -Targets $targets -Adapters $adapters
+} catch {
+    $plan = [pscustomobject]@{ Valid = $false; Errors = @($_.Exception.Message); Items = @() }
+}
+
+if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'started' -Detail "$($targets.Count) target(s)" }
+if (-not $plan.Valid) {
+    foreach ($problem in @($plan.Errors)) { Write-VsClientLog -Level ERROR $problem }
+    $detail = 'validation failed: ' + (@($plan.Errors) -join ' | ')
+    Set-StaticIpStatus -Success $false -Detail $detail
+    if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'staticip' -PhaseEvent 'failed' -Detail $detail }
+    exit 1
+}
 
 # $applied zaehlt nur Adapter, deren Sollzustand danach VERIFIZIERT wurde. Ein
 # Interface mit einem anderen Modus als 'Static' durchlief den Block vorher ohne
@@ -88,74 +102,146 @@ $applied = 0
 $failed = 0
 $appliedStatic = 0
 $appliedDhcp = 0
-# Eine Standardroute pro VM, nicht eine pro statischer Schnittstelle. Zwei
-# Default-Gateways auf einer Maschine sind kein Ausfall, aber eine Wette: Windows
-# waehlt nach Metrik, und welche Schnittstelle den Verkehr traegt, haengt dann an
-# Werten, die niemand hier gesetzt hat. Die erste statische Karte mit Gateway
-# gewinnt, die naechsten bekommen ihre Adresse ohne Route und sagen das.
-$gatewaySet = $false
 
-foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -ne 'Wireless' })) {
-    $mac = ConvertTo-VsNormalizedMac $adapter.MacAddress
-    if (-not $mac -or -not $configByMac.ContainsKey($mac)) { continue }
-    $cfg = $configByMac[$mac]
+function Get-ManagedNetworkState {
+    param([string]$Mac)
+    $key = Join-Path (Join-Path $statusBase 'staticip\Managed') ($Mac -replace ':', '')
+    if (-not (Test-Path -Path $key)) { return $null }
+    return (Get-ItemProperty -Path $key -ErrorAction Stop)
+}
+
+function Set-ManagedNetworkState {
+    param([string]$Mac, [string]$Mode, [string]$Ip = '', [int]$Prefix = 0, [string]$Gateway = '', [string[]]$Dns = @())
+    $key = Join-Path (Join-Path $statusBase 'staticip\Managed') ($Mac -replace ':', '')
+    New-Item -Path $key -Force -ErrorAction Stop | Out-Null
+    foreach ($pair in @(
+        @{ Name = 'Mode'; Value = $Mode },
+        @{ Name = 'Ip'; Value = $Ip },
+        @{ Name = 'Prefix'; Value = [string]$Prefix },
+        @{ Name = 'Gateway'; Value = $Gateway },
+        @{ Name = 'Dns'; Value = (@($Dns) -join ',') }
+    )) {
+        New-ItemProperty -Path $key -Name $pair.Name -Value $pair.Value -PropertyType String -Force -ErrorAction Stop | Out-Null
+    }
+}
+
+function Test-StringArrayEqual {
+    param([string[]]$Left = @(), [string[]]$Right = @())
+    if (@($Left).Count -ne @($Right).Count) { return $false }
+    for ($i = 0; $i -lt @($Left).Count; $i++) {
+        if (-not [string]::Equals([string]$Left[$i], [string]$Right[$i], [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Wait-UsableIpv4Address {
+    param([int]$InterfaceIndex, [string]$Ip, [int]$Prefix)
+    for ($attempt = 0; $attempt -lt 16; $attempt++) {
+        $address = @(Get-NetIPAddress -InterfaceIndex $InterfaceIndex -AddressFamily IPv4 -IPAddress $Ip -ErrorAction SilentlyContinue |
+            Where-Object { [int]$_.PrefixLength -eq $Prefix })
+        if ($address.Count -eq 1) {
+            $state = [string]$address[0].AddressState
+            if ($state -in @('Duplicate', 'Invalid')) { throw "Adresse $Ip ist im Zustand $state (Adresskonflikt im Netz?)." }
+            if ($state -notin @('Tentative')) { return $address[0] }
+        } elseif ($address.Count -gt 1) { throw "Adresse $Ip liegt mehrfach auf derselben Schnittstelle." }
+        if ($attempt -lt 15) { Start-Sleep -Seconds 1 }
+    }
+    throw "Adresse $Ip blieb 15 Sekunden Tentative oder wurde nicht sichtbar."
+}
+
+foreach ($item in @($plan.Items)) {
+    $adapter = $item.Adapter
+    $mac = $item.Mac
+    $cfg = $item.Target
+
+    $oldName = [string]$adapter.Name
+    $renamed = $false
+    $addedAddress = $false
+    $addedRoute = $false
+    $removedAddress = $false
+    $removedRoute = $false
+    $dhcpChanged = $false
+    $dnsChanged = $false
+    $oldDns = @()
+    $writtenDns = @()
+    $oldDhcp = ''
+    $previous = $null
 
     try {
-        # Adapter umbenennen (Kollision abfangen)
+        $previous = Get-ManagedNetworkState -Mac $mac
+
+        # Namenskollisionen wurden fuer den gesamten Plan bereits vor dem ersten
+        # Write ausgeschlossen.
         if (-not [string]::IsNullOrWhiteSpace($cfg.Name) -and $adapter.Name -ne $cfg.Name) {
-            $clash = Get-NetAdapter -Name $cfg.Name -ErrorAction SilentlyContinue
-            if ($clash -and $clash.ifIndex -ne $adapter.ifIndex) {
-                Write-VsClientLog -Level WARN "Adaptername '$($cfg.Name)' bereits vergeben - Umbenennung uebersprungen."
-            } else {
-                Rename-NetAdapter -InputObject $adapter -NewName $cfg.Name -Confirm:$false -ErrorAction Stop
-            }
+            Rename-NetAdapter -InputObject $adapter -NewName $cfg.Name -Confirm:$false -ErrorAction Stop
+            $renamed = $true
         }
 
         if ($cfg.Mode -eq $modeStatic) {
-            $prefix = Convert-VsSubnetMaskToPrefix $cfg.Subnet
-            # -eq $null statt -not: /0 ist eine gueltige Praefixlaenge und faellt
-            # sonst faelschlich in den Fehlerzweig.
-            if ($null -eq $prefix) { throw "ungueltige Subnetzmaske '$($cfg.Subnet)'" }
+            $prefix = [int]$item.Prefix
+            $ipInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+            $oldDhcp = [string]$ipInterface.Dhcp
+            $oldDns = @((Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses)
 
-            # Idempotenz: bestehende IP/Gateway entfernen, Fehler ignorieren
-            Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -Confirm:$false -ErrorAction SilentlyContinue
-            Remove-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
-
-            $ipParams = @{
-                InterfaceIndex = $adapter.ifIndex
-                IPAddress      = $cfg.Ip
-                PrefixLength   = $prefix
-                Confirm        = $false
-                ErrorAction    = 'Stop'
-            }
-            if (-not [string]::IsNullOrWhiteSpace($cfg.Gateway)) {
-                if ($gatewaySet) {
-                    Write-VsClientLog -Level WARN "Adapter '$($cfg.Name)': Gateway $($cfg.Gateway) uebersprungen, diese VM hat schon eine Standardroute."
-                } else {
-                    $ipParams['DefaultGateway'] = $cfg.Gateway
+            # Nur eine frueher von VirtuSphere bestaetigte Adresse/Route darf
+            # entfernt werden. IPv6 und unbekannte manuelle Werte bleiben stehen.
+            if ($previous -and [string]$previous.Mode -eq 'static' -and [string]$previous.Ip -and
+                ([string]$previous.Ip -ne [string]$cfg.Ip -or [int]$previous.Prefix -ne $prefix)) {
+                $oldAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress ([string]$previous.Ip) -ErrorAction SilentlyContinue |
+                    Where-Object { [int]$_.PrefixLength -eq [int]$previous.Prefix })
+                if ($oldAddress.Count -gt 0) {
+                    Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress ([string]$previous.Ip) -Confirm:$false -ErrorAction Stop
+                    $removedAddress = $true
                 }
             }
-            New-NetIPAddress @ipParams | Out-Null
-            if ($ipParams.ContainsKey('DefaultGateway')) { $gatewaySet = $true }
-
-            $dns = @($cfg.Dns1, $cfg.Dns2) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-            if ($dns.Count -gt 0) {
-                Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $dns -ErrorAction Stop
+            if ($previous -and [string]$previous.Gateway -and [string]$previous.Gateway -ne [string]$cfg.Gateway) {
+                $oldRoute = @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -ErrorAction SilentlyContinue)
+                if ($oldRoute.Count -gt 0) {
+                    Remove-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -Confirm:$false -ErrorAction Stop
+                    $removedRoute = $true
+                }
+            }
+            if ($ipInterface.Dhcp -ne 'Disabled') {
+                Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp Disabled -ErrorAction Stop
+                $dhcpChanged = $true
             }
 
-            # Nachlesen statt annehmen. New-NetIPAddress kann zurueckkommen, ohne
-            # dass die Adresse traegt (DHCP schreibt sie kurz darauf zurueck, ein
-            # Duplikat setzt sie auf "Tentative"/"Duplicate"). Ohne diese Pruefung
-            # meldete die Phase Erfolg und die VM war danach nicht erreichbar -
-            # unter gruener Phase, also niemandes Aufgabe.
-            $liveAddress = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-                Where-Object { $_.IPAddress -eq $cfg.Ip }
-            if (-not $liveAddress) {
-                throw "Adresse $($cfg.Ip) liegt nach dem Setzen nicht auf der Schnittstelle."
+            $desiredAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress $cfg.Ip -ErrorAction SilentlyContinue)
+            if ($desiredAddress.Count -gt 0 -and @($desiredAddress | Where-Object { [int]$_.PrefixLength -ne $prefix }).Count -gt 0) {
+                throw "Adresse $($cfg.Ip) ist bereits mit einem anderen Praefix vorhanden; fremder Wert bleibt erhalten."
             }
-            if ($liveAddress.AddressState -in @('Duplicate', 'Invalid')) {
-                throw "Adresse $($cfg.Ip) ist im Zustand $($liveAddress.AddressState) (Adresskonflikt im Netz?)."
+            if (@($desiredAddress | Where-Object { [int]$_.PrefixLength -eq $prefix }).Count -eq 0) {
+                New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress $cfg.Ip -PrefixLength $prefix -Confirm:$false -ErrorAction Stop | Out-Null
+                $addedAddress = $true
             }
+
+            if (-not [string]::IsNullOrWhiteSpace($cfg.Gateway)) {
+                $desiredRoute = @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $cfg.Gateway -ErrorAction SilentlyContinue)
+                if ($desiredRoute.Count -eq 0) {
+                    New-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $cfg.Gateway -ErrorAction Stop | Out-Null
+                    $addedRoute = $true
+                }
+            }
+
+            # Leeres DNS bedeutet fuer statische Ziele bewusst "bestehenden
+            # DNS-Stand erhalten". Ein nichtleeres Soll ersetzt ihn exakt.
+            if ($item.Dns.Count -gt 0 -and -not (Test-StringArrayEqual -Left $oldDns -Right $item.Dns)) {
+                Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $item.Dns -ErrorAction Stop
+                $dnsChanged = $true
+                $writtenDns = @($item.Dns)
+            }
+
+            [void](Wait-UsableIpv4Address -InterfaceIndex $adapter.ifIndex -Ip $cfg.Ip -Prefix $prefix)
+            $liveInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+            if ($liveInterface.Dhcp -ne 'Disabled') { throw "Schnittstelle steht nach der Umstellung weiterhin auf Dhcp=$($liveInterface.Dhcp)." }
+            if ($cfg.Gateway -and @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $cfg.Gateway -ErrorAction SilentlyContinue).Count -eq 0) {
+                throw "Gateway $($cfg.Gateway) fehlt nach der Umstellung."
+            }
+            if ($item.Dns.Count -gt 0) {
+                $liveDns = @((Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses)
+                if (-not (Test-StringArrayEqual -Left $liveDns -Right $item.Dns)) { throw 'DNS-Server entsprechen nach der Umstellung nicht dem Soll.' }
+            }
+            Set-ManagedNetworkState -Mac $mac -Mode 'static' -Ip $cfg.Ip -Prefix $prefix -Gateway $cfg.Gateway -Dns $item.Dns
             Write-VsClientLog "Adapter '$($cfg.Name)' ($mac), Ziel $modeStatic : IP $($cfg.Ip)/$prefix gesetzt und geprueft."
             $appliedStatic++
             $applied++
@@ -168,35 +254,87 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
             # Idempotent: erst nachsehen, dann nur bei Bedarf umstellen. Danach
             # in jedem Fall nachlesen statt annehmen, wie im statischen Zweig.
             $ipInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+            $oldDhcp = [string]$ipInterface.Dhcp
+            $oldDns = @((Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses)
+            if ($previous -and [string]$previous.Mode -eq 'static' -and [string]$previous.Ip) {
+                $oldAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress ([string]$previous.Ip) -ErrorAction SilentlyContinue |
+                    Where-Object { [int]$_.PrefixLength -eq [int]$previous.Prefix })
+                if ($oldAddress.Count -gt 0) {
+                    Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress ([string]$previous.Ip) -Confirm:$false -ErrorAction Stop
+                    $removedAddress = $true
+                }
+                if ([string]$previous.Gateway) {
+                    $oldRoute = @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -ErrorAction SilentlyContinue)
+                    if ($oldRoute.Count -gt 0) {
+                        Remove-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -Confirm:$false -ErrorAction Stop
+                        $removedRoute = $true
+                    }
+                }
+            }
             if ($ipInterface.Dhcp -ne 'Enabled') {
-                # Die statische Adresse und ihre Standardroute muessen weg, sonst
-                # bleibt die alte Adresse neben der geleasten liegen.
-                Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -Confirm:$false -ErrorAction SilentlyContinue
-                Remove-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
                 Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp Enabled -ErrorAction Stop
+                $dhcpChanged = $true
             }
             # DNS ebenfalls zurueck an DHCP: eine haendisch gesetzte
             # Serveradresse ueberlebt die Umstellung sonst und zeigt weiter ins
-            # alte VLAN. Das Gateway kommt vom DHCP-Server, $gatewaySet bleibt
-            # deshalb unberuehrt.
+            # alte VLAN. Das Gateway kommt vom DHCP-Server und wird nicht aus
+            # der statischen Soll-Gatewayregel abgeleitet.
             Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses -ErrorAction Stop
+            $dnsChanged = $true
+            $writtenDns = @((Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses)
 
             $liveInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
             if ($liveInterface.Dhcp -ne 'Enabled') {
                 throw "Schnittstelle steht nach der Umstellung weiterhin auf Dhcp=$($liveInterface.Dhcp)."
             }
+            Set-ManagedNetworkState -Mac $mac -Mode 'dhcp'
             Write-VsClientLog "Adapter '$($cfg.Name)' ($mac), Ziel $modeDhcp : auf DHCP zurueckgestellt und geprueft."
             $appliedDhcp++
             $applied++
-        } else {
-            # Weder Static noch DHCP: die Registry traegt einen Wert, den dieses
-            # Skript nicht kennt. Frueher lief der Adapter hier ohne jede Aktion
-            # durch und wurde trotzdem als erfolgreich gezaehlt.
-            throw "unbekannter Modus '$($cfg.Mode)' (erwartet: $modeStatic oder $modeDhcp)"
         }
     } catch {
         $failed++
         Write-VsClientLog -Level ERROR "Adapter $mac fehlgeschlagen: $($_.Exception.Message)"
+
+        # Best effort in umgekehrter Reihenfolge. Jeder Rueckfall greift nur,
+        # wenn der aktuelle Wert noch dem in diesem Lauf gesetzten Wert
+        # entspricht; zwischenzeitliche Fremdaenderungen werden nicht entfernt.
+        try {
+            if ($dnsChanged) {
+                $currentDns = @((Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).ServerAddresses)
+                if (Test-StringArrayEqual -Left $currentDns -Right $writtenDns) {
+                    if ($oldDns.Count -gt 0) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $oldDns -ErrorAction Stop }
+                    else { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses -ErrorAction Stop }
+                }
+            }
+            if ($addedRoute -and @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $cfg.Gateway -ErrorAction SilentlyContinue).Count -gt 0) {
+                Remove-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $cfg.Gateway -Confirm:$false -ErrorAction Stop
+            }
+            if ($addedAddress -and @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress $cfg.Ip -ErrorAction SilentlyContinue).Count -gt 0) {
+                Remove-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress $cfg.Ip -Confirm:$false -ErrorAction Stop
+            }
+            if ($removedAddress -and $previous -and @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress ([string]$previous.Ip) -ErrorAction SilentlyContinue).Count -eq 0) {
+                New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress ([string]$previous.Ip) -PrefixLength ([int]$previous.Prefix) -Confirm:$false -ErrorAction Stop | Out-Null
+            }
+            if ($removedRoute -and $previous -and [string]$previous.Gateway -and @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -ErrorAction SilentlyContinue).Count -eq 0) {
+                New-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop ([string]$previous.Gateway) -ErrorAction Stop | Out-Null
+            }
+            if ($dhcpChanged) {
+                $currentDhcp = [string](Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).Dhcp
+                $ourDhcp = if ($cfg.Mode -eq $modeStatic) { 'Disabled' } else { 'Enabled' }
+                if ($currentDhcp -eq $ourDhcp -and $oldDhcp -in @('Enabled', 'Disabled')) {
+                    Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp $oldDhcp -ErrorAction Stop
+                }
+            }
+            if ($renamed) {
+                $currentAdapter = Get-NetAdapter -InterfaceIndex $adapter.ifIndex -ErrorAction Stop
+                if ([string]$currentAdapter.Name -eq [string]$cfg.Name) {
+                    Rename-NetAdapter -InputObject $currentAdapter -NewName $oldName -Confirm:$false -ErrorAction Stop
+                }
+            }
+        } catch {
+            Write-VsClientLog -Level WARN "Begrenzter Rueckfall fuer Adapter $mac unvollstaendig: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -207,13 +345,13 @@ foreach ($adapter in @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $
 # Registry-Konfiguration nennt Ziele; findet sich zu keinem davon eine Karte,
 # stimmt eine Annahme nicht (MAC-Abweichung, Karte nicht Up, falsches VLAN), und
 # das muss jemand sehen.
-$success = ($failed -eq 0 -and $applied -gt 0)
+$success = ($failed -eq 0 -and $applied -eq $targets.Count -and $targets.Count -gt 0)
 # Die Modusverteilung steht mit im Detail, damit die Portalkarte "3 Ziele, 2
 # statisch, 1 DHCP" zeigen kann statt nur einer Zahl ohne Aussage.
-$detail = "applied={0} (static={1} dhcp={2}) failed={3} targets={4}" -f $applied, $appliedStatic, $appliedDhcp, $failed, $configByMac.Count
+$detail = "applied={0} (static={1} dhcp={2}) failed={3} targets={4}" -f $applied, $appliedStatic, $appliedDhcp, $failed, $targets.Count
 if ($applied -eq 0 -and $failed -eq 0) {
     $detail += ' (no matching adapter)'
-    Write-VsClientLog -Level ERROR "Keiner der $($configByMac.Count) konfigurierten Adapter wurde gefunden: MAC-Adressen, Adapterstatus und VLAN pruefen."
+    Write-VsClientLog -Level ERROR "Keiner der $($targets.Count) konfigurierten Adapter wurde gefunden: MAC-Adressen, Adapterstatus und VLAN pruefen."
 }
 Set-StaticIpStatus -Success $success -Detail $detail
 if ($reportMac) {

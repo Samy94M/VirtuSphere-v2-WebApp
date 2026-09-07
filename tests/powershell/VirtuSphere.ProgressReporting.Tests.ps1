@@ -9,9 +9,12 @@ BeforeAll {
     $script:ClaudeGuide = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'CLAUDE.md') -Raw
     $script:QaGuide = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QA.md') -Raw
     $script:CheckRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1') -Raw
+    $script:CheckRuntime = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'runtime.ps1') -Raw
+    $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
+    $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
 }
 
 Describe 'Visible progress reporting contract' {
@@ -30,6 +33,12 @@ Describe 'Visible progress reporting contract' {
         $script:CheckRunner | Should -Match '\$gateTotal\s*=\s*\$selected\.Count'
         $script:CheckRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
         $script:CheckRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} \{3\}"
+    }
+
+    It 'streams the long PowerShell child while preserving its captured artifact' {
+        $script:CheckRuntime | Should -Match 'param\(\[string\]\$Exe, \[string\[\]\]\$Arguments = @\(\), \[switch\]\$Live\)'
+        $script:CheckRuntime | Should -Match 'if \(\$Live\) \{ Write-Host \$line \}'
+        $script:FastGates | Should -Match "run-pester\.ps1'\)\) -Live"
     }
 
     It 'reports every selected guard case before and after execution' {
@@ -59,5 +68,13 @@ Describe 'Visible progress reporting contract' {
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+RUN network/WDS preflight'
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+OK network/WDS preflight'
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
+    }
+
+    It 'reports every explicitly approved MECM cleanup unit without polluting its result stream' {
+        $script:MecmCommon | Should -Match '\$total\s*=\s*@\(\$CurrentPlan\.Items\)\.Count'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] RUN cleanup'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] pass cleanup'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] fail cleanup'
+        $script:MecmCommon | Should -Not -Match 'Write-Output\s+\("\[\{0\}/\{1\}\].*cleanup'
     }
 }

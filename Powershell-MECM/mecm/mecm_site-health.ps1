@@ -93,7 +93,7 @@ while ($true) {
         Write-VsLog -Level ERROR -Message ("Site-Health-Abfrage fehlgeschlagen: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
     } finally {
         # Genau EINE Abschlussmeldung pro Iteration (nur completed).
-        $durationMs = [int]((Get-Date) - $cycleStart).TotalMilliseconds
+        $durationMs = Get-VsRunDurationMilliseconds -StartedAt $cycleStart
         $reportParams = @{
             Config          = $config
             Source          = 'mecm-site-health'

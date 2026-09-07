@@ -17,6 +17,7 @@
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Common.ps1"
+. "$PSScriptRoot\VirtuSphere-MembershipJournal.ps1"
 
 $config = Get-VsConfig
 if (-not $config) {
@@ -37,6 +38,18 @@ Initialize-VsLog -Component 'device-sync' -LogRoot $config.LogRoot
 # in JEDEM Aufgabenprozess passieren: der Installer setzte es nur in seinem.
 Initialize-VsTls -Config $config
 Write-VsLog -Message '=== Device-Sync gestartet ==='
+
+$membershipJournalPath = Get-VsMembershipJournalPath -Root $PSScriptRoot
+try {
+    # Held for the complete process lifetime. The Task Scheduler setting is a
+    # convenience; this OS lock is the actual two-instance safety boundary.
+    $membershipJournalLock = Enter-VsMembershipJournalInstance -Path $membershipJournalPath
+    if (-not $membershipJournalLock.CanRead) { throw 'Membership-Journalsperre ist nicht verwendbar.' }
+    [void](Read-VsMembershipJournal -Path $membershipJournalPath)
+} catch {
+    Write-VsLog -Level ERROR -Message ("Membership-Journal nicht sicher verwendbar; Device-Sync beendet ohne MECM-Mutation: {0}" -f $_.Exception.Message)
+    throw
+}
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'device-sync/2.0'
@@ -108,7 +121,6 @@ while ($true) {
         # enumerieren: [] -> 0, ein Objekt -> 1, mehrere Objekte -> n.
         $deviceResponse = Invoke-VsApi -Config $config -Path '/mecm-api.php?action=getDeviceList' -TimeoutSec 20
         $devices = @($deviceResponse | ForEach-Object { $_ })
-        $consecutiveErrors = 0
         $received = $devices.Count
         $phase = 'mecm'
 
@@ -142,9 +154,16 @@ while ($true) {
             # Mehrdeutigkeit sichtbar und wird zum Fehler, nicht zur Heuristik.
             $mecmIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Fast -ErrorAction Stop | Select-Object Name, MACAddress, ResourceID)
             $taskSequences = @(Get-CMTaskSequence -Fast -ErrorAction Stop | Select-Object -ExpandProperty Name)
-            $collectionCache = @{}
+            $collectionCache = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::Ordinal)
+            $ambiguousCollectionNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
             foreach ($c in @(Get-CMDeviceCollection -ErrorAction Stop | Select-Object Name, CollectionID)) {
-                if ($c.Name) { $collectionCache[$c.Name] = $c.CollectionID }
+                if (-not $c.Name) { continue }
+                $collectionName = [string]$c.Name
+                if ($collectionCache.ContainsKey($collectionName)) {
+                    [void]$ambiguousCollectionNames.Add($collectionName)
+                    continue
+                }
+                $collectionCache[$collectionName] = $c.CollectionID
             }
             $collectionsToUpdate = @{}
 
@@ -321,6 +340,59 @@ while ($true) {
                     continue
                 }
 
+                # Replay is deliberately before a fresh plan. A confirmed
+                # remote result may be reported again idempotently; an intent
+                # without that confirmation is an ownership-uncertain crash
+                # window and must never be reconstructed from current presence.
+                $journalEntries = @(Get-VsMembershipJournalEntriesForVm -Path $membershipJournalPath -VmId ([int]$device.id))
+                if ($journalEntries.Count -gt 0) {
+                    $journalBlocked = $false
+                    $journalReplayed = $false
+                    $journalFailureCounted = $false
+                    foreach ($journalEntry in $journalEntries) {
+                        if ([int]$journalEntry.rollout_revision -ne [int]$rolloutRevision -or [string]$journalEntry.resource_id -ne [string]$resourceId) {
+                            Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'rollout_or_resource_changed'
+                            $journalBlocked = $true
+                            continue
+                        }
+                        if ([string]$journalEntry.state -ne 'remote_confirmed') {
+                            $journalBlocked = $true
+                            continue
+                        }
+                        try {
+                            $replayBody = @{
+                                deviceid = [int]$journalEntry.vm_id
+                                rollout_revision = [int]$journalEntry.rollout_revision
+                                memberships = @(@{
+                                    collection_id = [string]$journalEntry.collection_id
+                                    collection_name = [string]$journalEntry.collection_name
+                                    type = [string]$journalEntry.type
+                                    change = [string]$journalEntry.change
+                                })
+                            }
+                            Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $replayBody | Out-Null
+                            Remove-VsMembershipJournalEntry -Path $membershipJournalPath -OperationId $journalEntry.operation_id
+                            $journalReplayed = $true
+                        } catch {
+                            $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
+                            if ($statusCode -in @(404, 409)) {
+                                Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason ('portal_http_' + $statusCode)
+                            }
+                            $journalBlocked = $true
+                            $journalFailureCounted = $true
+                            $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
+                            Write-VsLog -Level WARN -Context $deviceName -Message ("Membership-Journal konnte nicht quittiert werden; VM bleibt blockiert: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+                        }
+                    }
+                    if ($journalBlocked -or $journalReplayed) {
+                        if (-not $journalFailureCounted) { $itemFailures++ }
+                        $journalCause = if ($journalBlocked) { 'membership_operation_uncertain' } else { 'membership_report_pending' }
+                        if (-not $journalFailureCounted) { Add-VsRunCause -Causes $causes -Cause $journalCause -Target $deviceName }
+                        continue
+                    }
+                }
+
                 # Reconciliation (ADR-0034): desired/owned/present -> Plan.
                 # desired kommt aus dem Payload (OS, Pakete, Mission), owned aus
                 # der mitgelieferten Provenienz (owned_collections), present aus
@@ -333,15 +405,34 @@ while ($true) {
                 foreach ($pkg in @($device.packages)) { if ($pkg.package_name) { $desired.Add(@{ name = [string]$pkg.package_name; type = 'package' }) } }
                 $desired.Add(@{ name = [string]$missionName; type = 'mission' })
 
+                if (-not (Test-VsDesiredMembershipTargets -Desired $desired)) {
+                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Gewuenschte Collectionnamen sind leer oder demselben exakten Namen sind widerspruechliche Typen zugeordnet; keine Mitgliedschaft geaendert.'
+                    $itemFailures++
+                    Add-VsRunCause -Causes $causes -Cause 'membership_identity_ambiguous' -Target $deviceName
+                    continue
+                }
+
                 $ownedRules = @()
+                $ownedRulesValid = $true
                 foreach ($ownedRule in @($device.owned_collections)) {
-                    if ($ownedRule.collection_id) {
-                        $ownedRules += @{
-                            collection_id   = [string]$ownedRule.collection_id
-                            collection_name = [string]$ownedRule.collection_name
-                            type            = [string]$ownedRule.collection_type
-                        }
+                    $ownedId = [string]$ownedRule.collection_id
+                    $ownedName = [string]$ownedRule.collection_name
+                    $ownedType = [string]$ownedRule.collection_type
+                    if ([string]::IsNullOrWhiteSpace($ownedId) -or [string]::IsNullOrWhiteSpace($ownedName) -or $ownedType -notin @('os', 'package', 'mission')) {
+                        $ownedRulesValid = $false
+                        break
                     }
+                    $ownedRules += @{
+                        collection_id   = $ownedId
+                        collection_name = $ownedName
+                        type            = $ownedType
+                    }
+                }
+                if (-not $ownedRulesValid) {
+                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Portal-Provenienz ist unvollstaendig oder ungueltig; keine Mitgliedschaft wird geaendert und die VM bleibt in der Warteschlange.'
+                    $itemFailures++
+                    Add-VsRunCause -Causes $causes -Cause 'membership_provenance_invalid' -Target $deviceName
+                    continue
                 }
 
                 # Zaehlt die Zuweisungen, die NICHT gesessen haben. Der Zaehler
@@ -349,7 +440,15 @@ while ($true) {
                 $targetsSkipped = 0
 
                 $present = @()
+                $membershipReadUnknown = $false
+                $membershipReadCause = 'membership_query_failed'
                 foreach ($target in $desired) {
+                    if ($ambiguousCollectionNames.Contains([string]$target.name)) {
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Collectionname '{0}' ist im MECM-Bestand mehrfach vorhanden; keine zufaellige ID wird verwendet." -f $target.name)
+                        $membershipReadUnknown = $true
+                        $membershipReadCause = 'membership_identity_ambiguous'
+                        break
+                    }
                     if (-not $collectionCache.ContainsKey($target.name)) {
                         Write-VsLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target.name)
                         $dataWarnings++
@@ -358,16 +457,41 @@ while ($true) {
                         continue
                     }
                     $collectionId = [string]$collectionCache[$target.name]
-                    $member = Get-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction SilentlyContinue
-                    if ($member) { $present += @{ collection_id = $collectionId; collection_name = [string]$target.name } }
+                    $membership = Get-VsDirectMembershipState -CollectionId $collectionId -ResourceId $resourceId
+                    if ($membership.State -eq 'unknown') {
+                        $membershipReadUnknown = $true
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung ausgefuehrt." -f $target.name)
+                        break
+                    }
+                    if ($membership.State -eq 'present') { $present += @{ collection_id = $collectionId; collection_name = [string]$target.name } }
                 }
-                foreach ($ownedRule in $ownedRules) {
+                if (-not $membershipReadUnknown) { foreach ($ownedRule in $ownedRules) {
                     if (@($present | Where-Object { $_.collection_id -eq $ownedRule.collection_id }).Count -gt 0) { continue }
-                    $member = Get-CMDeviceCollectionDirectMembershipRule -CollectionId $ownedRule.collection_id -ResourceId $resourceId -ErrorAction SilentlyContinue
-                    if ($member) { $present += @{ collection_id = [string]$ownedRule.collection_id; collection_name = [string]$ownedRule.collection_name } }
+                    $membership = Get-VsDirectMembershipState -CollectionId $ownedRule.collection_id -ResourceId $resourceId
+                    if ($membership.State -eq 'unknown') {
+                        $membershipReadUnknown = $true
+                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Eigene Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung und kein Provenienzrueckzug ausgefuehrt." -f $ownedRule.collection_name)
+                        break
+                    }
+                    if ($membership.State -eq 'present') { $present += @{ collection_id = [string]$ownedRule.collection_id; collection_name = [string]$ownedRule.collection_name } }
+                } }
+                if ($membershipReadUnknown) {
+                    $itemFailures++
+                    Add-VsRunCause -Causes $causes -Cause $membershipReadCause -Target $deviceName
+                    continue
                 }
 
                 $plan = Get-VsMembershipPlan -Desired $desired -Owned $ownedRules -Present $present
+                # Validate the complete known operation shape before the first
+                # remote membership write. The PHP endpoint stays strict; a
+                # malformed removal must not discard otherwise valid additions
+                # only after MECM was already changed.
+                if (-not (Test-VsMembershipPlanOperations -Plan $plan)) {
+                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Mitgliedschaftsplan enthaelt keine vollstaendig meldbare ID-/Name-/Typ-Provenienz; keine Remote-Aenderung ausgefuehrt.'
+                    $itemFailures++
+                    Add-VsRunCause -Causes $causes -Cause 'membership_provenance_invalid' -Target $deviceName
+                    continue
+                }
                 $membershipReport = New-Object System.Collections.Generic.List[object]
 
                 # Nenner der Unvollstaendigkeits-Meldung weiter unten, und der
@@ -385,11 +509,20 @@ while ($true) {
                     # als add, weil es nicht present ist.
                     if (-not $collectionCache.ContainsKey($target.name)) { continue }
                     $collectionId = [string]$collectionCache[$target.name]
+                    $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
+                    $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId $collectionId -CollectionName ([string]$target.name) -Type ([string]$target.type) -Change added
                     try {
+                        Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
                         Add-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction Stop | Out-Null
+                        Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State remote_confirmed
                         $collectionsToUpdate[$target.name] = $true
-                        $membershipReport.Add(@{ collection_id = $collectionId; collection_name = [string]$target.name; type = [string]$target.type; change = 'added' })
+                        $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = $collectionId; collection_name = [string]$target.name; type = [string]$target.type; change = 'added' })
                     } catch {
+                        try { Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'remote_add_not_confirmed' } catch {
+                            $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
+                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Add nicht aktualisiert werden: {0}" -f $_.Exception.Message)
+                        }
                         Write-VsLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target.name, $_.Exception.Message)
                         $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause 'collection_assign_failed' -Target $deviceName -Collection $target.name
@@ -401,12 +534,21 @@ while ($true) {
                 # mehr desired (Entscheidung 2). Ein Fehlschlag laesst das
                 # Device in der Warteschlange, der naechste Lauf konvergiert.
                 foreach ($rule in @($plan.remove)) {
+                    $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
+                    $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -Type ([string]$rule.type) -Change removed
                     try {
+                        Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
                         Remove-CMDeviceCollectionDirectMembershipRule -CollectionId $rule.collection_id -ResourceId $resourceId -Force -ErrorAction Stop
+                        Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State remote_confirmed
                         $collectionsToUpdate[$rule.collection_name] = $true
-                        $membershipReport.Add(@{ collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
+                        $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
                         Write-VsLog -Context $deviceName -Message ("Eigene, nicht mehr zugewiesene Regel entfernt: '{0}' ({1})." -f $rule.collection_name, $rule.collection_id)
                     } catch {
+                        try { Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'remote_remove_not_confirmed' } catch {
+                            $itemFailures++
+                            Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
+                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Remove nicht aktualisiert werden: {0}" -f $_.Exception.Message)
+                        }
                         Write-VsLog -Level ERROR -Context $deviceName -Message ("Entfernen der eigenen Regel '{0}' fehlgeschlagen: {1}" -f $rule.collection_name, $_.Exception.Message)
                         $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause 'collection_remove_failed' -Target $deviceName -Collection $rule.collection_name
@@ -417,7 +559,10 @@ while ($true) {
                 # Verfallene Provenienz (Regel in MECM von Hand entfernt): nur
                 # zurueckmelden, nie zurueckkaempfen - MECM bleibt die Wahrheit.
                 foreach ($rule in @($plan.stale_owned)) {
-                    $membershipReport.Add(@{ collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
+                    $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
+                    $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -Type ([string]$rule.type) -Change removed -State remote_confirmed
+                    Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
+                    $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
                     Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt - Provenienz wird zurueckgezogen." -f $rule.collection_name)
                 }
 
@@ -449,10 +594,13 @@ while ($true) {
                         # Revision 1 ohne Tombstone durch.
                         $membershipBody = @{
                             deviceid    = $device.id
-                            memberships = @($membershipReport)
+                            memberships = @($membershipReport | Select-Object collection_id, collection_name, type, change)
                         }
                         if ($rolloutRevision) { $membershipBody['rollout_revision'] = [int]$rolloutRevision }
                         Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $membershipBody | Out-Null
+                        foreach ($reported in @($membershipReport)) {
+                            Remove-VsMembershipJournalEntry -Path $membershipJournalPath -OperationId ([string]$reported.operation_id)
+                        }
                     } catch {
                         # 409 heisst: dieser Scan arbeitet mit einem veralteten
                         # Rollout. Kein Transportfehler, keine Handarbeit - der
@@ -530,6 +678,10 @@ while ($true) {
             $category = 'partial_failure'
             $detail = Format-VsRunDetail -Causes $causes
         }
+        # Reset only after the complete portal + MECM section returned. A
+        # successful API read must not hide a repeatedly broken SMS Provider.
+        # Per-item data warnings still prove the provider itself answered.
+        $consecutiveErrors = 0
     } catch {
         $consecutiveErrors++
         $detail = Get-VsErrorDetail -ErrorRecord $_
@@ -546,7 +698,7 @@ while ($true) {
         }
     } finally {
         # Genau EINE Abschlussmeldung pro Iteration, auch bei continue/throw.
-        $durationMs = [int]((Get-Date) - $scanStart).TotalMilliseconds
+        $durationMs = Get-VsRunDurationMilliseconds -StartedAt $scanStart
         $summary = @{
             received                 = $received
             imported                 = $imported

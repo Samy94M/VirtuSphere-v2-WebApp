@@ -14,6 +14,28 @@
       "expected": {"add": ["Mission Alpha", "ProjectX-1.2.0", "Win11-24H2"], "preserve": [], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": []}
     },
     {
+      "name": "duplicate-desired-is-one-operation",
+      "why": "The same exact desired identity is idempotent and must not produce two remote adds.",
+      "desired": [
+        {"name": "ProjectX-1.2.0", "type": "package"},
+        {"name": "ProjectX-1.2.0", "type": "package"}
+      ],
+      "owned": [],
+      "present": [],
+      "expected": {"add": ["ProjectX-1.2.0"], "preserve": [], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": []}
+    },
+    {
+      "name": "case-variants-stay-distinct",
+      "why": "The cross-language plan uses exact names; it must not inherit PowerShell hashtable case folding that PHP does not share.",
+      "desired": [
+        {"name": "Package-A", "type": "package"},
+        {"name": "package-a", "type": "package"}
+      ],
+      "owned": [],
+      "present": [],
+      "expected": {"add": ["Package-A", "package-a"], "preserve": [], "preserve_manual": [], "remove": [], "stale_owned": [], "foreign": []}
+    },
+    {
       "name": "steady-state",
       "why": "Everything desired exists and is owned: nothing to do, and the plan says so explicitly.",
       "desired": [
