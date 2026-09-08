@@ -199,7 +199,11 @@ function deploy_parse_schedule(array $post, ?string $timezone = null): array
     // Reads $_POST, so a system mode is rejected here as well as in the repo.
     $mode = deploy_job_normalize_mission_mode((string) ($post['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL));
     $startMode = (string) ($post['start_mode'] ?? 'now');
-    $tz = new DateTimeZone($timezone ?? portal_timezone());
+    if ($timezone === null) {
+        require_once __DIR__ . '/../portal_time.php';
+        $timezone = portal_timezone();
+    }
+    $tz = new DateTimeZone($timezone);
     $nowEpoch = time();
 
     $baseUtc = null;

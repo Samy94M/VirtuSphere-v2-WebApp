@@ -70,6 +70,13 @@ Describe 'Visible progress reporting contract' {
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
     }
 
+    It 'keeps the portal closure probes inside the counted guard harness' {
+        $script:GuardRunner | Should -Match "Name = 'portal-require-closure.probes'"
+        $script:GuardRunner | Should -Match '--fail-on-empty-test-suite'
+        $script:GuardRunner | Should -Match 'Zero entrypoints are a contract error'
+        (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/gates-integration.ps1')) | Should -Match "test-guards\.ps1'\)\) -Live"
+    }
+
     It 'reports every explicitly approved MECM cleanup unit without polluting its result stream' {
         $script:MecmCommon | Should -Match '\$total\s*=\s*@\(\$CurrentPlan\.Items\)\.Count'
         $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] RUN cleanup'

@@ -17,6 +17,33 @@ the existing configuration owner, so neither DAC override nor a root Apache
 privilege transition is needed. Missing images or transport are infrastructure
 errors; broken ownership, capabilities or login are contract failures.
 
+## Portal require closure
+
+`PortalRequireClosureContractTest` derives PHP entrypoints from the portal
+filesystem and parses first-party source with the existing development-only
+PHP parser. It never includes a route or bootstrap. Function ownership comes
+from declarations, while explicit includes and the existing help-panel registry
+define module edges. Dynamic language catalogs must resolve to nonempty data-only
+files. The help registry is checked against its directory in both directions.
+
+Calls in every syntactic branch are checked, including literal callbacks and
+first-class callables. Only internal PHP functions count as built-ins; loading
+a helper elsewhere in PHPUnit cannot satisfy a portal dependency. Namespaces,
+function imports and method calls retain their PHP distinction. Callable
+parameters and callable collections use the existing owner's type/PHPDoc
+contract; caller arguments and callable returns are checked as well. An
+unresolved dynamic callback/include fails closed instead of entering a name
+allowlist. Add an explicit resolvable dependency or a verifiable callable owner
+contract when introducing a new dynamic form.
+
+Unconditional module edges are separate from includes inside branches and
+functions: a deferred include cannot provide a global dependency elsewhere.
+This is a dependency-closure contract, not an execution-order or general PHP
+type proof. Synthetic mutations, empty inventories and the original dashboard
+edge removal run in `PortalClosureAnalysisTest` and in the existing
+`guard-harness` family (`portal-require-closure.probes`). The AST cache is bounded
+so the normal PHPUnit memory limit remains sufficient.
+
 ## Canonical Check Runner
 
 `scripts/check.ps1` is the executable SSoT of all quality gates (ADR-0031). It runs under Windows PowerShell 5.1 and PowerShell 7 and replaces "run these commands in order" lists; the commands below stay documented for targeted debugging of a single gate.

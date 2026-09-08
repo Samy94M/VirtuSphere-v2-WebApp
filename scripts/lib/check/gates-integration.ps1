@@ -295,7 +295,7 @@ function Register-IntegrationCheckGates {
     Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {
         $hostExe = 'powershell'
         if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
-        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'test-guards.ps1'))
+        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'test-guards.ps1')) -Live
         if ($r.ExitCode -eq 2) { return New-InfraResult 'Guard-Harness ohne vollstaendige Umgebung' $r.Output }
         Format-ToolResult $r 'alle Guards positiv/negativ/zero-match bewiesen' 'Guard-Harness meldet unbewiesene Guards'
     }

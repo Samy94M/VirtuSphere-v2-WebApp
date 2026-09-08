@@ -1131,6 +1131,20 @@ $cases += @(
     } }
 )
 
+$cases += @(
+    @{ Name = 'portal-require-closure.probes'; Body = {
+        if (-not $phpImageAvailable) { throw 'INFRA: PHP test image unavailable' }
+        $result = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none',
+            '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+            $phpImage, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--filter',
+            'PortalClosureAnalysisTest|PortalRequireClosureContractTest',
+            '--fail-on-empty-test-suite', '--fail-on-skipped', '--testdox')
+        $proof = Assert-Guard $result @(0) 'Dashboard regression mutation removes its real module edge'
+        if ($proof.Status -ne 'proven') { return $proof }
+        Assert-Guard $result @(0) 'Zero entrypoints are a contract error'
+    } }
+)
+
 # --- Ausfuehrung -----------------------------------------------------------------
 $selected = $cases
 if ($Filter) {
