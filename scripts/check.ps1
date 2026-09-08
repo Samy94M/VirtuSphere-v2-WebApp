@@ -157,7 +157,7 @@ $script:qaStackStarted = $false
 
 # --- Fokussierte Runner-Module ----------------------------------------------
 $checkModuleDir = Join-Path $scriptDir 'lib/check'
-foreach ($module in @('runtime.ps1', 'registry.ps1', 'gates-fast.ps1', 'gates-integration.ps1', 'gates-release.ps1')) {
+foreach ($module in @('runtime.ps1', 'registry.ps1', 'phpmyadmin.ps1', 'gates-fast.ps1', 'gates-integration.ps1', 'gates-release.ps1')) {
     . (Join-Path $checkModuleDir $module)
 }
 

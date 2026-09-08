@@ -261,7 +261,9 @@ function Register-IntegrationCheckGates {
             if ($_.Exception.Response) { $testsStatus = [int]$_.Exception.Response.StatusCode } else { return New-InfraResult ('Portal nicht erreichbar: ' + $_.Exception.Message) }
         }
         if ($testsStatus -ne 403) { return New-FailResult ('/tests/bootstrap.php liefert HTTP {0} statt 403 (Exposure-Vertrag)' -f $testsStatus) }
-        New-PassResult 'nginx -t OK, health=200, /tests=403'
+        $pma = Invoke-PhpMyAdminSmoke
+        if ($pma.class -ne 'pass') { return $pma }
+        New-PassResult ('nginx -t OK, health=200, /tests=403; ' + $pma.detail)
     }
 
     Add-Gate -Name 'e2e-portal' -Lanes $intRel -Kind 'native' -Network $true -Body {

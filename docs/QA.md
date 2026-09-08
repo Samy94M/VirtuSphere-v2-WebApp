@@ -2,6 +2,21 @@
 
 This page is the operating manual for the VirtuSphere QA battery: how to run each check and how to debug a red one locally. What a gate means and how to interpret its result lives in `docs/QUALITY-GATES.md`; the decisions behind the setup are ADR-0015 (baseline and skip policy), ADR-0028 (E2E tiers) and ADR-0031 (runner). It is intentionally container-first so checks work the same way on Windows hosts and in air-gapped LAN environments once Docker images and Composer vendor artifacts are present.
 
+## phpMyAdmin tools-profile smoke
+
+The existing `health-contract` gate starts phpMyAdmin only through the `tools`
+profile of the canonical throwaway QA stack and stops it in `finally`. Run
+`scripts/check.ps1 -Lane Integration -Gate qa-stack,health-contract` for the
+targeted check. It uses only the synthetic credentials in `Docker/qa/qa.env`;
+cookies, tokens, response bodies and configuration secrets are never logged.
+The runtime probe checks the configuration directory owner/mode, generated
+files, zero effective capabilities and absence of writable vendor entries.
+An authenticated page must show the actual MySQL TCP connection; HTTP 200 also
+occurs for failed logins and is insufficient. The image starts as `www-data`,
+the existing configuration owner, so neither DAC override nor a root Apache
+privilege transition is needed. Missing images or transport are infrastructure
+errors; broken ownership, capabilities or login are contract failures.
+
 ## Canonical Check Runner
 
 `scripts/check.ps1` is the executable SSoT of all quality gates (ADR-0031). It runs under Windows PowerShell 5.1 and PowerShell 7 and replaces "run these commands in order" lists; the commands below stay documented for targeted debugging of a single gate.

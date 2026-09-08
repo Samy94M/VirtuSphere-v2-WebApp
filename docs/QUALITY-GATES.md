@@ -50,7 +50,7 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 | `migrate-check` | Migrations-Preflight `pending=0` gegen den QA-Stack | containerisiert | Migration fehlt oder ist nicht idempotent |
 | `phpunit-full` | Volle Suite inkl. Integrationstests, `--fail-on-skipped`; Allowlist-/Credential-Zustände arrangieren die Tests selbst | containerisiert | Ein dynamischer Skip oder eine echte Integrations-Regression |
 | `schema-convergence` | `struktur.sql` allein == `struktur.sql` + alle Migrationen, inkl. der 0019/0020-Edge-Cases | containerisiert | Schema-Änderung nur auf einer Seite |
-| `health-contract` | `health.php` 200/`ok` mit vergröberter PHP-Version, `/tests/` 403 | containerisiert | Exposure-Regression |
+| `health-contract` | `health.php` 200/`ok` mit vergröberter PHP-Version, `/tests/` 403; phpMyAdmin im QA-`tools`-Profil als `www-data`, ohne Capabilities, mit erzeugter Konfiguration, nicht schreibbarem Vendorbaum und authentifizierter MySQL-TCP-Anmeldung | containerisiert | Exposure- oder phpMyAdmin-Laufzeitregression; HTTP 200 allein beweist keine Anmeldung |
 | `e2e-portal` | Playwright Chromium gegen den QA-Stack: der E6-Abdeckungsvertrag (unten) | nativ, Netz für Toolbezug | Browser-beweisbare Regression; Report im Artefakt |
 | `guard-harness` | Jeder Guard positiv, negativ (Mutation wird erkannt) und im Zero-Match-Fall bewiesen (`scripts/test-guards.ps1`) | nativ | Ein Guard schützt nicht mehr, was er behauptet |
 

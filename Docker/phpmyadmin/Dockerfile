@@ -37,3 +37,8 @@ RUN apt-get update \
 # reads the updated tree exactly as it read the bundled one.
 COPY --from=vendor --chown=www-data:www-data /var/www/html/vendor /var/www/html/vendor
 COPY --from=vendor --chown=www-data:www-data /var/www/html/composer.lock /var/www/html/composer.lock
+
+# With cap_drop ALL, root cannot write the www-data-owned configuration
+# directory or drop Apache's uid/gid. Start as its existing owner instead:
+# configuration generation and Apache need no capabilities or writable vendor.
+USER www-data:www-data
