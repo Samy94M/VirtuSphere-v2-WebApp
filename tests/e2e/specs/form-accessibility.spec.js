@@ -7,19 +7,46 @@ const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
 const { formReferenceProblems } = require('../lib/form-accessibility');
-const { phpJson } = require('../lib/php');
+const { phpJson, runPhp } = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
 
 const MARK = 'e2eformaria';
+const OS_NAME = `${MARK}-os`;
 let seeded = null;
 
+function cleanupFixtures() {
+  try {
+    cleanupMatrixFixtures(MARK);
+  } finally {
+    runPhp(`
+$stmt = db()->prepare('DELETE FROM deploy_os WHERE os_name = ?');
+$name = '${OS_NAME}';
+$stmt->bind_param('s', $name);
+$stmt->execute();
+`);
+  }
+}
+
 test.beforeAll(() => {
-  cleanupMatrixFixtures(MARK);
+  cleanupFixtures();
   seeded = seedMatrixFixtures(MARK);
+  // The shared matrix fixture is for rendering, not saving: its Win11 value
+  // need not exist in the catalog. This spec also submits the VM form, so it
+  // owns an active OS and binds its VMs to it even on an empty QA database.
+  runPhp(`
+$name = '${OS_NAME}';
+$stmt = db()->prepare("INSERT INTO deploy_os (os_name, os_status) VALUES (?, 'Aktiv')");
+$stmt->bind_param('s', $name);
+$stmt->execute();
+$missionId = ${Number(seeded.missionId)};
+$stmt = db()->prepare('UPDATE deploy_vms SET vm_os = ? WHERE mission_id = ?');
+$stmt->bind_param('si', $name, $missionId);
+$stmt->execute();
+`);
 });
 
-test.afterAll(() => cleanupMatrixFixtures(MARK));
+test.afterAll(() => cleanupFixtures());
 
 async function expectReferenceIntegrity(page, context) {
   const problems = await formReferenceProblems(page);
@@ -64,10 +91,14 @@ test('RAM is normalized on the server with JavaScript disabled', async ({ browse
   try {
     const page = await context.newPage();
     await page.goto(`vm_edit.php?mission_id=${seeded.missionId}&vm_id=${seeded.vmId}`);
+    await expect(page.locator('select[name="vm_os"]')).toHaveValue(OS_NAME);
     await expect(page.locator('[data-ram-preset]')).toBeDisabled();
     await page.locator('[data-ram-value]').fill('6');
     await page.locator('[data-ram-unit]').selectOption('gb');
-    await page.locator('form:has([data-ram-value]) button[type="submit"]').click();
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/vm_edit.php') && response.request().method() === 'POST'),
+      page.locator('form:has([data-ram-value]) button[type="submit"]').click(),
+    ]);
     await expect(page).toHaveURL(/vms\.php/);
     const saved = phpJson(`
 $stmt = db()->prepare('SELECT vm_ram FROM deploy_vms WHERE id = ?');
