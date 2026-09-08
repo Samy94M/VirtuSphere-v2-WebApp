@@ -89,12 +89,16 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
   await expect(page.locator('h1')).toHaveCount(1);
   await expect(page.locator('h1')).toHaveText(/Systemstatus|System status/);
   await expect(page.locator('nav a[href="system_status.php"]')).toHaveText(/Systemstatus|System status/);
-  await expect(page.locator('.status-overview-card')).toHaveCount(5);
+  const directoryCards = await page.locator('.status-overview-card[href="system_status.php#directory-status"]').count();
+  await expect(page.locator('.status-overview-card')).toHaveCount(6 + directoryCards);
   // The hrefs are built by system_status_url(), so they carry the page path;
   // with no query they still resolve to this same document and jump in place.
-  for (const anchor of ['mecm', 'ansible', 'esxi', 'deviations', 'internal-services']) {
+  for (const anchor of ['deploy-service', 'mecm', 'ansible', 'esxi', 'deviations', 'internal-services']) {
     await expect(page.locator(`.status-overview-card[href="system_status.php#${anchor}"]`)).toHaveCount(1);
     await expect(page.locator(`#${anchor}`)).toHaveCount(1);
+  }
+  if (directoryCards === 1) {
+    await expect(page.locator('#directory-status')).toHaveCount(1);
   }
 
   const firstTimestamp = await page.locator('.status-generated time').textContent();
@@ -313,30 +317,30 @@ test('unknown Systemstatus POST action is rejected with HTTP 400', async ({ brow
   }
 });
 
-// Etappe 15.3: the overview strip gained a fifth card for the deviation scan.
-// A fixed grid plus a card added in PHP is how a strip quietly becomes two rows
-// of four and one, so the row geometry is measured rather than assumed, and the
-// wrap boundary below it is measured too: five labels in a fifth of the content
-// width is exactly where the strip starts growing taller than what it summarises.
-test('Systemstatus overview: five cards on one row, and a wrap boundary below it', async ({ page }) => {
+// The overview now has six fixed signals and one optional directory signal.
+// Its auto-fit grid is measured at the wrap boundary because a conditional
+// card count cannot be mirrored safely in CSS.
+test('Systemstatus overview: all visible cards share the responsive grid', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto('system_status.php');
 
   const cards = page.locator('.status-overview .status-overview-card');
-  await expect(cards, 'the strip carries one card per health signal').toHaveCount(5);
+  const count = await cards.count();
+  expect(count, 'the strip carries all six fixed health signals').toBeGreaterThanOrEqual(6);
+  expect(count, 'at most the directory signal is conditional').toBeLessThanOrEqual(7);
 
   const rowsAt = async () => page.locator('.status-overview').evaluate((strip) => {
     const tops = [...strip.querySelectorAll('.status-overview-card')].map((c) => Math.round(c.getBoundingClientRect().top));
     return new Set(tops).size;
   });
 
-  expect(await rowsAt(), 'all five sit on one row at desktop width').toBe(1);
+  expect(await rowsAt(), 'all visible cards sit on one row at desktop width').toBe(1);
 
   await page.setViewportSize({ width: 1000, height: 900 });
   expect(await rowsAt(), 'below the wrap boundary the strip reflows instead of squeezing').toBeGreaterThan(1);
 
   await page.setViewportSize({ width: 500, height: 900 });
-  expect(await rowsAt(), 'on a narrow viewport every card gets its own row').toBe(5);
+  expect(await rowsAt(), 'on a narrow viewport every card gets its own row').toBe(count);
 });
 
 // The count is one number with two readers. The strip must not be able to say

@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/envboot.php';
 require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/ssh_transport_exceptions.php';
 
 /**
  * Filesystem and naming for deploy artifacts: where the source playbooks live,
@@ -67,7 +68,7 @@ function ansible_source_dir(): string
         }
     }
 
-    throw new RuntimeException('Ansible source directory not found. Set ANSIBLE_SOURCE_DIR for the worker.');
+    throw new SshTransportConfigurationException('Ansible source directory not found. Set ANSIBLE_SOURCE_DIR for the worker.');
 }
 
 function ansible_create_job_work_dir(int $jobId, string $missionName): string

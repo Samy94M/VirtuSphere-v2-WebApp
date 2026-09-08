@@ -45,9 +45,8 @@ const VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER = '::virtusphere-allowlist::';
  * (a Python ModuleNotFoundError, a missing collection) survives into the detail
  * behind the alert, not just the marker.
  *
- * $strict swaps the collection probe from vmware_guest to vmware_host_auto_start,
- * the module that pins the required collection floor (requirements.yml 6.2.0,
- * ADR-0025). The on-demand credential test uses strict mode to catch a too-old
+ * $strict swaps the module probe from vmware_guest to vmware_host_auto_start,
+ * the module that pins the required feature floor (ADR-0025). The on-demand credential test uses strict mode to catch a too-old
  * collection that carries vmware_guest but not the autostart module. The deploy
  * worker uses the lenient probe on purpose: an old collection can still run a
  * create-only deploy, so its hard preflight gate must not fail for a module that
@@ -81,13 +80,13 @@ function ansible_preflight_checks(bool $strict = false): array
         'community.vmware' => ansible_collection_probe_command($collectionModule),
         // Presence is not readiness (Etappe 14B, plan 12.2). The incident report
         // named ansible-core 2.16.3 on the production host while the pinned
-        // collection requires 2.19 or newer, and every check above passes on
+        // collection requires a newer core, and every check above passes on
         // such a host: ansible-playbook exists, python imports, and ansible-doc
         // reads documentation without loading a module. The version pair is
-        // therefore checked as its own component, and it is read from the
-        // INSTALLED artifacts on the host rather than from a second version pair
-        // written into PHP.
-        'runtime-versions' => ansible_runtime_version_probe_command(ansible_pinned_collection_version()),
+        // therefore checked as its own component. Every exact collection pin
+        // comes from requirements.yml and every core floor from the respective
+        // INSTALLED runtime artifact, never from a second list in PHP.
+        'runtime-versions' => ansible_runtime_version_probe_command(ansible_pinned_collection_versions()),
         // The async state directory a per-VM create needs: creatable with 0700,
         // writable with 0600, removable again. A host whose home is read-only or
         // whose umask forbids the mode fails here, before a job has started a

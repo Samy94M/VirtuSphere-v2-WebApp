@@ -179,7 +179,10 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
     // the worker's own status row. That is not a second opinion about the file
     // the supervisor watches: the two live in different containers, and each
     // layer uses the only source it can actually reach.
-    $childAlive = integration_deploy_worker_alive_now($db, $now);
+    $workerStatus = integration_deploy_worker_status_now($db, $now);
+    $childAlive = $workerStatus !== null && integration_deploy_worker_alive([
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => $workerStatus,
+    ]);
 
     $availability = deploy_service_availability([
         'supervisor_contract' => $contract,
@@ -211,6 +214,9 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
         'badge' => deploy_service_badge_variant($availability, $attention),
         'queue' => $queue,
         'active' => $active,
+        'service_heartbeat_at' => $workerStatus['row']['last_checked_at']
+            ?? $workerStatus['row']['last_seen_at']
+            ?? null,
         'claim' => $claim,
         'recovery' => $recovery,
         'supervisor' => $supervisor + ['fresh' => $supervisorFresh, 'child_alive' => $childAlive],

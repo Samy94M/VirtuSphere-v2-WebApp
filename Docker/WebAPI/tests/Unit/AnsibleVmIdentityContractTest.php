@@ -95,6 +95,29 @@ final class AnsibleVmIdentityContractTest extends TestCase
         }
     }
 
+    public function testEveryPowerAndAutostartMutationSelectsTheValidatedLiveInstanceUuid(): void
+    {
+        foreach ([
+            'startVMs-ESXi_playbook.yml' => 'community.vmware.vmware_guest_powerstate:',
+            'powercycleVMs-ESXi_playbook.yml' => 'community.vmware.vmware_guest_powerstate:',
+            'autostartVMs-ESXi_playbook.yml' => 'community.vmware.vmware_host_auto_start:',
+        ] as $file => $module) {
+            $playbook = $this->source($file);
+            preg_match_all('/' . preg_quote($module, '/') . '\R((?:\s{8}.+\R)+)/', $playbook, $matches);
+            self::assertNotEmpty($matches[1], $file . ' has no inspectable mutation arguments');
+            foreach ($matches[1] as $arguments) {
+                // The host-wide autostart defaults intentionally select no VM.
+                if ($file === 'autostartVMs-ESXi_playbook.yml' && str_contains($arguments, 'system_defaults:')) {
+                    continue;
+                }
+                self::assertStringContainsString('uuid:', $arguments, $file);
+                self::assertStringContainsString('instance_uuid', $arguments, $file);
+                self::assertStringContainsString('use_instance_uuid: true', $arguments, $file);
+                self::assertDoesNotMatchRegularExpression('/^\s*name:/m', $arguments, $file . ' must not resolve the VM by name again');
+            }
+        }
+    }
+
     public function testExportTurnsAnIdentityMismatchIntoAPerVmFailureBeforeTheCallback(): void
     {
         $playbook = $this->source('exportVMs-Informations-ESXi_playbook.yml');

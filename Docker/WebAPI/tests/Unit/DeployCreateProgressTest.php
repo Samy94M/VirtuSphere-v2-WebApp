@@ -181,4 +181,30 @@ final class DeployCreateProgressTest extends TestCase
             }
         }
     }
+
+    public function testStoredCreateFindingsDistinguishFailureClassesWithoutParsingProse(): void
+    {
+        $rows = $this->rows([
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, ''],
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN, ''],
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, ''],
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN, ''],
+        ]);
+        $rows[0]['error_code'] = VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED;
+        $rows[1]['error_code'] = VIRTUSPHERE_CREATE_ERROR_ASYNC_STATE_MISSING;
+        $rows[2]['error_code'] = VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT;
+        $rows[3]['error_code'] = VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR;
+
+        $view = deploy_create_progress_from_rows($rows);
+        self::assertNotNull($view);
+        self::assertSame([
+            'deploy.create_progress_reason_module_failed',
+            'deploy.create_progress_reason_unresolved_observation',
+            'deploy.create_progress_reason_identity_conflict',
+            'deploy.create_progress_reason_invalid_evidence',
+        ], array_column($view['findings'], 'reason_key'));
+        foreach ($view['findings'] as $finding) {
+            self::assertNotSame($finding['error_code'], $finding['reason_label']);
+        }
+    }
 }

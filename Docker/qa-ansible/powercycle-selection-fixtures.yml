@@ -25,9 +25,14 @@
       - { vm_name: suspendiert-ohne-mac, needs_mac: true }
     powercycle_initial:
       results:
-        - { item: { vm_name: aus-und-ohne-mac }, instance: { hw_power_status: poweredOff } }
-        - { item: { vm_name: laeuft-ohne-mac }, instance: { hw_power_status: poweredOn } }
-        - { item: { vm_name: suspendiert-ohne-mac }, instance: { hw_power_status: suspended } }
+        - { item: { vm_name: aus-und-ohne-mac }, instance: { hw_power_status: poweredOff, instance_uuid: uuid-aus } }
+        - { item: { vm_name: laeuft-ohne-mac }, instance: { hw_power_status: poweredOn, instance_uuid: uuid-an } }
+        - { item: { vm_name: suspendiert-ohne-mac }, instance: { hw_power_status: suspended, instance_uuid: uuid-suspendiert } }
+    powercycle_start_results:
+      results:
+        - { item: { item: { vm_name: aus-und-ohne-mac }, instance: { instance_uuid: uuid-aus } }, changed: true, failed: false }
+        - { item: { item: { vm_name: extern-gestartet }, instance: { instance_uuid: uuid-extern } }, changed: false, failed: false }
+        - { item: { item: { vm_name: ausgang-unklar }, instance: { instance_uuid: uuid-unklar } }, changed: true, failed: true }
     # Zwei kaputte Formen, weil sie verschieden scheitern: ein Item ganz ohne
     # instance und ein instance ohne hw_power_status. Ein dotted-Filter wirft
     # auf beiden (ansible-core behandelt fehlende Attribute hart, hier
@@ -49,14 +54,27 @@
       ansible.builtin.set_fact:
         powercycle_to_start: >-
           {{ powercycle_initial.results | default([])
-             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff')
-             | map(attribute='item') | list }}
+             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff') | list }}
+
+    - name: Bestaetigte eigene Starts leer initialisieren
+      ansible.builtin.set_fact:
+        powercycle_started_by_run: []
+
+    - name: Nur erfolgreiche eigene Einschaltungen fuer Cleanup erfassen
+      ansible.builtin.set_fact:
+        powercycle_started_by_run: "{{ powercycle_started_by_run + [item.item] }}"
+      loop: "{{ powercycle_start_results.results | default([]) }}"
+      when:
+        - item.changed | default(false) | bool
+        - not (item.failed | default(false) | bool)
 
     - name: Auswahl entspricht dem Vertrag
       ansible.builtin.assert:
         that:
           - powercycle_targets | map(attribute='vm_name') | list == ['aus-und-ohne-mac', 'laeuft-ohne-mac', 'suspendiert-ohne-mac']
-          - powercycle_to_start | map(attribute='vm_name') | list == ['aus-und-ohne-mac']
+          - powercycle_to_start | map(attribute='item.vm_name') | list == ['aus-und-ohne-mac']
+          - powercycle_to_start | map(attribute='instance.instance_uuid') | list == ['uuid-aus']
+          - powercycle_started_by_run | map(attribute='item.vm_name') | list == ['aus-und-ohne-mac']
         fail_msg: >-
           Die Powercycle-Auswahl weicht vom Vertrag ab: Ziel ist nur, wer
           needs_mac bejaht, geschaltet wird nur, wer initial poweredOff war.

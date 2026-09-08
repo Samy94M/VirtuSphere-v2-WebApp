@@ -5,25 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/directory_constants.php';
-
-/**
- * SSoT for links into the visible System status page. The compatible endpoint
- * remains system_status.php; callers provide only an actual rendered anchor.
- *
- * @param array<string,int|string> $query
- */
-function system_status_url(string $anchor, array $query = []): string
-{
-    if (preg_match('/\A[a-z0-9][a-z0-9-]*\z/', $anchor) !== 1) {
-        throw new InvalidArgumentException('Invalid System status anchor.');
-    }
-    $url = 'system_status.php';
-    if ($query !== []) {
-        $url .= '?' . http_build_query($query);
-    }
-
-    return $url . '#' . $anchor;
-}
+require_once __DIR__ . '/system_status_urls.php';
 
 /**
  * How many mission/VM deviations the scan found, or null when it could not run.

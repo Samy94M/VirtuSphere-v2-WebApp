@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ansible_command_shell.php';
+require_once __DIR__ . '/ansible_paths.php';
+require_once __DIR__ . '/ssh_transport_exceptions.php';
 
 /**
  * The sources VirtuSphere embeds into remote preflight commands.
@@ -60,49 +62,75 @@ function ansible_embedded_script_source(string $source): string
 }
 
 /**
- * The collection version pinned in Ansible/requirements.yml, which is the SSoT
- * (ADR-0025). Parsed rather than duplicated: a second literal here would keep
- * passing while it quietly stopped meaning the same thing.
+ * The complete direct/transitive collection lock in Ansible/requirements.yml,
+ * which is the SSoT (ADR-0025). Parsed rather than duplicated: literals here
+ * would keep passing while they quietly stopped meaning the same thing.
  */
-function ansible_pinned_collection_version(): string
+function ansible_pinned_collection_versions(): array
 {
-    static $version = null;
-    if ($version !== null) {
-        return $version;
+    static $versions = null;
+    if ($versions !== null) {
+        return $versions;
     }
-    $path = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'Ansible' . DIRECTORY_SEPARATOR . 'requirements.yml';
+    $path = ansible_source_dir() . DIRECTORY_SEPARATOR . 'requirements.yml';
     $source = is_readable($path) ? (string) file_get_contents($path) : '';
-    if (preg_match('/name:\s*community\.vmware\s*\R\s*version:\s*"?([0-9][0-9A-Za-z.\-]*)"?/', $source, $matches) !== 1) {
-        // No guessed default: a pin that cannot be read must not silently
-        // become "any version is fine".
-        throw new RuntimeException('The community.vmware pin could not be read from Ansible/requirements.yml.');
+    preg_match_all(
+        '/^\s*-\s+name:\s*([a-z0-9_]+\.[a-z0-9_]+)\s*\R\s*version:\s*["\']?([0-9][0-9A-Za-z.\-]*)["\']?\s*$/mi',
+        $source,
+        $matches,
+        PREG_SET_ORDER
+    );
+    $parsed = [];
+    foreach ($matches as $match) {
+        $parsed[(string) $match[1]] = (string) $match[2];
+    }
+    foreach (['community.vmware', 'vmware.vmware'] as $required) {
+        if (!isset($parsed[$required])) {
+            throw new SshTransportConfigurationException(
+                'The complete Ansible collection lock could not be read from the effective requirements.yml.'
+            );
+        }
+    }
+    if (count($parsed) !== count($matches)) {
+        throw new SshTransportConfigurationException(
+            'The effective Ansible requirements.yml contains a duplicate collection pin.'
+        );
     }
 
-    return $version = $matches[1];
+    return $versions = $parsed;
+}
+
+/** Compatibility facade for callers that need the primary collection only. */
+function ansible_pinned_collection_version(): string
+{
+    return ansible_pinned_collection_versions()['community.vmware'];
 }
 
 /**
- * Probe that compares the host's installed runtime against what the pinned
- * collection itself demands.
+ * Probe that compares the host's installed runtime against the complete lock
+ * and what each pinned collection itself demands.
  *
  * Two questions, one component, both answered from artifacts on the host:
  *
- *  1. Is the installed community.vmware the pinned one? A host that silently
- *     carries another version runs different modules than every test in this
- *     repository.
- *  2. Does the installed ansible-core satisfy the `requires_ansible` of that
- *     installed collection? The floor is read out of the collection's own
- *     meta/runtime.yml, so no number is repeated in PHP and a collection bump
- *     brings its new floor with it.
+ *  1. Is every locked collection installed at its exact pinned version?
+ *  2. Does ansible-core satisfy every installed collection's own
+ *     `requires_ansible`? Floors come from each meta/runtime.yml, so no number
+ *     is repeated in PHP and a collection bump brings its new floor with it.
  *
  * The probe prints a one-line reason on failure and nothing on success.
  */
-function ansible_runtime_version_probe_command(string $pinnedVersion): string
+function ansible_runtime_version_probe_command(array|string $pinnedVersions): string
 {
     $source = <<<'PY'
 import json, re, subprocess, sys
 
-pinned = sys.argv[1]
+try:
+    pinned = json.loads(sys.argv[1])
+except (TypeError, ValueError):
+    pinned = {}
+if not isinstance(pinned, dict) or not pinned:
+    sys.stderr.write("the VirtuSphere collection lock is empty or unreadable\n")
+    raise SystemExit(1)
 
 listing = subprocess.run(
     ["ansible-galaxy", "collection", "list", "--format", "json"],
@@ -113,39 +141,8 @@ try:
 except (TypeError, ValueError):
     paths = {}
 
-found = None
-for root, collections in (paths.items() if isinstance(paths, dict) else []):
-    entry = collections.get("community.vmware") if isinstance(collections, dict) else None
-    if isinstance(entry, dict) and entry.get("version"):
-        found = (root, str(entry["version"]))
-        break
-
-if found is None:
-    sys.stderr.write("community.vmware is not installed for this ansible-galaxy\n")
-    raise SystemExit(1)
-
-root, installed = found
-if installed != pinned:
-    sys.stderr.write(
-        "community.vmware %s is installed, but this VirtuSphere pins %s\n" % (installed, pinned)
-    )
-    raise SystemExit(1)
-
 def version_tuple(text):
     return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
-
-try:
-    with open("%s/community/vmware/meta/runtime.yml" % root, "r", encoding="utf-8") as handle:
-        runtime = handle.read()
-except OSError:
-    sys.stderr.write("the installed community.vmware carries no readable meta/runtime.yml\n")
-    raise SystemExit(1)
-
-match = re.search(r"requires_ansible:\s*['\"]?>=\s*([0-9][0-9.]*)", runtime)
-if match is None:
-    sys.stderr.write("the installed community.vmware declares no ansible-core floor\n")
-    raise SystemExit(1)
-floor = match.group(1)
 
 core = subprocess.run(["ansible", "--version"], capture_output=True, text=True)
 core_match = re.search(r"core\s+([0-9][0-9.]*)", core.stdout or "")
@@ -153,16 +150,53 @@ if core_match is None:
     sys.stderr.write("the installed ansible-core version could not be read\n")
     raise SystemExit(1)
 
-if version_tuple(core_match.group(1)) < version_tuple(floor):
-    sys.stderr.write(
-        "ansible-core %s is installed, but community.vmware %s requires %s or newer\n"
-        % (core_match.group(1), installed, floor)
-    )
-    raise SystemExit(1)
+for collection, expected in pinned.items():
+    found = None
+    for root, collections in (paths.items() if isinstance(paths, dict) else []):
+        entry = collections.get(collection) if isinstance(collections, dict) else None
+        if isinstance(entry, dict) and entry.get("version"):
+            found = (root, str(entry["version"]))
+            break
+    if found is None:
+        sys.stderr.write("%s is not installed for this ansible-galaxy\n" % collection)
+        raise SystemExit(1)
+
+    root, installed = found
+    if installed != str(expected):
+        sys.stderr.write(
+            "%s %s is installed, but this VirtuSphere pins %s\n"
+            % (collection, installed, expected)
+        )
+        raise SystemExit(1)
+
+    namespace, name = collection.split(".", 1)
+    try:
+        with open("%s/%s/%s/meta/runtime.yml" % (root, namespace, name), "r", encoding="utf-8") as handle:
+            runtime = handle.read()
+    except OSError:
+        sys.stderr.write("the installed %s carries no readable meta/runtime.yml\n" % collection)
+        raise SystemExit(1)
+
+    match = re.search(r"requires_ansible:\s*['\"]?>=\s*([0-9][0-9.]*)", runtime)
+    if match is None:
+        sys.stderr.write("the installed %s declares no ansible-core floor\n" % collection)
+        raise SystemExit(1)
+    floor = match.group(1)
+    if version_tuple(core_match.group(1)) < version_tuple(floor):
+        sys.stderr.write(
+            "ansible-core %s is installed, but %s %s requires %s or newer\n"
+            % (core_match.group(1), collection, installed, floor)
+        )
+        raise SystemExit(1)
 PY;
 
+    if (is_string($pinnedVersions)) {
+        $pinnedVersions = ['community.vmware' => $pinnedVersions];
+    }
+    $encoded = json_encode($pinnedVersions, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
     return 'command -v ansible-galaxy >/dev/null 2>&1 && python3 -c '
-        . ansible_sh_quote(ansible_embedded_script_source($source)) . ' ' . ansible_sh_quote($pinnedVersion) . ' 2>&1';
+        . ansible_sh_quote(ansible_embedded_script_source($source)) . ' ' . ansible_sh_quote($encoded) . ' 2>&1';
 }
 
 function ansible_collection_probe_command(string $module): string

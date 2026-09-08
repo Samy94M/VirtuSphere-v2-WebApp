@@ -95,12 +95,11 @@ final class AnsiblePreflightAmpelTest extends TestCase
         );
     }
 
-    public function testAnUnreadableTimestampKeepsTheRecordedState(): void
+    public function testAMissingOrUnreadableTimestampCannotProveSuccess(): void
     {
-        // Never invent an age: a row whose timestamp cannot be parsed still has
-        // a status the operator recorded, and guessing 'stale' would drop it.
-        self::assertSame('ok', ansible_preflight_ampel($this->state(['last_checked_at' => '']), $this->now()));
-        self::assertSame('ok', ansible_preflight_ampel($this->state(['last_checked_at' => 'not a date']), $this->now()));
+        self::assertSame('unknown', ansible_preflight_ampel($this->state(['last_checked_at' => '']), $this->now()));
+        self::assertSame('unknown', ansible_preflight_ampel($this->state(['last_checked_at' => 'not a date']), $this->now()));
+        self::assertSame('unknown', ansible_preflight_ampel($this->state(['evidence_current' => false]), $this->now()));
     }
 
     public function testStaleRanksWithUnknownRatherThanWithOk(): void

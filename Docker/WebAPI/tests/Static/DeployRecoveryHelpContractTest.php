@@ -9,20 +9,18 @@ final class DeployRecoveryHelpContractTest extends TestCase
 {
     private const REQUIRED = [
         'de' => [
-            'Nur wenn ein Abbruch oder ein Zeitbudget während oder nach dem Create-Schritt eintritt',
-            'bestätigtem MAC-Import',
-            'bereitgestellten Zustand',
-            'vor einem Wiederholungslauf',
-            'Bestand auf ESXi',
-            'gespeicherte Identität',
+            'Identität übernehmen beendet die ungeklärte Create-Einheit nicht',
+            'vorhandene VM weder als nicht erstellt freigeben noch als allgemeine Reparatur löschen',
+            'erfolgreicher VM-Inventarabruf',
+            'neuer als Auftrag und Einheit',
+            'Recent Tasks',
         ],
         'en' => [
-            'Only a cancellation or a time budget reached during or after the create step',
-            'confirmed MAC import',
-            'provisioned state',
-            'Before a retry',
-            'inventory on ESXi',
-            'stored identity',
+            'Adopting identity does not resolve the unresolved create unit',
+            'neither release an existing VM as not created nor delete it as a general repair',
+            'successful VM inventory pull',
+            'newer than both the job and the unit',
+            'Recent Tasks',
         ],
     ];
 
@@ -66,6 +64,9 @@ final class DeployRecoveryHelpContractTest extends TestCase
         self::assertArrayHasKey('deploy_identity_p2', $catalog);
         self::assertIsString($catalog['deploy_identity_p2']);
 
-        return $catalog['deploy_identity_p2'];
+        self::assertArrayHasKey('create_progress_p3', $catalog);
+        self::assertIsString($catalog['create_progress_p3']);
+
+        return $catalog['deploy_identity_p2'] . ' ' . $catalog['create_progress_p3'];
     }
 }

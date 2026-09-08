@@ -6,6 +6,8 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/help_page.php';
+require_once __DIR__ . '/portal_time.php';
+require_once __DIR__ . '/layout_response.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/system_status.php';
 
@@ -76,14 +78,20 @@ function deploy_create_progress_from_rows(array $rows): ?array
     }
     $summary = deploy_create_summary($rows);
     $unresolved = null;
+    $findings = [];
     foreach ($rows as $row) {
-        if ((string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN) {
+        if ($unresolved === null && (string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN) {
             $unresolved = [
                 'position' => (int) $row['position'],
                 'vm_name' => (string) $row['vm_name'],
                 'error_code' => (string) ($row['error_code'] ?? ''),
             ];
-            break;
+        }
+        if (in_array((string) $row['status'], [
+            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN,
+        ], true)) {
+            $findings[] = deploy_create_progress_finding($row);
         }
     }
 
@@ -107,6 +115,41 @@ function deploy_create_progress_from_rows(array $rows): ?array
         'counters' => $counters,
         'current' => $summary['current'],
         'unresolved' => $unresolved,
+        'findings' => $findings,
+    ];
+}
+
+/**
+ * A stored failure class presented without parsing prose or exposing it as the
+ * visible explanation. The technical error code remains alongside the label so
+ * operations can still correlate it with a runbook or support case.
+ *
+ * @param array<string,mixed> $row
+ * @return array<string,mixed>
+ */
+function deploy_create_progress_finding(array $row): array
+{
+    $errorCode = (string) ($row['error_code'] ?? '');
+    $reasonKey = match ($errorCode) {
+        VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED => 'deploy.create_progress_reason_module_failed',
+        VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT => 'deploy.create_progress_reason_identity_conflict',
+        VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
+        VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID => 'deploy.create_progress_reason_invalid_evidence',
+        VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED => 'deploy.create_progress_reason_operator_released',
+        VIRTUSPHERE_CREATE_ERROR_LAUNCH_UNCONFIRMED,
+        VIRTUSPHERE_CREATE_ERROR_ASYNC_STATE_MISSING,
+        VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST,
+        VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT,
+        VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST => 'deploy.create_progress_reason_unresolved_observation',
+        default => 'deploy.create_progress_reason_unknown',
+    };
+
+    return [
+        'position' => (int) $row['position'],
+        'vm_name' => (string) $row['vm_name'],
+        'error_code' => $errorCode,
+        'reason_key' => $reasonKey,
+        'reason_label' => __t($reasonKey),
     ];
 }
 
@@ -158,6 +201,17 @@ function deploy_create_progress_payload_from_view(?array $view): ?array
                 ? null
                 : deploy_create_progress_since_label($current),
         ],
+        'findings' => array_map(
+            static fn(array $finding): array => [
+                'error_code' => (string) $finding['error_code'],
+                'text' => __t('deploy.create_progress_finding', [
+                    'name' => (string) $finding['vm_name'],
+                    'position' => (string) (int) $finding['position'],
+                    'reason' => (string) $finding['reason_label'],
+                ]),
+            ],
+            $view['findings']
+        ),
     ];
 }
 
@@ -253,6 +307,23 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
                 </div>
             <?php } ?>
         </dl>
+        <div data-create-findings<?php echo $view['findings'] === [] ? ' hidden' : ''; ?>>
+            <p><strong><?php echo h(__t('deploy.create_progress_findings_heading')); ?></strong></p>
+            <ul data-create-finding-list>
+                <?php foreach ($view['findings'] as $finding) { ?>
+                    <li>
+                        <span><?php echo h(__t('deploy.create_progress_finding', [
+                            'name' => (string) $finding['vm_name'],
+                            'position' => (string) (int) $finding['position'],
+                            'reason' => (string) $finding['reason_label'],
+                        ])); ?></span>
+                        <?php if ((string) $finding['error_code'] !== '') { ?>
+                            <code><?php echo h((string) $finding['error_code']); ?></code>
+                        <?php } ?>
+                    </li>
+                <?php } ?>
+            </ul>
+        </div>
         <?php if ($view['unresolved'] !== null) { ?>
             <div class="alert alert-warning">
                 <p><?php echo h(__t('deploy.create_progress_unresolved', [

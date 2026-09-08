@@ -59,7 +59,7 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'esxi_inventory_add_vm_issue',
         'esxi_inventory_vm_deviations',
         'esxi_inventory_deviating_mission_ids',
-        'repo_reassign_vlan',
+        'esxi_inventory_deviation_report',
         'esxi_inventory_interval_hours',
         'esxi_inventory_ampel',
         'esxi_inventory_summaries',

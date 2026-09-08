@@ -128,15 +128,20 @@ const FILE_SIZE_ALLOWANCES = [
     // Etappe 15F raised migrate.php 1259->1261 for migration 0051: the same two
     // registry lines - a require and a map entry - that every migration since
     // 0042 costs, with its body in lib/migrations/.
+    // System-status hardening raised migrate.php 1261->1267 for migration 0052:
+    // two registry lines and four fresh-schema columns. The migration body stays
+    // in lib/migrations/; the fresh-schema mirror is part of this registry. It
+    // also raised constants.php 727->729 for the conditional AD card and the
+    // fixed conditional VLAN-repair anchor registered by the URL owner.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1261,
+        'lines' => 1267,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 727,
+        'lines' => 729,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],
@@ -160,11 +165,6 @@ const FILE_SIZE_ALLOWANCES = [
     'Docker/WebAPI/lib/esxi_inventory_options.php' => [
         'lines' => 455,
         'why' => 'one presence/bucket domain just over the target',
-        'stage' => 'bei naechster fachlicher Aenderung pruefen',
-    ],
-    'Docker/WebAPI/lib/status.php' => [
-        'lines' => 418,
-        'why' => 'one status-mapping domain just over the target',
         'stage' => 'bei naechster fachlicher Aenderung pruefen',
     ],
     'Docker/WebAPI/lib/errors.php' => [

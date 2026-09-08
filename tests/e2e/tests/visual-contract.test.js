@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { resolveBrowser } = require('../lib/browser-resolver');
 const { assertVisualQaIsolation } = require('../lib/visual-seed');
-const { compareMetadata } = require('../visual/metadata');
+const { compareMetadata, platformRelease } = require('../visual/metadata');
 const { comparePngs, refuseUpdateRequest, requireCleanCaptureScope, requireMatchingMetadata, requireUsableBaselines, validateHarnessEnvironment, UPDATE_ENV_NAMES } = require('../visual/harness');
 const { expectedBaselineFiles, expectedRunFiles, runnerIdentity, verifyBaselineSet, writeDiffImage } = require('../visual/baselines');
 const { MINIMUM_REASON_LENGTH, parseReason, requireExplicitAllowance, requireMatchingRunner } = require('../visual/update-baselines');
@@ -48,6 +48,13 @@ test('metadata comparison reports an exact runner mismatch', () => {
   const expected = { osRelease: 'fixed', browser: { revision: '1' } };
   assert.deepEqual(compareMetadata(expected, expected), []);
   assert.match(compareMetadata(expected, { osRelease: 'other', browser: { revision: '1' } })[0], /osRelease/);
+});
+
+test('Linux visual metadata pins the distribution release, not a rolling host kernel', () => {
+  const release = 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"\n';
+  assert.equal(platformRelease('linux', '6.17.0-1022-azure', release), 'ubuntu-24.04');
+  assert.equal(platformRelease('linux', 'fallback-kernel', 'NAME=unknown\n'), 'fallback-kernel');
+  assert.equal(platformRelease('win32', '10.0.26200', release), '10.0.26200');
 });
 
 test('metadata mismatch is an infrastructure error before any visual run', () => {

@@ -251,7 +251,7 @@ function Register-FastCheckGates {
         }
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
             $toolImages.ansible, 'sh', '/repo/Docker/qa-ansible/module-contract.sh')
-        Format-ToolResult $r 'Jedes benutzte Modul laedt gegen die gepinnte Collection' 'Modulvertrag der gepinnten Collection verletzt'
+        Format-ToolResult $r 'Module und vollstaendiger Collection-Lock stimmen' 'Modul- oder Collection-Lock-Vertrag verletzt'
     }
 
     Add-Gate -Name 'ansible-powercycle-selection' -Lanes $allLanes -Kind 'container' -Body {
@@ -288,13 +288,15 @@ function Register-FastCheckGates {
         # weshalb das Status-Playbook seine Unterscheidung auf die Anwesenheit
         # der Statusdatei stuetzt. Die Fixture pinnt beides.
         $fixture = Join-Path $repoRoot 'Docker/qa-ansible/create-async-fixtures.yml'
+        $contract = Join-Path $repoRoot 'Docker/qa-ansible/create-async-contract.py'
         if (-not (Test-Path $fixture)) { return New-InfraResult 'create-async-fixtures.yml fehlt unter dem Pruef-Root (Zero-Match)' }
+        if (-not (Test-Path $contract)) { return New-InfraResult 'create-async-contract.py fehlt unter dem Pruef-Root (Zero-Match)' }
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'ansible-playbook', '/repo/Docker/qa-ansible/create-async-fixtures.yml')
-        Format-ToolResult $r 'Async-Start, Wiederauffinden, Poll und gezielter Cleanup bewiesen' 'Async-Vertrag des per-VM-Create verletzt'
+            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/create-async-contract.py', '/repo') -Live
+        Format-ToolResult $r 'Async-Start, Produktionsstatus, Ergebniswahrheit und Cleanup bewiesen' 'Async-Vertrag des per-VM-Create verletzt'
     }
 
     Add-Gate -Name 'ansible-output-buffering' -Lanes $allLanes -Kind 'container' -Body {

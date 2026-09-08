@@ -98,6 +98,8 @@ final class DeployCreateProgressContractTest extends TestCase
                 // one starts, and one text node would drop the "since".
                 'data-create-current-label',
                 'data-create-since-text',
+                'data-create-findings',
+                'data-create-finding-list',
                 "help_url('deploy', 'help-create-progress')",
             ],
             'lib/help_page.php' => [
@@ -111,6 +113,8 @@ final class DeployCreateProgressContractTest extends TestCase
                 'renderCreateProgress(payload.create_progress || null);',
                 'data-create-current-label',
                 'data-create-since-text',
+                'data-create-findings',
+                'data-create-finding-list',
                 // The control is a real link now, so its default navigation
                 // must be suppressed here rather than relied upon.
                 'event.preventDefault();',

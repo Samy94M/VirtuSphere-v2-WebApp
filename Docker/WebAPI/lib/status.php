@@ -127,12 +127,13 @@ function virtusphere_heartbeat_staleness(?string $lastSeenAt, int $intervalSecon
         return 'unknown';
     }
 
-    $seenTs = strtotime($lastSeenAt);
-    if ($seenTs === false) {
+    $current = $now ?? time();
+    $seenTs = virtusphere_evidence_timestamp($lastSeenAt, $current);
+    if ($seenTs === null) {
         return 'unknown';
     }
 
-    $age = ($now ?? time()) - $seenTs;
+    $age = max(0, $current - $seenTs);
     $warnAfter = max($intervalSeconds * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER, VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS);
     $dangerAfter = max($intervalSeconds * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER, VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS);
 
@@ -204,7 +205,10 @@ function virtusphere_heartbeat_state_rank(string $state): int
  */
 function ansible_preflight_ampel(?array $state, ?int $now = null): string
 {
-    if ($state === null || trim((string) ($state['last_status'] ?? '')) === '') {
+    if ($state === null
+        || (array_key_exists('evidence_current', $state) && !$state['evidence_current'])
+        || trim((string) ($state['last_status'] ?? '')) === ''
+    ) {
         return 'unknown';
     }
 
@@ -221,17 +225,20 @@ function ansible_preflight_ampel(?array $state, ?int $now = null): string
 
     $checkedAt = trim((string) ($state['last_checked_at'] ?? ''));
     if ($checkedAt === '') {
-        return $ampel;
+        return 'unknown';
     }
-    $checkedEpoch = strtotime($checkedAt . ' UTC');
-    if ($checkedEpoch === false) {
-        return $ampel;
+    $current = $now ?? time();
+    $checkedEpoch = virtusphere_evidence_timestamp($checkedAt, $current);
+    if ($checkedEpoch === null) {
+        return 'unknown';
     }
 
-    return (($now ?? time()) - $checkedEpoch) > VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400
+    return ($current - $checkedEpoch) > VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400
         ? 'stale'
         : $ampel;
 }
+
+require_once __DIR__ . '/status_evidence.php';
 
 // --- V2 result-reporting derivation (ADR-0018 reportRun) --------------------
 // Display-only, server-clock only. `last_event` is the sole driver of legacy vs
@@ -253,63 +260,37 @@ function virtusphere_integration_source_kind(string $source): string
     return 'internal';
 }
 
-// One completed run: fail is always red; otherwise the last result ages out
-// through the normal staleness thresholds and a fresh result shows its own
-// outcome (ok=green, warning=yellow, unknown=grey). An `unknown` counts as
-// activity, so its last_result_at is fresh and it stays grey until the reporter
-// actually goes silent.
-function virtusphere_run_completed_state(array $row, ?int $now = null): string
-{
-    $outcome = (string) ($row['last_status'] ?? '');
-    if ($outcome === VIRTUSPHERE_RUN_OUTCOME_FAIL) {
-        return 'danger';
-    }
-
-    $resultAt = isset($row['last_result_at']) ? (string) $row['last_result_at'] : null;
-    if ($resultAt === null || $resultAt === '') {
-        return $outcome === VIRTUSPHERE_RUN_OUTCOME_OK ? 'ok'
-            : ($outcome === VIRTUSPHERE_RUN_OUTCOME_WARNING ? 'warning' : 'unknown');
-    }
-
-    $stale = virtusphere_heartbeat_staleness($resultAt, (int) ($row['interval_seconds'] ?? 0), null, $now);
-    if ($stale === 'danger' || $stale === 'warning') {
-        return $stale;
-    }
-
-    return match ($outcome) {
-        VIRTUSPHERE_RUN_OUTCOME_OK => 'ok',
-        VIRTUSPHERE_RUN_OUTCOME_WARNING => 'warning',
-        default => 'unknown',
-    };
-}
-
 // A run in progress (two-clock model): the badge keeps the last completed
 // result, and the row is not treated as stale until the run itself exceeds
 // max(3x interval, 60s, RUN_GRACE). Beyond that the reporter is stuck and ages
 // out normally.
 function virtusphere_run_running_state(array $row, ?int $now = null): string
 {
+    $current = $now ?? time();
     $interval = (int) ($row['interval_seconds'] ?? 0);
     $attemptAt = isset($row['last_attempt_at']) ? (string) $row['last_attempt_at'] : null;
-    $attemptTs = $attemptAt !== null && $attemptAt !== '' ? strtotime($attemptAt) : false;
-    if ($attemptTs !== false) {
-        $age = ($now ?? time()) - $attemptTs;
-        $grace = max(
-            $interval * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
-            VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
-            VIRTUSPHERE_RUN_GRACE_SECONDS
+    $attemptTs = virtusphere_evidence_timestamp($attemptAt, $current);
+    if ($attemptTs === null) {
+        return 'unknown';
+    }
+    $age = $current - $attemptTs;
+    $grace = max(
+        $interval * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
+        VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
+        VIRTUSPHERE_RUN_GRACE_SECONDS
+    );
+    if ($age > $grace) {
+        $dangerAfter = max(
+            $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
+            VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS
         );
-        if ($age > $grace) {
-            $dangerAfter = max(
-                $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
-                VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS
-            );
 
-            return $age > $dangerAfter ? 'danger' : 'warning';
-        }
+        return $age > $dangerAfter ? 'danger' : 'warning';
     }
 
-    if (empty($row['last_result_at'])) {
+    if (empty($row['last_result_at'])
+        || virtusphere_evidence_timestamp((string) $row['last_result_at'], $current) === null
+    ) {
         return 'unknown';
     }
 
@@ -355,7 +336,7 @@ function virtusphere_integration_row_state(?array $row, string $kind, bool $anyS
     }
 
     if ($kind === 'site') {
-        return virtusphere_run_completed_state($row, $now);
+        return virtusphere_site_completed_state($row, $now);
     }
 
     return match ((string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT)) {

@@ -9,8 +9,15 @@ declare(strict_types=1);
 /** @var array<string,mixed> $user */
 ?>
     <div class="stack" id="panel-system-status" role="tabpanel" aria-labelledby="tab-system-status" tabindex="0" data-tab-panel>
+        <nav aria-label="<?php echo h(__t('help_system_status.jump_heading')); ?>"><ul>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-overview')); ?>"><?php echo h(__t('help_system_status.jump_overview')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-deploy')); ?>"><?php echo h(__t('help_system_status.jump_deploy')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-directory')); ?>"><?php echo h(__t('help_system_status.jump_directory')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('help_system_status.jump_mecm')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-esxi')); ?>"><?php echo h(__t('help_system_status.jump_esxi')); ?></a></li>
+        </ul></nav>
         <section class="panel">
-            <h2><?php echo h(__t('help_system_status.system_status_roles_heading')); ?></h2>
+            <h2 id="help-status-overview" tabindex="-1"><?php echo h(__t('help_system_status.system_status_roles_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.system_status_roles_p1')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_single_site')); ?></p>
             <h3><?php echo h(__t('help_system_status.system_status_signals_heading')); ?></h3>
@@ -20,7 +27,7 @@ declare(strict_types=1);
             </ul>
         </section>
         <section class="panel">
-            <h2><?php echo h(__t('help_system_status.service_card_heading')); ?></h2>
+            <h2 id="help-status-deploy" tabindex="-1"><?php echo h(__t('help_system_status.service_card_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.service_card_p1')); ?></p>
             <?php // One text, one owner: the state machine is explained in the
                   // deploy help, and this page links to it rather than keeping a
@@ -97,7 +104,7 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2><?php echo h(__t('help_system_status.directory_heading')); ?></h2>
+            <h2 id="help-status-directory" tabindex="-1"><?php echo h(__t('help_system_status.directory_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.directory_p1')); ?></p>
             <?php // Same sentence the card itself shows (system_status.directory_cadence),
                   // not a second copy that could drift from it. ?>
@@ -111,7 +118,7 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2><?php echo h(__t('help_system_status.mecmfolders_heading')); ?></h2>
+            <h2 id="help-status-mecm" tabindex="-1"><?php echo h(__t('help_system_status.mecmfolders_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.mecmfolders_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_system_status.mecmfolders_item1')); ?></li>
@@ -164,7 +171,7 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2><?php echo h(__t('help_system_status.esxi_inv_heading')); ?></h2>
+            <h2 id="help-status-esxi" tabindex="-1"><?php echo h(__t('help_system_status.esxi_inv_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.esxi_inv_p1', ['hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT])); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_p2')); ?></p>
             <?php // The cadence line each inventory card carries. The card names the

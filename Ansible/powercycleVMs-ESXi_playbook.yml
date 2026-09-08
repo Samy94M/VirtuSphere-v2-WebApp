@@ -90,12 +90,18 @@
       ansible.builtin.set_fact:
         powercycle_to_start: >-
           {{ powercycle_initial.results | default([])
-             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff')
-             | map(attribute='item') | list }}
+             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff') | list }}
+
+    - name: Bestaetigte eigene Starts leer initialisieren
+      ansible.builtin.set_fact:
+        powercycle_started_by_run: []
 
     - name: Power-Cycle mit Aufraeumgarantie
       when: powercycle_to_start | length > 0
       block:
+        # Einzelne Startfehler werden nur bis zum gemeinsamen Ergebnis-Check
+        # toleriert, damit das always-Cleanup jeden nachweislich erfolgreichen
+        # Start dieses Laufs sicher wieder ausschalten kann.
         - name: VMs einschalten (nur initial ausgeschaltete ohne MAC)
           community.vmware.vmware_guest_powerstate:
             hostname: "{{ esxi_hostname }}"
@@ -103,17 +109,33 @@
             username: "{{ esxi_username }}"
             password: "{{ esxi_password }}"
             validate_certs: "{{ esxi_validate_certs | bool }}"
-            name: "{{ item.vm_name }}"
+            uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
+            use_instance_uuid: true
             folder: "/"
-            datacenter: "{{ item.datacenter_name }}"
+            datacenter: "{{ (item['item'] | default({}))['datacenter_name'] }}"
             state: powered-on
             force: false
           delegate_to: localhost
           loop: "{{ powercycle_to_start }}"
+          loop_control:
+            label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+          register: powercycle_start_results
+          ignore_errors: true
+
+        - name: Nur erfolgreiche eigene Einschaltungen fuer Cleanup erfassen
+          ansible.builtin.set_fact:
+            powercycle_started_by_run: "{{ powercycle_started_by_run + [item['item']] }}"
+          loop: "{{ powercycle_start_results.results | default([]) }}"
+          loop_control:
+            label: "{{ ((item['item'] | default({}))['item'] | default({}))['vm_name'] | default('unknown') }}"
+          when:
+            - item['changed'] | default(false) | bool
+            - not (item['failed'] | default(false) | bool)
 
         - name: Warten, bis ESXi die MACs vergibt
           ansible.builtin.pause:
             seconds: "{{ PowerCycleWaitSeconds | default(5) | int }}"
+          when: powercycle_started_by_run | length > 0
       always:
         # Hart (force true) und nur fuer die Liste, die dieser Lauf gestartet
         # hat: eine VM, die vor dem Lauf schon lief, steht hier nie drin. Ein
@@ -125,10 +147,24 @@
             username: "{{ esxi_username }}"
             password: "{{ esxi_password }}"
             validate_certs: "{{ esxi_validate_certs | bool }}"
-            name: "{{ item.vm_name }}"
+            uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
+            use_instance_uuid: true
             folder: "/"
-            datacenter: "{{ item.datacenter_name }}"
+            datacenter: "{{ (item['item'] | default({}))['datacenter_name'] }}"
             state: powered-off
             force: true
           delegate_to: localhost
-          loop: "{{ powercycle_to_start }}"
+          loop: "{{ powercycle_started_by_run | default([]) }}"
+          loop_control:
+            label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    - name: Mehrdeutige oder fehlgeschlagene Einschaltungen hart melden
+      ansible.builtin.assert:
+        that:
+          - powercycle_start_results.results | default([]) | map(attribute='failed', default=false) | select('equalto', true) | list | length == 0
+        fail_msg: >-
+          Mindestens eine Einschaltung ist fehlgeschlagen oder ihr Ausgang ist
+          unklar. Nur nachweislich erfolgreiche, von diesem Lauf ausgefuehrte
+          Einschaltungen wurden wieder ausgeschaltet; den aktuellen Zustand der
+          betroffenen UUID im ESXi Host Client pruefen.
+      when: powercycle_to_start | length > 0

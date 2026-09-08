@@ -11,8 +11,11 @@ BeforeAll {
     $script:CheckRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1') -Raw
     $script:CheckRuntime = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'runtime.ps1') -Raw
     $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
+    $script:CreateAsyncContract = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'qa-ansible') 'create-async-contract.py') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
+    $script:CollectionLock = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'verify-collection-lock.py') -Raw
+    $script:CollectionLockContract = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'collection-lock-contract.py') -Raw
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
 }
@@ -39,6 +42,14 @@ Describe 'Visible progress reporting contract' {
         $script:CheckRuntime | Should -Match 'param\(\[string\]\$Exe, \[string\[\]\]\$Arguments = @\(\), \[switch\]\$Live\)'
         $script:CheckRuntime | Should -Match 'if \(\$Live\) \{ Write-Host \$line \}'
         $script:FastGates | Should -Match "run-pester\.ps1'\)\) -Live"
+    }
+
+    It 'reports and streams every create async production sample' {
+        $script:CreateAsyncContract | Should -Match 'for index, \(label, case\) in enumerate\(cases, start=1\)'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] RUN \{label\}"'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] PASS \{label\}"'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] FAIL \{label\}:'
+        $script:FastGates | Should -Match "create-async-contract\.py'.+-Live"
     }
 
     It 'reports every selected guard case before and after execution' {
@@ -68,6 +79,15 @@ Describe 'Visible progress reporting contract' {
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+RUN network/WDS preflight'
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+OK network/WDS preflight'
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
+    }
+
+    It 'reports every pinned Ansible collection before and after lock verification' {
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] RUN collection-lock-'
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] PASS collection-lock-'
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] FAIL collection-lock-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] RUN collection-lock-contract-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] PASS collection-lock-contract-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] FAIL collection-lock-contract-'
     }
 
     It 'keeps the portal closure probes inside the counted guard harness' {

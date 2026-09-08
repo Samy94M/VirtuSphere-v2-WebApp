@@ -19,5 +19,6 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/esxi_inventory_scheduler.php';
 require_once __DIR__ . '/esxi_inventory_deviations.php';
+require_once __DIR__ . '/esxi_inventory_deviation_report.php';
 require_once __DIR__ . '/esxi_inventory_display.php';
 require_once __DIR__ . '/esxi_inventory_evidence.php';

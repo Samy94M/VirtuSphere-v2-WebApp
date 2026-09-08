@@ -61,6 +61,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     };
 
     try {
+        // Resolve the local source contract before any lifecycle write or
+        // remote call. Missing requirements are a local configuration fault.
+        ansible_pinned_collection_version();
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing deploy artifacts.');
         $channel->tick(0);
         $materializedVmIds = deploy_worker_network_preflight(
@@ -106,7 +109,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // reach the portal, while a create-only job must not be failed for a
         // route it never uses (B6; same derivation as the missing-result rule).
         $preflightApiBaseUrl = ansible_mode_expects_mac_result((string) $payload['mode']) ? $apiBaseUrl : '';
-        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
+        $preflightCommand = ansible_preflight_command($preflightApiBaseUrl);
+        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
 
             deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
         }, 45, $heartbeatOnSilence);

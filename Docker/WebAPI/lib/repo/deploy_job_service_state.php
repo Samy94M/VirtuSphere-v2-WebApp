@@ -8,6 +8,20 @@ require_once __DIR__ . '/../deploy_create_constants.php';
 require_once __DIR__ . '/deploy_runtime_identity.php';
 require_once __DIR__ . '/helpers.php';
 
+const VIRTUSPHERE_DEPLOY_SERVICE_CASE_LIMIT = 10;
+
+/** @return list<int> */
+function repo_deploy_attention_job_ids(mysqli $db, string $sql, string $types, array $params): array
+{
+    $stmt = $db->prepare($sql);
+    if ($types !== '') {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+
+    return array_map(static fn (array $row): int => (int) $row['id'], repo_fetch_all($stmt->get_result()));
+}
+
 /**
  * The claim axis of the deploy service (Etappe 13R).
  *
@@ -79,23 +93,22 @@ function repo_deploy_claim_state(mysqli $db): array
  * Idempotent: requesting a pause twice is not an error and does not write a
  * second row, so a double click cannot produce a second audit line.
  */
-function repo_deploy_request_claim_pause(mysqli $db, int $userId): string
+function repo_deploy_request_claim_pause(mysqli $db, int $userId): array
 {
-    return repo_transaction($db, static function () use ($db, $userId): string {
-        $current = repo_deploy_claim_state($db)['state'];
+    return repo_transaction($db, static function () use ($db, $userId): array {
+        $before = repo_deploy_claim_state($db);
+        $current = $before['state'];
         if ($current !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) {
-            return $current;
+            return $before + ['changed' => false, 'job_ids' => []];
         }
 
         $placeholders = implode(',', array_fill(0, count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES), '?'));
-        $stmt = $db->prepare(
-            'SELECT COUNT(*) AS active FROM deploy_jobs WHERE status IN (' . $placeholders . ') FOR UPDATE'
-        );
+        $stmt = $db->prepare('SELECT id FROM deploy_jobs WHERE status IN (' . $placeholders . ') ORDER BY id FOR UPDATE');
         $stmt->bind_param(str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)), ...VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES);
         $stmt->execute();
-        $active = (int) (($stmt->get_result()->fetch_assoc() ?: ['active' => 0])['active']);
+        $jobIds = array_map(static fn (array $row): int => (int) $row['id'], repo_fetch_all($stmt->get_result()));
 
-        $target = $active > 0
+        $target = $jobIds !== []
             ? VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT
             : VIRTUSPHERE_DEPLOY_CLAIM_PAUSED;
 
@@ -108,7 +121,10 @@ function repo_deploy_request_claim_pause(mysqli $db, int $userId): string
         $update->bind_param('sis', $target, $actor, $accepting);
         $update->execute();
 
-        return $update->affected_rows === 1 ? $target : repo_deploy_claim_state($db)['state'];
+        $changed = $update->affected_rows === 1;
+        $after = repo_deploy_claim_state($db);
+
+        return $after + ['changed' => $changed, 'job_ids' => $changed ? $jobIds : []];
     });
 }
 
@@ -182,12 +198,12 @@ function repo_deploy_queue_pressure(mysqli $db, ?int $now = null): array
     $row = repo_fetch_one(
         $db,
         'SELECT
-            SUM(CASE WHEN scheduled_at IS NULL OR scheduled_at <= NOW() THEN 1 ELSE 0 END) AS due,
-            SUM(CASE WHEN scheduled_at IS NOT NULL AND scheduled_at > NOW() THEN 1 ELSE 0 END) AS scheduled,
-            MIN(CASE WHEN scheduled_at IS NULL OR scheduled_at <= NOW() THEN COALESCE(scheduled_at, created_at) END) AS oldest_due_at
-         FROM deploy_jobs WHERE status = ?',
-        's',
-        [VIRTUSPHERE_DEPLOY_STATUS_QUEUED]
+            SUM(CASE WHEN scheduled_at IS NULL OR scheduled_at <= clock.eval_now THEN 1 ELSE 0 END) AS due,
+            SUM(CASE WHEN scheduled_at IS NOT NULL AND scheduled_at > clock.eval_now THEN 1 ELSE 0 END) AS scheduled,
+            MIN(CASE WHEN scheduled_at IS NULL OR scheduled_at <= clock.eval_now THEN COALESCE(scheduled_at, created_at) END) AS oldest_due_at
+         FROM deploy_jobs CROSS JOIN (SELECT FROM_UNIXTIME(?) AS eval_now) clock WHERE status = ?',
+        'is',
+        [$now, VIRTUSPHERE_DEPLOY_STATUS_QUEUED]
     );
 
     $oldest = $row === null || $row['oldest_due_at'] === null ? null : (string) $row['oldest_due_at'];
@@ -205,8 +221,7 @@ function repo_deploy_queue_pressure(mysqli $db, ?int $now = null): array
 }
 
 /**
- * The one job the service is executing, if any, and whether its row is
- * internally consistent.
+ * Every active job and whether its ownership shape is legitimate.
  *
  * "Consistent" means the job holds a lock and its heartbeat is younger than the
  * stale limit. An active job without either is the shape a dead worker leaves
@@ -219,18 +234,18 @@ function repo_deploy_active_job_summary(mysqli $db, ?int $now = null): array
 {
     $now ??= time();
     $placeholders = implode(',', array_fill(0, count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES), '?'));
-    $row = repo_fetch_one(
-        $db,
-        'SELECT j.id, j.mission_id, m.mission_name, j.status, j.locked_by, j.heartbeat_at
+    $stmt = $db->prepare(
+        'SELECT j.id, j.mission_id, m.mission_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.recovery_requested_at
          FROM deploy_jobs j
          LEFT JOIN deploy_missions m ON m.id = j.mission_id
-         WHERE j.status IN (' . $placeholders . ') AND j.locked_at IS NOT NULL
-         ORDER BY j.locked_at ASC LIMIT 1',
-        str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)),
-        VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES
+         WHERE j.status IN (' . $placeholders . ')
+         ORDER BY j.id'
     );
+    $stmt->bind_param(str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)), ...VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES);
+    $stmt->execute();
+    $rows = repo_fetch_all($stmt->get_result());
 
-    if ($row === null) {
+    if ($rows === []) {
         return [
             'job_id' => null,
             'mission_id' => null,
@@ -238,20 +253,53 @@ function repo_deploy_active_job_summary(mysqli $db, ?int $now = null): array
             'status' => null,
             'heartbeat_at' => null,
             'consistent' => true,
+            'count' => 0,
+            'inconsistent_count' => 0,
+            'recovery_waiting_count' => 0,
+            'jobs' => [],
         ];
     }
 
-    $heartbeat = $row['heartbeat_at'] === null ? null : (string) $row['heartbeat_at'];
-    $fresh = $heartbeat !== null
-        && ($now - (int) strtotime($heartbeat . ' UTC')) <= VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS;
+    $jobs = [];
+    $inconsistent = 0;
+    $recoveryWaiting = 0;
+    foreach ($rows as $row) {
+        $heartbeat = $row['heartbeat_at'] === null ? null : (string) $row['heartbeat_at'];
+        $seen = $heartbeat === null ? false : strtotime($heartbeat . ' UTC');
+        $fresh = $seen !== false && $seen <= $now
+            && ($now - $seen) <= VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS;
+        $owned = $row['locked_at'] !== null && trim((string) ($row['locked_by'] ?? '')) !== '';
+        $waitingForRecovery = !$owned && $row['recovery_requested_at'] !== null;
+        $consistent = ($owned && $fresh) || $waitingForRecovery;
+        if (!$consistent) {
+            $inconsistent++;
+        }
+        if ($waitingForRecovery) {
+            $recoveryWaiting++;
+        }
+        $jobs[] = [
+            'job_id' => (int) $row['id'],
+            'mission_id' => $row['mission_id'] === null ? null : (int) $row['mission_id'],
+            'mission_name' => $row['mission_name'] === null ? null : (string) $row['mission_name'],
+            'status' => (string) $row['status'],
+            'heartbeat_at' => $heartbeat,
+            'consistent' => $consistent,
+            'ownership' => $waitingForRecovery ? 'recovery_waiting' : ($owned ? 'owned' : 'missing'),
+        ];
+    }
+    $row = $jobs[0];
 
     return [
-        'job_id' => (int) $row['id'],
-        'mission_id' => $row['mission_id'] === null ? null : (int) $row['mission_id'],
-        'mission_name' => $row['mission_name'] === null ? null : (string) $row['mission_name'],
-        'status' => (string) $row['status'],
-        'heartbeat_at' => $heartbeat,
-        'consistent' => $fresh && trim((string) ($row['locked_by'] ?? '')) !== '',
+        'job_id' => $row['job_id'],
+        'mission_id' => $row['mission_id'],
+        'mission_name' => $row['mission_name'],
+        'status' => $row['status'],
+        'heartbeat_at' => $row['heartbeat_at'],
+        'consistent' => $inconsistent === 0,
+        'count' => count($jobs),
+        'inconsistent_count' => $inconsistent,
+        'recovery_waiting_count' => $recoveryWaiting,
+        'jobs' => $jobs,
     ];
 }
 
@@ -262,46 +310,68 @@ function repo_deploy_active_job_summary(mysqli $db, ?int $now = null): array
  * resolved remote execution and routine cleanup retries are outside. An
  * uncertain create unit remains actionable even when its job is terminal.
  *
- * @return array{manual_required:int,legacy_uncertain_active:int,recovering:int}
+ * @return array{manual_required:int,legacy_uncertain_active:int,recovering:int,cases:list<array{job_id:int,kind:string}>,case_total:int,case_omitted:int}
  */
 function repo_deploy_recovery_attention_counts(mysqli $db): array
 {
     $placeholders = implode(',', array_fill(0, count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES), '?'));
     $activeTypes = str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES));
 
-    $manual = (int) (repo_scalar(
+    $manualIds = repo_deploy_attention_job_ids(
         $db,
-        'SELECT COUNT(*) FROM deploy_jobs j
+        'SELECT j.id FROM deploy_jobs j
          WHERE (j.status IN (' . $placeholders . ') AND EXISTS (
-             SELECT 1 FROM deploy_remote_executions e WHERE e.job_id = j.id AND e.reconciliation_state = ?
+             SELECT 1 FROM deploy_remote_executions e WHERE e.job_id = j.id
+               AND e.job_attempt = j.attempts AND e.generation_id = j.execution_generation_id
+               AND e.reconciliation_state = ?
          )) OR EXISTS (
              SELECT 1 FROM deploy_create_vm_results c WHERE c.job_id = j.id AND c.status = ?
-         )',
+         ) ORDER BY j.id',
         $activeTypes . 'ss',
         array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, ['manual_required', VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN])
-    ) ?? 0);
+    );
 
-    $legacy = (int) (repo_scalar(
+    $legacyIds = repo_deploy_attention_job_ids(
         $db,
-        'SELECT COUNT(*) FROM deploy_jobs WHERE recovery_reason = ? AND status IN (' . $placeholders . ')',
+        'SELECT id FROM deploy_jobs WHERE recovery_reason = ? AND status IN (' . $placeholders . ') ORDER BY id',
         's' . $activeTypes,
         array_merge([VIRTUSPHERE_DEPLOY_RECOVERY_LEGACY_UNCERTAIN], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)
-    ) ?? 0);
+    );
 
-
-    $recovering = (int) (repo_scalar(
+    $recoveringIds = repo_deploy_attention_job_ids(
         $db,
-        'SELECT COUNT(*) FROM deploy_jobs j
-         LEFT JOIN deploy_remote_executions e ON e.job_id = j.id
+        'SELECT j.id FROM deploy_jobs j
          WHERE j.status IN (' . $placeholders . ')
-           AND (j.recovery_requested_at IS NOT NULL OR e.reconciliation_state IN (?, ?))',
+           AND (j.recovery_requested_at IS NOT NULL OR EXISTS (
+               SELECT 1 FROM deploy_remote_executions e WHERE e.job_id = j.id
+                 AND e.job_attempt = j.attempts AND e.generation_id = j.execution_generation_id
+                 AND e.reconciliation_state IN (?, ?)
+           )) ORDER BY j.id',
         $activeTypes . 'ss',
         array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, ['pending', 'running'])
-    ) ?? 0);
+    );
+
+    $casesByJob = [];
+    foreach ([
+        'manual' => $manualIds,
+        'legacy' => $legacyIds,
+        'recovering' => $recoveringIds,
+    ] as $kind => $ids) {
+        foreach ($ids as $id) {
+            $casesByJob[$id] ??= ['job_id' => $id, 'kind' => $kind];
+        }
+    }
+    ksort($casesByJob, SORT_NUMERIC);
+    $caseTotal = count($casesByJob);
+    $cases = array_slice(array_values($casesByJob), 0, VIRTUSPHERE_DEPLOY_SERVICE_CASE_LIMIT);
 
     return [
-        'manual_required' => $manual,
-        'legacy_uncertain_active' => $legacy,
-        'recovering' => $recovering,
+        'manual_required' => count($manualIds),
+        'legacy_uncertain_active' => count($legacyIds),
+        'manual_total' => count(array_unique(array_merge($manualIds, $legacyIds))),
+        'recovering' => count($recoveringIds),
+        'cases' => $cases,
+        'case_total' => $caseTotal,
+        'case_omitted' => $caseTotal - count($cases),
     ];
 }

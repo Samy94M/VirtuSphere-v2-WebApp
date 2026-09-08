@@ -36,7 +36,10 @@ final class NetworkMacContractTest extends TestCase
         self::assertStringContainsString('repo_replace_interfaces(', $this->source('lib/mission_transfer_import.php'));
         self::assertStringContainsString('repo_replace_interfaces(', $this->source('lib/repo/vms_legacy.php'));
         self::assertStringContainsString('repo_vm_network_assert_scope_idle(', $this->source('lib/repo/vms_operations.php'));
-        self::assertStringContainsString('repo_vm_network_assert_scope_idle(', $this->source('lib/esxi_inventory_deviations.php'));
+        self::assertStringContainsString("require_once __DIR__ . '/repo/vlan_reassign.php';", $this->source('lib/system_status_page.php'));
+        $vlanReassign = $this->source('lib/repo/vlan_reassign.php');
+        self::assertStringContainsString("\$scope['active_jobs'] !== []", $vlanReassign);
+        self::assertStringContainsString('throw new VmNetworkScopeActiveException(', $vlanReassign);
 
         $portal = $this->source('lib/system_status_page.php');
         self::assertStringContainsString('repo_reassign_vlan(', $portal);

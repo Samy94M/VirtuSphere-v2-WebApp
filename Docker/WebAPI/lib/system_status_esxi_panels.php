@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/system_status_esxi_evidence.php';
+require_once __DIR__ . '/system_status_deviation_controls.php';
 
 /**
  * The ESXi half of the System status page: inventory cards, host facts and the
@@ -214,6 +215,8 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
     // Defaults true so a snapshot from before this key existed does not invent a
     // blocker; integration_health() always sets it.
     $deployWorkerAlive = (bool) ($snapshot['esxi']['deploy_worker_alive'] ?? true);
+    $maintenanceAlive = (bool) ($snapshot['esxi']['maintenance_alive'] ?? true);
+    $claimState = (string) ($snapshot['esxi']['claim_state'] ?? VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI); ?>">
         <div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.inv_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.inv_hint')); ?></p></div>
@@ -258,6 +261,14 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                       // missing Ansible host or a zero interval each stop the pull for a
                       // different reason, and each needs a different fix. ?>
                 <small class="status-cadence"><?php echo h(credential_cadence_esxi($intervalHours, $state, $ansibleSelected, $deployWorkerAlive)); ?></small>
+                <?php if (!$maintenanceAlive) { ?><small class="status-cadence"><?php echo h(__t('system_status.inv_cadence_maintenance_down')); ?></small><?php } ?>
+                <?php if ($pending !== null) { ?><small class="status-cadence"><?php echo h(__t(
+                    (string) ($pending['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_RUNNING
+                        ? 'system_status.inv_cadence_running'
+                        : ($claimState === VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING
+                            ? 'system_status.inv_cadence_queued'
+                            : 'system_status.inv_cadence_waiting_resume')
+                )); ?></small><?php } elseif ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) { ?><small class="status-cadence"><?php echo h(__t('system_status.inv_cadence_claims_paused')); ?></small><?php } ?>
                 <?php $lastJobId = $state !== null ? (int) ($state['last_job_id'] ?? 0) : 0; ?>
                 <?php $failedCategory = $state !== null ? (string) ($state['last_error_category'] ?? '') : ''; ?>
                 <?php // An ansible_* code names a fault on the Ansible host, and this card can
@@ -319,49 +330,66 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
  * not run, which is the same fact as "no ESXi inventory" and is therefore not
  * passed a second time as its own flag.
  *
- * @param array<int,array<string,mixed>> $deviations @param string[] $activeVlanNames
+ * @param array<string,mixed> $view @param string[] $activeVlanNames
  */
-function system_status_render_deviations(array $deviations, array $activeVlanNames, array $user, string $reassignFrom, ?int $deviationCount): void
+function system_status_render_deviations(array $view, array $activeVlanNames, array $user, string $reassignFrom, ?int $deviationCount, ?array $report = null, array $query = []): void
 {
     $hasInventory = $deviationCount !== null;
-    $hasVlanDeviation = false;
-    foreach ($deviations as $entry) {
-        foreach ($entry['issues'] as $issue) {
-            if (($issue['field'] ?? '') === 'vlan') {
-                $hasVlanDeviation = true;
-                break 2;
-            }
-        }
-    }
+    $deviations = (array) ($view['entries'] ?? []);
+    $hasVlanDeviation = (bool) ($view['has_vlan'] ?? false);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
         <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount); ?></h2>
         <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
-        <?php if (!$hasInventory) { ?><p class="muted"><?php echo h(__t('system_status.dev_no_inventory')); ?></p><?php } elseif ($deviations === []) { ?><p class="muted"><?php echo h(__t('system_status.dev_none')); ?></p><?php } else { ?>
+        <?php system_status_render_deviation_evidence($report); ?>
+        <?php if ($hasInventory) { ?>
+            <?php system_status_render_deviation_filters($view, $query); ?>
+        <?php } ?>
+        <?php if (!$hasInventory) { ?><p class="muted"><?php echo h(__t('system_status.dev_no_inventory')); ?></p><?php } elseif ($deviations === []) { ?><p class="muted"><?php echo h((int) $view['total'] === 0 && ($view['filter'] !== 'all' || $view['query'] !== '') ? __t('system_status.dev_filter_none') : __t('system_status.dev_none')); ?></p><?php } else { ?>
             <div class="deviation-groups"><?php foreach ($deviations as $entry) { ?>
                 <article>
                     <h3>
-                        <a href="mission_details.php?id=<?php echo h((string) $entry['mission_id']); ?>"><?php echo h((string) $entry['mission_name']); ?></a>
+                        <a href="<?php echo h(mission_details_url((int) $entry['mission_id'])); ?>"><?php echo h((string) $entry['mission_name']); ?></a>
                         <?php // A deviation on a template is not an outage: it becomes one only when a mission is created from it.
                               // The flag the scan computed, not a second str_starts_with: one predicate, one answer. ?>
                         <?php if (!empty($entry['is_template'])) { echo ' ' . portal_badge('info', __t('system_status.dev_template_badge')); } ?>
                         <?php if (!empty($entry['vm_name'])) { ?> · <a href="vm_edit.php?mission_id=<?php echo h((string) $entry['mission_id']); ?>&amp;vm_id=<?php echo h((string) $entry['vm_id']); ?>"><?php echo h((string) $entry['vm_name']); ?></a><?php } ?>
                     </h3>
                     <ul><?php foreach ($entry['issues'] as $issue) { ?>
-                        <li><?php echo h(__t('system_status.dev_field_' . $issue['field'])); ?>: <code class="break-anywhere"><?php echo h((string) $issue['value']); ?></code><?php if ($issue['field'] === 'vlan' && can('missions.write', $user) && can('vms.write', $user)) { ?> <a href="<?php echo h(system_status_url('reassign', ['reassign_from' => $issue['value']])); ?>" title="<?php echo h(__t('system_status.dev_reassign_link_title')); ?>"><?php echo h(__t('system_status.dev_reassign_link')); ?></a><?php } ?></li>
+                        <li><?php echo h(__t('system_status.dev_field_' . $issue['field'])); ?>: <code class="break-anywhere"><?php echo h((string) $issue['value']); ?></code><?php if ($issue['field'] === 'vlan' && $activeVlanNames !== [] && can('missions.write', $user) && can('vms.write', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN, ['reassign_from' => $issue['value']])); ?>" title="<?php echo h(__t('system_status.dev_reassign_link_title')); ?>"><?php echo h(__t('system_status.dev_reassign_link')); ?></a><?php } ?></li>
                     <?php } ?></ul>
                 </article>
             <?php } ?></div>
+            <?php system_status_render_deviation_pagination($view, $query); ?>
         <?php } ?>
         <?php if ($hasVlanDeviation && can('missions.write', $user) && can('vms.write', $user) && $activeVlanNames !== []) { ?>
             <details class="repair-actions" id="reassign"<?php echo form_has_state('vlan_reassign') || $reassignFrom !== '' ? ' open' : ''; ?>><summary><?php echo h(__t('system_status.repair_heading')); ?></summary>
                 <h3><?php echo h(__t('system_status.reassign_heading')); ?></h3>
                 <?php $reassignHintId = form_hint_id('vlan_reassign', 'group'); ?>
                 <p class="muted" id="<?php echo h($reassignHintId); ?>"><?php echo h(__t('system_status.reassign_hint')); ?></p>
-                <form class="form-grid" method="post" action="system_status.php"<?php echo form_control_attrs('vlan_reassign', 'group', null, [$reassignHintId], ''); ?> role="group" autocomplete="off"><?php echo csrf_field(); ?><input type="hidden" name="action" value="reassign_vlan">
+                <?php
+                $scopeFingerprint = form_old('vlan_reassign', 'scope_fingerprint');
+                $hasPreview = preg_match('/^[a-f0-9]{64}$/D', $scopeFingerprint) === 1;
+                $previewActiveJobs = (int) form_old('vlan_reassign', 'preview_active_jobs', '0');
+                $canConfirmPreview = $hasPreview && $previewActiveJobs === 0;
+                ?>
+                <form class="form-grid" method="post" action="system_status.php"<?php echo form_control_attrs('vlan_reassign', 'group', null, [$reassignHintId], ''); ?> role="group" autocomplete="off"><?php echo csrf_field(); ?>
                     <label><?php echo h(__t('system_status.reassign_from')); ?><input name="vlan_from" maxlength="255" value="<?php echo h(form_old('vlan_reassign', 'vlan_from', $reassignFrom)); ?>"<?php echo form_control_attrs('vlan_reassign', 'vlan_from'); ?> required><?php echo form_error_html('vlan_reassign', 'vlan_from'); ?></label>
                     <label><?php echo h(__t('system_status.reassign_to')); ?><select name="vlan_to"<?php echo form_control_attrs('vlan_reassign', 'vlan_to'); ?> required><option value=""><?php echo h(__t('system_status.reassign_choose')); ?></option><?php $oldTarget = form_old('vlan_reassign', 'vlan_to'); foreach ($activeVlanNames as $name) { ?><option value="<?php echo h($name); ?>"<?php echo $oldTarget === $name ? ' selected' : ''; ?>><?php echo h($name); ?></option><?php } ?></select><?php echo form_error_html('vlan_reassign', 'vlan_to'); ?></label>
-                    <div class="actions"><button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('system_status.reassign_confirm')); ?>"><?php echo h(__t('system_status.reassign_btn')); ?></button></div>
+                    <?php if ($hasPreview) { ?>
+                        <input type="hidden" name="scope_fingerprint" value="<?php echo h($scopeFingerprint); ?>">
+                        <p class="muted"><?php echo h(__t('system_status.reassign_preview_counts', [
+                            'missions' => form_old('vlan_reassign', 'preview_missions', '0'),
+                            'templates' => form_old('vlan_reassign', 'preview_templates', '0'),
+                            'vms' => form_old('vlan_reassign', 'preview_vms', '0'),
+                            'interfaces' => form_old('vlan_reassign', 'preview_interfaces', '0'),
+                            'jobs' => (string) $previewActiveJobs,
+                        ])); ?></p>
+                    <?php } ?>
+                    <div class="actions">
+                        <button class="button button-secondary" type="submit" name="action" value="preview_vlan_reassign"><?php echo h(__t('system_status.reassign_preview_btn')); ?></button>
+                        <?php if ($canConfirmPreview) { ?><button class="button button-danger" type="submit" name="action" value="reassign_vlan" data-confirm="<?php echo h(__t('system_status.reassign_confirm')); ?>"><?php echo h(__t('system_status.reassign_btn')); ?></button><?php } ?>
+                    </div>
                 </form>
             </details>
         <?php } ?>

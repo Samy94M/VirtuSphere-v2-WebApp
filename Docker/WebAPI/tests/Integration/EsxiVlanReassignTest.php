@@ -55,6 +55,7 @@ final class EsxiVlanReassignTest extends TestCase
         $from = self::PREFIX . 'a';
         $to = self::PREFIX . 'b';
         $other = self::PREFIX . 'c';
+        $this->activateVlan($to);
 
         $missionA = $this->makeMission('m_a', $from);
         $this->makeVm($missionA, 'PHPUNITRA1', $from);
@@ -76,6 +77,7 @@ final class EsxiVlanReassignTest extends TestCase
         $normalized = self::PREFIX . 'raw';
         $raw = $normalized . ' ';
         $target = self::PREFIX . 'target';
+        $this->activateVlan($target);
         $rawMission = $this->makeMission('m_raw', $normalized);
         $rawVm = $this->makeVm($rawMission, 'PHPUNITRAW1', $normalized);
         $normalizedMission = $this->makeMission('m_normalized', $normalized);
@@ -100,6 +102,7 @@ final class EsxiVlanReassignTest extends TestCase
     {
         $from = self::PREFIX . 'source';
         $to = self::PREFIX . 'target';
+        $this->activateVlan($to);
         $missionId = $this->makeMission('m_collision', $from);
         $vmId = $this->makeVm($missionId, 'PHPUNITRAC', $from);
         repo_execute(
@@ -127,6 +130,7 @@ final class EsxiVlanReassignTest extends TestCase
     {
         $from = self::PREFIX . 'wds_source';
         $to = self::PREFIX . 'wds_target';
+        $this->activateVlan($to);
         $missionId = $this->makeMission('m_running', $from);
         $this->makeVm($missionId, 'PHPUNITRAR', self::PREFIX . 'application');
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
@@ -147,6 +151,65 @@ final class EsxiVlanReassignTest extends TestCase
 
         self::assertSame($from, $this->missionVlan($missionId));
         self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_interfaces WHERE vlan = ?', 's', [$to]));
+    }
+
+    public function testReassignRejectsRunningWdsMissionWhoseVmHasNoInterfaceRows(): void
+    {
+        $from = self::PREFIX . 'wds_empty_source';
+        $to = self::PREFIX . 'wds_empty_target';
+        $this->activateVlan($to);
+        $missionId = $this->makeMission('m_running_empty', $from);
+        $vmId = $this->makeVm($missionId, 'PHPUNITRAE', self::PREFIX . 'application');
+        repo_execute($this->db, 'DELETE FROM deploy_interfaces WHERE vm_id = ?', 'i', [$vmId]);
+        repo_execute(
+            $this->db,
+            'INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)',
+            'iss',
+            [$missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, json_encode(['mode' => 'full', 'vm_ids' => [$vmId]], JSON_THROW_ON_ERROR)]
+        );
+
+        $this->expectException(VmNetworkScopeActiveException::class);
+        repo_reassign_vlan($this->db, $from, $to);
+    }
+
+    public function testPreviewFingerprintRejectsAMacChangeBeforeWrite(): void
+    {
+        $from = self::PREFIX . 'fingerprint_source';
+        $to = self::PREFIX . 'fingerprint_target';
+        $this->activateVlan($to);
+        $missionId = $this->makeMission('m_fingerprint', $from);
+        $vmId = $this->makeVm($missionId, 'PHPUNITRAF', $from);
+        $preview = repo_vlan_reassign_preview($this->db, $from, $to);
+        repo_execute(
+            $this->db,
+            'UPDATE deploy_interfaces SET mac = ? WHERE vm_id = ?',
+            'si',
+            ['00:11:22:33:44:55', $vmId]
+        );
+
+        try {
+            repo_reassign_vlan($this->db, $from, $to, $preview['fingerprint']);
+            self::fail('a changed effective network bundle must invalidate the preview');
+        } catch (VlanReassignScopeChangedException) {
+            self::assertSame($from, $this->missionVlan($missionId));
+        }
+    }
+
+    public function testPreviewedTargetMustStillBeActiveAtWriteTime(): void
+    {
+        $from = self::PREFIX . 'retired_source';
+        $to = self::PREFIX . 'retired_target';
+        $this->activateVlan($to);
+        $missionId = $this->makeMission('m_retired_target', $from);
+        $preview = repo_vlan_reassign_preview($this->db, $from, $to);
+        repo_execute($this->db, 'UPDATE deploy_vlan SET retired_at = NOW() WHERE vlan_name = ?', 's', [$to]);
+
+        try {
+            repo_reassign_vlan($this->db, $from, $to, $preview['fingerprint']);
+            self::fail('a retired target may not receive a reassignment');
+        } catch (VlanReassignTargetInactiveException) {
+            self::assertSame($from, $this->missionVlan($missionId));
+        }
     }
 
     public function testDeviationsFlagUnknownVlanButNotMatchingOrTemplate(): void
@@ -211,9 +274,11 @@ final class EsxiVlanReassignTest extends TestCase
     {
         // "From" is free text on the system status page. A typo must not look like
         // a successful rename; the caller turns zero counts into a warning.
-        $this->makeMission('m_keep', self::PREFIX . 'live');
+        $target = self::PREFIX . 'live';
+        $this->activateVlan($target);
+        $this->makeMission('m_keep', $target);
 
-        $result = repo_reassign_vlan($this->db, self::PREFIX . 'typo', self::PREFIX . 'live');
+        $result = repo_reassign_vlan($this->db, self::PREFIX . 'typo', $target);
         self::assertSame(['missions' => 0, 'interfaces' => 0], $result);
     }
 
@@ -325,6 +390,11 @@ final class EsxiVlanReassignTest extends TestCase
         return (string) repo_scalar($this->db, 'SELECT wds_vlan FROM deploy_missions WHERE id = ?', 'i', [$missionId]);
     }
 
+    private function activateVlan(string $name): void
+    {
+        repo_execute($this->db, 'INSERT INTO deploy_vlan (vlan_name) VALUES (?)', 's', [$name]);
+    }
+
     private function cleanup(): void
     {
         // Contains-match so the leading-underscore template name is cleaned too.
@@ -333,6 +403,7 @@ final class EsxiVlanReassignTest extends TestCase
                   'DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE ?)',
                   'DELETE FROM deploy_esxi_inventory WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE ?)',
                   'DELETE FROM deploy_missions WHERE mission_name LIKE ?',
+                  'DELETE FROM deploy_vlan WHERE vlan_name LIKE ?',
                   'DELETE FROM deploy_credentials WHERE name LIKE ?'] as $sql) {
             $stmt = $this->db->prepare($sql);
             $stmt->bind_param('s', $like);

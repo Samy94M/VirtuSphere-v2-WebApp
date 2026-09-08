@@ -145,6 +145,16 @@ bis zur getrennten Etappe 14B in der Remote-Aktivierungspolicy gesperrt.
 
 Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.
 
+Jeder Volltest gehört zu einer monotonen Konfigurationsrevision und
+Testgeneration. Zugang und verschlüsseltes Secret werden vor dem externen Lauf
+aus demselben Datenbankstand materialisiert; während SSH/SFTP bleibt keine
+Datenbanksperre offen. Das Ergebnis wird anschließend nur gespeichert, wenn
+Typ, Revision und Generation noch übereinstimmen. Eine Secretrotation, ein
+Typwechsel, eine Löschung oder ein neuerer paralleler Test kann einen älteren
+Abschluss daher nicht dem aktuellen Zugang zuordnen. Vor Migration 0052
+gespeicherte Ergebnisse besitzen diesen Nachweis nicht und erscheinen bis zum
+erneuten Test als unbekannt.
+
 Der Missionsnachweis wird direkt aus `deploy_jobs` gelesen: neuester terminaler Auftrag je `credential_ansible_id`, nur mit Mission; `queued`, `running`, `cancelling` und missionslose Inventaraufträge zählen nicht. Sein Status, Zeitpunkt und Jobprotokoll belegen den tatsächlich gelaufenen Modus. Ein erfolgreicher Start- oder Shutdown-Auftrag beweist beispielsweise weder SFTP-Neuaufbau noch MAC-Rückkanal und färbt daher die Volltest-Ampel nicht grün. Bei Zeitgleichheit entscheidet die höhere Job-ID. Es gibt keine zweite Statuskopie und kein zusätzliches Laufzeitprotokoll.
 
 „Volltest jetzt starten“ im Systemstatus verwendet denselben CSRF-/RBAC-geschützten Handler wie die Seite Zugangsdaten. Das Ergebnis aktualisiert `deploy_ansible_preflight_state` und schreibt wie bisher genau eine Auditzeile in **Protokolle → Sicherheit**, Kategorie `credentials`; **Prüfprotokolle öffnen** führt dorthin. Missionsausgabe bleibt ausschließlich in `deploy_job_logs`, erreichbar über den direkten Link am Missionsnachweis.
@@ -237,6 +247,17 @@ umstellt. Solange die laufende Prozessform nicht zum gespeicherten Vertrag passt
 meldet der Dienst sich absichtlich als beeinträchtigt statt einen Zustand zu
 raten.
 
+Die Systemstatus-Karte bewertet Verfügbarkeit, Auftragsannahme und
+Recoverybedarf als getrennte Achsen. Sie liest alle aktiven Jobs: normaler
+Workerbesitz, legitimes Warten auf Recovery und inkonsistenter Besitz bleiben
+unterschieden. Recoveryzählungen deduplizieren auf Jobebene und binden
+Remotehandles an aktuellen Attempt und aktuelle Generation; terminale
+ungeklärte Create-Einheiten bleiben unabhängig davon sichtbar. Falllisten sind
+begrenzt, ihre vollständigen Zähler nicht. Auftragsheartbeat und
+Dienstheartbeat werden getrennt angezeigt. Eine wiederholte Pause ohne echten
+Zustandswechsel erzeugt keine neue Auditbehauptung; der transaktionale Writer
+liefert Zustand und tatsächlichen Jobkontext gemeinsam.
+
 ## Ein Auftrag, den die Aufsicht beendet hat
 
 Steht als Abschlussgrund `stale_heartbeat`, kam über das Fenster `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` kein Herzschlag an. Nur beim dadurch fehlgeschlagenen laufenden Auftrag bleibt dieselbe redigierte Diagnose zusätzlich als letzter Fehler für die Zeit nach der Log-Retention erhalten. Ein abbrechender Auftrag konvergiert dagegen mit `cancel_converged` zu `cancelled` und schreibt niemals einen letzten Fehler. Die begrenzte Detailmeldung nennt ausschließlich Beobachtbares: Job-ID, Alter des letzten Herzschlags gegen dieses Limit, wer den Lock hielt und den daraus folgenden Übergang.
@@ -303,6 +324,53 @@ Create summary: total=15 created=14 updated=0 unchanged=0 skipped=0 failed=1 unc
 Der Abschluss folgt einer festen Matrix: alles erfolgreich oder übersprungen ergibt `succeeded`, mindestens ein Erfolg ergibt `partial`, kein Erfolg ergibt `failed`. `partial` ist hier eine echte Kategorie und keine gerundete Niederlage: Ein Auftrag, der vierzehn von fünfzehn VMs erstellt hat, hat den Zielhost verändert. Ein Create-only-Auftrag lässt den fachlichen Lebenszyklus der VMs netto unverändert, ein `full` bricht vor dem Powercycle ab und konvergiert wie bisher.
 
 Der Reaper konvergiert in derselben Transaktion nur die noch fliegenden Einheiten nach `uncertain`; bestätigte Erfolge, Fehler und Übersprungene bleiben unangetastet. Ein stehengelassenes `running` wäre die Behauptung eines Polls, den niemand mehr ausführt.
+
+Die Create-Karte zählt weiterhin ausschließlich diese Ergebniszeilen. Unter den
+Zählern ordnet sie gespeicherte Fehler zusätzlich fachlich ein, ohne den
+technischen Code zu verstecken: entfernter Modulfehler, ungeklärte Beobachtung,
+ungültige Ergebnisbelege und Identitätskollision sind verschiedene Ursachen.
+Ein lokaler Konfigurationsfehler entsteht bereits vor der entfernten Einheit und
+steht deshalb im strukturierten Auftragsabschluss, nicht als erfundener
+VM-Fehler in der Create-Karte. Eine übernommene Identität ändert nur die aktuelle
+Bindung der Portal-VM; eine ungeklärte Einheit und ihre Retry-Sperre bleiben
+unverändert.
+
+## Historische Create-Ergebnisse lesend bewerten
+
+Die Korrektur des Async-Statusvertrags wirkt nur für neue Abfragen. Bereits
+gespeicherte Ergebnisse werden deshalb vor jeder Wiederholung zunächst lesend
+inventarisiert. Der folgende Befehl verändert weder Auftrag noch VM und stößt
+keinen entfernten Lauf an:
+
+```powershell
+docker compose exec php php /var/www/html/lib/create_history_review_cli.php --job-id=123
+```
+
+Ohne `--job-id` werden alle bekannten Verdachtsformen ausgegeben. Mit
+`--before=2026-09-08T12:00:00Z` lässt sich die Liste zusätzlich auf Einheiten
+vor einem bekannten UTC-Rolloutzeitpunkt begrenzen. Der JSON-Bericht enthält
+Fehlercode und gespeichertes Ergebnis, Prepare-Evidenz, aktuelle gespeicherte
+Identität, Ausführungszeiten sowie den noch vorhandenen Datensatz des gebundenen
+Remotehandles. `possible_created_recorded_failed` bezeichnet eine Einheit, bei
+der eine neue VM trotz `identity_result_invalid` vorhanden sein könnte.
+`possible_module_failure_recorded_unchanged` bezeichnet einen ebenso
+mehrdeutigen Erfolg: `unchanged` kann korrekt sein, konnte vor der Reparatur aber
+auch einen terminalen Modulfehler verdecken.
+
+Jeder Treffer bleibt ausdrücklich `suspect_only`. Zuerst Auftragsprotokoll und
+Remoteevidenz sichern, dann einen erfolgreichen VM-Inventarabruf für genau die
+Zugangsdaten des Auftrags ausführen und Name, MOID sowie Instance-UUID im ESXi
+Host Client abgleichen. Dieses neue Inventar beweist nur aktuelle Existenz und
+Identität. Es beweist weder das damalige Modulergebnis noch die vollständige
+Konvergenz von CPU, RAM, Disks oder Netzwerken. Identitätsübernahme ändert diese
+Beweisgrenze nicht und hebt eine ungeklärte Create-Einheit nicht auf.
+
+Aus dem Bericht folgt daher keine SQL-Korrektur, kein automatischer Retry und
+kein Löschen. Ein nach frischem, zeitlich passendem Inventar nachweislich nicht
+vorhandenes Objekt kann ausschließlich über die bereits dokumentierte,
+bestätigte Freigabe einer `uncertain`-Einheit behandelt werden. Eine positive
+Auflösung einer vorhandenen ungeklärten VM benötigt dagegen den gesonderten,
+noch nicht beschlossenen Recoveryvertrag.
 
 ## Abbruch und Teilfehler
 

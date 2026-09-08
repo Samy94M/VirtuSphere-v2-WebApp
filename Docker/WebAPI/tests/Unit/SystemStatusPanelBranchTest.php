@@ -262,10 +262,11 @@ final class SystemStatusPanelBranchTest extends TestCase
     private function renderDeviations(array $deviations, bool $hasInventory): string
     {
         $admin = ['id' => 1, 'role' => 'admin'];
+        $view = system_status_deviation_view($deviations, 'all', '', 1);
         ob_start();
         // The renderer takes the count the page computed, not the flag: null is
         // "the scan could not run", which is the same fact as "no inventory".
-        system_status_render_deviations($deviations, ['VLAN_701'], $admin, '', system_status_deviation_count($deviations, $hasInventory));
+        system_status_render_deviations($view, ['VLAN_701'], $admin, '', system_status_deviation_count($deviations, $hasInventory));
 
         return (string) ob_get_clean();
     }
@@ -322,11 +323,12 @@ final class SystemStatusPanelBranchTest extends TestCase
 
     public function testATemplateDeviationIsMarkedAsOne(): void
     {
+        $templateBadge = portal_badge('info', __t('system_status.dev_template_badge'));
         $template = $this->renderDeviations($this->deviation(VIRTUSPHERE_TEMPLATE_PREFIX . 'GOLD', 1), true);
-        self::assertStringContainsString(__t('system_status.dev_template_badge'), $template);
+        self::assertStringContainsString($templateBadge, $template);
 
         $mission = $this->renderDeviations($this->deviation('PROD-WEB', 1), true);
-        self::assertStringNotContainsString(__t('system_status.dev_template_badge'), $mission);
+        self::assertStringNotContainsString($templateBadge, $mission);
     }
 
     public function testTheTemplateBadgeFollowsTheScanFlagAndNotTheName(): void
@@ -338,7 +340,10 @@ final class SystemStatusPanelBranchTest extends TestCase
         $entry = $this->deviation('PROD-WEB', 1);
         $entry[0]['is_template'] = true;
 
-        self::assertStringContainsString(__t('system_status.dev_template_badge'), $this->renderDeviations($entry, true));
+        self::assertStringContainsString(
+            portal_badge('info', __t('system_status.dev_template_badge')),
+            $this->renderDeviations($entry, true)
+        );
     }
 
     /**
@@ -348,6 +353,9 @@ final class SystemStatusPanelBranchTest extends TestCase
      */
     private function renderAnsible(string $state, ?array $stateRow, ?array $lastMissionJob = null, ?array $user = null): string
     {
+        if ($stateRow !== null && !array_key_exists('evidence_current', $stateRow)) {
+            $stateRow['evidence_current'] = true;
+        }
         $snapshot = ['ansible' => ['rows' => [[
             'credential' => ['id' => 5, 'name' => 'ansible-01', 'host' => '10.0.0.9'],
             'state_row' => $stateRow,

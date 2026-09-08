@@ -286,7 +286,7 @@ final class AutostartPolicyTest extends TestCase
     {
         $playbook = (string) file_get_contents($this->playbookPath('autostart'));
 
-        self::assertStringContainsString("'powerOn' if (item.autostart.enabled | bool) else 'none'", $playbook);
+        self::assertStringContainsString("'powerOn' if ((item['item'] | default({}))['autostart']['enabled'] | bool) else 'none'", $playbook);
         self::assertStringNotContainsString('mission_configuration.autostart.enabled | bool) and', $playbook);
         // Never disables the host manager: other missions may live on this host.
         self::assertStringNotContainsString('enabled: false', $playbook);

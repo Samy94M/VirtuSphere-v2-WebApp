@@ -88,14 +88,23 @@ function system_status_render_mecm(array $snapshot, array $user): void
     // replaces four repeated repair instructions; the rows drop their per-row
     // hints in that state. A source that reported once and went quiet is
     // warning/danger, and its silent siblings then read `missing`.
-    $setupPending = $syncState === 'unknown' && $siteState === 'unknown';
+    $syncHasReports = array_key_exists('has_reports', $snapshot['mecm_sync'])
+        ? (bool) $snapshot['mecm_sync']['has_reports']
+        : count(array_filter($snapshot['mecm_sync']['rows'], static fn (array $entry): bool => $entry['row'] !== null)) > 0;
+    $siteHasReports = array_key_exists('has_reports', $snapshot['mecm_site'])
+        ? (bool) $snapshot['mecm_site']['has_reports']
+        : count(array_filter($snapshot['mecm_site']['rows'], static fn (array $entry): bool => $entry['row'] !== null)) > 0;
+    $setupPending = !$syncHasReports && !$siteHasReports;
     // "Nothing has ever reported" has three causes that used to render as one grey
     // row: never installed, installed but the first run is still pending, and
     // installed but REFUSED at the IP gate. The third is the commonest setup
     // mistake in the product, and a refusal is the one piece of positive evidence
     // that tells it apart: somebody IS knocking. Naming the IP turns the row into
     // the fix, because that IP is exactly what has to go on the allowlist.
-    $denials = (array) ($snapshot['machine_api_denials'] ?? []);
+    $denialSummary = (array) ($snapshot['machine_api_denials'] ?? []);
+    $denials = isset($denialSummary['rows']) && is_array($denialSummary['rows']) ? $denialSummary['rows'] : $denialSummary;
+    $denialTotal = isset($denialSummary['total']) ? (int) $denialSummary['total'] : count($denials);
+    $denialOmitted = isset($denialSummary['omitted']) ? (int) $denialSummary['omitted'] : 0;
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM); ?>">
         <div class="section-heading-actions">
@@ -110,10 +119,13 @@ function system_status_render_mecm(array $snapshot, array $user): void
                   // even next to sources that otherwise report, because it means one
                   // more host is being turned away than the rows show. ?>
             <div class="alert alert-warning">
-                <?php echo h(__t('system_status.machine_api_denied', [
+                <?php echo h(__t('system_status.machine_api_denied_history', [
                     'ips' => implode(', ', array_map(static fn (array $row): string => (string) $row['ip'], $denials)),
                     'when' => portal_format_timestamp((string) $denials[0]['last_at']),
+                    'total' => $denialTotal,
+                    'hours' => (int) (VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS / 3600),
                 ])); ?>
+                <?php if ($denialOmitted > 0) { echo ' ' . h(__t('system_status.machine_api_denied_more', ['count' => $denialOmitted])); } ?>
                 <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?>
                 <?php if (can('users.manage', $user)) { ?><a href="<?php echo h(log_category_url(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API)); ?>"><?php echo h(__t('system_status.machine_api_open_log')); ?></a><?php } ?>
             </div>
@@ -127,6 +139,7 @@ function system_status_render_mecm(array $snapshot, array $user): void
             </div>
         <?php } ?>
 
+        <?php if ($setupPending) { ?><details class="technical-details"><summary><?php echo h(__t('system_status.mecm_setup_sources_summary')); ?></summary><?php } ?>
         <div class="status-subgroup">
             <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge($syncState); ?></h3>
             <p class="muted"><?php echo h(__t('system_status.mecm_sync_hint')); ?></p>
@@ -138,6 +151,7 @@ function system_status_render_mecm(array $snapshot, array $user): void
             <p class="muted"><?php echo h(__t('system_status.mecm_site_hint')); ?></p>
             <?php system_status_render_site($snapshot['mecm_site']['rows']); ?>
         </div>
+        <?php if ($setupPending) { ?></details><?php } ?>
     </section>
     <?php
 }
@@ -166,6 +180,7 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
             ?>
             <article class="status-row">
                 <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($state); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
+                <?php if ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
                 <?php
                 // All six fields, always, in this order. They used to appear only
                 // when they had a value, so the number of columns differed per
@@ -234,6 +249,7 @@ function system_status_render_site(array $rows): void
     $detail = trim((string) ($row['last_detail'] ?? ''));
     ?>
     <article class="status-row">
+        <?php if ($state === 'stale') { ?><p class="status-action"><?php echo h(__t('system_status.site_historical_result')); ?></p><?php } ?>
         <?php
         // Seven fixed fields, same shape as the sync rows above. This card used
         // to be the one whose only child was the list, so neither the

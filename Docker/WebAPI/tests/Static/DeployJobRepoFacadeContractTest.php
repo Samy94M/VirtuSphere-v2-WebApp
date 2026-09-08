@@ -76,6 +76,7 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         // is composed from. They live in the deploy job repository because the
         // claim gate is a condition of the claim transaction itself, not a
         // setting some caller consults beforehand.
+        'repo_deploy_attention_job_ids',
         'repo_deploy_claim_state',
         'repo_deploy_request_claim_pause',
         'repo_deploy_resume_claims',

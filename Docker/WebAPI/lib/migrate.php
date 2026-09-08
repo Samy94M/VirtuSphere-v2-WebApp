@@ -17,6 +17,7 @@ require_once __DIR__ . '/migrations/0048_create_unit_release.php';
 require_once __DIR__ . '/migrations/0049_supervisor_runtime_state.php';
 require_once __DIR__ . '/migrations/0050_mecm_rollout_hostname.php';
 require_once __DIR__ . '/migrations/0051_correlation_lookup_index.php';
+require_once __DIR__ . '/migrations/0052_ansible_preflight_generation.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -382,6 +383,8 @@ $migrations = [
             created_by INT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+            ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
             UNIQUE KEY credential_name_type_unique (type, name),
             CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -801,6 +804,8 @@ SQL;
             last_status VARCHAR(16) NOT NULL,
             last_checked_at TIMESTAMP NULL,
             last_component VARCHAR(64) NULL,
+            tested_config_revision BIGINT UNSIGNED NULL,
+            test_generation BIGINT UNSIGNED NULL,
             CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         migrator_out('0023: created deploy_ansible_preflight_state');
@@ -1213,6 +1218,7 @@ SQL;
     '0049_supervisor_runtime_state' => migrate_0049_supervisor_runtime_state(...),
     '0050_mecm_rollout_hostname' => migrate_0050_mecm_rollout_hostname(...),
     '0051_correlation_lookup_index' => migrate_0051_correlation_lookup_index(...),
+    '0052_ansible_preflight_generation' => migrate_0052_ansible_preflight_generation(...),
 ];
 try {
     $db = db();

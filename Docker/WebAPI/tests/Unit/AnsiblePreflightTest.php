@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/ansible_command.php';
+require_once dirname(__DIR__, 2) . '/lib/connection_errors.php';
+require_once dirname(__DIR__, 2) . '/lib/ssh.php';
 
 /**
  * The Ansible-host preflight: the shell command the credential test and the
@@ -109,7 +113,93 @@ final class AnsiblePreflightTest extends TestCase
         self::assertStringContainsString(ansible_pinned_collection_version(), $probe);
         self::assertStringContainsString('requires_ansible', $probe);
         self::assertStringContainsString('ansible-galaxy', $probe);
-        self::assertSame('6.2.0', ansible_pinned_collection_version(), 'the pin is read from Ansible/requirements.yml');
+        $requirements = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . 'requirements.yml');
+        self::assertMatchesRegularExpression(
+            '/name:\s*community\.vmware\s*\R\s*version:\s*["\']?' . preg_quote(ansible_pinned_collection_version(), '/') . '["\']?/',
+            $requirements,
+            'the runtime probe must consume the community.vmware pin from the effective requirements.yml'
+        );
+    }
+
+    public function testTheCompleteCollectionLockPinsTheDirectAndTransitiveCollections(): void
+    {
+        self::assertSame([
+            'community.vmware' => '6.2.0',
+            'vmware.vmware' => '2.9.0',
+        ], ansible_pinned_collection_versions());
+
+        $probe = ansible_preflight_checks()['runtime-versions'];
+        foreach (ansible_pinned_collection_versions() as $collection => $version) {
+            self::assertStringContainsString($collection, $probe);
+            self::assertStringContainsString($version, $probe);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testPinnedVersionUsesTheExplicitAnsibleSourceDirectory(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents(
+            $sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml',
+            "collections:\n  - name: community.vmware\n    version: \"9.8.7\"\n  - name: vmware.vmware\n    version: \"2.9.0\"\n"
+        );
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            self::assertSame(realpath($sourceDir), ansible_source_dir());
+            self::assertSame('9.8.7', ansible_pinned_collection_version());
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testUnreadablePinIsALocalConfigurationFailure(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml', "collections:\n  - name: other.collection\n    version: 1.0.0\n");
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            ansible_pinned_collection_version();
+            self::fail('A missing community.vmware pin must fail before a remote preflight is built.');
+        } catch (SshTransportConfigurationException $exception) {
+            self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_CONFIG, ansible_connection_error_category($exception));
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testCredentialTestRejectsTheLocalPinBeforeSsh(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml', "collections: []\n");
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            $result = credential_test_ansible(
+                ['type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 'host' => 'must-not-resolve.invalid', 'port' => 22, 'username' => 'nobody'],
+                'unused-secret'
+            );
+            self::assertFalse($result['ok']);
+            self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_CONFIG, $result['code']);
+            self::assertStringContainsString('requirements.yml', $result['detail']);
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
     }
 
     public function testPortalProbeIsAppendedOnlyWithAnApiBaseUrl(): void

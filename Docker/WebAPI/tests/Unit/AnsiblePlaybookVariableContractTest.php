@@ -28,7 +28,7 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
     private const NON_DATA_TOKENS = [
         'default', 'int', 'bool', 'length', 'list', 'map', 'attribute', 'lower',
         'first', 'selectattr', 'rejectattr', 'combine', 'dict2items', 'flatten',
-        'to_json', 'to_nice_json', 'b64encode', 'trim', 'lookup',
+        'to_json', 'to_nice_json', 'from_json', 'b64encode', 'trim', 'lookup',
         // Filters and tests the create control playbooks use (Etappe 14B).
         'string', 'replace', 'truncate', 'match', 'equalto',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',
@@ -94,6 +94,15 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
             }
             preg_match_all('/\b(?:item|vs_target)\.((?:\w+\.)*\w+)/', $scanned, $matches);
             foreach (array_unique($matches[1]) as $path) {
+                // A registered loop result wraps the original VM below
+                // item.item. Treat that wrapper as transport structure, not as
+                // a generated serverlist key.
+                if ($path === 'item') {
+                    continue;
+                }
+                if (str_starts_with($path, 'item.')) {
+                    $path = substr($path, strlen('item.'));
+                }
                 self::assertContains(
                     $path,
                     $vmKeys,

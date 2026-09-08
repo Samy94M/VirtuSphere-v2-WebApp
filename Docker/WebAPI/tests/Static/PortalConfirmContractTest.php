@@ -57,6 +57,7 @@ final class PortalConfirmContractTest extends TestCase
         'system_status.php:test' => 'delegates to the same non-destructive Ansible diagnostic from its status card',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
+        'system_status.php:preview_vlan_reassign' => 'renders the exact write scope and writes nothing',
         // Resuming can only ever start work that was already queued and cannot
         // lose anything; the pause in the other direction does carry a prompt.
         'system_status.php:deploy_claim_resume' => 'resumes job intake; nothing is deleted and nothing already running is affected',

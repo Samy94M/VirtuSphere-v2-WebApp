@@ -226,6 +226,27 @@
             var cell = progressCard.querySelector('[data-create-count="' + CSS.escape(name) + '"]');
             if (cell) { cell.textContent = String(counters[name]); }
         });
+        var findingsContainer = progressCard.querySelector('[data-create-findings]');
+        var findingsList = progressCard.querySelector('[data-create-finding-list]');
+        if (findingsContainer && findingsList) {
+            var findings = Array.isArray(progress.findings) ? progress.findings : [];
+            findingsList.replaceChildren();
+            findings.forEach(function (finding) {
+                if (!finding || typeof finding.text !== 'string') { return; }
+                var item = document.createElement('li');
+                var text = document.createElement('span');
+                text.textContent = finding.text;
+                item.appendChild(text);
+                if (typeof finding.error_code === 'string' && finding.error_code !== '') {
+                    item.appendChild(document.createTextNode(' '));
+                    var code = document.createElement('code');
+                    code.textContent = finding.error_code;
+                    item.appendChild(code);
+                }
+                findingsList.appendChild(item);
+            });
+            findingsContainer.hidden = findings.length === 0;
+        }
     }
     function rowFor(entry) {
         var seqValue = String(entry.seq);

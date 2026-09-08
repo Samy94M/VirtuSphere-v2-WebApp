@@ -46,6 +46,9 @@ function directory_controller_ampel(array $controller, int $currentRevision, ?in
     $notAfter = trim((string) ($controller['certificate_not_after'] ?? ''));
     if ($notAfter !== '') {
         $notAfterEpoch = strtotime($notAfter . ' UTC');
+        if ($notAfterEpoch !== false && $notAfterEpoch < $now) {
+            return 'danger';
+        }
         if ($notAfterEpoch !== false && $notAfterEpoch < $now + VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS * 86400) {
             return 'warning';
         }
@@ -87,7 +90,7 @@ function directory_controller_ampel(array $controller, int $currentRevision, ?in
  *
  * @param array<string,mixed>|null $config
  * @param list<array<string,mixed>> $controllers
- * @return array{overall:string,now:int,controllers:list<array{controller:array<string,mixed>,state:string}>}
+ * @return array{overall:string,now:int,controllers:list<array{controller:array<string,mixed>,state:string}>,counts:array{admitted:int,current_ok:int,stale:int,disturbed:int},last_admitted_success_at:?string}
  */
 function directory_health_snapshot(?array $config, array $controllers, ?int $now = null): array
 {
@@ -131,6 +134,33 @@ function directory_health_snapshot(?array $config, array $controllers, ?int $now
             default => 'warning',
         };
     }
+    $admitted = 0;
+    $currentOk = 0;
+    $stale = 0;
+    $disturbed = 0;
+    $lastAdmittedSuccess = null;
+    foreach ($rows as $row) {
+        $controller = $row['controller'];
+        $isAdmitted = (int) $controller['enabled'] === 1
+            && (int) ($controller['validated_revision'] ?? 0) === $revision;
+        if (!$isAdmitted) {
+            continue;
+        }
+        $admitted++;
+        $currentOk += $row['state'] === 'ok' ? 1 : 0;
+        $stale += $row['state'] === 'stale' ? 1 : 0;
+        $disturbed += in_array($row['state'], ['danger', 'warning'], true) ? 1 : 0;
+        $success = trim((string) ($controller['last_success_at'] ?? ''));
+        if ($success !== '' && ($lastAdmittedSuccess === null || strcmp($success, $lastAdmittedSuccess) > 0)) {
+            $lastAdmittedSuccess = $success;
+        }
+    }
 
-    return ['overall' => $overall, 'now' => $now, 'controllers' => $rows];
+    return [
+        'overall' => $overall,
+        'now' => $now,
+        'controllers' => $rows,
+        'counts' => ['admitted' => $admitted, 'current_ok' => $currentOk, 'stale' => $stale, 'disturbed' => $disturbed],
+        'last_admitted_success_at' => $lastAdmittedSuccess,
+    ];
 }

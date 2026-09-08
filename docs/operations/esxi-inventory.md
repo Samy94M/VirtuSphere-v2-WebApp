@@ -58,7 +58,7 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 | `parse` | Marker, Ausgabe oder Ergebnisvertrag unerwartet | Technischen Text im Jobprotokoll prüfen |
 | `config` | Portal-/Auftragskonfiguration vor dem entfernten Lauf unvollständig | Portal- und Auftragskonfiguration prüfen; Ansible-Voraussetzungen haben eigene Codes |
 
-Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES` in `lib/inventory_error_constants.php`; der bestehende Require-Pfad `lib/deploy_constants.php` lädt sie mit. Nur der exakte Code `auth` pausiert einen ESXi-Zugang; insbesondere `ansible_auth` und `ansible_authz` tun das nicht. `http` bleibt ausschließlich für lesbaren Altbestand erhalten. Seit Etappe 6 schreiben die typisierten Producer SFTP-Budgetüberschreitungen als `ansible_timeout`, andere SFTP-Fehler als `ansible_sftp` und lokale SSH-/SFTP-Voraussetzungen als `config`; gewöhnliche Exceptions mit ähnlich klingendem Text werden nicht in einen Budgettyp umgedeutet. Seit Etappe 7 qualifiziert die eine gemeinsame Funktion `ansible_connection_error_category()` (`lib/connection_errors.php`) jeden generischen Befund als Ansible-Host-Ursache, bevor der Inventarworker (SSH-/Transport-Phase) oder der SSH-Zugangstest ihn speichert: eine abgelehnte Anmeldung, ein DNS-Fehler oder eine verweigerte Verbindung auf diesem Weg landen als `ansible_auth`/`ansible_dns`/`ansible_unreachable`, nie mehr als das generische `auth`/`dns`/`unreachable`, das dieselbe Zeile bislang wie einen ESXi-Fund aussehen ließ. `ssh` ist dadurch kein aktiver Fallback dieser beiden Producer mehr. Seit Etappe 8 hat der Wert überhaupt keinen Schreiber mehr: Der Preflight-Exitcode setzt `ansible_preflight`, weil eine fehlgeschlagene Vorprüfung eine Komponente **auf** dem Ansible-Host benennt und nicht die Verbindung zu ihm. Bestehende Altzeilen bleiben lesbar. Ebenfalls seit Etappe 8 gilt die verbindliche Reihenfolge aus Abschnitt 3 des Masterplans: Ein `mysqli_sql_exception` bleibt phasenunabhängig `worker`, weil ein Datenbankausfall keine Aussage über den entfernten Host ist; eine lokale Transport-Fehlkonfiguration bleibt phasenunabhängig `config`; ein Zeitbudget wird nur auf den drei Wegen zum Ansible-Host zu `ansible_timeout`; und die eigene Phase des Uploads sagt einen sonst generischen Transportbefund als `ansible_sftp`.
+Die Kategorien sind die SSoT-Liste `VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES` in `lib/inventory_error_constants.php`; der bestehende Require-Pfad `lib/deploy_constants.php` lädt sie mit. Nur der exakte Code `auth` pausiert einen ESXi-Zugang; insbesondere `ansible_auth` und `ansible_authz` tun das nicht. `http` bleibt ausschließlich für lesbaren Altbestand erhalten. Seit Etappe 6 schreiben die typisierten Producer SFTP-Budgetüberschreitungen als `ansible_timeout`, andere SFTP-Fehler als `ansible_sftp` und lokale SSH-/SFTP-Voraussetzungen als `config`; dazu gehören auch ein fehlender wirksamer Ansible-Quellpfad und eine fehlende, unlesbare oder nicht eindeutig gepinnte `requirements.yml`. Diese Prüfung läuft vor jeder SSH-/SFTP-Operation und liest dieselbe Quelle wie der Playbook-Upload. Gewöhnliche Exceptions mit ähnlich klingendem Text werden nicht in einen Budgettyp umgedeutet. Seit Etappe 7 qualifiziert die eine gemeinsame Funktion `ansible_connection_error_category()` (`lib/connection_errors.php`) jeden generischen Befund als Ansible-Host-Ursache, bevor der Inventarworker (SSH-/Transport-Phase) oder der SSH-Zugangstest ihn speichert: eine abgelehnte Anmeldung, ein DNS-Fehler oder eine verweigerte Verbindung auf diesem Weg landen als `ansible_auth`/`ansible_dns`/`ansible_unreachable`, nie mehr als das generische `auth`/`dns`/`unreachable`, das dieselbe Zeile bislang wie einen ESXi-Fund aussehen ließ. `ssh` ist dadurch kein aktiver Fallback dieser beiden Producer mehr. Seit Etappe 8 hat der Wert überhaupt keinen Schreiber mehr: Der Preflight-Exitcode setzt `ansible_preflight`, weil eine fehlgeschlagene Vorprüfung eine Komponente **auf** dem Ansible-Host benennt und nicht die Verbindung zu ihm. Bestehende Altzeilen bleiben lesbar. Ebenfalls seit Etappe 8 gilt die verbindliche Reihenfolge aus Abschnitt 3 des Masterplans: Ein `mysqli_sql_exception` bleibt phasenunabhängig `worker`, weil ein Datenbankausfall keine Aussage über den entfernten Host ist; eine lokale Transport-Fehlkonfiguration bleibt phasenunabhängig `config`; ein Zeitbudget wird nur auf den drei Wegen zum Ansible-Host zu `ansible_timeout`; und die eigene Phase des Uploads sagt einen sonst generischen Transportbefund als `ansible_sftp`.
 
 Die Zustandszeile speichert nur die Kategorie und den Verweis auf den verursachenden Systemauftrag. Das technische Original steht ausschließlich in `deploy_job_logs` des noch aufbewahrten `deploy_jobs`-Auftrags. Die Inventarkarte rendert keine persistierte Detailspalte, und `Docker/WebAPI/logs/error.log` erhält keine zweite Kopie dieses Inventarfehlers. Der Jobprotokoll-Link ist deshalb bewusst an `deploy.run` und die Aufbewahrung des Auftrags gebunden.
 
@@ -274,7 +274,21 @@ Die Anzeige ist **warnend, nie blockierend** (Cache-blockiert-nie-Regel): fehlt 
 
 ## Abweichungen und VLAN-Neuzuweisung
 
-Eine Abweichung liegt vor, wenn Datacenter, Datastore oder VLAN nicht im aktuellen Inventar der jeweiligen Kategorie vorkommt. Geprüft werden Missionen (Datacenter, Datastore, WDS-VLAN), VM-Overrides (Datacenter, Datastore) und VM-Netzwerkkarten (VLAN). Eine Kategorie wird nur bewertet, wenn das Inventar mindestens einen Eintrag davon hat; ein leeres oder nie abgerufenes Inventar erzeugt also keine falschen Abweichungen. Ohne ein einziges ESXi-Zugangsdatum läuft der Scan gar nicht: der Systemstatus zeigt dann „Nicht geprüft" statt einer grünen Null, denn ein nicht durchgeführter Vergleich ist kein bestandener. Eine Abweichung an einer Vorlage wird als solche markiert; sie wird erst wirksam, wenn daraus eine Mission entsteht. Sichtbar an drei Stellen, alle rein hinweisend (kein Deploy-Block): Bereich „Abweichungen" im Systemstatus, Badge „Inventar-Abweichung" in der Missionsliste, Hinweis beim Einreihen eines Bereitstellungsauftrags. Der Badge leuchtet auch, wenn nur eine VM der Mission abweicht.
+Eine Abweichung wird je Objektart nur dann ermittelt, wenn jeder konfigurierte
+ESXi-Zugang einen qualifizierten Semantik-2-Namensstand für diese Art besitzt.
+Eine bestätigte leere Menge ist dabei ein vollständiger Negativnachweis; eine
+abgelehnte, übersprungene oder nie qualifizierte Abfrage ist keiner. Ein später
+fehlgeschlagener Abruf erhält den älteren Namensstand als historische Diagnose,
+macht ihn aber nicht aktuell. Der Systemstatus nennt deshalb pro Art aktuellen,
+historischen oder nicht auswertbaren Nachweis samt letzter Beobachtung. Fehlende
+Evidenz erzeugt weder eine Abweichung noch eine Deployfreigabe.
+
+Geprüft werden Missionen (Datacenter, Datastore, WDS-VLAN), Vorlagen,
+VM-Overrides und VM-Netzwerkkarten. Der vollständige Befund wird einmal
+ermittelt; die Oberfläche filtert ihn nach Mission, Vorlage, VM oder Art und
+zeigt höchstens 50 Einträge pro Seite. Gesamtzahl, Filter und
+Inventarauswahl bleiben in der URL erhalten. Der Bericht ist warnend und
+ersetzt keine zielgebundene Deployprüfung.
 
 | Symptom | Wahrscheinliche Ursache | Maßnahme |
 |---|---|---|
@@ -282,7 +296,16 @@ Eine Abweichung liegt vor, wenn Datacenter, Datastore oder VLAN nicht im aktuell
 | VLAN fehlt im Auswahlfeld | Portgruppe existiert nicht (mehr) auf ESXi oder wurde retired | Auf ESXi prüfen; nach Anlage „Aktualisieren"; gespeicherter Wert bleibt bis dahin wählbar |
 | VLAN auf ESXi umbenannt | Erscheint als „alt retired, neu aktiv" (Rename nicht von Löschen unterscheidbar) | Geführte Massen-Neuzuweisung nutzen (siehe unten) |
 
-**Geführte VLAN-Massen-Neuzuweisung** (Systemstatus, Rechte `missions.write` + `vms.write`): ändert alle Zuweisungen eines VLAN-Namens (in Missionen und VM-Netzwerkkarten) in einem Schritt auf einen aktiven Katalog-Eintrag. Feld „Von" ist Freitext (auch der alte/retired Name), „Nach" ein aktives VLAN. Die Umstellung läuft in einer Transaktion, betrifft nur Portal-Datensätze (nie ESXi) und schreibt einen aggregierten Audit-Eintrag. Das Formular erscheint nur bei einer echten VLAN-Abweichung und ist als „Korrekturaktionen" eingeklappt. Leere, identische, zu lange oder inaktive Ziele werden feldbezogen abgewiesen; ohne Treffer bleibt der eingegebene Wert erhalten. Cancel ändert nichts, Confirm schreibt Missionen und Interfaces gemeinsam.
+**Geführte VLAN-Massen-Neuzuweisung** (Systemstatus, Rechte `missions.write` +
+`vms.write`) bewahrt den exakten Rohwert einschließlich Case, Unicode und
+Rand-Leerzeichen. Zuerst zeigt eine read-only Vorschau den vollständigen Scope:
+Missionen, Vorlagen, VMs, Interfaces und aktive Konfliktaufträge. Die
+Bestätigung ist an einen versionierten Fingerprint dieses Scopes einschließlich
+Netzwerkbundles und MACs gebunden. Im Write werden Zielaktivität und Scope unter
+der bestehenden Reihenfolge Mission → aktiver Job → VM → Interface erneut
+gesperrt und geprüft. Jede Abweichung verlangt eine neue Vorschau; ohne
+Übereinstimmung erfolgt kein Teilwrite. Die Transaktion ändert ausschließlich
+Portal-Datensätze und schreibt erst danach den aggregierten Audit-Eintrag.
 
 ## Teilpräsenz und VLAN-IDs im Katalog (Mehr-Host-Betrieb)
 

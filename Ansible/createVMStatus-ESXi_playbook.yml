@@ -42,25 +42,29 @@
       ansible.builtin.set_fact:
         vs_target: "{{ vs_targets | first }}"
 
-    # ZUERST die Statusdatei, dann die Abfrage. Der Grund ist gemessen, nicht
-    # angenommen (Gate ansible-create-async pinnt es): `async_status` antwortet
-    # auf eine verschwundene Job-ID mit `finished: true` und `msg: could not
-    # find job`, und unter `failed_when: false` steht dort zusaetzlich
-    # `failed: false`. Ein verlorener Job saehe damit aus wie ein fertiger, und
-    # die Einheit wuerde als Erfolg oder Fehlschlag verbucht, obwohl niemand
-    # weiss, was auf dem Host passiert ist. Die Anwesenheit der Statusdatei ist
-    # die strukturelle Antwort auf dieselbe Frage; die Meldung des Moduls ist
-    # freier Text und entscheidet hier nichts.
-    - name: Statusdatei des Async-Jobs pruefen
-      ansible.builtin.stat:
-        path: "{{ vs_async_dir }}/{{ vs_async_jid }}"
+    # ZUERST ein gebundener Snapshot der Statusdatei, dann die normale
+    # async_status-Abfrage. async_status behandelt eine leere oder unlesbare
+    # Datei als laufend und kann einen zwischenzeitlich entfernten Zustand nur
+    # über freie Meldung beschreiben. Der kleine Inspector liefert dagegen
+    # geschlossene Strukturwerte und bewahrt failed/changed des ursprünglichen
+    # Modulresultats. Er liest genau <async_dir>/<jid>, löscht nichts und stellt
+    # keine Verbindung zu ESXi her.
+    - name: Statusdatei des Async-Jobs gebunden lesen
+      ansible.builtin.command:
+        argv:
+          - python3
+          - ./inspect_create_async_state.py
+          - "{{ vs_async_dir }}"
+          - "{{ vs_async_jid }}"
       delegate_to: localhost
-      register: vs_async_state
+      register: vs_async_snapshot_command
+      changed_when: false
+      failed_when: false
 
-    - name: Verlorenen Async-Zustand strukturiert melden
-      when: not vs_async_state.stat.exists
+    - name: Fehler des lokalen Statuslesers strukturiert melden
+      when: vs_async_snapshot_command.rc | int != 0
       block:
-        - name: Fehlenden Zustand schreiben
+        - name: Leserfehler schreiben
           ansible.builtin.copy:
             dest: "{{ vs_result_file }}"
             mode: "0600"
@@ -70,8 +74,42 @@
                   'event': 'rejected',
                   'portal_vm_id': vs_target.portal_vm_id | int,
                   'vm_name': vs_target.vm_name,
-                  'error_code': 'async_state_missing',
-                  'error': 'the async state file of this job id is gone'
+                  'error_code': 'protocol_error',
+                  'error': 'the bound async state inspector could not run'
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne Statusannahme beenden
+          ansible.builtin.meta: end_play
+
+    - name: Gebundenen Statussnapshot dekodieren
+      ansible.builtin.set_fact:
+        vs_async_snapshot: "{{ vs_async_snapshot_command.stdout | from_json }}"
+
+    - name: Fehlenden oder unlesbaren Async-Zustand strukturiert melden
+      when: vs_async_snapshot.state in ['missing', 'unreadable', 'invalid']
+      block:
+        - name: Ungeklärten Zustand schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': ('async_state_missing' if vs_async_snapshot.state == 'missing' else 'protocol_error'),
+                  'error': (
+                    'the async state file of this job id is gone'
+                    if vs_async_snapshot.state == 'missing'
+                    else (
+                      'the async state file of this job id is unreadable'
+                      if vs_async_snapshot.state == 'unreadable'
+                      else vs_async_snapshot.reason | default('the async state file is invalid')
+                    )
+                  )
                 } | to_nice_json
               }}
           delegate_to: localhost
@@ -79,21 +117,71 @@
         - name: Ohne Abfrage beenden
           ansible.builtin.meta: end_play
 
-    # Genau eine Frage an den Async-Job. `failed_when: false` ist hier kein
-    # toleriertes Scheitern, sondern die Trennung der Ausgänge weiter unten: ein
-    # Modulfehler des Async-Jobs ist ein Ergebnis dieser Einheit und kein Fehler
-    # dieses Steueraufrufs.
+    # Genau eine normale Frage an den Async-Job. ignore_errors lässt das
+    # Steuerplaybook weiterlaufen, ohne failed oder changed des ursprünglichen
+    # Modulresultats umzuschreiben. Der Snapshot bleibt die unabhängige
+    # strukturelle Evidenz und beide Antworten müssen zusammenpassen.
     - name: Async-Job genau einmal abfragen
       ansible.builtin.async_status:
         jid: "{{ vs_async_jid }}"
       vars:
         ansible_async_dir: "{{ vs_async_dir }}"
       register: vs_status
-      failed_when: false
-      changed_when: false
+      ignore_errors: true
+
+    - name: Statusdatei nach der Abfrage erneut pruefen
+      ansible.builtin.stat:
+        path: "{{ vs_async_dir }}/{{ vs_async_jid }}"
+      delegate_to: localhost
+      register: vs_async_state_after
+
+    - name: Snapshot und Statusabfrage muessen konsistent sein
+      ansible.builtin.set_fact:
+        vs_async_status_consistent: >-
+          {{
+            (vs_async_snapshot.state == 'running')
+            or (
+              vs_async_snapshot.state == 'failed'
+              and (vs_status.finished | default(false) | bool)
+              and (vs_status.failed | default(false) | bool)
+            )
+            or (
+              vs_async_snapshot.state == 'succeeded'
+              and (vs_status.finished | default(false) | bool)
+              and not (vs_status.failed | default(false) | bool)
+              and (vs_status.changed is defined)
+              and ((vs_status.changed | bool) == (vs_async_snapshot.changed | bool))
+            )
+          }}
+
+    - name: Widerspruechliche oder entfernte Statusevidenz melden
+      when: (not vs_async_state_after.stat.exists) or not (vs_async_status_consistent | bool)
+      block:
+        - name: Widerspruch schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': ('async_state_missing' if not vs_async_state_after.stat.exists else 'protocol_error'),
+                  'error': (
+                    'the async state file disappeared while its result was being checked'
+                    if not vs_async_state_after.stat.exists
+                    else 'the async state snapshot contradicts the async status result'
+                  )
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Ohne Ergebnisannahme beenden
+          ansible.builtin.meta: end_play
 
     - name: Noch laufend melden
-      when: not (vs_status.finished | default(0) | int == 1)
+      when: vs_async_snapshot.state == 'running'
       block:
         - name: Laufzustand schreiben
           ansible.builtin.copy:
@@ -113,7 +201,7 @@
           ansible.builtin.meta: end_play
 
     - name: Terminalen Modulfehler melden
-      when: vs_status.failed | default(false) | bool
+      when: vs_async_snapshot.state == 'failed'
       block:
         # Die Ursache wird auf eine Zeile begrenzt und traegt keine
         # Modulargumente: der Marker ist eine Diagnosezeile, kein Dump.
@@ -127,7 +215,7 @@
                   'event': 'failed',
                   'portal_vm_id': vs_target.portal_vm_id | int,
                   'async_jid': vs_async_jid | string,
-                  'error': (vs_status.msg | default('the create module reported a failure'))
+                  'error': (vs_async_snapshot.error | default('the create module reported a failure'))
                            | string | replace('\n', ' ') | truncate(1024, true, '')
                 } | to_nice_json
               }}
@@ -197,7 +285,7 @@
               'portal_vm_id': vs_target.portal_vm_id | int,
               'vm_name': vs_target.vm_name,
               'async_jid': vs_async_jid | string,
-              'changed': vs_status.changed | default(false) | bool,
+              'changed': vs_async_snapshot.changed | bool,
               'moid': vs_precheck_moid,
               'instance_uuid': vs_precheck_instance_uuid,
               'power_state': vs_guest.instance.hw_power_status | default('unknown')

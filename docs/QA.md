@@ -367,14 +367,16 @@ module manual into the job log, `ansible_command.php` is already a require
 facade over split modules, and the full log tail with `has_more`/`caught_up`
 arrived with Etappe 10A. Etappe G therefore shrinks to the progress card.
 
-Runtime versions, recorded rather than assumed. The pinned QA image carries
-ansible-core 2.19.11, Python 3.13.14 and community.vmware 6.2.0. Production
-reported ansible-core 2.16.3 in the incident; that number comes from the
-customer report, not from a machine this repository can reach, and it sits below
-the 2.19 floor that the 6.2.0 pin enforces. Whether the production host runs an
-older collection or the ESXi path is failing there for that reason is a site
-question, and Etappe D turns it into a hard preflight check instead of a
-document.
+Runtime versions are recorded rather than assumed. `Ansible/requirements.yml`
+is the only Collection install list; the `ansible-module-contract` gate records
+the installed versions and rejects a missing, version-wrong or newly unpinned
+direct or transitive Collection. The reviewed QA image also carried
+ansible-core 2.19.11 and Python 3.13.14. Production reported ansible-core 2.16.3
+in the incident; that number comes from the customer report, not from a machine
+this repository can reach, and it sits below the requirement declared by the
+pinned Collection runtime. Whether production has the complete locked set is a
+site question, and the executable preflight turns it into a hard check instead
+of a second version list in this document.
 
 ### Etappe 14B: what proves the repaired create path
 
@@ -659,7 +661,7 @@ Expected results: PHPUnit and the Python client tests exit green, lang audit rep
 
 ## Continuous Integration (GitHub Actions)
 
-`.github/workflows/ci.yml` runs the **Fast lane of the canonical runner** (`scripts/check.ps1 -Lane Fast`) on every `push` to `main` and on every pull request, instead of maintaining a second step list that could drift from the local gates. The **Integration lane** runs as its own job on every merge to `main`, nightly and on manual dispatch (never on PRs): same setup plus a Playwright Chromium install pinned by `tests/e2e/package-lock.json`, then `scripts/check.ps1 -Lane Integration` with the throwaway QA stack described above; the machine-readable result and, on failure, the Playwright report are uploaded as artifacts. Actions are pinned to full commit SHAs, the job has a `timeout-minutes` budget, and the machine-readable lane result (`qa-fast.json`) is uploaded as a build artifact with limited retention. Setup before the lane: PHP 8.4 on the host (so `php -l`/lang-audit lint with the runtime version, not the runner default), Node 20, `.env` from `.env.example` for the compose gate, the project PHP image and the QA Ansible image built from their Dockerfiles, `composer install` inside the project image, and Pester/PSScriptAnalyzer at the exact versions from `scripts/tool-lock.json`.
+`.github/workflows/ci.yml` runs the **Fast lane of the canonical runner** (`scripts/check.ps1 -Lane Fast`) on every `push` to `main` and on every pull request, instead of maintaining a second step list that could drift from the local gates. The **Integration lane** runs on the explicit GitHub-hosted `ubuntu-24.04` label on every merge to `main`, nightly and on manual dispatch (never on PRs): same setup plus a Playwright Chromium install pinned by `tests/e2e/package-lock.json`, then `scripts/check.ps1 -Lane Integration` with the throwaway QA stack described above. D01 selected Linux because no maintained matching Windows runner exists. Until a person has captured and reviewed the replacement Linux images, the checked-in runner contract and target images deliberately remain the previous Windows review set; that transition is an open release acceptance, not permission to weaken metadata validation or zero tolerance. All three machine-readable lane results are written and uploaded at matching paths below `qa-artifacts/`; a missing JSON report is an upload error even if an earlier setup failure already made the job red. The functional Chromium report comes from `tests/e2e/playwright-report-chromium`, while visual metadata and diffs come from the run-specific `qa-artifacts/visual-baselines-*` directory. Those optional diagnostics are uploaded only when the respective directory exists, because a setup or earlier gate failure can prevent that browser section from starting. Actions are pinned to full commit SHAs and every job has a `timeout-minutes` budget. Setup before the lane: PHP 8.4 on the host (so `php -l`/lang-audit lint with the runtime version, not the runner default), Node 20, `.env` from `.env.example` for the compose gate, the project PHP image and the QA Ansible image built from their Dockerfiles, `composer install` inside the project image, and Pester/PSScriptAnalyzer at the exact versions from `scripts/tool-lock.json`.
 
 **No MySQL server** is provisioned: the Fast lane runs the unit + static suites without skips (`--fail-on-skipped`); the full suite including integration tests belongs to the Integration lane, which follows the ADR-0015 amendment and ADR-0028 revision. One step stays outside the lane on purpose: `lint-csp-patterns.sh --range <base> <head>` checks the pushed commit range (the lane's `csp-patterns` gate checks the worktree, which is always clean in CI; locally use `--worktree`).
 
@@ -964,6 +966,8 @@ powershell -NoProfile -File scripts\check.ps1 -Lane Integration -Gate qa-stack,e
 ```
 
 The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, the desktop/wrap/mobile viewports, the captured pages, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation, hidden caret and the mask list. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS`, `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` and `VIRTUSPHERE_VISUAL_BASELINE_UPDATE` are refused, and the gate clears all three before calling the harness.
+
+That Windows contract is still the last reviewed visual evidence. D01 on 08.09.2026 chose migration to the explicit `ubuntu-24.04` Integration runner because there is no matching maintained Windows runner, but the visual reference has not been activated on Linux. On Linux, `metadata.actual.json` records the stable distribution identity from `/etc/os-release` and diagnostic `fc-match` paths and hashes for regular/bold `system-ui` plus the regular generic sans-serif. Those diagnostics do not satisfy the old contract; they only supply measured candidates for the new one. The first normal Linux Integration run therefore remains an expected `infrastructure_error` and uploads those actual metadata. Copy only the measured platform, release, browser and chosen font-query values into a reviewed `runner-contract.json` change. Proposal workflow, writer invocation, manifest and PNG updates belong to a separate activation change after that contract review. Inspect every generated diff image before the replacement baseline is accepted. The migration is complete only after that human review. Do not edit `runner-contract.json` to guessed values and do not relabel the Windows manifest as Linux.
 
 The runner proves exact QA Compose labels and zero queued/running/cancelling jobs before pausing workers. It restores only those that were originally running in `finally`; shared/dev/production labels fail before `stop`. The seed is namespaced `visuale11fixture`, cleans only its own rows and is guarded by the exact QA URL, containers and DB. The harness decodes PNG pixels rather than comparing encoded bytes and writes metadata, comparison and diff evidence below ignored `qa-artifacts/visual-baselines-*`.
 

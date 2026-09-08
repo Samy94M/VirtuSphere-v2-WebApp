@@ -60,6 +60,8 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     ]); ?>
                     <?php if ((string) $entry['state'] === 'stale') { ?>
                         <p class="status-action"><?php echo h(__t('system_status.ansible_stale_detail', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+                    <?php } elseif ($stateRow !== null && empty($stateRow['evidence_current'])) { ?>
+                        <p class="status-action"><?php echo h(__t('system_status.ansible_invalidated_detail')); ?></p>
                     <?php } ?>
                     <?php // A badge over a timestamp reads as "last poll" everywhere else in
                           // the portal, and the preflight is the one status here that nothing
@@ -95,8 +97,8 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     // Its last sentence names another page, so the box carries the way
                     // there, gated like that page and under the label the MECM empty
                     // state already uses: one destination, one name.
-                    if (($stateRow['last_status'] ?? '') === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?></div><?php
-                    } elseif ($component !== '') { ?><p class="muted"><?php echo h(__t('system_status.ansible_failed_component', ['component' => $component])); ?></p><?php } ?>
+                    if (!empty($stateRow['evidence_current']) && ($stateRow['last_status'] ?? '') === 'warning') { ?><div class="alert alert-warning"><?php echo h(__t('system_status.ansible_allowlist_detail')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('system_status.mecm_configure_allowlist')); ?></a><?php } ?></div><?php
+                    } elseif (!empty($stateRow['evidence_current']) && $component !== '') { ?><p class="muted"><?php echo h(__t('system_status.ansible_failed_component', ['component' => $component])); ?></p><?php } ?>
                 </article>
             <?php } ?>
             </div>

@@ -274,6 +274,8 @@ CREATE TABLE IF NOT EXISTS deploy_ansible_preflight_state (
     last_status VARCHAR(16) NOT NULL,
     last_checked_at TIMESTAMP NULL,
     last_component VARCHAR(64) NULL,
+    tested_config_revision BIGINT UNSIGNED NULL,
+    test_generation BIGINT UNSIGNED NULL,
     CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -416,6 +418,8 @@ CREATE TABLE IF NOT EXISTS deploy_credentials (
     created_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY credential_name_type_unique (type, name),
     CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

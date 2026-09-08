@@ -30,7 +30,10 @@ $id = repo_create_credential($db, [
     'port' => 22,
     'username' => 'e2e',
 ], 'e2e-secret-value', 1);
-repo_ansible_preflight_record($db, $id, '${preflightStatus}', ${component === null ? 'null' : `'${component}'`});
+$credential = repo_credential($db, $id);
+$revision = (int) $credential['config_revision'];
+$generation = repo_ansible_preflight_begin($db, $id, $revision);
+repo_ansible_preflight_record($db, $id, '${preflightStatus}', ${component === null ? 'null' : `'${component}'`}, $revision, $generation);
 echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 `,
     ['lib/repo/credentials.php', 'lib/repo/ansible_preflight.php'],
@@ -172,6 +175,21 @@ echo 'JSON' . json_encode([
     .locator('.badge')
     .allTextContents();
   expect(helpHeartbeat, 'help and the page must explain the same heartbeat states').toEqual(heartbeat);
+});
+
+test('a help section hash reveals its tab and moves focus to the exact section', async ({ page }) => {
+  await page.goto('help.php#help-status-esxi');
+
+  await expect(page.locator('#panel-system-status')).toBeVisible();
+  await expect(page.locator('#help-status-esxi')).toBeFocused();
+
+  await page.evaluate(() => {
+    window.location.hash = 'help-status-directory';
+  });
+  await expect(page.locator('#help-status-directory')).toBeFocused();
+
+  await page.locator('a[href$="#help-status-directory"]').click();
+  await expect(page.locator('#help-status-directory')).toBeFocused();
 });
 
 test('an action hint is a repair instruction: it appears on a broken row and not on a healthy one', async ({ page }) => {

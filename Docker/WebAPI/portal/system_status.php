@@ -10,6 +10,7 @@ require_once __DIR__ . '/../lib/system_status_service_panel.php';
 require_once __DIR__ . '/../lib/system_status_shared_panels.php';
 require_once __DIR__ . '/../lib/system_status_panels.php';
 require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
+require_once __DIR__ . '/../lib/system_status_deviation_view.php';
 require_once __DIR__ . '/../lib/system_status_directory_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 
@@ -25,7 +26,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $snapshot = integration_health_snapshot($connection);
 // One snapshot, four surfaces (Etappe 13R). This page reads the same function
 // the dashboard, the deploy page and the anonymous health endpoint read.
-$serviceSnapshot = deploy_service_health_snapshot($connection);
+$serviceSnapshot = null;
+try {
+    $serviceSnapshot = deploy_service_health_snapshot($connection, (int) $snapshot['now']);
+} catch (Throwable $exception) {
+    error_log('[system-status] deploy service snapshot unavailable: ' . virtusphere_redact_log_text($exception->getMessage()));
+}
+if ($serviceSnapshot !== null) {
+    $snapshot['esxi']['claim_state'] = $serviceSnapshot['claim_state'];
+}
+$directoryData = system_status_directory_panel_data($connection, $user);
 
 // A detail query is accepted only for an ESXi credential already present in
 // the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
@@ -50,20 +60,37 @@ $selectedInventory = $selectedInventoryId > 0
 // list badge and the deploy hint leave them out, but a stale VLAN or datastore
 // that lives only in a template propagates into every mission cloned from it.
 // This report is the one place that has to show it, flagged as a template.
-$hasInventory = $snapshot['esxi']['rows'] !== [];
-$deviations = $hasInventory
-    ? esxi_inventory_mission_deviations($connection, true)
-    : [];
+$deviationReport = esxi_inventory_deviation_report(
+    $connection,
+    $snapshot['esxi']['rows'],
+    (int) $snapshot['esxi']['interval_hours'],
+    (int) $snapshot['now'],
+    true
+);
+$hasInventory = (bool) $deviationReport['has_evidence'];
+$deviations = $deviationReport['deviations'];
 $activeVlanNames = array_map(
     static fn (array $vlan): string => (string) $vlan['vlan_name'],
     repo_active_vlans($connection)
 );
 // Computed once here, read by the overview card and by the section below it.
 $deviationCount = system_status_deviation_count($deviations, $hasInventory);
-$reassignFrom = mb_substr(request_trimmed($_GET, 'reassign_from'), 0, 255);
+$deviationView = system_status_deviation_view(
+    $deviations,
+    request_string($_GET, 'deviation_kind', 'all'),
+    request_string($_GET, 'deviation_q'),
+    max(1, request_int($_GET, 'deviation_page'))
+);
+$reassignFrom = mb_substr(request_string($_GET, 'reassign_from'), 0, 255);
 // The selection the page is currently rendering, so the overview cards stay
 // same-document links and a chosen credential survives a jump to another card.
 $anchorQuery = $selectedInventoryId > 0 ? ['inventory' => $selectedInventoryId] : [];
+if ($deviationView['filter'] !== 'all') {
+    $anchorQuery['deviation_kind'] = $deviationView['filter'];
+}
+if ($deviationView['query'] !== '') {
+    $anchorQuery['deviation_q'] = $deviationView['query'];
+}
 $refreshUrl = $selectedInventoryId > 0
     ? system_status_url('credential-' . $selectedInventoryId, ['inventory' => $selectedInventoryId])
     : 'system_status.php';
@@ -87,16 +114,16 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
         </div>
     </section>
 
-    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery); ?>
+    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery, $serviceSnapshot, $directoryData); ?>
     <?php // Directly under the overview: this is the card an operator opens the
           // page for while a deploy is in flight, and it is the only one that
           // carries an action changing what the installation does next. ?>
     <?php system_status_render_deploy_service($serviceSnapshot, $user); ?>
-    <?php system_status_render_directory($connection, $user); ?>
+    <?php system_status_render_directory($connection, $user, $directoryData); ?>
     <?php system_status_render_mecm($snapshot, $user); ?>
     <?php system_status_render_ansible($snapshot, $user); ?>
     <?php system_status_render_esxi($snapshot, $user, $selectedInventoryId, $selectedInventory); ?>
-    <?php system_status_render_deviations($deviations, $activeVlanNames, $user, $reassignFrom, $deviationCount); ?>
+    <?php system_status_render_deviations($deviationView, $activeVlanNames, $user, $reassignFrom, $deviationCount, $deviationReport, $anchorQuery); ?>
     <?php system_status_render_internal($snapshot, $user); ?>
 </div>
 <?php layout_footer(); ?>

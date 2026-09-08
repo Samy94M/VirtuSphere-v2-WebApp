@@ -39,30 +39,34 @@ function system_status_handle_service_action(mysqli $connection, array $user, st
     $target = system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE);
 
     if ($action === 'deploy_claim_pause') {
-        $active = repo_deploy_active_job_summary($connection);
-        $state = repo_deploy_request_claim_pause($connection, $actorId);
+        $transition = repo_deploy_request_claim_pause($connection, $actorId);
+        $state = (string) $transition['state'];
         // Exactly one audit line per real change. A second click lands on the
         // same state, writes nothing and says so: an idempotent action that
         // logs every attempt turns the trail into a click counter.
         // The registry's own vocabulary: this is a state machine transition, so
         // it is a `new_state`, not a field invented for one event.
         $context = ['new_state' => $state];
-        if ($active['job_id'] !== null) {
-            $context['job_id'] = $active['job_id'];
+        if (count($transition['job_ids']) === 1) {
+            $context['job_id'] = $transition['job_ids'][0];
         }
-        audit_event(
-            $connection,
-            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED,
-            'system',
-            null,
-            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-            $context,
-            $actorId
-        );
-        flash_set('success', __t(
-            $state === VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT
-                ? 'system_status.service_flash_pause_after_current'
-                : 'system_status.service_flash_paused'
+        if ($transition['changed']) {
+            audit_event(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED,
+                'system',
+                null,
+                VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                $context,
+                $actorId
+            );
+        }
+        flash_set($transition['changed'] ? 'success' : 'info', __t(
+            !$transition['changed']
+                ? 'system_status.service_flash_pause_unchanged'
+                : ($state === VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT
+                    ? 'system_status.service_flash_pause_after_current'
+                    : 'system_status.service_flash_paused')
         ));
         redirect_to($target);
     }

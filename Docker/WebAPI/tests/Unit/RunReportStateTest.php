@@ -80,7 +80,7 @@ final class RunReportStateTest extends TestCase
 
     public function testSiteHealthUsesCompletedDerivation(): void
     {
-        self::assertSame('danger', $this->state(['last_event' => 'completed', 'last_status' => 'fail', 'last_result_at' => self::FRESH, 'interval_seconds' => 300], 'site'));
+        self::assertSame('danger', $this->state(['last_event' => 'completed', 'last_status' => 'fail', 'last_error_category' => VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL, 'last_result_at' => self::FRESH, 'interval_seconds' => 300], 'site'));
         self::assertSame('unknown', $this->state(['last_event' => 'completed', 'last_status' => 'unknown', 'last_result_at' => self::FRESH, 'interval_seconds' => 300], 'site'));
     }
 

@@ -169,8 +169,20 @@ final class CreateFlowPlaybookContractTest extends TestCase
         // finished one, so the structural check comes first.
         self::assertStringContainsString('stat:', $status);
         self::assertStringContainsString('{{ vs_async_dir }}/{{ vs_async_jid }}', $status);
+        self::assertStringContainsString(VIRTUSPHERE_CREATE_ASYNC_INSPECTOR, $status);
         self::assertStringContainsString('async_state_missing', $status);
         self::assertStringNotContainsString('could not find job', $status, 'the decision must not read the module message');
+        self::assertStringContainsString('ignore_errors: true', $status, 'the control play must continue with the original async result');
+        self::assertDoesNotMatchRegularExpression(
+            '/ansible\.builtin\.async_status:[\s\S]{0,240}failed_when:\s*false/',
+            $status,
+            'overwriting failed turns a terminal module error into success'
+        );
+        self::assertDoesNotMatchRegularExpression(
+            '/ansible\.builtin\.async_status:[\s\S]{0,240}changed_when:\s*false/',
+            $status,
+            'overwriting changed loses created/updated evidence'
+        );
     }
 
     public function testTheCleanupPlaybookCannotRemoveAnythingButOneStateFile(): void

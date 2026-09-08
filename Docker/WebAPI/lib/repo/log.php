@@ -347,7 +347,7 @@ function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400,
          FROM deploy_logs
          WHERE event_code = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'
          GROUP BY ip
-         ORDER BY last_at DESC
+         ORDER BY last_at DESC, ip ASC
          LIMIT ' . $limit
     );
     $stmt->bind_param('si', $eventCode, $withinSeconds);
@@ -359,6 +359,21 @@ function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400,
     }
 
     return $rows;
+}
+
+/** Complete count plus a bounded historical display list. */
+function repo_recent_machine_api_denial_summary(mysqli $db, int $withinSeconds = 86400, int $limit = 5): array
+{
+    $eventCode = VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
+    $total = (int) (repo_scalar(
+        $db,
+        'SELECT COUNT(DISTINCT ip) FROM deploy_logs WHERE event_code = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'',
+        'si',
+        [$eventCode, $withinSeconds]
+    ) ?? 0);
+    $rows = repo_recent_machine_api_denials($db, $withinSeconds, $limit);
+
+    return ['rows' => $rows, 'total' => $total, 'omitted' => max(0, $total - count($rows)), 'window_seconds' => $withinSeconds];
 }
 
 /** @param array<string,mixed> $filter The validated struct (lib/log_filter.php). */

@@ -51,6 +51,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     };
 
     try {
+        // Resolve the local source contract while the failure phase is still
+        // config. No SSH/SFTP call is allowed to precede this check.
+        ansible_pinned_collection_version();
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing ESXi inventory fetch.');
         $channel->tick(0);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
@@ -86,7 +89,8 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // portal unreachable from the Ansible host must not fail it (B6 fixed
         // the deploy path; this path never needed the route).
         $preflightApiBaseUrl = '';
-        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
+        $preflightCommand = ansible_preflight_command($preflightApiBaseUrl);
+        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
 
             deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
         }, 45, $heartbeatOnSilence);

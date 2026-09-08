@@ -434,6 +434,17 @@ rein anzeigend und best effort bleiben.
   ausgefallen dar, ein ausgefallener Sync behauptet nicht, MECM selbst sei
   kritisch. Das Dashboard liest denselben Health-Snapshot und zeigt in der
   „System status"-Kachel zwei beschriftete Zeilen: „Integration" und „MECM-Site".
+  Eine alte oder zeitlich ungültige Meldung bestätigt keinen aktuellen Erfolg.
+  Ein veralteter ehemals kritischer Sitewert bleibt als historischer Befund mit
+  Zeitpunkt sichtbar, färbt die Gegenwart aber nicht rot; Rot bleibt einem
+  frischen MECM-bestätigten Status 2 vorbehalten. Ein Providerfehler bleibt
+  unabhängig vom Alter unbekannt. Ein gestarteter Sync zeigt den aktuellen
+  Start getrennt vom letzten abgeschlossenen Ergebnis.
+- Abgewiesene Machine-API-Zugriffe erscheinen als historische Ereignisse im
+  benannten Zeitfenster. Die Anzeige nennt die vollständige Zahl verschiedener
+  IPs, eine begrenzte Liste und ausgelassene Einträge. Sie ordnet eine IP ohne
+  weitere positive Evidenz weder MECM noch Ansible zu und behauptet nach einer
+  späteren Erholung keine aktuelle Blockade.
 - **VM-Detail**: Abschnitt „Client-Phasen" mit den vier Phasen und den letzten
   20 Roh-Ereignissen.
 - MECM-relevante Audit-Einträge stehen im Log unter der Kategorie
@@ -1029,8 +1040,10 @@ insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
 **Deployment hängt auf dem Client**
 1. VM-Detail im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
    (getinfo/hostname/staticip/disks)?
-2. „Ausgeführt, Bestätigung ausstehend" ist meist harmlos (VLAN-Wechsel nach
-   staticip). „Fehlgeschlagen" mit Detailtext → Client-Log unter
+2. „Ausgeführt, Bestätigung ausstehend" ist kein Erfolgsnachweis. Ein
+   erwarteter Neustart oder VLAN-Wechsel kann die Abschlussmeldung verhindern;
+   bleibt der Zustand bestehen, Client-Log und Erreichbarkeit prüfen.
+   „Fehlgeschlagen" mit Detailtext → Client-Log unter
    `C:\Program Files\VirtuSphere\Logs`.
 
 **Pakete verschwinden / Sync abgelehnt (409)**

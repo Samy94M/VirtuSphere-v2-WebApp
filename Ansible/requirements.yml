@@ -1,7 +1,8 @@
 ---
-# Ansible collection pin for the VirtuSphere Ansible host (ADR-0025).
+# Complete Ansible collection lock for the VirtuSphere Ansible host (ADR-0025).
 #
-# This file is the single source of truth for the collection version. On a
+# This file is the single source of truth for direct and transitive collection
+# versions. On a
 # connected host install it directly:
 #
 #   ansible-galaxy collection install -r Ansible/requirements.yml
@@ -12,7 +13,7 @@
 # steps in docs/operations/offline-install.md) - nothing needs the network
 # beforehand anymore.
 #
-# 6.2.0 is the version verified to carry every module the playbooks use,
+# community.vmware 6.2.0 is verified to carry every module the playbooks use,
 # including community.vmware.vmware_host_auto_start (autostart policy) and
 # community.vmware.vmware_about_info (capability diagnostics). It requires
 # ansible-core >= 2.19 and pyVmomi >= 8.0.3.0.1 on the host, and supports
@@ -33,14 +34,17 @@
 #            maintained until then; unmaintained is release 4, not 6. For an
 #            air-gapped LAN product that is a planning date, not a warning.
 #
-#   Of the ten community.vmware modules the playbooks call, exactly one is
+#   Of the community.vmware modules the playbooks call, exactly one is
 #   deprecated in 6.2.0: vmware_guest_powerstate (removal in 7.0.0, successor
 #   vmware.vmware.vm_powerstate), used by startVMs-ESXi_playbook.yml and
-#   powercycleVMs-ESXi_playbook.yml. The successor ships in vmware.vmware 2.9.0,
-#   which installs alongside this pin as a dependency, so the port is available
-#   whenever the power path can be verified against a real host.
+#   powercycleVMs-ESXi_playbook.yml. The successor ships in vmware.vmware 2.9.0.
+#   community.vmware declares vmware.vmware >=2.5.0 as a dependency; pinning
+#   2.9.0 explicitly below makes rebuilt QA images and offline bundles consume
+#   the same bytes instead of whichever compatible release is newest that day.
 #   Docker/qa-ansible/module-deprecations.txt is the checked-in list; a newly
 #   deprecated module fails the gate instead of surfacing on a customer host.
 collections:
   - name: community.vmware
     version: "6.2.0"
+  - name: vmware.vmware
+    version: "2.9.0"

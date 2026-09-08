@@ -42,7 +42,10 @@ $credential = repo_create_credential($db, [
     'port' => 1,
     'username' => 'ansible',
 ], 'secret123', $admin);
-repo_ansible_preflight_record($db, $credential, VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK, null);
+$row = repo_credential($db, $credential);
+$revision = (int) $row['config_revision'];
+$generation = repo_ansible_preflight_begin($db, $credential, $revision);
+repo_ansible_preflight_record($db, $credential, VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK, null, $revision, $generation);
 $age = VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS + 1;
 $db->query('UPDATE deploy_ansible_preflight_state SET last_checked_at = DATE_SUB(NOW(), INTERVAL ' . $age . ' DAY) WHERE credential_id = ' . $credential);
 $mission = repo_create_mission($db, [
@@ -158,6 +161,7 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
   expect(jobs.c, 'an inventory system job was enqueued for the credential').toBe(1);
 });
 
+// e2e-covers: system_status.php:preview_vlan_reassign
 // e2e-covers: system_status.php:reassign_vlan
 // e2e-covers-cancel: system_status.php:reassign_vlan
 test('reassign_vlan: renders only with a real deviation, Cancel keeps assignments, Confirm rewrites them', async ({ page }) => {
@@ -165,9 +169,11 @@ test('reassign_vlan: renders only with a real deviation, Cancel keeps assignment
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
 $esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-inv', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
-$stmt = $db->prepare("INSERT INTO deploy_esxi_inventory (credential_id, kind, name) VALUES (?, 'network', 'E2EVLAN-OK')");
-$stmt->bind_param('i', $esxi);
-$stmt->execute();
+repo_esxi_inventory_record_success($db, $esxi);
+repo_esxi_inventory_replace_kind($db, $esxi, VIRTUSPHERE_INVENTORY_KIND_NETWORK, [['name' => 'E2EVLAN-OK']]);
+repo_esxi_inventory_record_kind_evidence($db, $esxi, [VIRTUSPHERE_INVENTORY_KIND_NETWORK], [
+  'normalization' => ['networks' => ['raw' => 1, 'persistable' => 1, 'supported' => 1]],
+], null);
 $db->query("INSERT INTO deploy_vlan (vlan_name) VALUES ('E2EVLAN-OK')");
 $mid = repo_create_mission($db, ['mission_name' => '${MARK}-mission', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local', 'wds_vlan' => 'E2EVLAN-STALE'], false, null);
 $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, 'E2EIVM1', 'E2EIVM1')");
@@ -178,7 +184,7 @@ $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway,
 $stmt->bind_param('i', $vmId);
 $stmt->execute();
 echo 'JSON' . json_encode(['missionId' => $mid, 'vmId' => $vmId]) . 'JSON';
-`, ['lib/repo/credentials.php', 'lib/repo/missions.php']);
+`, ['lib/repo/credentials.php', 'lib/repo/missions.php', 'lib/esxi_inventory.php']);
 
   const missionVlan = () => phpJson(`
 $db = db();
@@ -191,13 +197,18 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 
   await page.goto('system_status.php');
   await page.locator('details.repair-actions > summary').click();
-  const form = page.locator('form:has(input[name="action"][value="reassign_vlan"])');
+  const form = page.locator('form:has(button[name="action"][value="preview_vlan_reassign"])');
   await expect(form, 'the deviation makes the reassign form render').toBeVisible();
   await form.locator('input[name="vlan_from"]').fill('E2EVLAN-STALE');
   await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
 
   const dialog = page.locator('[data-confirm-dialog]');
-  await form.locator('button[type="submit"]').click();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    form.locator('button[value="preview_vlan_reassign"]').click(),
+  ]);
+  await expect(form.locator('button[value="reassign_vlan"]'), 'a valid preview reveals the destructive action').toBeVisible();
+  await form.locator('button[value="reassign_vlan"]').click();
   await expect(dialog, 'the mass rewrite asks first').toBeVisible();
   await dialog.locator('button[value="cancel"]').click();
   await expect(dialog).toBeHidden();
@@ -205,7 +216,7 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 
   await form.locator('input[name="vlan_from"]').fill('E2EVLAN-OK');
   await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
-  await form.locator('button[type="submit"]').click();
+  await form.locator('button[value="reassign_vlan"]').click();
   await expect(dialog).toBeVisible();
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
@@ -217,18 +228,20 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
   await form.locator('input[name="vlan_from"]').evaluate((input) => input.removeAttribute('required'));
   await form.locator('input[name="vlan_from"]').fill('');
   await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
-  await form.locator('button[type="submit"]').click();
-  await expect(dialog).toBeVisible();
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
-    dialog.locator('[data-confirm-accept]').click(),
+    form.locator('button[value="preview_vlan_reassign"]').click(),
   ]);
   await expect(page.locator('input[name="vlan_from"]'), 'the server reports an empty source at its field').toHaveAttribute('aria-invalid', 'true');
   expect(missionVlan(), 'empty source changed nothing').toBe('E2EVLAN-STALE');
 
   await form.locator('input[name="vlan_from"]').fill('E2EVLAN-NOT-ASSIGNED');
   await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
-  await form.locator('button[type="submit"]').click();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    form.locator('button[value="preview_vlan_reassign"]').click(),
+  ]);
+  await form.locator('button[value="reassign_vlan"]').click();
   await expect(dialog).toBeVisible();
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
@@ -241,7 +254,11 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 
   await form.locator('input[name="vlan_from"]').fill('E2EVLAN-STALE');
   await form.locator('select[name="vlan_to"]').selectOption('E2EVLAN-OK');
-  await form.locator('button[type="submit"]').click();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),
+    form.locator('button[value="preview_vlan_reassign"]').click(),
+  ]);
+  await form.locator('button[value="reassign_vlan"]').click();
   await expect(dialog).toBeVisible();
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('system_status.php') && r.request().method() === 'POST'),

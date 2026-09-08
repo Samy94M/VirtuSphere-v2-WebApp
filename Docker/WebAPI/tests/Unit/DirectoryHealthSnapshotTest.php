@@ -90,6 +90,26 @@ final class DirectoryHealthSnapshotTest extends TestCase
         self::assertSame('warning', directory_controller_ampel($this->controller(['certificate_not_after' => $soon]), 3, $this->now()));
     }
 
+    public function testAnExpiredCertificateIsDanger(): void
+    {
+        self::assertSame(
+            'danger',
+            directory_controller_ampel($this->controller(['certificate_not_after' => $this->daysAgo(1)]), 3, $this->now())
+        );
+    }
+
+    public function testSnapshotSeparatesAdmissionFromOperatingEvidence(): void
+    {
+        $snapshot = directory_health_snapshot($this->config(), [
+            $this->controller(['id' => 1]),
+            $this->controller(['id' => 2, 'last_success_at' => $this->daysAgo(400)]),
+            $this->controller(['id' => 3, 'last_outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_TIMEOUT]),
+            $this->controller(['id' => 4, 'validated_revision' => 2]),
+        ], $this->now());
+        self::assertSame(['admitted' => 3, 'current_ok' => 1, 'stale' => 1, 'disturbed' => 1], $snapshot['counts']);
+        self::assertSame(self::NOW, $snapshot['last_admitted_success_at']);
+    }
+
     public function testTheCertificateExpiryWindowIsInclusiveOfItsLastSecond(): void
     {
         $window = VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS * 86400;

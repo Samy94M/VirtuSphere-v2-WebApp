@@ -21,10 +21,8 @@ require_once __DIR__ . '/../Support/CssRules.php';
  * working and stops leading anywhere.
  *
  * Scope is deliberate. The named VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_* constants
- * are the section deep links and are walked here. The two remaining anchors are
- * not constants and are not covered by the reverse direction: `reassign` is a
- * details element inside the deviation section, and `credential-<id>` is
- * generated per row, so a value list would have to be invented for them.
+ * are the fixed deep links and are walked here. Only `credential-<id>` is
+ * generated per row and therefore validated as a closed positive-id pattern.
  */
 final class SystemStatusDeepLinkContractTest extends TestCase
 {
@@ -54,7 +52,7 @@ final class SystemStatusDeepLinkContractTest extends TestCase
     }
 
     /** The one file allowed to spell the link out, because it is the builder. */
-    private const BUILDER = 'lib/system_status.php';
+    private const BUILDER = 'lib/system_status_urls.php';
 
     /** Modules that render the page's sections; globbed, never a single file. */
     private const RENDERERS = 'lib/system_status*.php';
@@ -166,6 +164,13 @@ final class SystemStatusDeepLinkContractTest extends TestCase
         );
     }
 
+    public function testEveryAnchorConstantIsAcceptedByTheBuilder(): void
+    {
+        foreach ($this->anchorConstants() as $anchor) {
+            self::assertSame('system_status.php#' . $anchor, system_status_url($anchor));
+        }
+    }
+
     public function testNoPageHandWritesASystemStatusDeepLink(): void
     {
         $offenders = [];
@@ -201,5 +206,17 @@ final class SystemStatusDeepLinkContractTest extends TestCase
         // browser answers one with silence.
         $this->expectException(InvalidArgumentException::class);
         system_status_url('Ansible Status');
+    }
+
+    public function testTheBuilderRejectsAValidLookingUnknownAnchor(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        system_status_url('valid-but-not-rendered');
+    }
+
+    public function testTheBuilderRejectsAnInvalidDynamicCredentialAnchor(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        system_status_url('credential-0');
     }
 }

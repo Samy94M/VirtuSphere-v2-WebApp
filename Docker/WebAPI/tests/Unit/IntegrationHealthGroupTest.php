@@ -71,4 +71,53 @@ final class IntegrationHealthGroupTest extends TestCase
         ];
         self::assertSame('missing', repo_integration_worst_state($rows));
     }
+
+    public function testCompletedEvidenceNeedsAReadableNonFutureTimestamp(): void
+    {
+        $now = strtotime('2026-09-08 12:00:00 UTC');
+        $row = ['last_status' => VIRTUSPHERE_RUN_OUTCOME_OK, 'interval_seconds' => 60];
+        self::assertSame('unknown', virtusphere_run_completed_state($row, $now));
+        $row['last_result_at'] = 'not-a-time';
+        self::assertSame('unknown', virtusphere_run_completed_state($row, $now));
+        $row['last_result_at'] = gmdate('Y-m-d H:i:s', $now + VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS + 1);
+        self::assertSame('unknown', virtusphere_run_completed_state($row, $now));
+        $row['last_result_at'] = gmdate('Y-m-d H:i:s', $now + VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS);
+        self::assertSame('ok', virtusphere_run_completed_state($row, $now));
+    }
+
+    public function testRunningEvidenceRejectsInvalidAttemptOrPreviousResultTime(): void
+    {
+        $now = strtotime('2026-09-08 12:00:00 UTC');
+        $row = [
+            'last_event' => VIRTUSPHERE_RUN_EVENT_STARTED,
+            'last_status' => VIRTUSPHERE_RUN_OUTCOME_OK,
+            'interval_seconds' => 60,
+            'last_attempt_at' => 'not-a-time',
+            'last_result_at' => gmdate('Y-m-d H:i:s', $now - 30),
+        ];
+        self::assertSame('unknown', virtusphere_run_running_state($row, $now));
+        $row['last_attempt_at'] = gmdate('Y-m-d H:i:s', $now - 10);
+        $row['last_result_at'] = gmdate('Y-m-d H:i:s', $now + VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS + 1);
+        self::assertSame('unknown', virtusphere_run_running_state($row, $now));
+    }
+
+    public function testSiteAgeAndProviderFaultNeverInventMecmCriticality(): void
+    {
+        $now = strtotime('2026-09-08 12:00:00 UTC');
+        $row = [
+            'last_status' => VIRTUSPHERE_RUN_OUTCOME_UNKNOWN,
+            'last_error_category' => VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED,
+            'last_result_at' => gmdate('Y-m-d H:i:s', $now - 30),
+            'interval_seconds' => 60,
+        ];
+        self::assertSame('unknown', virtusphere_site_completed_state($row, $now));
+        $freshFor = max(60 * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER, VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS);
+        $row['last_result_at'] = gmdate('Y-m-d H:i:s', $now - $freshFor - 1);
+        self::assertSame('stale', virtusphere_site_completed_state($row, $now));
+        $row['last_status'] = VIRTUSPHERE_RUN_OUTCOME_FAIL;
+        $row['last_error_category'] = VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL;
+        self::assertSame('stale', virtusphere_site_completed_state($row, $now));
+        $row['last_result_at'] = gmdate('Y-m-d H:i:s', $now - 30);
+        self::assertSame('danger', virtusphere_site_completed_state($row, $now));
+    }
 }

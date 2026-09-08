@@ -483,6 +483,8 @@ const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS = 'deviations';
 // says "the deploy service is paused" or "a case is waiting for you", so it
 // needs the same stable fragment the other sections have.
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE = 'deploy-service';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY = 'directory-status';
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN = 'reassign';
 
 // The same idea one page over: settings.php spreads its forms over tabs, and a
 // link that names the page without its panel lands on the first tab, which is

@@ -241,7 +241,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
             <?php } elseif (is_array($retryEvaluation) && (int) ($retryEvaluation['repair_vm_id'] ?? 0) > 0 && can('vms.write', $user)) { ?>
                 <a class="button button-secondary" href="<?php echo h(vm_edit_url((int) $job['mission_id'], (int) $retryEvaluation['repair_vm_id'], 'interfaces')); ?>"><?php echo h(__t('deploy.retry_fix_configuration')); ?></a>
             <?php } elseif (is_array($retryEvaluation)) { ?>
-                <span class="muted"><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
+                <span class="muted" data-deploy-retry-blocked><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
             <?php } ?>
         </div>
     </section>

@@ -79,6 +79,39 @@ function deploy_service_attention_label(string $state): string
     };
 }
 
+/** Badge colour for the availability axis alone. */
+function deploy_service_availability_variant(string $state): string
+{
+    return match ($state) {
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_READY => 'success',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => 'info',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => 'warning',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => 'danger',
+        default => 'neutral',
+    };
+}
+
+/** Label following the same precedence as the compact combined badge. */
+function deploy_service_summary_label(array $snapshot): string
+{
+    $availability = (string) $snapshot['availability'];
+    $attention = (string) $snapshot['recovery_attention'];
+    if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE) {
+        return deploy_service_availability_label($availability);
+    }
+    if ($attention === VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW) {
+        return deploy_service_attention_label($attention);
+    }
+    if (in_array($availability, [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN], true)) {
+        return deploy_service_availability_label($availability);
+    }
+    if ($attention === VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING) {
+        return deploy_service_attention_label($attention);
+    }
+
+    return deploy_service_availability_label($availability);
+}
+
 /**
  * The supervisor and its child, as two separate facts.
  *
@@ -130,12 +163,25 @@ function system_status_supervisor_facts(array $snapshot): array
  * @param array<string,mixed> $snapshot the deploy_service_health_snapshot()
  * @param array<string,mixed> $user
  */
-function system_status_render_deploy_service(array $snapshot, array $user): void
+function system_status_render_deploy_service(?array $snapshot, array $user): void
 {
+    if ($snapshot === null) {
+        ?>
+        <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE); ?>">
+            <h2><?php echo h(__t('system_status.service_heading')); ?></h2>
+            <p class="status-action"><?php echo h(__t('system_status.service_snapshot_failed')); ?></p>
+        </section>
+        <?php
+        return;
+    }
     $canManage = can('system.config', $user);
     $claimState = (string) $snapshot['claim_state'];
     $active = $snapshot['active'];
     $queue = $snapshot['queue'];
+    $processFacts = [
+        ['label' => __t('system_status.service_fact_contract'), 'html' => h(deploy_service_contract_label((string) $snapshot['source_contract']))],
+        ...system_status_supervisor_facts($snapshot),
+    ];
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE); ?>">
         <div class="section-heading-actions">
@@ -146,31 +192,29 @@ function system_status_render_deploy_service(array $snapshot, array $user): void
         </div>
         <article class="status-row">
             <div class="status-row-head">
-                <strong><?php echo h(deploy_service_availability_label((string) $snapshot['availability'])); ?></strong>
                 <?php // All three, always. The compact badge exists for a table
                       // cell; a detail view that shows only it would hide the
                       // half its precedence dropped. ?>
-                <?php echo portal_badge((string) $snapshot['badge'], deploy_service_availability_label((string) $snapshot['availability'])); ?>
-                <?php echo portal_badge(
+                <span><?php echo h(__t('system_status.service_axis_availability')); ?>: <?php echo portal_badge(deploy_service_availability_variant((string) $snapshot['availability']), deploy_service_availability_label((string) $snapshot['availability'])); ?></span>
+                <span><?php echo h(__t('system_status.service_axis_claim')); ?>: <?php echo portal_badge(
                     $claimState === VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING ? 'neutral' : 'warning',
                     deploy_service_claim_label($claimState)
-                ); ?>
-                <?php echo portal_badge(
+                ); ?></span>
+                <span><?php echo h(__t('system_status.service_axis_recovery')); ?>: <?php echo portal_badge(
                     match ((string) $snapshot['recovery_attention']) {
                         VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW => 'danger',
                         VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING => 'warning',
                         default => 'neutral',
                     },
                     deploy_service_attention_label((string) $snapshot['recovery_attention'])
-                ); ?>
+                ); ?></span>
             </div>
             <?php
             echo system_status_fact_list([
-                ['label' => __t('system_status.service_fact_contract'), 'html' => h(deploy_service_contract_label((string) $snapshot['source_contract']))],
-                ...system_status_supervisor_facts($snapshot),
                 ['label' => __t('system_status.service_fact_queue_due'), 'html' => h((string) $queue['due'])],
                 ['label' => __t('system_status.service_fact_queue_scheduled'), 'html' => h((string) $queue['scheduled'])],
                 ['label' => __t('system_status.service_fact_oldest_due'), 'html' => system_status_fact_time($queue['oldest_due_at'])],
+                ['label' => __t('system_status.service_fact_active_count'), 'html' => h((string) ($active['count'] ?? ($active['job_id'] === null ? 0 : 1)))],
                 [
                     'label' => __t('system_status.service_fact_active'),
                     // A job id alone is not a link an operator can use; the log
@@ -180,9 +224,23 @@ function system_status_render_deploy_service(array $snapshot, array $user): void
                         : '<a href="' . h(deploy_job_log_url((int) $active['job_id'])) . '">'
                             . h(__t('system_status.service_fact_active_job', ['id' => (int) $active['job_id']])) . '</a>',
                 ],
-                ['label' => __t('system_status.service_fact_heartbeat'), 'html' => system_status_fact_time($active['heartbeat_at'])],
+                ['label' => __t('system_status.service_fact_job_heartbeat'), 'html' => system_status_fact_time($active['heartbeat_at'])],
+                ['label' => __t('system_status.service_fact_service_heartbeat'), 'html' => system_status_fact_time($snapshot['service_heartbeat_at'] ?? null)],
+                ['label' => __t('system_status.service_fact_manual_count'), 'html' => h((string) ($snapshot['recovery']['manual_total'] ?? ((int) $snapshot['recovery']['manual_required'] + (int) $snapshot['recovery']['legacy_uncertain_active'])))],
+                ['label' => __t('system_status.service_fact_recovering_count'), 'html' => h((string) $snapshot['recovery']['recovering'])],
             ]);
             ?>
+            <?php if ((string) $snapshot['availability'] === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED) {
+                echo system_status_fact_list($processFacts);
+            } else { ?><details class="technical-details"><summary><?php echo h(__t('system_status.service_process_details')); ?></summary><?php echo system_status_fact_list($processFacts); ?></details><?php } ?>
+            <?php if (($active['count'] ?? 0) > 1) { ?>
+                <ul><?php foreach ($active['jobs'] as $job) { ?><li><a href="<?php echo h(deploy_job_log_url((int) $job['job_id'])); ?>"><?php echo h(__t('system_status.service_fact_active_job', ['id' => (int) $job['job_id']])); ?></a> · <?php echo h((string) $job['ownership'] === 'recovery_waiting' ? __t('system_status.service_job_recovery_waiting') : ((bool) $job['consistent'] ? __t('system_status.service_job_owned') : __t('system_status.service_job_inconsistent'))); ?></li><?php } ?></ul>
+            <?php } ?>
+            <?php if (($snapshot['recovery']['cases'] ?? []) !== []) { ?>
+                <h3><?php echo h(__t('system_status.service_cases_heading')); ?></h3>
+                <ul><?php foreach ($snapshot['recovery']['cases'] as $case) { ?><li><a href="<?php echo h(deploy_job_log_url((int) $case['job_id'])); ?>"><?php echo h(__t('system_status.service_fact_active_job', ['id' => (int) $case['job_id']])); ?></a> · <?php echo h(__t('system_status.service_case_' . $case['kind'])); ?></li><?php } ?></ul>
+                <?php if (($snapshot['recovery']['case_omitted'] ?? 0) > 0) { ?><p class="muted"><?php echo h(__t('system_status.service_cases_more', ['count' => (int) $snapshot['recovery']['case_omitted']])); ?></p><?php } ?>
+            <?php } ?>
             <?php if ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING && $snapshot['claim']['changed_at'] !== null) { ?>
                 <?php // Who and when, with the same deleted-user fallback the
                       // terminal presenter uses: an account that is gone must

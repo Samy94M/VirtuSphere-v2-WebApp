@@ -131,7 +131,8 @@ function credentials_handle_post(mysqli $connection, array $user): string
             // Pre-update row for the diff; the secret is never read back here and a
             // rotation is reported as "secret: changed", not with its value.
             $before = repo_credential($connection, $id, true) ?? [];
-            repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null);
+            $preflightCleared = false;
+            repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared);
             // Certificate material is public, not a secret, but a PEM block is
             // still bulk configuration data that must not flood the audit log.
             $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
@@ -143,7 +144,7 @@ function credentials_handle_post(mysqli $connection, array $user): string
             // drops back to "not tested" until someone clicks Test again. The
             // reset rides the update's own audit line rather than adding a
             // second entry for a deterministic consequence.
-            if (repo_ansible_preflight_clear($connection, $id)) {
+            if ($preflightCleared) {
                 $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
             }
             if ((string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
@@ -227,7 +228,17 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 } catch (Throwable $exception) {
                     $apiBaseUrl = '';
                 }
-                $result = credential_test_connection($credential, repo_credential_secret($connection, $id), $apiBaseUrl);
+                // The immutable read used for the network test carries both the
+                // encrypted secret and the monotone configuration revision.
+                // The generation is allocated before external work and fenced
+                // again afterwards; no database lock is held during SSH/SFTP.
+                $configRevision = (int) ($credential['config_revision'] ?? 0);
+                $testGeneration = repo_ansible_preflight_begin($connection, $id, $configRevision);
+                $result = credential_test_connection(
+                    $credential,
+                    crypto_decrypt_secret((string) $credential['secret_ciphertext']),
+                    $apiBaseUrl
+                );
                 // Persist so the credential row and the System status page can show
                 // a badge instead of only this one-shot flash. An SFTP failure has
                 // no preflight marker, so its code doubles as the component name;
@@ -244,7 +255,14 @@ function credentials_handle_post(mysqli $connection, array $user): string
                         ? VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING
                         : VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK;
                 }
-                repo_ansible_preflight_record($connection, $id, $preflightStatus, $failedComponent);
+                $evidenceStored = repo_ansible_preflight_record(
+                    $connection,
+                    $id,
+                    $preflightStatus,
+                    $failedComponent,
+                    $configRevision,
+                    $testGeneration
+                );
                 $detail = $result['ok'] ? '' : (string) $result['detail'];
                 // The audit line names the failed component too ("preflight:
                 // pyvmomi"), so the trail answers WHAT broke without the flash.
@@ -258,6 +276,7 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 }
                 $testContext = [
                     'outcome' => (string) ($result['code'] ?? ($result['ok'] ? 'ok' : 'failed')),
+                    'evidence_stored' => $evidenceStored,
                 ];
                 if ($failedComponent !== '') {
                     $testContext['component'] = $failedComponent;
@@ -282,7 +301,16 @@ function credentials_handle_post(mysqli $connection, array $user): string
                         'label' => __t('credentials.test_action_system_status'),
                     ];
                 }
-                flash_set($flashType, credentials_test_message($result), $detail, $flashAction);
+                if (!$evidenceStored) {
+                    $flashType = 'warning';
+                    $detail = '';
+                }
+                flash_set(
+                    $flashType,
+                    $evidenceStored ? credentials_test_message($result) : __t('credentials.test_result_discarded'),
+                    $detail,
+                    $flashAction
+                );
             }
         }
     } catch (ValidationException $exception) {

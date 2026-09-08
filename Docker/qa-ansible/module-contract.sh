@@ -31,8 +31,12 @@ set -eu
 REPO="${REPO:-/repo}"
 PROBE="$REPO/Docker/qa-ansible/module-probe.yml"
 ALLOWLIST="$REPO/Docker/qa-ansible/module-deprecations.txt"
+LOCK_VERIFIER="$REPO/Docker/qa-ansible/verify-collection-lock.py"
+LOCK_CONTRACT="$REPO/Docker/qa-ansible/collection-lock-contract.py"
+REQUIREMENTS="$REPO/Ansible/requirements.yml"
 COLLECTION_ROOT="${COLLECTION_ROOT:-/usr/share/ansible/collections/ansible_collections/community/vmware}"
 RUNTIME="$COLLECTION_ROOT/meta/runtime.yml"
+COLLECTIONS_ROOT="${COLLECTIONS_ROOT:-/usr/share/ansible/collections/ansible_collections}"
 
 errors=0
 fail() {
@@ -40,7 +44,7 @@ fail() {
   errors=$((errors + 1))
 }
 
-for required in "$PROBE" "$ALLOWLIST" "$RUNTIME"; do
+for required in "$PROBE" "$ALLOWLIST" "$RUNTIME" "$LOCK_VERIFIER" "$LOCK_CONTRACT" "$REQUIREMENTS"; do
   [ -f "$required" ] || { echo "FEHLER: [ansible-module-contract.no-ssot] $required fehlt." >&2; exit 2; }
 done
 
@@ -55,6 +59,18 @@ if [ -z "$used" ]; then
   exit 2
 fi
 used_count=$(printf '%s\n' "$used" | wc -l | tr -d ' ')
+used_collections=$(grep -rhoE '^[[:space:]]+[a-z0-9_]+\.[a-z0-9_]+\.[a-z0-9_]+:' "$REPO/Ansible/"*.yml 2>/dev/null \
+  | sed 's/^[[:space:]]*//; s/:$//; s/\.[^.]*$//' | grep -v '^ansible\.builtin$' | LC_ALL=C sort -u)
+if [ -z "$used_collections" ]; then
+  echo "FEHLER: [ansible-module-contract.zero-match] keine benutzte Collection unter $REPO/Ansible/ gefunden." >&2
+  exit 2
+fi
+
+# Direkte Nutzung plus rekursive MANIFEST-Abhaengigkeiten muessen exakt in der
+# einen requirements.yml gepinnt und im Image mit denselben Versionen vorhanden
+# sein. Eine neue transitive Abhaengigkeit ist damit rot, bis ihr Pin reviewed ist.
+# shellcheck disable=SC2086
+python3 "$LOCK_CONTRACT" "$LOCK_VERIFIER" "$REQUIREMENTS" "$COLLECTIONS_ROOT" $used_collections || exit 1
 
 # --- Die geprobten Module, in beide Richtungen ---------------------------------
 probed=$(grep -oE '^      community\.vmware\.[a-z0-9_]+' "$PROBE" 2>/dev/null \

@@ -21,6 +21,7 @@ const VIRTUSPHERE_ESXI_INVENTORY_SERVICE_MODULES = [
     'lib/esxi_inventory.php',
     'lib/esxi_inventory_scheduler.php',
     'lib/esxi_inventory_deviations.php',
+    'lib/esxi_inventory_deviation_report.php',
     'lib/esxi_inventory_display.php',
     'lib/esxi_inventory_evidence.php',
 ];

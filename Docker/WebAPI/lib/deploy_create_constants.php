@@ -192,6 +192,7 @@ const VIRTUSPHERE_CREATE_PLAYBOOK_STATUS = 'createVMStatus-ESXi_playbook.yml';
 const VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP = 'createVMCleanup-ESXi_playbook.yml';
 const VIRTUSPHERE_CREATE_IDENTITY_TASKS = 'create_identity_check_tasks.yml';
 const VIRTUSPHERE_CREATE_RESULT_EMITTER = 'emit_create_result.py';
+const VIRTUSPHERE_CREATE_ASYNC_INSPECTOR = 'inspect_create_async_state.py';
 
 /**
  * The extra-vars the worker passes to a create control playbook, per playbook.
@@ -224,6 +225,7 @@ const VIRTUSPHERE_CREATE_ARTIFACTS = [
     VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP,
     VIRTUSPHERE_CREATE_IDENTITY_TASKS,
     VIRTUSPHERE_CREATE_RESULT_EMITTER,
+    VIRTUSPHERE_CREATE_ASYNC_INSPECTOR,
 ];
 
 /**

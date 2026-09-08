@@ -8,9 +8,8 @@ use PHPUnit\Framework\TestCase;
  * The overview strip and the deviation count it now carries.
  *
  * Two things drift silently here and neither shows up as an error. The first is
- * the column count: the strip is a fixed grid, so a card added to the PHP alone
- * starts a second row holding one card, which reads as a rendering fault rather
- * than as a design. The second is the count itself. It used to be summed inside
+ * the responsive grid: the optional AD card means the count is not fixed. The
+ * second is the deviation count itself. It used to be summed inside
  * the deviation renderer; with a second reader in the strip above, two sums
  * would be two numbers the moment one of them is edited, and a strip saying
  * "3 deviations" over a section listing four is worse than no strip at all. So
@@ -35,9 +34,9 @@ final class SystemStatusOverviewContractTest extends TestCase
     private function overviewCards(): array
     {
         $source = $this->source('lib/system_status_panels.php');
-        $start = strpos($source, '$cards = [');
+        $start = strpos($source, 'function system_status_render_overview(');
         self::assertNotFalse($start, 'system_status_render_overview() must build its cards in one list');
-        $end = strpos($source, '];', $start);
+        $end = strpos($source, '?>', $start);
         self::assertNotFalse($end);
         $block = substr($source, $start, $end - $start);
 
@@ -47,7 +46,7 @@ final class SystemStatusOverviewContractTest extends TestCase
         return $m[0];
     }
 
-    public function testTheGridHasOneColumnPerCard(): void
+    public function testTheGridAdaptsToTheConditionalCardCount(): void
     {
         $cards = $this->overviewCards();
         $css = $this->source('portal/assets/css/status.css');
@@ -59,14 +58,12 @@ final class SystemStatusOverviewContractTest extends TestCase
         );
         self::assertSame(
             1,
-            preg_match('/grid-template-columns:\s*repeat\((\d+),/', $block[1], $columns),
-            'the strip must declare an explicit column count'
+            preg_match('/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(/', $block[1]),
+            'the strip must adapt to the permission- and setup-dependent directory card'
         );
-        self::assertSame(
-            count($cards),
-            (int) $columns[1],
-            'the strip renders ' . count($cards) . ' cards; the grid must give each one a column'
-        );
+        self::assertSame($cards, array_values(array_unique($cards)), 'an overview target may appear only once');
+        self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE', $cards);
+        self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY', $cards);
     }
 
     public function testTheDeviationScanHasItsOwnCard(): void

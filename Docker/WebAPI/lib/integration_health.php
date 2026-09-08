@@ -33,10 +33,13 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
     $syncRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES);
     $siteRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES);
     $internalRows = repo_integration_rows_for_sources($rows, VIRTUSPHERE_INTEGRATION_INTERNAL_SOURCES);
+    $maintenanceEntry = $bySource[VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE] ?? null;
     // The two groups keep their own state and are never collapsed on the
     // Dashboard or the detail panel; 'mecm' is a worst-of ONLY for the System
     // status overview nav card ("something in the MECM area needs attention").
     $mecmRows = array_merge($syncRows, $siteRows);
+    $syncReportCount = count(array_filter($syncRows, static fn (array $entry): bool => $entry['row'] !== null));
+    $siteReportCount = count(array_filter($siteRows, static fn (array $entry): bool => $entry['row'] !== null));
 
     // The installer registers all four MECM tasks (three syncs plus site-health)
     // on the same host, so a fresh report arriving from a second IP is equally
@@ -47,12 +50,12 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         if ($row === null || trim((string) ($row['last_ip'] ?? '')) === '') {
             continue;
         }
-        $seen = strtotime((string) ($row['last_seen_at'] ?? ''));
+        $seen = virtusphere_evidence_timestamp(isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null, $now);
         $freshFor = max(
             (int) ($row['interval_seconds'] ?? 0) * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
             VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS
         );
-        if ($seen !== false && ($now - $seen) <= $freshFor) {
+        if ($seen !== null && ($now - $seen) <= $freshFor) {
             $freshIps[(string) $row['last_ip']][] = (string) $entry['source'];
         }
     }
@@ -110,8 +113,8 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'now' => $now,
         'rows' => $rows,
         'by_source' => $bySource,
-        'mecm_sync' => ['rows' => $syncRows, 'state' => repo_integration_worst_state($syncRows)],
-        'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows)],
+        'mecm_sync' => ['rows' => $syncRows, 'state' => repo_integration_worst_state($syncRows), 'report_count' => $syncReportCount, 'has_reports' => $syncReportCount > 0],
+        'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows), 'report_count' => $siteReportCount, 'has_reports' => $siteReportCount > 0],
         'mecm' => ['rows' => $mecmRows, 'state' => repo_integration_worst_state($mecmRows)],
         'internal' => ['rows' => $internalRows, 'state' => repo_integration_worst_state($internalRows)],
         'mecm_fresh_ips' => $freshIps,
@@ -121,7 +124,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         // and the commonest setup mistake in the product is invisible: the task
         // runs every minute against a closed IP gate, and the portal looks like a
         // server where MECM was never installed.
-        'machine_api_denials' => repo_recent_machine_api_denials($db, VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS),
+        'machine_api_denials' => repo_recent_machine_api_denial_summary($db, VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS),
         'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst],
         // ansible_selected is what esxi_inventory_automation_blocker() needs as
         // its third input, and it is resolved here rather than in the renderer:
@@ -137,6 +140,9 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
             // as a switched-off interval, and the cadence line must say so instead
             // of promising a cycle nobody drives.
             'deploy_worker_alive' => integration_deploy_worker_alive($bySource),
+            'maintenance_alive' => $maintenanceEntry !== null
+                && ($maintenanceEntry['row'] ?? null) !== null
+                && (string) $maintenanceEntry['state'] === 'ok',
         ],
     ];
 }
@@ -168,10 +174,20 @@ function integration_deploy_worker_alive(array $bySource): bool
  */
 function integration_deploy_worker_alive_now(mysqli $db, ?int $now = null): bool
 {
+    $entry = integration_deploy_worker_status_now($db, $now);
+
+    return $entry !== null && integration_deploy_worker_alive([
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => $entry,
+    ]);
+}
+
+/** The worker row and its derived state, evaluated on the caller's clock. */
+function integration_deploy_worker_status_now(mysqli $db, ?int $now = null): ?array
+{
     $bySource = [];
     foreach (repo_integration_status_rows($db, $now ?? time()) as $row) {
         $bySource[(string) $row['source']] = $row;
     }
 
-    return integration_deploy_worker_alive($bySource);
+    return $bySource[VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER] ?? null;
 }

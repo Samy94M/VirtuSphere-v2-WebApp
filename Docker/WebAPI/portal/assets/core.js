@@ -206,6 +206,31 @@
         }
     });
 
+    function currentHashId() {
+        var hash = window.location.hash.replace(/^#/, '');
+        try {
+            return decodeURIComponent(hash);
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function focusHashTarget() {
+        var hash = currentHashId();
+        if (!hash) {
+            return;
+        }
+        var target = document.getElementById(hash);
+        if (!target || target.hidden || target.closest('[hidden]')) {
+            return;
+        }
+        target.scrollIntoView({block: 'start'});
+        if (!target.matches('a, button, input, select, textarea, [tabindex]')) {
+            target.tabIndex = -1;
+        }
+        target.focus({preventScroll: true});
+    }
+
     function initTabs() {
         var root = document.querySelector('[data-tabs]');
         if (!root) {
@@ -237,6 +262,33 @@
             }
         }
 
+        function tabAndTargetForHash() {
+            var hash = currentHashId();
+            var result = {tab: null, target: null};
+            tabs.forEach(function (tab) {
+                if (hash && tab.getAttribute('data-tab-target') === hash) {
+                    result.tab = tab;
+                    result.target = document.getElementById(hash);
+                }
+            });
+            if (!result.tab && hash) {
+                var nested = document.getElementById(hash);
+                if (nested) {
+                    panels.forEach(function (panel) {
+                        if (panel.contains(nested)) {
+                            tabs.forEach(function (tab) {
+                                if (tab.getAttribute('data-tab-target') === panel.id) {
+                                    result.tab = tab;
+                                    result.target = nested;
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+            return result;
+        }
+
         list.addEventListener('click', function (event) {
             var tab = event.target.closest('[data-tab-target]');
             if (tab) {
@@ -266,41 +318,20 @@
         });
 
         var initial = tabs[0];
-        var hash = window.location.hash.replace('#', '');
-        var scrollTarget = null;
-        var matchedTab = null;
-        tabs.forEach(function (tab) {
-            if (hash && tab.getAttribute('data-tab-target') === hash) {
-                matchedTab = tab;
-            }
-        });
-        if (matchedTab) {
-            initial = matchedTab;
-        } else if (hash) {
-            // Deep link to an element inside a panel (e.g. settings.php#panel-backup):
-            // open the owning panel and scroll the element into view.
-            var nested = document.getElementById(hash);
-            if (nested) {
-                panels.forEach(function (panel) {
-                    if (panel.contains(nested)) {
-                        tabs.forEach(function (tab) {
-                            if (tab.getAttribute('data-tab-target') === panel.id) {
-                                initial = tab;
-                                scrollTarget = nested;
-                            }
-                        });
-                    }
-                });
-            }
+        var resolved = tabAndTargetForHash();
+        var scrollTarget = resolved.target;
+        var matchedTab = resolved.tab && resolved.target
+            && resolved.tab.getAttribute('data-tab-target') === resolved.target.id
+            ? resolved.tab
+            : null;
+        if (resolved.tab) {
+            initial = resolved.tab;
         }
 
         list.hidden = false;
         activate(initial, false, false);
         if (scrollTarget && scrollTarget.scrollIntoView) {
-            scrollTarget.scrollIntoView();
-            if (scrollTarget.focus) {
-                scrollTarget.focus({preventScroll: true});
-            }
+            focusHashTarget();
         } else if (matchedTab && document.querySelector('[data-flash]')) {
             // A save redirect carries its tab as the fragment. The browser's
             // anchor jump to that panel parks the flash message behind the
@@ -321,6 +352,33 @@
                 window.addEventListener('load', revealFlash);
             }
         }
+
+        window.addEventListener('hashchange', function () {
+            var next = tabAndTargetForHash();
+            if (next.tab) {
+                activate(next.tab, false, false);
+            }
+        });
+    }
+
+    function initHashNavigation() {
+        window.addEventListener('hashchange', function () {
+            window.requestAnimationFrame(focusHashTarget);
+        });
+        document.addEventListener('click', function (event) {
+            var link = event.target.closest('a[href*="#"]');
+            if (!link) {
+                return;
+            }
+            var targetUrl = new URL(link.href, window.location.href);
+            if (targetUrl.origin === window.location.origin
+                && targetUrl.pathname === window.location.pathname
+                && targetUrl.search === window.location.search
+                && targetUrl.hash === window.location.hash
+            ) {
+                window.requestAnimationFrame(focusHashTarget);
+            }
+        });
     }
 
     function initSessionTimer() {
@@ -618,6 +676,7 @@
 
     initConfirmDialog();
     initTabs();
+    initHashNavigation();
     initSessionTimer();
     initTimeDrift();
     initBusyButtons();

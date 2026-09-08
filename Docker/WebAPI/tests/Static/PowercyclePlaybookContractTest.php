@@ -130,13 +130,8 @@ final class PowercyclePlaybookContractTest extends TestCase
             'the power-on must sit in a block whose always: powers the started VMs off again'
         );
 
-        preg_match_all('/^\s*loop:\s*"\{\{\s*(\w+)\s*\}\}"\s*$/m', $source, $loops);
-        $powerLoops = array_filter($loops[1], static fn (string $var): bool => $var !== 'powercycle_targets');
-        self::assertSame(
-            ['powercycle_to_start', 'powercycle_to_start'],
-            array_values($powerLoops),
-            'power-on and cleanup must loop over the same derived list; anything else can touch a VM this run did not start'
-        );
+        self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_to_start }}"'), 'power-on uses the vetted candidate list exactly once');
+        self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_started_by_run | default([]) }}"'), 'cleanup uses confirmed successful starts exactly once');
 
         // force: true is the cleanup's hard power-off (fresh VMs have no guest
         // OS to shut down); the power-on must not carry it.
@@ -150,6 +145,24 @@ final class PowercyclePlaybookContractTest extends TestCase
             $source,
             'the power-on carries force: false'
         );
+    }
+
+    public function testCleanupUsesOnlyConfirmedSuccessfulStartsInsteadOfTheOriginalCandidateList(): void
+    {
+        $source = $this->playbook();
+        $chains = $this->chains($source, self::PLAYBOOK);
+
+        self::assertStringNotContainsString("map(attribute='item')", $chains['powercycle_to_start'], 'the live UUID evidence must stay attached to each candidate');
+        self::assertStringContainsString('register: powercycle_start_results', $source);
+        self::assertStringContainsString('powercycle_started_by_run:', $source);
+        self::assertStringContainsString("item['changed'] | default(false) | bool", $source);
+        self::assertStringContainsString("not (item['failed'] | default(false) | bool)", $source);
+        self::assertMatchesRegularExpression(
+            '/state: powered-off.*?loop:\s*"\{\{\s*powercycle_started_by_run\s*\|\s*default\(\[\]\)\s*\}\}"/s',
+            $source,
+            'cleanup may only power off starts that returned successful changed evidence'
+        );
+        self::assertStringContainsString('powercycle_start_results', $source, 'ambiguous start errors must remain a hard playbook error');
     }
 
     /**

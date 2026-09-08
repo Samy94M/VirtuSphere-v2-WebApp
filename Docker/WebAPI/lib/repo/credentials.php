@@ -144,7 +144,7 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
 
 function repo_credentials(mysqli $db): array
 {
-    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
     $stmt->execute();
 
     return repo_fetch_all($stmt->get_result());
@@ -153,7 +153,7 @@ function repo_credentials(mysqli $db): array
 function repo_credentials_by_type(mysqli $db, string $type): array
 {
     $type = credential_normalize_type($type);
-    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
+    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
     $stmt->bind_param('s', $type);
     $stmt->execute();
 
@@ -163,9 +163,9 @@ function repo_credentials_by_type(mysqli $db, string $type): array
 function repo_credential(mysqli $db, int $id, bool $includeSecret = false): ?array
 {
     if ($includeSecret) {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     } else {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     }
     $stmt->bind_param('i', $id);
     $stmt->execute();
@@ -201,8 +201,9 @@ function repo_create_credential(mysqli $db, array $data, string $secret, int $cr
     });
 }
 
-function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null): bool
+function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null, bool &$preflightCleared = false): bool
 {
+    $preflightCleared = false;
     if ($id <= 0) {
         throw new InvalidArgumentException('Credential id is required.');
     }
@@ -230,18 +231,25 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
     // secrets are encrypted verbatim (no trim), so surrounding spaces survive.
     if ($secretChanges) {
         $ciphertext = crypto_encrypt_secret($secret);
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), updated_at = NOW() WHERE id = ?');
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, updated_at = NOW() WHERE id = ?');
         $stmt->bind_param('sssissssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     } else {
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), updated_at = NOW() WHERE id = ?');
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, updated_at = NOW() WHERE id = ?');
         $stmt->bind_param('sssisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     }
 
-    return repo_transaction($db, static function () use ($db, $stmt, $id, $values): bool {
+    return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {
         $stmt->execute();
         if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
             throw new RuntimeException('Credential not found.');
         }
+        // The old evidence and the new revision become visible atomically. A
+        // test starting for the new revision after commit can therefore never
+        // be deleted by the update request that created that revision.
+        $clear = $db->prepare('DELETE FROM deploy_ansible_preflight_state WHERE credential_id = ?');
+        $clear->bind_param('i', $id);
+        $clear->execute();
+        $preflightCleared = $clear->affected_rows > 0;
         repo_sync_disabled_remote_activations($db, $id, $values['type']);
         return true;
     });

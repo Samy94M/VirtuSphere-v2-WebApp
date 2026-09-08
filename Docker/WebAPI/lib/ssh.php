@@ -69,20 +69,26 @@ function credential_test_connection(array $credential, string $secret, string $a
 }
 
 /**
- * Tests an Ansible credential end to end, in the order a deploy needs it: SSH
- * login, then the tooling/portal preflight over SSH exec, then a real SFTP
- * write into /tmp. Each layer only runs once the one below it passed, so the
- * failure that comes back is the first thing actually broken.
+ * Tests an Ansible credential end to end. The local Ansible source contract is
+ * resolved before SSH login; only then follow login, the tooling/portal
+ * preflight over SSH exec and a real SFTP write into /tmp. A missing local pin
+ * must not be reported as a fault of a host we never needed to contact.
  */
 function credential_test_ansible(array $credential, string $secret, string $apiBaseUrl = ''): array
 {
+    try {
+        $preflightCommand = ansible_preflight_command($apiBaseUrl, true);
+    } catch (Throwable $exception) {
+        return credential_test_ssh_failure($exception, $secret);
+    }
+
     $login = credential_test_ssh($credential, $secret);
     if (!$login['ok']) {
         return $login;
     }
 
     try {
-        $result = ssh_execute_capture($credential, $secret, ansible_preflight_command($apiBaseUrl, true), 25);
+        $result = ssh_execute_capture($credential, $secret, $preflightCommand, 25);
         $exitCode = (int) $result['exit_code'];
         if ($exitCode !== 0) {
             // The login worked, so this is not a credential problem: the remote

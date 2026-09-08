@@ -29,6 +29,14 @@ Diese Punkte sind keine vergessenen Reste, sondern die im Runner als manuell dek
 - SYSTEM-Smoke der PowerShell-Clients in einer Wegwerf-Windows-VM und die MECM-Staging-Abnahme.
 - Reales Ansible-/ESXi-Staging mit zweitem Idempotenzlauf.
 - Clean-Checkout-Releaseprobe auf frischem Host.
+- **D01 Linux-Visualmigration.** Auf dem expliziten CI-Runner `ubuntu-24.04`
+  zuerst über einen normalen Integrationslauf die tatsächlichen OS-, Browser-
+  und Fontmetadaten erfassen. Den Runnervertrag nur mit diesen Messwerten
+  vorbereiten. Proposal-Workflow und Writer-Aufruf erst in einem getrennten
+  Aktivierungswechsel ergänzen, nachdem der gemessene Runnervertrag reviewt
+  wurde. Jedes Diffbild prüfen und Runnervertrag, Manifest und PNGs erst
+  anschließend gemeinsam freigeben. Bis dahin bleibt der frühere
+  Windows-Bildsatz unverändert und gilt nicht als Linux-Nachweis.
 - **MECM-Labnachweis des Rolloutnamens (Etappe 14D, ADR-0043).** Eine VM
   `VM-12345` mit Windows-Hostname `Backup-12345` importieren und belegen, dass
   MECM sie als `Backup-12345` führt und Windows denselben Namen bekommt: ob die

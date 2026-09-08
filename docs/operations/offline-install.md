@@ -118,11 +118,14 @@ Standortevidenz.
 `create` und `full` laufen unabhängig davon weiterhin über den bestehenden
 SSH-Weg, seit Etappe 14B aber mit einem Aufruf je VM. Dafür gilt offline dasselbe
 wie sonst: Es wird zur Laufzeit nichts nachgeladen. `ansible-core`, `pyvmomi`,
-`requests` und die Collection kommen als gepinnte Wheels beziehungsweise als
-gepinnte Collection aus `deps/wheels` und `collections/` des Bundles, und der
-Preflight vergleicht die installierte Collection mit dem Pin und den installierten
-Kern mit dem, was diese Collection selbst fordert. Eine abweichende Version wird
-abgelehnt, nicht stillschweigend verwendet.
+`requests` und der vollständige Collectionstand kommen als gepinnte Wheels
+beziehungsweise Collectionarchive aus `deps/wheels` und `collections/` des
+Bundles. `Ansible/requirements.yml` besitzt direkte und transitive Pins
+gemeinsam; das QA-Gate vergleicht deren rekursive `MANIFEST.json`-Abhängigkeiten
+mit dem Lock. Der Host-Preflight vergleicht anschließend jede installierte
+Collection mit ihrem Pin und den installierten Kern mit den Anforderungen aller
+Collections. Eine fehlende, zusätzliche ungepinnte Abhängigkeit oder abweichende
+Version wird abgelehnt, nicht stillschweigend verwendet.
 
 Ein kurzer Selbsttest der Async-Naht ohne ESXi lohnt sich hier, weil sie das
 einzige Stück des Create-Wegs ist, das vom Host und nicht von VirtuSphere abhängt:

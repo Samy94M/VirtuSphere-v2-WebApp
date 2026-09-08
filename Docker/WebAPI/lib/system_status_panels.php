@@ -18,6 +18,8 @@ require_once __DIR__ . '/system_status_shared_panels.php';
 require_once __DIR__ . '/system_status_mecm_panels.php';
 require_once __DIR__ . '/system_status_ansible_panels.php';
 require_once __DIR__ . '/system_status_internal_panels.php';
+require_once __DIR__ . '/system_status_service_panel.php';
+require_once __DIR__ . '/system_status_directory_panels.php';
 
 /**
  * The overview strip.
@@ -37,15 +39,19 @@ require_once __DIR__ . '/system_status_internal_panels.php';
  * @param array<string,mixed> $snapshot
  * @param array<string,int|string> $query the page's current selection
  */
-function system_status_render_overview(array $snapshot, ?int $deviationCount = null, array $query = []): void
+function system_status_render_overview(array $snapshot, ?int $deviationCount = null, array $query = [], ?array $serviceSnapshot = null, ?array $directoryData = null): void
 {
     $cards = [
+        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE, __t('system_status.overview_deploy_service'), $serviceSnapshot, 'deploy'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM, __t('system_status.overview_mecm'), $snapshot['mecm']['state'], 'heartbeat'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE, __t('system_status.overview_ansible'), $snapshot['ansible']['state'] ?? 'unknown', 'ansible'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI, __t('system_status.overview_esxi'), $snapshot['esxi']['state'] ?? 'unknown', 'esxi'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS, __t('system_status.overview_deviations'), '', 'deviations'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL, __t('system_status.overview_internal'), $snapshot['internal']['state'], 'heartbeat'],
     ];
+    if ($directoryData !== null) {
+        $cards[] = [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY, __t('system_status.overview_directory'), $directoryData['snapshot']['overall'], 'directory'];
+    }
     ?>
     <nav class="status-overview" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
         <?php foreach ($cards as [$anchor, $label, $state, $kind]) { ?>
@@ -56,6 +62,10 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
                     'esxi' => esxi_state_badge((string) $state),
                     'ansible' => ansible_state_badge((string) $state),
                     'deviations' => deviation_count_badge($deviationCount),
+                    'deploy' => $state === null
+                        ? portal_badge('neutral', __t('system_status.service_unknown'))
+                        : portal_badge((string) $state['badge'], deploy_service_summary_label($state)),
+                    'directory' => directory_state_badge((string) $state),
                     default => heartbeat_badge((string) $state),
                 };
                 ?>

@@ -86,17 +86,17 @@
     font-size: 13px;
 }
 
-/* One column per card in system_status_render_overview(); the count is pinned
-   against that renderer by SystemStatusOverviewContractTest, because a fifth
-   card added to the PHP alone would silently start a second row of one. */
+/* The optional directory card makes the count permission- and setup-dependent.
+   Auto-fit keeps every visible card in the same responsive grid without a
+   second hard-coded count; the geometry remains pinned in the browser. */
 .status-overview {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
     gap: var(--space-3);
 }
 
 /* No min-height: the card holds a label and a badge, and a floor sized for a
-   two-line label made every one of the four twice as tall as its content on the
+   two-line label made every card twice as tall as its content on the
    page whose whole complaint is that it spends its area on air. */
 .status-overview-card {
     display: flex;

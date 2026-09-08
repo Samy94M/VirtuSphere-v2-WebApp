@@ -105,8 +105,11 @@ final class MachineApiDenialTraceTest extends TestCase
         $snapshot = integration_health_snapshot($this->db);
 
         self::assertArrayHasKey('machine_api_denials', $snapshot);
-        self::assertNotSame([], $snapshot['machine_api_denials'], 'the status page needs the refusal to tell three grey states apart');
-        $first = $snapshot['machine_api_denials'][0];
+        $summary = $snapshot['machine_api_denials'];
+        self::assertArrayHasKey('rows', $summary);
+        self::assertGreaterThanOrEqual(1, (int) $summary['total']);
+        self::assertNotSame([], $summary['rows'], 'the status page needs the refusal to tell three grey states apart');
+        $first = $summary['rows'][0];
         self::assertNotSame('', (string) $first['ip'], 'the IP is the fix: it is what goes on the allowlist');
         self::assertNotSame('', (string) $first['last_at']);
     }

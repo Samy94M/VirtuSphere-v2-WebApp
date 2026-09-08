@@ -24,9 +24,20 @@ const MARK = 'e2ecreateprogress';
 function cleanup() {
   runPhp(`
 $db = db();
-$db->query("DELETE FROM deploy_create_vm_results WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE '%${MARK}%')");
-$db->query("DELETE FROM deploy_job_logs WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE '%${MARK}%')");
-$db->query("DELETE FROM deploy_jobs WHERE payload_json LIKE '%${MARK}%'");
+$payloadPattern = '%${MARK}%';
+$cleanupStmt = $db->prepare('DELETE FROM deploy_create_vm_results WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE ?)');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$cleanupStmt = $db->prepare('DELETE FROM deploy_job_logs WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE ?)');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$cleanupStmt = $db->prepare('DELETE FROM deploy_jobs WHERE payload_json LIKE ?');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$missionPattern = '${MARK}%';
+$cleanupStmt = $db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
+$cleanupStmt->bind_param('s', $missionPattern);
+$cleanupStmt->execute();
 echo 'CLEANED';
 `);
 }
@@ -79,6 +90,44 @@ $last = $total + 1;
 $db->query(sprintf("INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (%d,%d,'worker_error','${MARK} create step ended without a result for position 15')", $job, $last));
 echo 'JSON' . json_encode(['job' => $job, 'last' => $last]) . 'JSON';
 `, ['lib/repo/deploy_jobs.php']);
+}
+
+/** All persisted outcome classes a person must be able to tell apart. */
+function seedMixedOutcomes() {
+  return phpJson(`
+$db = db();
+$mission = repo_create_mission($db, [
+    'mission_name' => '${MARK}-mixed',
+    'hypervisor_datastorage' => 'QA-Datastore',
+    'hypervisor_datacenter' => 'QA-Datacenter',
+    'domain' => 'qa.invalid',
+], false, null);
+$payload = json_encode(['mode' => 'create', 'fixture' => '${MARK}', 'vm_ids' => []], JSON_THROW_ON_ERROR);
+$status = 'failed';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)');
+$stmt->bind_param('iss', $mission, $status, $payload);
+$stmt->execute();
+$job = (int) $db->insert_id;
+$units = [
+    ['succeeded', 'created', 1, ''],
+    ['succeeded', 'updated', 1, ''],
+    ['succeeded', 'unchanged', 0, ''],
+    ['failed', '', 0, 'module_failed'],
+    ['uncertain', '', 0, 'async_state_missing'],
+];
+foreach ($units as $offset => [$unitStatus, $outcome, $changed, $errorCode]) {
+    $position = $offset + 1;
+    $name = sprintf('${MARK}-MIX%03d', $position);
+    $stmt = $db->prepare(
+        'INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status, outcome,'
+        . ' changed, existed_before, error_code, started_at, finished_at)'
+        . " VALUES (?, ?, ?, 5, 'create', ?, NULLIF(?, ''), ?, 0, NULLIF(?, ''), NOW(), NOW())"
+    );
+    $stmt->bind_param('isissis', $job, $name, $position, $unitStatus, $outcome, $changed, $errorCode);
+    $stmt->execute();
+}
+echo 'JSON' . json_encode(['job' => $job]) . 'JSON';
+`, ['lib/repo/missions.php']);
 }
 
 test('the card counts fourteen of fifteen with one unresolved, from the rows and not from the log', async ({ page }) => {
@@ -147,6 +196,27 @@ test('older lines are reachable without JavaScript', async ({ browser }) => {
   // script running at all.
   await expect(page.locator('[data-deploy-create-progress] [data-create-count="uncertain"]')).toHaveText('1');
   await context.close();
+});
+
+test('stored create outcomes and their failure classes stay distinguishable while retry is blocked', async ({ page }) => {
+  const seed = seedMixedOutcomes();
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+
+  const card = page.locator('[data-deploy-create-progress]');
+  await expect(card.locator('[data-create-count="created"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="updated"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="unchanged"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="failed"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="uncertain"]')).toHaveText('1');
+
+  const findings = card.locator('[data-create-finding-list] li');
+  await expect(findings).toHaveCount(2);
+  await expect(findings.nth(0).locator('code')).toHaveText('module_failed');
+  await expect(findings.nth(1).locator('code')).toHaveText('async_state_missing');
+  expect(await findings.nth(0).locator('span').textContent()).not.toBe(
+    await findings.nth(1).locator('span').textContent()
+  );
+  await expect(page.locator('[data-deploy-retry-blocked]')).toBeVisible();
 });
 
 test('a job without a create section shows no card at all', async ({ page }) => {

@@ -16,6 +16,11 @@ const VIRTUSPHERE_HELP_PANELS = [
 
 const VIRTUSPHERE_HELP_SECTIONS = [
     'help-backup' => 'stack',
+    'help-status-overview' => 'system-status',
+    'help-status-deploy' => 'system-status',
+    'help-status-directory' => 'system-status',
+    'help-status-mecm' => 'system-status',
+    'help-status-esxi' => 'system-status',
     // The deploy service is explained ONCE, in the deploy help, although its
     // card lives on System status and its expectation sentence on the deploy
     // page. Two texts about one state machine drift; a link does not.
