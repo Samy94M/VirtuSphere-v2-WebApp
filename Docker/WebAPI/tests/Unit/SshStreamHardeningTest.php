@@ -14,6 +14,20 @@ require_once dirname(__DIR__, 2) . '/lib/ssh.php';
  */
 final class SshStreamHardeningTest extends TestCase
 {
+    public function testExitStatusRequiresAnObservedVerdict(): void
+    {
+        self::assertSame(0, ssh_command_exit_status(0));
+        self::assertSame(23, ssh_command_exit_status(23));
+        foreach ([false, null] as $missing) {
+            try {
+                ssh_command_exit_status($missing);
+                self::fail('Missing exit status became a result.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('without a command exit status', $exception->getMessage());
+            }
+        }
+    }
+
     /**
      * @param list<string|bool> $slices
      * @return callable():(string|bool)

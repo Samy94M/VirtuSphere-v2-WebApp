@@ -334,7 +334,7 @@ final class DeployWorkerDbChannel
     private function resume(int $outageSeconds): bool
     {
         try {
-            $this->ops->assertJobIsOurs($this->db, $this->jobId, $this->workerId);
+            $this->ops->assertJobStillOwned($this->db, $this->jobId, $this->workerId);
         } catch (DeployWorkerCancelled $lost) {
             // Not our job any more. Drop the spool unwritten: those lines belong
             // to a run whose conclusion somebody else has already published.
@@ -354,7 +354,7 @@ final class DeployWorkerDbChannel
         try {
             $this->ops->touchJobHeartbeat($this->db, $this->jobId, $this->workerId);
 
-            $buffered = $this->spool->take();
+            $buffered = $this->spool->snapshot();
             $dropped = $buffered['dropped'];
             $spool = $buffered['lines'];
 
@@ -366,10 +366,12 @@ final class DeployWorkerDbChannel
                     . count($spool) . ' buffered output line(s) follow'
                     . ($dropped > 0 ? ', ' . $dropped . ' older line(s) were dropped by the buffer limit of '
                         . VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES : '')
-                    . '.'
+                    . '. A write whose acknowledgement was lost may be repeated.'
             );
+            $this->spool->acknowledgeDropped();
             foreach ($spool as $entry) {
                 $this->ops->appendLog($this->db, $this->jobId, $entry['stream'], $entry['line']);
+                $this->spool->acknowledgeLine();
             }
         } catch (mysqli_sql_exception $exception) {
             // Still inside the window attemptReconnect() opened, so the channel

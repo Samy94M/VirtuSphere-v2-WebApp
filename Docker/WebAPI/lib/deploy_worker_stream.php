@@ -28,27 +28,39 @@ function deploy_worker_credential(mysqli $db, int $credentialId, string $type): 
 function deploy_worker_log_stream_chunk(DeployWorkerDbChannel $channel, string $stream, string &$buffer, string $chunk, ?callable $onLine = null): void
 {
     $channel->tick();
-    $buffer .= str_replace("\r\n", "\n", str_replace("\r", "\n", $chunk));
-    while (($pos = strpos($buffer, "\n")) !== false) {
-        $line = substr($buffer, 0, $pos);
-        $buffer = substr($buffer, $pos + 1);
-        $channel->log($stream, $line);
-        if ($onLine !== null) {
-            $onLine($line);
+    $chunk = str_replace(["\r\n", "\r"], "\n", $chunk);
+    $offset = 0;
+    do {
+        $end = strpos($chunk, "\n", $offset);
+        $length = ($end === false ? strlen($chunk) : $end) - $offset;
+        if (strlen($buffer) + $length > VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES) {
+            // Keep only a bounded discard sentinel until the real line ends.
+            // Never emit a prefix: it could end halfway through a secret or
+            // turn a truncated control marker into false execution evidence.
+            $buffer = str_repeat(' ', VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES + 1);
+        } else {
+            $buffer .= substr($chunk, $offset, $length);
         }
-    }
+        if ($end !== false) {
+            deploy_worker_log_stream_flush($channel, $stream, $buffer, $onLine, false);
+            $offset = $end + 1;
+        }
+    } while ($end !== false && $offset < strlen($chunk));
 }
 
-function deploy_worker_log_stream_flush(DeployWorkerDbChannel $channel, string $stream, string &$buffer, ?callable $onLine = null): void
+function deploy_worker_log_stream_flush(DeployWorkerDbChannel $channel, string $stream, string &$buffer, ?callable $onLine = null, bool $tick = true): void
 {
     if ($buffer === '') {
         return;
     }
 
-    $channel->log($stream, $buffer);
-    if ($onLine !== null) {
+    $discarded = strlen($buffer) > VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES;
+    $channel->log($stream, $discarded ? '[oversized remote output line discarded]' : $buffer);
+    if (!$discarded && $onLine !== null) {
         $onLine($buffer);
     }
-    $channel->tick(0);
+    if ($tick) {
+        $channel->tick(0);
+    }
     $buffer = '';
 }

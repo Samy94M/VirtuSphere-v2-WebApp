@@ -208,6 +208,25 @@ final class DeployWorkerDbChannelRecoveryTest extends TestCase
         self::assertSame($foreignError, (string) $job['last_error'], 'the established account survives untouched');
     }
 
+    public function testReconnectDoesNotConfirmCancellationDuringRemoteWork(): void
+    {
+        $missionId = $this->insertMission($this->prefix . '_cancel');
+        $jobId = $this->insertRunningJob($missionId, 'worker-a');
+        $channel = $this->channel($jobId, 'worker-a');
+        $this->ops->writesFail = true;
+        $channel->log(VIRTUSPHERE_DEPLOY_LOG_STDOUT, 'still running');
+        $stmt = db()->prepare('UPDATE deploy_jobs SET status = ? WHERE id = ?');
+        $status = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+        $stmt->bind_param('si', $status, $jobId);
+        $stmt->execute();
+        $this->ops->writesFail = false;
+        self::assertTrue($channel->recover(1, static function (): void {}));
+        self::assertFalse($channel->hasLostOwnership());
+        self::assertSame($status, $this->job($jobId)['status']);
+        $this->expectException(DeployWorkerCancelled::class);
+        $channel->assertJobIsOurs();
+    }
+
     private function channel(int $jobId, string $workerId): DeployWorkerDbChannel
     {
         return new DeployWorkerDbChannel(

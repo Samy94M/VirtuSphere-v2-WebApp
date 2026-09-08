@@ -46,6 +46,7 @@
     var followStorageKey = 'virtusphere.deploy_log.follow';
     var busy = false;
     var stopped = false;
+    var accessDenied = false;
     var historyMode = false;
     var retryDelay = 2000;
     var timer = null;
@@ -271,10 +272,12 @@
         if (trimmed) { setOlderState(true); }
     }
 
-    function trimNewest() {
+    function trimNewest(lastVisible) {
         var rows = body.querySelectorAll('[data-log-seq]');
         while (rows.length > domLimit) {
-            rows[rows.length - 1].remove();
+            // Keep the visible range, even when history is loaded from near
+            // the tail. Once it is reached, discard the farthest older rows.
+            (rows[rows.length - 1] === lastVisible ? rows[0] : rows[rows.length - 1]).remove();
             rows = body.querySelectorAll('[data-log-seq]');
         }
     }
@@ -317,8 +320,19 @@
 
     function prepend(entries) {
         removeEmpty();
-        var oldHeight = scroller ? scroller.scrollHeight : 0;
-        var oldTop = scroller ? scroller.scrollTop : 0;
+        var anchor = null;
+        var lastVisible = null;
+        var anchorTop = 0;
+        if (scroller) {
+            var top = scroller.getBoundingClientRect().top;
+            anchor = Array.prototype.find.call(body.querySelectorAll('[data-log-seq]'), function (row) {
+                return row.getBoundingClientRect().bottom > top;
+            });
+            if (anchor) { anchorTop = anchor.getBoundingClientRect().top; }
+            Array.prototype.forEach.call(body.querySelectorAll('[data-log-seq]'), function (row) {
+                if (row.getBoundingClientRect().top < scroller.getBoundingClientRect().bottom) { lastVisible = row; }
+            });
+        }
         var marker = body.firstChild;
         var fragment = document.createDocumentFragment();
         entries.forEach(function (entry) {
@@ -326,14 +340,14 @@
             if (row) { fragment.appendChild(row); }
         });
         body.insertBefore(fragment, marker);
-        trimNewest();
+        trimNewest(lastVisible);
         var first = body.querySelector('[data-log-seq]');
         if (first) {
             beforeSeq = parseInt(first.getAttribute('data-log-seq') || '0', 10);
             root.setAttribute('data-before-seq', String(beforeSeq));
         }
-        if (scroller) {
-            scroller.scrollTop = oldTop + Math.max(0, scroller.scrollHeight - oldHeight);
+        if (scroller && anchor && anchor.isConnected) {
+            scroller.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
         }
     }
 
@@ -343,11 +357,13 @@
             credentials: 'same-origin'
         }).then(function (response) {
             if (response.status === 401) {
+                accessDenied = true;
                 stopped = true;
                 setConnection(i18n.session_expired || '');
                 return null;
             }
             if (response.status === 403) {
+                accessDenied = true;
                 stopped = true;
                 setConnection(i18n.forbidden || '');
                 return null;
@@ -435,7 +451,7 @@
     }
 
     function loadOlder() {
-        if (busy || stopped || beforeSeq <= 0) { return; }
+        if (busy || accessDenied || beforeSeq <= 0) { return; }
         busy = true;
         historyMode = true;
         setFeedback(i18n.loading || '');

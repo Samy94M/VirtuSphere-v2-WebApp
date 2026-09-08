@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'number' => ':field must be a number with a dot or comma and at most ten decimal places.',
+    'range_unit' => ':field must be between :min and :max :unit.',
     'failed' => 'Validation failed.',
     'required' => ':field is required.',
     'max_length' => ':field must be at most :max characters long.',

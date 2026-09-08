@@ -42,11 +42,6 @@ parameters:
 			count: 1
 			path: lib/repo/deploy_job_queue.php
 
-		-
-			message: '#^Strict comparison using \=\=\= between int and null will always evaluate to false\.$#'
-			identifier: identical.alwaysFalse
-			count: 1
-			path: lib/ssh.php
 
 		-
 			message: '#^Variable \$connection might not be defined\.$#'

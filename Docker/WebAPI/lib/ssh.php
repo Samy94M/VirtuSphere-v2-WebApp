@@ -290,7 +290,17 @@ function ssh_execute_command(array $credential, string $secret, string $command,
     $status = $ssh->getExitStatus();
     $ssh->disconnect();
 
-    return $status === false || $status === null ? 0 : (int) $status;
+    return ssh_command_exit_status($status);
+}
+
+/** A closed channel without a reported verdict is a transport failure. */
+function ssh_command_exit_status(int|false|null $status): int
+{
+    if ($status === false || $status === null) {
+        throw new RuntimeException('SSH transport closed without a command exit status.');
+    }
+
+    return $status;
 }
 
 /**

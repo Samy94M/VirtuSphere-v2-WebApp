@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/system_status.php';
+require_once __DIR__ . '/../Support/CssRules.php';
 
 /**
  * system_status.php is one long page of sections, and every link into it is a
@@ -27,6 +28,31 @@ require_once dirname(__DIR__, 2) . '/lib/system_status.php';
  */
 final class SystemStatusDeepLinkContractTest extends TestCase
 {
+    public function testDynamicCredentialTargetsHaveOneSemanticHighlight(): void
+    {
+        $targets = 0;
+        foreach (glob($this->root() . '/' . self::RENDERERS) ?: [] as $path) {
+            preg_match_all('/<article[^\n]*id="credential-[^\n]*/', (string) file_get_contents($path), $matches);
+            foreach ($matches[0] as $tag) {
+                $targets++;
+                self::assertStringContainsString('data-deep-link-target', $tag, $path);
+            }
+        }
+        self::assertGreaterThan(0, $targets);
+        $owners = [];
+        foreach (CssRules::stylesheets($this->root()) as $path => $css) {
+            foreach (CssRules::rules($css) as $rule) {
+                self::assertStringNotContainsString('tr:target', $rule['selector']);
+                if ($rule['selector'] === '[data-deep-link-target]:target') {
+                    $owners[] = $path;
+                    self::assertStringContainsString('var(--surface-muted)', $rule['body']);
+                    self::assertStringContainsString('inset', $rule['body']);
+                }
+            }
+        }
+        self::assertCount(1, $owners);
+    }
+
     /** The one file allowed to spell the link out, because it is the builder. */
     private const BUILDER = 'lib/system_status.php';
 

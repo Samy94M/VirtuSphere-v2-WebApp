@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../remote_execution_constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../deploy_create_constants.php';
 require_once __DIR__ . '/deploy_runtime_identity.php';
 require_once __DIR__ . '/helpers.php';
 
@@ -25,9 +26,8 @@ require_once __DIR__ . '/helpers.php';
  * Lock order is fixed and one-way: deploy_jobs first, deploy_runtime_identity
  * second. The pause locks the active jobs before it writes the runtime row, and
  * the worker's confirmation runs inside repo_finish_deploy_job(), which already
- * holds its job row. The worker's own claim reads the runtime row WITHOUT a
- * lock, so it never holds one while waiting for deploy_jobs; that is what keeps
- * the two paths from forming a cycle.
+ * holds its job row. Claim first rejects a paused snapshot, then rechecks the
+ * current runtime state under lock after locking its queued job.
  *
  * A pause is deliberately NOT a lock on the active job. The playbook keeps
  * running and keeps changing ESXi; pausing claims only means no further job is
@@ -259,9 +259,8 @@ function repo_deploy_active_job_summary(mysqli $db, ?int $now = null): array
  * The counts behind the attention axis.
  *
  * Every one of them is scoped to something UNRESOLVED and currently bound. A
- * resolved remote execution, a terminal job and a cleanup that will retry on
- * its own are all deliberately outside: they are history or routine, not a
- * person's queue.
+ * resolved remote execution and routine cleanup retries are outside. An
+ * uncertain create unit remains actionable even when its job is terminal.
  *
  * @return array{manual_required:int,legacy_uncertain_active:int,recovering:int}
  */
@@ -272,11 +271,14 @@ function repo_deploy_recovery_attention_counts(mysqli $db): array
 
     $manual = (int) (repo_scalar(
         $db,
-        'SELECT COUNT(*) FROM deploy_remote_executions e
-         INNER JOIN deploy_jobs j ON j.id = e.job_id
-         WHERE e.reconciliation_state = ? AND j.status IN (' . $placeholders . ')',
-        's' . $activeTypes,
-        array_merge(['manual_required'], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)
+        'SELECT COUNT(*) FROM deploy_jobs j
+         WHERE (j.status IN (' . $placeholders . ') AND EXISTS (
+             SELECT 1 FROM deploy_remote_executions e WHERE e.job_id = j.id AND e.reconciliation_state = ?
+         )) OR EXISTS (
+             SELECT 1 FROM deploy_create_vm_results c WHERE c.job_id = j.id AND c.status = ?
+         )',
+        $activeTypes . 'ss',
+        array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, ['manual_required', VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN])
     ) ?? 0);
 
     $legacy = (int) (repo_scalar(
@@ -285,6 +287,7 @@ function repo_deploy_recovery_attention_counts(mysqli $db): array
         's' . $activeTypes,
         array_merge([VIRTUSPHERE_DEPLOY_RECOVERY_LEGACY_UNCERTAIN], VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)
     ) ?? 0);
+
 
     $recovering = (int) (repo_scalar(
         $db,

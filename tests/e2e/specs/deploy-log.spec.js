@@ -65,6 +65,23 @@ echo 'FINISHED';
 test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
+test('terminal polling still permits history and preserves its visible row at the DOM cap', async ({ page }) => {
+  const job = seedJob('succeeded', 2600);
+  await page.goto(`deploy_log.php?id=${job}`);
+  await expect(page.locator('[data-deploy-log]')).toHaveAttribute('data-caught-up', '1');
+  await page.locator('[data-deploy-log-older]').click();
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).toHaveCount(1500);
+  const firstSeq = await rows.first().getAttribute('data-log-seq');
+  const first = page.locator(`[data-log-seq="${firstSeq}"]`);
+  await first.scrollIntoViewIfNeeded();
+  const before = await first.evaluate((node) => node.getBoundingClientRect().top - node.closest('[data-deploy-log-scroller]').getBoundingClientRect().top);
+  await page.locator('[data-deploy-log-older]').click();
+  await expect(rows.first()).not.toHaveAttribute('data-log-seq', firstSeq);
+  await expect(rows).toHaveCount(1500);
+  expect(Math.abs(await first.evaluate((node) => node.getBoundingClientRect().top - node.closest('[data-deploy-log-scroller]').getBoundingClientRect().top) - before)).toBeLessThan(2);
+});
+
 test('initial HTML is the newest tail, older cursor preserves the anchor, raw download is complete', async ({ page }) => {
   const job = seedJob('succeeded', 1205);
   await page.goto(`deploy_log.php?id=${job}`);

@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'vm_hostname' => request_string($_POST, 'vm_hostname'),
             'vm_domain' => request_string($_POST, 'vm_domain'),
             'vm_os' => request_string($_POST, 'vm_os'),
-            'vm_ram' => request_string($_POST, 'vm_ram'),
+            'vm_ram' => (string) vm_edit_ram_from_post($_POST),
             'vm_cpu' => request_string($_POST, 'vm_cpu'),
             'vm_disk' => request_string($_POST, 'vm_disk'),
             'vm_datastore' => request_string($_POST, 'vm_datastore'),

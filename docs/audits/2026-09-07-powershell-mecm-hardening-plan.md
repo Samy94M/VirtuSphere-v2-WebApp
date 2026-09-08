@@ -1,5 +1,7 @@
 # Ausführungsplan: PowerShell, MECM und VirtuSphere
 
+**Aktueller Stand 08.09.2026:** A01–A18 sind lokal umgesetzt (Abschlussprotokoll unten, Referenz cf75676). Die ursprüngliche Startanweisung ist historisch und kein Auftrag zur erneuten Umsetzung. Die drei offenen Einstellungshilfen wurden jetzt fachlich korrigiert. U01–U07 und echte MECM-/Windows-Abnahmen bleiben offen.
+
 Stand: 07.09.2026. Ziel der Umsetzung: neue Session mit **SOL High**.
 
 Referenzstand der Prüfung: `7fe9b187eb827db6833e2fc298bd535ac22e2253`.

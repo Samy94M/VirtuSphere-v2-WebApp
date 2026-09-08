@@ -29,6 +29,8 @@ final class VmEditModuleContractTest extends TestCase
         'vm_edit_render_status_panel',
         'render_vm_status_history',
         'vm_edit_identity_fields',
+        'vm_edit_ram_from_post',
+        'render_vm_ram_field',
     ];
 
     public function testRegistryMatchesFilesystemInBothDirections(): void

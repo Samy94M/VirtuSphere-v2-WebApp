@@ -247,7 +247,13 @@ function deploy_queue_blockers(mysqli $db, array $input): array
             // selection is too large while it is still a selection, not from an
             // exception after the submit.
             try {
-                repo_vm_network_assert_scope_within_bounds($preflight['vms']);
+                if ((int) $state['stagger_minutes'] > 0 && in_array($state['mode'], VIRTUSPHERE_DEPLOY_STAGGER_MODES, true)) {
+                    foreach ($preflight['vms'] as $vm) {
+                        repo_vm_network_assert_scope_within_bounds([$vm]);
+                    }
+                } else {
+                    repo_vm_network_assert_scope_within_bounds($preflight['vms']);
+                }
             } catch (ValidationException $exception) {
                 $scopeBlocker = deploy_action_blocker(
                     'job_scope_limit',

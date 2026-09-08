@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
+// The live scope-limit branch formats the same localized errors as the page.
+require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/deploy_blockers.php';
 require_once __DIR__ . '/../lib/deploy_preflight_bounds.php';
 

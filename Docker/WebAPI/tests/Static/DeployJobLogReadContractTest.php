@@ -137,7 +137,8 @@ final class DeployJobLogReadContractTest extends TestCase
                 'Math.min(5000, retryDelay * 2)',
                 'data-log-seq',
                 'trimOldest();',
-                'trimNewest();',
+                'trimNewest(lastVisible);',
+                'busy || accessDenied || beforeSeq <= 0',
                 "setFeedback(i18n.history_mode || '')",
                 // The visible status text comes from `label` alone. A fallback
                 // to `status` would put the raw token back in front of a person

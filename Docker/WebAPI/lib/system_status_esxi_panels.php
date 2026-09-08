@@ -229,7 +229,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
             $counts = $entry['counts'];
             $isSelected = $credentialId === $selectedId && $selectedDetail !== null;
             ?>
-            <article class="inventory-card<?php echo $isSelected ? ' inventory-card-open' : ''; ?>" id="credential-<?php echo h((string) $credentialId); ?>">
+            <article class="inventory-card<?php echo $isSelected ? ' inventory-card-open' : ''; ?>" data-deep-link-target id="credential-<?php echo h((string) $credentialId); ?>">
                 <header><div><h3><?php echo h((string) $credential['name']); ?></h3><code class="break-anywhere"><?php echo h((string) $credential['host']); ?></code></div><?php echo esxi_state_badge((string) $entry['health']); ?></header>
                 <?php $capabilityFacts = system_status_capability_facts($state); ?>
                 <?php if ($capabilityFacts !== '') { ?><p class="muted"><?php echo h(__t('system_status.cap_heading')); ?>: <?php echo h($capabilityFacts); ?></p><?php } ?>

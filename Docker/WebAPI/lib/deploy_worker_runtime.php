@@ -247,7 +247,7 @@ function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, 
  * the seams, and the convergence sweep (L4) cleans up VMs left `deploying` if
  * the worker dies before its own catch runs.
  */
-function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId): void
+function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId, bool $atStepBoundary = true): void
 {
     $job = repo_deploy_job($db, $jobId);
     if ($job === null) {
@@ -259,6 +259,9 @@ function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $worker
         throw new DeployWorkerCancelled('Deploy job was cancelled.');
     }
     if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+        if (!$atStepBoundary && (string) ($job['locked_by'] ?? '') === $workerId) {
+            return;
+        }
         // The stop IS the confirmation (ADR-0033): this check runs exactly at
         // the step boundaries where a cancel is honoured, so the worker that
         // owns the lock concludes the state machine here via the ownership

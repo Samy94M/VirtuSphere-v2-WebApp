@@ -34,6 +34,7 @@ declare(strict_types=1);
                 'line_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_LINE_MAX_BYTES,
                 'job_bytes' => VIRTUSPHERE_DEPLOY_OUTPUT_JOB_MAX_BYTES,
             ])); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_output_limits_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_log_window_p1', [
                 'limit' => VIRTUSPHERE_DEPLOY_LOG_DOM_WINDOW,
             ])); ?></p>

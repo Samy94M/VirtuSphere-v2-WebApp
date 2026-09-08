@@ -14,6 +14,8 @@ require_once dirname(__DIR__, 2) . '/lib/deploy_worker_db_channel.php';
 final class FakeDeployWorkerDbOperations extends DeployWorkerDbOperations
 {
     public bool $writesFail = false;
+    public ?string $failLine = null;
+    public bool $commitBeforeFailure = false;
 
     public ?string $ownershipLostReason = null;
 
@@ -29,6 +31,13 @@ final class FakeDeployWorkerDbOperations extends DeployWorkerDbOperations
     {
         $this->calls[] = 'append';
         $this->failIfDown();
+        if ($this->failLine === $line) {
+            $this->failLine = null;
+            if ($this->commitBeforeFailure) {
+                $this->written[] = $line;
+            }
+            throw new mysqli_sql_exception('Acknowledgement lost');
+        }
         $this->written[] = $line;
     }
 
@@ -56,6 +65,11 @@ final class FakeDeployWorkerDbOperations extends DeployWorkerDbOperations
     public function touchProcessHeartbeat(): void
     {
         $this->processHeartbeats++;
+    }
+
+    public function assertJobStillOwned(mysqli $db, int $jobId, string $workerId): void
+    {
+        $this->assertJobIsOurs($db, $jobId, $workerId);
     }
 
     private function failIfDown(): void
@@ -336,6 +350,29 @@ final class DeployWorkerDbChannelTest extends TestCase
             VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE
         );
         self::assertGreaterThan(0, VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE);
+    }
+
+    public function testSecondOutageRetainsUnacknowledgedTail(): void
+    {
+        foreach ([false, true] as $uncertainCommit) {
+            $this->setUp();
+            $channel = $this->channel();
+            $this->ops->writesFail = true;
+            foreach (['first', 'second', 'third'] as $line) {
+                $channel->log('stdout', $line);
+            }
+            $this->ops->writesFail = false;
+            $this->connectSucceeds = true;
+            $this->ops->failLine = 'second';
+            $this->ops->commitBeforeFailure = $uncertainCommit;
+            self::assertFalse($channel->recover(1, static function (): void {}));
+            self::assertSame(2, $channel->spooledLineCount());
+            self::assertTrue($channel->recover(1, static function (): void {}));
+            self::assertSame(0, $channel->spooledLineCount());
+            $lines = array_values(array_filter($this->ops->written, static fn (string $line): bool => !str_starts_with($line, 'Database was unreachable')));
+            self::assertSame($uncertainCommit ? ['first', 'second', 'second', 'third'] : ['first', 'second', 'third'], $lines);
+            self::assertStringContainsString('may be repeated', implode('\n', $this->ops->written));
+        }
     }
 
     private function channel(): DeployWorkerDbChannel

@@ -227,6 +227,19 @@ echo 'JSON' . json_encode(['esxi' => $esxi, 'ansible' => $ansible, 'job' => (int
   await expect(page.locator(`#credential-${seed.esxi} .inventory-details`)).toContainText('DS-QA');
   await expect(page.getByRole('link', { name: /Status aktualisieren|Refresh status/ })).toHaveAttribute('href', `system_status.php?inventory=${seed.esxi}#credential-${seed.esxi}`);
 
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
+    for (const credential of [seed.esxi, seed.ansible]) {
+      const target = page.locator(`#credential-${credential}`);
+      await expect(target).toHaveAttribute('data-deep-link-target', '');
+      await page.evaluate(() => { location.hash = 'esxi'; });
+      const before = await target.evaluate((node) => getComputedStyle(node).backgroundColor);
+      await page.evaluate((id) => { location.hash = `credential-${id}`; }, credential);
+      await expect.poll(() => target.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(before);
+      await expect.poll(() => target.evaluate((node) => getComputedStyle(node).boxShadow)).toContain('inset');
+    }
+  }
+
   await page.goto(`system_status.php?inventory=${seed.ansible}#esxi`);
   await expect(page.locator('.inventory-card-open')).toHaveCount(0);
   await expect(page.locator('.inventory-details')).toHaveCount(0);

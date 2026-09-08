@@ -2,7 +2,7 @@
 
 Stand: 2026-08-13
 
-Status: Am 13.08.2026 fachlich freigegeben. Es wurde noch nichts aus diesem Plan implementiert.
+Status am 08.09.2026: A–H lokal implementiert und im Abschlussprotokoll dieses Plans sowie im Masterplan (14B) dokumentiert. Reale ESXi-Abnahme bleibt offen. Die Remote-Owner-Anbindung und ihre Freigabe bleiben im getrennten 8R-Strang. Die Korrekturen vom 08.09. sind im Nachtrag zur Restarbeit dokumentiert.
 
 Diese Datei ist die ausführende Spezifikation für ausschließlich den per-VM-Create-Ablauf. Sie ersetzt keine allgemeinen Architekturentscheidungen. Bei einer Überschneidung mit `docs/audits/2026-08-11-deploy-reliability-master-plan.md` ist diese Datei nur für die hier ausdrücklich genannten Create-Einheiten, Ansible-Async-JIDs, Create-Identität, Create-Fortschritt und das vierstündige Create-Gesamtbudget genauer. Der zusammengeführte Plan `docs/audits/2026-08-13-mac-import-vlan-ambiguity-qol-implementation-plan.md` ist dagegen Owner von Remote-Handle, Worker-Lease/Fencing, Reaper/Recovery, Cleanupfreigabe, Dienstzustand, Netzwerkblocker und Retry-Präzedenz.
 

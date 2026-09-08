@@ -101,8 +101,8 @@ function deploy_service_availability(array $facts): string
 /**
  * The attention axis: manual review beats recovering beats none.
  *
- * Only UNRESOLVED, currently bound cases count. A terminal history row and a
- * cleanup retry are explicitly not attention: a signal that lights up for
+ * Unresolved create units count even after their job ends. Resolved history
+ * and routine cleanup retries are not attention: a signal that lights up for
  * things nobody can act on is a signal people learn to ignore, and then it is
  * not there on the day it matters.
  *

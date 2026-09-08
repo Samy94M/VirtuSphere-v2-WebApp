@@ -13,6 +13,49 @@ Dieses Runbook beginnt beim sichtbaren Symptom. Es ersetzt weder das Auftragspro
 
 ## Symptomtabelle
 
+### RAM-Wert prüfen
+
+Im VM-Editor gehören Zahl und Einheit zusammen. Beispiel: **6 GB** werden als
+**6144 MB** gespeichert. Die VM-Liste zeigt dafür **6 GB**, der CSV-Export
+enthält **6144** unter der Spalte **RAM (MB)**. Bei Dezimalwerten zeigt die
+Vorschau, ob auf ganze MB gerundet wird.
+
+Für die technische Prüfung: `deploy_vms.vm_ram` und der Audit-Diff enthalten
+`6144`; in der erzeugten Ansible-Konfiguration steht `memory: 6144`.
+Stimmt der gespeicherte Wert, aber die Anzeige nicht, liegt das Problem in der
+Anzeige. Ist schon der gespeicherte Wert falsch, Eingabe und Einheit prüfen.
+Stimmen Speicherung und Ansible-Konfiguration, den tatsächlich beobachteten
+ESXi-Wert prüfen. Daraus allein keine automatische Korrektur oder Rundung durch
+ESXi ableiten.
+
+### Ungeklärtes Anlegen oder unvollständiges Protokoll
+
+- **Ungeklärte VM:** Auch ein beendeter Auftrag kann eine VM hinterlassen, deren
+  Ergebnis noch unbekannt ist. Das bleibt im Systemstatus als Handlungsbedarf
+  sichtbar. Im Auftrag die betroffene VM und den letzten Nachweis prüfen. Nicht
+  allein wegen des beendeten Auftrags erneut anlegen oder das Remote-Verzeichnis
+  löschen. Für die Freigabe gelten die Inventar- und Bedienernachweise des
+  Create-Verfahrens.
+- **Keine SSH-Ergebnisbestätigung:** Ein geschlossener Kanal beweist keinen
+  Erfolg. Zuerst Hostzustand und Auftragsergebnis klären.
+- **Ausgelassene Ausgabezeile:** Der Hinweis
+  `[oversized remote output line discarded]` ersetzt eine zu lange Remote-Zeile.
+  Er betrifft die Diagnose, nicht die Ausführung des Auftrags.
+- **Inventarantwort zu groß:** Bei `Inventory output exceeded its capture limit`
+  bleibt der vorherige Inventarstand erhalten. Zunächst die zusätzliche
+  Ansible-Detailausgabe abschalten und den Abruf wiederholen. Bleibt der Fehler,
+  Ausgabegröße und Umfang des Zielhosts untersuchen; eine Teilantwort darf
+  nicht als vollständiges neues Inventar übernommen werden.
+- **Nachgetragene oder doppelte Zeilen:** Nach einem Datenbankausfall nennt der
+  Worker gepufferte und verworfene Zeilen. Eine verlorene Schreibbestätigung
+  kann zur Wiederholung einer Logzeile führen. Das ist allein kein Nachweis
+  einer doppelt ausgeführten VM-Operation.
+- **Ältere Zeilen:** Sie lassen sich auch nach Auftragsende nachladen. Die
+  Browseransicht ist ein begrenzter Ausschnitt; für alle noch aufbewahrten
+  Zeilen das vollständige Rohprotokoll des Auftrags herunterladen.
+
+### Weitere Symptome
+
 | Symptom | Bedeutung | Portal-Seite / Log-Tab / Kategorie | Erste Maßnahme |
 |---|---|---|---|
 | Einfacher Start-/Create-Auftrag erzeugt sofort mehr als 1.000 Zeilen | Bei älteren Aufträgen stammt der Block meist aus der vollständigen `ansible-doc`-Moduldokumentation; bei neuen Aufträgen erzeugt vor allem aktiviertes `Ansible -vvv` zusätzliche Diagnose | Auftragsprotokoll: Quelle und Beginn des großen Blocks; Bereitstellungsformular: Detailstufe | Bei einem neuen Auftrag `-vvv` für Normalbetrieb ausschalten. Wiederholt ein aktueller Auftrag vollständige Modulhandbücher, Anwendungsversion und Ansible-Preflight prüfen; ein erfolgreicher Modulcheck muss still bleiben, ein Fehler muss seine Diagnose behalten. |

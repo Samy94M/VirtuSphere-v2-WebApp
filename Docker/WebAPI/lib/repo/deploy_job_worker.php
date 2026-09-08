@@ -63,7 +63,12 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
         }
 
         $jobId = (int) $row['id'];
-        $runtime = repo_fetch_one($db, 'SELECT LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        $runtime = repo_fetch_one($db, 'SELECT claim_state, LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        // The earlier read is only a fast rejection. This current locked read
+        // serializes the actual claim with a concurrent pause, Job -> Runtime.
+        if (!deploy_claim_state_allows_new_work((string) ($runtime['claim_state'] ?? ''))) {
+            return null;
+        }
         $generation = (string) ($runtime['generation_id'] ?? '');
         if (preg_match('/^[a-f0-9]{32}$/', $generation) !== 1) {
             throw new RuntimeException('Deploy runtime generation is missing.');

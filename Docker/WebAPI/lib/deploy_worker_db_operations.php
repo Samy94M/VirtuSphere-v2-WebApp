@@ -54,6 +54,12 @@ class DeployWorkerDbOperations
         deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
     }
 
+    /** Reconnecting is an observation during execution, never a cancel boundary. */
+    public function assertJobStillOwned(mysqli $db, int $jobId, string $workerId): void
+    {
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, false);
+    }
+
     /** The container-level liveness file; never touches the database. */
     public function touchProcessHeartbeat(): void
     {

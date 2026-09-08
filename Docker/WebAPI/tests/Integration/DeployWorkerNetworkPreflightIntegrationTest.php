@@ -116,6 +116,19 @@ final class DeployWorkerNetworkPreflightIntegrationTest extends TestCase
         $this->assertNoRemoteWork($jobId);
     }
 
+    public function testInterfacesGrowingAfterQueueAreBlockedBeforeRemoteWork(): void
+    {
+        $jobId = $this->queueFullJob();
+        for ($i = 0; $i < VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM; $i++) {
+            repo_execute($this->db, 'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)', 'isssss', [$this->vmId, '', '', '', 'extra-' . $i, '']);
+        }
+        $this->processClaimed($jobId);
+        $job = repo_deploy_job($this->db, $jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED, $job['terminal_reason_code']);
+        $this->assertNoRemoteWork($jobId);
+    }
+
     public function testCancelWinsBeforeAtomicPreflightTerminalWrite(): void
     {
         $jobId = $this->queueFullJob();

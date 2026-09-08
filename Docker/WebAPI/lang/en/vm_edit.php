@@ -3,6 +3,12 @@
 declare(strict_types=1);
 
 return [
+    'ram_unit' => 'RAM unit',
+    'ram_invalid' => 'Enter a valid RAM size and choose MB or GB. MB requires whole numbers; GB also accepts decimals with a dot or comma.',
+    'ram_unit_invalid' => 'Choose MB or GB as the RAM unit.',
+    'ram_rounding' => 'GB values are rounded to whole MB when needed. Without JavaScript, the selected unit applies when saving.',
+    'ram_preview' => ':mb MB will be saved.',
+    'ram_rounded' => 'The value was rounded.',
     'title_edit' => 'Edit VM',
     'title_add' => 'Add VM',
     'back_to_vms' => 'Back to VMs',
@@ -57,7 +63,7 @@ return [
     'domain_title' => 'Use a DNS FQDN with at least one dot, for example corp.example.local.',
     'label_os' => 'OS',
     'select_os' => 'Select OS',
-    'label_ram' => 'RAM MB',
+    'label_ram' => 'Memory',
     'ram_custom' => 'Custom',
     'ram_preset' => 'RAM preset',
     'label_cpu' => 'CPU',

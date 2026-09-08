@@ -35,9 +35,15 @@ function deploy_worker_network_preflight(DeployWorkerDbChannel $channel, array $
         (string) ($mission['wds_vlan'] ?? '')
     );
     $materializedVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $preflight['vms']);
+    $scopeError = null;
+    try {
+        repo_vm_network_assert_scope_within_bounds($preflight['vms']);
+    } catch (ValidationException $exception) {
+        $scopeError = $exception;
+    }
     $missingVmIds = $requestedVmIds === [] ? [] : array_values(array_diff($requestedVmIds, $materializedVmIds));
     sort($missingVmIds, SORT_NUMERIC);
-    if ($missingVmIds === []) {
+    if ($missingVmIds === [] && $scopeError === null) {
         try {
             // Recheck mutable location evidence at the same pre-remote boundary
             // as the NIC contract. A queue-time proof may expire before start.
@@ -70,6 +76,8 @@ function deploy_worker_network_preflight(DeployWorkerDbChannel $channel, array $
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, '[' . $position . '/' . $total . '] RUN network/WDS preflight ' . $name);
         if (!empty($vm['missing'])) {
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, '[' . $position . '/' . $total . '] FAIL network/WDS preflight ' . $name . ': selected VM no longer exists');
+        } elseif ($scopeError !== null) {
+            $channel->log(VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, '[' . $position . '/' . $total . '] FAIL network/WDS preflight ' . $name . ': job scope exceeds supported limits');
         } elseif (isset($byVmBlocker[$vmId])) {
             $codes = implode(',', array_column($byVmBlocker[$vmId], 'code'));
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, '[' . $position . '/' . $total . '] FAIL network/WDS preflight ' . $name . ': ' . $codes);
@@ -85,6 +93,9 @@ function deploy_worker_network_preflight(DeployWorkerDbChannel $channel, array $
             VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
             'Network preflight warning: ' . count($warningVmIds) . ' VM(s), codes=' . implode(',', $warningCodes) . '. Mode continues without MAC mapping.'
         );
+    }
+    if ($scopeError !== null) {
+        throw new DeployWorkerConfigurationBlocked($scopeError->getMessage(), null, $scopeError);
     }
     if ($blockers !== [] || $missingVmIds !== []) {
         $result = vm_network_preflight_result_contract((string) $payload['mode'], $preflight['vms'], $blockers, $missingVmIds);

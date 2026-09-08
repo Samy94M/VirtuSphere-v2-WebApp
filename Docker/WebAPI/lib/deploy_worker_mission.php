@@ -16,6 +16,7 @@ require_once __DIR__ . '/deploy_worker_network_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
 require_once __DIR__ . '/deploy_worker_create.php';
+require_once __DIR__ . '/deploy_worker_cleanup.php';
 
 /**
  * The mission deploy processor: preflight, artifact preparation, the autostart
@@ -95,16 +96,21 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // consumes): on failure the last stage marker in here names the broken
         // component for the job's error message.
         $preflightOutput = '';
+        $preflightObserver = static function (string $line) use (&$preflightOutput): void {
+            if (ansible_preflight_failed_component($line) !== null) {
+                $preflightOutput = $line;
+            }
+        };
         // The portal/allowlist probes gate exactly the modes whose sequence
         // uploads MACs: those jobs strand at stage 2/5 when the host cannot
         // reach the portal, while a create-only job must not be failed for a
         // route it never uses (B6; same derivation as the missing-result rule).
         $preflightApiBaseUrl = ansible_mode_expects_mac_result((string) $payload['mode']) ? $apiBaseUrl : '';
-        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, &$preflightOutput): void {
-            $preflightOutput .= $chunk;
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk);
+        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
+
+            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
         }, 45, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer);
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
         if ($preflightExitCode !== 0) {
@@ -275,63 +281,6 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         if (!empty($options['cleanup'])) {
             ansible_cleanup_artifacts($localDir);
         }
-    }
-}
-
-/**
- * Removes the job's remote work directory, but only when this worker can prove
- * that nothing of the job is still running on the host.
- *
- * The material is not ordinary scratch: accounts.yml carries the ESXi password
- * until it is gone. With one chained remote command an EXIT trap removed it;
- * one command per playbook cannot use EXIT, so the steps carry HUP/INT/TERM
- * traps for the terminated cases and this runs for the normal one.
- *
- * A step that never returned (a cancel accepted mid-playbook, a broken
- * transport) is deliberately left alone: deleting the directory under a
- * running playbook would break the very work whose outcome is still unknown,
- * and the remote trap covers it when that shell ends. Material left behind by
- * a host this worker can no longer reach is reported, not resolved; it is the
- * remote-ownership stage that resolves it.
- *
- * @param array<string, mixed>|null $credential
- */
-function deploy_worker_cleanup_remote_dir(
-    DeployWorkerDbChannel $channel,
-    ?array $credential,
-    ?string $secret,
-    ?string $remoteDir,
-    bool $stepInFlight
-): void {
-    if ($remoteDir === null || $remoteDir === '' || $credential === null || $secret === null) {
-        return;
-    }
-    if ($stepInFlight) {
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Remote job directory left in place: a remote step did not return, so this worker cannot prove the host is idle.'
-        );
-
-        return;
-    }
-
-    try {
-        ssh_execute_command(
-            $credential,
-            $secret,
-            ansible_remote_cleanup_command($remoteDir),
-            static function (string $chunk): void {
-            },
-            VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS
-        );
-    } catch (Throwable $exception) {
-        // Never the job's outcome: this runs in a finally block, after the
-        // result is decided, and a host that cannot be reached for a cleanup
-        // must not turn a finished deploy into an unhandled exception.
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Remote job directory could not be removed: ' . deploy_worker_redact_secrets($exception->getMessage(), [$secret])
-        );
     }
 }
 

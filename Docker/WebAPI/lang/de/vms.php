@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'csv_ram' => 'RAM (MB)',
     'title_template' => 'Vorlagen-VMs',
     'title_mission' => 'Missions-VMs',
     'open_deploy' => 'Bereitstellen',

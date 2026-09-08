@@ -93,39 +93,6 @@
         }
     }
 
-    // Compound field: a convenience <select> next to the real <input> (RAM presets).
-    // Picking an option fills the input; the empty option means "keep the free text".
-    function syncComboPicker(picker) {
-        if (!picker) {
-            return;
-        }
-
-        var root = picker.closest('.compound-field');
-        var input = root ? root.querySelector('[data-combo-input]') : null;
-        if (!input || input.readOnly) {
-            return;
-        }
-        if (picker.value === '') {
-            return;
-        }
-
-        input.value = picker.value;
-        input.dispatchEvent(new Event('input', {bubbles: true}));
-    }
-
-    function syncComboInput(input) {
-        if (!input) {
-            return;
-        }
-
-        var root = input.closest('.compound-field');
-        var picker = root ? root.querySelector('[data-combo-picker]') : null;
-        if (picker) {
-            var value = input.value.trim();
-            picker.value = selectHasValue(picker, value) ? value : '';
-        }
-    }
-
     function syncInterfaceMode(select) {
         if (!select || select.disabled) {
             return;
@@ -186,12 +153,6 @@
         });
         root.querySelectorAll('[data-subnet-input]').forEach(function (input) {
             syncSubnetInput(input, false);
-        });
-        // Only input -> picker on init. The other direction could overwrite a
-        // stored value with the picker's empty option before the user touched
-        // anything.
-        root.querySelectorAll('[data-combo-input]').forEach(function (input) {
-            syncComboInput(input);
         });
     }
 
@@ -275,10 +236,6 @@
             return;
         }
 
-        var comboInput = event.target.closest('[data-combo-input]');
-        if (comboInput) {
-            syncComboInput(comboInput);
-        }
     });
 
     document.addEventListener('change', function (event) {
@@ -310,11 +267,6 @@
             return;
         }
 
-        var comboPicker = event.target.closest('[data-combo-picker]');
-        if (comboPicker) {
-            syncComboPicker(comboPicker);
-            return;
-        }
 
         var subnetInput = event.target.closest('[data-subnet-input]');
         if (subnetInput) {
@@ -322,10 +274,58 @@
             return;
         }
 
-        var comboInput = event.target.closest('[data-combo-input]');
-        if (comboInput) {
-            syncComboInput(comboInput);
+    });
+
+    document.querySelectorAll('[data-ram-field]').forEach(function (root) {
+        var factors = JSON.parse(root.getAttribute('data-ram-factors'));
+        var minimum = Number(root.getAttribute('data-ram-min'));
+        var maximum = Number(root.getAttribute('data-ram-max'));
+        var input = root.querySelector('[data-ram-value]');
+        var unit = root.querySelector('[data-ram-unit]');
+        var preset = root.querySelector('[data-ram-preset]');
+        var output = root.parentElement.querySelector('[data-ram-output]');
+        var oldUnit = unit.value;
+        preset.disabled = input.readOnly;
+        function parse(value, token) {
+            value = value.trim();
+            var pattern = token === 'mb' ? /^[0-9]+$/ : /^[0-9]+(?:[.,][0-9]{1,10})?$/;
+            if (!factors[token] || value.length > 16 || !pattern.test(value)) { return null; }
+            var parts = value.replace(',', '.').split('.');
+            var whole = Number(parts[0]);
+            var factor = factors[token];
+            if (whole > maximum / factor) { return null; }
+            var denominator = Math.pow(10, (parts[1] || '').length);
+            var fractional = Number(parts[1] || '0') * factor;
+            var base = whole * factor;
+            if (base + fractional / denominator < minimum || base + fractional / denominator > maximum) { return null; }
+            return {mb: base + Math.floor((fractional + Math.floor(denominator / 2)) / denominator), rounded: fractional % denominator !== 0};
         }
+        function numberInUnit(mb, token) {
+            return (mb / factors[token]).toFixed(10).replace(/\.?0+$/, '');
+        }
+        function refresh() {
+            var value = parse(input.value, unit.value);
+            preset.value = value ? String(value.mb) : '';
+            output.textContent = input.value.trim() === '' ? '' : value
+                ? root.getAttribute('data-ram-preview').replace(':mb', String(value.mb)) + (value.rounded ? ' ' + root.getAttribute('data-ram-rounded') : '')
+                : root.getAttribute('data-ram-invalid');
+        }
+        input.addEventListener('input', refresh);
+        unit.addEventListener('change', function () {
+            var value = parse(input.value, oldUnit);
+            if (value && factors[unit.value]) { input.value = numberInUnit(value.mb, unit.value); }
+            oldUnit = unit.value;
+            refresh();
+        });
+        preset.addEventListener('change', function () {
+            if (preset.value !== '') {
+                unit.value = 'gb';
+                oldUnit = unit.value;
+                input.value = numberInUnit(Number(preset.value), unit.value);
+            }
+            refresh();
+        });
+        refresh();
     });
 
     initDynamicControls(document);

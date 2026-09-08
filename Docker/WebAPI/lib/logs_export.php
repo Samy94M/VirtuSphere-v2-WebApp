@@ -69,6 +69,7 @@ function logs_export_send_csv(mysqli $connection, array $filter, int $userId): n
  */
 function logs_export_prepare(mysqli $connection, array $filter, ?int $userId): array
 {
+    $filter['_max_id'] = (int) repo_scalar($connection, 'SELECT COALESCE(MAX(id), 0) FROM deploy_logs');
     $total = repo_count_logs($connection, $filter);
     $bounds = log_filter_export_bounds($total);
     $rows = logs_export_rows($connection, $filter, $bounds['exported']);
@@ -119,8 +120,11 @@ function logs_export_rows(mysqli $connection, array $filter, int $max): array
             $connection,
             $filter,
             min(VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS, $max - $offset),
-            $offset
+            0
         );
+        if ($chunk !== []) {
+            $filter['_before_id'] = (int) $chunk[array_key_last($chunk)]['id'];
+        }
         foreach ($chunk as $row) {
             $csvRows[] = [
                 (string) ($row['id'] ?? ''),

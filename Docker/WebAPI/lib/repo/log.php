@@ -228,6 +228,14 @@ function repo_log_filter(array $filter): array
     $conditions = [];
     $types = '';
     $params = [];
+    // Internal export cursors, never populated by request parsing.
+    foreach (['_max_id' => '<=', '_before_id' => '<'] as $key => $operator) {
+        if (isset($filter[$key])) {
+            $conditions[] = 'l.id ' . $operator . ' ?';
+            $types .= 'i';
+            $params[] = (int) $filter[$key];
+        }
+    }
     if ($search !== '') {
         $conditions[] = '(l.log_message LIKE ? OR u.name LIKE ?)';
         $needle = '%' . addcslashes($search, '%_\\') . '%';

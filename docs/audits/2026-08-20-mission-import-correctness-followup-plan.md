@@ -1,5 +1,7 @@
 # Mission-Import: Folgeplan fuer Shape-Sicherheit, Handoff, Uploadgrenzen und Diagnose
 
+**Aktueller Stand 08.09.2026:** Dokumentanalysator, Shape-Prüfung und Upload-Vertragsprüfungen sind vorhanden: MissionTransferDocumentTest, MissionImportShapeContractTest und MissionImportUploadLimitContractTest. Die folgenden Ausgangsfehler beschreiben den damaligen Stand. Ein neuer Runtime-Ini-Nachweis und die vollständige DoD-Abnahme sind damit nicht behauptet.
+
 Stand: 2026-08-20. Dieser Plan ist fuer die Ausfuehrung in einer neuen Sitzung geschrieben und ersetzt fuer diesen Folgeumfang die widerspruechlichen Teile von `C:\Users\Samy\.claude\plans\logical-knitting-kay.md`. Der urspruengliche Fix aus Commit `3187391` bleibt die Basis: Namensprobleme sind Vorschau-Befunde, der GET-Dry-Run scheitert nicht mehr still, und `blocked_in_file` deaktiviert den Bestaetigen-Button nur fuer Befunde, die das Namensfeld nicht beheben kann.
 
 Der Plan implementiert keine Deploy-, MECM-, PowerShell-, Worker-, Schema- oder Machine-API-Aenderung. Der bei der Planerstellung vorhandene fremde, uncommittete Diff in `docs/audits/2026-08-11-deploy-reliability-master-plan.md` bleibt unangetastet. In der ausfuehrenden Sitzung gilt trotzdem allein der dann aktuelle `git status`/Diff.

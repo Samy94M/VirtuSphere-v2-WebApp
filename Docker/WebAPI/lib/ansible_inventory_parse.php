@@ -4,6 +4,20 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/esxi_object_names.php';
 
+// Complete raw inventory capture, including base64 payload and diagnostic
+// noise. Exceeding this budget invalidates the observation; never parse a
+// prefix as a complete inventory and never replace the previous cache with it.
+const VIRTUSPHERE_INVENTORY_OUTPUT_MAX_BYTES = 16777216;
+
+function ansible_inventory_capture_chunk(string &$output, string $chunk): bool
+{
+    if (strlen($chunk) > VIRTUSPHERE_INVENTORY_OUTPUT_MAX_BYTES - strlen($output)) {
+        return false;
+    }
+    $output .= $chunk;
+    return true;
+}
+
 /**
  * Core inventory output normalization (ADR-0023). Split out of
  * lib/ansible_inventory.php (Etappe 7, ADR-0006): the marker decode, the two

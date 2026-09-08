@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'number' => ':field muss eine Zahl mit Punkt oder Komma und höchstens zehn Nachkommastellen sein.',
+    'range_unit' => ':field muss zwischen :min und :max :unit liegen.',
     'failed' => 'Validierung fehlgeschlagen.',
     'required' => ':field ist erforderlich.',
     'max_length' => ':field darf höchstens :max Zeichen lang sein.',

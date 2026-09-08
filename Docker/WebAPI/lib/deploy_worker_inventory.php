@@ -32,6 +32,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     $localDir = null;
     $failCategory = null;
     $fullOutput = '';
+    $captureOverflow = false;
     // Phase tracking (B6): a thrown failure is classified by WHERE it happened
     // first and by text evidence second (deploy_worker_classify_inventory_failure),
     // instead of every throw reading as "the host answered unexpectedly".
@@ -76,15 +77,20 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // Same accumulation as the deploy path: the last stage marker names the
         // broken component in the job error instead of a bare exit code.
         $preflightOutput = '';
+        $preflightObserver = static function (string $line) use (&$preflightOutput): void {
+            if (ansible_preflight_failed_component($line) !== null) {
+                $preflightOutput = $line;
+            }
+        };
         // Deliberately probe-less: the inventory pull has no MAC callback, so a
         // portal unreachable from the Ansible host must not fail it (B6 fixed
         // the deploy path; this path never needed the route).
         $preflightApiBaseUrl = '';
-        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, &$preflightOutput): void {
-            $preflightOutput .= $chunk;
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk);
+        $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, ansible_preflight_command($preflightApiBaseUrl), static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
+
+            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
         }, 45, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer);
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
         if ($preflightExit !== 0) {
@@ -120,8 +126,10 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty($inventoryPayload['verbose']));
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running ESXi inventory playbook.');
         $buffer = '';
-        $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($channel, &$buffer, &$fullOutput): void {
-            $fullOutput .= $chunk;
+        $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $command, static function (string $chunk) use ($channel, &$buffer, &$fullOutput, &$captureOverflow): void {
+            if (!$captureOverflow) {
+                $captureOverflow = !ansible_inventory_capture_chunk($fullOutput, $chunk);
+            }
             deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $chunk);
         }, 0, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
@@ -134,6 +142,10 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
 
+        if ($captureOverflow) {
+            $phase = VIRTUSPHERE_DEPLOY_PHASE_MARKER;
+            throw new RuntimeException('Inventory output exceeded its capture limit; the previous cache is retained.');
+        }
         if ($exitCode !== 0) {
             $failCategory = ansible_categorize_inventory_error($fullOutput, $exitCode);
             throw new RuntimeException('Inventory fetch failed (' . $failCategory . ').');

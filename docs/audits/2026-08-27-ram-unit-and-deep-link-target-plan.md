@@ -2,9 +2,7 @@
 
 Stand: 27.08.2026
 
-Status: entscheidungsreifer, gegen Code-, Test-, SSoT-, Doku- und
-Betriebsverträge geprüfter Plan. Keine Produktimplementierung in diesem
-Arbeitslauf.
+Status am 08.09.2026: Teile B und A im Arbeitsbaum implementiert. Native Parser-, Formular- und Vertragsprüfungen vorhanden. Browser-/No-JavaScript-Abnahme und Visual-Gate noch offen, weil Docker Desktop nicht startet. Keine Baseline aktualisiert. Der folgende Plan bleibt die fachliche Spezifikation; jüngere Modulpfade sind im Abschlussnachtrag genannt.
 
 ## 0. Geltung, Reihenfolge und Vorbedingungen
 

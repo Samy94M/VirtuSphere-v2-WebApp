@@ -28,6 +28,7 @@ final class FormAccessibilityContractTest extends TestCase
                 'lib/users_directory_panels.php',
                 'lib/vm_edit_names.php',
                 'lib/vm_edit_panels.php',
+                'lib/vm_edit_ram.php',
                 'lib/vm_edit_rows.php',
                 'portal/account.php',
                 'portal/mission_details.php',

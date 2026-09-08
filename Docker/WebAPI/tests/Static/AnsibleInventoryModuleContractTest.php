@@ -20,6 +20,7 @@ final class AnsibleInventoryModuleContractTest extends TestCase
         'ansible_prepare_inventory_artifacts',
         'ansible_inventory_remote_command',
         'ansible_inventory_network_item',
+        'ansible_inventory_capture_chunk',
         'ansible_inventory_vm_item',
         'ansible_parse_inventory_output',
         'ansible_inventory_normalization_log_line',

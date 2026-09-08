@@ -3,6 +3,12 @@
 declare(strict_types=1);
 
 return [
+    'ram_unit' => 'RAM-Einheit',
+    'ram_invalid' => 'Geben Sie eine gültige RAM-Größe und die Einheit MB oder GB ein. MB erlaubt nur ganze Zahlen; GB auch Dezimalzahlen mit Punkt oder Komma.',
+    'ram_unit_invalid' => 'Wählen Sie MB oder GB als RAM-Einheit.',
+    'ram_rounding' => 'GB-Werte werden bei Bedarf auf ganze MB gerundet. Ohne JavaScript gilt die gewählte Einheit beim Speichern.',
+    'ram_preview' => 'Gespeichert werden :mb MB.',
+    'ram_rounded' => 'Der Wert wurde gerundet.',
     'title_edit' => 'VM bearbeiten',
     'title_add' => 'VM hinzufügen',
     'back_to_vms' => 'Zurück zu VMs',
@@ -57,7 +63,7 @@ return [
     'domain_title' => 'DNS-FQDN mit mindestens einem Punkt verwenden, z. B. corp.example.local.',
     'label_os' => 'OS',
     'select_os' => 'OS auswählen',
-    'label_ram' => 'RAM MB',
+    'label_ram' => 'Arbeitsspeicher',
     'ram_custom' => 'Benutzerdefiniert',
     'ram_preset' => 'RAM-Voreinstellung',
     'label_cpu' => 'CPU',

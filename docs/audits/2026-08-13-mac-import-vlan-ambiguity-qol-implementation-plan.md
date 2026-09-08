@@ -1,5 +1,7 @@
 # Konsolidierter Umsetzungsplan: selbstheilende Deploy-Ausführung, eindeutige VM-Netzwerke und sicherer MAC-Retry
 
+**Lesestand 08.09.2026:** 13R und 14A/14B/14C besitzen lokale Implementierungsnachweise im Masterplan. 8R-O enthält deaktivierte Grundlagen; produktive Consumer-/Recovery-Anbindung und Aktivierungsweg sind weiterhin unvollständig. 8R-S und Standortfreigaben bleiben offen. Die offenen DoD-Kästchen unten sind daher keine Liste ausschließlich fehlenden Codes.
+
 Stand: 13.08.2026
 
 Status: entscheidungsreifer Gesamtplan; seit 2026-08-20 in Offline-Implementierung (8R-O) und Standortabnahme (8R-S) getrennt

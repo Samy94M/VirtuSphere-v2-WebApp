@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const VIRTUSPHERE_RAM_INPUT_FACTORS_MB = ['mb' => 1, 'gb' => 1024];
+
 require_once __DIR__ . '/constants.php';
 
 const VIRTUSPHERE_VM_DEFAULTS = [

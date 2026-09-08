@@ -2,7 +2,7 @@
 
 Stand: 27.08.2026
 
-Status: lokale Etappe 14A seit 31.08.2026 implementiert; Standort-/Canary-Abnahme offen; Etappe 14B nicht begonnen
+Status am 08.09.2026: 14A lokal implementiert; Standort-/Canary-Abnahme offen. Auch 14B ist inzwischen lokal implementiert, siehe Create-Abschluss und Masterplan. Die frühere Aussage „14B nicht begonnen“ ist überholt.
 
 Korrekturstand: 27.08.2026. Eingearbeitet sind die expliziten Amendments zum
 allgemeinen Netzwerkvertrag, kindweise Inventar-Namenssemantik, Datacenter-

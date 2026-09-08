@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../lib/vm_ram.php';
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/missions.php';
@@ -221,7 +222,7 @@ $vmLocationOverride = static function (array $vm): string {
 // downloads of the same list disagree on their shape.
 if (($_GET['export'] ?? '') === 'csv') {
     $header = [
-        __t('vms.th_vm_name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.th_ram'),
+        __t('vms.th_vm_name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.csv_ram'),
         __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
         __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
         __t('vms.csv_network_status'), __t('vms.csv_network_detail'),
@@ -327,7 +328,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <?php } ?></td>
                         <td><?php echo h($vm['vm_os'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
-                        <td><?php echo h($vm['vm_ram'] ?? ''); ?></td>
+                        <td><?php echo h(vm_ram_format($vm['vm_ram'] ?? '')); ?></td>
                         <td><?php echo status_badge((string) ($vm['vm_status'] ?? '')); ?></td>
                         <?php if ($hasProgressAttention) { ?>
                             <td><?php

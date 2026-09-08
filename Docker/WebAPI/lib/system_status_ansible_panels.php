@@ -45,7 +45,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                 $lastMissionJob = is_array($entry['last_mission_job'] ?? null) ? $entry['last_mission_job'] : null;
                 $component = trim((string) ($stateRow['last_component'] ?? ''));
                 ?>
-                <article class="status-row" id="credential-<?php echo h((string) $credential['id']); ?>">
+                <article class="status-row" data-deep-link-target id="credential-<?php echo h((string) $credential['id']); ?>">
                     <?php // The snapshot's state, not a fresh derivation from the row: re-deriving
                           // here would put a second clock on a page whose whole point is that every
                           // age is measured against one, and the row could then disagree with the

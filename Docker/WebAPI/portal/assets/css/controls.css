@@ -324,7 +324,16 @@ button.button:disabled:hover,
 }
 
 .ram-field {
-    grid-template-columns: minmax(0, 1fr) 116px;
+    grid-template-columns: minmax(0, 1fr) 64px minmax(0, 116px);
+}
+
+@media (max-width: 600px) {
+    .ram-field {
+        grid-template-columns: minmax(0, 1fr) 64px;
+    }
+    .ram-field > select:last-child {
+        grid-column: 1 / -1;
+    }
 }
 
 .narrow-form {

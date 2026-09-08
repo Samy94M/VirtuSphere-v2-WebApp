@@ -7,6 +7,7 @@ const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
 const { formReferenceProblems } = require('../lib/form-accessibility');
+const { phpJson } = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -24,6 +25,62 @@ async function expectReferenceIntegrity(page, context) {
   const problems = await formReferenceProblems(page);
   expect(problems, `${context}\n${problems.join('\n')}`).toEqual([]);
 }
+
+test('RAM unit changes preserve MB and remain contained on narrow screens', async ({ page }) => {
+  await page.goto(`vm_edit.php?mission_id=${seeded.missionId}&vm_id=${seeded.vmId}`);
+  const value = page.locator('[data-ram-value]');
+  const unit = page.locator('[data-ram-unit]');
+  await unit.selectOption('mb');
+  await value.fill('1536');
+  await unit.selectOption('gb');
+  await expect(value).toHaveValue('1.5');
+  await unit.selectOption('mb');
+  await expect(value).toHaveValue('1536');
+  await unit.selectOption('gb');
+  await value.fill('1,3');
+  await expect(page.locator('[data-ram-output]')).toContainText('1331');
+  await page.locator('[data-ram-preset]').selectOption('8192');
+  await expect(unit).toHaveValue('gb');
+  await expect(value).toHaveValue('8');
+  await value.fill('invalid');
+  await unit.selectOption('mb');
+  await expect(value).toHaveValue('invalid');
+  for (const width of [1280, 600, 360]) {
+    await page.setViewportSize({ width, height: 800 });
+    const overflow = await page.locator('[data-ram-field]').evaluate((root) => {
+      const bounds = root.getBoundingClientRect();
+      return Array.from(root.children).some((child) => {
+        const box = child.getBoundingClientRect();
+        return box.left < bounds.left - 1 || box.right > bounds.right + 1;
+      });
+    });
+    expect(overflow).toBe(false);
+  }
+  await expectReferenceIntegrity(page, 'RAM units');
+});
+
+test('RAM is normalized on the server with JavaScript disabled', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, storageState: ROLES.admin.storageState, javaScriptEnabled: false });
+  try {
+    const page = await context.newPage();
+    await page.goto(`vm_edit.php?mission_id=${seeded.missionId}&vm_id=${seeded.vmId}`);
+    await expect(page.locator('[data-ram-preset]')).toBeDisabled();
+    await page.locator('[data-ram-value]').fill('6');
+    await page.locator('[data-ram-unit]').selectOption('gb');
+    await page.locator('form:has([data-ram-value]) button[type="submit"]').click();
+    await expect(page).toHaveURL(/vms\.php/);
+    const saved = phpJson(`
+$stmt = db()->prepare('SELECT vm_ram FROM deploy_vms WHERE id = ?');
+$id = ${Number(seeded.vmId)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+    expect(saved.vm_ram).toBe('6144');
+  } finally {
+    await context.close();
+  }
+});
 
 test('server validation binds every visible field error to exactly one invalid control', async ({ page }) => {
   await page.goto('credentials.php');

@@ -39,6 +39,20 @@ final class LogCsvExportTest extends TestCase
 
     private mysqli $db;
 
+    public function testExportKeysetIgnoresRowsInsertedBetweenPages(): void
+    {
+        $this->seed(12);
+        $filter = $this->filter();
+        $filter['_max_id'] = (int) repo_scalar($this->db, 'SELECT MAX(id) FROM deploy_logs');
+        $expected = array_column(repo_recent_logs($this->db, $filter, 50), 'id');
+        $first = repo_recent_logs($this->db, $filter, 5);
+        $this->seed(3);
+        $filter['_before_id'] = (int) $first[array_key_last($first)]['id'];
+        $tail = repo_recent_logs($this->db, $filter, 50);
+        self::assertSame($expected, array_column(array_merge($first, $tail), 'id'));
+        self::assertCount(12, $expected);
+    }
+
     protected function setUp(): void
     {
         try {

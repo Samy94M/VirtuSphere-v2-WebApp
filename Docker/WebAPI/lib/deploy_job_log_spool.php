@@ -46,17 +46,23 @@ final class DeployJobLogSpool
     }
 
     /**
-     * Hands out everything it holds and empties itself, so a failed drain
-     * cannot write the same line twice on the next attempt.
+     * Snapshot only. Entries stay buffered until their write is acknowledged.
      *
      * @return array{lines: list<array{stream: string, line: string}>, dropped: int}
      */
-    public function take(): array
+    public function snapshot(): array
     {
-        $taken = ['lines' => $this->lines, 'dropped' => $this->dropped];
-        $this->clear();
+        return ['lines' => $this->lines, 'dropped' => $this->dropped];
+    }
 
-        return $taken;
+    public function acknowledgeLine(): void
+    {
+        array_shift($this->lines);
+    }
+
+    public function acknowledgeDropped(): void
+    {
+        $this->dropped = 0;
     }
 
     /** Throws the buffer away unwritten, for lines that are no longer ours. */

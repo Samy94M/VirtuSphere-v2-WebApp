@@ -22,22 +22,6 @@
     color: var(--muted);
 }
 
-/* Deep-link landing (e.g. the status badge on credentials linking to
-   system_status.php#cred-<id>): mark the addressed row or card so the reader
-   sees WHICH entry the link meant, not just roughly where the page scrolled.
-   Theme-aware via the accent variable; color-mix is already relied on in
-   base.css. */
-
-tr:target > td {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-tr:target {
-    /* Keep credential deep links below the sticky 76px topbar, with the same
-       16px breathing room used by the other fragment-navigation targets. */
-    scroll-margin-top: 92px;
-}
-
 td.actions {
     /* Keep this a real table-cell, NOT display:flex. A flex <td> does not stretch
        to the row height, so when the data cells are taller (wrapped OS names, a

@@ -54,19 +54,14 @@ final class PortalComboHooksTest extends TestCase
         return $source;
     }
 
-    public function testNoOrphanedRamHooksRemain(): void
+    public function testRamUnitsHaveMatchingMarkupAndScriptHooks(): void
     {
-        $offenders = [];
-        foreach ($this->markup() as $relative => $contents) {
-            if (str_contains($contents, 'data-ram-')) {
-                $offenders[] = $relative;
-            }
+        $markup = $this->markup()['lib/vm_edit_ram.php'];
+        foreach (['field', 'value', 'unit', 'preset', 'factors', 'min', 'max', 'output', 'preview', 'rounded', 'invalid'] as $hook) {
+            self::assertStringContainsString('data-ram-' . $hook, $markup);
+            self::assertStringContainsString('data-ram-' . $hook, $this->assetsJs());
         }
-        if (str_contains($this->assetsJs(), 'data-ram-')) {
-            $offenders[] = 'portal/assets/*.js';
-        }
-
-        self::assertSame([], $offenders, 'data-ram-* was replaced by data-combo-*; the scripts no longer handle it');
+        self::assertStringNotContainsString('1024', (string) file_get_contents(dirname(__DIR__, 2) . '/portal/assets/forms.js'));
     }
 
     public function testEveryComboPickerHasAnInputInTheSameFile(): void
@@ -188,22 +183,11 @@ final class PortalComboHooksTest extends TestCase
         }
     }
 
-    public function testAppJsHandlesEveryComboAttributeTheMarkupUses(): void
+    public function testRetiredComboHooksAreGone(): void
     {
-        $appJs = $this->assetsJs();
-
-        $used = [];
-        foreach ($this->markup() as $contents) {
-            foreach (['data-combo-input', 'data-combo-picker', 'data-combo-clear'] as $attribute) {
-                if (str_contains($contents, $attribute)) {
-                    $used[$attribute] = true;
-                }
-            }
-        }
-
-        self::assertNotSame([], $used, 'the compound-field markup disappeared entirely');
-        foreach (array_keys($used) as $attribute) {
-            self::assertStringContainsString($attribute, $appJs, $attribute . ' is rendered but never read');
+        self::assertStringNotContainsString('data-combo-', $this->assetsJs());
+        foreach ($this->markup() as $source) {
+            self::assertStringNotContainsString('data-combo-', $source);
         }
     }
 }
