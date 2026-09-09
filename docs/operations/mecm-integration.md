@@ -260,8 +260,15 @@ V22-Client kann seine Konfiguration weiterhin lesen, bleibt ohne den neuen ACK
 im Portal aber auf 4/5. Der Installer ersetzt beide Dateien und stößt bei einer
 bestehenden Anwendung `Update-CMDistributionPoint` an.
 
-Vor jeder MECM-Änderung vergleicht er für alle vier Ordner das vollständige
+Vor jeder MECM-Änderung vergleicht er für alle Clientordner das vollständige
 lokale Pfad-/Längen-/SHA-256-Manifest mit dem tatsächlichen `ContentShare`.
+Alle Manifestvergleiche werden abgeschlossen. Sobald ein veröffentlichter Ordner
+fehlt, nicht vollständig lesbar ist oder abweicht, endet der Installer danach mit
+`!!` und Exit 1, noch vor Site-Initialisierung und vor dem ersten
+Configuration-Manager-Cmdlet. Der fehlerhafte Lauf ändert daher keine
+Applications, Deployment Types, Dependencies oder Contentverteilungen. Den
+gemeldeten Freigabepfad, dessen Leserechte und den Inhalt korrigieren und erst
+dann den Installer erneut ausführen.
 Anschließend verlangt er pro Application einen VirtuSphere-Eigentumsmarker oder
 den engen Legacy-Nachweis im Ordner `VirtuSphere_Core`, genau einen erwarteten
 Deployment Type, den Detection-/System-/Reboot-/Returncodevertrag und die

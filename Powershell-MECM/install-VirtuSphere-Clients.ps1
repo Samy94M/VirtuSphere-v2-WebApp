@@ -46,7 +46,7 @@ param(
     [Parameter(Mandatory)][string]$ContentShare,
     [string]$PackagesBase = 'D:\VirtuSphere\Base\Packages',
     [string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
-    [string]$SourceDir = (Join-Path $PSScriptRoot 'clients'),
+    [string]$SourceDir = '',
     [string]$AppFolder = 'VirtuSphere_Core',
     [string]$WebApi = 'virtusphere.lan:8021',
     [ValidateSet('http', 'https')][string]$Scheme = 'http',
@@ -55,6 +55,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 1.0
+
+# Windows PowerShell 5.1 setzt $PSScriptRoot beim Auswerten eines
+# Parameter-Defaultausdrucks noch nicht. Den Standard deshalb erst nach der
+# Parameterbindung ableiten; ein ausdruecklich uebergebener Wert bleibt exakt
+# die Entscheidung des Aufrufers und wird von den vorhandenen Pfadchecks
+# beurteilt.
+if (-not $PSBoundParameters.ContainsKey('SourceDir')) {
+    $SourceDir = Join-Path $PSScriptRoot 'clients'
+}
 
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPackaging.ps1')
@@ -121,18 +130,24 @@ foreach ($spec in $specs) {
 # Ordner wird deshalb das vollstaendige, sortierte Pfad/Laenge/SHA-256-Manifest
 # des lokalen Satzes mit dem tatsaechlichen ContentShare verglichen. Auch alte
 # Zusatzdateien sind Drift, weil MECM sie sonst weiter verteilen koennte.
+$contentManifestBlockers = @()
 foreach ($spec in $specs) {
     $publishedPath = Join-Path $ContentShare $spec.Folder
     try {
         $contentIssues = @(Compare-VsClientContentManifest -StagedPath $stagedContent[[string]$spec.AppName] -PublishedPath $publishedPath)
         if ($contentIssues.Count -gt 0) {
+            $contentManifestBlockers += [string]$spec.AppName
             Write-Warn ("ContentShare-Manifest fuer '{0}' weicht ab ({1}). ContentLocation wird nicht als aktuell bestaetigt." -f $spec.AppName, ($contentIssues -join ', '))
         } else {
             Write-Ok ("{0}: vollstaendiges ContentShare-Manifest stimmt" -f $spec.AppName)
         }
     } catch {
+        $contentManifestBlockers += [string]$spec.AppName
         Write-Warn ("ContentShare fuer '{0}' nicht vollstaendig pruefbar: {1}" -f $spec.AppName, (Get-VsErrorDetail -ErrorRecord $_))
     }
+}
+if ($contentManifestBlockers.Count -gt 0) {
+    throw ("ContentShare-Manifestpruefung fehlgeschlagen ({0}). Vor der ersten MECM-Aenderung abbrechen; Freigabepfad, Leserechte und Inhalt korrigieren und den Installer erneut starten." -f ($contentManifestBlockers -join ', '))
 }
 
 # Der Client-Content laeuft als SYSTEM auf jedem Client. Ist PackagesBase fuer

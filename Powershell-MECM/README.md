@@ -71,8 +71,13 @@ Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 Aufgabe läuft nicht, das Portal antwortet nicht oder mit 403, ein Tageslog bleibt
 leer, die Freigabe zeigt nicht auf den Paketpfad, oder eine Application, ihr
 Content oder die Vorlage fehlt. Die Schlusszeile nennt dann die Zahl der offenen
-Punkte, und der Prozess endet mit Exit-Code 1. Ein **Hinweis** (`~~`) berührt das
-Ergebnis nicht: die DP-Gruppe darf legitim erst nach der Installation entstehen,
+Punkte, und der Prozess endet mit Exit-Code 1. Beim Client-Installer werden immer
+alle veröffentlichten Client-Contentmanifeste geprüft. Fehlt eines, ist es nicht
+vollständig lesbar oder weicht es ab, endet der Lauf nach dieser vollständigen
+Prüfung vor Site-Initialisierung und vor jedem Configuration-Manager-Cmdlet. Erst
+nach Korrektur von Freigabepfad, Leserechten oder Inhalt darf der Installer erneut
+gestartet werden. Ein **Hinweis** (`~~`) berührt das Ergebnis nicht: die
+DP-Gruppe darf legitim erst nach der Installation entstehen,
 DNS löst auf dem MECM-Server anders auf als im Deploy-VLAN, der Paketordner ist
 für Benutzer beschreibbar (eine ACL-Entscheidung), oder der Site-Health-Provider
 ist nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“). Die

@@ -117,6 +117,12 @@ als einen SHA-256-geprüften Paketsatz per atomarem Verzeichnis-Swap und rollt b
 einem Aktivierungsfehler den vollständigen Altstand zurück. Das vollständige
 Pfad-/Längen-/SHA-256-Manifest jedes lokalen Ordners muss am tatsächlichen
 `ContentShare` identisch lesbar sein; eine alte gleichnamige Datei reicht nicht.
+Der Installer prüft alle veröffentlichten Clientordner und bricht bei einem fehlenden, nicht
+vollständig lesbaren oder abweichenden Manifest vor Site-Initialisierung und vor
+jedem Configuration-Manager-Cmdlet ab. In diesem Lauf werden keine Applications,
+Deployment Types, Dependencies oder Contentverteilungen geändert. Freigabepfad,
+Leserechte beziehungsweise Inhalt korrigieren und den Installer danach erneut
+starten.
 Bei jedem Re-Run werden Eigentumsmarker bzw. der enge Legacy-Ordnernachweis,
 genau ein verwalteter Deployment Type, Detection, Systemkontext, Rebootverhalten,
 die Standard-Returncodes und jede Dependency bis zum wirklichen Ziel-DT geprüft.
