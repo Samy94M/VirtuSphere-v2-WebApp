@@ -32,12 +32,13 @@ function deploy_job_decode_terminal_result(?string $json): ?array
     }
     $decoded = json_decode($json, true);
     if (!is_array($decoded)
-        || (int) ($decoded['version'] ?? 0) !== VIRTUSPHERE_DEPLOY_RESULT_VERSION
-        || (string) ($decoded['kind'] ?? '') !== VIRTUSPHERE_DEPLOY_RESULT_KIND
+        || count($decoded) !== 3
+        || ($decoded['version'] ?? null) !== VIRTUSPHERE_DEPLOY_RESULT_VERSION
+        || ($decoded['kind'] ?? null) !== VIRTUSPHERE_DEPLOY_RESULT_KIND
     ) {
         return null;
     }
-    $outcome = (string) ($decoded['outcome'] ?? '');
+    $outcome = $decoded['outcome'] ?? null;
     if (!in_array($outcome, [VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true)) {
         return null;
     }

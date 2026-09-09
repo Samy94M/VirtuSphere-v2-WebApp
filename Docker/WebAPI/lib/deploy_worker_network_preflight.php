@@ -7,6 +7,7 @@ require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/vm_network.php';
 require_once __DIR__ . '/vm_network_preflight_result.php';
+require_once __DIR__ . '/repo/deploy_create_fence.php';
 
 final class DeployWorkerConfigurationBlocked extends RuntimeException
 {
@@ -23,6 +24,16 @@ function deploy_worker_network_preflight(DeployWorkerDbChannel $channel, array $
     $jobId = (int) $job['id'];
     $missionId = (int) $job['mission_id'];
     $payload = deploy_worker_payload($job);
+    try {
+        repo_transaction($channel->connection(), static function () use ($channel, $job, $missionId, $jobId, $payload): void {
+            $db = $channel->connection();
+            repo_deploy_lock_mission($db, $missionId);
+            repo_fetch_one($db, 'SELECT id FROM deploy_jobs WHERE id = ? FOR UPDATE', 'i', [$jobId]);
+            repo_deploy_assert_create_history_resolved($db, $missionId, (int) $job['credential_esxi_id'], (array) $payload['vm_ids'], $jobId);
+        });
+    } catch (DeployCreateHistoryBlocked $exception) {
+        throw new DeployWorkerConfigurationBlocked($exception->getMessage(), null, $exception);
+    }
     $mission = repo_get_mission($channel->connection(), $missionId);
     if ($mission === null) {
         throw new DeployWorkerConfigurationBlocked('Mission no longer exists.');

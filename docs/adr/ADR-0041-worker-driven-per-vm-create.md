@@ -82,6 +82,60 @@ that never returned is deliberately left in place and said so in the log.
 
 ## Consequences
 
+### Amendment: partial Create summaries retain their retry plan (SC-002)
+
+A worker conclusion stores a strict version-1 `kind=deploy_job` summary when no
+richer result exists. Retry accepts its `partial` outcome as a stopped Create
+section only when the terminal source job, original Create-capable mode, complete
+explicit VM selection and ordered durable units agree. The units must include
+both confirmed success and unfinished or failed work. Unknown protocols, missing
+units or deleted selected VMs fail closed; unresolved units keep their existing
+release requirement.
+
+The retry evaluation owns one plan and the locked source rows. Queue insertion
+uses that same plan: Create and Full retain the entire original selection,
+confirmed units become `verify_skip` with their source reference, and failed or
+not-started units become `create`. Full continues its remaining pipeline across
+that entire selection after all Create units are confirmed. A valid partial MAC
+result still plans Export for only its failed VM IDs. Both retry confirmations
+describe the evaluation rather than decoding the result again.
+
+`DeployCreateTerminalRetryTest` drives real claim, per-VM identity commit, worker
+conclusion and retry materialization for Create and Full, plus the MAC conclusion
+and blocked countercases. `DeployCreateRetryEvidenceTest` checks malformed summary
+types, forged or incomplete unit evidence, scope ordering and DE/EN confirmation.
+
+### Amendment: historical Create effects fence fresh admission (SC-007)
+
+Queue, stagger, claim and the worker's pre-remote check share
+`repo/deploy_create_fence.php`. A prepared, running or uncertain historical unit
+blocks another job on its portal VM identity, even after a rename or changed
+target. An exact snapshot name or known UUID also blocks an overlapping host
+scope, including another credential for that host. VM names and UUID evidence
+are compared exactly; DNS host spelling is case-insensitive, and a different
+scheme or port alone does not establish another standalone host. Missing host
+evidence is treated as unknown, so it cannot prove that scopes are independent.
+DNS aliases and IP/name equivalence are not inferred.
+
+Claim skips a blocked queued job without changing its status or attempt and
+continues to independent jobs, including inventory pulls needed for recovery.
+The existing reviewed release remains the owner of resolution; admitting a new
+job never resolves a historical row. Credential target changes and deletion are
+refused while active jobs or unresolved Create rows still reference that target;
+access repairs remain possible. Previously changed credential targets cannot be
+reconstructed from the old schema, which stored only their credential reference.
+
+`DeployCreateHistoricalFenceTest` covers the three unresolved states, queue and
+stagger rollback, exact/disjoint scope, credential aliases, claim continuation,
+worker recheck, credential evidence protection and the reviewed release path.
+Its two-connection cases hold an older parent job while a newer independent
+claim completes and prove that a pinned transaction snapshot cannot hide a newly
+committed historical effect or its credential association. The history read locks
+only Create rows (`FOR UPDATE OF r`), never earlier parent jobs or joined
+credentials. Claim locks Mission -> Job -> Runtime before those rows; release
+locks Mission -> Job -> Unit. This preserves the forward lock direction of
+service pause, reaping and credential edits.
+
 - Cancelling during create now has a per-VM boundary: the VM in flight may still
   come into existence completely, and no further VM begins. That is a stronger
   promise than the per-step boundary of ADR-0033, and it is stated in the help in

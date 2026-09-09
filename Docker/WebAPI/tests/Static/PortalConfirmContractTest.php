@@ -231,6 +231,11 @@ final class PortalConfirmContractTest extends TestCase
         // three wordings), so resolve exactly that one indirection.
         $offenders = [];
         foreach ($this->portalPages() as $page => $contents) {
+            // The log detail imports the same translated retry prompt owner as
+            // deploy.php. Its name does not match the detail's renderer prefix.
+            if (str_contains($contents, "require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';")) {
+                $contents .= "\n" . (string) file_get_contents($this->root() . '/lib/deploy_retry_confirmation.php');
+            }
             preg_match_all('/data-confirm(?:-action)?="([^"]*)"/', $contents, $matches);
             foreach ($matches[1] as $value) {
                 if (str_contains($value, '__t(')) {

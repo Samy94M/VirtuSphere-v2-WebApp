@@ -8,6 +8,7 @@ require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_remote_mode_activation.php';
+require_once __DIR__ . '/deploy_create_fence.php';
 
 function credential_normalize_type(string $type): string
 {
@@ -239,6 +240,7 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
     }
 
     return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {
+        repo_deploy_create_fence_credential_change($db, $id, $values);
         $stmt->execute();
         if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
             throw new RuntimeException('Credential not found.');
@@ -324,22 +326,11 @@ function repo_delete_credential(mysqli $db, int $id): bool
         throw new InvalidArgumentException('Credential id is required.');
     }
 
-    $active = (int) repo_scalar(
-        $db,
-        'SELECT COUNT(*) FROM deploy_jobs WHERE status IN (?, ?) AND (credential_esxi_id = ? OR credential_ansible_id = ?)',
-        'ssii',
-        [VIRTUSPHERE_DEPLOY_STATUS_QUEUED, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, $id, $id]
-    );
-    if ($active > 0) {
-        throw new RuntimeException('Credential is used by an active deploy job.');
-    }
-
-    $stmt = $db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
-    $stmt->bind_param('i', $id);
-    $stmt->execute();
-    if ($stmt->affected_rows === 0) {
-        throw new RuntimeException('Credential not found.');
-    }
-
-    return true;
+    return repo_transaction($db, static function () use ($db, $id): bool {
+        repo_deploy_create_fence_credential_change($db, $id, null);
+        $stmt = $db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        return $stmt->affected_rows === 1;
+    });
 }

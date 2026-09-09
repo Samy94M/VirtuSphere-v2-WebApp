@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'blocker_create_history' => 'The earlier create operation for :name in job #:job is unresolved. Review its create result before starting another job.',
+    'blocker_create_credential_target' => 'This credential still identifies an active deployment job or an unresolved VM creation. Its target cannot currently be changed or deleted.',
     'service_expect_ready' => 'The deploy service is ready: the job starts right away.',
     'service_expect_busy' => 'The deploy service is working: the job is saved and waits.',
     'service_expect_paused' => 'Job intake is paused: the job is saved and waits until somebody resumes it.',
@@ -109,6 +111,7 @@ return [
     'empty' => 'No deploy jobs found.',
     'retry' => 'Run again',
     'confirm_retry' => 'Queue the deploy for mission :name again?',
+    'confirm_retry_create' => 'Queue the deploy for mission :name again? Confirmed VMs are checked live; failed and not-started units are created. The original mode and complete original VM selection are retained.',
     // Retry of a partial job: the new job repeats only the MAC export, never
     // the create or power-cycle steps. Sentence picked by count; the variant
     // without a count applies when no trustworthy partial result exists and

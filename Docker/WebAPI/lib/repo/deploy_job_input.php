@@ -126,8 +126,8 @@ function deploy_job_payload(array $data): array
  * Only failed, cancelled and partial jobs can be re-queued: re-running a
  * succeeded job is the start form's business (it walks the readiness preview),
  * and active jobs are cancelled, not retried. A partial job is terminal with a
- * durable per-VM verdict in result_json; its retry is the export-only follow-up
- * (deploy_job_retry_plan). Mission-less system jobs (the ESXi inventory pulls)
+ * durable result. The shared evaluation distinguishes a partial Create section
+ * from the export-only follow-up of a MAC result. Mission-less system jobs (the ESXi inventory pulls)
  * are scheduled by the worker, never retried by hand.
  */
 function deploy_job_is_retryable(string $status, ?int $missionId): bool
@@ -144,7 +144,9 @@ function deploy_job_is_retryable(string $status, ?int $missionId): bool
 }
 
 /**
- * Decides what a retry re-queues. NULL means "repeat the old payload
+ * Plans the MAC-result branch of a retry. The shared retry evaluation validates
+ * the result protocol and separately recognizes Create summaries before using
+ * any plan. NULL means "repeat the old payload
  * unchanged", which stays the behaviour for plain failed and cancelled jobs.
  *
  * Once a MAC import has committed anything, a retry must never re-run

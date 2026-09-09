@@ -11,6 +11,8 @@ require_once __DIR__ . '/../remote_execution.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
+require_once __DIR__ . '/deploy_job_input.php';
+require_once __DIR__ . '/deploy_create_fence.php';
 
 /**
  * Worker ownership: claim, heartbeat, finish and the job log append.
@@ -28,69 +30,88 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
         throw new InvalidArgumentException('Worker id is required.');
     }
 
-    return repo_transaction($db, static function () use ($db, $workerId): ?array {
-        // The claim gate (Etappe 13R). It sits INSIDE the claim transaction, not
-        // in the worker loop, because a check in the caller is a check some
-        // future second caller will not make; a paused service that still takes
-        // a job through another path is worse than no pause at all.
-        //
-        // Only NEW work is refused. The worker's own running job keeps its
-        // heartbeat, its log and its recovery paths: a pause exists so that work
-        // may finish, not so that it is abandoned half-applied on ESXi.
-        if (!deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
-            return null;
-        }
+    // Observe candidates without a lock; every candidate is re-read under the
+    // mission lock below. A blocked first job must not starve an independent
+    // scope or the inventory pull needed to release its historical Create.
+    $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+    $stmt = $db->prepare('SELECT id, mission_id FROM deploy_jobs WHERE status = ? AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP()) ORDER BY (mission_id IS NULL) ASC, id ASC');
+    $stmt->bind_param('s', $queued);
+    $stmt->execute();
+    $candidates = repo_fetch_all($stmt->get_result());
+    foreach ($candidates as $candidate) {
+        $claimed = repo_transaction($db, static function () use ($db, $workerId, $candidate): ?array {
+            // The claim gate (Etappe 13R). It sits INSIDE the claim transaction, not
+            // in the worker loop, because a check in the caller is a check some
+            // future second caller will not make; a paused service that still takes
+            // a job through another path is worse than no pause at all.
+            //
+            // Only NEW work is refused. The worker's own running job keeps its
+            // heartbeat, its log and its recovery paths: a pause exists so that work
+            // may finish, not so that it is abandoned half-applied on ESXi.
+            if (!deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
+                return null;
+            }
 
-        $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
-        // Scheduled jobs (scheduled_at in the future) are not yet eligible.
-        // The DB session is pinned to UTC (db()), so UTC_TIMESTAMP() matches the
-        // stored UTC scheduled_at (ADR-0022).
-        //
-        // Mission deploys claim before mission-less system jobs (inventory
-        // pulls): with several ESXi credentials one interval cycle enqueues a
-        // burst of pulls that would otherwise delay an operator's deploy by
-        // many minutes. Deliberate starvation trade-off: a continuous deploy
-        // stream postpones inventory jobs, which is fine because the cache is
-        // a warn-only mirror and re-enqueues every interval (ADR-0023). The
-        // expression is not index-backed; with LIMIT 1 over the small queued
-        // set that is irrelevant.
-        $stmt = $db->prepare('SELECT id FROM deploy_jobs WHERE status = ? AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP()) ORDER BY (mission_id IS NULL) ASC, id ASC LIMIT 1 FOR UPDATE');
-        $stmt->bind_param('s', $queued);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        if (!$row) {
-            return null;
-        }
+            $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+            $jobId = (int) $candidate['id'];
+            $missionId = (int) ($candidate['mission_id'] ?? 0);
+            if ($missionId > 0) {
+                repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$missionId]);
+            }
+            $stmt = $db->prepare('SELECT id, mission_id, credential_esxi_id, payload_json FROM deploy_jobs WHERE id = ? AND status = ? AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP()) FOR UPDATE');
+            $stmt->bind_param('is', $jobId, $queued);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            if (!$row) {
+                return null;
+            }
 
-        $jobId = (int) $row['id'];
-        $runtime = repo_fetch_one($db, 'SELECT claim_state, LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
-        // The earlier read is only a fast rejection. This current locked read
-        // serializes the actual claim with a concurrent pause, Job -> Runtime.
-        if (!deploy_claim_state_allows_new_work((string) ($runtime['claim_state'] ?? ''))) {
-            return null;
-        }
-        $generation = (string) ($runtime['generation_id'] ?? '');
-        if (preg_match('/^[a-f0-9]{32}$/', $generation) !== 1) {
-            throw new RuntimeException('Deploy runtime generation is missing.');
-        }
-        $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $legacyContract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
-        // The ownership fence of this claim (Etappe 14B). A worker id is
-        // derived from host and process and survives a restart, so it cannot
-        // tell a returning old worker from its successor; a per-claim random
-        // token can, and the per-VM create writes compare it on every
-        // transition. The lease epoch travels with it so the same comparison
-        // keeps working once the remote execution contract owns the lease.
-        // Nothing here activates that contract: the job stays `legacy`.
-        $lockToken = bin2hex(random_bytes(16));
-        $epoch = (int) repo_scalar($db, "SELECT COALESCE(MAX(epoch), 0) FROM deploy_worker_leases WHERE lease_name = 'deploy-worker'");
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, lock_token = ?, worker_epoch = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssissi', $running, $workerId, $lockToken, $epoch, $legacyContract, $generation, $jobId);
-        $stmt->execute();
-        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
+            $runtime = repo_fetch_one($db, 'SELECT claim_state, LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+            // The earlier read is only a fast rejection. This current locked read
+            // serializes the actual claim with a concurrent pause, Job -> Runtime.
+            if (!deploy_claim_state_allows_new_work((string) ($runtime['claim_state'] ?? ''))) {
+                return null;
+            }
+            if ($missionId > 0) {
+                $payload = json_decode((string) $row['payload_json'], true);
+                if (!is_array($payload)) {
+                    return null;
+                }
+                $scope = deploy_job_normalize_vm_ids($payload['vm_ids'] ?? []);
+                if (repo_deploy_create_fence_conflicts($db, $missionId, (int) $row['credential_esxi_id'], $scope, $jobId, true) !== []) {
+                    return null;
+                }
+            }
+            $generation = (string) ($runtime['generation_id'] ?? '');
+            if (preg_match('/^[a-f0-9]{32}$/', $generation) !== 1) {
+                throw new RuntimeException('Deploy runtime generation is missing.');
+            }
+            $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+            $legacyContract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+            // The ownership fence of this claim (Etappe 14B). A worker id is
+            // derived from host and process and survives a restart, so it cannot
+            // tell a returning old worker from its successor; a per-claim random
+            // token can, and the per-VM create writes compare it on every
+            // transition. The lease epoch travels with it so the same comparison
+            // keeps working once the remote execution contract owns the lease.
+            // Nothing here activates that contract: the job stays `legacy`.
+            $lockToken = bin2hex(random_bytes(16));
+            $epoch = (int) repo_scalar($db, "SELECT COALESCE(MAX(epoch), 0) FROM deploy_worker_leases WHERE lease_name = 'deploy-worker'");
+            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, lock_token = ?, worker_epoch = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ? AND status = ? AND cancelled_at IS NULL');
+            $stmt->bind_param('sssissis', $running, $workerId, $lockToken, $epoch, $legacyContract, $generation, $jobId, $queued);
+            $stmt->execute();
+            if ($stmt->affected_rows !== 1) {
+                return null;
+            }
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
 
-        return repo_deploy_job($db, $jobId);
-    });
+            return repo_deploy_job($db, $jobId);
+        });
+        if ($claimed !== null) {
+            return $claimed;
+        }
+    }
+    return null;
 }
 
 function repo_touch_deploy_job_heartbeat(mysqli $db, int $jobId, string $workerId): bool

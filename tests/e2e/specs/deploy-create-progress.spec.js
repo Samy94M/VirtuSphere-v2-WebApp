@@ -109,21 +109,27 @@ $stmt->bind_param('iss', $mission, $status, $payload);
 $stmt->execute();
 $job = (int) $db->insert_id;
 $units = [
-    ['succeeded', 'created', 1, ''],
-    ['succeeded', 'updated', 1, ''],
-    ['succeeded', 'unchanged', 0, ''],
-    ['failed', '', 0, 'module_failed'],
-    ['uncertain', '', 0, 'async_state_missing'],
+    ['succeeded', 'created', 1, 0, 'vm-mixed-1', '5001-mixed-1', '123456789012.1', '', ''],
+    ['succeeded', 'updated', 1, 1, 'vm-mixed-2', '5001-mixed-2', '123456789012.2', '', ''],
+    ['succeeded', 'unchanged', 0, 1, 'vm-mixed-3', '5001-mixed-3', '123456789012.3', '', ''],
+    ['failed', '', null, 0, '', '', '123456789012.4', 'module_failed', 'The create module reported a failure.'],
+    ['uncertain', '', null, 0, '', '', '123456789012.5', 'async_state_missing', 'The async result state is missing.'],
 ];
-foreach ($units as $offset => [$unitStatus, $outcome, $changed, $errorCode]) {
+foreach ($units as $offset => [$unitStatus, $outcome, $changed, $existedBefore, $moid, $instanceUuid, $asyncJid, $errorCode, $errorDetail]) {
     $position = $offset + 1;
     $name = sprintf('${MARK}-MIX%03d', $position);
     $stmt = $db->prepare(
         'INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status, outcome,'
-        . ' changed, existed_before, error_code, started_at, finished_at)'
-        . " VALUES (?, ?, ?, 5, 'create', ?, NULLIF(?, ''), ?, 0, NULLIF(?, ''), NOW(), NOW())"
+        . ' changed, existed_before, vm_moid, vm_instance_uuid, async_jid, async_deadline_at,'
+        . ' error_code, error_detail, started_at, finished_at)'
+        . " VALUES (?, ?, ?, 5, 'create', ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?,"
+        . " DATE_ADD(NOW(), INTERVAL 1 HOUR), NULLIF(?, ''), NULLIF(?, ''), NOW(), NOW())"
     );
-    $stmt->bind_param('isissis', $job, $name, $position, $unitStatus, $outcome, $changed, $errorCode);
+    $stmt->bind_param(
+        'isissiisssss',
+        $job, $name, $position, $unitStatus, $outcome, $changed, $existedBefore,
+        $moid, $instanceUuid, $asyncJid, $errorCode, $errorDetail
+    );
     $stmt->execute();
 }
 echo 'JSON' . json_encode(['job' => $job]) . 'JSON';

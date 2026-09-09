@@ -35,6 +35,7 @@ final class PortalConfirmNamingContractTest extends TestCase
         // nobody looked at was not created.
         'deploy.create_release_confirm',
         'deploy.confirm_retry',
+        'deploy.confirm_retry_create',
         'deploy.confirm_retry_external',
         'deploy.confirm_retry_partial',
         'deploy.confirm_retry_partial_many',

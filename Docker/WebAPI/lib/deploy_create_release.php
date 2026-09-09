@@ -6,6 +6,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/repo/helpers.php';
+require_once __DIR__ . '/repo/deploy_job_guards.php';
 
 /**
  * Whether an operator may release an unresolved create unit (Etappe 14B,
@@ -53,11 +54,13 @@ const VIRTUSPHERE_CREATE_RELEASE_BLOCKERS = [
  */
 function deploy_create_release_blockers(mysqli $db, int $jobId, int $position, bool $lock = false): array
 {
-    $unit = null;
-    foreach (repo_deploy_create_results($db, $jobId, $lock) as $row) {
-        if ((int) $row['position'] === $position) {
-            $unit = $row;
-            break;
+    if ($lock) {
+        // Mission -> Job -> Unit, like admission and Create ownership. Taking
+        // the unit first could hold it while waiting for a parent job that a
+        // concurrent service pause already holds on its way to a new claim.
+        $missionId = (int) repo_scalar($db, 'SELECT mission_id FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+        if ($missionId > 0) {
+            repo_deploy_lock_mission($db, $missionId);
         }
     }
     $job = repo_fetch_one(
@@ -67,6 +70,15 @@ function deploy_create_release_blockers(mysqli $db, int $jobId, int $position, b
         'i',
         [$jobId]
     );
+    $missionId = (int) ($job['mission_id'] ?? 0);
+    $missionBusy = $missionId > 0 && repo_deploy_active_job_exists($db, $missionId);
+    $unit = null;
+    foreach (repo_deploy_create_results($db, $jobId, $lock) as $row) {
+        if ((int) $row['position'] === $position) {
+            $unit = $row;
+            break;
+        }
+    }
     if ($unit === null || $job === null) {
         return ['eligible' => false, 'blockers' => ['release_unit_not_uncertain'], 'unit' => null, 'evidence' => []];
     }
@@ -78,8 +90,7 @@ function deploy_create_release_blockers(mysqli $db, int $jobId, int $position, b
     if (!in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
         $blockers[] = 'release_job_active';
     }
-    $missionId = (int) $job['mission_id'];
-    if ($missionId > 0 && repo_deploy_active_job_exists($db, $missionId)) {
+    if ($missionBusy) {
         $blockers[] = 'release_mission_busy';
     }
 

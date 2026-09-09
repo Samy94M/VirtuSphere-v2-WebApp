@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'blocker_create_history' => 'Das Ergebnis der früheren VM-Erstellung für :name in Auftrag #:job ist ungeklärt. Prüfen Sie das Erstellungsergebnis vor einem neuen Auftrag.',
+    'blocker_create_credential_target' => 'Diese Zugangsdaten bestimmen noch das Ziel eines aktiven Bereitstellungsauftrags oder einer ungeklärten VM-Erstellung. Das Ziel kann deshalb derzeit weder geändert noch gelöscht werden.',
     'service_expect_ready' => 'Der Bereitstellungsdienst ist bereit: Der Auftrag startet sofort.',
     'service_expect_busy' => 'Der Bereitstellungsdienst arbeitet gerade: Der Auftrag wird gespeichert und wartet.',
     'service_expect_paused' => 'Die Auftragsannahme ist pausiert: Der Auftrag wird gespeichert und wartet, bis jemand sie fortsetzt.',
@@ -109,6 +111,7 @@ return [
     'empty' => 'Keine Bereitstellungsaufträge gefunden.',
     'retry' => 'Erneut ausführen',
     'confirm_retry' => 'Deploy für Mission :name erneut in die Warteschlange stellen?',
+    'confirm_retry_create' => 'Deploy für Mission :name erneut einreihen? Bestätigte VMs werden live geprüft; fehlgeschlagene und noch nicht begonnene Einheiten werden erstellt. Der ursprüngliche Modus und die vollständige ursprüngliche VM-Auswahl bleiben erhalten.',
     // Retry eines partial-Jobs: der neue Auftrag wiederholt nur den MAC-Export,
     // nie das Anlegen oder den Power-Cycle. Satzwahl nach Anzahl; die Variante
     // ohne Anzahl greift, wenn kein vertrauenswürdiges Teilergebnis vorliegt

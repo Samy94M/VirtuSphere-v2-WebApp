@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/vm_urls.php';
+require_once __DIR__ . '/deploy_retry_confirmation.php';
 
 /** @var list<array<string,mixed>> $missions */
 /** @var int $selectedMissionId */
@@ -59,22 +60,7 @@ require_once __DIR__ . '/vm_urls.php';
                     <?php if (deploy_job_is_retryable((string) $job['status'], $job['mission_id'] !== null ? (int) $job['mission_id'] : null)) {
                         $retryEvaluation = $retryEvaluations[(int) $job['id']] ?? null;
                         $retryName = (string) ($job['mission_name'] ?? '');
-                        if ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
-                            $retryResult = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
-                            $retryFailedCount = $retryResult !== null && $retryResult['outcome'] === 'partial' ? count($retryResult['failed_vm_ids']) : 0;
-                            if ($retryFailedCount === 1) {
-                                $retryConfirm = __t('deploy.confirm_retry_partial_one', ['name' => $retryName]);
-                            } elseif ($retryFailedCount > 1) {
-                                $retryConfirm = __t('deploy.confirm_retry_partial_many', ['name' => $retryName, 'count' => $retryFailedCount]);
-                            } else {
-                                $retryConfirm = __t('deploy.confirm_retry_partial', ['name' => $retryName]);
-                            }
-                        } else {
-                            $retryConfirm = __t('deploy.confirm_retry', ['name' => $retryName]);
-                        }
-                        if (is_array($retryEvaluation) && !empty($retryEvaluation['external_confirmation'])) {
-                            $retryConfirm = __t('deploy.confirm_retry_external', ['name' => $retryName]);
-                        }
+                        $retryConfirm = deploy_retry_confirmation($retryEvaluation ?? [], $retryName);
                         ?>
                         <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed'])) { ?>
                             <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">

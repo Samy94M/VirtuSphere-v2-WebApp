@@ -14,6 +14,7 @@ require_once __DIR__ . '/../lib/deploy_log_create_release.php';
 require_once __DIR__ . '/../lib/deploy_create_progress.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
+require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -193,6 +194,7 @@ $isTerminal = in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_
 $retryEvaluation = deploy_job_is_retryable((string) $job['status'], (int) ($job['mission_id'] ?? 0))
     ? deploy_retry_blockers($connection, (int) $job['id'])
     : null;
+$retryConfirm = deploy_retry_confirmation($retryEvaluation ?? [], (string) ($job['mission_name'] ?? ''));
 $existingVmIds = deploy_log_existing_vm_ids($connection, $job);
 $originUrl = deploy_job_origin_url($job);
 // An empty log on an old finished job is almost certainly the retention prune,
@@ -236,7 +238,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
                     <input type="hidden" name="action" value="retry">
                     <input type="hidden" name="job_id" value="<?php echo h((string) $job['id']); ?>">
                     <input type="hidden" name="origin" value="<?php echo h(VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG); ?>">
-                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(!empty($retryEvaluation['external_confirmation']) ? __t('deploy.confirm_retry_external', ['name' => (string) ($job['mission_name'] ?? '')]) : __t('deploy.confirm_retry', ['name' => (string) ($job['mission_name'] ?? '')])); ?>"><?php echo h(__t('deploy.retry')); ?></button>
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h($retryConfirm); ?>"><?php echo h(__t('deploy.retry')); ?></button>
                 </form>
             <?php } elseif (is_array($retryEvaluation) && (int) ($retryEvaluation['repair_vm_id'] ?? 0) > 0 && can('vms.write', $user)) { ?>
                 <a class="button button-secondary" href="<?php echo h(vm_edit_url((int) $job['mission_id'], (int) $retryEvaluation['repair_vm_id'], 'interfaces')); ?>"><?php echo h(__t('deploy.retry_fix_configuration')); ?></a>

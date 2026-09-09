@@ -16,6 +16,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/vms.php';
 require_once __DIR__ . '/repo/vm_network.php';
+require_once __DIR__ . '/repo/deploy_create_fence.php';
 
 /**
  * One exhaustive, discriminated list for every condition that disables queueing.
@@ -278,6 +279,17 @@ function deploy_queue_blockers(mysqli $db, array $input): array
             foreach (repo_vm_network_preflight_blockers($preflight, $state['mode']) as $finding) {
                 $blockers[] = deploy_network_finding_item($finding, true);
             }
+        }
+    }
+
+    if ($selectedMission !== null && $selectedEsxiValid) {
+        foreach (repo_deploy_create_fence_conflicts($db, $missionId, $state['credential_esxi_id'], $state['vm_ids']) as $finding) {
+            $blockers[] = deploy_action_blocker(
+                (string) $finding['code'],
+                __t('deploy.blocker_create_history', ['name' => $finding['vm_name'], 'job' => $finding['job_id']]),
+                deploy_job_log_url((int) $finding['job_id']),
+                __t('deploy.log_title')
+            );
         }
     }
 

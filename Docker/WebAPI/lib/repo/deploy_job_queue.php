@@ -15,6 +15,7 @@ require_once __DIR__ . '/deploy_job_guards.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/deploy_job_retry.php';
 require_once __DIR__ . '/deploy_create_results.php';
+require_once __DIR__ . '/deploy_create_fence.php';
 require_once __DIR__ . '/../ansible_command_modes.php';
 
 /**
@@ -89,6 +90,7 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         if (repo_deploy_active_job_exists($db, $missionId)) {
             throw new RuntimeException('This mission already has an active deploy job.');
         }
+        repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
         repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
 
         $correlationId = virtusphere_correlation_id();
@@ -117,9 +119,9 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
  * Re-queues a retryable mission job as a NEW job with the old job's credential
  * snapshot. Runs immediately (no scheduled_at or group_id carry-over: "retry"
  * means "run it again now") and is attributed to the retrying user, not the
- * original author. The payload is the old one, unless deploy_job_retry_plan()
- * turns the retry into an export-only follow-up (partial jobs and diverged
- * failed jobs). Every create-time guard fires again via
+ * original author. The locked retry evaluation owns the mode, scope and Create
+ * evidence: a partial MAC result follows up with Export; a partial Create
+ * section retains the original mode and selection. Every create-time guard fires again via
  * repo_create_deploy_job(): one-active-job-per-mission, mission readiness,
  * VM-id filtering and the credential type asserts, so a mission or credential
  * deleted since the original run throws instead of half-queuing.
@@ -146,15 +148,9 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
 
         $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
-        $plan = deploy_job_retry_plan(
-            (string) $job['status'],
-            mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null),
-            deploy_job_normalize_vm_ids($payload['vm_ids'] ?? [])
-        );
-        if ($plan !== null) {
-            $payload['mode'] = $plan['mode'];
-            $payload['vm_ids'] = $plan['vm_ids'];
-        }
+        $plan = $evaluation['plan'];
+        $payload['mode'] = $evaluation['effective_mode'];
+        $payload['vm_ids'] = $evaluation['scope_vm_ids'];
 
         // The per-VM create retry (Etappe 14B-F, plan section 10.3). The WHOLE
         // original selection travels into the new job, not the failed part of
@@ -166,12 +162,7 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
         // A source job whose retry no longer creates anything (the export-only
         // follow-up above) is deliberately untouched here: it materializes no
         // create units and claims nothing about them.
-        $createRetrySource = null;
-        $sourceCreateRows = repo_deploy_create_results($db, $jobId);
-        if ($sourceCreateRows !== [] && ansible_mode_creates_vms((string) $payload['mode'])) {
-            $createRetrySource = $sourceCreateRows;
-            $payload['vm_ids'] = deploy_create_retry_vm_ids($sourceCreateRows);
-        }
+        $createRetrySource = $evaluation['source_create_rows'] !== [] ? $evaluation['source_create_rows'] : null;
 
         $newJobId = repo_create_deploy_job(
             $db,
@@ -184,7 +175,7 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
             $createRetrySource
         );
         $note = 'Retry of deploy job ' . $jobId;
-        if ($plan !== null) {
+        if ($plan !== null && $plan['mode'] === 'export') {
             $note .= ' (export-only: ' . ($plan['scope'] === 'failed_vms' ? count($plan['vm_ids']) . ' failed VMs' : 'original selection') . ')';
         }
         if ($createRetrySource !== null) {
@@ -260,6 +251,7 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             array_map(static fn (array $vm): int => (int) $vm['id'], $vms)
         );
         $scopeIds = array_map(static fn (array $vm): int => (int) $vm['id'], $vms);
+        repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $scopeIds);
         // Union pre-check for the whole group: it fans out into one job per VM
         // below, so the per-job scope cap is deliberately not applied here.
         repo_vm_network_assert_deploy_ready($db, $missionId, $scopeIds, (string) ($mission['wds_vlan'] ?? ''), (string) $basePayload['mode'], true, false);

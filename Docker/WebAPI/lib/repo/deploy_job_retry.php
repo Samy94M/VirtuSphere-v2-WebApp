@@ -10,6 +10,7 @@ require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/vm_identity.php';
 require_once __DIR__ . '/vm_network.php';
 require_once __DIR__ . '/../vm_network_preflight_result.php';
+require_once __DIR__ . '/../deploy_create_retry_evidence.php';
 
 final class DeployRetryBlockedException extends RuntimeException
 {
@@ -38,7 +39,7 @@ function repo_deploy_retry_job(mysqli $db, int $jobId, bool $lock = false): ?arr
  * The sole retry decision. Findings are emitted in invariant order: remote,
  * identity, current portal network, then confirmable external history.
  *
- * @return array{retryable:bool,allowed:bool,effective_mode:string,scope_vm_ids:list<int>,findings:list<array<string,mixed>>,blocking_findings:list<array<string,mixed>>,external_confirmation:bool,network_ready:bool,repair_vm_id:?int,plan:?array}
+ * @return array{retryable:bool,allowed:bool,effective_mode:string,scope_vm_ids:list<int>,findings:list<array<string,mixed>>,blocking_findings:list<array<string,mixed>>,external_confirmation:bool,network_ready:bool,repair_vm_id:?int,plan:?array,source_create_rows:list<array<string,mixed>>}
  */
 function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): array
 {
@@ -76,17 +77,7 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     $isValidNetworkPreflightResult = $networkPreflightResult !== null
         && (string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_FAILED
         && (string) $networkPreflightResult['mode'] === (string) $originalPayload['mode'];
-    $plan = deploy_job_retry_plan(
-        (string) $job['status'],
-        $result,
-        deploy_job_normalize_vm_ids($originalPayload['vm_ids'] ?? [])
-    );
-    $mode = $plan !== null ? (string) $plan['mode'] : (string) $originalPayload['mode'];
-    $scopeIds = $plan !== null ? $plan['vm_ids'] : $originalPayload['vm_ids'];
     $findings = [];
-
-    $resultProtocolError = ((string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL || $rawResult !== '')
-        && $result === null && !$isValidNetworkPreflightResult;
 
     // Remote execution owns the first decision. A retry cannot race a durable
     // handle or cross a runtime generation that is no longer ours.
@@ -125,6 +116,22 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
         break;
     }
 
+    // One source read and one plan serve the verdict, confirmation and write.
+    // Runtime and remote handles precede Create units in the locking path.
+    $sourceCreateRows = repo_deploy_create_results($db, $jobId, $lock);
+    $isCreateSummary = deploy_create_retry_summary_is_valid($job, $originalPayload, $sourceCreateRows);
+    $plan = $result === null ? null : deploy_job_retry_plan(
+        (string) $job['status'],
+        $result,
+        $originalPayload['vm_ids']
+    );
+    $mode = $plan !== null ? (string) $plan['mode'] : (string) $originalPayload['mode'];
+    if ($plan === null && ansible_mode_creates_vms($mode) && $sourceCreateRows !== []) {
+        $plan = ['mode' => $mode, 'vm_ids' => deploy_create_retry_vm_ids($sourceCreateRows), 'scope' => 'create_units'];
+    }
+    $scopeIds = $plan !== null ? $plan['vm_ids'] : $originalPayload['vm_ids'];
+    $resultProtocolError = ((string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL || $rawResult !== '')
+        && $result === null && !$isValidNetworkPreflightResult && !$isCreateSummary;
     if ($resultProtocolError) {
         $findings[] = deploy_retry_finding('identity', 'retry_result_protocol_error', true);
     }
@@ -134,7 +141,7 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     // question: whether work of the SOURCE job may still be running on the
     // host. A retry that starts while one async create of this mission is
     // unresolved is how one VM becomes two.
-    foreach (deploy_create_retry_findings($db, $jobId, $missionId, $mode, $lock) as $createFinding) {
+    foreach (deploy_create_retry_findings($db, $missionId, $mode, $sourceCreateRows) as $createFinding) {
         $findings[] = $createFinding;
     }
 
@@ -204,6 +211,7 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
         'network_ready' => $networkReady,
         'repair_vm_id' => $repairVmId,
         'plan' => $plan,
+        'source_create_rows' => ansible_mode_creates_vms($mode) ? $sourceCreateRows : [],
     ];
 }
 
@@ -252,6 +260,7 @@ function deploy_retry_evaluation_unavailable(string $code): array
         'network_ready' => false,
         'repair_vm_id' => null,
         'plan' => null,
+        'source_create_rows' => [],
     ];
 }
 
@@ -277,9 +286,8 @@ function deploy_retry_evaluation_unavailable(string $code): array
  *
  * @return list<array<string,mixed>>
  */
-function deploy_create_retry_findings(mysqli $db, int $jobId, int $missionId, string $mode, bool $lock): array
+function deploy_create_retry_findings(mysqli $db, int $missionId, string $mode, array $rows): array
 {
-    $rows = repo_deploy_create_results($db, $jobId, $lock);
     if ($rows === []) {
         return ansible_mode_creates_vms($mode)
             ? [deploy_retry_finding('create', 'retry_create_results_missing', true)]
