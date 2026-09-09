@@ -58,6 +58,13 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] proven\s+\{2\}'"
     }
 
+    It 'counts the complete unmutated module fixture as an observable guard case' {
+        $script:GuardRunner | Should -Match "Name = 'runner.ansible-module-contract.control'"
+        $script:GuardRunner | Should -Match 'New-Fixture \$moduleContractFixtureFiles'
+        $script:GuardRunner | Should -Match 'Docker/qa-ansible/verify-collection-lock.py'
+        $script:GuardRunner | Should -Match 'Docker/qa-ansible/collection-lock-contract.py'
+    }
+
     It 'reports every visual theme before and after, and every capture inside it' {
         # Die Fortschrittseinheit ist seit Etappe 17 das Theme, nicht der
         # einzelne Playwright-Lauf: wie viele Aufnahmen ein Theme braucht, haengt

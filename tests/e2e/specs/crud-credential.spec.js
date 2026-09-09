@@ -205,6 +205,8 @@ test('Ansible test: a failing connection is categorized, persisted and linked to
   expect(response.status(), 'the failed test is not a server error').toBeLessThan(500);
   const alert = page.locator('.alert-error, .alert').first();
   await expect(alert, 'the operator sees a result sentence').toBeVisible();
+  await expect(alert).toContainText(/Die Verbindung zum Ansible-Host kam nicht zustande\.|The connection to the Ansible host could not be established\./);
+  await expect(alert).not.toContainText(/Audit context|evidence_stored/);
   expect(credentialRow(id), 'the connection test does not rewrite the credential').toEqual(before);
   const refreshedRow = page.locator('tr', { hasText: name }).first();
   await expect(refreshedRow.locator('form:has(input[name="action"][value="test"]) button')).toHaveText(/Verbindung und Umgebung prüfen|Check connection and environment/);
@@ -331,11 +333,15 @@ test('delete: Cancel keeps the row, Confirm removes it', async ({ page }) => {
 function seedPreflight(id, status, daysAgo) {
   runPhp(`
 $db = db();
-$db->query("INSERT INTO deploy_ansible_preflight_state (credential_id, last_status, last_checked_at, last_component)
-  VALUES (${Number(id)}, '${status}', DATE_SUB(NOW(), INTERVAL ${Number(daysAgo)} DAY), NULL)
-  ON DUPLICATE KEY UPDATE last_status = VALUES(last_status), last_checked_at = VALUES(last_checked_at)");
+$credential = repo_credential($db, ${Number(id)});
+$revision = (int) $credential['config_revision'];
+$generation = repo_ansible_preflight_begin($db, ${Number(id)}, $revision);
+if (!repo_ansible_preflight_record($db, ${Number(id)}, '${status}', null, $revision, $generation)) {
+    throw new RuntimeException('Fixture preflight evidence was refused');
+}
+$db->query("UPDATE deploy_ansible_preflight_state SET last_checked_at = DATE_SUB(NOW(), INTERVAL ${Number(daysAgo)} DAY) WHERE credential_id = ${Number(id)}");
 echo 'SEEDED';
-`);
+`, ['lib/repo/credentials.php', 'lib/repo/ansible_preflight.php']);
 }
 
 /**
@@ -395,7 +401,7 @@ echo 'JSON' . json_encode([
     seedPreflight(ansibleId, 'ok', 0);
 
     await page.goto('credentials.php');
-    const cadenceOf = (name) => page.locator('tr', { hasText: name }).first().locator('.status-cadence');
+    const cadenceOf = (name) => page.locator('tr', { hasText: name }).first().locator('[data-credential-cadence]');
     const badgeOf = (name) => page.locator('tr', { hasText: name }).first().locator('.badge');
 
     // Every row states its cadence; the two types must not state the same one,

@@ -217,6 +217,11 @@ $enumFixtureFiles = @(
     'Docker/WebAPI/lib/migrations'
 )
 $fileSizeFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal')
+$moduleContractFixtureFiles = @(
+    'Ansible', 'Docker/qa-ansible/module-probe.yml',
+    'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh',
+    'Docker/qa-ansible/verify-collection-lock.py', 'Docker/qa-ansible/collection-lock-contract.py'
+)
 $phpVerFixtureFiles = @(
     'Docker/php/Dockerfile', 'Docker/WebAPI/composer.json',
     'Docker/WebAPI/lib/constants.php', 'CLAUDE.md', 'AGENTS.md'
@@ -770,6 +775,11 @@ function zz_guard_ok(mysqli $db): void
         # muss trotzdem Exit 1 dominieren (ADR-0031 Exitcode-Praezedenz).
         Assert-Guard (Invoke-RunnerGate $fx 'powershell-syntax,ansible-lint') @(1)
     } }
+    @{ Name = 'runner.ansible-module-contract.control'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(0) -InfraOnExit2
+    } }
     @{ Name = 'runner.ansible-module-contract.missing-library'; Body = {
         # Der Originalbefund war: ohne `requests` scheitert JEDES benutzte
         # community.vmware-Modul beim Import, vor der Argumentpruefung, waehrend
@@ -778,47 +788,40 @@ function zz_guard_ok(mysqli $db): void
         # beweist der gruene Gate-Lauf gegen das echte Repo. Die Bibliothek im
         # Image zu entfernen ginge nur ueber einen Image-Build je Fall.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Ansible', 'Docker/qa-ansible/module-deprecations.txt',
-            'Docker/qa-ansible/module-contract.sh')
-        Add-FixtureFile $fx 'Docker/qa-ansible/module-probe.yml' @'
----
-- name: Fixture
-  hosts: localhost
-  gather_facts: false
-  tasks:
+        $fx = New-Fixture $moduleContractFixtureFiles
+        $probe = [System.IO.File]::ReadAllText((Join-Path $fx 'Docker/qa-ansible/module-probe.yml'))
+        Add-FixtureFile $fx 'Docker/qa-ansible/module-probe.yml' ($probe + @'
+
     - name: die Meldung, die das Gate faengt
       ansible.builtin.fail:
         msg: Failed to import the required Python library (requests) on probe Python /usr/bin/python3
       ignore_errors: true
-'@
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) -InfraOnExit2
+'@)
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.missing-library\]' -InfraOnExit2
     } }
     @{ Name = 'runner.ansible-module-contract.argument-spec'; Body = {
         # Gegen die ECHTE Collection: ein Argumentname, den die gepinnte Version
         # nicht kennt, muss auffallen. Genau diese Klasse hat einmal 13
         # Portgruppen als 0 gemeldet, weil die Aufgabe unter ignore_errors lief.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Ansible', 'Docker/qa-ansible/module-probe.yml',
-            'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh')
+        $fx = New-Fixture $moduleContractFixtureFiles
         Edit-Fixture $fx 'Docker/qa-ansible/module-probe.yml' 'esxi_hostname: virtusphere-probe-host' 'esxi_hostnaem: virtusphere-probe-host'
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) -InfraOnExit2
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.argument-spec\]' -InfraOnExit2
     } }
     @{ Name = 'runner.ansible-module-contract.deprecation-unrecorded'; Body = {
         # Ein upstream neu als deprecated markiertes Modul darf nicht still
         # durchlaufen: die Frist muss im Repo stehen, sonst faellt sie beim Kunden auf.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Ansible', 'Docker/qa-ansible/module-probe.yml',
-            'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh')
+        $fx = New-Fixture $moduleContractFixtureFiles
         Add-FixtureFile $fx 'Docker/qa-ansible/module-deprecations.txt' "# leer`n"
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) -InfraOnExit2
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.deprecation-unrecorded\]' -InfraOnExit2
     } }
     @{ Name = 'runner.ansible-module-contract.probe-incomplete'; Body = {
         # Der realistische Weg, wie der Vertrag stillschweigend schrumpft: jemand
         # benutzt ein neues Modul in einem Playbook. Ohne diese Richtung meldet die
         # Probe weiter gruen fuer die zehn, die sie kennt.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Ansible', 'Docker/qa-ansible/module-probe.yml',
-            'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh')
+        $fx = New-Fixture $moduleContractFixtureFiles
         Add-FixtureFile $fx 'Ansible/zzprobe_playbook.yml' @'
 ---
 - name: Fixture
@@ -829,25 +832,27 @@ function zz_guard_ok(mysqli $db): void
       community.vmware.vmware_cluster_info:
         hostname: 127.0.0.1
 '@
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) 'probe-incomplete' -InfraOnExit2
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.probe-incomplete\]' -InfraOnExit2
     } }
     @{ Name = 'runner.ansible-module-contract.probe-stale'; Body = {
         # Gegenrichtung: eine Probe-Zeile fuer ein Modul, das kein Playbook mehr
         # benutzt, bindet den Vertrag an etwas, das uns nicht mehr betrifft.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Ansible', 'Docker/qa-ansible/module-probe.yml',
-            'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh')
+        $fx = New-Fixture $moduleContractFixtureFiles
         Edit-Fixture $fx 'Docker/qa-ansible/module-probe.yml' 'community.vmware.vmware_about_info' 'community.vmware.vmware_cluster_info'
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) 'probe-stale' -InfraOnExit2
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.probe-stale\]' -InfraOnExit2
     } }
     @{ Name = 'runner.ansible-module-contract.zero-match'; Body = {
         # Eine Ableitung, die nichts findet, macht jede Pruefung darunter
         # dauerhaft und still gruen. Sie muss ein Fehler sein.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
-        $fx = New-Fixture @('Docker/qa-ansible/module-probe.yml',
-            'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh')
-        Add-FixtureFile $fx 'Ansible/.gitkeep' ''
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) -InfraOnExit2
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Get-ChildItem -LiteralPath (Join-Path $fx 'Ansible') -Filter '*.yml' | Where-Object { $_.Name -ne 'requirements.yml' } | ForEach-Object {
+            Add-FixtureFile $fx ('Ansible/' + $_.Name) "---
+[]
+"
+        }
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.zero-match\]' -InfraOnExit2
     } }
     @{ Name = 'runner.yaml-lint.red'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }

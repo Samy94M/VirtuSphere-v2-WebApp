@@ -27,8 +27,10 @@ echo 'CLEANED';
 `);
 }
 
-test.beforeAll(() => cleanup());
-test.afterAll(() => cleanup());
+// Each action owns its sources: an untested refresh credential from an earlier
+// action must not make the inventory union inconclusive in the VLAN scenario.
+test.beforeEach(() => cleanup());
+test.afterEach(() => cleanup());
 
 // e2e-covers: system_status.php:test
 test('Ansible card separates an outdated full test from mission evidence and can retest in place', async ({ page }) => {
@@ -116,6 +118,8 @@ echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'ne
   ]);
   await expect(page).toHaveURL(/system_status\.php$/);
   await expect(page.locator('.alert-error').first(), 'the failed localhost SSH test reports its real outcome').toBeVisible();
+  await expect(page.locator('.alert-error').first()).toContainText(/Die Verbindung zum Ansible-Host kam nicht zustande\.|The connection to the Ansible host could not be established\./);
+  await expect(page.locator('.alert-error').first()).not.toContainText(/Audit context|evidence_stored/);
 
   const recorded = phpJson(`
 $db = db();
@@ -169,6 +173,7 @@ test('reassign_vlan: renders only with a real deviation, Cancel keeps assignment
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
 $esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-inv', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$unknown = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-unknown', 'host' => '127.0.0.3', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
 repo_esxi_inventory_record_success($db, $esxi);
 repo_esxi_inventory_replace_kind($db, $esxi, VIRTUSPHERE_INVENTORY_KIND_NETWORK, [['name' => 'E2EVLAN-OK']]);
 repo_esxi_inventory_record_kind_evidence($db, $esxi, [VIRTUSPHERE_INVENTORY_KIND_NETWORK], [
@@ -183,7 +188,7 @@ $vmId = (int) $db->insert_id;
 $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mode) VALUES (?, '', '', '', 'E2EVLAN-STALE', 'dhcp')");
 $stmt->bind_param('i', $vmId);
 $stmt->execute();
-echo 'JSON' . json_encode(['missionId' => $mid, 'vmId' => $vmId]) . 'JSON';
+echo 'JSON' . json_encode(['missionId' => $mid, 'vmId' => $vmId, 'unknown' => $unknown]) . 'JSON';
 `, ['lib/repo/credentials.php', 'lib/repo/missions.php', 'lib/esxi_inventory.php']);
 
   const missionVlan = () => phpJson(`
@@ -196,6 +201,18 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `).wds_vlan;
 
   await page.goto('system_status.php');
+  await expect(page.locator('details.repair-actions'), 'an untested source prevents a false absence verdict').toHaveCount(0);
+  runPhp(`
+$db = db();
+repo_esxi_inventory_apply($db, ${Number(seed.unknown)}, [
+    'networks' => ['E2EVLAN-OK'],
+    'queries' => array_fill_keys(['networks_standard', 'networks_dvs'], ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED]),
+    'normalization' => ['networks' => ['raw' => 1, 'persistable' => 1, 'supported' => 1]],
+]);
+repo_esxi_inventory_record_success($db, ${Number(seed.unknown)});
+echo 'QUALIFIED';
+`, ['lib/repo/esxi_inventory.php']);
+  await page.reload();
   await page.locator('details.repair-actions > summary').click();
   const form = page.locator('form:has(button[name="action"][value="preview_vlan_reassign"])');
   await expect(form, 'the deviation makes the reassign form render').toBeVisible();

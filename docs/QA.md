@@ -46,6 +46,19 @@ so the normal PHPUnit memory limit remains sufficient.
 
 ## Canonical Check Runner
 
+The Ansible module-contract guard family starts with a complete unmutated
+fixture, including both collection-lock Python owners and `requirements.yml`.
+Each negative mutation must reach its own diagnostic ID. The missing-library
+probe retains the real module probes and adds a simulated import error; the
+zero-match probe retains the lock inputs while removing module use. A failure
+before the intended diagnostic does not prove the guard.
+
+Browser fixtures for Ansible status bind results through the preflight
+revision/generation owner before ageing timestamps. Inventory absence requires
+fresh per-kind evidence from every configured source. The VLAN action test
+first proves that an untested additional source prevents repair, then qualifies
+that source before testing preview, cancel and confirm.
+
 `scripts/check.ps1` is the executable SSoT of all quality gates (ADR-0031). It runs under Windows PowerShell 5.1 and PowerShell 7 and replaces "run these commands in order" lists; the commands below stay documented for targeted debugging of a single gate.
 
 The public entry point is deliberately small. It dot-sources focused modules from `scripts/lib/check/` for runtime helpers and the Fast, Integration and Release registries; importing a module defines functions only and neither emits output nor changes environment/current directory. Gate names, order, lane membership, exit codes, progress lines and JSON schema remain contracts of `check.ps1`, not separate module APIs. `VirtuSphere.CheckRunner.Tests.ps1` holds the pre-split golden catalog, help/invalid-call behavior, Fast selection and JSON shape, including negative mutants.

@@ -334,6 +334,8 @@ repo_esxi_inventory_apply($db, $esxi, [
     'datacenters' => ['DC-QA'],
     'datastores' => [['name' => 'DS-QA', 'capacity_bytes' => 1000000, 'free_bytes' => 400000]],
     'networks' => ['PG-QA'],
+    'queries' => array_fill_keys(['hosts', 'datacenters', 'datastores', 'networks_standard', 'networks_dvs', 'vms'], ['state' => VIRTUSPHERE_INVENTORY_QUERY_ANSWERED]),
+    'normalization' => array_fill_keys(['hosts', 'datacenters', 'datastores', 'networks'], ['raw' => 1, 'persistable' => 1, 'supported' => 1]),
 ]);
 repo_esxi_inventory_record_success($db, $esxi, ['api_type' => 'HostAgent', 'product_version' => '8.0', 'license_product' => 'free', 'license_free' => true, 'in_ha_cluster' => false, 'in_maintenance' => false]);
 echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';

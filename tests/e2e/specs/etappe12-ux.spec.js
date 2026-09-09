@@ -136,6 +136,14 @@ test('every live queue control refreshes blockers and disabled filled values sur
   expect(params.get('stagger_minutes')).toBe('7');
   expect(params.get('mission_id')).toBe(String(ids.mission));
   expect(params.get('start_wait')).toBe('99');
+  await expect(page.locator('[data-deploy-queue-button]')).toBeDisabled();
+  await expect(page.locator('[data-deploy-blocker-list]')).toContainText('Wählen Sie mindestens eine VM aus.');
+
+  const vmSelection = form.locator('input[name="vm_ids[]"]');
+  params = await changeAndReadBlockerRequest(page, () => vmSelection.check());
+  expect(params.getAll('vm_ids[]')).toEqual([await vmSelection.inputValue()]);
+  expect(params.get('start_wait')).toBe('99');
+  expect(params.get('stagger_minutes')).toBe('7');
   await expect(page.locator('[data-deploy-queue-button]')).toBeEnabled();
 });
 

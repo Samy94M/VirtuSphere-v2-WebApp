@@ -120,7 +120,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             ?>
                             <a href="<?php echo h(system_status_url('credential-' . $rowId, ['inventory' => $rowId])); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
                             <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>
-                            <small class="status-cadence"><?php echo h(credential_cadence_esxi($inventoryIntervalHours, $esxiState, $ansibleHostSelected)); ?></small>
+                            <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_esxi($inventoryIntervalHours, $esxiState, $ansibleHostSelected)); ?></small>
                             <?php if (credential_esxi_trust_mode($row) === VIRTUSPHERE_ESXI_TRUST_STRICT) { ?>
                                 <small class="status-trust"><?php echo portal_badge('info', __t('credentials.trust_strict')); ?></small>
                             <?php } else { ?>
@@ -135,7 +135,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState, $renderedAt); ?></a>
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                             <?php if ($pfState !== null && empty($pfState['evidence_current'])) { ?><small class="status-cadence"><?php echo h(__t('credentials.test_evidence_invalid')); ?></small><?php } ?>
-                            <small class="status-cadence"><?php echo h(credential_cadence_ansible()); ?></small>
+                            <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible()); ?></small>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>
