@@ -155,6 +155,13 @@ Abschluss daher nicht dem aktuellen Zugang zuordnen. Vor Migration 0052
 gespeicherte Ergebnisse besitzen diesen Nachweis nicht und erscheinen bis zum
 erneuten Test als unbekannt.
 
+Ergebniszeile und typisierter Audit sind ein gemeinsamer Datenbankabschluss.
+Der Auditcontext enthält bei jedem Volltest das boolesche Feld
+`evidence_stored`. Ein überholter Abschluss erhält `false`, Ausgang
+`discarded` und Auditresultat `warning`; er überschreibt keinen Status. Das
+Portal zeigt dafür nur den lokalisierten Hinweis zum verworfenen Ergebnis und
+keine technische Diagnose aus dem inzwischen überholten Lauf.
+
 Der Missionsnachweis wird direkt aus `deploy_jobs` gelesen: neuester terminaler Auftrag je `credential_ansible_id`, nur mit Mission; `queued`, `running`, `cancelling` und missionslose Inventaraufträge zählen nicht. Sein Status, Zeitpunkt und Jobprotokoll belegen den tatsächlich gelaufenen Modus. Ein erfolgreicher Start- oder Shutdown-Auftrag beweist beispielsweise weder SFTP-Neuaufbau noch MAC-Rückkanal und färbt daher die Volltest-Ampel nicht grün. Bei Zeitgleichheit entscheidet die höhere Job-ID. Es gibt keine zweite Statuskopie und kein zusätzliches Laufzeitprotokoll.
 
 „Volltest jetzt starten“ im Systemstatus verwendet denselben CSRF-/RBAC-geschützten Handler wie die Seite Zugangsdaten. Das Ergebnis aktualisiert `deploy_ansible_preflight_state` und schreibt wie bisher genau eine Auditzeile in **Protokolle → Sicherheit**, Kategorie `credentials`; **Prüfprotokolle öffnen** führt dorthin. Missionsausgabe bleibt ausschließlich in `deploy_job_logs`, erreichbar über den direkten Link am Missionsnachweis.

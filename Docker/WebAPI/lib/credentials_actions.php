@@ -61,6 +61,119 @@ function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): arra
     return ['error', __t('credentials.test_esxi_failed'), $result];
 }
 
+/**
+ * Completes one manual Ansible test after its external work returned.
+ *
+ * Persistence, audit and the one-shot operator result deliberately share this
+ * owner. A concurrent credential edit or newer test makes the completion stale:
+ * it may be audited as discarded, but it must not replace current evidence or
+ * expose technical detail from a configuration that is no longer current.
+ *
+ * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>} $result
+ */
+function credentials_complete_ansible_test(
+    mysqli $connection,
+    int $credentialId,
+    int $userId,
+    array $result,
+    int $configRevision,
+    int $testGeneration,
+    bool $returnToAnsibleStatus = false
+): void {
+    $isAllowlistWarning = credentials_test_is_allowlist_warning($result);
+    $failedComponent = ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP || $isAllowlistWarning)
+        ? $result['code']
+        : (string) ($result['context']['component'] ?? '');
+    $preflightStatus = VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_FAILED;
+    if ($result['ok']) {
+        $preflightStatus = $isAllowlistWarning
+            ? VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING
+            : VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK;
+    }
+    // The evidence row and its audit are one fact. The nested record helper
+    // joins this transaction, so a registry or insert failure rolls both back
+    // and can never recreate the split state from SC-022.
+    $evidenceStored = repo_transaction($connection, static function () use (
+        $connection,
+        $credentialId,
+        $userId,
+        $result,
+        $configRevision,
+        $testGeneration,
+        $preflightStatus,
+        $failedComponent,
+        $isAllowlistWarning
+    ): bool {
+        $stored = repo_ansible_preflight_record(
+            $connection,
+            $credentialId,
+            $preflightStatus,
+            $failedComponent,
+            $configRevision,
+            $testGeneration
+        );
+
+        if (!$stored) {
+            $testResult = VIRTUSPHERE_AUDIT_RESULT_WARNING;
+            $testContext = [
+                'outcome' => 'discarded',
+                'evidence_stored' => false,
+            ];
+        } else {
+            $testContext = [
+                'outcome' => $result['code'],
+                'evidence_stored' => true,
+            ];
+            if ($failedComponent !== '') {
+                $testContext['component'] = $failedComponent;
+            }
+            $warnedIp = trim((string) ($result['context']['ip'] ?? ''));
+            if ($warnedIp !== '') {
+                $testContext['ip'] = $warnedIp;
+            }
+            $testResult = $result['ok']
+                ? ($isAllowlistWarning ? VIRTUSPHERE_AUDIT_RESULT_WARNING : VIRTUSPHERE_AUDIT_RESULT_SUCCESS)
+                : VIRTUSPHERE_AUDIT_RESULT_FAILURE;
+        }
+
+        if (!audit_event(
+            $connection,
+            VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED,
+            'credential',
+            $credentialId,
+            $testResult,
+            $testContext,
+            $userId
+        )) {
+            throw new RuntimeException('Credential test audit could not be stored.');
+        }
+
+        return $stored;
+    });
+
+    if (!$evidenceStored) {
+        flash_set('warning', __t('credentials.test_result_discarded'));
+        return;
+    }
+
+    $flashType = $result['ok']
+        ? ($isAllowlistWarning ? 'warning' : 'success')
+        : 'error';
+    $flashAction = credentials_test_action($result);
+    if ($returnToAnsibleStatus && $flashAction === null) {
+        $flashAction = [
+            'url' => system_status_url('credential-' . $credentialId),
+            'label' => __t('credentials.test_action_system_status'),
+        ];
+    }
+    flash_set(
+        $flashType,
+        credentials_test_message($result),
+        $result['ok'] ? '' : (string) $result['detail'],
+        $flashAction
+    );
+}
+
 // After saving an ESXi credential: clear any auth pause and trigger an immediate
 // inventory pull (fail-soft; a scheduling hiccup must not fail the save).
 function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId, int $userId): void
@@ -239,77 +352,14 @@ function credentials_handle_post(mysqli $connection, array $user): string
                     crypto_decrypt_secret((string) $credential['secret_ciphertext']),
                     $apiBaseUrl
                 );
-                // Persist so the credential row and the System status page can show
-                // a badge instead of only this one-shot flash. An SFTP failure has
-                // no preflight marker, so its code doubles as the component name;
-                // the system-status detail then says what broke instead of a dash.
-                // The allowlist verdict rides the same slot: it is the check that
-                // raised the warning, not a broken component.
-                $isAllowlistWarning = credentials_test_is_allowlist_warning($result);
-                $failedComponent = ($result['code'] === VIRTUSPHERE_CREDENTIAL_TEST_SFTP || $isAllowlistWarning)
-                    ? $result['code']
-                    : (string) ($result['context']['component'] ?? '');
-                $preflightStatus = VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_FAILED;
-                if ($result['ok']) {
-                    $preflightStatus = $isAllowlistWarning
-                        ? VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_WARNING
-                        : VIRTUSPHERE_ANSIBLE_PREFLIGHT_STATUS_OK;
-                }
-                $evidenceStored = repo_ansible_preflight_record(
+                credentials_complete_ansible_test(
                     $connection,
                     $id,
-                    $preflightStatus,
-                    $failedComponent,
+                    (int) $user['id'],
+                    $result,
                     $configRevision,
-                    $testGeneration
-                );
-                $detail = $result['ok'] ? '' : (string) $result['detail'];
-                // The audit line names the failed component too ("preflight:
-                // pyvmomi"), so the trail answers WHAT broke without the flash.
-                $warnedIp = trim((string) ($result['context']['ip'] ?? ''));
-                if ($isAllowlistWarning) {
-                    $auditOutcome = 'ok with warning (allowlist' . ($warnedIp !== '' ? ': ' . $warnedIp : '') . ')';
-                } elseif ($result['ok']) {
-                    $auditOutcome = 'ok';
-                } else {
-                    $auditOutcome = 'failed (' . $result['code'] . ($failedComponent !== '' && $failedComponent !== $result['code'] ? ': ' . $failedComponent : '') . ')';
-                }
-                $testContext = [
-                    'outcome' => (string) ($result['code'] ?? ($result['ok'] ? 'ok' : 'failed')),
-                    'evidence_stored' => $evidenceStored,
-                ];
-                if ($failedComponent !== '') {
-                    $testContext['component'] = $failedComponent;
-                }
-                if ($warnedIp !== '') {
-                    $testContext['ip'] = $warnedIp;
-                }
-                $testResult = $result['ok']
-                    ? ($isAllowlistWarning ? VIRTUSPHERE_AUDIT_RESULT_WARNING : VIRTUSPHERE_AUDIT_RESULT_SUCCESS)
-                    : VIRTUSPHERE_AUDIT_RESULT_FAILURE;
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED, 'credential', $id, $testResult, $testContext, (int) $user['id']);
-                $flashType = 'error';
-                if ($result['ok']) {
-                    $flashType = $isAllowlistWarning ? 'warning' : 'success';
-                }
-                // Same shape as the ESXi branch above: a result whose fix lives on
-                // another page carries the way there.
-                $flashAction = credentials_test_action($result);
-                if ($returnToAnsibleStatus && $flashAction === null) {
-                    $flashAction = [
-                        'url' => system_status_url('credential-' . $id),
-                        'label' => __t('credentials.test_action_system_status'),
-                    ];
-                }
-                if (!$evidenceStored) {
-                    $flashType = 'warning';
-                    $detail = '';
-                }
-                flash_set(
-                    $flashType,
-                    $evidenceStored ? credentials_test_message($result) : __t('credentials.test_result_discarded'),
-                    $detail,
-                    $flashAction
+                    $testGeneration,
+                    $returnToAnsibleStatus
                 );
             }
         }

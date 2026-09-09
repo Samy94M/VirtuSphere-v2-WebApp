@@ -413,6 +413,57 @@ final class AuditRegistryTest extends TestCase
         }
     }
 
+    public function testCredentialTestContextAcceptsOnlyTypedEvidenceDisposition(): void
+    {
+        $definition = audit_event_definition(
+            VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED,
+            'credential',
+            '42',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+        );
+
+        self::assertSame(
+            ['evidence_stored' => true, 'outcome' => 'ok'],
+            audit_context_normalize(
+                ['outcome' => 'ok', 'evidence_stored' => true],
+                $definition,
+                VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+            )
+        );
+    }
+
+    public function testCredentialTestContextRefusesMissingEvidenceDisposition(): void
+    {
+        $definition = audit_event_definition(
+            VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED,
+            'credential',
+            '42',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Required audit context field is missing: evidence_stored');
+        audit_context_normalize(['outcome' => 'ok'], $definition, VIRTUSPHERE_AUDIT_RESULT_SUCCESS);
+    }
+
+    public function testCredentialTestContextRefusesStringEvidenceDisposition(): void
+    {
+        $definition = audit_event_definition(
+            VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED,
+            'credential',
+            '42',
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Audit context field must be bool: evidence_stored');
+        audit_context_normalize(
+            ['outcome' => 'ok', 'evidence_stored' => 'true'],
+            $definition,
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+        );
+    }
+
     /** @param array<string,mixed> $entry @return list<string|null> */
     private function objectIdsFor(array $entry): array
     {

@@ -66,7 +66,7 @@ davon, ob ein Ereignis sie deklariert.
 | `lib/directory_service.php:94,100,107` | `directory.controller_tested` | `directory_controller` / Controller-ID | `success` oder `failure` | `outcome` | `directory` |
 | `lib/directory_service.php:162` | `directory.bind_rejected` | `directory_config` / `active` | `warning` | `action` | `directory` |
 | `portal/credentials.php:115,143,148,152,159` | `credential.changed` | `credential` / Zugang-ID | `success` | `action`, optional `changes`, `trust_mode`, `selection_cleared` | `credentials` |
-| `portal/credentials.php:231` | `credential.tested` | `credential` / Zugang-ID | `success`, `warning` oder `failure` | `outcome`, optional `component`, `ip` | `credentials` |
+| `lib/credentials_actions.php` | `credential.tested` | `credential` / Zugang-ID | `success`, `warning` oder `failure` | `outcome`, boolesch `evidence_stored`; optional `component`, `ip`. Ein überholter Abschluss ist `warning` / `discarded` / `false`. | `credentials` |
 | `portal/credentials.php:76`, `lib/deploy_worker_inventory.php:208` | `credential.inventory_automation_changed` | `credential` / Zugang-ID | `recovered` oder `warning` | `action`, `reason` | `credentials` |
 | `portal/credentials.php:170` | `deploy.inventory_requested` | `credential` / Zugang-ID | `success` oder `warning` | `reason`, optional `job_id` | `deploy` |
 | `portal/missions.php:50,59,142`, `portal/mission_details.php:91` | `mission.changed` | `mission` / Missions-ID | `success` | `action`, optional `name`, `changes`, `vm_count` | `missions` |
