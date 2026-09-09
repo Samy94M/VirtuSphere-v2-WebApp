@@ -91,7 +91,7 @@ final class CreatorProvenanceTest extends TestCase
         $this->saveVm($missionId, $vmId, 'phpunitprov2', [
             'vm_creator' => 'FORGED',
             'vm_ram' => '4096',
-        ], $this->otherUserId, (string) ($bundle['updated_at'] ?? ''));
+        ], $this->otherUserId, (string) ($bundle['edit_version'] ?? ''));
 
         self::assertSame($original, $this->vmCreator($vmId));
         self::assertNotSame('FORGED', $this->vmCreator($vmId));
@@ -137,7 +137,7 @@ final class CreatorProvenanceTest extends TestCase
         self::assertSame('YES', (string) $column['Null'], 'pre-migration rows stay NULL, never backfilled');
     }
 
-    private function saveVm(int $missionId, ?int $vmId, string $name, array $overrides, int $userId, string $expectedUpdatedAt = ''): int
+    private function saveVm(int $missionId, ?int $vmId, string $name, array $overrides, int $userId, string $expectedVersion = ''): int
     {
         $payload = $overrides + [
             'vm_name' => $name,
@@ -163,7 +163,7 @@ final class CreatorProvenanceTest extends TestCase
             [['id' => 0, 'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '', 'vlan' => 'phpunit-vlan', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thin']],
             [],
-            $expectedUpdatedAt,
+            $expectedVersion,
             $userId
         );
     }

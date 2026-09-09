@@ -18,6 +18,7 @@ require_once __DIR__ . '/migrations/0049_supervisor_runtime_state.php';
 require_once __DIR__ . '/migrations/0050_mecm_rollout_hostname.php';
 require_once __DIR__ . '/migrations/0051_correlation_lookup_index.php';
 require_once __DIR__ . '/migrations/0052_ansible_preflight_generation.php';
+require_once __DIR__ . '/migrations/0053_edit_versions.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1219,6 +1220,7 @@ SQL;
     '0050_mecm_rollout_hostname' => migrate_0050_mecm_rollout_hostname(...),
     '0051_correlation_lookup_index' => migrate_0051_correlation_lookup_index(...),
     '0052_ansible_preflight_generation' => migrate_0052_ansible_preflight_generation(...),
+    '0053_edit_versions' => migrate_0053_edit_versions(...),
 ];
 try {
     $db = db();

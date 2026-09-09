@@ -198,7 +198,7 @@ function repo_mission_assert_vm_names_unique_for_activation(mysqli $db, int $mis
     }
 }
 
-function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, array $interfaces, array $disks, array $packages, string $expectedUpdatedAt, ?int $userId = null): int
+function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, array $interfaces, array $disks, array $packages, string $expectedVersion, ?int $userId = null, bool $requireVersion = false): int
 {
     if ($missionId <= 0) {
         throw new RuntimeException('Mission is required.');
@@ -215,7 +215,7 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
         ? (string) (repo_scalar($db, 'SELECT vm_creator FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$vmId, $missionId]) ?? '')
         : repo_creator_name($db, $userId);
 
-    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $values, $interfaces, $disks, $packages, $expectedUpdatedAt, $userId): int {
+    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $values, $interfaces, $disks, $packages, $expectedVersion, $userId, $requireVersion): int {
         if (repo_deploy_lock_mission($db, $missionId) === null) {
             throw new RuntimeException('Mission not found.');
         }
@@ -226,11 +226,11 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
 
         if ($vmId > 0) {
             repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
-            $current = repo_fetch_one($db, 'SELECT id, updated_at, vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
+            $current = repo_fetch_one($db, 'SELECT id, edit_version, vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
             if ($current === null) {
                 throw new RuntimeException('VM not found.');
             }
-            if ($expectedUpdatedAt !== '' && (string) $current['updated_at'] !== $expectedUpdatedAt) {
+            if (!repo_edit_version_matches($expectedVersion, $current['edit_version'], $requireVersion)) {
                 throw new RuntimeException('VM was changed by another user. Reload before saving.');
             }
 
@@ -259,7 +259,7 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
             repo_replace_interfaces($db, $vmId, $interfaces, true);
             repo_replace_disks($db, $vmId, $disks);
             repo_replace_packages($db, $vmId, $packages);
-            repo_execute($db, 'UPDATE deploy_vms SET updated_at = NOW() WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+            repo_advance_vm_edit_version($db, $vmId);
         } else {
             $values['mission_id'] = $missionId;
             $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;

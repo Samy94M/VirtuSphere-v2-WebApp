@@ -237,7 +237,7 @@ function repo_reassign_vlan(mysqli $db, string $from, string $to, ?string $expec
             throw new VmNetworkPreflightException($issues);
         }
 
-        $updateMission = $db->prepare('UPDATE deploy_missions SET wds_vlan = ? WHERE id = ?');
+        $updateMission = $db->prepare('UPDATE deploy_missions SET wds_vlan = ?, ' . VIRTUSPHERE_EDIT_VERSION_INCREMENT_SQL . ' WHERE id = ?');
         foreach ($scope['missions'] as $missionId) {
             $updateMission->bind_param('si', $to, $missionId);
             $updateMission->execute();

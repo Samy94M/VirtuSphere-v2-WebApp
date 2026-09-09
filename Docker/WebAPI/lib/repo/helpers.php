@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../log_redaction.php';
+require_once __DIR__ . '/edit_version.php';
 
 function repo_fetch_all(mysqli_result $result): array
 {
@@ -208,9 +209,17 @@ function repo_update_from_values(mysqli $db, string $table, array $values, strin
         return true;
     }
 
+    $versionedTable = in_array($table, ['deploy_vms', 'deploy_missions'], true);
+    if ($versionedTable && array_key_exists('edit_version', $values)) {
+        throw new InvalidArgumentException('edit_version is repository-owned.');
+    }
+
     $sets = [];
     foreach (array_keys($values) as $column) {
         $sets[] = "`{$column}` = ?";
+    }
+    if ($versionedTable) {
+        $sets[] = VIRTUSPHERE_EDIT_VERSION_INCREMENT_SQL;
     }
 
     $params = array_values($values);

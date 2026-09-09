@@ -69,7 +69,7 @@ Portal i18n is governed by ADR-0014. `Lang` and `__t()` are the SSoT for portal 
 
 The `data-confirm` attribute is the SSoT for portal confirmations (ADR-0013). It is the whole markup contract: a single `<dialog class="modal modal-confirm">` from `lib/layout_modals.php` (rendered once by `layout_footer()`) and one handler in `assets/core.js` build every prompt, and both portal modals (confirm, session expiry) share the `.modal` base in `components.css`. The accept button reuses the trigger's own localized label, so no translatable string lives in JavaScript; `data-confirm-action` overrides that label only when it would collide with the dialog's dismiss button.
 
-`portal_format_timestamp()` in `lib/layout.php` is the SSoT for rendering stored `created_at`/`updated_at`/`last_seen_at`/`locked_until` values in the portal (`d.m.Y H:i:s`). Route every new display-only timestamp through it instead of echoing the raw MySQL string. Values that round-trip through a form for optimistic-concurrency checks (the hidden `updated_at` field on `vm_edit.php`/`mission_details.php`) must stay raw, since they are compared byte-for-byte against the DB column.
+`portal_format_timestamp()` in `lib/layout.php` is the SSoT for rendering stored `created_at`/`updated_at`/`last_seen_at`/`locked_until` values in the portal (`d.m.Y H:i:s`). Route every new display-only timestamp through it instead of echoing the raw MySQL string. VM and mission editors use the raw `edit_version` counter for optimistic concurrency, independently of display timestamps. Portal writes require that version; the intentional legacy opt-out is documented in `docs/operations/edit-concurrency.md`.
 
 ## 3. Security Constraints
 

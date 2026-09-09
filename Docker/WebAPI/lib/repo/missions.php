@@ -269,20 +269,19 @@ function repo_get_mission(mysqli $db, int $missionId): ?array
 function repo_mission_has_mecm_active_vms(mysqli $db, int $missionId): bool
 {
     $registered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
-
     return repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE mission_id = ? AND mecm_sync_state = ? LIMIT 1', 'is', [$missionId, $registered]) !== null;
 }
 
-function repo_update_mission_checked(mysqli $db, int $missionId, array $missionData, string $expectedUpdatedAt, bool $requireLocation = false): bool
+function repo_update_mission_checked(mysqli $db, int $missionId, array $missionData, string $expectedVersion, bool $requireLocation = false, bool $requireVersion = false): bool
 {
-    return repo_transaction($db, static function () use ($db, $missionId, $missionData, $expectedUpdatedAt, $requireLocation): bool {
+    return repo_transaction($db, static function () use ($db, $missionId, $missionData, $expectedVersion, $requireLocation, $requireVersion): bool {
         // The mission is the first lock for every network writer. Staleness and
         // the WDS active-job gate therefore cover one indivisible edit.
         $mission = repo_fetch_one($db, 'SELECT * FROM deploy_missions WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$missionId]);
         if ($mission === null) {
             throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
         }
-        if ($expectedUpdatedAt !== '' && (string) $mission['updated_at'] !== $expectedUpdatedAt) {
+        if (!repo_edit_version_matches($expectedVersion, $mission['edit_version'], $requireVersion)) {
             throw new RuntimeException(validator_text('validate.mission_stale', 'The mission was changed by someone else in the meantime. Please reload and save again.'));
         }
         $values = [];
@@ -319,6 +318,7 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
             $sets[] = "`{$column}` = ?";
         }
         $sets[] = 'updated_at = NOW()';
+        $sets[] = VIRTUSPHERE_EDIT_VERSION_INCREMENT_SQL;
         $params = array_values($values);
         $types = str_repeat('s', count($params)) . 'i';
         $params[] = $missionId;

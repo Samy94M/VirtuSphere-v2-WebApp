@@ -10,6 +10,8 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.mission_p2')); ?></p>
             <p><?php echo h(__t('help_missions.mission_p3')); ?></p>
             <p><?php echo h(__t('help_missions.mission_p4')); ?></p>
+            <h3><?php echo h(__t('help_missions.edit_conflict_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.edit_conflict_p1')); ?></p>
         </section>
 
         <section class="panel">

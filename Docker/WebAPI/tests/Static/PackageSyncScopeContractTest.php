@@ -10,10 +10,11 @@ use PHPUnit\Framework\TestCase;
  *
  * The question this answers is "can a package re-import re-queue a VM for MECM,
  * or move it back in its lifecycle". The answer today is no, and the reason is
- * that mecm_packages.php references neither `deploy_vms`, nor `updated`, nor
- * `mecm_sync_state` anywhere. That is a real guarantee an operator relies on: a
- * catalog sync runs every minute, and a VM that starts installing again because a
- * package name changed would be a production incident.
+ * that mecm_packages.php changes only package assignments and the owning VM's
+ * configuration version. It never changes rollout or lifecycle state. That is a
+ * real guarantee an operator relies on: a catalog sync runs every minute, and a
+ * VM that starts installing again because a package name changed would be a
+ * production incident.
  *
  * But nothing pinned it. The guarantee held by construction, and construction is
  * exactly what changes when somebody adds "and while we're here, mark affected
@@ -29,7 +30,6 @@ final class PackageSyncScopeContractTest extends TestCase
      * VM state, with what each one would mean if it did.
      */
     private const FORBIDDEN = [
-        'deploy_vms' => 'a catalog sync must not read or write VM rows; a package name is not a reason to touch a VM',
         'mecm_sync_state' => 'this would re-queue a VM for device-sync from a catalog event',
         'lifecycle_state' => 'this would move a VM backwards or forwards in its lifecycle from a catalog event',
         'updated' => 'the legacy re-queue flag; setting it here would push a VM back into the MECM queue',
@@ -43,7 +43,7 @@ final class PackageSyncScopeContractTest extends TestCase
         return (string) file_get_contents($path);
     }
 
-    public function testTheSyncNeverTouchesVmState(): void
+    public function testTheSyncNeverTouchesRuntimeVmState(): void
     {
         $source = $this->source();
         // Comments are stripped first: this file explains what it does NOT do,
@@ -57,6 +57,49 @@ final class PackageSyncScopeContractTest extends TestCase
                 sprintf('mecm_packages.php references "%s": %s', $needle, $why)
             );
         }
+    }
+
+    public function testTheOnlyVmParentAccessIsOrderedLockAndConfigurationVersionTouch(): void
+    {
+        $source = $this->source();
+        $code = (string) preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $source);
+        $scopeHelper = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/repo/package_sync.php');
+
+        self::assertSame(1, substr_count($scopeHelper, 'deploy_vms'));
+        self::assertStringContainsString(
+            "SELECT id FROM deploy_vms WHERE id IN (' . \$placeholders . ') ORDER BY id FOR UPDATE",
+            $scopeHelper,
+            'the exact affected parents must be locked deterministically before assignment writes'
+        );
+        self::assertSame(1, substr_count($code, 'repo_advance_vm_edit_version('));
+        self::assertStringNotContainsString('UPDATE deploy_vms', $code, 'the endpoint may not add another VM mutation');
+
+        $versionHelper = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/repo/edit_version.php');
+        self::assertSame(1, substr_count($versionHelper, 'UPDATE deploy_vms SET'));
+        self::assertStringContainsString(
+            "UPDATE deploy_vms SET ' . VIRTUSPHERE_EDIT_VERSION_INCREMENT_SQL . ', updated_at = NOW() WHERE id = ?",
+            $versionHelper,
+            'the allowed helper must change only the configuration version and its display timestamp for one VM id'
+        );
+        foreach (['mecm_sync_state', 'lifecycle_state', 'updated ='] as $forbiddenState) {
+            self::assertStringNotContainsString($forbiddenState, $versionHelper);
+        }
+    }
+
+    public function testVmParentsAreLockedBeforeAnyPackageCatalogWrite(): void
+    {
+        $source = $this->source();
+        $scopeLock = strpos($source, '$relinkVmScope = packages_lock_relink_vm_scope(');
+        $catalogWrite = strpos($source, "catalog_retire_missing(\$connection, 'deploy_packages'");
+        self::assertIsInt($scopeLock);
+        self::assertIsInt($catalogWrite);
+        self::assertLessThan($catalogWrite, $scopeLock, 'VM -> package order must match the editor and avoid a deadlock cycle');
+
+        $relinkStart = strpos($source, 'function packages_relink_upgrades');
+        $relinkEnd = strpos($source, 'function packages_pick_successor', $relinkStart);
+        self::assertIsInt($relinkStart);
+        self::assertIsInt($relinkEnd);
+        self::assertStringNotContainsString('FOR UPDATE', substr($source, $relinkStart, $relinkEnd - $relinkStart), 'relink must use only the prelocked parent scope');
     }
 
     /** Zero-match guard: the file must still be the sync we think it is. */

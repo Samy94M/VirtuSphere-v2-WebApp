@@ -8,6 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/db.php';
 // The purge is part of the contract here: it and the relink compose into the one
 // path that could lose an assignment for good.
 require_once dirname(__DIR__, 2) . '/lib/repo/catalog.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/package_sync.php';
 
 // E3 hardening contract: retire instead of delete, assignment relink on
 // version bumps, threshold brake. Runs in-stack (db() + HTTP against
@@ -98,8 +99,10 @@ final class PackageSyncTest extends TestCase
         $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . (int) $v1['id'] . ')');
 
         // Second sync: v1 gone, v2 present -> retire + relink.
+        $editVersion = (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
         [$status, $body] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . 'Other-2.0']));
         self::assertSame(200, $status, $body);
+        self::assertGreaterThan($editVersion, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
 
         $v1After = $this->packageRow(self::PREFIX . '-1.0');
         self::assertNotNull($v1After, 'retired row must still exist');
@@ -117,6 +120,43 @@ final class PackageSyncTest extends TestCase
         $v1Again = $this->packageRow(self::PREFIX . '-1.0');
         self::assertSame('Aktiv', $v1Again['package_status']);
         self::assertNull($v1Again['retired_at']);
+    }
+
+    public function testRelinkScopeLocksVmBeforePackageAndLeavesALateAssignmentOutsideTheSnapshot(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
+        self::assertNotNull($v1);
+        $packageId = (int) $v1['id'];
+        $firstVmId = $this->seedVmWithPackages([$packageId]);
+        $missionId = (int) repo_scalar($this->db, 'SELECT mission_id FROM deploy_vms WHERE id = ?', 'i', [$firstVmId]);
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)', 'iss', [$missionId, 'PHPUNIT-E3-LATE', 'PHPUNIT-E3-LATE']);
+        $lateVmId = (int) $this->db->insert_id;
+
+        $late = new mysqli(
+            envboot_required('DB_HOST'),
+            envboot_required('DB_USER'),
+            envboot_required('DB_PASS'),
+            envboot_required('DB_NAME'),
+            (int) envboot_optional('DB_PORT', '3306')
+        );
+        $late->set_charset('utf8mb4');
+        $late->query("SET time_zone = '+00:00'");
+        $late->query('SET SESSION innodb_lock_wait_timeout = 2');
+
+        $this->db->begin_transaction();
+        try {
+            $scope = packages_lock_relink_vm_scope($this->db, [['id' => $packageId]]);
+            repo_execute($late, 'INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (?, ?)', 'ii', [$lateVmId, $packageId]);
+
+            self::assertSame([$firstVmId], $scope[$packageId] ?? []);
+        } finally {
+            $this->db->rollback();
+            $late->close();
+        }
+
+        self::assertSame([$packageId], $this->linkedPackageIds($lateVmId), 'a concurrent assignment outside the snapshot remains on the selectable retired row as that writer chose');
     }
 
     /**

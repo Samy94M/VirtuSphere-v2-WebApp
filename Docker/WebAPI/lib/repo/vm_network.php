@@ -256,6 +256,8 @@ function repo_vm_network_update_vlan_ids(mysqli $db, array $interfaceIds, string
         $stmt->bind_param('si', $targetVlan, $id);
         $stmt->execute();
         $updated += $stmt->affected_rows;
+        $vmId = (int) repo_scalar($db, 'SELECT vm_id FROM deploy_interfaces WHERE id = ?', 'i', [$id]);
+        repo_advance_vm_edit_version($db, $vmId);
     }
     return $updated;
 }

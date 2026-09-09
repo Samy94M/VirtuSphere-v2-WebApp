@@ -13,6 +13,7 @@ require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/settings.php';
 require_once __DIR__ . '/lib/repo/log.php';
 require_once __DIR__ . '/lib/repo/catalog.php';
+require_once __DIR__ . '/lib/repo/package_sync.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -110,8 +111,9 @@ function packages_retire_guard(mysqli $db, string $table, string $nameColumn, st
  * $newPackageIds are the ids this payload inserted (not updated), keyed by id.
  *
  * @param array<int, true> $newPackageIds
+ * @param array<int,list<int>> $relinkVmScope
  */
-function packages_relink_upgrades(mysqli $db, array $retiredRows, array $newPackageIds, string $clientIp): int
+function packages_relink_upgrades(mysqli $db, array $retiredRows, array $newPackageIds, array $relinkVmScope, string $clientIp): int
 {
     $relinked = 0;
     $summary = [];
@@ -136,20 +138,37 @@ function packages_relink_upgrades(mysqli $db, array $retiredRows, array $newPack
         }
 
         $newId = (int) $successor['id'];
-        // UPDATE IGNORE skips the rows whose VM already holds the successor
-        // (composite PK collision); those are then deleted, because keeping them
-        // would leave the VM with two links for one package. Scoped to exactly
-        // those VMs, not "everything still pointing at the old id": an unscoped
-        // DELETE also removed rows the UPDATE had failed on for any other reason.
-        $stmt = $db->prepare('UPDATE IGNORE deploy_vm_packages SET package_id = ? WHERE package_id = ?');
-        $stmt->bind_param('ii', $newId, $oldId);
-        $stmt->execute();
-        $moved = $stmt->affected_rows;
-
-        $stmt = $db->prepare('DELETE FROM deploy_vm_packages WHERE package_id = ? AND vm_id IN (SELECT vm_id FROM (SELECT vm_id FROM deploy_vm_packages WHERE package_id = ?) AS held)');
-        $stmt->bind_param('ii', $oldId, $newId);
-        $stmt->execute();
-        $collapsed = $stmt->affected_rows;
+        $moved = 0;
+        $collapsed = 0;
+        $move = $db->prepare('UPDATE IGNORE deploy_vm_packages SET package_id = ? WHERE package_id = ? AND vm_id = ?');
+        $holdsSuccessor = $db->prepare('SELECT 1 FROM deploy_vm_packages WHERE vm_id = ? AND package_id = ? LIMIT 1');
+        $collapse = $db->prepare('DELETE FROM deploy_vm_packages WHERE package_id = ? AND vm_id = ?');
+        foreach ($relinkVmScope[$oldId] ?? [] as $vmId) {
+            // The scope helper already owns this VM lock. Per-parent updates keep
+            // a late assignment outside the snapshot untouched and make every
+            // child change advance exactly its own editor version.
+            $move->bind_param('iii', $newId, $oldId, $vmId);
+            $move->execute();
+            $vmMoved = $move->affected_rows;
+            $vmCollapsed = 0;
+            if ($vmMoved === 0) {
+                // UPDATE IGNORE may skip the old row because this VM already
+                // holds the successor. Delete only that proven duplicate; an
+                // unrelated ignored update must never lose the assignment.
+                $holdsSuccessor->bind_param('ii', $vmId, $newId);
+                $holdsSuccessor->execute();
+                if ($holdsSuccessor->get_result()->fetch_row() !== null) {
+                    $collapse->bind_param('ii', $oldId, $vmId);
+                    $collapse->execute();
+                    $vmCollapsed = $collapse->affected_rows;
+                }
+            }
+            if ($vmMoved > 0 || $vmCollapsed > 0) {
+                repo_advance_vm_edit_version($db, $vmId);
+            }
+            $moved += $vmMoved;
+            $collapsed += $vmCollapsed;
+        }
 
         if ($moved > 0 || $collapsed > 0) {
             // The marker is what keeps the purge from deleting a row whose only
@@ -277,6 +296,7 @@ try {
     $connection->begin_transaction();
 
     $retiredPackageRows = [];
+    $relinkVmScope = [];
     if ($hasPackagePayload) {
         // Capture the soon-retired rows first so assignments can be relinked
         // to their successors after the upsert.
@@ -293,6 +313,7 @@ try {
         }
         $stmt->execute();
         $retiredPackageRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $relinkVmScope = packages_lock_relink_vm_scope($connection, $retiredPackageRows);
 
         catalog_retire_missing($connection, 'deploy_packages', 'package_name', 'package_status', $packageNames);
     } else {
@@ -332,7 +353,7 @@ try {
     }
 
     if ($retiredPackageRows !== []) {
-        packages_relink_upgrades($connection, $retiredPackageRows, $newPackageIds, $clientIp);
+        packages_relink_upgrades($connection, $retiredPackageRows, $newPackageIds, $relinkVmScope, $clientIp);
     }
 
     $connection->commit();

@@ -130,6 +130,10 @@ function vmListToUpdate($vmList, $connection)
                     throw new RuntimeException('VM update skipped: mission not found.');
                 }
                 repo_vm_network_assert_scope_idle($connection, $missionId, [$vmId]);
+                $currentVm = repo_fetch_one($connection, 'SELECT * FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
+                if ($currentVm === null) {
+                    throw new RuntimeException('VM update skipped: VM changed mission or was removed.');
+                }
                 if ($values !== []) {
                     $values = repo_validate_vm_payload($connection, (int) $currentVm['mission_id'], array_merge($currentVm, $values), $vmId);
                     repo_update_from_values($connection, 'deploy_vms', $values, 'id = ?', 'i', [$vmId]);
@@ -143,6 +147,9 @@ function vmListToUpdate($vmList, $connection)
                 if (repo_object_has($vm, 'Disks') || repo_object_has($vm, 'disks')) {
                     repo_replace_disks($connection, $vmId, repo_object_get($vm, 'Disks', repo_object_get($vm, 'disks', [])));
                 }
+                // Legacy partial bundles deliberately have no expected version.
+                // They still invalidate any portal snapshot, including child-only edits.
+                repo_advance_vm_edit_version($connection, $vmId);
                 $successCount++;
             }
 

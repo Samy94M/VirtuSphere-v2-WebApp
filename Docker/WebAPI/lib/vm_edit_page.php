@@ -70,8 +70,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             vm_parse_interfaces(is_array($_POST['interfaces'] ?? null) ? $_POST['interfaces'] : [], $mission),
             vm_parse_disks(is_array($_POST['disks'] ?? null) ? $_POST['disks'] : []),
             vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []),
-            request_string($_POST, 'updated_at'),
-            (int) $user['id']
+            request_string($_POST, 'edit_version'),
+            (int) $user['id'],
+            requireVersion: true
         );
         // On update, $vm is the pre-save bundle: diff the scalar columns so the
         // entry names the change (a datastore override, a renamed hostname). The

@@ -135,8 +135,9 @@ const FILE_SIZE_ALLOWANCES = [
     // fixed conditional VLAN-repair anchor registered by the URL owner.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
+    // U11 adds the require and ordered registry entry for migration 0053; its body stays separate.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1267,
+        'lines' => 1269,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

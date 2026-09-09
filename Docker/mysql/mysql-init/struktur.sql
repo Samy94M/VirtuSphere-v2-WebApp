@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS deploy_missions (
     autostart_wait_for_heartbeat TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    edit_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     UNIQUE KEY mission_name_unique (mission_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     updated TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    edit_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     -- Dedicated progress observations (ADR-0038). They are not lifecycle
     -- timestamps: warnings derived from them never change VM state.
     mecm_pending_since TIMESTAMP NULL,

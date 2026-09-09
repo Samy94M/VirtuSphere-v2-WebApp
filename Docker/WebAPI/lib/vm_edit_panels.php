@@ -167,7 +167,7 @@ declare(strict_types=1);
         <?php echo csrf_field(); ?>
         <input type="hidden" name="mission_id" value="<?php echo h((string) $missionId); ?>">
         <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-        <input type="hidden" name="updated_at" value="<?php echo h($vm['updated_at'] ?? ''); ?>">
+        <input type="hidden" name="edit_version" value="<?php echo h($vm['edit_version'] ?? ''); ?>">
         <input type="hidden" name="vm_disk" value="<?php echo h($vm['vm_disk'] ?? ''); ?>">
 
         <section class="panel">

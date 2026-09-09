@@ -58,11 +58,17 @@ final class EsxiVlanReassignTest extends TestCase
         $this->activateVlan($to);
 
         $missionA = $this->makeMission('m_a', $from);
-        $this->makeVm($missionA, 'PHPUNITRA1', $from);
+        $vmA = $this->makeVm($missionA, 'PHPUNITRA1', $from);
         $missionB = $this->makeMission('m_b', $other); // must stay untouched
         $this->makeVm($missionB, 'PHPUNITRA2', $other);
 
+        $missionVersion = repo_scalar($this->db, 'SELECT edit_version FROM deploy_missions WHERE id = ?', 'i', [$missionA]);
+        $vmVersion = repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmA]);
+        $otherVersion = repo_scalar($this->db, 'SELECT edit_version FROM deploy_missions WHERE id = ?', 'i', [$missionB]);
         $result = repo_reassign_vlan($this->db, $from, $to);
+        self::assertGreaterThan((int) $missionVersion, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_missions WHERE id = ?', 'i', [$missionA]));
+        self::assertGreaterThan((int) $vmVersion, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmA]));
+        self::assertSame($otherVersion, repo_scalar($this->db, 'SELECT edit_version FROM deploy_missions WHERE id = ?', 'i', [$missionB]));
         self::assertSame(1, $result['missions']);
         self::assertSame(1, $result['interfaces']);
 

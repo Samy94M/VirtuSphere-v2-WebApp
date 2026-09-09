@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'autostart_stop_action' => request_string($_POST, 'autostart_stop_action'),
                 'autostart_wait_for_heartbeat' => request_string($_POST, 'autostart_wait_for_heartbeat', '0'),
             ];
-            repo_update_mission_checked($connection, $missionId, $missionChanges, request_string($_POST, 'updated_at'), !$isTemplate);
+            repo_update_mission_checked($connection, $missionId, $missionChanges, request_string($_POST, 'edit_version'), !$isTemplate, requireVersion: true);
             // $mission holds the pre-update row (loaded before the POST branch), so
             // the diff names which columns changed and from what: this is the entry
             // that answers "who moved the mission to the wrong datastore". Notes are
@@ -240,7 +240,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
         <form class="stack" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="update">
-            <input type="hidden" name="updated_at" value="<?php echo h($mission['updated_at'] ?? ''); ?>">
+            <input type="hidden" name="edit_version" value="<?php echo h($mission['edit_version'] ?? ''); ?>">
             <div class="form-grid">
                 <label><?php echo h(__t('common.name')); ?><input name="mission_name"<?php echo form_control_attrs('update', 'mission_name'); ?> pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('update', 'mission_name', (string) ($mission['mission_name'] ?? ''))); ?>" required <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'mission_name'); ?></label>
                 <?php $wdsHintId = form_hint_id('update', 'wds_vlan'); ?>

@@ -16,6 +16,7 @@ Für einen neuen Betreiber ist die Lesereihenfolge bewusst betrieblich, nicht na
 Danach führen die spezialisierten Betriebshandbücher weiter:
 
 - [Installation mit Netzzugang](docs/INSTALLATION-ANLEITUNG.md); für einen luftspaltgetrennten Produktionshost stattdessen [Offline-Installation](docs/operations/offline-install.md).
+- [Gleichzeitige Bearbeitung](docs/operations/edit-concurrency.md): Versionsprüfung bei VM- und Missionsänderungen und Konflikte beim Speichern.
 - [ESXi-Inventar](docs/operations/esxi-inventory.md), [MECM-Integration](docs/operations/mecm-integration.md), [Active Directory über LDAPS](docs/operations/active-directory.md), [VM-Fortschrittsbeobachtung](docs/operations/vm-progress-observation.md), [HTTPS](docs/operations/https.md) und [Backup/Restore](docs/operations/backup.md).
 - [Deployment- und Supportmatrix](docs/DEPLOYMENT.md), [QA-Bedienung](docs/QA.md), [Qualitätsgates](docs/QUALITY-GATES.md) und [Pre-Ship-Checkliste](PRE-SHIP-CHECKLIST.md).
 

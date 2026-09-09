@@ -9,11 +9,11 @@ require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
 
 /**
- * Two operators editing the same VM. repo_save_vm() takes an $expectedUpdatedAt
+ * Two operators editing the same VM. repo_save_vm() takes an expected version
  * and, inside a FOR UPDATE transaction, rejects a save whose expectation no longer
  * matches the stored row: the second writer is told to reload rather than silently
  * clobbering the first writer's disks, interfaces or overrides. The portal renders
- * this hidden `updated_at` field and passes it back, so the guard is live, not
+ * this hidden `edit_version` field and passes it back, so the guard is live, not
  * theoretical.
  *
  * These pin that behaviour against the real database: a stale expectation is
@@ -48,8 +48,100 @@ final class VmEditConflictTest extends TestCase
     protected function tearDown(): void
     {
         if ($this->db !== null) {
+            $this->db->query('SET timestamp = 0');
             $this->cleanupTestRows();
         }
+    }
+
+    public function testSameSecondStaleVmSavePreservesFirstWriterAndChildren(): void
+    {
+        $this->db->query('SET timestamp = 1788900000');
+        [$missionId, $vmId] = $this->seedVm('cfl-seconds');
+        $version = $this->editVersion($vmId);
+        $stamp = repo_scalar($this->db, 'SELECT updated_at FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+        $this->saveVm($missionId, $vmId, 'cfl-seconds', ['vm_cpu' => '4'], $version);
+        $before = repo_get_vm_bundle($this->db, $vmId);
+        self::assertSame($stamp, $before['updated_at']);
+        self::assertNotSame($version, $this->editVersion($vmId));
+        try {
+            $this->saveVm($missionId, $vmId, 'cfl-seconds', ['vm_notes' => 'stale writer'], $version);
+            self::fail('Same-second stale VM writer must be rejected.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('changed by another user', $error->getMessage());
+        }
+        self::assertSame($before, repo_get_vm_bundle($this->db, $vmId));
+        $this->saveVm($missionId, $vmId, 'cfl-seconds', ['vm_cpu' => '6'], $this->editVersion($vmId));
+        self::assertSame('6', repo_get_vm_bundle($this->db, $vmId)['vm_cpu']);
+    }
+
+    public function testSameSecondMissionConflictAndExplicitPortalRequirement(): void
+    {
+        $this->db->query('SET timestamp = 1788900000');
+        [$missionId] = $this->seedVm('cfl-mission');
+        $mission = repo_get_mission($this->db, $missionId);
+        repo_update_mission_checked($this->db, $missionId, ['mission_notes' => 'first'], (string) $mission['edit_version'], requireVersion: true);
+        $before = repo_get_mission($this->db, $missionId);
+        self::assertSame($mission['updated_at'], $before['updated_at']);
+        foreach ([(string) $mission['edit_version'], '', '01', 'broken', (string) $mission['updated_at']] as $stale) {
+            try {
+                repo_update_mission_checked($this->db, $missionId, ['mission_notes' => 'lost'], $stale, requireVersion: true);
+                self::fail('Stale, missing and malformed portal versions must fail closed.');
+            } catch (RuntimeException $error) {
+                self::assertNotSame('', $error->getMessage());
+            }
+            self::assertSame($before, repo_get_mission($this->db, $missionId));
+        }
+        repo_update_mission_checked($this->db, $missionId, ['mission_notes' => 'legacy'], '');
+        self::assertNotSame($before['edit_version'], repo_get_mission($this->db, $missionId)['edit_version']);
+    }
+
+    public function testVmPortalRequirementRejectsMissingAndMalformedVersions(): void
+    {
+        [$missionId, $vmId] = $this->seedVm('cfl-vm-required');
+        $before = repo_get_vm_bundle($this->db, $vmId);
+        self::assertIsArray($before);
+
+        foreach (['', '01', 'broken', (string) $before['updated_at']] as $invalid) {
+            try {
+                $this->saveVm($missionId, $vmId, 'cfl-vm-required', ['vm_notes' => 'lost'], $invalid, true);
+                self::fail('A missing or malformed portal VM version must fail closed.');
+            } catch (RuntimeException $error) {
+                self::assertSame('VM was changed by another user. Reload before saving.', $error->getMessage());
+            }
+            self::assertSame($before, repo_get_vm_bundle($this->db, $vmId));
+        }
+    }
+
+    public function testLegacyChildOnlyWriteInvalidatesOpenVmEditor(): void
+    {
+        $this->db->query('SET timestamp = 1788900000');
+        [$missionId, $vmId] = $this->seedVm('cfl-child');
+        $version = $this->editVersion($vmId);
+        self::assertSame(1, vmListToUpdate([['id' => $vmId, 'disks' => [['disk_name' => 'Legacy', 'disk_size' => 80, 'disk_type' => 'thin']]]], $this->db));
+        $before = repo_get_vm_bundle($this->db, $vmId);
+        self::assertNotSame($version, $this->editVersion($vmId));
+        try {
+            $this->saveVm($missionId, $vmId, 'cfl-child', [], $version);
+            self::fail('A child-only legacy edit must invalidate the portal snapshot.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('changed by another user', $error->getMessage());
+        }
+        self::assertSame($before, repo_get_vm_bundle($this->db, $vmId));
+    }
+
+    public function testVersionRollsBackWithFailedBundle(): void
+    {
+        [$missionId, $vmId] = $this->seedVm('cfl-rollback');
+        $before = repo_get_vm_bundle($this->db, $vmId);
+        try {
+            repo_transaction($this->db, function () use ($missionId, $vmId): void {
+                $this->saveVm($missionId, $vmId, 'cfl-rollback', ['vm_cpu' => '4'], $this->editVersion($vmId));
+                throw new RuntimeException('rollback fixture');
+            });
+        } catch (RuntimeException $error) {
+            self::assertSame('rollback fixture', $error->getMessage());
+        }
+        self::assertSame($before, repo_get_vm_bundle($this->db, $vmId));
     }
 
     public function testAStaleExpectationIsRejected(): void
@@ -76,10 +168,10 @@ final class VmEditConflictTest extends TestCase
     {
         [$missionId, $vmId] = $this->seedVm('cfl-b');
 
-        $this->saveVm($missionId, $vmId, 'cfl-b', ['vm_cpu' => '4'], $this->updatedAt($vmId));
+        $this->saveVm($missionId, $vmId, 'cfl-b', ['vm_cpu' => '4'], $this->editVersion($vmId));
         // Reading the row back and saving again with the new stamp is what a
         // reload-then-edit does, and it must be accepted.
-        $this->saveVm($missionId, $vmId, 'cfl-b', ['vm_cpu' => '6'], $this->updatedAt($vmId));
+        $this->saveVm($missionId, $vmId, 'cfl-b', ['vm_cpu' => '6'], $this->editVersion($vmId));
 
         self::assertSame('6', (string) repo_scalar($this->db, 'SELECT vm_cpu FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
     }
@@ -87,7 +179,7 @@ final class VmEditConflictTest extends TestCase
     public function testAnEmptyExpectationOptsOutOfTheGuard(): void
     {
         [$missionId, $vmId] = $this->seedVm('cfl-c');
-        // No timestamp at all is the escape hatch for callers with no form to
+        // No version at all is the escape hatch for callers with no form to
         // carry one (import, legacy API): last-write, on purpose, and pinned so a
         // future refactor does not turn the opt-out into an accidental block.
         $this->saveVm($missionId, $vmId, 'cfl-c', ['vm_cpu' => '4'], '');
@@ -104,12 +196,12 @@ final class VmEditConflictTest extends TestCase
         return [$missionId, $vmId];
     }
 
-    private function updatedAt(int $vmId): string
+    private function editVersion(int $vmId): string
     {
-        return (string) (repo_scalar($this->db, 'SELECT updated_at FROM deploy_vms WHERE id = ?', 'i', [$vmId]) ?? '');
+        return (string) (repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]) ?? '');
     }
 
-    private function saveVm(int $missionId, ?int $vmId, string $name, array $overrides, string $expectedUpdatedAt): int
+    private function saveVm(int $missionId, ?int $vmId, string $name, array $overrides, string $expectedVersion, bool $requireVersion = false): int
     {
         $payload = $overrides + [
             'vm_name' => $name,
@@ -134,8 +226,9 @@ final class VmEditConflictTest extends TestCase
             [['id' => 0, 'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '', 'vlan' => 'phpunit-vlan', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thin']],
             [],
-            $expectedUpdatedAt,
-            $this->userId
+            $expectedVersion,
+            $this->userId,
+            $requireVersion
         );
     }
 

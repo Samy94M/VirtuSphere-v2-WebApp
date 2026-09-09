@@ -9,6 +9,7 @@ require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/../mac.php';
 require_once __DIR__ . '/../vm_progress.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/edit_version.php';
 require_once __DIR__ . '/status_events.php';
 // The VM delete paths refuse to run while a deploy of the mission is in flight;
 // that predicate and the mission lock it needs live in the job repo.
