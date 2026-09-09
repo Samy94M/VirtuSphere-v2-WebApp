@@ -17,6 +17,32 @@ require_once dirname(__DIR__, 2) . '/lib/deploy_form_state.php';
  */
 final class DeployFormStateTest extends TestCase
 {
+    public function testPortalSelectionMarkerDistinguishesExplicitEmptyFromWholeMissionPayload(): void
+    {
+        $legacyOrInternal = deploy_queue_normalize_input(['mission_id' => '4', 'vm_ids' => []]);
+        self::assertSame([], $legacyOrInternal['vm_ids']);
+        self::assertFalse($legacyOrInternal['vm_selection_explicit']);
+
+        $portal = deploy_queue_normalize_input([
+            'mission_id' => '4',
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD => '4',
+            'vm_ids' => [],
+        ]);
+        self::assertSame([], $portal['vm_ids']);
+        self::assertTrue($portal['vm_selection_explicit']);
+
+        // The live endpoint and final gate normalize once before calling the
+        // blocker owner, which normalizes again. The decision must survive.
+        self::assertTrue(deploy_queue_normalize_input($portal)['vm_selection_explicit']);
+
+        $stale = deploy_queue_normalize_input([
+            'mission_id' => '5',
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD => '4',
+            'vm_ids' => ['3'],
+        ]);
+        self::assertFalse($stale['vm_selection_explicit']);
+    }
+
     #[RunInSeparateProcess]
     #[PreserveGlobalState(false)]
     public function testAMissionChangeRestoresTheQueryStringButNotTheVmSelection(): void
@@ -31,6 +57,47 @@ final class DeployFormStateTest extends TestCase
         self::assertSame('5', deploy_form_value('powercycle_wait', '5'));
         // The checkboxes named the VMs of the mission being left, so the new
         // mission starts fully checked instead of empty.
+        self::assertNull(deploy_form_vm_selection());
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testSameMissionNavigationRestoresTheVmSubset(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_GET = [
+            'mission_id' => '4',
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD => '4',
+            'vm_ids' => ['3', 7, ['nested'], 'abc', '0'],
+        ];
+
+        self::assertSame([3 => true, 7 => true], deploy_form_vm_selection());
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testSameMissionNavigationRestoresAnExplicitlyEmptyVmSelection(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_GET = [
+            'mission_id' => '4',
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD => '4',
+        ];
+
+        self::assertSame([], deploy_form_vm_selection());
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testMismatchedSelectionProvenanceCannotSelectIdsFromAnotherMission(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_GET = [
+            'mission_id' => '5',
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD => '4',
+            'vm_ids' => ['3'],
+        ];
+
         self::assertNull(deploy_form_vm_selection());
     }
 

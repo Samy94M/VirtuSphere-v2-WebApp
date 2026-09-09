@@ -48,6 +48,7 @@ if ($deployPreview !== null) { ?>
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="start">
             <input type="hidden" name="confirmed" value="1">
+            <input type="hidden" name="vm_selection_mission_id" value="<?php echo h((string) $selectedMissionId); ?>">
             <?php foreach (VIRTUSPHERE_DEPLOY_QUEUE_FIELDS as $field) { ?>
                 <input type="hidden" name="<?php echo h($field); ?>" value="<?php echo h(deploy_form_value($field)); ?>">
             <?php } ?>
@@ -76,6 +77,7 @@ if ($deployPreview !== null) { ?>
     <form class="form-grid" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
         <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="start">
+        <input type="hidden" name="vm_selection_mission_id" value="<?php echo h((string) $selectedMissionId); ?>">
         <label><?php echo h(__t('deploy.label_mission')); ?>
             <select name="mission_id" required data-deploy-mission <?php echo $missions === [] ? 'disabled' : ''; ?>>
                 <option value=""><?php echo h(__t('deploy.select_mission')); ?></option>

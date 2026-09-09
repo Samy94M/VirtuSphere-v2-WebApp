@@ -32,7 +32,8 @@ final class DeployFormStateContractTest extends TestCase
     private const NON_CARRIED = [
         'action' => 'the dispatch key the form sets itself, never a user value',
         'verbose' => 'a checkbox: its absence is its "off" value, so it is read and re-posted on its own',
-        'vm_ids[]' => 'a selection bound to one mission; a mission change replaces the whole list',
+        'vm_ids[]' => 'a mission-bound list carried separately with provenance only for same-mission navigation',
+        'vm_selection_mission_id' => 'query/POST provenance for vm_ids[], never part of a durable job payload',
     ];
 
     private function deployPage(): string
@@ -118,6 +119,11 @@ final class DeployFormStateContractTest extends TestCase
             $this->deployPage(),
             'the schedule preview must re-post the carried field list, not a hand-written copy of it'
         );
+        self::assertGreaterThanOrEqual(
+            2,
+            substr_count($this->deployPage(), 'name="vm_selection_mission_id"'),
+            'the queue form and its preview confirmation must keep explicit-selection provenance'
+        );
     }
 
     public function testThePageReadsItsValuesThroughTheDeployFormReaders(): void
@@ -135,6 +141,28 @@ final class DeployFormStateContractTest extends TestCase
             "deploy.php reads the sticky stash directly.\n"
             . 'Use deploy_form_value()/deploy_form_vm_selection(), or the field survives a failed validation and nothing else.'
         );
+    }
+
+    public function testTheNavigationCarrierKeepsSelectionOnlyWithMatchingMissionProvenance(): void
+    {
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $script = (string) file_get_contents($root . '/portal/assets/deploy_form.js');
+
+        self::assertStringContainsString("params.append(name, field.value)", $script);
+        self::assertStringContainsString("params.set('vm_selection_mission_id', sourceMissionId)", $script);
+        self::assertStringContainsString('missionId === sourceMissionId && field.checked', $script);
+        self::assertStringContainsString('missionId && missionId === sourceMissionId', $script);
+
+        $state = (string) file_get_contents($root . '/lib/deploy_form_state.php');
+        self::assertStringContainsString(
+            "const VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD = 'vm_selection_mission_id'",
+            $state
+        );
+        self::assertStringContainsString('$selectionMissionId !== $missionId', $state);
+
+        $blockers = (string) file_get_contents($root . '/lib/deploy_blockers.php');
+        self::assertStringContainsString("\$state['vm_selection_explicit'] && \$state['vm_ids'] === []", $blockers);
+        self::assertStringContainsString("deploy_selection_blocker('selection_empty'", $blockers);
     }
 
     public function testEveryDeployPanelIsRequiredAndEveryRequireExists(): void

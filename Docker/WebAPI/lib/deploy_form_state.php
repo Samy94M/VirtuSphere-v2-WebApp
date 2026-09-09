@@ -16,9 +16,9 @@ require_once __DIR__ . '/repo/deploy_job_input.php';
  *    (form_remember()),
  *  - on the schedule preview, which answers the POST directly instead of
  *    redirecting, so the request itself is the newest truth,
- *  - after a mission change, which deploy_form.js turns into a GET because the VM
- *    list, the storage table and the per-host warnings are rendered server-side
- *    and only exist for the selected mission.
+ *  - after queue-form navigation, which deploy_form.js turns into a GET because
+ *    the VM list, the storage table and the per-host warnings are rendered
+ *    server-side and only exist for the selected mission.
  *
  * Only the first path had a reader, so changing the mission (or filtering the
  * job list, which writes the same mission_id) reset the credential pair, the
@@ -34,10 +34,11 @@ require_once __DIR__ . '/repo/deploy_job_input.php';
  * The queue form's scalar fields. Every one of them must survive all three
  * paths, and the schedule preview's confirm step re-posts exactly this list.
  *
- * The form's three other controls are deliberately absent: `action` is the
- * dispatch key the form sets itself, `verbose` is a checkbox whose absence is
- * its "off" value, and `vm_ids[]` is a selection bound to one mission (see
- * deploy_form_vm_selection()). tests/Static/DeployFormStateContractTest.php
+ * The form's other controls are deliberately absent: `action` is the dispatch
+ * key the form sets itself, `verbose` is a checkbox whose absence is its "off"
+ * value, `vm_ids[]` is a selection bound to one mission, and the selection's
+ * mission marker is provenance rather than a job field. See
+ * deploy_form_vm_selection(); tests/Static/DeployFormStateContractTest.php
  * pins the list against the form's real controls in both directions.
  */
 const VIRTUSPHERE_DEPLOY_QUEUE_FIELDS = [
@@ -53,13 +54,28 @@ const VIRTUSPHERE_DEPLOY_QUEUE_FIELDS = [
 ];
 
 /**
+ * Form/query provenance for a carried VM checkbox selection. Its value is the
+ * mission whose checkbox rows produced `vm_ids[]`; it is deliberately outside
+ * VIRTUSPHERE_DEPLOY_QUEUE_FIELDS and therefore never enters a job payload.
+ */
+const VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD = 'vm_selection_mission_id';
+
+/**
  * Canonical queue input shared by the HTML handler, the read-only live blocker
  * endpoint and the final backend recheck.
  *
- * @return array{mission_id:int,credential_esxi_id:int,credential_ansible_id:int,mode:string,powercycle_wait:mixed,start_wait:mixed,start_mode:string,scheduled_at:string,stagger_minutes:mixed,verbose:bool,vm_ids:list<int>}
+ * `vm_selection_explicit` is true only for the portal form's mission-bound
+ * checkbox list. Repository/internal callers that omit the marker retain the
+ * established `vm_ids=[]` meaning of the whole mission.
+ *
+ * @return array{mission_id:int,credential_esxi_id:int,credential_ansible_id:int,mode:string,powercycle_wait:mixed,start_wait:mixed,start_mode:string,scheduled_at:string,stagger_minutes:mixed,verbose:bool,vm_ids:list<int>,vm_selection_explicit:bool}
  */
 function deploy_queue_normalize_input(array $input): array
 {
+    $missionId = max(0, request_int($input, 'mission_id'));
+    $selectionMissionId = max(0, request_int($input, VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD));
+    $selectionExplicit = filter_var($input['vm_selection_explicit'] ?? false, FILTER_VALIDATE_BOOLEAN)
+        || ($missionId > 0 && $selectionMissionId === $missionId);
     $vmIds = [];
     $submittedVmIds = is_array($input['vm_ids'] ?? null) ? $input['vm_ids'] : [];
     foreach ($submittedVmIds as $vmId) {
@@ -69,7 +85,7 @@ function deploy_queue_normalize_input(array $input): array
     }
 
     return [
-        'mission_id' => max(0, request_int($input, 'mission_id')),
+        'mission_id' => $missionId,
         'credential_esxi_id' => max(0, request_int($input, 'credential_esxi_id')),
         'credential_ansible_id' => max(0, request_int($input, 'credential_ansible_id')),
         'mode' => deploy_job_normalize_mission_mode(request_string($input, 'mode', VIRTUSPHERE_DEPLOY_MODE_FULL)),
@@ -80,6 +96,9 @@ function deploy_queue_normalize_input(array $input): array
         'stagger_minutes' => $input['stagger_minutes'] ?? '',
         'verbose' => filter_var($input['verbose'] ?? false, FILTER_VALIDATE_BOOLEAN),
         'vm_ids' => array_keys($vmIds),
+        // Keep normalization idempotent: the live endpoint and final queue gate
+        // pass their already-normalized state into deploy_queue_blockers().
+        'vm_selection_explicit' => $selectionExplicit,
     ];
 }
 
@@ -116,11 +135,16 @@ function deploy_form_value(string $field, string $default = ''): string
  * The checked VM ids as a lookup, or null when this render carries no selection
  * at all and every VM of the mission starts checked.
  *
- * A mission change is the null case on purpose: those checkboxes named the VMs
- * of the mission the operator just left, and the whole new mission is the right
- * default. The two other paths must reflect exactly what was submitted, or a
- * corrected resubmit silently widens the deploy to the whole mission, which is
- * what the preview render did while the preview above it listed the subset.
+ * A GET can be either a same-mission navigation (for example the job filter) or
+ * a real mission change. deploy_form.js marks only the former with the mission
+ * that owns the carried checkbox rows. Matching provenance restores the exact
+ * selection, including an absent `vm_ids` key as explicitly empty; missing or
+ * mismatched provenance returns null so a new mission starts fully checked.
+ *
+ * POST and sticky state always belong to the mission in that one chosen source
+ * and must reflect exactly what was submitted, or a corrected resubmit silently
+ * widens the deploy to the whole mission, which is what the preview render did
+ * while the preview above it listed the subset.
  *
  * @return array<int, true>|null
  */
@@ -128,7 +152,14 @@ function deploy_form_vm_selection(): ?array
 {
     $state = deploy_form_state();
     if ($state['kind'] === 'query') {
-        return null;
+        $missionId = max(0, request_int($state['values'], 'mission_id'));
+        $selectionMissionId = max(0, request_int(
+            $state['values'],
+            VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD
+        ));
+        if ($missionId === 0 || $selectionMissionId !== $missionId) {
+            return null;
+        }
     }
 
     $submitted = $state['values']['vm_ids'] ?? null;

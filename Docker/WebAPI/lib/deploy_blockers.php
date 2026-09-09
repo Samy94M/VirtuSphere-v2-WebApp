@@ -231,14 +231,17 @@ function deploy_queue_blockers(mysqli $db, array $input): array
             );
         }
     }
-    if ($selectedMission !== null && $state['vm_ids'] !== []) {
+    if ($selectedMission !== null && $state['vm_selection_explicit'] && $state['vm_ids'] === []) {
+        $blockers[] = deploy_selection_blocker('selection_empty', __t('deploy.err_selection_empty'));
+    } elseif ($selectedMission !== null && $state['vm_ids'] !== []) {
         $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
         if (array_intersect($state['vm_ids'], $missionVmIds) === []) {
             $blockers[] = deploy_selection_blocker('selection_gone', __t('deploy.err_selection_gone'));
         }
     }
 
-    if ($selectedMission !== null && $missionVms !== []) {
+    if ($selectedMission !== null && $missionVms !== []
+        && !($state['vm_selection_explicit'] && $state['vm_ids'] === [])) {
         $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
         $scopeIds = $state['vm_ids'] === [] ? [] : array_values(array_intersect($state['vm_ids'], $missionVmIds));
         if ($state['vm_ids'] === [] || $scopeIds !== []) {

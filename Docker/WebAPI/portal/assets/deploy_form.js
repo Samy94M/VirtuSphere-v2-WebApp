@@ -9,16 +9,23 @@
     // deploy.php travels without a change here. form.elements rather than
     // FormData, because FormData drops disabled controls and the power-cycle wait
     // time deliberately keeps its typed value while a non-power mode disables it.
-    // Skipped on purpose: an unchecked box, whose absence IS "off" on the PHP
-    // side, and vm_ids[], which names the VMs of the mission being left.
-    function deployQueueQuery(form, missionId) {
+    // The checkbox list travels only within the mission that rendered it. Its
+    // provenance marker distinguishes an explicitly empty same-mission list
+    // from a real mission change, where the new mission starts with its own VMs.
+    function deployQueueQuery(form, missionId, sourceMissionId) {
         var params = new URLSearchParams();
         if (missionId) {
             params.set('mission_id', missionId);
         }
         Array.prototype.forEach.call(form.elements, function (field) {
             var name = field.name;
-            if (!name || name === '_csrf' || name === 'action' || name === 'mission_id' || name === 'vm_ids[]') {
+            if (!name || name === '_csrf' || name === 'action' || name === 'mission_id' || name === 'vm_selection_mission_id') {
+                return;
+            }
+            if (name === 'vm_ids[]') {
+                if (missionId === sourceMissionId && field.checked) {
+                    params.append(name, field.value);
+                }
                 return;
             }
             if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) {
@@ -29,21 +36,29 @@
             }
             params.set(name, field.value);
         });
+        if (missionId && missionId === sourceMissionId) {
+            params.set('vm_selection_mission_id', sourceMissionId);
+        }
 
         return params.toString();
     }
 
-    function deployNavigate(form, missionId) {
-        var query = deployQueueQuery(form, missionId);
+    function deployNavigate(form, missionId, sourceMissionId) {
+        var query = deployQueueQuery(form, missionId, sourceMissionId);
         window.location = 'deploy.php' + (query ? '?' + query : '');
     }
+
+    // Keep the mission that produced the current checkbox rows. Reading the
+    // select inside its change handler is too late: it already holds the target.
+    var renderedMission = document.querySelector('[data-deploy-mission]');
+    var renderedMissionId = renderedMission ? renderedMission.value : '';
 
     // Mission select navigates; select-all flips the VM checkboxes. Registered
     // before initDeployStorage() so its recompute sees the flipped state.
     document.addEventListener('change', function (event) {
         var deployMission = event.target.closest('[data-deploy-mission]');
         if (deployMission) {
-            deployNavigate(deployMission.form, deployMission.value);
+            deployNavigate(deployMission.form, deployMission.value, renderedMissionId);
             return;
         }
 
@@ -71,7 +86,7 @@
             // "All missions" is 0 here, not an empty value.
             var missionId = picked && picked.value !== '0' ? picked.value : '';
             event.preventDefault();
-            deployNavigate(mission.form, missionId);
+            deployNavigate(mission.form, missionId, renderedMissionId);
         });
     }
 

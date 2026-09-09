@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'err_selection_empty' => 'Select at least one VM.',
     'blocker_create_history' => 'The earlier create operation for :name in job #:job is unresolved. Review its create result before starting another job.',
     'blocker_create_credential_target' => 'This credential still identifies an active deployment job or an unresolved VM creation. Its target cannot currently be changed or deleted.',
     'service_expect_ready' => 'The deploy service is ready: the job starts right away.',
