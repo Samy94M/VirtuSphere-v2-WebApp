@@ -50,7 +50,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     // asks it for the live handle. A local $db captured in a closure is a dead
     // object the moment the channel reconnects, and a database outage during a
     // playbook must not end the SSH stream: the remote work continues either way.
-    $channel = deploy_worker_open_db_channel($db, $jobId, $workerId);
+    $channel = deploy_worker_open_db_channel($db, $jobId, $workerId, $job);
 
     // Time-based heartbeat (AP6): the bounded SSH transport calls this on every
     // silent read slice, so a playbook that is busy without printing (a long
@@ -77,8 +77,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         if ($vmIds === []) {
             $vmIds = $materializedVmIds;
         }
-        $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), (int) $job['mission_id'], 'deploy job ' . $jobId . ' started', $vmIds);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), $job, 'deploy job ' . $jobId . ' started', $vmIds);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         $esxiCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
@@ -116,7 +116,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
         deploy_worker_settle_db_channel($channel, $options, null);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
         if ($preflightExitCode !== 0) {
             $failedComponent = ansible_preflight_failed_component($preflightOutput);
             throw new RuntimeException(
@@ -132,7 +132,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $remoteDir = (string) $artifacts['remote_dir'];
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy files prepared: ' . implode(', ', (array) $artifacts['files']));
         $channel->tick(0);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         // Autostart preflight (ADR-0025). Runs only when this job would write the
         // policy, and may drop the autostart step from a full pipeline without
@@ -149,7 +149,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
         });
         deploy_worker_settle_db_channel($channel, $options, null);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         // The per-VM create section (Etappe 14B). It runs BEFORE the sequence
         // below and owns the create playbook entirely: one call per VM, one
@@ -161,7 +161,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             $createOutcome = deploy_worker_run_create_section(
                 $channel,
                 $job,
-                deploy_worker_job_fence($channel->connection(), $jobId, $workerId),
+                deploy_worker_job_fence($channel->connection(), $jobId, $workerId, $job),
                 [
                     'credential' => $ansibleCredential,
                     'secret' => $ansibleSecret,
@@ -173,7 +173,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             );
             // Honours a cancel that was accepted while the last create VM ran,
             // and a lease this worker lost in the meantime.
-            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
             if (!$createOutcome['all_successful']) {
                 deploy_worker_conclude_create_section($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles, $createOutcome);
 
@@ -192,7 +192,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             // stop anything the portal had already promised it would stop. All
             // four outcomes live in one helper: still ours and running, our own
             // cancel to confirm, ownership lost, or somebody else concluded it.
-            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
             // Named from the descriptor, not derived from the marker stream:
             // with one command per playbook the worker KNOWS which step it is
@@ -240,7 +240,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 
         // The last boundary. A cancel committed while the final playbook ran is
         // honoured here rather than being overtaken by a success.
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         deploy_worker_conclude_sequence($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles);
     } catch (DeployWorkerCancelled $cancelled) {
@@ -252,7 +252,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         repo_append_deploy_job_log($channel->connection(), $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
         $terminalStatus = deploy_worker_finish_job(
             $channel->connection(),
-            $jobId,
+            $job,
             $workerId,
             VIRTUSPHERE_DEPLOY_STATUS_FAILED,
             $message,

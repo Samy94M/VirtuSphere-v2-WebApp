@@ -28,9 +28,9 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('deploy_worker_job_mac_result($db, $jobId)', $outcome);
         self::assertStringContainsString('no usable MAC import result was recorded', $outcome);
         self::assertStringContainsString('MAC import failed for every VM of this job.', $outcome);
-        self::assertStringContainsString('deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);', $outcome);
+        self::assertStringContainsString('deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);', $outcome);
         self::assertStringNotContainsString(
-            'deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary)',
+            'deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary)',
             $outcome,
             'partial result belongs in result_json, not last_error'
         );
@@ -97,11 +97,11 @@ final class DeployConvergenceContractTest extends TestCase
         $outcome = $this->workerSource();
 
         self::assertStringContainsString('catch (DeployWorkerCancelled', $this->workerSource());
-        self::assertStringContainsString("cancelled while deploying', \$vmIds, [], true)", $outcome);
+        self::assertStringContainsString("cancelled while deploying', \$vmIds, true)", $outcome);
         self::assertStringContainsString("\$lifecycle !== VIRTUSPHERE_LIFECYCLE_DEPLOYING", $outcome);
         // The reaper keeps VMs whose import already committed.
         self::assertMatchesRegularExpression(
-            '/reaped after stale heartbeat.*successful_vm_ids/s',
+            '/deploy_worker_fail_locked_job_vms.*deploy_worker_locked_imported_vm_ids/s',
             $outcome
         );
     }

@@ -27,6 +27,13 @@ require_once __DIR__ . '/deploy_worker_runtime.php';
  */
 class DeployWorkerDbOperations
 {
+    private ?array $claim = null;
+
+    public function __construct(?array $claim = null)
+    {
+        $this->claim = $claim;
+    }
+
     /** @throws mysqli_sql_exception when the database is unreachable */
     public function appendLog(mysqli $db, int $jobId, string $stream, string $line): void
     {
@@ -51,13 +58,13 @@ class DeployWorkerDbOperations
      */
     public function assertJobIsOurs(mysqli $db, int $jobId, string $workerId): void
     {
-        deploy_worker_assert_job_is_ours($db, $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, true, $this->claim);
     }
 
     /** Reconnecting is an observation during execution, never a cancel boundary. */
     public function assertJobStillOwned(mysqli $db, int $jobId, string $workerId): void
     {
-        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, false);
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, false, $this->claim);
     }
 
     /** The container-level liveness file; never touches the database. */

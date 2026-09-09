@@ -166,3 +166,28 @@ bounded result and `failed/configuration_blocked` terminal state therefore use
 one atomic owner/status CAS. A cancellation that wins first is confirmed as
 `cancelled` without retaining `kind=network_preflight`; the cancellation detail
 uses the pre-remote wording and never claims an already-running remote step.
+
+## Amendment (2026-09-09): VM convergence belongs to the original claim
+
+A worker carries the claim's original worker id, token, lease epoch, attempt
+and execution generation through every VM and terminal write. Reading a fresh
+token after a reconnect cannot adopt a successor's claim. The current ownership
+read and its VM writes share Mission -> Job -> Runtime -> VM locks, with a
+lifecycle compare-and-swap and the current committed MAC successes preserved.
+An older REPEATABLE READ snapshot cannot supply the final MAC verdict.
+
+Cancellation confirmation, failure/success convergence and terminal publication
+are one transaction. A terminal, deleted or foreign claim performs no VM write;
+maintenance owns any remaining orphaned state. Reaper convergence also happens
+before its terminal commit, so a successor cannot be claimed between the old
+job's end and its VM write. Its wrapper performs no later VM sweep.
+Before any VM convergence, the reaper locks its complete Create row set by
+job id and position, matching historical admission scans even when heartbeat
+age orders the batch differently. `DeployReaperCreateBatchTest` checks this
+boundary through a second MySQL session using `NOWAIT`.
+
+`DeployWorkerVmOwnershipFenceTest` covers the individual ownership fields and
+atomic rollback. `DeployWorkerVmOwnershipRaceTest` exercises two MySQL sessions
+at callback, reaper and successor-claim boundaries, including lock-wait refusal
+and an earlier transaction snapshot. Callback HTTP behavior remains covered
+separately by `MacImportCallbackTest`.

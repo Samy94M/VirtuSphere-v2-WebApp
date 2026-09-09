@@ -137,7 +137,7 @@ function repo_deploy_job(mysqli $db, int $jobId): ?array
 {
     return repo_fetch_one(
         $db,
-        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.terminal_reason_code, j.terminal_reason_detail, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.cancel_requested_at, j.cancel_requested_by, cu.name AS cancel_requested_by_name, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
+        'SELECT j.id, j.mission_id, m.mission_name, j.user_id, u.name AS user_name, j.status, j.locked_at, j.locked_by, j.lock_token, j.worker_epoch, LOWER(HEX(j.execution_generation_id)) AS execution_generation_id, j.heartbeat_at, j.attempts, j.last_error, j.payload_json, j.result_json, j.terminal_reason_code, j.terminal_reason_detail, j.credential_esxi_id, e.name AS esxi_credential_name, j.credential_ansible_id, a.name AS ansible_credential_name, j.cancelled_at, j.cancel_requested_at, j.cancel_requested_by, cu.name AS cancel_requested_by_name, j.scheduled_at, j.group_id, j.correlation_id, j.created_at, j.updated_at
          FROM deploy_jobs j
          LEFT JOIN deploy_missions m ON m.id = j.mission_id
          LEFT JOIN deploy_users u ON u.id = j.user_id

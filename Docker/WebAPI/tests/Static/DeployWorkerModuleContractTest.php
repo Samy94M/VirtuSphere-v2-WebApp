@@ -58,6 +58,11 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_mark_vms_deploying',
         'deploy_worker_restore_deploying_vms',
         'deploy_worker_mark_vms_failed',
+        'deploy_worker_owned_transaction',
+        'deploy_worker_claim_matches',
+        'deploy_worker_fail_locked_job_vms',
+        'deploy_worker_locked_imported_vm_ids',
+        'deploy_worker_confirm_owned_cancel',
         'deploy_worker_scope_vms',
         'deploy_worker_job_mac_result',
         // Etappe 14B-E. The ownership fence of a claim, read fresh because
@@ -113,6 +118,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_network_preflight',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
+        'deploy_worker_cleanup_diagnose',
         'deploy_worker_credential',
         'deploy_worker_log_stream_chunk',
         'deploy_worker_log_stream_flush',
@@ -200,7 +206,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         $owners = [];
         foreach (VIRTUSPHERE_DEPLOY_WORKER_MODULES as $module) {
             $source = (string) file_get_contents(dirname(__DIR__, 2) . '/' . $module);
-            if (preg_match_all('/^function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m', $source, $matches) === 0) {
+            if (preg_match_all('/^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m', $source, $matches) === 0) {
                 continue;
             }
             foreach ($matches[1] as $name) {

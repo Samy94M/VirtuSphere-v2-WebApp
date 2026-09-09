@@ -102,32 +102,5 @@ function deploy_worker_reap_stale_jobs(mysqli $db): int
         ? 'Separate observation at this moment: a deploy service is reporting its status row. That is a statement about now, not about the process that held this job, which may have been restarted since.'
         : 'Separate observation at this moment: no deploy service is reporting its status row.';
 
-    $reaped = 0;
-    foreach (repo_reap_stale_deploy_jobs($db, VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, $cause) as $job) {
-        $payload = deploy_worker_payload($job);
-        $vmIds = $payload['vm_ids'] ?? [];
-        $jobId = (int) $job['id'];
-        // A reaped job may already carry a committed MAC import: those VMs are
-        // really deployed and keep their state; only the rest converges to
-        // failed/failed. The note names what actually happened: a converged
-        // cancellation is the operator's wish, not a stale-heartbeat failure.
-        // "the worker died before confirming" was asserted, never established:
-        // the same path is reached when the worker is alive and only its
-        // heartbeat could not be written, so the status event stated a cause
-        // that had not been checked. It now says what was observed.
-        $result = deploy_worker_job_mac_result($db, $jobId);
-        $note = ($job['reaped_to'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED
-            ? 'deploy job ' . $jobId . ' cancelled; converged by the reaper after a stale heartbeat'
-            : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
-        deploy_worker_mark_vms_failed(
-            $db,
-            (int) $job['mission_id'],
-            $note,
-            $vmIds,
-            $result !== null ? $result['successful_vm_ids'] : []
-        );
-        $reaped++;
-    }
-
-    return $reaped;
+    return count(repo_reap_stale_deploy_jobs($db, VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, $cause));
 }

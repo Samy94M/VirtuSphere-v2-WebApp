@@ -44,7 +44,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     // reconnect policy: an inventory pull loses its database exactly like a
     // deploy does, and two behaviours would mean two failure modes to reason
     // about (Masterplan Etappe 2, requirement 7).
-    $channel = deploy_worker_open_db_channel($db, $jobId, $workerId);
+    $channel = deploy_worker_open_db_channel($db, $jobId, $workerId, $job);
 
     $heartbeatOnSilence = static function () use ($channel): void {
         $channel->tick();
@@ -56,7 +56,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         ansible_pinned_collection_version();
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Preparing ESXi inventory fetch.');
         $channel->tick(0);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         $esxiCredential = deploy_worker_credential($channel->connection(), $credentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         $inventoryPayload = deploy_worker_payload($job);
@@ -96,7 +96,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }, 45, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
         deploy_worker_settle_db_channel($channel, $options, null);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
         if ($preflightExit !== 0) {
             // Set before the throw, so the outer transport classifier cannot
             // overwrite evidence the exit code already carries (Etappe 8): the
@@ -124,7 +124,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
         });
         deploy_worker_settle_db_channel($channel, $options, null);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         $phase = VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT;
         $command = ansible_inventory_remote_command((string) $artifacts['remote_dir'], !empty($inventoryPayload['verbose']));
@@ -144,7 +144,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         if ($channel->hasLostOwnership()) {
             throw new DeployWorkerCancelled('Ownership was lost while the database was unreachable: ' . (string) $channel->ownershipReason());
         }
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         if ($captureOverflow) {
             $phase = VIRTUSPHERE_DEPLOY_PHASE_MARKER;
@@ -203,7 +203,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         if ($normalizationLine !== null) {
             $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $normalizationLine);
         }
-        deploy_worker_finish_job($channel->connection(), $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        deploy_worker_finish_job($channel->connection(), $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
     } catch (DeployWorkerCancelled $cancelled) {
         // Tolerant of a vanished row for the same reason as the deploy path: one
         // of the ways we land here is that the job no longer exists.
@@ -235,7 +235,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
         deploy_worker_finish_job(
             $db,
-            $jobId,
+            $job,
             $workerId,
             VIRTUSPHERE_DEPLOY_STATUS_FAILED,
             $message,

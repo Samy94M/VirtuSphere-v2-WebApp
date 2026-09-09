@@ -214,7 +214,7 @@ final class DeployCancellationStateMachineTest extends TestCase
         $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
         repo_cancel_deploy_job($this->db, $jobId, 42);
 
-        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        deploy_worker_finish_job($this->db, $this->job($jobId), self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
 
         $job = $this->job($jobId);
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
@@ -239,7 +239,7 @@ final class DeployCancellationStateMachineTest extends TestCase
     {
         $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
 
-        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        deploy_worker_finish_job($this->db, $this->job($jobId), self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, (string) $this->job($jobId)['status']);
 
         try {
@@ -256,7 +256,7 @@ final class DeployCancellationStateMachineTest extends TestCase
     {
         $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'phpunit:other');
 
-        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, 'ours');
+        deploy_worker_finish_job($this->db, $this->job($jobId), self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, 'ours');
 
         $job = $this->job($jobId);
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $job['status']);
@@ -276,11 +276,12 @@ final class DeployCancellationStateMachineTest extends TestCase
     public function testAVanishedJobIsReportedWithoutWritingAgainstAForeignKey(): void
     {
         $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        $claim = $this->job($jobId);
         $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE id = ?');
         $stmt->bind_param('i', $jobId);
         $stmt->execute();
 
-        deploy_worker_finish_job($this->db, $jobId, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        deploy_worker_finish_job($this->db, $claim, self::WORKER, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
 
         self::assertSame('', $this->logText($jobId), 'a deleted job has nowhere to log; the line goes to error_log.');
     }
@@ -380,7 +381,7 @@ final class DeployCancellationStateMachineTest extends TestCase
             $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)');
             $stmt->bind_param('iss', $this->missionId, $status, $payload);
         } else {
-            $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, locked_at, locked_by, heartbeat_at) VALUES (?, ?, ?, NOW(), ?, ' . $heartbeat . ')');
+            $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, locked_at, locked_by, lock_token, worker_epoch, heartbeat_at) VALUES (?, ?, ?, NOW(), ?, REPEAT(CHAR(97), 32), 1, ' . $heartbeat . ')');
             $stmt->bind_param('isss', $this->missionId, $status, $payload, $lockedBy);
         }
         $stmt->execute();

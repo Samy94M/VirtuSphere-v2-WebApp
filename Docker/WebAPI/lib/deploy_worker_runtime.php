@@ -9,6 +9,7 @@ require_once __DIR__ . '/integration_health.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/deploy_worker_vm_state.php';
 
 /**
  * Worker runtime: the vocabulary and the per-tick bookkeeping every job path
@@ -247,11 +248,14 @@ function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, 
  * the seams, and the convergence sweep (L4) cleans up VMs left `deploying` if
  * the worker dies before its own catch runs.
  */
-function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId, bool $atStepBoundary = true): void
+function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId, bool $atStepBoundary = true, ?array $claim = null): void
 {
     $job = repo_deploy_job($db, $jobId);
     if ($job === null) {
         throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' no longer exists.');
+    }
+    if ($claim !== null && !deploy_worker_claim_matches($claim, $job)) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' no longer belongs to this claim.');
     }
 
     $status = (string) $job['status'];
@@ -267,7 +271,7 @@ function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $worker
         // owns the lock concludes the state machine here via the ownership
         // CAS. Under a foreign lock this worker only stops; the owner (or the
         // reaper, if the owner died) delivers the confirmation.
-        if ((string) ($job['locked_by'] ?? '') === $workerId && repo_confirm_deploy_job_cancelled($db, $jobId, $workerId)) {
+        if ((string) ($job['locked_by'] ?? '') === $workerId && deploy_worker_confirm_owned_cancel($db, $claim ?? $job)) {
             throw new DeployWorkerCancelled('Cancel requested by operator; confirmed at this step boundary.');
         }
 
@@ -288,13 +292,17 @@ function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $worker
  * survives a restart, so a returning old worker could satisfy it while its
  * successor holds the job. The claim therefore mints a random lock token and
  * records the lease epoch alongside it, and every per-VM create write compares
- * all three. Read fresh rather than taken from the job array a caller has been
- * carrying: the fence has to be the current one, not the one at claim time.
+ * all three. Production supplies the original claim; a fresh read must never
+ * adopt a successor token just because its process name is identical.
  *
  * @return array{worker_id:string,lock_token:string,worker_epoch:int}
  */
-function deploy_worker_job_fence(mysqli $db, int $jobId, string $workerId): array
+function deploy_worker_job_fence(mysqli $db, int $jobId, string $workerId, ?array $claim = null): array
 {
+    if ($claim !== null) {
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, false, $claim);
+        return ['worker_id' => $workerId, 'lock_token' => (string) $claim['lock_token'], 'worker_epoch' => (int) $claim['worker_epoch']];
+    }
     $row = repo_fetch_one(
         $db,
         'SELECT locked_by, lock_token, worker_epoch FROM deploy_jobs WHERE id = ? LIMIT 1',

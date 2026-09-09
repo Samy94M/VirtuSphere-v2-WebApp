@@ -37,42 +37,53 @@ require_once __DIR__ . '/deploy_worker_vm_state.php';
  */
 function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerId, array $vmIds, array $priorLifecycles = []): void
 {
-    $jobId = (int) $job['id'];
-    $payload = deploy_worker_payload($job);
-
-    $macResult = null;
-    if (ansible_mode_expects_mac_result((string) $payload['mode'])) {
-        $macResult = deploy_worker_job_mac_result($db, $jobId);
-        if ($macResult === null) {
-            throw new RuntimeException('Playbook sequence finished, but no usable MAC import result was recorded for this job.');
+    $summary = null;
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $priorLifecycles, &$summary): ?string {
+        if ((string) $locked['locked_by'] !== $workerId) {
+            return null;
         }
-        if ($macResult['outcome'] === 'failed') {
-            throw new RuntimeException('MAC import failed for every VM of this job.');
+        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
         }
-    } else {
-        // A sequence without an export step produces no per-VM verdict, so the
-        // `deploying` painted at claim time must be taken back by the worker
-        // itself. Left alone, the convergence sweep would later mark the VMs
-        // of this GREEN job failed/failed - a false failure after a success.
-        deploy_worker_restore_deploying_vms($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' succeeded without export step; lifecycle restored', $vmIds, $priorLifecycles);
-    }
+        $jobId = (int) $job['id'];
+        $payload = deploy_worker_payload($job);
 
-    if ($macResult !== null && $macResult['outcome'] === 'partial') {
-        $failedCount = count($macResult['failed_vm_ids']);
-        $summary = 'MAC import partial: ' . $failedCount . ' of ' . ($failedCount + count($macResult['successful_vm_ids'])) . ' VMs failed.';
-        deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' mac import partial', $vmIds, $macResult['successful_vm_ids']);
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);
-        deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $summary);
-    } else {
-        deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
-        deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
-    }
+        $macResult = null;
+        if (ansible_mode_expects_mac_result((string) $payload['mode'])) {
+            $macResult = deploy_worker_job_mac_result($db, $jobId);
+            if ($macResult === null) {
+                throw new RuntimeException('Playbook sequence finished, but no usable MAC import result was recorded for this job.');
+            }
+            if ($macResult['outcome'] === 'failed') {
+                throw new RuntimeException('MAC import failed for every VM of this job.');
+            }
+        } else {
+            // A sequence without an export step produces no per-VM verdict, so the
+            // `deploying` painted at claim time must be taken back by the worker
+            // itself. Left alone, the convergence sweep would later mark the VMs
+            // of this GREEN job failed/failed - a false failure after a success.
+            deploy_worker_restore_deploying_vms($db, $job, 'deploy job ' . $jobId . ' succeeded without export step; lifecycle restored', $vmIds, $priorLifecycles);
+        }
+
+        if ($macResult !== null && $macResult['outcome'] === 'partial') {
+            $failedCount = count($macResult['failed_vm_ids']);
+            $summary = 'MAC import partial: ' . $failedCount . ' of ' . ($failedCount + count($macResult['successful_vm_ids'])) . ' VMs failed.';
+            deploy_worker_mark_vms_failed($db, $job, 'deploy job ' . $jobId . ' mac import partial', $vmIds, $macResult['successful_vm_ids']);
+            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL);
+        } else {
+            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+        }
+    });
     // A create/full deploy changed ESXi resource usage (new VMs, datastore
     // allocation): enqueue an inventory refresh for this credential (E3.4b).
     // Fail-soft and after the job is finalized, so it can never taint the
     // deploy result; the double-enqueue guard prevents pile-up. A partial
     // job created VMs too, so it refreshes as well.
-    deploy_worker_refresh_inventory_after_deploy($db, $job);
+    if ($terminalStatus !== null) {
+        // A caught audit deadlock must never roll back the domain transaction.
+        deploy_worker_audit_outcome($db, $job, $terminalStatus, $summary);
+        deploy_worker_refresh_inventory_after_deploy($db, $job);
+    }
 }
 
 /**
@@ -81,24 +92,17 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
  * the import endpoint already finished stay deployed/pending, and stored
  * MACs are never touched. The job status itself stays `cancelled`.
  *
- * Also the landing place for the two other ways a job stops being this worker's
- * (deploy_worker_assert_job_is_ours): the row is gone, or somebody else
- * concluded it. Both are why the job log is written only while the row still
- * exists: deploy_logs references it, so a log line about a deleted job fails on
- * a foreign key and turns a clean stop into an unexplained crash. The VM
- * convergence still runs in that case, from the mission id of the job the worker
- * holds in memory, because those VMs are the ones actually left in `deploying`.
+ * A deleted, terminal or foreign-attempt job has no authority over any VM.
+ * Its orphaned state belongs to the maintenance sweep; a returning old worker
+ * cannot determine whether a successor already owns the same VM.
  *
  * @param int[] $vmIds
  */
 function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds, string $reason = 'Deploy job was cancelled.'): void
 {
     $jobId = (int) $job['id'];
-    deploy_worker_log_if_job_exists($db, $jobId, 'Worker stopped processing. Reason: ' . $reason);
-
-    $swept = deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' cancelled while deploying', $vmIds, [], true);
-    if ($swept > 0) {
-        deploy_worker_log_if_job_exists($db, $jobId, 'Marked ' . $swept . ' still-deploying VM(s) of this job as failed; already imported MACs are kept.');
+    if (!deploy_worker_confirm_owned_cancel($db, $job, $reason)) {
+        error_log('[deploy-worker] job ' . $jobId . ': worker stopped without a VM write; ' . virtusphere_redact_log_text($reason));
     }
 }
 
@@ -147,39 +151,37 @@ function deploy_worker_handle_failure(
     string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED
 ): void
 {
-    $jobId = (int) $job['id'];
-    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
-    $macResult = deploy_worker_job_mac_result($db, $jobId);
-    $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
-    deploy_worker_mark_vms_failed($db, (int) $job['mission_id'], 'deploy job ' . $jobId . ' failed', $vmIds, $keepVmIds);
-    if ($keepVmIds !== []) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a committed MAC import keep their deployed state.');
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode): ?string {
+        if ((string) $locked['locked_by'] !== $workerId) {
+            return null;
+        }
+        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+        }
+        $jobId = (int) $job['id'];
+        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
+        $macResult = deploy_worker_job_mac_result($db, $jobId);
+        $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
+        deploy_worker_mark_vms_failed($db, $job, 'deploy job ' . $jobId . ' failed', $vmIds, $keepVmIds);
+        if ($keepVmIds !== []) {
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a committed MAC import keep their deployed state.');
+        }
+        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
+    });
+    if ($terminalStatus !== null) {
+        deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
     }
-    deploy_worker_finish_job($db, $jobId, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
-    deploy_worker_audit_outcome($db, $job, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message);
 }
 
 /**
- * Writes the job's terminal status through a compare-and-swap, and resolves the
- * one race that a previously read status cannot (Etappe 8).
- *
- * The swap only fires from `running` under this worker's lock, so the outcome
- * and a cancel request cannot both win. When it hits zero rows, exactly one
- * thing is established: this job was not `running` under our lock at that
- * instant. WHICH of the reasons it was decides what has to happen next, so the
- * row is read instead of guessed - the old message named a lost lock even when
- * the lock was still ours and only the status had moved on.
- *
- * The reason that must not be left alone is a cancel that committed while the
- * last step ran: nobody else is going to conclude that job, because the worker
- * holding it is this one, so it would sit in `cancelling` until the reaper
- * eventually noticed a heartbeat that stopped. It is confirmed here instead,
- * and the log says what the operator otherwise could not know: the work of the
- * step that was already running did happen.
+ * Publishes only under the original active claim. The locked current status
+ * decides between the requested finish and a cancellation that won first.
+ * VM convergence is inside the same owner transaction; an old worker returns
+ * null without changing another attempt's result, log or VM state.
  */
 function deploy_worker_finish_job(
     mysqli $db,
-    int $jobId,
+    array $job,
     string $workerId,
     string $status,
     ?string $lastError = null,
@@ -189,44 +191,23 @@ function deploy_worker_finish_job(
     bool $remoteStepStarted = true
 ): ?string
 {
-    if (repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult)) {
-        return $status;
-    }
-
-    $job = repo_deploy_job($db, $jobId);
-    if ($job === null) {
-        // Through the guarded helper, never a direct append: deploy_job_logs
-        // references deploy_jobs, so writing about a row that is gone fails on
-        // a foreign key and turns a clean stop into an unexplained crash.
-        deploy_worker_log_if_job_exists($db, $jobId, 'Terminal status ' . $status . ' was not written: the job row no longer exists.');
-
-        return null;
-    }
-
-    $observed = (string) $job['status'];
-    $lockedBy = (string) ($job['locked_by'] ?? '');
-    if ($observed === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING
-        && $lockedBy === $workerId
-        && repo_confirm_deploy_job_cancelled(
-            $db,
-            $jobId,
-            $workerId,
-            $remoteStepStarted
+    $jobId = (int) $job['id'];
+    return deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $remoteStepStarted): ?string {
+        if ((string) $locked['locked_by'] !== $workerId) {
+            return null;
+        }
+        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            $message = $remoteStepStarted
                 ? 'Cancelled after operator request; the remote step that was already running ran to its end, '
                     . 'so its changes on ESXi are in place; no further step was started.'
-                : 'Cancelled after operator request at the pre-remote configuration boundary; no remote step was started.'
-        )
-    ) {
-        return VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
-    }
+                : 'Cancelled after operator request at the pre-remote configuration boundary; no remote step was started.';
 
-    // A terminal or foreign-owned row is immutable evidence. This diagnostic
-    // cannot be appended to it without lying about the terminal boundary.
-    error_log('[deploy-worker] job ' . $jobId . ': terminal status ' . $status
-        . ' was not written; observed status ' . $observed
-        . ', locked by ' . ($lockedBy !== '' ? $lockedBy : 'nobody') . '.');
+            return deploy_worker_confirm_owned_cancel($db, $job, $message) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+        }
 
-    return in_array($observed, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true) ? $observed : null;
+        return repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult)
+            ? $status : null;
+    });
 }
 
 function deploy_terminal_reason_for_exception(Throwable $exception): string

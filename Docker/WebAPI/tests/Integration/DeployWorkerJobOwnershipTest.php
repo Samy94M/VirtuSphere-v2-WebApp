@@ -136,9 +136,8 @@ final class DeployWorkerJobOwnershipTest extends TestCase
 
         deploy_worker_handle_cancelled($this->db, $job, [$vmId], 'Deploy job ' . $jobId . ' no longer exists.');
 
-        // The VM convergence still runs: those VMs are really left in `deploying`
-        // and nothing else is coming to move them.
-        self::assertSame(VIRTUSPHERE_LIFECYCLE_FAILED, $this->vmLifecycle($vmId));
+        // A vanished job owns no VM. Maintenance decides whether it is orphaned.
+        self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYING, $this->vmLifecycle($vmId));
     }
 
     private function insertMission(): int

@@ -138,7 +138,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $deployed = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $jobId = $this->insertJob($missionId, 'create', [$fresh, $deployed], null);
 
-        $prior = deploy_worker_mark_vms_deploying($this->db, $missionId, 'deploy job ' . $jobId . ' started', [$fresh, $deployed]);
+        $prior = deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$fresh, $deployed]);
         self::assertSame([$fresh => VIRTUSPHERE_LIFECYCLE_READY, $deployed => VIRTUSPHERE_LIFECYCLE_DEPLOYED], $prior);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($fresh));
 
@@ -160,7 +160,8 @@ final class DeployWorkerOutcomeTest extends TestCase
         $missionId = $this->insertMission('m17c');
         $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
-        $restored = deploy_worker_restore_deploying_vms($this->db, $missionId, 'restore probe', [$vmId], []);
+        $jobId = $this->insertJob($missionId, 'create', [$vmId], null);
+        $restored = deploy_worker_restore_deploying_vms($this->db, $this->job($jobId), 'restore probe', [$vmId], []);
 
         self::assertSame(0, $restored);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmId));
@@ -198,7 +199,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $mac = '02:AB:CD:EF:00:11';
         $this->insertInterface($imported, 'WDS', $mac);
         $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
-        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], null, VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], null, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
 
         deploy_worker_handle_cancelled($this->db, $this->job($jobId), [$imported, $stuck]);
 
@@ -268,7 +269,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $payload = json_encode(['mode' => $mode, 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
         $worker = self::WORKER;
         $heartbeat = $staleHeartbeat ? 'DATE_SUB(NOW(), INTERVAL 1 DAY)' : 'NOW()';
-        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, result_json, locked_at, locked_by, heartbeat_at) VALUES (?, ?, ?, ?, NOW(), ?, ' . $heartbeat . ')');
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, result_json, locked_at, locked_by, lock_token, worker_epoch, heartbeat_at) VALUES (?, ?, ?, ?, NOW(), ?, REPEAT(CHAR(97), 32), 1, ' . $heartbeat . ')');
         $stmt->bind_param('issss', $missionId, $status, $payload, $resultJson, $worker);
         $stmt->execute();
 

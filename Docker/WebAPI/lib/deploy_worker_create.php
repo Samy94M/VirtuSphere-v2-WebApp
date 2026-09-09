@@ -72,7 +72,7 @@ function deploy_worker_run_create_section(
     // reported neither progress nor a stop would otherwise spin.
     $maxPasses = (count($rows) + 1) * 4;
     for ($pass = 0; $pass < $maxPasses; $pass++) {
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, (string) $fence['worker_id']);
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, (string) $fence['worker_id'], true, $job);
         $rows = repo_deploy_create_results($channel->connection(), $jobId);
         $unit = deploy_worker_create_next_unit($rows);
         if ($unit === null) {
@@ -296,54 +296,64 @@ function deploy_worker_conclude_create_section(
     array $priorLifecycles,
     array $createOutcome
 ): void {
-    $jobId = (int) $job['id'];
-    $mode = (string) deploy_worker_payload($job)['mode'];
-    $status = deploy_worker_create_job_status($createOutcome['summary']);
-    $summary = $createOutcome['summary'];
-    $message = 'The per-VM create section ended without creating every VM: '
-        . (int) $summary['succeeded'] . ' created, ' . (int) $summary['skipped'] . ' skipped, '
-        . (int) $summary['failed'] . ' failed, ' . (int) $summary['uncertain'] . ' unresolved, '
-        . (int) $summary['not_started'] . ' not started. No further playbook of this job was started.';
+    $message = null;
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $priorLifecycles, $createOutcome, &$message): ?string {
+        if ((string) $locked['locked_by'] !== $workerId) {
+            return null;
+        }
+        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+        }
+        $jobId = (int) $job['id'];
+        $mode = (string) deploy_worker_payload($job)['mode'];
+        $status = deploy_worker_create_job_status($createOutcome['summary']);
+        $summary = $createOutcome['summary'];
+        $message = 'The per-VM create section ended without creating every VM: '
+            . (int) $summary['succeeded'] . ' created, ' . (int) $summary['skipped'] . ' skipped, '
+            . (int) $summary['failed'] . ' failed, ' . (int) $summary['uncertain'] . ' unresolved, '
+            . (int) $summary['not_started'] . ' not started. No further playbook of this job was started.';
 
-    // The literal is how this codebase names the mode everywhere else
-    // (VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, ansible_playbooks_for_mode);
-    // there is no constant for it, and inventing one here would create a
-    // second name for the same token.
-    if ($mode === 'create') {
-        deploy_worker_restore_deploying_vms(
-            $db,
-            (int) $job['mission_id'],
-            'deploy job ' . $jobId . ' create section ended; lifecycle restored',
-            $vmIds,
-            $priorLifecycles
-        );
-    } else {
-        deploy_worker_mark_vms_failed(
-            $db,
-            (int) $job['mission_id'],
-            'deploy job ' . $jobId . ' stopped before its pipeline because the create section did not complete',
-            $vmIds
-        );
-    }
+        // The literal is how this codebase names the mode everywhere else
+        // (VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, ansible_playbooks_for_mode);
+        // there is no constant for it, and inventing one here would create a
+        // second name for the same token.
+        if ($mode === 'create') {
+            deploy_worker_restore_deploying_vms(
+                $db,
+                $job,
+                'deploy job ' . $jobId . ' create section ended; lifecycle restored',
+                $vmIds,
+                $priorLifecycles
+            );
+        } else {
+            deploy_worker_mark_vms_failed(
+                $db,
+                $job,
+                'deploy job ' . $jobId . ' stopped before its pipeline because the create section did not complete',
+                $vmIds
+            );
+        }
 
-    if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
-    }
-    $terminalStatus = deploy_worker_finish_job(
-        $db,
-        $jobId,
-        $workerId,
-        $status,
-        $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $message : null,
-        $status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL
-            ? VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT
-            : VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
-        $message
-    );
+        if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED) {
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
+        }
+        $terminalStatus = deploy_worker_finish_job(
+            $db,
+            $job,
+            $workerId,
+            $status,
+            $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $message : null,
+            $status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL
+                ? VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT
+                : VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+            $message
+        );
+        return $terminalStatus;
+    });
     if ($terminalStatus !== null) {
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
     }
-    if ($status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
+    if ($terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
         // VMs were created, so the ESXi cache is out of date exactly as it is
         // after a fully successful job.
         deploy_worker_refresh_inventory_after_deploy($db, $job);

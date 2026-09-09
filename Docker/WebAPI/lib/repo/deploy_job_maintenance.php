@@ -8,6 +8,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/status_events.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_worker.php';
+require_once __DIR__ . '/../deploy_worker_vm_state.php';
 require_once __DIR__ . '/deploy_create_identity.php';
 
 /**
@@ -126,10 +127,54 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
     $suffix = $cause === '' ? '' : ' ' . $cause;
 
     return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $cancelled, $suffix): array {
-        $stmt = $db->prepare('SELECT id, mission_id, status, payload_json, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC FOR UPDATE SKIP LOCKED');
+        $stmt = $db->prepare('SELECT id, mission_id FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC');
         $stmt->bind_param('ssi', $running, $cancelling, $staleAfterSeconds);
         $stmt->execute();
-        $jobs = repo_fetch_all($stmt->get_result());
+        $candidates = repo_fetch_all($stmt->get_result());
+        // Lock the whole batch in Mission -> Job -> Runtime -> VM order.
+        // In particular, never take the next mission after changing a VM of
+        // the previous job. Recheck stale status with a current locking read;
+        // the initial candidate scan is only discovery, never authorization.
+        $missionIds = array_values(array_unique(array_filter(array_map(
+            static fn (array $row): int => (int) ($row['mission_id'] ?? 0),
+            $candidates
+        ))));
+        sort($missionIds, SORT_NUMERIC);
+        $lockedMissions = [];
+        foreach ($missionIds as $missionId) {
+            if (repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE SKIP LOCKED', 'i', [$missionId]) !== null) {
+                $lockedMissions[$missionId] = true;
+            }
+        }
+        $jobs = [];
+        foreach ($candidates as $candidate) {
+            $missionId = (int) ($candidate['mission_id'] ?? 0);
+            if ($missionId > 0 && !isset($lockedMissions[$missionId])) {
+                continue;
+            }
+            $job = repo_fetch_one(
+                $db,
+                'SELECT id, mission_id, status, payload_json, result_json, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
+                'issi',
+                [(int) $candidate['id'], $running, $cancelling, $staleAfterSeconds]
+            );
+            if ($job !== null && (int) ($job['mission_id'] ?? 0) === $missionId) {
+                $jobs[] = $job;
+            }
+        }
+        if ($jobs !== []) {
+            repo_fetch_one($db, 'SELECT id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        }
+
+        // Admission scans historical Create rows by job and position. Acquire
+        // the whole batch in that same order before convergence takes VM locks;
+        // heartbeat order can be the reverse and would deadlock with admission
+        // from an otherwise unrelated mission. Keep the returned heartbeat order.
+        $createLockJobIds = array_map('intval', array_column($jobs, 'id'));
+        sort($createLockJobIds, SORT_NUMERIC);
+        foreach ($createLockJobIds as $createLockJobId) {
+            repo_deploy_create_results($db, $createLockJobId, true);
+        }
 
         foreach ($jobs as &$job) {
             $jobId = (int) $job['id'];
@@ -149,6 +194,20 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 (string) $job['reaped_to']
             );
             $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation . $suffix;
+            // Converge and describe the open Create units before terminalizing
+            // their parent. The log owner rejects every terminal append; doing
+            // this afterwards rolled back the entire mixed reaper batch.
+            // Already decided units and their async identity remain untouched.
+            $converged = repo_deploy_create_converge_reaped($db, $jobId, $observation);
+            if ($converged > 0) {
+                $message .= ' ' . $converged . ' create unit(s) of this job had not finished and are now recorded as unresolved. '
+                    . 'Their VMs may or may not exist on ESXi; check the host before running this mission again.';
+            }
+            $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
+            $note = $wasCancelling
+                ? 'deploy job ' . $jobId . ' cancelled; converged by the reaper after a stale heartbeat'
+                : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
+            deploy_worker_fail_locked_job_vms($db, $job, $note, $payload['vm_ids'] ?? []);
             if ($wasCancelling) {
                 // The accepted request already is the single immutable cancel
                 // SYSTEM line. The reaper supplies only the terminal metadata.
@@ -165,25 +224,6 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
-                // Etappe 14B: the create units of this job, in the same
-                // transaction as its terminal write. Confirmed successes,
-                // failures and skips are left exactly as they are - that is the
-                // property the 13.08.2026 incident lacked - and only a unit
-                // that was still in flight is converged, to `uncertain`. It is
-                // the honest word: this worker is gone, nobody will poll that
-                // async job again here, and nothing about the VM has been
-                // established either way.
-                $converged = repo_deploy_create_converge_reaped($db, $jobId, $observation);
-                if ($converged > 0) {
-                    repo_insert_deploy_job_log_unlocked(
-                        $db,
-                        $jobId,
-                        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-                        $converged . ' create unit(s) of this job had not finished and are now recorded as unresolved. '
-                        . 'Their VMs may or may not exist on ESXi; check the host before running this mission again.'
-                    );
-                }
-                $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
                 if (!$wasCancelling
                     && ($job['mission_id'] ?? null) === null
                     && (int) ($job['credential_esxi_id'] ?? 0) > 0

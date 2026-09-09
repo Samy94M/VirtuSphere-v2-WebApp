@@ -21,9 +21,10 @@ require_once __DIR__ . '/deploy_worker_db_channel.php';
  * there cannot be a second reconnect policy that behaves differently for
  * inventory pulls than for mission deploys.
  */
-function deploy_worker_open_db_channel(mysqli $db, int $jobId, string $workerId): DeployWorkerDbChannel
+function deploy_worker_open_db_channel(mysqli $db, int $jobId, string $workerId, ?array $claim = null): DeployWorkerDbChannel
 {
-    return new DeployWorkerDbChannel($db, static fn (): mysqli => db(true), $jobId, $workerId);
+    return new DeployWorkerDbChannel($db, static fn (): mysqli => db(true), $jobId, $workerId,
+        ops: new DeployWorkerDbOperations($claim));
 }
 
 /**

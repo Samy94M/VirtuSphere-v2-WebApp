@@ -166,11 +166,17 @@ final class DeployWorkerNetworkPreflightIntegrationTest extends TestCase
     private function processClaimed(int $jobId, ?callable $observer = null): void
     {
         $workerId = 'phpunit:network-preflight-' . $jobId;
+        // This fixture starts after claim. Carry the complete original claim
+        // identity, just like the real worker, so the preflight's terminal CAS
+        // has authority to write; a process name alone deliberately has none.
+        $lockToken = bin2hex(random_bytes(16));
         repo_execute(
             $this->db,
-            'UPDATE deploy_jobs SET status = ?, locked_by = ?, locked_at = NOW(), heartbeat_at = NOW() WHERE id = ?',
-            'ssi',
-            [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, $workerId, $jobId]
+            'UPDATE deploy_jobs SET status = ?, locked_by = ?, lock_token = ?, worker_epoch = 0, attempts = 1,'
+            . ' execution_generation_id = (SELECT current_generation_id FROM deploy_runtime_identity WHERE id = 1),'
+            . ' locked_at = NOW(), heartbeat_at = NOW() WHERE id = ?',
+            'sssi',
+            [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, $workerId, $lockToken, $jobId]
         );
         $job = repo_deploy_job($this->db, $jobId);
         self::assertNotNull($job);

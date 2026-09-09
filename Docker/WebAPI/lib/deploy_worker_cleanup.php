@@ -49,9 +49,10 @@ function deploy_worker_cleanup_remote_dir(
         $stepInFlight = true;
     }
     if ($stepInFlight || $channel->hasLostOwnership()) {
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Remote job directory left in place: a remote step did not return, so this worker cannot prove the host is idle.'
+        deploy_worker_cleanup_diagnose(
+            $channel->jobId(),
+            'Remote job directory left in place: this worker cannot prove the host is idle.',
+            $secret
         );
 
         return;
@@ -73,9 +74,26 @@ function deploy_worker_cleanup_remote_dir(
         // Never the job's outcome: this runs in a finally block, after the
         // result is decided, and a host that cannot be reached for a cleanup
         // must not turn a finished deploy into an unhandled exception.
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Remote job directory could not be removed: ' . deploy_worker_redact_secrets($exception->getMessage(), [$secret])
+        deploy_worker_cleanup_diagnose(
+            $channel->jobId(),
+            'Remote job directory could not be removed: ' . $exception->getMessage(),
+            $secret
         );
+    }
+}
+
+/**
+ * Cleanup runs after the terminal decision, including after ownership loss or
+ * a database outage. Its diagnosis belongs to the existing worker error log,
+ * never the immutable job log or a spool that could replay after termination.
+ * Even a failing diagnostic sink must allow the rest of finally to run.
+ */
+function deploy_worker_cleanup_diagnose(int $jobId, string $message, string $secret): void
+{
+    try {
+        error_log('[deploy-worker] job ' . $jobId . ' cleanup: '
+            . deploy_worker_redact_secrets(deploy_job_output_normalize_line($message), [$secret]));
+    } catch (Throwable) {
+        // A secondary diagnostic failure cannot replace the decided outcome.
     }
 }
