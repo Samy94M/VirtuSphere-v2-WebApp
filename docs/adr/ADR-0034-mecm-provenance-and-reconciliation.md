@@ -51,7 +51,40 @@ Instanzen. `VirtuSphere-MembershipJournal.ps1` besitzt Schema, Bounds,
 Validierung, atomare Ersetzung und Quarantäne; Caller leiten diese Regeln nicht
 neu ab.
 
-Status: accepted (2026-07-27). Entscheidungen 1-3 der Härtungskampagne 2026-07.
+## Amendment 4 (09.09.2026): dauerhafte Journalgrenze und Wiederherstellung
+
+Vorhandene Quarantänedateien sperren auch weitere Prozessstarts und ein
+ersetztes Hauptjournal. Das Journal verwendet explizites, verlustfreies UTF-8;
+ungültige Bytes bleiben als ungeklärte Evidenz erhalten. Die Freigabe verlangt
+eine dokumentierte manuelle Ownership-Entscheidung, keine zeitbasierte Löschung.
+
+Auditentscheidung D-01 präzisiert verfallene Provenienz: Eine weiterhin
+ausdrücklich im Portal gewünschte eigene Membership wird unter aktueller
+Rolloutrevision wiederhergestellt. Der pure Plan darf `add` und `stale_owned`
+für dasselbe Ziel enthalten, weil beide den Zustand vor dem Apply beschreiben.
+Nach einem bestätigten Add unter derselben exakten CollectionID bleibt die
+Provenienz erhalten. Eine neue CollectionID unter gleichem Namen ersetzt
+dagegen nicht die alte Identität; deren verfallene Provenienz wird separat
+zurückgezogen. Ein nicht bestätigtes Add erlaubt keinen solchen Rückzug.
+Fremde/manuelle Regeln werden weiterhin weder adoptiert noch entfernt.
+
+Eine externe Entfernung soll dauerhaft gelten, indem die Zuweisung im Portal
+ausdrücklich aufgehoben beziehungsweise die Ownership freigegeben wird.
+Die Reihenfolge widersprüchlicher Add-/Remove-Berichte ist keine fachliche
+Entscheidung über den Portalwunsch. Die bestehenden Revisions-, ResourceID-
+und CollectionID-Grenzen bleiben verbindlich.
+
+Beim Replay eines alten bestätigten Add-/Remove-Paars für dieselbe VM,
+Rolloutrevision, ResourceID und CollectionID wird das Add gemeldet und nach
+dessen ACK das gesamte Paar in
+einer atomaren Journalersetzung quittiert. So erzeugt ein Abbruch zwischen
+lokalen Löschungen keinen einzelnen veralteten Remove-Eintrag. Ein isolierter
+Remove wird nur bei erfolgreich gelesener aktueller Abwesenheit replayt;
+`present` oder `unknown` hält ihn dauerhaft als `uncertain` zur Klärung fest.
+Live-Präsenz begründet dabei keine Adoption oder neue Ownership.
+
+Status: accepted (2026-07-27). Entscheidungen 1-3 der Härtungskampagne 2026-07,
+präzisiert durch Amendment 4 / Auditentscheidung D-01.
 
 ## Kontext
 
@@ -87,9 +120,10 @@ sogar „bestehende Mitgliedschaften werden nie entfernt".
 - **VM-Löschen bleibt rein lokal** (Entscheidung 1): die Provenienz stirbt mit
   der VM (CASCADE), die MECM-Regeln bleiben stehen, es gibt keine
   MECM-Bereinigung und keinen Nachlauf. Die Hilfe sagt das ausdrücklich.
-- **Verfallene Provenienz** (Regel von Hand in MECM entfernt) wird
-  zurückgezogen, nie zurückgekämpft: MECM ist die Wahrheit über das, was
-  existiert.
+- **Verfallene Provenienz** (Regel von Hand in MECM entfernt) wird gemäß
+  Amendment 4 behandelt: Ein weiterhin gewünschtes eigenes Ziel wird
+  wiederhergestellt; ein nicht mehr gewünschtes Ziel wird zurückgezogen.
+  MECM bleibt die Wahrheit über den aktuellen Live-Bestand.
 - **Wire additiv:** `getDeviceList` führt je Gerät `owned_collections`;
   `mecm_updateid.php?action=reportMembership` nimmt die angewandten
   added/removed-Änderungen idempotent und atomar entgegen (404 für unbekannte

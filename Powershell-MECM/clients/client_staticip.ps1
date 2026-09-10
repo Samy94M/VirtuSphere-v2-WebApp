@@ -11,8 +11,8 @@
 #    (Registry VirtuSphere\staticip + reportPhase), nicht mehr hart auf $true
 #  - leeres Gateway / leere DNS-Liste sauber via Parameter-Splatting
 #  - Rename-Kollisionen abgefangen; Get-CimInstance statt Get-WmiObject
-#  - reportPhase 'started' VOR der Umstellung (VLAN-Wechsel kann den Client
-#    danach offline nehmen), 'finished' best effort danach
+#  - reportPhase 'started' VOR der Umstellung (IP-/Adapterkonfiguration kann den
+#    Client danach offline nehmen), 'finished' best effort danach
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
@@ -177,7 +177,7 @@ foreach ($item in @($plan.Items)) {
             $renamed = $true
         }
 
-        if ($cfg.Mode -eq $modeStatic) {
+        if ($item.Mode -eq $modeStatic) {
             $prefix = [int]$item.Prefix
             $ipInterface = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
             $oldDhcp = [string]$ipInterface.Dhcp
@@ -245,11 +245,11 @@ foreach ($item in @($plan.Items)) {
             Write-VsClientLog "Adapter '$($cfg.Name)' ($mac), Ziel $modeStatic : IP $($cfg.Ip)/$prefix gesetzt und geprueft."
             $appliedStatic++
             $applied++
-        } elseif ($cfg.Mode -eq $modeDhcp) {
+        } elseif ($item.Mode -eq $modeDhcp) {
             # Der Client spricht moeglicherweise ueber genau diese Karte, und die
             # Umstellung kann die Verbindung kappen. Das ist gedeckt: 'started'
-            # geht vor der ersten Umstellung raus (wie beim VLAN-Wechsel), die
-            # terminale Meldung ist best effort.
+            # geht vor der ersten IP-/Adapterkonfiguration raus, die terminale
+            # Meldung ist best effort.
             #
             # Idempotent: erst nachsehen, dann nur bei Bedarf umstellen. Danach
             # in jedem Fall nachlesen statt annehmen, wie im statischen Zweig.
@@ -277,7 +277,7 @@ foreach ($item in @($plan.Items)) {
             }
             # DNS ebenfalls zurueck an DHCP: eine haendisch gesetzte
             # Serveradresse ueberlebt die Umstellung sonst und zeigt weiter ins
-            # alte VLAN. Das Gateway kommt vom DHCP-Server und wird nicht aus
+            # alte Netz. Das Gateway kommt vom DHCP-Server und wird nicht aus
             # der statischen Soll-Gatewayregel abgeleitet.
             Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses -ErrorAction Stop
             $dnsChanged = $true
@@ -321,7 +321,7 @@ foreach ($item in @($plan.Items)) {
             }
             if ($dhcpChanged) {
                 $currentDhcp = [string](Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop).Dhcp
-                $ourDhcp = if ($cfg.Mode -eq $modeStatic) { 'Disabled' } else { 'Enabled' }
+                $ourDhcp = if ($item.Mode -eq $modeStatic) { 'Disabled' } else { 'Enabled' }
                 if ($currentDhcp -eq $ourDhcp -and $oldDhcp -in @('Enabled', 'Disabled')) {
                     Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp $oldDhcp -ErrorAction Stop
                 }
@@ -343,7 +343,7 @@ foreach ($item in @($plan.Items)) {
 # Erfolg fuer null geleistete Arbeit, die MECM-Erkennung war erfuellt, und die VM
 # blieb mit DHCP oder ohne Adresse in einer gruenen Phase zurueck. Die
 # Registry-Konfiguration nennt Ziele; findet sich zu keinem davon eine Karte,
-# stimmt eine Annahme nicht (MAC-Abweichung, Karte nicht Up, falsches VLAN), und
+# stimmt eine Annahme nicht (MAC-Abweichung oder Karte nicht Up), und
 # das muss jemand sehen.
 $success = ($failed -eq 0 -and $applied -eq $targets.Count -and $targets.Count -gt 0)
 # Die Modusverteilung steht mit im Detail, damit die Portalkarte "3 Ziele, 2

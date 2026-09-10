@@ -46,15 +46,44 @@ function Test-VsMembershipJournalEntry {
     return $true
 }
 
+function Get-VsMembershipJournalQuarantines {
+    param([Parameter(Mandatory)][string]$Path)
+    $directory = Split-Path $Path -Parent
+    if ([string]::IsNullOrWhiteSpace($directory)) { $directory = '.' }
+    if (-not (Test-Path -LiteralPath $directory -ErrorAction Stop)) { return @() }
+
+    $prefix = (Split-Path $Path -Leaf) + '.quarantine.'
+    try {
+        return @(Get-ChildItem -LiteralPath $directory -File -ErrorAction Stop | Where-Object {
+            $_.Name.StartsWith($prefix, [StringComparison]::Ordinal) -and $_.Name.EndsWith('.json', [StringComparison]::Ordinal)
+        })
+    } catch {
+        throw ('Membership-Journal-Quarantaene konnte nicht sicher gelesen werden; mutierender Lauf blockiert: {0}' -f $_.Exception.Message)
+    }
+}
+
 function Read-VsMembershipJournal {
     param([string]$Path)
+    $quarantines = @(Get-VsMembershipJournalQuarantines -Path $Path)
+    if ($quarantines.Count -gt 0) {
+        throw ('Membership-Journal besitzt {0} ungeklaerte Quarantaenedatei(en); vor einem mutierenden Lauf manuell pruefen und entfernen.' -f $quarantines.Count)
+    }
     if (-not (Test-Path -LiteralPath $Path)) {
         return [pscustomobject]@{ schema = $script:VsMembershipJournalSchema; entries = @() }
     }
     try {
         $item = Get-Item -LiteralPath $Path -ErrorAction Stop
         if ($item.Length -gt $script:VsMembershipJournalMaxBytes) { throw 'Journal ueberschreitet das Bytelimit.' }
-        $document = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        # Windows PowerShell 5.1 decodes a BOM-less Get-Content read through
+        # the active ANSI code page. The journal writer deliberately emits
+        # BOM-less UTF-8, so the reader must select UTF-8 explicitly as well.
+        # Decode bytes directly: StreamReader BOM auto-detection can replace a
+        # strict supplied encoding with a replacement-fallback UTF-8 decoder.
+        $utf8 = New-Object Text.UTF8Encoding($false, $true)
+        $rawBytes = [IO.File]::ReadAllBytes($Path)
+        $offset = if ($rawBytes.Length -ge 3 -and $rawBytes[0] -eq 0xEF -and $rawBytes[1] -eq 0xBB -and $rawBytes[2] -eq 0xBF) { 3 } else { 0 }
+        $json = $utf8.GetString($rawBytes, $offset, $rawBytes.Length - $offset)
+        $document = $json | ConvertFrom-Json -ErrorAction Stop
         if ([int]$document.schema -ne $script:VsMembershipJournalSchema) { throw 'Unbekannte Journalschemaversion.' }
         $entries = @($document.entries)
         if ($entries.Count -gt $script:VsMembershipJournalMaxEntries) { throw 'Journal ueberschreitet das Eintragslimit.' }
@@ -63,9 +92,14 @@ function Read-VsMembershipJournal {
         }
         return [pscustomobject]@{ schema = $script:VsMembershipJournalSchema; entries = $entries }
     } catch {
+        $readError = $_.Exception.Message
         $quarantine = '{0}.quarantine.{1}.{2}.json' -f $Path, (Get-Date -Format 'yyyyMMddHHmmss'), ([guid]::NewGuid().ToString('N'))
-        try { Move-Item -LiteralPath $Path -Destination $quarantine -ErrorAction Stop } catch { Write-Debug $_ }
-        throw ('Membership-Journal ist unlesbar und wurde quarantiniert; mutierender Lauf blockiert: {0}' -f $_.Exception.Message)
+        try {
+            Move-Item -LiteralPath $Path -Destination $quarantine -ErrorAction Stop
+        } catch {
+            throw ('Membership-Journal ist unlesbar und konnte nicht sicher quarantiniert werden; mutierender Lauf blockiert: {0}; Quarantaenefehler: {1}' -f $readError, $_.Exception.Message)
+        }
+        throw ('Membership-Journal ist unlesbar und wurde quarantiniert; mutierender Lauf bleibt bis zur manuellen Klaerung blockiert: {0}' -f $readError)
     }
 }
 
@@ -77,13 +111,14 @@ function Write-VsMembershipJournal {
     if ($Entries.Count -gt $script:VsMembershipJournalMaxEntries) { throw 'Membership-Journal ist voll.' }
     $document = [ordered]@{ schema = $script:VsMembershipJournalSchema; entries = @($Entries) }
     $json = $document | ConvertTo-Json -Depth 8 -Compress
-    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    $utf8 = New-Object Text.UTF8Encoding($false, $true)
+    $bytes = $utf8.GetBytes($json)
     if ($bytes.Length -gt $script:VsMembershipJournalMaxBytes) { throw 'Membership-Journal ueberschreitet das Bytelimit.' }
     $directory = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force -ErrorAction Stop | Out-Null }
     $temp = Join-Path $directory ('.membership-journal-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
-        [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText($temp, $json, $utf8)
         if (Test-Path -LiteralPath $Path) {
             $backup = Join-Path $directory ('.membership-journal-' + [guid]::NewGuid().ToString('N') + '.bak')
             try { [IO.File]::Replace($temp, $Path, $backup, $true) } finally {
@@ -170,11 +205,21 @@ function Set-VsMembershipJournalState {
     Write-VsMembershipJournal -Path $Path -Entries @($journal.entries)
 }
 
+function Remove-VsMembershipJournalEntries {
+    param(
+        [string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OperationIds
+    )
+    $remove = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($operationId in @($OperationIds)) { [void]$remove.Add([string]$operationId) }
+    $journal = Read-VsMembershipJournal -Path $Path
+    $remaining = @($journal.entries | Where-Object { -not $remove.Contains([string]$_.operation_id) })
+    Write-VsMembershipJournal -Path $Path -Entries $remaining
+}
+
 function Remove-VsMembershipJournalEntry {
     param([string]$Path, [Parameter(Mandatory)][string]$OperationId)
-    $journal = Read-VsMembershipJournal -Path $Path
-    $remaining = @($journal.entries | Where-Object { [string]$_.operation_id -ne $OperationId })
-    Write-VsMembershipJournal -Path $Path -Entries $remaining
+    Remove-VsMembershipJournalEntries -Path $Path -OperationIds @($OperationId)
 }
 
 function Get-VsMembershipJournalEntriesForVm {

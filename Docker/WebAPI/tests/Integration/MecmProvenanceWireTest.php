@@ -142,6 +142,116 @@ final class MecmProvenanceWireTest extends TestCase
         );
     }
 
+    public function testRestoredSameCollectionIdKeepsTheAddedProvenanceRegardlessOfLegacyReportOrder(): void
+    {
+        $this->setRolloutRevision(2);
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100010', 'collection_name' => 'Old exact name', 'type' => 'package', 'change' => 'added'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100010', 'collection_name' => 'Old exact name', 'type' => 'package', 'change' => 'removed'],
+                ['collection_id' => 'VS100010', 'collection_name' => 'New exact name', 'type' => 'os', 'change' => 'added'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+
+        $rules = repo_mecm_rules_for_vm($this->db, $this->vmId);
+        self::assertCount(1, $rules);
+        self::assertSame('VS100010', $rules[0]['collection_id']);
+        self::assertSame('New exact name', $rules[0]['collection_name'], 'same ID with a changed name keeps the actual restored add');
+        self::assertSame('os', $rules[0]['collection_type']);
+
+        // The reverse legacy order has the same real-world meaning and must
+        // not let the stale observation erase the successful restore.
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100010', 'collection_name' => 'Newest exact name', 'type' => 'mission', 'change' => 'added'],
+                ['collection_id' => 'VS100010', 'collection_name' => 'New exact name', 'type' => 'os', 'change' => 'removed'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+        $rules = repo_mecm_rules_for_vm($this->db, $this->vmId);
+        self::assertCount(1, $rules);
+        self::assertSame('Newest exact name', $rules[0]['collection_name']);
+        self::assertSame('mission', $rules[0]['collection_type']);
+    }
+
+    public function testConfirmedReplacementWithdrawsOnlyTheOldExactCollectionId(): void
+    {
+        $this->setRolloutRevision(2);
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100020', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'added'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100099', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'added'],
+                ['collection_id' => 'VS100020', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'removed'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+        self::assertSame(
+            ['VS100099'],
+            array_column(repo_mecm_rules_for_vm($this->db, $this->vmId), 'collection_id'),
+            'same name never weakens the CollectionID fence'
+        );
+    }
+
+    public function testStaleRolloutRevisionCannotApplyACombinedRestoreReport(): void
+    {
+        $this->setRolloutRevision(2);
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100030', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'added'],
+            ],
+        ]);
+        self::assertSame(200, $status, $body);
+
+        $this->setRolloutRevision(3);
+
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', [
+            'deviceid' => $this->vmId,
+            'rollout_revision' => 2,
+            'memberships' => [
+                ['collection_id' => 'VS100031', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'added'],
+                ['collection_id' => 'VS100030', 'collection_name' => 'Package A', 'type' => 'package', 'change' => 'removed'],
+            ],
+        ]);
+        self::assertSame(409, $status, $body);
+        self::assertSame(
+            ['VS100030'],
+            array_column(repo_mecm_rules_for_vm($this->db, $this->vmId), 'collection_id'),
+            'revision refusal and provenance write remain one transaction'
+        );
+    }
+
+    private function setRolloutRevision(int $revision): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_vms SET mecm_rollout_revision = ? WHERE id = ?');
+        $stmt->bind_param('ii', $revision, $this->vmId);
+        $stmt->execute();
+    }
+
     /** @return array<string, mixed>|null */
     private function deviceFromList(): ?array
     {

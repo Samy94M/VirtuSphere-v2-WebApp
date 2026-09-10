@@ -87,6 +87,41 @@ function New-VsDeviceCollection {
     return [pscustomobject]@{ Collection = $created; FolderFailed = $folderFailed }
 }
 
+# Decides what a stale-owned PLAN observation means after this run's actual
+# adds. The plan deliberately keeps add(A) and stale_owned(A): one describes
+# desired-versus-live, the other owned-versus-live. Only the apply boundary has
+# the new exact CollectionID and knows whether the restoration really returned.
+function Get-VsStaleOwnedDisposition {
+    param(
+        [Parameter(Mandatory)][string]$CollectionId,
+        [Parameter(Mandatory)][string]$CollectionName,
+        [array]$PlannedAdds = @(),
+        [array]$AppliedAdds = @()
+    )
+
+    foreach ($applied in @($AppliedAdds)) {
+        if ([string]::Equals([string]$applied.collection_id, $CollectionId, [StringComparison]::Ordinal)) {
+            return 'restored_same_id'
+        }
+    }
+
+    $isBeingRestored = $false
+    foreach ($planned in @($PlannedAdds)) {
+        if ([string]::Equals([string]$planned.name, $CollectionName, [StringComparison]::Ordinal)) {
+            $isBeingRestored = $true
+            break
+        }
+    }
+    if (-not $isBeingRestored) { return 'withdraw' }
+
+    foreach ($applied in @($AppliedAdds)) {
+        if ([string]::Equals([string]$applied.collection_name, $CollectionName, [StringComparison]::Ordinal)) {
+            return 'withdraw_replaced_id'
+        }
+    }
+    return 'defer_until_restored'
+}
+
 while ($true) {
     $loop++
     $scanStart = Get-Date
@@ -349,6 +384,28 @@ while ($true) {
                     $journalBlocked = $false
                     $journalReplayed = $false
                     $journalFailureCounted = $false
+                    # Upgrade recovery for journals written before D-01: that
+                    # sender could persist a confirmed add and a stale-owned
+                    # removal for the same exact fenced CollectionID. Replaying
+                    # them as separate requests would recreate SC-005 even when
+                    # the receiver coalesces one batch. Only a current,
+                    # confirmed add suppresses its matching non-remote stale
+                    # observation, and both ACK records are removed in ONE
+                    # journal replacement after the add report succeeds.
+                    $replayAddsByCollectionId = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                    $replaySuppressedRemovals = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+                    foreach ($candidate in $journalEntries) {
+                        if ([int]$candidate.rollout_revision -ne [int]$rolloutRevision -or [string]$candidate.resource_id -ne [string]$resourceId -or [string]$candidate.state -ne 'remote_confirmed') { continue }
+                        $candidateId = [string]$candidate.collection_id
+                        if ([string]$candidate.change -eq 'added') { [void]$replayAddsByCollectionId.Add($candidateId) }
+                    }
+                    foreach ($candidate in $journalEntries) {
+                        if ([int]$candidate.rollout_revision -ne [int]$rolloutRevision -or [string]$candidate.resource_id -ne [string]$resourceId -or [string]$candidate.state -ne 'remote_confirmed' -or [string]$candidate.change -ne 'removed') { continue }
+                        $candidateId = [string]$candidate.collection_id
+                        if (-not $replayAddsByCollectionId.Contains($candidateId)) { continue }
+                        if (-not $replaySuppressedRemovals.ContainsKey($candidateId)) { $replaySuppressedRemovals[$candidateId] = New-Object System.Collections.Generic.List[string] }
+                        $replaySuppressedRemovals[$candidateId].Add([string]$candidate.operation_id)
+                    }
                     foreach ($journalEntry in $journalEntries) {
                         if ([int]$journalEntry.rollout_revision -ne [int]$rolloutRevision -or [string]$journalEntry.resource_id -ne [string]$resourceId) {
                             Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'rollout_or_resource_changed'
@@ -358,6 +415,25 @@ while ($true) {
                         if ([string]$journalEntry.state -ne 'remote_confirmed') {
                             $journalBlocked = $true
                             continue
+                        }
+                        if ([string]$journalEntry.change -eq 'removed' -and $replayAddsByCollectionId.Contains([string]$journalEntry.collection_id)) {
+                            continue
+                        }
+                        if ([string]$journalEntry.change -eq 'removed') {
+                            # A schema-1 orphan can be either a confirmed remote
+                            # remove or the old sender's non-remote stale-owned
+                            # observation after its paired add was already ACKed.
+                            # Presence therefore cannot authorize a provenance
+                            # delete. Only confirmed absence is safe to replay;
+                            # present/unknown becomes durable manual evidence.
+                            $removeReplayState = Get-VsDirectMembershipState -CollectionId ([string]$journalEntry.collection_id) -ResourceId ([string]$resourceId)
+                            if ($removeReplayState.State -ne 'absent') {
+                                $removeReplayReason = if ($removeReplayState.State -eq 'present') { 'replay_remove_still_present' } else { 'replay_remove_presence_unknown' }
+                                Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason $removeReplayReason
+                                $journalBlocked = $true
+                                Write-VsLog -Level WARN -Context $deviceName -Message ("Entfernte Membership aus altem Journal ist nicht als abwesend bestaetigt ({0}); Provenienz bleibt zur manuellen Klaerung erhalten." -f $journalEntry.collection_id)
+                                continue
+                            }
                         }
                         try {
                             $replayBody = @{
@@ -371,7 +447,11 @@ while ($true) {
                                 })
                             }
                             Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $replayBody | Out-Null
-                            Remove-VsMembershipJournalEntry -Path $membershipJournalPath -OperationId $journalEntry.operation_id
+                            $acknowledgedOperationIds = @([string]$journalEntry.operation_id)
+                            if ([string]$journalEntry.change -eq 'added' -and $replaySuppressedRemovals.ContainsKey([string]$journalEntry.collection_id)) {
+                                $acknowledgedOperationIds += @($replaySuppressedRemovals[[string]$journalEntry.collection_id])
+                            }
+                            Remove-VsMembershipJournalEntries -Path $membershipJournalPath -OperationIds $acknowledgedOperationIds
                             $journalReplayed = $true
                         } catch {
                             $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
@@ -493,6 +573,7 @@ while ($true) {
                     continue
                 }
                 $membershipReport = New-Object System.Collections.Generic.List[object]
+                $appliedMembershipAdds = New-Object System.Collections.Generic.List[object]
 
                 # Nenner der Unvollstaendigkeits-Meldung weiter unten, und der
                 # heisst hier mit Absicht, was er ist: ALLE Mitgliedschafts-
@@ -516,6 +597,7 @@ while ($true) {
                         Add-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction Stop | Out-Null
                         Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State remote_confirmed
                         $collectionsToUpdate[$target.name] = $true
+                        $appliedMembershipAdds.Add(@{ collection_id = $collectionId; collection_name = [string]$target.name })
                         $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = $collectionId; collection_name = [string]$target.name; type = [string]$target.type; change = 'added' })
                     } catch {
                         try { Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'remote_add_not_confirmed' } catch {
@@ -556,14 +638,32 @@ while ($true) {
                     }
                 }
 
-                # Verfallene Provenienz (Regel in MECM von Hand entfernt): nur
-                # zurueckmelden, nie zurueckkaempfen - MECM bleibt die Wahrheit.
+                # Verfallene Provenienz fuer ein nicht mehr gewuenschtes Ziel
+                # wird zurueckgezogen. Ist dasselbe Ziel weiterhin gewuenscht,
+                # gilt D-01: der aktuelle Lauf stellt es wieder her. Bei exakt
+                # derselben CollectionID bleibt die vorhandene Ownershipzeile
+                # erhalten; bei einer ersetzten ID wird nur die alte entfernt.
+                # Ein nicht bestaetigtes Add darf die alte Ownership nicht
+                # loeschen, denn der naechste Lauf muss den Wunsch weiter sicher
+                # rekonstruieren koennen.
                 foreach ($rule in @($plan.stale_owned)) {
+                    # Windows PowerShell 5.1 wirft beim direkten Binden einer
+                    # generischen List[object] durch @() eine ArgumentException.
+                    # Die Apply-Grenze braucht ein echtes Object-Array.
+                    $staleDisposition = Get-VsStaleOwnedDisposition -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -PlannedAdds @($plan.add) -AppliedAdds ($appliedMembershipAdds.ToArray())
+                    if ($staleDisposition -eq 'restored_same_id') {
+                        Write-VsLog -Context $deviceName -Message ("Eigene Regel '{0}' ({1}) wurde unter derselben CollectionID wiederhergestellt; Provenienz bleibt erhalten." -f $rule.collection_name, $rule.collection_id)
+                        continue
+                    }
+                    if ($staleDisposition -eq 'defer_until_restored') {
+                        Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' ist weiterhin gewuenscht, wurde aber nicht bestaetigt wiederhergestellt; Provenienz bleibt bis zum sicheren Folgelauf erhalten." -f $rule.collection_name)
+                        continue
+                    }
                     $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
                     $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -Type ([string]$rule.type) -Change removed -State remote_confirmed
                     Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
                     $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt - Provenienz wird zurueckgezogen." -f $rule.collection_name)
+                    Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt oder durch eine neue CollectionID ersetzt - alte Provenienz {1} wird zurueckgezogen." -f $rule.collection_name, $rule.collection_id)
                 }
 
                 # Angewandte Aenderungen zurueckmelden, BEVOR die ResourceID das
@@ -598,9 +698,7 @@ while ($true) {
                         }
                         if ($rolloutRevision) { $membershipBody['rollout_revision'] = [int]$rolloutRevision }
                         Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $membershipBody | Out-Null
-                        foreach ($reported in @($membershipReport)) {
-                            Remove-VsMembershipJournalEntry -Path $membershipJournalPath -OperationId ([string]$reported.operation_id)
-                        }
+                        Remove-VsMembershipJournalEntries -Path $membershipJournalPath -OperationIds @($membershipReport | ForEach-Object { [string]$_.operation_id })
                     } catch {
                         # 409 heisst: dieser Scan arbeitet mit einem veralteten
                         # Rollout. Kein Transportfehler, keine Handarbeit - der

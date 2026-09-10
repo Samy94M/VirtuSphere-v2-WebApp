@@ -137,6 +137,16 @@ final class PortalClosureAnalysisTest extends TestCase
         self::assertStringContainsString('[portal-closure.dynamic-call]', implode("\n", $this->problems()));
     }
 
+    public function testBuiltinParentUsesItsOwnSignatureWithoutExemptingCallbackParents(): void
+    {
+        $this->put('portal/index.php', '<?php class CallbackOwner { public function __construct(callable $callback) {} } class Problem extends \\RuntimeException { public function __construct() { parent::__construct("An ordinary error message."); } }');
+        self::assertSame([], $this->problems());
+        $this->put('portal/index.php', '<?php class CallbackOwner { public function __construct(callable $callback) {} } class Problem extends CallbackOwner { public function __construct() { parent::__construct("missing_parent_callback"); } }');
+        self::assertStringContainsString('missing_parent_callback', implode("\n", $this->problems()));
+        $this->put('portal/index.php', '<?php class Collection extends \\ArrayObject { public function order(): void { parent::uasort("missing_builtin_callback"); } }');
+        self::assertStringContainsString('missing_builtin_callback', implode("\n", $this->problems()));
+    }
+
     public function testNullableCallableDefaultRetainsItsContractButChecksTheFallback(): void
     {
         $this->put('portal/index.php', '<?php function invoke_callback(?callable $f = null): void { $f = $f ?? static fn () => 1; $f(); }');

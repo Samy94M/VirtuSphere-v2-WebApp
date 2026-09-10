@@ -265,8 +265,21 @@ final class SystemStatusPanelBranchTest extends TestCase
         $view = system_status_deviation_view($deviations, 'all', '', 1);
         ob_start();
         // The renderer takes the count the page computed, not the flag: null is
-        // "the scan could not run", which is the same fact as "no inventory".
-        system_status_render_deviations($view, ['VLAN_701'], $admin, '', system_status_deviation_count($deviations, $hasInventory));
+        // "the scan could not run", distinct from no configured inventory source.
+        system_status_render_deviations(
+            $view,
+            ['VLAN_701'],
+            $admin,
+            '',
+            system_status_deviation_count($deviations, $hasInventory),
+            [
+                'source_count' => $hasInventory ? 1 : 0,
+                'has_evidence' => $hasInventory,
+                'fully_evaluable' => $hasInventory,
+                'fully_current' => $hasInventory,
+                'kinds' => [],
+            ]
+        );
 
         return (string) ob_get_clean();
     }
@@ -295,7 +308,7 @@ final class SystemStatusPanelBranchTest extends TestCase
     {
         $html = $this->renderDeviations([], false);
         self::assertStringContainsString(__t('system_status.dev_count_unknown'), $html);
-        self::assertStringContainsString(__t('system_status.dev_no_inventory'), $html);
+        self::assertStringContainsString(__t('system_status.dev_no_sources'), $html);
         self::assertStringNotContainsString(__t('system_status.dev_count_none'), $html);
         // Neutral, not green: nothing was verified, so nothing may look verified.
         self::assertStringContainsString('badge-neutral', $html);

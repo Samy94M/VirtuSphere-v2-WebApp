@@ -261,6 +261,17 @@ final class DeploySupervisorPolicyTest extends TestCase
         self::assertSame(VIRTUSPHERE_SUPERVISOR_ACTION_SHUTDOWN, $result['action'], 'a cooldown must not outlive PID 1');
     }
 
+    public function testShutdownPreservesAManualOwnershipLatch(): void
+    {
+        $result = $this->tick(
+            ['phase' => VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL],
+            ['shutdown_requested' => true, 'child_running' => false]
+        );
+
+        self::assertSame(VIRTUSPHERE_SUPERVISOR_ACTION_SHUTDOWN, $result['action']);
+        self::assertSame(VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL, $result['state']['phase']);
+    }
+
     public function testAMissingHeartbeatFileCountsAsStale(): void
     {
         $result = $this->tick(

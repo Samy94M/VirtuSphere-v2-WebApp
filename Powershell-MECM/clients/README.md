@@ -52,12 +52,17 @@ DNS-Wechsel steht im **Admin-Runbook** in
 
 ## Rückkanal
 
-Jede Phase meldet `started` vor und `finished`/`failed` nach der Aktion an die
-WebApp (`mecm_report.php`), sodass der Deploy-Fortschritt im Portal an der VM
-sichtbar wird. `staticip` meldet `started` **vor** der IP-Umstellung (der
-Client kann danach durch einen VLAN-Wechsel offline sein — das Portal zeigt
-dann „ausgeführt, Bestätigung ausstehend"), `hostname` meldet `finished`
-**vor** dem Reboot. Diese Phasenmeldungen sind best effort und blockieren nie.
+Die Skripte können `started`, `finished` oder `failed` an die WebApp
+(`mecm_report.php`) senden, damit ihr letzter gemeldeter Stand im Portal an der
+VM sichtbar wird. Das ist keine lückenlose Sequenz: frühe Abbrüche und fachliche
+Skip-Pfade können einzelne Events auslassen, und jeder POST hat nur einen
+best-effort-Sendeversuch. `staticip` versucht `started` **vor** der
+IP-Umstellung; die neue IP- oder Subnetzkonfiguration kann danach die
+Portalverbindung unterbrechen. Das Skript verschiebt die vNIC nicht in eine
+andere ESXi-Portgruppe. Bei einer echten Umbenennung versucht `hostname` bei
+vorhandener Report-MAC `finished` **vor** dem Reboot zu melden; Domain-Skip und
+bereits passender Name brauchen keinen Rename-Reboot. Fehlende Telemetrie
+blockiert die Fachaktion nicht und belegt weder Erfolg noch Fehler.
 
 Davon getrennt ist der verbindliche Client-Ready-ACK von `client_getinfo`:
 Basisfelder und Interfaces werden zunächst unter einem neuen, versionierten

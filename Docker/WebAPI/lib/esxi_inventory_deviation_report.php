@@ -97,6 +97,11 @@ function esxi_inventory_deviation_report(
     return [
         'deviations' => $deviations,
         'kinds' => $kindFacts,
+        // The renderer must distinguish "no configured source" from
+        // "sources exist, but no kind is qualified across all of them".
+        // This is presentation context only; it does not weaken the all-source
+        // negative-evidence gate above.
+        'source_count' => count($summaries),
         'has_evidence' => $qualifiedCount > 0,
         'fully_evaluable' => $qualifiedCount === count($kinds),
         'fully_current' => $currentCount === count($kinds),

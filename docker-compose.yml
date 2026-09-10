@@ -106,6 +106,9 @@ services:
     cap_add:
       # php-fpm master starts as root and drops each worker to www-data
       # (uid/gid 33); the setuid/setgid syscalls need these caps.
+      # KILL lets that root master signal its uid-33 children on shutdown.
+      # Without it SIGQUIT waits out Docker's grace and ends with exit 137.
+      - KILL
       - SETGID
       - SETUID
     security_opt:

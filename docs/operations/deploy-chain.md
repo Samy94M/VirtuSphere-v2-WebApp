@@ -13,7 +13,7 @@ Dieses Runbook beschreibt jeden Sprung eines vollständigen Deploys: Wer löst i
 | ESXi/Ansible → MAC-Rückruf | Export-Schritt sammelt MOID, Instance-UUID und MACs | Auftragsprotokoll zeigt Uploadversuch und API-Antwort | `db_importMAC.php` schreibt nur zum passenden `mission_id`/`job_id` und laufenden beziehungsweise abbrechenden Auftrag | IP-Allowlist, HTTP/TLS-Pin, fehlende `job_id`, Identitäts- oder MAC-Konflikt |
 | Portal → MECM Device-Sync | Geplante MECM-Aufgabe liest Geräte mit bekannter DHCP-MAC und importiert sie unter dem eingefrorenen **Rolloutnamen** (`vm_hostname` auf der Leitung, nicht `vm_name`) | Systemstatus zeigt Start/Abschluss und Ursachen; Kategorie `mecm` | `mecm_updateid.php` meldet ResourceID und Provenienz der Collection-Mitgliedschaften, beides mit der Rolloutrevision | MECM-Provider, fehlende Collection, doppelte MAC, ResourceID fehlt, Rückreport abgelehnt, Identität nicht auflösbar, veraltete Rolloutrevision (409) |
 | MECM → PXE-VM | Collection/Task Sequence ist bereit und VM startet | MECM-Status plus Portalstufe 4/5 | Windows-Client meldet Phasen an `mecm_report.php` | Verteilung noch nicht erfolgreich, falsche Task Sequence, PXE-/Netzproblem |
-| Windows-Client → Portal | Clientphasen melden `started`, `finished` oder `failed` anhand der MAC | **VM bearbeiten → Client-Phasen** mit Zeit, Ergebnis und Detail | Report-Endpoint speichert ausschließlich Telemetrie; keine Lifecycle-Schreibabkürzung | API nicht erreichbar, Zertifikatswechsel/Pin, kein passender Adapter oder Datenträger |
+| Windows-Client → Portal | Clientphasen versuchen `started`, `finished` oder `failed` anhand der MAC best effort zu melden | **VM bearbeiten → Client-Phasen** mit dem letzten eingetroffenen Event; fehlende Events sind kein Fachnachweis | Report-Endpoint speichert ausschließlich Telemetrie; keine Lifecycle-Schreibabkürzung und keine Outbox | API nicht erreichbar, Zertifikatswechsel/Pin, kein passender Adapter oder Datenträger |
 
 ## Aktiver Transport und vorbereiteter Durable Runner
 
@@ -30,7 +30,9 @@ passende 8R-S-Standortevidenz ist kein Produktivjob an den neuen Launcher
 verdrahtet und es gibt keinen stillen Fallback von einem Remote-Modus auf die
 Legacy-Kette. Linger, User-Bus, cgroup-Enforcement, Kapazitätsgrenzen, reale
 Faults und Rückbau bleiben am echten Air-Gap-/Ansible-/ESXi-Ziel nachzuweisen.
-`create` und `full` sind zusätzlich bis Etappe 14B ausgeschlossen.
+Create und Full wurden in der späteren Etappe 14B für den aktiven direkten
+`legacy_v1`-Pfad als eine persistente Einheit je VM umgesetzt. Der vorbereitete
+Durable Runner bleibt davon unberührt und weiterhin nicht aktiviert.
 
 Migration 0042 bereitet dafür nur persistente Identität und Fencing vor. Die
 Runtime-Generation wird einmal zufällig erzeugt; Lease, Epoch, Jobtoken,
@@ -138,8 +140,9 @@ Sie bleibt bei nur eingereihten Jobs erlaubt, wird aber während
 `running`/`cancelling` unter demselben Missions-/Joblock mit einem Link auf das
 aktive Jobprotokoll abgewiesen.
 
-Etappe 14A aktiviert keinen neuen Remote-Create-Pfad. Create und Full bleiben
-bis zur getrennten Etappe 14B in der Remote-Aktivierungspolicy gesperrt.
+Etappe 14A aktivierte noch keinen neuen Remote-Create-Pfad. Die danach
+umgesetzte Etappe 14B führt Create und Full je VM im aktiven direkten
+`legacy_v1`-Pfad aus; sie aktiviert den separaten Durable Runner nicht.
 
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
@@ -217,17 +220,24 @@ Handler installiert hat; der Kernel wendet dort keine Standardaktionen an.
 Zweitens erbt dieser Container vom PHP-FPM-Basisimage `STOPSIGNAL SIGQUIT`, weil
 php-fpm damit sauber herunterfährt. Es kam also SIGQUIT an, niemand hörte zu, und
 `docker stop` endete nach der vollen Frist im SIGKILL: gemessen 30,4 Sekunden und
-Exitcode 137, bei jedem Neustart, jedem Stackupdate und jedem Hostreboot. Genau
+Exitcode 137 im untersuchten Deploy-Worker-Fall. Genau
 dann konnte der Worker weder eine letzte Zeile schreiben noch seinen Besitz
-abgeben, und ein laufendes Playbook lief auf dem Ansible-Host weiter. Nach der
-Korrektur beenden sich Deploy-Worker, Wartungsworker und Aufsicht in 0,4 Sekunden
-mit Exitcode 0.
+abgeben, und ein laufendes Playbook lief auf dem Ansible-Host weiter. Im
+historischen Auditvergleich reagierte der isolierte untätige Hilfsprozess in
+326 Millisekunden und mit Exitcode 0. Das ist ein historischer
+Messwert dieses Falles, keine neue Laufzeitmessung dieser Änderungen und keine
+allgemeine Zusage für alle drei Prozesse. Insbesondere kann ein bereits laufender
+mysqli-Aufruf die Reaktion begrenzen, bis der Aufruf zurückkehrt. Die getrennt
+beobachteten Exit-137-Fälle eines PHP-Containers belegen für sich keine Ursache
+im Bereitstellungsdienst.
 
-Die Zusage dabei ist bewusst bescheiden: Ein **untätiger** Prozess endet sofort
-und sauber, und das ist die große Mehrheit aller Stopps. Ein Prozess **mitten in
-einem Auftrag** merkt sich die Anforderung und arbeitet weiter, denn das Playbook
-verändert ESXi auf einem anderen Host und kein Signal an diesen Prozess hält das
-auf. Er schreibt dafür eine Zeile ins Containerlog, was vorher niemand hatte.
+Die Zusage dabei ist bewusst bescheiden: Sobald ein **untätiger** Prozess die
+Stopanforderung beobachtet, beendet er sich sauber; seine Pausen zwischen zwei
+Versuchen sind dafür unterbrechbar. Ein bereits laufender Systemaufruf kann den
+Beobachtungszeitpunkt begrenzen. Ein Prozess **mitten in einem Auftrag** merkt
+sich die Anforderung und arbeitet weiter, denn das Playbook verändert ESXi auf
+einem anderen Host und kein Signal an diesen Prozess hält das auf. Er schreibt
+dafür eine Zeile ins Containerlog, was vorher niemand hatte.
 
 **Die Aufsicht startet nie einen zweiten Arbeitsprozess**, bevor das Ende des
 alten bestätigt ist, und bestätigt heißt hier `waitpid`, nicht „wir haben ein
@@ -243,7 +253,39 @@ und der Grund, warum der Worker überhaupt einen Datenbankkanal hat. Die Aufsich
 entscheidet deshalb ausschließlich anhand der Lebenszeichendatei des Prozesses
 und nie anhand der Datenbank. Sie veröffentlicht ihren Zustand best effort in die
 Datenbank, weil das Portal in einem anderen Container läuft und diese Datei gar
-nicht lesen kann.
+nicht lesen kann. Verliert nur diese Veröffentlichung ihre mysqli-Verbindung,
+verwirft sie den Handle, wartet gedrosselt und verbindet sich neu. Der laufende
+Kindprozess und seine PID bleiben dabei dieselben; ein DB-Wert fließt weiterhin
+nicht in die Lebensentscheidung ein.
+
+Das Neustartfenster, der Zähler, die Abkühlfrist und der nächste Versuch liegen
+als begrenztes JSON unter `Docker/WebAPI/var/deploy-supervisor`. Dieses
+gitignorierte Verzeichnis liegt im bind-gemounteten WebAPI-Baum; `/tmp` ist
+tmpfs und eignet sich dafür nicht. Verzeichnis und Dateien sind restriktiv. Ein
+separates exklusives, nicht blockierendes Lock bleibt über die gesamte Laufzeit
+auf demselben Inode, während JSON im selben Verzeichnis atomar ersetzt wird.
+Vor jedem Kindstart ist der vollständige Zustand dauerhaft reserviert. Schlägt
+das Schreiben fehl, bleibt ein Ersatzstart gesperrt; die Beobachtung und ein aus
+lokaler Prozessevidenz nötiger Stop oder Reap laufen weiter.
+
+Findet eine neu gestartete Aufsicht einen gespeicherten Zustand `running` oder
+`stopping`, besitzt sie keinen lokalen Prozesshandle und damit keinen
+`waitpid`-Beleg für das Ende des alten Kindes. Auch PID 1 beweist keinen neuen
+PID-Namespace. Die reservierte Ausführung wird deshalb gegen das Restartbudget
+gerechnet und der Zustand bleibt `manual`, bis ein Administrator das Ende des
+alten Prozesses außerhalb dieser Automatik geklärt hat. Ein gespeicherter PID
+wird nie als Besitznachweis übernommen. Auch ein geordneter Stop der neuen
+Aufsicht löscht diese Sperre nicht.
+
+Beim Start und beim untätigen Wiederverbinden prüfen Deploy- und
+Wartungsworker den gemeinsamen Stopstatus vor jeder Verbindung und nach einem
+zurückgekehrten Verbindungsaufruf. Die Pausen zwischen Fehlversuchen laufen über
+`worker_idle_wait()`. Ein Stop liefert dort `null`, und beide Aufrufer beenden
+sich vor jeder weiteren DB-Nutzung. `--once` bleibt auf drei Versuche begrenzt.
+Ein bereits laufender Datenbank-Verbindungsaufruf kann nicht durch den Helfer
+abgebrochen werden; die Reaktion folgt dann erst nach seiner Rückkehr. Ein
+aktiver Deploy-Schritt behält unverändert die Regel, seine aktuelle Arbeit bis
+zur sicheren Grenze zu Ende zu führen.
 
 Der Wechsel zwischen den Formen ist ein auditiertes Wartungsfenster und passiert
 nie von selbst. `lib/deploy_supervisor_switch.php --check` nennt alle offenen

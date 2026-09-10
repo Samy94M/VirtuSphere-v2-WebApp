@@ -26,32 +26,143 @@
 # Exitcodes: 0 Drill bestanden; 1 Befund; 2 Umgebung unvollstaendig.
 set -eu
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
-cd "$(dirname "$0")/.."
 
-BACKUP_DIR="Docker/backups"
+PROGRESS_TOTAL=9
+progress_position=0
+progress_unit=""
+progress_run() {
+  progress_position=$1
+  progress_unit=$2
+  echo "[$progress_position/$PROGRESS_TOTAL] RUN $progress_unit"
+}
+progress_result() {
+  echo "[$progress_position/$PROGRESS_TOTAL] $1 $progress_unit"
+  progress_unit=""
+}
+fail() {
+  [ -z "$progress_unit" ] || progress_result fail
+  echo "FEHLER: $*" >&2
+  exit 1
+}
+envfail() {
+  [ -z "$progress_unit" ] || progress_result infrastructure_error
+  echo "FEHLER (Umgebung): $*" >&2
+  exit 2
+}
+progress_run 1 restore-inputs
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)
+SCRIPT_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)
+if [ "${VIRTUSPHERE_CHECK_ROOT+x}" = x ]; then
+  [ -n "$VIRTUSPHERE_CHECK_ROOT" ] \
+    || envfail "[restore.root-empty] VIRTUSPHERE_CHECK_ROOT ist gesetzt, aber leer; kein Rueckfall auf den Skriptroot."
+  requested_root=$VIRTUSPHERE_CHECK_ROOT
+else
+  requested_root=$SCRIPT_ROOT
+fi
+[ -d "$requested_root" ] \
+  || envfail "[restore.root-missing] beauftragter Restore-Pruefroot existiert nicht: $requested_root"
+CHECK_ROOT=$(CDPATH='' cd -- "$requested_root" 2>/dev/null && pwd -P) \
+  || envfail "[restore.root-missing] beauftragter Restore-Pruefroot ist nicht aufloesbar: $requested_root"
+BACKUP_DIR="$CHECK_ROOT/Docker/backups"
+SCHEMA_SQL="$CHECK_ROOT/Docker/mysql/mysql-init/struktur.sql"
+[ -d "$BACKUP_DIR" ] \
+  || envfail "[restore.root-incomplete] Backupverzeichnis fehlt im beauftragten Restore-Pruefroot: $BACKUP_DIR"
+[ -f "$SCHEMA_SQL" ] \
+  || envfail "[restore.root-incomplete] struktur.sql fehlt im beauftragten Restore-Pruefroot: $SCHEMA_SQL"
+for required in \
+  Docker/WebAPI/lib/migrate.php \
+  Docker/WebAPI/lib/directory_restore_converge.php \
+  Docker/WebAPI/tests/tools/restore-drill-probe.php
+do
+  [ -f "$CHECK_ROOT/$required" ] \
+    || envfail "[restore.root-incomplete] $required fehlt im beauftragten Restore-Pruefroot $CHECK_ROOT"
+done
+cd "$CHECK_ROOT"
+
 MYSQL_IMAGE="${VIRTUSPHERE_MYSQL_IMAGE:-mysql:8.4-virtusphere}"
 PHP_IMAGE="${VIRTUSPHERE_PHP_IMAGE:-virtusphere-v2-webapp-php}"
-SUFFIX="$$"
+SUFFIX="$(date +%s)-$$"
+RUN_LABEL="restore-drill-$SUFFIX"
 NET="vs-restore-net-$SUFFIX"
 MYSQL_NAME="vs-restore-mysql-$SUFFIX"
 SMOKE_NAME="vs-restore-web-$SUFFIX"
+NET_ID=""
+MYSQL_ID=""
+SMOKE_ID=""
 SMOKE_PORT=8099
 PW="restore-drill-$(date +%s)-$SUFFIX"
 DRILL_ADMIN_USER="restore-drill-admin"
 DRILL_ADMIN_PASS="Drill-Admin-Passw0rd-$SUFFIX"
-REPO_MOUNT="$(pwd -W 2>/dev/null || pwd)"
+REPO_MOUNT="$(pwd -W 2>/dev/null || pwd -P)"
 WORKDIR="$(mktemp -d)"
 
-fail() { echo "FEHLER: $*" >&2; exit 1; }
-envfail() { echo "FEHLER (Umgebung): $*" >&2; exit 2; }
-
-cleanup() {
-  docker rm -f "$SMOKE_NAME" >/dev/null 2>&1 || true
-  docker rm -f "$MYSQL_NAME" >/dev/null 2>&1 || true
-  docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$WORKDIR"
+valid_id() {
+  [ "${#1}" -eq 64 ] && ! printf '%s' "$1" | grep -q '[^a-f0-9]'
 }
-trap cleanup EXIT INT TERM
+verify_container() {
+  _id=$1
+  _name=$2
+  valid_id "$_id" || return 1
+  _actual=$(docker inspect "$_id" --format '{{.Id}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "virtusphere.qa.probe"}}' 2>/dev/null) || return 1
+  [ "$_actual" = "$_id|/$_name|virtusphere-qa|$RUN_LABEL" ]
+}
+verify_network() {
+  valid_id "$NET_ID" || return 1
+  _actual=$(docker network inspect "$NET_ID" --format '{{.Id}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "virtusphere.qa.probe"}}' 2>/dev/null) || return 1
+  [ "$_actual" = "$NET_ID|$NET|virtusphere-qa|$RUN_LABEL" ]
+}
+cleanup() {
+  original_ec=$1
+  trap - EXIT INT TERM
+  [ -z "$progress_unit" ] || progress_result fail
+  progress_run 9 cleanup
+  cleanup_failed=0
+  if [ -n "$SMOKE_ID" ]; then
+    if verify_container "$SMOKE_ID" "$SMOKE_NAME"; then
+      docker rm -f "$SMOKE_ID" >/dev/null 2>&1 || cleanup_failed=1
+    else
+      echo "FEHLER: Cleanup verweigert fremden Smoke-Container $SMOKE_ID." >&2
+      cleanup_failed=1
+    fi
+  fi
+  if [ -n "$MYSQL_ID" ]; then
+    if verify_container "$MYSQL_ID" "$MYSQL_NAME"; then
+      docker rm -f "$MYSQL_ID" >/dev/null 2>&1 || cleanup_failed=1
+    else
+      echo "FEHLER: Cleanup verweigert fremden MySQL-Container $MYSQL_ID." >&2
+      cleanup_failed=1
+    fi
+  fi
+  if [ -n "$NET_ID" ]; then
+    if verify_network; then
+      docker network rm "$NET_ID" >/dev/null 2>&1 || cleanup_failed=1
+    else
+      echo "FEHLER: Cleanup verweigert fremdes Restore-Netz $NET_ID." >&2
+      cleanup_failed=1
+    fi
+  fi
+  rm -rf "$WORKDIR" || cleanup_failed=1
+  if [ "$cleanup_failed" -eq 0 ]; then
+    progress_result pass
+  else
+    progress_result fail
+    [ "$original_ec" -ne 0 ] || original_ec=1
+  fi
+  exit "$original_ec"
+}
+trap 'cleanup $?' EXIT
+trap 'exit 130' INT TERM
+
+# --- 0. Juengstes Backup-Tripel finden --------------------------------------
+dump=$(ls -1t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | head -n 1 || true)
+[ -n "$dump" ] || envfail "[restore.backup-missing] kein DB-Dump unter $BACKUP_DIR/ gefunden. Erst sh scripts/backup.sh laufen lassen."
+ts=$(basename "$dump" | sed 's/^db-//; s/\.sql\.gz$//')
+config="$BACKUP_DIR/config-$ts.tar.gz"
+manifest="$BACKUP_DIR/manifest-$ts.sha256"
+[ -f "$config" ] || fail "[restore.backup-incomplete] Config-Archiv $config fehlt zum Dump $dump; das Backup-Tripel ist unvollstaendig."
+[ -f "$manifest" ] || fail "[restore.backup-incomplete] Manifest $manifest fehlt. Ein Backup ohne Hash-Manifest ist nicht verifizierbar; sh scripts/backup.sh erneut laufen lassen."
+echo "Restore-Drill Auswahl: Pruefroot=$CHECK_ROOT; Backup-Stand=$ts"
 
 command -v docker >/dev/null 2>&1 || envfail "docker fehlt."
 command -v sha256sum >/dev/null 2>&1 || envfail "sha256sum fehlt."
@@ -59,22 +170,16 @@ docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 \
   || envfail "PHP-Image $PHP_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_PHP_IMAGE setzen)."
 docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1 \
   || envfail "MySQL-Image $MYSQL_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_MYSQL_IMAGE setzen)."
-
-# --- 0. Juengstes Backup-Tripel finden --------------------------------------
-dump=$(ls -1t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | head -n 1 || true)
-[ -n "$dump" ] || envfail "kein DB-Dump unter $BACKUP_DIR/ gefunden. Erst sh scripts/backup.sh laufen lassen."
-ts=$(basename "$dump" | sed 's/^db-//; s/\.sql\.gz$//')
-config="$BACKUP_DIR/config-$ts.tar.gz"
-manifest="$BACKUP_DIR/manifest-$ts.sha256"
-[ -f "$config" ] || fail "Config-Archiv $config fehlt zum Dump $dump; das Backup-Tripel ist unvollstaendig."
-[ -f "$manifest" ] || fail "Manifest $manifest fehlt. Ein Backup ohne Hash-Manifest ist nicht verifizierbar; sh scripts/backup.sh erneut laufen lassen."
-echo "Restore-Drill mit Backup-Stand: $ts"
+progress_result pass
 
 # --- 1. Manifest ---------------------------------------------------------------
+progress_run 2 manifest
 ( cd "$BACKUP_DIR" && sha256sum -c "$(basename "$manifest")" ) \
   || fail "Manifest-Pruefung fehlgeschlagen: mindestens ein Archiv ist veraendert oder unvollstaendig."
+progress_result pass
 
 # --- 2. Dateirechte im Config-Archiv -------------------------------------------
+progress_run 3 archived-config
 # Auf einem POSIX-Host ist ein gruppen-/weltlesbares .env oder ein lesbarer
 # SSL-Key ein Befund. Git-Bash unter Windows kann POSIX-Modi nicht abbilden
 # (alles erscheint als 644/755), dort wird nur gewarnt.
@@ -136,35 +241,54 @@ APP_DB_PASS="$(env_value DB_PASS)"
 [ -n "$APP_KEY" ] || fail "APP_KEY fehlt im gesicherten .env; Credentials waeren nach diesem Restore unlesbar."
 [ -n "$APP_DB_USER" ] || fail "DB_USER fehlt im gesicherten .env; die App haette nach diesem Restore keinen DB-Zugang."
 [ -n "$APP_DB_PASS" ] || fail "DB_PASS fehlt im gesicherten .env; die App haette nach diesem Restore keinen DB-Zugang."
+progress_result pass
 
 # --- 4. Wegwerf-MySQL + Import ---------------------------------------------------
+progress_run 4 database-restore
 # Der Wegwerf-Container entsteht wie der Produktionsstack: der mysql-Entrypoint
 # legt den App-User aus der archivierten .env an (MYSQL_USER/MYSQL_PASSWORD/
 # MYSQL_DATABASE, wie docker-compose.yml sie setzt). Genau diese Grants muss der
 # Import ueberleben, denn die App verbindet nie als root.
-docker network create "$NET" >/dev/null
-docker run -d --name "$MYSQL_NAME" --network "$NET" \
+if docker network inspect "$NET" >/dev/null 2>&1; then
+  fail "[restore.resource-collision] Restore-Netz $NET existiert bereits."
+fi
+NET_ID=$(docker network create \
+  --label com.docker.compose.project=virtusphere-qa \
+  --label "virtusphere.qa.probe=$RUN_LABEL" "$NET") \
+  || envfail "Restore-Netz konnte nicht erzeugt werden."
+verify_network || envfail "Erzeugtes Restore-Netz besteht die ID-/Label-Pruefung nicht."
+if docker container inspect "$MYSQL_NAME" >/dev/null 2>&1; then
+  fail "[restore.resource-collision] MySQL-Name $MYSQL_NAME existiert bereits."
+fi
+MYSQL_ID=$(docker create --name "$MYSQL_NAME" --network "$NET_ID" \
+  --label com.docker.compose.project=virtusphere-qa \
+  --label "virtusphere.qa.probe=$RUN_LABEL" \
   -e MYSQL_ROOT_PASSWORD="$PW" \
   -e MYSQL_DATABASE="$DB_NAME" \
   -e MYSQL_USER="$APP_DB_USER" -e MYSQL_PASSWORD="$APP_DB_PASS" \
-  "$MYSQL_IMAGE" >/dev/null
+  "$MYSQL_IMAGE") || envfail "Wegwerf-MySQL konnte nicht erzeugt werden."
+verify_container "$MYSQL_ID" "$MYSQL_NAME" \
+  || envfail "Erzeugter MySQL-Container besteht die ID-/Label-Pruefung nicht."
+docker start "$MYSQL_ID" >/dev/null \
+  || envfail "Wegwerf-MySQL konnte nicht gestartet werden."
 
 echo "Warte auf MySQL im Wegwerf-Container ..."
 # Bewusst SELECT 1 statt mysqladmin ping: waehrend der Image-Initialisierung
 # antwortet ein temporaerer Server, bei dem das Root-Passwort noch nicht gesetzt
 # ist — ping meldet den faelschlich als bereit.
 i=0
-until docker exec "$MYSQL_NAME" mysql -uroot -p"$PW" -N -e 'SELECT 1' >/dev/null 2>&1; do
+until docker exec "$MYSQL_ID" mysql -uroot -p"$PW" -N -e 'SELECT 1' >/dev/null 2>&1; do
   i=$((i + 1))
   [ "$i" -lt 60 ] || envfail "Wegwerf-MySQL wurde nicht bereit."
   sleep 2
 done
 
 echo "Spiele Dump ein ..."
-gunzip -c "$dump" | docker exec -i "$MYSQL_NAME" mysql -uroot -p"$PW"
+gunzip -c "$dump" | docker exec -i "$MYSQL_ID" mysql -uroot -p"$PW" \
+  || fail "DB-Dump konnte nicht vollstaendig importiert werden."
 
 ROOT_PW="$PW"
-drill_sql() { docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "$1" 2>/dev/null; }
+drill_sql() { docker exec "$MYSQL_ID" mysql -uroot -p"$ROOT_PW" -N -e "$1" 2>/dev/null; }
 
 # --- 4a. Der App-User muss nach dem Import arbeiten koennen ---------------------
 #
@@ -175,7 +299,7 @@ drill_sql() { docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "$1" 2>/
 # der importierte Alt-Stand nicht mehr zur .env. FLUSH PRIVILEGES zuerst, weil
 # der Server importierte Grant-Tabellen erst dann liest - genau wie nach dem
 # Neustart, der im Ernstfall auf den Import folgt.
-docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "FLUSH PRIVILEGES" 2>/dev/null || true
+docker exec "$MYSQL_ID" mysql -uroot -p"$ROOT_PW" -N -e "FLUSH PRIVILEGES" 2>/dev/null || true
 
 # Ein Alt-Archiv ersetzt nach dem FLUSH auch das ROOT-Passwort des Zielservers
 # durch den archivierten Stand (empirisch: der Drill brach hier still ab). Der
@@ -183,7 +307,7 @@ docker exec "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N -e "FLUSH PRIVILEGES" 2>/
 if ! drill_sql "SELECT 1" >/dev/null; then
   ARCHIVED_ROOT_PW="$(env_value MYSQL_ROOT_PASSWORD)"
   if [ -n "$ARCHIVED_ROOT_PW" ] \
-    && docker exec "$MYSQL_NAME" mysql -uroot -p"$ARCHIVED_ROOT_PW" -N -e "SELECT 1" >/dev/null 2>&1; then
+    && docker exec "$MYSQL_ID" mysql -uroot -p"$ARCHIVED_ROOT_PW" -N -e "SELECT 1" >/dev/null 2>&1; then
     ROOT_PW="$ARCHIVED_ROOT_PW"
     echo "Hinweis: der Grant-Import hat auch das Root-Passwort des Wegwerf-Servers ersetzt; weiter mit dem archivierten MYSQL_ROOT_PASSWORD (Alt-Archiv-Effekt, siehe backup.md)."
   else
@@ -191,7 +315,7 @@ if ! drill_sql "SELECT 1" >/dev/null; then
   fi
 fi
 app_can_work() {
-  docker exec "$MYSQL_NAME" mysql -u"$APP_DB_USER" -p"$APP_DB_PASS" -N \
+  docker exec "$MYSQL_ID" mysql -u"$APP_DB_USER" -p"$APP_DB_PASS" -N \
     -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME'" >/dev/null 2>&1
 }
 if zgrep -m1 -q '^-- Current Database: .mysql.$' "$dump" 2>/dev/null \
@@ -211,19 +335,24 @@ fi
 app_can_work \
   || fail "Der App-User $APP_DB_USER kann nach dem Restore nicht arbeiten; die App haette keinen DB-Zugriff, waehrend ein root-Drill gruen bliebe."
 echo "OK: App-User $APP_DB_USER kann nach dem Restore arbeiten."
+progress_result pass
 
 # --- 5. Tabellenzahl Dump vs. Restore ------------------------------------------
+progress_run 5 table-count
 dump_tables=$(gunzip -c "$dump" | awk -v db="$DB_NAME" '
   /^-- Current Database:/ { in_db = index($0, "`" db "`") > 0 }
   in_db && /^CREATE TABLE/ { n++ }
   END { print n + 0 }')
-restored_tables=$(drill_sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME'")
+restored_tables=$(drill_sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME'") \
+  || fail "Tabellenzahl der wiederhergestellten Datenbank ist nicht lesbar."
 [ "$dump_tables" -ge 10 ] || fail "Dump enthaelt nur $dump_tables Tabellen fuer $DB_NAME; das ist kein vollstaendiges Backup."
 [ "$dump_tables" -eq "$restored_tables" ] \
   || fail "Tabellenzahl weicht ab: Dump $dump_tables, wiederhergestellt $restored_tables."
 echo "Tabellen OK: $restored_tables Tabellen in $DB_NAME wiederhergestellt."
+progress_result pass
 
 # --- 6. Migrationen + Konvergenz -------------------------------------------------
+progress_run 6 migrations-and-schema
 # run_php <app-key> <php-script> [args...] — Projekt-PHP im Drill-Netz mit den
 # Restore-Verbindungsdaten; der Schluessel ist Parameter, damit die Krypto-Probe
 # denselben Weg einmal mit dem gesicherten und einmal mit einem falschen
@@ -233,7 +362,8 @@ echo "Tabellen OK: $restored_tables Tabellen in $DB_NAME wiederhergestellt."
 # EnvBoot seine Anwesenheit verlangt.
 run_php() {
   _key="$1"; shift
-  docker run --rm --network "$NET" \
+  docker run --rm --network "$NET_ID" \
+    --label com.docker.compose.project=virtusphere-qa --label "virtusphere.qa.probe=$RUN_LABEL" \
     -v "$REPO_MOUNT:/repo" \
     -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
     -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
@@ -249,7 +379,7 @@ run_php "$APP_KEY" /repo/Docker/WebAPI/lib/directory_restore_converge.php \
 
 echo "Pruefe Schema-Konvergenz gegen struktur.sql ..."
 drill_sql "DROP DATABASE IF EXISTS vs_drill_fresh; CREATE DATABASE vs_drill_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null
-docker exec -i "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" vs_drill_fresh < Docker/mysql/mysql-init/struktur.sql 2>/dev/null \
+docker exec -i "$MYSQL_ID" mysql -uroot -p"$ROOT_PW" vs_drill_fresh < "$SCHEMA_SQL" 2>/dev/null \
   || fail "struktur.sql laedt nicht in eine frische Datenbank."
 # Fingerprint ueber information_schema statt mysqldump: eine ueber Migrationen
 # gewachsene Datenbank hat eine andere physische Spaltenreihenfolge (ADD COLUMN
@@ -258,7 +388,7 @@ docker exec -i "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" vs_drill_fresh < Docker/m
 # ENUM-Definition), NULL/Default/Extra/Collation, Indizes, FKs samt Regeln und
 # Tabellenoptionen — sortiert, damit das Layout keine Rolle spielt.
 schema_fingerprint() {
-  docker exec -i "$MYSQL_NAME" mysql -uroot -p"$ROOT_PW" -N 2>/dev/null <<SQL
+  docker exec -i "$MYSQL_ID" mysql -uroot -p"$ROOT_PW" -N 2>/dev/null <<SQL
 SELECT CONCAT_WS('|', 'col', table_name, column_name, column_type, is_nullable,
                  IFNULL(column_default, '<null>'), extra, IFNULL(collation_name, ''))
   FROM information_schema.columns WHERE table_schema = '$1'
@@ -278,32 +408,51 @@ SELECT CONCAT_WS('|', 'tbl', table_name, engine, IFNULL(table_collation, ''))
  ORDER BY table_name;
 SQL
 }
-schema_fingerprint "$DB_NAME" > "$WORKDIR/schema-restored.txt"
-schema_fingerprint vs_drill_fresh > "$WORKDIR/schema-fresh.txt"
+schema_fingerprint "$DB_NAME" > "$WORKDIR/schema-restored.txt" \
+  || fail "Schema-Fingerprint der Restore-Datenbank ist nicht lesbar."
+schema_fingerprint vs_drill_fresh > "$WORKDIR/schema-fresh.txt" \
+  || fail "Schema-Fingerprint der frischen Datenbank ist nicht lesbar."
 [ -s "$WORKDIR/schema-fresh.txt" ] || envfail "Schema-Fingerprint der frischen Datenbank ist leer (Abfrage kaputt)."
 diff -u "$WORKDIR/schema-fresh.txt" "$WORKDIR/schema-restored.txt" \
   || fail "Schema-Fingerprint weicht vom frischen struktur.sql ab (Drift auf dem gesicherten System)."
+progress_result pass
 
 # --- 7. Invarianten, Rowcounts, Credential-Krypto -------------------------------
+progress_run 7 invariants-and-crypto
 PROBE=/repo/Docker/WebAPI/tests/tools/restore-drill-probe.php
 run_php "$APP_KEY" "$PROBE" verify || fail "Invarianten-/Krypto-Probe rot."
-WRONG_KEY="base64:$(docker run --rm "$PHP_IMAGE" php -r 'echo base64_encode(random_bytes(32));')"
+WRONG_KEY="base64:$(docker run --rm \
+  --label com.docker.compose.project=virtusphere-qa --label "virtusphere.qa.probe=$RUN_LABEL" \
+  "$PHP_IMAGE" php -r 'echo base64_encode(random_bytes(32));')" \
+  || envfail "Falscher Testschluessel konnte nicht erzeugt werden."
 run_php "$WRONG_KEY" "$PROBE" expect-decrypt-failure \
   || fail "Ein falscher APP_KEY konnte gespeicherte Credentials entschluesseln."
+progress_result pass
 
 # --- 8. App-Smoke gegen die wiederhergestellten Daten ---------------------------
+progress_run 8 app-smoke
 echo "Starte Smoke-Server (php -S) gegen den Restore ..."
-docker run -d --name "$SMOKE_NAME" --network "$NET" \
+if docker container inspect "$SMOKE_NAME" >/dev/null 2>&1; then
+  fail "[restore.resource-collision] Smoke-Name $SMOKE_NAME existiert bereits."
+fi
+SMOKE_ID=$(docker create --name "$SMOKE_NAME" --network "$NET_ID" \
+  --label com.docker.compose.project=virtusphere-qa \
+  --label "virtusphere.qa.probe=$RUN_LABEL" \
   -v "$REPO_MOUNT:/repo" -w /repo/Docker/WebAPI \
   -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
   -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
   -e APP_KEY="$APP_KEY" \
-  "$PHP_IMAGE" php -S 0.0.0.0:$SMOKE_PORT -t /repo/Docker/WebAPI >/dev/null
+  "$PHP_IMAGE" php -S 0.0.0.0:$SMOKE_PORT -t /repo/Docker/WebAPI) \
+  || fail "Smoke-Container konnte nicht erzeugt werden."
+verify_container "$SMOKE_ID" "$SMOKE_NAME" \
+  || fail "Erzeugter Smoke-Container besteht die ID-/Label-Pruefung nicht."
+docker start "$SMOKE_ID" >/dev/null || fail "Smoke-Container konnte nicht gestartet werden."
 
 run_php "$APP_KEY" "$PROBE" seed-admin "$DRILL_ADMIN_USER" "$DRILL_ADMIN_PASS" >/dev/null \
   || fail "Drill-Admin liess sich nicht seeden."
 
-docker run --rm --network "$NET" \
+docker run --rm --network "$NET_ID" \
+  --label com.docker.compose.project=virtusphere-qa --label "virtusphere.qa.probe=$RUN_LABEL" \
   -v "$REPO_MOUNT:/repo" \
   -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
   -e DB_USER=root -e DB_PASS="$PW" -e MYSQL_ROOT_PASSWORD="$PW" \
@@ -316,3 +465,4 @@ docker run --rm --network "$NET" \
 run_php "$APP_KEY" "$PROBE" cleanup "$DRILL_ADMIN_USER" >/dev/null || true
 
 echo "Restore-Drill OK: Manifest, Schema, Migrationen, Invarianten, APP_KEY-Bindung und App-Smoke bestanden ($restored_tables Tabellen, Stand $ts)."
+progress_result pass

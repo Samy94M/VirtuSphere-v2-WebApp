@@ -42,6 +42,7 @@ BeforeAll {
     $script:InstMecm      = Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1'
     $script:InstClients   = Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1'
     $script:Template      = Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1'
+    $script:FixtureDir    = Join-Path $PSScriptRoot 'fixtures\haertung2026'
 
     # Dot-Source im Kindscope, damit Stubs nur im jeweiligen Testscope leben
     # (gleiche Technik wie in den bestehenden Suites).
@@ -103,6 +104,153 @@ BeforeAll {
         }
         return $false
     }
+
+    function Get-CommandParameterArgument {
+        param(
+            [Parameter(Mandatory)]$Command,
+            [Parameter(Mandatory)][string]$ParameterName
+        )
+        for ($i = 0; $i -lt $Command.CommandElements.Count; $i++) {
+            $element = $Command.CommandElements[$i]
+            if ($element -isnot [System.Management.Automation.Language.CommandParameterAst] -or
+                $element.ParameterName -ine $ParameterName) { continue }
+            if ($i + 1 -lt $Command.CommandElements.Count) {
+                return $Command.CommandElements[$i + 1]
+            }
+        }
+        return $null
+    }
+
+    function Get-CommandArgumentText {
+        param($Argument)
+        if ($null -eq $Argument) { return '' }
+        if ($Argument -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $Argument -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+            return [string]$Argument.Value
+        }
+        return [string]$Argument.Extent.Text
+    }
+
+    function Test-IsPowerShellExecutableText {
+        param([string]$Text)
+        return $Text -match '(?i)(^|[\\/''"])powershell(?:\.exe)?([''"]|$)' -or
+            $Text -match '(?i)(^|[\\/''"])pwsh(?:\.exe)?([''"]|$)'
+    }
+
+    function Test-PowerShellSwitchPrecedesPayload {
+        param(
+            [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+            [Parameter(Mandatory)][string]$SwitchPattern
+        )
+        $switch = [regex]::Match($Text, $SwitchPattern)
+        if (-not $switch.Success) { return $false }
+        $payload = [regex]::Match($Text, '(?i)(^|[\s''"])-(?:File|Command)(?=$|[\s''"])')
+        return (-not $payload.Success -or $switch.Index -lt $payload.Index)
+    }
+
+    function Test-AstUsesVsPowerShellArgs {
+        param($Ast)
+        if ($null -eq $Ast) { return $false }
+        $variables = $Ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $node.VariablePath.UserPath -ieq 'script:VsPowerShellArgs'
+        }, $true)
+        return @($variables).Count -gt 0
+    }
+
+    # Findet nur Stellen, die einen PowerShell-Prozess starten oder dessen
+    # MECM-Kommandozeile erzeugen. Beliebige Stringliterale und die lesende
+    # Win32_Process-Inventur sind bewusst keine Fundstellen.
+    function Get-VsPowerShellLaunchSites {
+        param([Parameter(Mandatory)][string]$Path)
+        $sites = @()
+        $commands = Find-Ast -Ast (Get-PsAst -Path $Path) `
+            -Type ([System.Management.Automation.Language.CommandAst])
+        foreach ($command in $commands) {
+            $name = [string]$command.GetCommandName()
+            $kind = $null
+            $argumentText = ''
+            $argumentAst = $null
+            if (Test-IsPowerShellExecutableText $name) {
+                $kind = 'native'
+                $argumentAst = $command
+                $argumentText = (($command.CommandElements | Select-Object -Skip 1 |
+                    ForEach-Object { $_.Extent.Text }) -join ' ')
+            } elseif ($name -ieq 'Start-Process') {
+                $filePath = Get-CommandArgumentText (Get-CommandParameterArgument -Command $command -ParameterName 'FilePath')
+                if (Test-IsPowerShellExecutableText $filePath) { $kind = 'start-process' }
+                $argumentAst = Get-CommandParameterArgument -Command $command -ParameterName 'ArgumentList'
+                $argumentText = Get-CommandArgumentText $argumentAst
+            } elseif ($name -ieq 'New-ScheduledTaskAction') {
+                $execute = Get-CommandArgumentText (Get-CommandParameterArgument -Command $command -ParameterName 'Execute')
+                if (Test-IsPowerShellExecutableText $execute) { $kind = 'scheduled-task' }
+                $argumentAst = Get-CommandParameterArgument -Command $command -ParameterName 'Argument'
+                $argumentText = Get-CommandArgumentText $argumentAst
+            } elseif ($name -ieq 'Get-VsPowerShellCommandLine') {
+                $kind = 'mecm-command-line'
+            }
+            if (-not $kind) { continue }
+            $literalNoProfile = Test-PowerShellSwitchPrecedesPayload -Text $argumentText `
+                -SwitchPattern '(?i)(^|[\s''"])-NoProfile(?=$|[\s''"])'
+            $usesSharedArgs = Test-AstUsesVsPowerShellArgs $argumentAst
+            $formatBindsSharedArgsFirst = $argumentText -match '(?is)-f\s*\$script:VsPowerShellArgs(?:\s*,|\s*\))'
+            $formatPlaceholderBeforePayload = Test-PowerShellSwitchPrecedesPayload -Text $argumentText `
+                -SwitchPattern '(?i)\{0\}'
+            $sharedArgsBeforePayload = $usesSharedArgs -and (
+                (Test-PowerShellSwitchPrecedesPayload -Text $argumentText `
+                    -SwitchPattern '(?i)\$script:VsPowerShellArgs') -or
+                ($formatBindsSharedArgsFirst -and $formatPlaceholderBeforePayload)
+            )
+            $sites += [pscustomobject]@{
+                Kind = $kind
+                Path = $Path
+                Text = [string]$command.Extent.Text
+                ArgumentText = $argumentText
+                HasNoProfile = ($kind -eq 'mecm-command-line' -or $literalNoProfile -or $sharedArgsBeforePayload)
+            }
+        }
+        return @($sites)
+    }
+
+    function Get-VsStaticIpFenceEvidence {
+        param([Parameter(Mandatory)][string]$Path)
+        $ast = Get-PsAst -Path $Path
+        $planCalls = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.CommandAst]) `
+            -Where { $_.GetCommandName() -eq 'New-VsClientNetworkPlan' }
+        $invalidFences = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.IfStatementAst]) `
+            -Where {
+                $condition = ($_.Clauses[0].Item1.Extent.Text -replace '\s+', '').Trim('(', ')')
+                $condition -in @('-not$plan.Valid', '!$plan.Valid')
+            }
+        $mutatingNames = @(
+            'Rename-NetAdapter', 'Set-NetIPInterface', 'New-NetIPAddress',
+            'Remove-NetIPAddress', 'New-NetRoute', 'Remove-NetRoute',
+            'Set-DnsClientServerAddress'
+        )
+        $mutations = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.CommandAst]) `
+            -Where { $_.GetCommandName() -in $mutatingNames }
+        $fencesWithExit = @($invalidFences | Where-Object {
+            $topLevelExitOne = @($_.Clauses[0].Item2.Statements | Where-Object {
+                $_ -is [System.Management.Automation.Language.ExitStatementAst] -and
+                ($_.Pipeline.Extent.Text -replace '\s+', '') -eq '1'
+            })
+            $topLevelExitOne.Count -eq 1
+        })
+        $firstPlan = @($planCalls | Sort-Object { $_.Extent.StartOffset } | Select-Object -First 1)
+        $firstFence = @($fencesWithExit | Sort-Object { $_.Extent.StartOffset } | Select-Object -First 1)
+        $firstMutation = @($mutations | Sort-Object { $_.Extent.StartOffset } | Select-Object -First 1)
+        $protected = $firstPlan.Count -eq 1 -and $firstFence.Count -eq 1 -and $firstMutation.Count -eq 1 -and
+            $firstPlan[0].Extent.EndOffset -le $firstFence[0].Extent.StartOffset -and
+            $firstFence[0].Extent.EndOffset -le $firstMutation[0].Extent.StartOffset
+        return [pscustomobject]@{
+            PlanCallCount = @($planCalls).Count
+            InvalidFenceCount = @($invalidFences).Count
+            FenceWithExitCount = $fencesWithExit.Count
+            MutationCount = @($mutations).Count
+            Protected = $protected
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -116,7 +264,7 @@ Describe 'E1 - Invoke-VsApi verliert das JSON-Array bei einem Eintrag' -Tag 'Hae
             $script:sent = @{}
             function Invoke-RestMethod {
                 param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType)
-                $script:sent[$Uri] = [string]$Body
+                $script:sent[$Uri] = $Body
             }
             $cfg = [pscustomobject]@{ WebApi = 'host:1'; Scheme = 'http'; ReportToken = '' }
 
@@ -134,12 +282,25 @@ Describe 'E1 - Invoke-VsApi verliert das JSON-Array bei einem Eintrag' -Tag 'Hae
             $script:sent
         }
 
+        # Erst den echten Bindungstyp pruefen. Ein Cast im Stub wuerde genau den
+        # Transportfehler verdecken, den diese Regression festhalten soll.
+        $result['http://host:1/one'] -is [byte[]] | Should -BeTrue
+        $result['http://host:1/one'].GetType().FullName | Should -Be 'System.Byte[]'
+        $result['http://host:1/two'] -is [byte[]] | Should -BeTrue
+        $result['http://host:1/two'].GetType().FullName | Should -Be 'System.Byte[]'
+        $result['http://host:1/hash'] -is [byte[]] | Should -BeTrue
+        $result['http://host:1/hash'].GetType().FullName | Should -Be 'System.Byte[]'
+
+        $oneJson = [Text.Encoding]::UTF8.GetString($result['http://host:1/one'])
+        $twoJson = [Text.Encoding]::UTF8.GetString($result['http://host:1/two'])
+        $hashJson = [Text.Encoding]::UTF8.GetString($result['http://host:1/hash'])
+
         # Die Liste bleibt eine Liste, egal wie viele Eintraege sie hat.
-        $result['http://host:1/one'].TrimStart() | Should -Match '^\[' -Because 'ein einzelnes Paket ist trotzdem ein Katalog'
-        $result['http://host:1/two'].TrimStart() | Should -Match '^\['
+        $oneJson.TrimStart() | Should -Match '^\[' -Because 'ein einzelnes Paket ist trotzdem ein Katalog'
+        $twoJson.TrimStart() | Should -Match '^\['
         # Und eine Hashtable bleibt ein Objekt: der Fix darf die anderen
         # Aufrufer nicht umdrehen.
-        $result['http://host:1/hash'].TrimStart() | Should -Match '^\{'
+        $hashJson.TrimStart() | Should -Match '^\{'
     }
 }
 
@@ -352,37 +513,47 @@ Describe 'E6 - Der Neustartcode 3010 erreicht MECM nicht' -Tag 'Haertung' {
 }
 
 # ---------------------------------------------------------------------------
-Describe 'E7 - -NoProfile fehlt an drei von vier Stellen' -Tag 'Haertung' {
+Describe 'E7 - PowerShell-Prozessstarts laufen ohne Profil' -Tag 'Haertung' {
 
-    It 'E7 - jede powershell.exe-Aufrufstelle traegt -NoProfile' {
+    It 'E7 - der Finder unterscheidet echte Starts von blossen Prozessnamen' {
+        $positive = Get-VsPowerShellLaunchSites -Path (Join-Path $script:FixtureDir 'e7-positive.ps1')
+        $negative = Get-VsPowerShellLaunchSites -Path (Join-Path $script:FixtureDir 'e7-negative.ps1')
+        $zero = Get-VsPowerShellLaunchSites -Path (Join-Path $script:FixtureDir 'e7-zero.ps1')
+
+        @($positive).Count | Should -Be 4 -Because 'die Positivfixture enthaelt alle vier unterstuetzten Startformen'
+        @($positive | Where-Object { -not $_.HasNoProfile }).Count | Should -Be 0
+        @($negative).Count | Should -Be 4 -Because 'die Negativfixture enthaelt vier echte Starts ohne wirksames -NoProfile'
+        @($negative | Where-Object { -not $_.HasNoProfile }).Count | Should -Be 4
+        @($zero).Count | Should -Be 0 -Because 'Strings und die lesende Win32_Process-Abfrage duerfen nicht als Start gelten'
+    }
+
+    It 'E7 - jeder tatsaechliche PowerShell-Startpfad traegt -NoProfile' {
         # Ein maschinenweites Profil ist Fremdcode im Installationsprozess, und
-        # alles hier laeuft als SYSTEM. Der Aufgaben-Installer macht es richtig
-        # und begruendet es in fuenf Kommentarzeilen; drei Stellen fehlen.
-        #
-        # Eine Zeile, die $script:VsPowerShellArgs einsetzt, traegt die Schalter
-        # per Konstruktion: der Plan verlangt genau diese Indirektion als SSoT,
-        # und was in der Konstante steht, pinnt das It darunter. Ohne diese
-        # Ausnahme wuerde der Test den vorgesehenen Fix verbieten und nur noch
-        # kopierte Literale zulassen.
-        $offenders = @()
-        $seen = 0
+        # alles hier laeuft als SYSTEM. Geprueft werden native Starts,
+        # Start-Process, geplante Aufgaben und die MECM-Commandline-Erzeuger.
+        # Der lesende Win32_Process-Filter ist keine Aufrufstelle.
+        $sites = @()
         foreach ($file in (Get-ChildItem -Path $script:PsRoot -Filter '*.ps1' -Recurse)) {
-            $code = Get-PsCodeText -Path $file.FullName
-            foreach ($line in ($code -split "`r?`n")) {
-                if ($line -notmatch '(?i)powershell\.exe') { continue }
-                $seen++
-                if ($line -match '(?i)-NoProfile' -or $line -match 'VsPowerShellArgs') { continue }
-                $offenders += ('{0}: {1}' -f $file.Name, $line.Trim())
-            }
+            $sites += @(Get-VsPowerShellLaunchSites -Path $file.FullName)
         }
-        $seen | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'
+        @($sites).Count | Should -BeGreaterThan 0 -Because 'ohne Fundstellen prueft dieser Test nichts'
+        @($sites | Where-Object { $_.Kind -eq 'native' }).Count | Should -BeGreaterThan 0
+        @($sites | Where-Object { $_.Kind -eq 'scheduled-task' }).Count | Should -BeGreaterThan 0
+        @($sites | Where-Object { $_.Kind -eq 'mecm-command-line' }).Count | Should -BeGreaterThan 0
+        @($sites | Where-Object { $_.Text -match 'Get-CimInstance|Win32_Process' }).Count | Should -Be 0
+        $offenders = @($sites | Where-Object { -not $_.HasNoProfile } |
+            ForEach-Object { '{0} [{1}]: {2}' -f ([IO.Path]::GetFileName($_.Path)), $_.Kind, $_.Text.Trim() })
         $offenders -join ' | ' | Should -BeNullOrEmpty
     }
 
-    It 'E7 - Common fuehrt die Kommandozeile als Konstante' {
-        $args = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsPowerShellArgs }
-        [string]$args | Should -Match '(?i)-NoProfile'
-        [string]$args | Should -Match '(?i)-NonInteractive'
+    It 'E7 - Common erzeugt die wirkliche MECM-Kommandozeile mit den Schutzschaltern' {
+        $commandLine = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            Get-VsPowerShellCommandLine -ScriptPath 'install.ps1'
+        }
+        [string]$commandLine | Should -Match '(?i)^powershell\.exe\s+'
+        [string]$commandLine | Should -Match '(?i)(^|\s)-NoProfile(?:\s|$)'
+        [string]$commandLine | Should -Match '(?i)(^|\s)-NonInteractive(?:\s|$)'
+        [string]$commandLine | Should -Match '(?i)-File\s+"install\.ps1"$'
     }
 }
 
@@ -440,9 +611,65 @@ Describe 'E9 - Keine DHCP-Rueckumstellung in client_staticip' -Tag 'Haertung' {
         $code | Should -Match '(?i)-Dhcp'
     }
 
-    It 'E9 - ein unbekannter Interface-Modus ist ein Fehlschlag' {
-        $code = Get-PsCodeText -Path $script:StaticIp
-        $code | Should -Match '(?i)unbekannter Modus'
+    It 'E9 - der Plan-Owner verwirft einen unbekannten Modus' {
+        $plans = Invoke-InFileScope -Path $script:ClientCommon -Body {
+            $adapter = [pscustomobject]@{
+                MacAddress = '00-11-22-33-44-55'
+                PhysicalMediaType = '802.3'
+                Status = 'Up'
+                ifIndex = 7
+                Name = 'Ethernet'
+            }
+            $base = @{
+                Mac = '00:11:22:33:44:55'
+                Name = 'Ethernet'
+                Ip = ''
+                Subnet = ''
+                Gateway = ''
+                Dns1 = ''
+                Dns2 = ''
+            }
+            $known = [pscustomobject]($base + @{ Mode = 'DHCP' })
+            $unknown = [pscustomobject]($base + @{ Mode = 'future-mode' })
+            [pscustomobject]@{
+                Known = New-VsClientNetworkPlan -Targets @($known) -Adapters @($adapter)
+                Unknown = New-VsClientNetworkPlan -Targets @($unknown) -Adapters @($adapter)
+            }
+        }
+
+        $plans.Known.Valid | Should -BeTrue -Because 'die Kontrolle muss einen ansonsten gueltigen Adapterplan herstellen'
+        @($plans.Known.Errors).Count | Should -Be 0
+        $plans.Unknown.Valid | Should -BeFalse
+        @($plans.Unknown.Errors).Count | Should -BeGreaterThan 0 -Because 'der Owner muss den unbekannten Modus selbst ablehnen'
+    }
+
+    It 'E9 - client_staticip beendet einen ungueltigen Plan vor der ersten Netzmutation' {
+        $positive = Get-VsStaticIpFenceEvidence -Path (Join-Path $script:FixtureDir 'e9-positive.ps1')
+        $negative = Get-VsStaticIpFenceEvidence -Path (Join-Path $script:FixtureDir 'e9-negative.ps1')
+        $inverted = Get-VsStaticIpFenceEvidence -Path (Join-Path $script:FixtureDir 'e9-inverted.ps1')
+        $conditionalExit = Get-VsStaticIpFenceEvidence -Path (Join-Path $script:FixtureDir 'e9-conditional-exit.ps1')
+        $zero = Get-VsStaticIpFenceEvidence -Path (Join-Path $script:FixtureDir 'e9-zero.ps1')
+        $actual = Get-VsStaticIpFenceEvidence -Path $script:StaticIp
+
+        $positive.PlanCallCount | Should -Be 1
+        $positive.FenceWithExitCount | Should -Be 1
+        $positive.MutationCount | Should -BeGreaterThan 0
+        $positive.Protected | Should -BeTrue
+        $negative.Protected | Should -BeFalse -Because 'eine Mutation vor dem Abbruch muss die Probe rot machen'
+        $inverted.InvalidFenceCount | Should -Be 0
+        $inverted.Protected | Should -BeFalse -Because 'ein Abbruch des gueltigen Plans ist kein Fail-closed-Schutz'
+        $conditionalExit.FenceWithExitCount | Should -Be 0
+        $conditionalExit.Protected | Should -BeFalse -Because 'ein nur bedingter Exit laesst den ungueltigen Plan zur Mutation durch'
+        $zero.PlanCallCount | Should -Be 0
+        $zero.FenceWithExitCount | Should -Be 0
+        $zero.MutationCount | Should -Be 0
+        $zero.Protected | Should -BeFalse -Because 'ohne alle drei Belege darf der Test nicht bestehen'
+
+        $actual.PlanCallCount | Should -BeGreaterThan 0 -Because 'der Caller muss den echten Plan-Owner verwenden'
+        $actual.InvalidFenceCount | Should -BeGreaterThan 0 -Because 'der Caller muss gerade den ungueltigen Plan abfangen'
+        $actual.FenceWithExitCount | Should -BeGreaterThan 0 -Because 'der ungueltige Plan braucht einen terminalen Abbruch'
+        $actual.MutationCount | Should -BeGreaterThan 0 -Because 'ohne reale Netzmutation prueft die Reihenfolge nichts'
+        $actual.Protected | Should -BeTrue
     }
 
     It 'E9 - Handprobe noetig: DHCP-Rueckumstellung an einer Test-VM (nicht maschinell pruefbar)' -Skip {

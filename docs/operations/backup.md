@@ -1,9 +1,10 @@
 # Backup und Restore
 
-VirtuSphere schreibt pro Lauf zwei Dateien nach `Docker/backups/` (gitignored):
+VirtuSphere schreibt pro vollständigem Lauf ein Tripel nach `Docker/backups/` (gitignored):
 
-1. `db-<ts>.sql.gz`: kompletter MySQL-Dump (alle Datenbanken, Routines, Events, Trigger, `--single-transaction`).
+1. `db-<ts>.sql.gz`: vollständiger Dump der Anwendungsdatenbank (Routines, Events, Trigger, `--single-transaction`).
 2. `config-<ts>.tar.gz`: `.env`, `docker-compose.yml`, `docker-compose.override.yml` (falls vorhanden), nginx-Konfiguration und (falls vorhanden) SSL-Material.
+3. `manifest-<ts>.sha256`: SHA-256-Nachweis für Dump und Konfigurationsarchiv; ein auswählbarer Backupstand braucht alle drei Dateien desselben Zeitstempels.
 
 Die Override-Datei ist host-spezifisch und nicht in Git, und genau deshalb liegt sie im Archiv: der Produktionshost braucht sie zum Starten (Subnetz-Pin, damit die Docker-Bridge das SSH nicht abschneidet, geleerte Proxy-Umgebung je Service). Ein Restore ohne sie bringt den Stack nicht hoch, obwohl beide Archive intakt sind.
 
@@ -15,7 +16,7 @@ Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt
 sh scripts/backup.sh
 ```
 
-Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität) und behält von jeder der beiden Dateien die neuesten Läufe (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Bei täglichem Lauf reicht der Rückgriff damit etwa 14 Tage zurück.
+Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Dateimuster; ein Restore braucht deshalb weiterhin das vollständige Zeitstempel-Tripel.
 
 Die Backup-Dateien enthalten Secrets (`.env`, DB-Inhalte inkl. verschlüsselter Credentials). `Docker/backups/` gehört auf ein zugriffsbeschränktes Ziel (`chmod 700`) und sollte zusätzlich auf einen zweiten Host synchronisiert werden (Pull vom Backup-Host, nicht Push vom App-Host).
 
@@ -68,6 +69,20 @@ Ein Backup ist erst dann ein Backup, wenn der Restore bewiesen ist:
 ```sh
 sh scripts/restore_test.sh
 ```
+
+Ohne weitere Vorgabe verwendet der Drill das Repository, zu dem dieses Skript
+gehört. Der kanonische Runner setzt `VIRTUSPHERE_CHECK_ROOT` auf seinen
+normalisierten Prüfroot. Ein direkter, bewusst gegen eine andere Datenkopie
+gerichteter Aufruf kann dieselbe Variable setzen. Dann kommen das jüngste
+Backuptripel, `struktur.sql`, Migrationen, Directory-Konvergenz, Restore-Probe
+und der in die Wegwerfcontainer gemountete Anwendungscode vollständig aus
+diesem Root. Ein direkt beim Shellaufruf explizit leer gesetzter Root sowie ein
+fehlender oder unvollständiger expliziter Root bricht begrenzt ab; der Drill
+fällt nie auf Backups neben dem Checker zurück. `check.ps1` behandelt eine
+eingehende leere Variable dagegen als nicht gesetzt und exportiert seinen
+normalisierten Standardroot. Die Ausgabe verbindet den normalisierten Prüfroot
+mit dem ausgewählten Backupstand, damit die Gateevidenz beide eindeutig
+zuordnet.
 
 Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem Stack-Image `mysql:8.4`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 

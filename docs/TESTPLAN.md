@@ -23,7 +23,7 @@ Dieses Dokument ist seither nur noch ein Wegweiser; es sammelt keine Checkboxen 
 
 ## Bewusst manuell gebliebene Prüfungen
 
-Diese Punkte sind keine vergessenen Reste, sondern die im Runner als manuell deklarierten Release-Gates (Begründung in `docs/QUALITY-GATES.md`):
+Diese Punkte sind zusätzliche manuelle Release-Abnahmen neben den automatisierten Runner-Gates (Begründung in `docs/QUALITY-GATES.md`). Der Runner führt sie nicht aus und bescheinigt mit einem grünen Exitcode nicht ihren Abschluss:
 
 - Tastatur-, Fokus- und Screenreader-Durchgang der Kernflüsse.
 - SYSTEM-Smoke der PowerShell-Clients in einer Wegwerf-Windows-VM und die MECM-Staging-Abnahme.

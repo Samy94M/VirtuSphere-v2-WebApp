@@ -189,7 +189,7 @@ tail -n 100 Docker/logs/nginx/error.log
 
 ## Wartung
 
-Alle Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie automatisch wieder. Der Deploy-Worker hält zudem eine MySQL-Unterbrechung aus: Er verbindet sich mit Backoff neu, statt abzustürzen und Deploy-Jobs im Status `queued` hängen zu lassen. Ein manueller Eingriff ist nur nötig, wenn ein Container dauerhaft in einem Fehlerzustand bleibt (`docker compose ps` prüfen).
+Die Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie wieder, sofern sie zuvor nicht ausdrücklich gestoppt wurden. Der Deploy-Worker hält zudem eine MySQL-Unterbrechung aus: Er verbindet sich mit Backoff neu, statt abzustürzen und Deploy-Jobs im Status `queued` hängen zu lassen. Ein Supervisor mit ungeklärtem altem Kind oder unlesbarem Restartbudget bleibt absichtlich im Zustand `manual` und startet keinen Ersatz; auch ein dauerhaft fehlerhafter Container braucht einen manuellen Eingriff (`docker compose ps` prüfen).
 
 Jeder Dienst hat einen Healthcheck: `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurück, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Prüfergebnisse.
 

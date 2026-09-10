@@ -60,6 +60,29 @@ CRON_FILE="${VIRTUSPHERE_BACKUP_CRON_FILE:-/etc/cron.d/virtusphere-backup}"
 TIMER_UNIT="${VIRTUSPHERE_BACKUP_TIMER_UNIT:-virtusphere-backup.timer}"
 KEEP=14
 STATUS_KEEP_LINES=90
+BACKUP_PROGRESS_TOTAL=4
+backup_progress_position=0
+backup_progress_unit=""
+db_sql_file=""
+db_file=""
+config_file=""
+manifest_file=""
+
+backup_progress_run() {
+  backup_progress_position=$1
+  backup_progress_unit=$2
+  echo "[$backup_progress_position/$BACKUP_PROGRESS_TOTAL] RUN $backup_progress_unit"
+}
+backup_progress_result() {
+  echo "[$backup_progress_position/$BACKUP_PROGRESS_TOTAL] $1 $backup_progress_unit"
+  backup_progress_unit=""
+}
+backup_fail() {
+  [ -z "$backup_progress_unit" ] || backup_progress_result fail
+  error=$1
+  echo "FEHLER: $error" >&2
+  exit 1
+}
 
 mkdir -p "$STATUS_DIR"
 
@@ -164,7 +187,7 @@ detect_schedule() {
 # Wird via EXIT-Trap immer aufgerufen (Erfolg wie Abbruch) und haengt die
 # JSONL-Statuszeile an, dann kappt es die Datei auf die neuesten Zeilen.
 write_status() {
-  ec=$?
+  ec=$1
   now=$(date +%s)
   duration=$(( now - start_epoch ))
 
@@ -198,32 +221,63 @@ write_status() {
       && mv "$STATUS_FILE.tmp" "$STATUS_FILE" || true
   fi
 }
-trap write_status EXIT
+finish_backup() {
+  ec=$?
+  trap - EXIT INT TERM
+  [ -z "$backup_progress_unit" ] || backup_progress_result fail
+  cleanup_failed=0
+  if [ -n "$db_sql_file" ] && [ -e "$db_sql_file" ]; then
+    rm -f "$db_sql_file" || cleanup_failed=1
+  fi
+  if [ "$status" != ok ]; then
+    for partial in "$db_file" "$config_file" "$manifest_file"; do
+      [ -z "$partial" ] || [ ! -e "$partial" ] || rm -f "$partial" || cleanup_failed=1
+    done
+  fi
+  if [ "$cleanup_failed" -ne 0 ]; then
+    status="failed"
+    error="Partielle Backup-Artefakte konnten nicht bereinigt werden."
+    [ "$ec" -ne 0 ] || ec=1
+  fi
+  write_status "$ec"
+  exit "$ec"
+}
+trap finish_backup EXIT
+trap 'exit 130' INT TERM
 
 # Darf den Backup-Lauf nie verhindern: der Zeitplan ist Anzeige-Metadatum.
 detect_schedule || true
 
 ts=$(date +%Y%m%d-%H%M%S)
 
+backup_progress_run 1 database-dump
 if ! docker exec "$CONTAINER" true >/dev/null 2>&1; then
-  error="MySQL-Container '$CONTAINER' nicht erreichbar. Stack gestartet?"
-  echo "FEHLER: $error" >&2
-  exit 1
+  backup_fail "MySQL-Container '$CONTAINER' nicht erreichbar. Stack gestartet?"
 fi
 
 db_file="$BACKUP_DIR/db-$ts.sql.gz"
-docker exec "$CONTAINER" sh -c 'exec mysqldump --databases "$MYSQL_DATABASE" --routines --events --triggers --single-transaction -uroot -p"$MYSQL_ROOT_PASSWORD"' \
-  | gzip > "$db_file"
+db_sql_file=$(umask 077 && mktemp "$BACKUP_DIR/.db-$ts-XXXXXX.sql") \
+  || backup_fail "Geschuetzte SQL-Tempdatei konnte nicht erzeugt werden."
+chmod 600 "$db_sql_file" \
+  || backup_fail "SQL-Tempdatei konnte nicht auf Modus 0600 begrenzt werden."
+if ! docker exec "$CONTAINER" sh -c 'exec mysqldump --databases "$MYSQL_DATABASE" --routines --events --triggers --single-transaction -uroot -p"$MYSQL_ROOT_PASSWORD"' > "$db_sql_file"; then
+  backup_fail "mysqldump schlug fehl; partieller Dump wird verworfen."
+fi
+if ! gzip -c "$db_sql_file" > "$db_file"; then
+  backup_fail "Komprimierung des DB-Dumps schlug fehl."
+fi
+rm -f "$db_sql_file" || backup_fail "Roher SQL-Dump konnte nicht entfernt werden."
+db_sql_file=""
 
 # Plausibilitaet: ein leerer/abgebrochener Dump darf nicht als Erfolg zaehlen.
 size=$(wc -c < "$db_file" | tr -d ' ')
 if [ "$size" -lt 10240 ] || ! gunzip -t "$db_file" 2>/dev/null; then
-  error="DB-Dump verdaechtig klein ($size Bytes) oder korrupt."
-  echo "FEHLER: DB-Dump $db_file ist verdaechtig klein ($size Bytes) oder korrupt." >&2
-  exit 1
+  backup_fail "DB-Dump $db_file ist verdaechtig klein ($size Bytes) oder korrupt."
 fi
 db_bytes=$size
+backup_progress_result pass
 
+backup_progress_run 2 config-archive
 config_file="$BACKUP_DIR/config-$ts.tar.gz"
 config_items="docker-compose.yml"
 [ -f .env ] && config_items="$config_items .env"
@@ -237,17 +291,25 @@ config_items="docker-compose.yml"
 [ -d Docker/nginx/conf.d ] && config_items="$config_items Docker/nginx/conf.d"
 [ -d Docker/nginx/ssl ] && config_items="$config_items Docker/nginx/ssl"
 # shellcheck disable=SC2086
-tar czf "$config_file" $config_items
-config_bytes=$(wc -c < "$config_file" | tr -d ' ')
+tar czf "$config_file" $config_items \
+  || backup_fail "Config-Archiv konnte nicht erstellt werden."
+config_bytes=$(wc -c < "$config_file" | tr -d ' ') \
+  || backup_fail "Groesse des Config-Archivs konnte nicht gelesen werden."
+backup_progress_result pass
+
+backup_progress_run 3 manifest
 
 # Manifest: ohne Hashes kann der Restore-Drill ein manipuliertes oder halb
 # kopiertes Archiv nicht von einem intakten unterscheiden.
 if ! command -v sha256sum >/dev/null 2>&1; then
-  error="sha256sum fehlt; Backup ohne Manifest ist nicht verifizierbar."
-  echo "FEHLER: $error" >&2
-  exit 1
+  backup_fail "sha256sum fehlt; Backup ohne Manifest ist nicht verifizierbar."
 fi
-( cd "$BACKUP_DIR" && sha256sum "db-$ts.sql.gz" "config-$ts.tar.gz" ) > "$BACKUP_DIR/manifest-$ts.sha256"
+manifest_file="$BACKUP_DIR/manifest-$ts.sha256"
+( cd "$BACKUP_DIR" && sha256sum "db-$ts.sql.gz" "config-$ts.tar.gz" ) > "$manifest_file" \
+  || backup_fail "Hash-Manifest konnte nicht erstellt werden."
+backup_progress_result pass
+
+backup_progress_run 4 retention
 
 # Retention: je Lauf-Artefakt getrennt nur die neuesten $KEEP Laeufe behalten.
 for pattern in 'db-*.sql.gz' 'config-*.tar.gz' 'manifest-*.sha256'; do
@@ -256,6 +318,7 @@ for pattern in 'db-*.sql.gz' 'config-*.tar.gz' 'manifest-*.sha256'; do
     rm -f "$old"
   done
 done
+backup_progress_result pass
 
 status="ok"
 echo "Backup OK: $db_file ($size Bytes), $config_file"

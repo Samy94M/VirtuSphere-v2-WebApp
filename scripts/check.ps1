@@ -131,10 +131,10 @@ foreach ($name in $requiredToolImages) {
     }
     $toolImages[$name] = [string]$entry.Value.ref
 }
-# Dev-Stack-Container: letzter Fallback fuer Invoke-AppComposer; der
-# primaere Pfad mountet immer den aktuellen Pruef-Root, damit ein Clean
+# Der App-Toolpfad mountet immer den aktuellen Pruef-Root, damit ein Clean
 # Checkout nie versehentlich den Code eines parallel laufenden Dev-Stacks
-# prueft. Alle Integration-Gates laufen gegen den QA-Stack.
+# prueft. Ein fehlendes Image fuehrt nie zu einer Ausfuehrung im Dev-Stack.
+# Alle Integration-Gates laufen gegen den QA-Stack.
 $phpContainer = 'virtusphere-v2-webapp-php-1'
 
 # --- QA-Wegwerf-Stack (Integration-/Release-Lane) ------------------------------

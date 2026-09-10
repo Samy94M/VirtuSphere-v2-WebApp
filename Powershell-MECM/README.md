@@ -10,8 +10,11 @@ VirtuSphere-Ownership, fehlenden Referenzen und vollständig bereitem Ersatz.
 Freie oder doppelte Versionsstrings, parallele Quellversionen und Altobjekte
 ohne Marker bleiben erhalten. Ein Portal-Retirement ist kein MECM-Löschauftrag.
 
-JSON wird unter Windows PowerShell 5.1 explizit als UTF-8 gesendet. Bei HTTPS
-bedeutet ein leerer Fingerabdruck normale PKI-Prüfung; ein gesetzter Abdruck ist
+JSON wird explizit als UTF-8-`byte[]` gesendet. Die beiden ausgelieferten
+Server-/Client-Helper geben das Array als ein einziges Funktionsobjekt zurück,
+damit PowerShell es nicht zu `object[]` entpackt und die HTTP-Bindung den
+Binärpfad verwendet. Bei HTTPS bedeutet ein leerer Fingerabdruck normale
+PKI-Prüfung; ein gesetzter Abdruck ist
 nur die enge Vertrauensausnahme für genau dieses selbstsignierte Zertifikat.
 Ein allgemeiner Accept-all-Pfad existiert nicht. Die Paketpfadprüfung arbeitet
 mit SIDs und erkennt deshalb dieselben breiten Schreibrechte auf deutschem und
@@ -67,7 +70,9 @@ eingestellten Wert, wenn der jeweilige Parameter nicht angegeben wird; ein
 Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 
 **Ergebnis beider Installer.** Sie unterscheiden zwei Klassen von Meldung. Ein
-**Blocker** (`!!`) heißt, die Installation hat ihre Arbeit nicht geleistet: eine
+**Blocker** (`!!`) heißt, dass die Gesamtabnahme des Laufs fehlgeschlagen ist. Er
+besagt nicht pauschal, dass vorher keinerlei lokale oder MECM-seitige Änderung
+erfolgte; Tageslog und vorherige Meldungen zeigen den erreichten Stand. Eine
 Aufgabe läuft nicht, das Portal antwortet nicht oder mit 403, ein Tageslog bleibt
 leer, die Freigabe zeigt nicht auf den Paketpfad, oder eine Application, ihr
 Content oder die Vorlage fehlt. Die Schlusszeile nennt dann die Zahl der offenen
@@ -194,7 +199,7 @@ Common stellt bereit:
 |---|---|
 | `Get-VsConfig` | liest die komplette Konfiguration aus `HKLM:\SOFTWARE\VirtuSphere\MECM`; liefert `$null`, wenn sie fehlt |
 | `Initialize-VsLog` / `Write-VsLog` | von `VirtuSphere-Logging.ps1` bereitgestellter Tageslogvertrag; tägliche, pro gemeinsamem Marker gesperrte Aufräumprüfung nach 30 Tagen; Log-Fehler stoppen nie den Hauptprozess |
-| `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel). Der Body geht über `ConvertTo-Json -InputObject`, damit eine Liste **immer** ein JSON-Array bleibt: über die Pipeline packt PS 5.1 eine einelementige Liste aus, und `mecm_packages.php` beantwortet das dauerhaft mit 400 |
+| `Invoke-VsApi` / `Get-VsApiBaseUrl` | HTTP-Aufrufe an die WebApp; `Get-VsApiBaseUrl` ist die **einzige** Schema-Stelle der Server-Skripte und liest `Scheme` aus der Registry (Default `http`, LAN-Projektziel). Der Body geht über `ConvertTo-Json -InputObject`, damit eine Liste **immer** ein JSON-Array bleibt: über die Pipeline packt PS 5.1 eine einelementige Liste aus, und `mecm_packages.php` beantwortet das dauerhaft mit 400. `ConvertTo-VsUtf8JsonBytes` emittiert sein `byte[]` als ein Objekt, damit die Funktionsausgabe nicht zu `object[]` wird und `Invoke-RestMethod` wirklich den Binärbody bindet. |
 | `Get-VsErrorDetail` / `Get-VsErrorStatusCode` | lesen den **Antwort-Body** einer fehlgeschlagenen Anfrage. `Invoke-RestMethod` wirft in PS 5.1 bei 4xx/5xx und verwirft den Body dabei — genau dort steht aber die JSON-Envelope der WebApp (`{"error":"..."}`). Ohne diese Helfer sagt das Log nur `(400) Bad Request`, nie den Grund |
 | `Resolve-VsInterval` | löst das konfigurierte Intervall **einmal** auf, für den Sleep und den Report: Untergrenze je Aufgabe aus `$script:VsIntervalBounds`, Obergrenze aus dem Wire-Contract, und eine WARN-Zeile, wenn geklemmt wurde. Die Statusseite färbt die Zeile nach dem *gemeldeten* Takt, also darf keine Aufgabe in einem anderen laufen |
 | `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
@@ -297,6 +302,12 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
      gespeichert. Nur ein bestätigtes Remote-Ergebnis wird idempotent ans
      Portal nachgemeldet; ein beim Absturz offener Intent blockiert als
      ungeklärter Ownership-Fall statt eine vorhandene Regel zu adoptieren.
+     Beschädigte Journale werden unverändert quarantiniert; vorhandene
+     `membership-journal.json.quarantine.*.json` sperren auch spätere Starts.
+     Ein neues Hauptjournal hebt diese Grenze nicht auf. Vor dem Entfernen
+     der Quarantäne sind Evidenz und Logs zu sichern und die Operationen mit
+     aktueller Rolloutrevision, ResourceID und exakter CollectionID in MECM
+     und Portal abzugleichen; die Ownership-Entscheidung ist festzuhalten.
    - Provenienz und ResourceID per `POST /mecm_updateid.php` zurückmelden,
      beides mit `rollout_revision`. Antwortet das Portal mit 409, arbeitet
      dieser Scan mit einem veralteten Rollout: eigener Code
@@ -328,13 +339,18 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
 - **Ordner-Self-Healing:** Nach jeder Site-Initialisierung stellt der
   Autoimporter sicher, dass die beiden `VirtuSphere_Applications`-Ordner
   (Applications und Device Collections) existieren, und legt sie sonst an.
-- **Change-Detection:** Fingerabdruck über alle `config.json` (Pfad + mtime)
-  **und** über `Package_Vorlage\install.ps1`; nur bei Änderung wird voll
-  gescannt. Der Fingerabdruck erfasst damit ausdrücklich **nicht** den übrigen
-  Paketinhalt: wer Installationsdateien innerhalb derselben Versionsnummer
-  austauscht, löst keinen Abgleich aus. Das ist Absicht, weil sonst jede Datei
-  im Baum (auch Logs und temporäre Dateien) den Vollscan auslösen würde; der
-  vorgesehene Weg ist eine neue `version`.
+- **Change-Detection:** SHA-256-Manifest des Paketdateibaums einschließlich
+  der Vorlage. Ausgenommen sind die im Manifesthelper ausdrücklich
+  ausgefilterten temporären Dateien. Auch geänderte Nutzlast unter derselben
+  Version löst deshalb einen Abgleich aus; reguläre Paketänderungen sollen
+  weiterhin eine neue `version` erhalten.
+- **Contentabschluss:** Der Auftrag bindet Application und Deployment Type
+  an die konkrete Content-ID. Bei Updates muss eine neue Content-ID sichtbar
+  werden; eine steigende Application-Packageversion wird nicht vorausgesetzt.
+  Zusätzlich müssen die Verteilungspunkte einen gegenüber der gespeicherten
+  Baseline neueren erfolgreichen Kopierstand melden. Unbestätigte Aufrufe,
+  unbekannte Identitäten und beschädigte Trackingdaten erlauben keine blinde
+  Wiederholung. Die tatsächliche Verteilung ist im MECM-Labor abzunehmen.
 - **Validierung:** kaputtes JSON, fehlende Pflichtfelder (`ProjectName`,
   `version`) oder ein unbekanntes `InstallationBehaviorType` → Ordner wird
   übersprungen und protokolliert.
@@ -360,11 +376,14 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     Lässt sich die Collection nicht anlegen, ist das ein offener Punkt
     (`collection_missing`) und der Deployment-Versuch entfällt, damit die
     Ursache nicht als `package_deploy_failed` erscheint.
-    Content-Verteilung an die DP-Gruppe, solange
-    `Get-VsContentDistributionState` den Content dort nicht als `succeeded`
-    meldet, auch für bestehende Apps; jeder andere Zustand
-    (`not_started`/`in_progress`/`failed`/`unknown`) ist ein offener Punkt mit
-    eigenem Ursachen-Code und wird im nächsten Durchlauf erneut geprüft.
+  - **Content-Verteilung unabhängig von der eigenen Collection:** Der
+    Distribution-Pfad läuft auch bei
+    `generateOwnDeviceColletion: "false"`. Abschluss verlangt die gebundene
+    Application-/Deployment-Type-Content-ID, vollständig erfolgreiche
+    Aggregatzähler und einen neueren erfolgreichen Kopiernachweis der bisherigen
+    DP-Ziele. Das ist kein eigener Nachweis der aktuellen Mitgliedschaft einer
+    konfigurierten DP-Gruppe. Unbekannte Evidenz bleibt ein offener Punkt und
+    autorisiert keine blinde erneute Verteilung.
   - Optionales Available-Deployment an die Collection aus `DeployTo`
     (fehlende Ziel-Collection ist ein Konfigurationsfehler; Warnung ohne
     Dauer-Retry).
@@ -426,8 +445,10 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
 - **Backoff und Site-Drive-Recovery:** durchgängiges try/catch; nach
   3 Fehlern in Folge wird das Site-Drive verworfen und im nächsten Durchlauf
   neu initialisiert (fängt WMI-/Drive-Hänger ab).
-- **Change-Detection vor Arbeit:** Voll-Scans bzw. Sendungen nur bei
-  tatsächlicher Änderung; der Leerlauf-Durchlauf kostet Millisekunden.
+- **Change-Detection vor Arbeit:** Sendungen und nachgelagerte Mutationen werden
+  bei unverändertem, bestätigtem Stand vermieden. Die Skripte können dafür
+  weiterhin vollständige lokale Inhaltsmanifeste lesen; eine konkrete
+  Leerlaufdauer ist ohne vergleichbare Standortmessung nicht zugesagt.
 - Der Devices Sync löst zusätzlich alle 100 Durchläufe eine Garbage
   Collection aus, um Speicherwachstum im Dauerbetrieb zu begrenzen.
 
@@ -479,6 +500,19 @@ einer leeren Konfiguration weiter, schrieb nach `…\Packages\-` und startete
 trotzdem alle Teilskripte als SYSTEM; MECM fing das erst über die nicht
 erfüllte Detection ab, also nach der Ausführung.
 
+Ein ausdrücklich erneut gestartetes `install.ps1` überspringt Teilskripte nur
+bei einem Erfolgsmarker mit genau ihrem aktuellen SHA-256. Sobald ein
+Teilskript erneut laufen muss, entfernt die Vorlage vor seinem Start den
+alten Gesamtmarker `Version`. Scheitert das Lesen oder Entfernen, startet
+dieses Teilskript nicht. Fehler und 1641 lassen die Detection aus; nach 1641
+setzt erst ein vollständiger Folgelauf den Gesamtmarker wieder. Bereits
+erfolgreiche unveränderte Teilskripte bleiben dabei übersprungen. Ein Aufruf
+mit ausschließlich passenden Hashmarkern invalidiert die Detection nicht.
+Das ist keine automatische MECM-Reparatur bei bereits positiver Detection:
+Der Einstieg ist der ausdrückliche erneute Aufruf des Wrappers im Paketordner
+im vorgesehenen Installationskontext; reguläre Inhaltsänderungen erhalten
+weiterhin eine neue Paketversion.
+
 Ihr Exit-Code folgt einer Rangfolge: **Fehler (1) → 1641 (Neustart eingeleitet)
 → 3010 (Neustart nötig) → 0**. Ein Fehlschlag gewinnt, sonst meldete ein Paket
 „bitte neu starten“ statt „hat nicht funktioniert“; 1641 gewinnt gegen 3010,
@@ -487,8 +521,9 @@ Erfolg gelten `0`, `1707`, `3010` und `1641` (`$successExitCodes`, genau einmal
 im Quelltext). Ein übersprungenes Teilskript liefert keinen Code und fordert
 damit auch keinen Neustart mehr an. Der Deployment-Type steht auf
 `RebootBehavior = BasedOnExitCode`, 3010 und 1641 stehen in der
-MECM-Standardtabelle als Neustart-Erfolg: **Clients starten dadurch tatsächlich
-neu, wo sie es vorher nicht taten.**
+MECM-Standardtabelle als Neustart-Erfolg. Damit ist die beabsichtigte
+MECM-Klassifikation konfiguriert; der tatsächliche Neustart und die Fortsetzung
+einer Task Sequence bleiben im jeweiligen MECM-/Client-Standort abzunehmen.
 
 Teilskripte startet die Vorlage mit
 `-NoProfile -ExecutionPolicy Bypass -NonInteractive` (dieselben Schalter wie
@@ -506,7 +541,11 @@ die App einmal in der Konsole.
 > `Package_Vorlage\install.ps1` die paketeigene `install.ps1`. Das ist
 > beabsichtigt (einheitliche Standard-Installation). SSoT ist der Repo-Ordner
 > `Package_Vorlage/`; Anpassungen dort vornehmen und den Installer erneut
-> ausführen, nicht die Kopie auf dem Server.
+> ausführen, nicht die Kopie auf dem Server. Der Serverinstaller staged und
+> hasht den vollständigen Vorlagenbaum auf dem Paketdateisystem, aktiviert ihn
+> mit Sicherung und nimmt ihn bei einem späteren Installationsfehler in denselben
+> Rollback auf. Ein unvollständig bestätigter Rollback lässt die Aufgaben
+> deaktiviert. Reale Datei-, ACL- und Datenträgerfehler bleiben Lababnahme.
 
 ## Client-Skripte (`clients/`)
 

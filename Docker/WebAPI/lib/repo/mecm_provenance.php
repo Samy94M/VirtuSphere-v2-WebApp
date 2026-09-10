@@ -104,8 +104,24 @@ function mecm_rule_report_entry(mixed $entry): ?array
 function repo_mecm_rules_apply_report(mysqli $db, int $vmId, array $entries, ?string $actor = null): void
 {
     repo_transaction($db, static function () use ($db, $vmId, $entries, $actor): void {
+        // Older device-sync versions could report both a successful restore
+        // and the pre-apply stale observation for the same exact CollectionID.
+        // The remote rule exists in that case, so `added` owns the final local
+        // state independent of report order. A removed DIFFERENT CollectionID
+        // remains effective, which cleans up a replaced collection without
+        // weakening the exact-ID ownership fence.
+        $addedCollectionIds = [];
+        foreach ($entries as $entry) {
+            if ($entry['change'] === VIRTUSPHERE_MECM_RULE_CHANGE_ADDED) {
+                $addedCollectionIds['id:' . $entry['collection_id']] = true;
+            }
+        }
+
         foreach ($entries as $entry) {
             if ($entry['change'] === VIRTUSPHERE_MECM_RULE_CHANGE_REMOVED) {
+                if (isset($addedCollectionIds['id:' . $entry['collection_id']])) {
+                    continue;
+                }
                 repo_execute($db, 'DELETE FROM deploy_vm_mecm_rules WHERE vm_id = ? AND collection_id = ?', 'is', [$vmId, $entry['collection_id']]);
                 continue;
             }

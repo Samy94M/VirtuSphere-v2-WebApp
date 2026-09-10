@@ -7,8 +7,9 @@
 # das auch" - der Stamp, die Ursachenliste und die Trigger-Definition sind die
 # drei Stellen, an denen ein Fehlschlag bisher als gelungener Lauf endete.
 #
-# Statisch ueber den AST, weil kein MECM-Server im Test steht: die MECM-Cmdlets
-# existieren hier nicht, die Struktur der Verzweigungen schon.
+# Statisch ueber den AST sowie mit extrahierten Controllerbloecken und lokalen
+# Fixtures, weil kein MECM-Server im Test steht: die echten Provider-, Registry-
+# und MECM-Grenzen bleiben ersetzt, die produktive Verzweigung wird ausgefuehrt.
 
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -61,6 +62,91 @@ BeforeAll {
             }
             [pscustomobject]@{ Line = $_.Extent.StartLineNumber; Block = $parent }
         }
+    }
+
+    # Fuehrt den originalen Content-Controllerblock fuer genau einen Scan aus.
+    # Die Schleifenhuelle macht seine `continue`-Grenzen ausfuehrbar, waehrend
+    # Provider, Registry und MECM-Aufrufe als kleine In-Memory-Fixture dienen.
+    $controllerSource = Get-Content -LiteralPath $script:Importer -Raw
+    $controllerStart = $controllerSource.IndexOf('$packageManifest = Get-VsFilesManifestStamp -Path $pkgFolder')
+    $controllerEnd = if ($controllerStart -ge 0) {
+        $controllerSource.IndexOf('# --- Collection + Deployments idempotent nachziehen', $controllerStart)
+    } else { -1 }
+    if ($controllerStart -lt 0 -or $controllerEnd -le $controllerStart) {
+        throw 'U09-Controllerblock konnte nicht aus dem Autoimporter extrahiert werden.'
+    }
+    $script:U09ControllerBlock = [scriptblock]::Create("do {`n" + $controllerSource.Substring($controllerStart, $controllerEnd - $controllerStart) + "`n} while (`$false)")
+
+    function Invoke-U09ControllerScan {
+        param(
+            [Parameter(Mandatory)]$TrackingBox,
+            [Parameter(Mandatory)]$RequestCounters,
+            [Parameter(Mandatory)][string]$Manifest,
+            [Parameter(Mandatory)][string]$ContentId,
+            [Parameter(Mandatory)][ValidateSet('not_started', 'succeeded')][string]$AggregateState,
+            [Parameter(Mandatory)][AllowEmptyCollection()][array]$CopyTargets,
+            [ValidateSet('none', 'initial', 'update')][string]$RequestFailure = 'none'
+        )
+        . $script:MecmCommon
+
+        function Get-VsFilesManifestStamp { param($Path) return $Manifest }
+        function Get-VsPackageContentTracking { param($ApplicationName) return $TrackingBox.Value }
+        function Get-VsContentDistributionSnapshot {
+            param($ApplicationName, $Application)
+            return [pscustomobject]@{ State = $AggregateState; SourceVersion = 1 }
+        }
+        function Get-VsDistributionCopySnapshot {
+            param($PackageId, $ApplicationModelName, $SiteCode, $ProviderMachine)
+            return [pscustomobject]@{ State = 'known'; Targets = @($CopyTargets) }
+        }
+        function Set-VsPackageContentTracking {
+            param(
+                $ApplicationName, $State, $Manifest, $BaselineSourceVersion = -1, $SourceVersion = -1,
+                $RequestKind, $ApplicationModelName, $ApplicationPackageId, $DeploymentTypeModelName,
+                $DeploymentTypeId, $BaselineContentId, $ContentId = '', $RequestConfirmed = $false,
+                $DistributionBaseline
+            )
+            $TrackingBox.Value = [pscustomobject]@{
+                State = $State; Manifest = $Manifest; BaselineSourceVersion = [int]$BaselineSourceVersion
+                SourceVersion = [int]$SourceVersion; RequestKind = $RequestKind
+                ApplicationModelName = $ApplicationModelName; ApplicationPackageId = $ApplicationPackageId
+                DeploymentTypeModelName = $DeploymentTypeModelName; DeploymentTypeId = $DeploymentTypeId
+                BaselineContentId = $BaselineContentId; ContentId = $ContentId
+                RequestConfirmed = [bool]$RequestConfirmed; DistributionBaseline = $DistributionBaseline
+            }
+        }
+        function Update-CMDistributionPoint {
+            param($ApplicationName, $DeploymentTypeName, $ErrorAction)
+            $RequestCounters.Update++
+            if ($RequestFailure -eq 'update') { throw 'simulierter Updatefehler' }
+        }
+        function Start-CMContentDistribution {
+            param($ApplicationName, $DistributionPointGroupName, $ErrorAction)
+            $RequestCounters.Initial++
+            if ($RequestFailure -eq 'initial') { throw 'simulierter Erstverteilungsfehler' }
+        }
+        function Write-VsLog { param($Level, $Context, $Message) }
+        function Add-VsRunCause { param($Causes, $Cause, $Target) }
+
+        $pkgFolder = 'fixture-package'
+        $fullName = 'Agent-1'
+        $deploymentTypeName = 'Agent-1 Deployment'
+        $siteCode = 'ABC'
+        $providerMachine = 'provider.test.invalid'
+        $dpGroupName = 'DP-Fixture'
+        $scanWarnings = 0
+        $causes = New-Object System.Collections.Generic.List[object]
+        $app = [pscustomobject]@{
+            LocalizedDisplayName = $fullName; ModelName = 'ScopeId_A/Application_A'; PackageID = 'ABC00001'
+        }
+        $deploymentTypes = @([pscustomobject]@{
+            LocalizedDisplayName = $deploymentTypeName; AppModelName = $app.ModelName
+            ModelName = 'ScopeId_A/DeploymentType_A'; CI_UniqueID = ('ScopeId_A/DeploymentType_A/{0}' -f $ContentId)
+            ContentId = $ContentId
+        })
+
+        & $script:U09ControllerBlock
+        return $TrackingBox.Value
     }
 }
 
@@ -166,19 +252,22 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
     }
 }
 
-Describe 'Autoimporter A13: Manifest, Intent und SourceVersion bilden eine Zustandsmaschine' {
+Describe 'Autoimporter U09: Manifest, Intent und providerseitige Contentidentitaet bilden eine Zustandsmaschine' {
     BeforeAll {
         $script:A13Source = Get-Content -Path $script:Importer -Raw
         $script:A13Common = Get-Content -Path $script:MecmCommon -Raw
     }
 
-    It 'fordert bestehende DT-Inhalte explizit an und speichert Intent davor, pending danach' {
+    It 'speichert Intent vor dem MECM-Aufruf und bestaetigt den Request erst nach dessen Rueckkehr' {
         $intent = $script:A13Source.IndexOf('Set-VsPackageContentTracking -ApplicationName $fullName -State intent')
         $update = $script:A13Source.IndexOf('Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName')
-        $pending = $script:A13Source.IndexOf('Set-VsPackageContentTracking -ApplicationName $fullName -State pending')
         $intent | Should -BeGreaterOrEqual 0
         $update | Should -BeGreaterThan $intent
-        $pending | Should -BeGreaterThan $update
+        $beforeUpdate = $script:A13Source.Substring($intent, $update - $intent)
+        $beforeUpdate | Should -Match '-RequestConfirmed \$false'
+        $afterUpdate = $script:A13Source.Substring($update)
+        $afterUpdate | Should -Match '(?s)Update-CMDistributionPoint.*-RequestConfirmed \$true'
+        $script:A13Source | Should -Match '(?s)State -eq ''intent''.*-not \$tracking\.RequestConfirmed.*package_content_unknown'
     }
 
     It 'verteilt unabhaengig von der optionalen eigenen Collection' {
@@ -190,14 +279,21 @@ Describe 'Autoimporter A13: Manifest, Intent und SourceVersion bilden eine Zusta
         $script:A13Source | Should -Match 'Update-CMDistributionPoint'
     }
 
-    It 'bestaetigt ein Manifest nur mit succeeded und einer SourceVersion oberhalb der Baseline' {
-        $script:A13Source | Should -Match "(?s)State -eq 'succeeded'.*SourceVersion -gt \[int\]\`$tracking\.BaselineSourceVersion.*-State complete"
+    It 'bestaetigt ein Manifest ueber ContentId und frische erfolgreiche Kopien aller gleichen DP-Ziele' {
+        $script:A13Source | Should -Match 'Get-VsDeploymentTypeContentIdentity'
+        $script:A13Source | Should -Match 'Get-VsDistributionCopySnapshot'
+        $script:A13Source | Should -Match 'Test-VsDistributionCopyAdvanced'
+        $script:A13Source | Should -Match "(?s)State -eq 'succeeded' -and \`$copyAdvanced.*-State complete"
+        $script:A13Source | Should -Not -Match 'SourceVersion -gt \[int\]\$tracking\.BaselineSourceVersion'
         $script:A13Source | Should -Match 'Get-VsFilesManifestStamp -Path \$pkgFolder'
     }
 
     It 'schreibt den Tracking-State als letzten Commit-Marker und akzeptiert nur geschlossene States' {
         $functionText = [regex]::Match($script:A13Common, '(?s)function Set-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $readerText = [regex]::Match($script:A13Common, '(?s)function Get-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
         $functionText | Should -Match "ValidateSet\('intent', 'pending', 'complete'\)"
+        $functionText | Should -Match "(?s)\`$State -in @\('pending', 'complete'\) -and -not \`$RequestConfirmed"
+        $readerText | Should -Match "(?s)\`$state -in @\('pending', 'complete'\) -and \`$requestConfirmed -ne 1"
         $writes = @([regex]::Matches($functionText, 'New-ItemProperty[^\r\n]+-Name State[^\r\n]+'))
         $writes.Count | Should -Be 2
         $writes[0].Value | Should -Match "-Value 'invalid'"
@@ -208,6 +304,196 @@ Describe 'Autoimporter A13: Manifest, Intent und SourceVersion bilden eine Zusta
         $script:A13Source | Should -Match '\$appMatches\.Count -gt 1'
         $script:A13Source | Should -Match '\$deploymentTypes\.Count -ne 1'
         $script:A13Source | Should -Match 'package_definition_drift'
+    }
+}
+
+Describe 'U09 Contentidentitaet und DP-Kopiergrenze' {
+    It 'liest nur eine vollstaendige Application-/DT-Bindung als bekannt' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; ModelName = 'ScopeId_A/Application_A'; PackageID = 'ABC00001' }
+            $dt = [pscustomobject]@{
+                LocalizedDisplayName = 'Agent-1 Deployment'; AppModelName = 'ScopeId_A/Application_A'
+                ModelName = 'ScopeId_A/DeploymentType_A'; CI_UniqueID = 'ScopeId_A/DeploymentType_A/1'; ContentId = 'Content_A'
+            }
+            [pscustomobject]@{
+                App = Get-VsApplicationContentIdentity -Application $app -ExpectedName 'Agent-1'
+                Dt = Get-VsDeploymentTypeContentIdentity -DeploymentType $dt -ExpectedName 'Agent-1 Deployment' -ExpectedApplicationModelName 'ScopeId_A/Application_A'
+                Foreign = Get-VsDeploymentTypeContentIdentity -DeploymentType $dt -ExpectedName 'Agent-1 Deployment' -ExpectedApplicationModelName 'ScopeId_B/Application_B'
+            }
+        }
+        $result.App.State | Should -Be 'known'
+        $result.App.PackageId | Should -Be 'ABC00001'
+        $result.Dt.State | Should -Be 'known'
+        $result.Dt.DeploymentTypeModelName | Should -Be 'ScopeId_A/DeploymentType_A'
+        $result.Dt.ContentId | Should -Be 'Content_A'
+        $result.Foreign.State | Should -Be 'unknown'
+    }
+
+    It 'weist alte succeeded-Aggregate ohne neuere LastCopied-Evidenz ab' {
+        $baseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
+        $sameOldSuccess = [pscustomobject]@{
+            State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
+        }
+        $newSuccess = [pscustomobject]@{
+            State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L })
+        }
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $sameOldSuccess) -Body {
+            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+        } | Should -BeFalse
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $newSuccess) -Body {
+            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+        } | Should -BeTrue
+    }
+
+    It 'erlaubt eine leere DP-Baseline nur fuer eine echte Erstverteilung' {
+        $empty = [pscustomobject]@{ State = 'known'; Targets = @() }
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($empty) -Body {
+            param($s) Test-VsDistributionCopyBaselineReady -RequestKind initial -Snapshot $s
+        } | Should -BeTrue
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($empty) -Body {
+            param($s) Test-VsDistributionCopyBaselineReady -RequestKind update -Snapshot $s
+        } | Should -BeFalse
+    }
+
+    It 'unterscheidet die leere Baseline von JSON-null und ungueltigen Leerformen' {
+        $successfulCopy = [pscustomobject]@{ State = 'known'; Targets = @(
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 1L }
+        ) }
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $successfulCopy) -Body {
+            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+        } | Should -BeTrue
+        $noCopy = [pscustomobject]@{ State = 'known'; Targets = @() }
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $noCopy) -Body {
+            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+        } | Should -BeFalse
+
+        foreach ($invalidBaseline in @('null', '[null]', '[[]]', '[invalid]')) {
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($invalidBaseline, $successfulCopy) -Body {
+                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+            } | Should -BeFalse -Because "'$invalidBaseline' keine explizite leere Baseline ist"
+        }
+
+        $twoSuccessfulCopies = [pscustomobject]@{ State = 'known'; Targets = @(
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 1L }
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 1L }
+        ) }
+        $mixedNullBaseline = '[null,{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":0}]'
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($mixedNullBaseline, $twoSuccessfulCopies) -Body {
+            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+        } | Should -BeFalse
+    }
+
+    It 'weist Zielwechsel, Fehler und nur teilweise frische Kopien ab' {
+        $baseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":200}]'
+        $cases = @(
+            [pscustomobject]@{ State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }) }
+            [pscustomobject]@{ State = 'known'; Targets = @(
+                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
+                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 3; LastCopiedTicks = 201L }
+            ) }
+            [pscustomobject]@{ State = 'known'; Targets = @(
+                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
+                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 200L }
+            ) }
+        )
+        foreach ($snapshot in $cases) {
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $snapshot) -Body {
+                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+            } | Should -BeFalse
+        }
+    }
+
+    It 'weist ein korruptes oder doppelt belegtes persistiertes Targetset ab' {
+        $current = [pscustomobject]@{ State = 'known'; Targets = @(
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 201L }
+        ) }
+        $badBaselines = @(
+            '{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}'
+            '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":-1},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":200}]'
+            '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
+        )
+        foreach ($baseline in $badBaselines) {
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $current) -Body {
+                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
+            } | Should -BeFalse
+        }
+    }
+
+    It 'schliesst zwei Contentupdates bei Package-SourceVersion 1 erst nach neuer ContentId und neuer DP-Kopie ab' {
+        $manifestA = ('A' * 64) -join ''
+        $manifestB = ('B' * 64) -join ''
+        $manifestC = ('C' * 64) -join ''
+        $baselineA = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":90}]'
+        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'complete'; Manifest = $manifestA; BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'BeforeA'; ContentId = 'ContentA'; RequestConfirmed = $true; DistributionBaseline = $baselineA
+        } }
+        $requests = [pscustomobject]@{ Initial = 0; Update = 0 }
+        $copy100 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
+        $copy101 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L })
+        $copy102 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 102L })
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentA -AggregateState succeeded -CopyTargets $copy100 | Out-Null
+        $requests.Update | Should -Be 1
+        $tracking.Value.State | Should -Be 'intent'
+        $tracking.Value.RequestConfirmed | Should -BeTrue
+        $tracking.Value.SourceVersion | Should -Be -1
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        $tracking.Value.ContentId | Should -Be 'ContentB'
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
+        $tracking.Value.State | Should -Be 'pending' -Because 'das alte succeeded-Aggregat keine frische Kopie der neuen ContentId beweist'
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy101 | Out-Null
+        $tracking.Value.State | Should -Be 'complete'
+        $tracking.Value.SourceVersion | Should -Be 1
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentB -AggregateState succeeded -CopyTargets $copy101 | Out-Null
+        $requests.Update | Should -Be 2
+        $tracking.Value.State | Should -Be 'intent'
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy101 | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy101 | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy102 | Out-Null
+        $tracking.Value.State | Should -Be 'complete'
+        $tracking.Value.SourceVersion | Should -Be 1
+        $requests.Update | Should -Be 2
+    }
+
+    It 'wiederholt einen fehlgeschlagenen initialen oder Update-Aufruf nicht blind' {
+        $manifestA = ('A' * 64) -join ''
+        $manifestB = ('B' * 64) -join ''
+        $copy100 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
+
+        $updateTracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'complete'; Manifest = $manifestA; BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'BeforeA'; ContentId = 'ContentA'; RequestConfirmed = $true
+            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":90}]'
+        } }
+        $updateRequests = [pscustomobject]@{ Initial = 0; Update = 0 }
+        Invoke-U09ControllerScan -TrackingBox $updateTracking -RequestCounters $updateRequests -Manifest $manifestB -ContentId ContentA -AggregateState succeeded -CopyTargets $copy100 -RequestFailure update | Out-Null
+        $updateTracking.Value.State | Should -Be 'intent'
+        $updateTracking.Value.RequestConfirmed | Should -BeFalse
+        Invoke-U09ControllerScan -TrackingBox $updateTracking -RequestCounters $updateRequests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
+        $updateRequests.Update | Should -Be 1
+        $updateTracking.Value.State | Should -Be 'intent'
+        $updateTracking.Value.RequestConfirmed | Should -BeFalse
+
+        $initialTracking = [pscustomobject]@{ Value = $null }
+        $initialRequests = [pscustomobject]@{ Initial = 0; Update = 0 }
+        Invoke-U09ControllerScan -TrackingBox $initialTracking -RequestCounters $initialRequests -Manifest $manifestA -ContentId ContentA -AggregateState not_started -CopyTargets @() -RequestFailure initial | Out-Null
+        $initialTracking.Value.State | Should -Be 'intent'
+        $initialTracking.Value.RequestConfirmed | Should -BeFalse
+        Invoke-U09ControllerScan -TrackingBox $initialTracking -RequestCounters $initialRequests -Manifest $manifestA -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
+        $initialRequests.Initial | Should -Be 1
+        $initialTracking.Value.State | Should -Be 'intent'
+        $initialTracking.Value.RequestConfirmed | Should -BeFalse
     }
 }
 
@@ -306,6 +592,31 @@ Describe 'Test-VsTemplateScriptCurrent (Inhalt, nicht Zeitstempel)' {
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @($script:TemplateFile, $absent) -Body {
             param($t, $p)
             Test-VsTemplateScriptCurrent -TemplateFile $t -PackageFile $p
+        } | Should -BeFalse
+    }
+
+    It 'fehlende Vorlage und fehlende Paket-install.ps1 gelten nicht als aktuell' {
+        $absentTemplate = Join-Path $script:Sandbox 'keine-vorlage.ps1'
+        $absentPackage = Join-Path $script:Sandbox 'kein-paket.ps1'
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($absentTemplate, $absentPackage) -Body {
+            param($t, $p) Test-VsTemplateScriptCurrent -TemplateFile $t -PackageFile $p
+        } | Should -BeFalse
+    }
+
+    It 'vorhandene Paket-install.ps1 bleibt ohne zentrale Vorlage ein gueltiges Bestandspaket' {
+        $absentTemplate = Join-Path $script:Sandbox 'keine-vorlage.ps1'
+        Set-Content -Path $script:PackageFile -Value 'exit 0' -Encoding UTF8
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($absentTemplate, $script:PackageFile) -Body {
+            param($t, $p) Test-VsTemplateScriptCurrent -TemplateFile $t -PackageFile $p
+        } | Should -BeTrue
+    }
+
+    It 'ein Verzeichnis namens install.ps1 gilt nicht als lesbares Skript' {
+        $absentTemplate = Join-Path $script:Sandbox 'keine-vorlage.ps1'
+        $directoryScript = Join-Path $script:Sandbox 'ordner-install.ps1'
+        New-Item -Path $directoryScript -ItemType Directory -Force | Out-Null
+        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($absentTemplate, $directoryScript) -Body {
+            param($t, $p) Test-VsTemplateScriptCurrent -TemplateFile $t -PackageFile $p
         } | Should -BeFalse
     }
 }
@@ -471,6 +782,49 @@ Describe 'Installer A11: gemeinsame Aktivierungs- und Rollbackgrenze' {
         $script:A11Text | Should -Match 'Set-Acl -LiteralPath \$registryPath -AclObject \$RegistrySnapshot\.Acl -ErrorAction Stop'
         $script:A11Text | Should -Match 'Register-ScheduledTask -TaskName \$snapshot\.Name -Xml \$snapshot\.Xml -Force -ErrorAction Stop'
         $script:A11Text | Should -Match 'Unregister-ScheduledTask -TaskName \$snapshot\.Name -Confirm:\$false -ErrorAction Stop'
+    }
+}
+
+Describe 'Installer U09: Package_Vorlage teilt Stage-, Hash- und Rollbackgrenze' {
+    BeforeAll {
+        $script:U09InstallerText = Get-Content -Path $script:Installer -Raw
+        $script:U09InstallerLines = Get-Content -Path $script:Installer
+    }
+
+    It 'verlangt install.ps1 und config.json vor der ersten Taskmutation' {
+        $required = ($script:U09InstallerLines | Select-String -SimpleMatch '$requiredTemplateFiles = @(''install.ps1'', ''config.json'')').LineNumber
+        $disable = ($script:U09InstallerLines | Select-String -SimpleMatch '$taskMutationStarted = $true').LineNumber
+        $required | Should -Not -BeNullOrEmpty
+        $required | Should -BeLessThan $disable
+    }
+
+    It 'staged die Vorlage als eindeutigen Geschwisterpfad auf dem PackagesRoot-Volume und prueft jeden Dateiinhalt' {
+        $script:U09InstallerText | Should -Match "Join-Path \`$PackagesRoot \('\.virtusphere-template-stage-'"
+        $script:U09InstallerText | Should -Not -Match "Join-Path \`$installStage 'Package_Vorlage'"
+        $script:U09InstallerText | Should -Match 'Get-FileHash -Algorithm SHA256 -LiteralPath \$source\.FullName'
+        $script:U09InstallerText | Should -Match 'Get-FileHash -Algorithm SHA256 -LiteralPath \$staged'
+        $script:U09InstallerText | Should -Match 'templateDirectoryManifest'
+    }
+
+    It 'aktiviert die Vorlage ueber Backup und verifiziert den vollstaendigen Live-Datei- und Verzeichnissatz' {
+        $backup = $script:U09InstallerText.IndexOf('Move-Item -LiteralPath $templateDest -Destination $templateBackup')
+        $activate = $script:U09InstallerText.IndexOf('Move-Item -LiteralPath $templateStage -Destination $templateDest')
+        $verify = $script:U09InstallerText.IndexOf("throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Dateisatz.'")
+        $backup | Should -BeGreaterThan -1
+        $activate | Should -BeGreaterThan $backup
+        $verify | Should -BeGreaterThan $activate
+        $script:U09InstallerText | Should -Not -Match "Copy-Item -Path \(Join-Path \`$templateSource '\*'\)"
+    }
+
+    It 'stellt das alte Template vor einem Aufgabenrestart wieder her und behaelt unvollstaendigen Rollback sichtbar' {
+        $restore = [regex]::Match($script:U09InstallerText, '(?s)function Restore-VsInstallTransaction \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $removeNew = $restore.IndexOf('Remove-Item -LiteralPath $TemplateDestination -Recurse')
+        $restoreOld = $restore.IndexOf('Move-Item -LiteralPath $TemplateBackupPath -Destination $TemplateDestination')
+        $taskStart = $restore.IndexOf('Start-ScheduledTask')
+        $removeNew | Should -BeGreaterThan -1
+        $restoreOld | Should -BeGreaterThan $removeNew
+        $taskStart | Should -BeGreaterThan $restoreOld
+        $restore | Should -Match '\$quiesced -and \$filesRestored -and \$registryRestored'
     }
 }
 

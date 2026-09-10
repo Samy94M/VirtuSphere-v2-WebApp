@@ -21,12 +21,23 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 $user = current_user($connection);
+$mustChangePassword = $user !== null && (int) ($user['must_change_password'] ?? 0) === 1;
+$canRunDeploy = $user !== null && can('deploy.run', $user);
+
+// Bootstrap may persist an explicit locale, and current_user() may persist a
+// lazy expiry or directory revalidation result. Close only after all of that
+// session work and after deriving this endpoint's complete auth/RBAC decision.
+// The blocker/warning reads below use only the local user snapshot and DB state.
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 if ($user === null) {
     http_response_code(401);
     echo json_encode(['ok' => false, 'message' => __t('deploy.blocker_session_expired')], JSON_THROW_ON_ERROR);
     exit;
 }
-if ((int) ($user['must_change_password'] ?? 0) === 1 || !can('deploy.run', $user)) {
+if ($mustChangePassword || !$canRunDeploy) {
     http_response_code(403);
     echo json_encode(['ok' => false, 'message' => __t('deploy.blocker_forbidden')], JSON_THROW_ON_ERROR);
     exit;

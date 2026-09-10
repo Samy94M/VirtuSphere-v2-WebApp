@@ -13,12 +13,16 @@ BeforeAll {
     $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
     $script:CreateAsyncContract = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'qa-ansible') 'create-async-contract.py') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
+    $script:PowerShellRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'run-pester.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
     $script:CollectionLock = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'verify-collection-lock.py') -Raw
     $script:CollectionLockContract = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'collection-lock-contract.py') -Raw
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
+    $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
+    $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
 }
+
 
 Describe 'Visible progress reporting contract' {
     It 'binds future agents and multi-unit runners to the n/total convention' {
@@ -42,6 +46,33 @@ Describe 'Visible progress reporting contract' {
         $script:CheckRuntime | Should -Match 'param\(\[string\]\$Exe, \[string\[\]\]\$Arguments = @\(\), \[switch\]\$Live\)'
         $script:CheckRuntime | Should -Match 'if \(\$Live\) \{ Write-Host \$line \}'
         $script:FastGates | Should -Match "run-pester\.ps1'\)\) -Live"
+    }
+
+    It 'reports the selected analyzer, Pester suite and historical register units before and after execution' {
+        $script:PowerShellRunner | Should -Match '\$unitTotal\s*=\s*0'
+        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipAnalyzer\) \{ \$unitTotal\+\+ \}'
+        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipTests\) \{\s+\$unitTotal\+\+'
+        $script:PowerShellRunner | Should -Match 'if \(\$registerPresent\) \{ \$unitTotal\+\+ \}'
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
+        ([regex]::Matches($script:PowerShellRunner, "Write-Host \('\[\{0\}/\{1\}\] RUN\s+\{2\}'")).Count | Should -Be 3
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''PSScriptAnalyzer \(Powershell-MECM\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Pester \(tests\\powershell\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Haertungsregister 2026-08 \(nicht Teil des Gates\)'''
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] pass \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] fail \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] open \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] infrastructure_error \{2\}:"
+    }
+
+    It 'shows named historical results and distinguishes discovery failure from an empty register without blocking the gate' {
+        $script:PowerShellRunner | Should -Match '\$regConfig\.Output\.Verbosity\s*=\s*''Detailed'''
+        $script:PowerShellRunner | Should -Match '\$registerFailedContainers\s*=\s*@\(\$reg\.FailedContainers'
+        $script:PowerShellRunner | Should -Match '\$reg\.FailedContainersCount -gt 0 -or \$reg\.FailedBlocksCount -gt 0'
+        $script:PowerShellRunner | Should -Match 'Discovery/Containerfehler:'
+        $script:PowerShellRunner | Should -Match '\$reg\.TotalCount\s*-eq\s*0'
+        $script:PowerShellRunner | Should -Match '0 Tests entdeckt \(nicht blockierend\)'
+        $registerSection = $script:PowerShellRunner.Substring($script:PowerShellRunner.IndexOf('# --- Haertungsregister'))
+        $registerSection | Should -Not -Match '\$failed\s*=\s*\$true'
     }
 
     It 'reports and streams every create async production sample' {
@@ -102,6 +133,18 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match '--fail-on-empty-test-suite'
         $script:GuardRunner | Should -Match 'Zero entrypoints are a contract error'
         (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/gates-integration.ps1')) | Should -Match "test-guards\.ps1'\)\) -Live"
+    }
+
+    It 'reports every restore and backup phase before and after execution' {
+        $script:RestoreDrill | Should -Match 'PROGRESS_TOTAL=9'
+        $script:RestoreDrill | Should -Match 'echo "\[\$progress_position/\$PROGRESS_TOTAL\] RUN \$progress_unit"'
+        ([regex]::Matches($script:RestoreDrill, 'progress_run [1-9] ')).Count | Should -Be 9
+        $script:RestoreDrill | Should -Match 'progress_result (pass|fail|infrastructure_error)'
+        $script:RestoreDrill | Should -Match 'progress_run 9 cleanup'
+        $script:BackupRunner | Should -Match 'BACKUP_PROGRESS_TOTAL=4'
+        $script:BackupRunner | Should -Match 'echo "\[\$backup_progress_position/\$BACKUP_PROGRESS_TOTAL\] RUN \$backup_progress_unit"'
+        ([regex]::Matches($script:BackupRunner, 'backup_progress_run [1-4] ')).Count | Should -Be 4
+        $script:BackupRunner | Should -Match 'backup_progress_result (pass|fail)'
     }
 
     It 'reports every explicitly approved MECM cleanup unit without polluting its result stream' {

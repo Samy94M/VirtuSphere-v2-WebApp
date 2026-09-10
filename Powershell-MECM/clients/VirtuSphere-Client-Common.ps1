@@ -138,7 +138,10 @@ function Get-VsClientApiHeaders {
 function ConvertTo-VsUtf8JsonBytes {
     param([Parameter(Mandatory)]$Value, [int]$Depth = 6)
     $json = ConvertTo-Json -InputObject $Value -Depth $Depth
-    return [Text.Encoding]::UTF8.GetBytes($json)
+    # Function output enumerates collections unless the byte[] is emitted as
+    # one pipeline object. Invoke-RestMethod binds byte[] as a binary body, while
+    # the enumerated object[] takes its text-conversion path instead.
+    return ,([Text.Encoding]::UTF8.GetBytes($json))
 }
 
 # TLS-Vorbereitung fuer PS 5.1. Ein leerer Fingerabdruck bedeutet normale PKI-
@@ -363,7 +366,8 @@ function Send-VsPhase {
         Invoke-RestMethod -Uri (Get-VsApiUrl -Api $api -Path '/mecm_report.php?action=reportPhase') -Method Post `
             -ContentType 'application/json; charset=utf-8' -Body (ConvertTo-VsUtf8JsonBytes -Value $body) -Headers (Get-VsClientApiHeaders) -TimeoutSec 5 | Out-Null
     } catch {
-        # Rueckkanal ist best effort - Client kann durch VLAN-Wechsel offline sein.
+        # Rueckkanal ist best effort - die IP-/Adapterkonfiguration kann den
+        # Client offline nehmen.
         # Trotzdem ins Dateilog, sonst ist ein dauerhaft stiller Rueckkanal
         # (falscher Token, IP nicht freigegeben, Portal auf HTTPS umgestellt)
         # auf dem Client nicht diagnostizierbar.
@@ -439,7 +443,8 @@ function Test-VsIpv4Literal {
 
 # Builds the complete desired/actual mapping without changing Windows. The
 # caller must refuse every write when Valid is false, so one missing second NIC
-# cannot leave the first NIC half configured under a green phase.
+# cannot leave the first NIC half configured under a green phase. Item.Mode is
+# the canonical, trimmed mode for the later mutation; Item.Target stays raw.
 function New-VsClientNetworkPlan {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][array]$Targets,

@@ -136,6 +136,12 @@ function Register-IntegrationCheckGates {
         }
         # Ab hier aufraeumen, auch wenn up nur halb durchkommt.
         $script:qaStackStarted = $true
+        # Fresh, non-copying QA log storage: FPM owns it, root workers use group 0
+        # without DAC_OVERRIDE. Never chmod or rotate the host's development logs.
+        $logInit = Invoke-QaCompose @('run', '--rm', '--no-deps', '--build',
+            '--cap-add', 'CHOWN', '--cap-add', 'FOWNER', 'php', 'sh', '-c',
+            'chown 33:0 /var/www/html/logs && chmod 0770 /var/www/html/logs')
+        if ($logInit.ExitCode -ne 0) { return New-InfraResult 'QA-App-Logvolume nicht initialisierbar' $logInit.Output }
         $up = Invoke-QaCompose (@('up', '-d', '--build', '--wait') + $qaServices)
         if ($up.ExitCode -ne 0) { return New-InfraResult 'docker compose up --wait rot (QA-Stack startet nicht)' $up.Output }
 
@@ -205,10 +211,14 @@ function Register-IntegrationCheckGates {
         try {
             $r = Invoke-Tool 'docker' @('run', '--rm',
                 '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+                '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
+                '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
+                '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
                 '--network', $qaNetwork,
                 '--env-file', $qaEnvFile,
                 '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
-                $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped')
+                $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped',
+                '--log-junit', '/qa-evidence/phpunit-full.xml')
         } finally {
             $restarted = Invoke-QaCompose (@('up', '-d', '--wait') + $qaTestWorkers)
         }

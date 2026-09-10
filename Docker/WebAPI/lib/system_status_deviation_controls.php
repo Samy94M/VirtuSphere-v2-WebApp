@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/system_status_deviation_view.php';
+require_once __DIR__ . '/system_status_urls.php';
 
 function system_status_render_deviation_evidence(?array $report): void
 {
@@ -28,6 +29,38 @@ function system_status_render_deviation_evidence(?array $report): void
     if ($facts !== []) {
         echo system_status_fact_list($facts);
     }
+}
+
+/** @param array<string,mixed>|null $report @param array<string,mixed> $user */
+function system_status_render_deviation_unavailable(?array $report, array $user): void
+{
+    if ($report === null) {
+        ?><p class="muted"><?php echo h(__t('system_status.dev_no_inventory')); ?></p><?php
+        return;
+    }
+
+    if ((int) ($report['source_count'] ?? 0) === 0) {
+        ?><p class="muted"><?php echo h(__t('system_status.dev_no_sources')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_configure_credentials')); ?></a><?php } ?></p><?php
+        return;
+    }
+
+    ?><p class="muted"><?php echo h(__t('system_status.dev_no_qualified_evidence')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.dev_open_inventory_evidence')); ?></a></p><?php
+}
+
+/** @param array<string,mixed> $view @param array<string,mixed>|null $report */
+function system_status_deviation_empty_message(array $view, ?array $report): string
+{
+    if ((int) ($view['total'] ?? 0) === 0
+        && (($view['filter'] ?? 'all') !== 'all' || ($view['query'] ?? '') !== '')
+    ) {
+        return __t('system_status.dev_filter_none');
+    }
+    if (!empty($report['fully_current'])) {
+        return __t('system_status.dev_none');
+    }
+    return __t(!empty($report['fully_evaluable'])
+        ? 'system_status.dev_none_historical'
+        : 'system_status.dev_none_partial');
 }
 
 function system_status_render_deviation_filters(array $view, array $query): void

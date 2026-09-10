@@ -221,6 +221,21 @@ foreach ($scriptFile in $dir_script) {
     # Alte Marker ohne Hash werden einmalig erneut ausgefuehrt.
     if ($status -eq "not installed" -or -not ([string]$status).StartsWith($successMarkerPrefix, [System.StringComparison]::Ordinal)) {
 
+        # Erst der Hash-Miss macht diesen Aufruf zu einer Reparatur. Vor dem
+        # Kindprozess darf die alte Gesamt-Detection nicht mehr gelten, auch
+        # wenn das Kind fehlschlaegt oder mit 1641 einen Neustart einleitet.
+        # Fehlende Version ist normal; ein Lese-/Loeschfehler dagegen sperrt
+        # die Nutzlast. Erfolgreiche Hash-Skips beruehren den Marker nicht.
+        try {
+            $packageState = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop
+            if ($null -ne $packageState.PSObject.Properties['Version']) {
+                Remove-ItemProperty -LiteralPath $registryPath -Name 'Version' -ErrorAction Stop
+            }
+        } catch {
+            Write-Host "Detection-Marker konnte vor der Reparatur nicht invalidiert werden: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+
         $success = 'Fehler'
         $stepFailed = $false
         $childExitCode = $null

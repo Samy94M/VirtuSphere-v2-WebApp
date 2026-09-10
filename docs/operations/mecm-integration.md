@@ -412,18 +412,19 @@ Phasen: `getinfo`, `hostname`, `staticip`, `disks`; Events: `started`,
 `finished`, `failed`. Empfehlung: `started` **vor** riskanten Aktionen senden
 (z. B. vor der IP-Umstellung), `finished` danach best effort; bleibt es aus,
 zeigt das Portal nach 15 Minuten „ausgeführt, Bestätigung ausstehend" (kein
-Fehler). Schutzmechanismen: 8-KB-Body-Limit (413), Dedupe identischer
+Erfolgs- oder Fehlernachweis). Schutzmechanismen: 8-KB-Body-Limit (413), Dedupe identischer
 Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
 
 ### Client-Ready-ACK (Windows-Client, verbindlich und idempotent)
 
-Nach dem vollständigen Schreiben der Registry-Nutzdaten sendet
-V23 `POST /mecm_client_ack.php` mit `{"mac":"00:50:56:AB:CD:EF"}`. Nur dieser
-Endpoint setzt 5/5; `getDeviceInfos` verändert keinen Zustand mehr. Scheitert der
-POST, liefert `client_getinfo` Exitcode 1, damit MECM den Lauf wiederholt. Erst
-nach der ACK-Antwort setzt es `SetupState=complete`; damit hinterlässt auch ein
-harter Abbruch während der Anfrage keinen falschen Erkennungsstatus. Ging nur die
-Antwort verloren, antwortet der Server beim Retry
+Nach dem vollständigen Schreiben der Registry-Nutzdaten sendet V23
+`POST /mecm_client_ack.php` mit
+`{"mac":"00:50:56:AB:CD:EF","rollout_revision":7}` aus derselben gelesenen
+Rolloutantwort. Nur dieser Endpoint setzt 5/5; `getDeviceInfos` verändert keinen
+Zustand mehr. Scheitert der POST oder seine Antwort, liefert `client_getinfo`
+Exitcode 1, damit MECM den Lauf wiederholt. Erst nach der positiven ACK-Antwort
+setzt der Client `SetupState=complete`. Der Server kann 5/5 bereits gespeichert
+haben, obwohl nur seine HTTP-Antwort verloren ging; dann antwortet er beim Retry
 mit `deduplicated:true` und erzeugt keine zweite Statuszeile. Dieser ACK ist
 absichtlich nicht Teil von `mecm_report.php`, dessen Phasenmeldungen weiterhin
 rein anzeigend und best effort bleiben.
@@ -695,7 +696,7 @@ nicht die breitere Anzeigeordnung des Portal-Katalogs.
 Ein freizugebender Plan muss stabile Application-/Collection-IDs, die exakten
 versionierten Ownership-Marker, keine Referenzen und einen vollständig bereiten
 Ersatz belegen. Bereit bedeutet: genau ein Deployment Type, bestätigtes
-Contentmanifest, vollständig erfolgreiche aktuelle SourceVersion und geprüftes
+Contentmanifest, vollständig bestätigter aktueller Contentstand und geprüftes
 Deployment. Unklare oder fremde Objekte bleiben erhalten. Der Plan wird direkt
 vor einer Ausführung neu erhoben; nur ein identischer SHA-256-Fingerabdruck ist
 gültig. Der normale Task ruft den Executor nicht auf. Eine echte Entfernung
@@ -703,8 +704,15 @@ wird ausschließlich in einer freigegebenen MECM-Testmenge abgenommen.
 
 ### Transport, TLS, ACL und Site-Health seit 07.09.2026
 
-Server- und Client-POSTs senden JSON unter Windows PowerShell 5.1 als explizite
-UTF-8-Bytes mit Charset. Fehlerdiagnosen verwenden zuerst den bereits in
+Server- und Client-POSTs senden JSON als explizites UTF-8-`byte[]` mit Charset.
+Beide ausgelieferten `ConvertTo-VsUtf8JsonBytes`-Helper emittieren dieses Array
+als ein Funktionsobjekt; andernfalls enumeriert PowerShell die Bytes zu
+`object[]`, und der HTTP-Cmdlet-Binder behandelt den Body nicht mehr als
+Binärdaten. Die Regression prüft Objekt, Ein-/Mehrarray und Unicode direkt am
+Helper sowie den untypisierten HTTP-Parameter. Für die Laufzeitabnahme liest die
+Loopback-Fixture in `VirtuSphere.JsonTransport.Tests.ps1` die tatsächlich
+übertragenen Bytes unter Windows PowerShell 5.1 und PowerShell 7 direkt hinter
+dem HTTP-Header. Fehlerdiagnosen verwenden zuerst den bereits in
 `ErrorRecord.ErrorDetails.Message` vorhandenen Antworttext und lesen den Stream
 nur als Rückfall; extrahierter Text ist begrenzt und wird anschließend vom
 Logger redigiert.
@@ -772,6 +780,14 @@ Wichtige Härtungen gegenüber den Altskripten:
   auszuführen. Erst danach deaktiviert und stoppt er Aufgaben und ersetzt das
   Loggingmodul vor der Common-Fassade. Fehlende oder versionsfalsche Module
   werden dadurch vor dem nächsten Sync sichtbar.
+- **Paketvorlage gehört zum selben Austausch.** `install.ps1`, `config.json`
+  und der ausgelieferte Vorlagenbaum werden vor dem Taskstopp gestaged und
+  gehasht. Das Vorlagen-Staging liegt unter `PackagesRoot`, damit die
+  Verzeichniswechsel auch bei einem anderen Paketlaufwerk auf demselben
+  Dateisystem bleiben. Der bisherige Vorlagenbaum wird gesichert, der neue
+  live gegen das Manifest geprüft und bei einem späteren Installationsfehler
+  zusammen mit Serverdateien und Registry zurückgerollt. Ein unvollständig
+  bestätigter Rollback lässt die Aufgaben deaktiviert.
 - **Upgrade und Re-Run als gemeinsame Transaktion.** Ein globaler Mutex schließt
   parallele Installer aus; nur das exakte, reparse-freie lokale Verzeichnis
   `%ProgramFiles%\VirtuSphere\mecm` darf ersetzt werden. Vor dem ersten
@@ -873,9 +889,12 @@ Kernpunkte:
 - **Adress-Fallback-Kette:** Registry-Override → DNS-Name (`virtusphere.lan:8021`,
   DNS-Eintrag im Deploy-Netz nötig) → hartkodierte IP. `client_getinfo`
   schreibt die funktionierende Adresse in die Registry für die Folge-Skripte.
-- **Rückkanal:** jede Phase meldet `started`/`finished`/`failed`;
-  `staticip` meldet `started` vor der IP-Umstellung, `hostname` `finished` vor
-  dem Reboot (VLAN-/Reboot-robust, „Bestätigung ausstehend" ist kein Fehler).
+- **Rückkanal:** Phasenevents sind einzelne best-effort-Sendeversuche und keine
+  garantierte `started`-zu-Terminal-Sequenz. `staticip` versucht `started` vor
+  der Änderung der Windows-IP-/Subnetzkonfiguration; das Skript ändert keine
+  ESXi-Portgruppe. Bei einer echten Umbenennung meldet `hostname` `finished`
+  vor dem Reboot. Skip-, Frühabbruch- und Zustellpfade können Events auslassen;
+  „Bestätigung ausstehend" belegt weder Erfolg noch Fehler.
 - **Snapshot (getinfo):** Ein neuer versionierter Stand wird vorbereitet,
   nachgelesen und erst über `ActiveSnapshot` veröffentlicht. Danach läuft der verbindliche Client-Ready-ACK, und erst seine
   Bestätigung setzt `SetupState=complete`; der idempotente Server-POST darf
@@ -960,11 +979,12 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
 | Eigene Regel nicht mehr zugewiesen (Provenienz, ADR-0034) | wird nur bei erfolgreich gelesenem Live-Bestand entfernt und mit ID, autoritativem Namen und Typ an `reportMembership` gemeldet; Hand-Regeln in MECM sind ohne Provenienzzeile unantastbar | INFO |
 | Entfernen der eigenen Regel scheitert | VM bleibt in der Warteschlange; nächster Lauf konvergiert | ERROR |
-| Eigene Regel wurde in MECM von Hand entfernt | Provenienz wird zurückgezogen (`removed` gemeldet), nie zurückgekämpft | WARN |
+| Eigene Regel wurde in MECM von Hand entfernt | Bleibt sie im Portal ausdrücklich gewünscht, stellt der Sync sie unter aktueller Revision wieder her. Bestätigtes Add unter derselben exakten CollectionID erhält die Provenienz; eine ersetzte CollectionID zieht nur den alten Nachweis zurück. Ohne bestätigtes Add bleibt der alte Nachweis zur Klärung erhalten. Ein nicht mehr gewünschtes Ziel wird als `removed` gemeldet. Fremde/manuelle Regeln bleiben unberührt (ADR-0034 Amendment 4, D-01). | INFO/WARN |
 | Membership-Abfrage fehlschlägt oder ein Collectionname ist mehrdeutig | VM bleibt in der Warteschlange; keine Membership-Mutation und kein Provenienzrückzug | ERROR |
 | Provenienz-Meldung (`reportMembership`) scheitert | Ein `remote_confirmed`-Journaleintrag bleibt erhalten und wird mit derselben VM-, Revisions-, Resource- und Collectionidentität idempotent wiederholt; die VM bleibt bis zum erfolgreichen Replay in der Warteschlange. | WARN |
+| Altes Journal enthält Add und Remove für dieselbe VM, Revision, ResourceID und CollectionID | Das bestätigte Add erhält die Provenienz; sein ACK entfernt das zusammengehörige Paar atomar aus dem Journal. Ein einzelner Remove braucht vor dem Replay eine erfolgreich gelesene aktuelle Abwesenheit. Bei vorhandener Regel oder unbekanntem Live-Bestand bleibt er `uncertain` zur manuellen Klärung, ohne Adoption oder Provenienzlöschung. | WARN/ERROR |
 | Journal enthält nur `intent`, passt nicht mehr zu Revision/ResourceID oder erhält beim Replay 404/409 | Ownership ist ungeklärt: kein erneuter MECM-Write, keine Adoption und keine ResourceID-Meldung. `membership-journal.json` samt lokalem Log sichern und Bestand/Operation manuell belegen; niemals nur wegen des Alters löschen. | ERROR |
-| Journal ist voll, nicht schreibbar oder beschädigt | Mutierender Device-Sync blockiert vor dem nächsten MECM-Write. Beschädigte Evidenz bleibt als `membership-journal.json.quarantine.*.json` erhalten; freien Speicher und ACL reparieren, Datei nicht verwerfen. | ERROR |
+| Journal ist voll, nicht schreibbar oder beschädigt | Mutierender Device-Sync blockiert vor dem nächsten MECM-Write. Beschädigte Evidenz bleibt als `membership-journal.json.quarantine.*.json` erhalten und sperrt auch spätere Starts sowie ein ersetztes Hauptjournal. Speicher/ACL reparieren, Evidenz und Logs sichern; Operationen gegen aktuelle Rolloutrevision, ResourceID und exakte CollectionID in MECM und Portal klären. Quarantäne erst nach dokumentierter Ownership-Entscheidung entfernen, niemals lediglich als Neustartmaßnahme. | ERROR |
 | Client-Snapshot nicht veröffentlicht oder ACK ausstehend | `client_getinfo` entfernt zuerst `SetupState`, schreibt einen neuen versionierten Snapshot, liest Identität und Interfaceanzahl nach und veröffentlicht ihn über `ActiveSnapshot`. Folgephasen lesen nur diesen vollständigen Stand. Erst ein bestätigter Client-Ready-ACK setzt `SetupState=complete`; ein Retry erzeugt einen neuen Snapshot und der ACK bleibt idempotent. | ERROR/Phase `failed` |
 | Client-Application vorhanden, Deployment Type oder Abhängigkeit fehlt | `install-VirtuSphere-Clients.ps1` prüft die verwalteten Pflichtteile bei jedem Re-Run, ergänzt einen fehlenden eigenen Deployment Type und eine fehlende eindeutige Dependency-Gruppe. Mehrdeutige oder nicht sicher auflösbare Fremddefinitionen werden nicht überschrieben und lassen den Installer mit Blocker enden. | Installer `!!`, Exit 1 |
 | Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
@@ -992,14 +1012,29 @@ Durchlauf ohne offene Punkte merkt den Stamp.
 Für jeden Paketordner wird ein eigener SHA-256-Manifeststand unter
 `HKLM:\SOFTWARE\VirtuSphere\MECM\ContentTracking` verfolgt. Vor
 `Start-CMContentDistribution` oder `Update-CMDistributionPoint` schreibt der
-Autoimporter `intent` samt bisheriger SourceVersion; nach dem Cmdlet folgt
-`pending`. Ein Crash dazwischen löst deshalb keine blinde zweite Verteilung aus.
-Erst wenn alle Statuszeilen dieselbe, gegenüber der Baseline neuere
-`SourceVersion` als vollständig erfolgreich melden, wird `complete` gesetzt und
-der globale Scan-Stamp darf weiterlaufen. Gemischte Versionen bleiben
-`in_progress`, Fehler brauchen die bisherige manuelle Reparatur in MECM. Diese
+Autoimporter `intent` samt Application-/Deployment-Type-Identität, bisheriger
+Content-ID und Kopierstand der konkreten Verteilungspunkte. Nur ein erfolgreich
+zurückgekehrter Aufruf wird als bestätigt gespeichert. Ein Crash oder Fehler
+in diesem Fenster löst keine blinde zweite Verteilung aus. Der bestätigte
+Auftrag wird an seine DT-Content-ID gebunden; bei einem Update muss sie sich
+gegenüber der Baseline ändern. Die Application-Packageversion darf dabei
+gleich bleiben. `complete` verlangt zusätzlich zum erfolgreichen Aggregat
+einen neueren erfolgreichen `LastCopied`-Nachweis für die bisherigen DP-Ziele;
+fehlende, ersetzte oder unbekannte Ziele erlauben keinen Abschluss.
+Ein Erstauftrag benötigt mindestens einen bestätigten Kopierstand. Dies ist
+kein separater Nachweis der konfigurierten DP-Gruppenmitgliedschaft.
+Unbestätigte oder beschädigte Trackingdaten brauchen manuelle Klärung. Diese
 Contentpflege läuft unabhängig von `generateOwnDeviceColletion`; eine eigene
 Collection ist keine Voraussetzung für eine aktuelle Paketquelle.
+
+Alte Trackingdatensätze ohne den neuen Identitäts- und Kopiervertrag bleiben
+auch mit dem früheren Zustand `complete` zur manuellen Prüfung gesperrt. Sie
+belegen keine historische Content-ID und werden nicht automatisch auf das
+aktuell gleichnamige Objekt übertragen. Vor einer Freigabe den betreffenden
+Registrydatensatz und die Tageslogs sichern, Application-/DT-Identität,
+lokales Manifest und tatsächlichen DP-Inhalt abgleichen und ausschließen,
+dass noch eine alte Verteilung läuft. Die Entscheidung über den Altstand ist
+zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 
 | Fall | Verhalten | Log |
 |---|---|---|
@@ -1010,10 +1045,10 @@ Collection ist keine Voraussetzung für eine aktuelle Paketquelle.
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
 | Alt-Version erkannt | bleibt unverändert; normaler Import darf ohne Eigentums-, Referenz- und Ersatznachweis nicht löschen (`package_cleanup_failed`) | WARN je Kandidat |
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
-| Vorlagen-install.ps1 nicht kopierbar | Retry im nächsten Durchlauf (`package_template_failed`) | WARN |
+| Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
-| Content-Verteilung scheitert oder bleibt unbekannt | Der Adapter liest die eindeutig aufgelöste Application über `-InputObject` und die MECM-Felder `Targeted`, `NumberSuccess`, `NumberErrors`, `NumberInProgress`, `NumberUnknown`, `SourceVersion`. Nur vollständig klassifizierter Erfolg der angeforderten neueren Version ist grün; fehlendes/ungültiges Schema bleibt `unknown`. Fehler werden nicht blind neu verteilt. Das Ergebnis ist weiterhin ein globales Application-Aggregat, kein gruppengenauer DP-Nachweis. | WARN mit Paket/Ursachencode |
-| Tracking steht auf `intent` oder ist unvollständig | Keine automatische zweite Contentmutation; Tageslog, SourceVersion und MECM-Verteilung manuell klären | WARN `package_content_unknown` |
+| Content-Verteilung scheitert oder bleibt unbekannt | Application-/DT-Contentidentität, vollständig erfolgreiche Aggregatzähler und der neuere Kopiernachweis jedes bisherigen DP-Ziels müssen zusammenpassen. Die Package-`SourceVersion` dient als Diagnose, ihr Anstieg ist kein Application-Abschlusskriterium. Unbekannte Identität oder Providerevidenz blockiert; Fehler werden nicht blind neu verteilt. | WARN mit Paket/Ursachencode |
+| Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
 | `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry, kein offener Punkt | WARN |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
 
@@ -1047,11 +1082,14 @@ insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
 **Deployment hängt auf dem Client**
 1. VM-Detail im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
    (getinfo/hostname/staticip/disks)?
-2. „Ausgeführt, Bestätigung ausstehend" ist kein Erfolgsnachweis. Ein
-   erwarteter Neustart oder VLAN-Wechsel kann die Abschlussmeldung verhindern;
-   bleibt der Zustand bestehen, Client-Log und Erreichbarkeit prüfen.
-   „Fehlgeschlagen" mit Detailtext → Client-Log unter
-   `C:\Program Files\VirtuSphere\Logs`.
+2. Phasenmeldungen sind best effort. „Ausgeführt, Bestätigung ausstehend"
+   bedeutet nur, dass `started` ankam und kein terminales Event gespeichert ist;
+   auch eine vollständig fehlende Phase beweist weder Erfolg noch PXE-Fehler.
+   Bei einer echten Umbenennung sendet `hostname` den Abschluss vor dem Reboot.
+   `staticip` kann durch die neue Windows-IP-/Subnetzkonfiguration die
+   Portalverbindung verlieren, verschiebt aber keine ESXi-Portgruppe. Deshalb
+   MECM-Application-Detection, Erreichbarkeit und Client-Log unter
+   `C:\Program Files\VirtuSphere\Logs` gemeinsam prüfen.
 
 **Pakete verschwinden / Sync abgelehnt (409)**
 1. Im Log (Kategorie „MECM-Integration") nach „Katalog-Sync abgelehnt" suchen:

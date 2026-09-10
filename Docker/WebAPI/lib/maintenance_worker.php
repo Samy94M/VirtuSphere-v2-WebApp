@@ -20,6 +20,7 @@ if (PHP_SAPI !== 'cli') {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/maintenance_tasks.php';
 require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/worker_database_connect.php';
 require_once __DIR__ . '/worker_stop_signal.php';
 
 function maintenance_worker_options(array $argv): array
@@ -52,6 +53,11 @@ function maintenance_worker_main(array $argv): int
     // sat out its whole stop grace and ended in a SIGKILL on every restart.
     worker_install_stop_handler(VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE);
     $db = maintenance_worker_connect_db($options);
+    if ($db === null) {
+        fwrite(STDERR, "[maintenance-worker] stopping before database use\n");
+
+        return 0;
+    }
     $state = ['last_run' => [], 'states' => []];
 
     do {
@@ -69,11 +75,19 @@ function maintenance_worker_main(array $argv): int
             }
             fwrite(STDERR, '[maintenance-worker] Database error, reconnecting: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
             $db = maintenance_worker_connect_db($options);
+            if ($db === null) {
+                fwrite(STDERR, "[maintenance-worker] stopping during database reconnect\n");
+
+                return 0;
+            }
             // Sleep before retrying: `continue` skipped it, so a PERMANENT SQL
             // error turned this loop into a hot spin that reconnected and failed
             // thousands of times a second while the portal said nothing. Same
             // defect as in the deploy worker's loop.
-            sleep((int) $options['sleep']);
+            worker_idle_wait((int) $options['sleep']);
+            if (worker_stop_requested()) {
+                return 0;
+            }
             continue;
         }
         if ($options['once']) {
@@ -83,32 +97,18 @@ function maintenance_worker_main(array $argv): int
     } while (true);
 }
 
-function maintenance_worker_connect_db(array $options): mysqli
+function maintenance_worker_connect_db(array $options): ?mysqli
 {
-    // Loop mode survives MySQL restarts/slow startups; --once fails fast.
-    $maxAttempts = $options['once'] ? 3 : 0;
-    $attempt = 0;
-
-    while (true) {
-        $attempt++;
-        try {
-            $db = db(true);
+    return worker_database_connect(
+        $options,
+        'maintenance-worker',
+        static function (mysqli $db): void {
             // Same reason as in the deploy worker: this process could not
             // observe anything before this moment, and the reaper it runs on
             // its interval must not read that blind spot as a dead worker.
             deploy_reap_observer_since(time());
-
-            return $db;
-        } catch (mysqli_sql_exception $exception) {
-            if ($maxAttempts > 0 && $attempt >= $maxAttempts) {
-                throw $exception;
-            }
-            fwrite(STDERR, '[maintenance-worker] Database not reachable (attempt ' . $attempt . '): ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
-            // Waiting out a DB restart is a healthy worker state (AP8).
-            worker_heartbeat_touch();
-            sleep(min(30, 2 * $attempt));
         }
-    }
+    );
 }
 
 exit(maintenance_worker_main($argv));

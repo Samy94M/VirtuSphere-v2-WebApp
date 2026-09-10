@@ -241,12 +241,14 @@ function Invoke-CheckPhp {
 # Pruef-Root. Ein parallel laufender Dev-Container kann aus einem anderen
 # Checkout gemountet sein und darf deshalb nie die bevorzugte Beweisquelle
 # sein. Das Projekt-Image bringt composer mit, vendor/ kommt aus dem Mount.
-# Der Dev-Container bleibt nur Fallback, falls sein Image-Tag fehlt.
+# Ein fehlendes Toolimage ist Infrastrukturfehler, kein Auftrag an den Dev-Stack.
 function Invoke-AppComposer {
     param([string[]]$Arguments)
     if (Test-DockerImage $toolImages.php) {
         return Invoke-Tool 'docker' (@('run', '--rm',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+            '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
+            '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
             '-e', 'COMPOSER_CACHE_DIR=/tmp/composer-cache', '-e', 'COMPOSER_ALLOW_SUPERUSER=1',
             # Der Mount gehoert dem Host-User, composer laeuft als root: ohne
             # safe.directory verweigert git die Versionsermittlung und composer
@@ -255,9 +257,6 @@ function Invoke-AppComposer {
             '-e', 'GIT_CONFIG_COUNT=1',
             '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=*',
             $toolImages.php, 'composer') + $Arguments)
-    }
-    if (Test-Container $phpContainer) {
-        return Invoke-Tool 'docker' (@('exec', '-w', '/var/www/html', $phpContainer, 'composer') + $Arguments)
     }
     return $null
 }

@@ -28,7 +28,7 @@ final class PortalClosureCalls
     }
 
     /** @param array<Node> $nodes @param array<string,list<Node\Expr>|true> $inherited */
-    private function scope(array $nodes, string $file, array $inherited, ?Node\FunctionLike $owner = null): void
+    private function scope(array $nodes, string $file, array $inherited, ?Node\FunctionLike $owner = null, ?string $parentClass = null): void
     {
         $outerAvailable = $this->available;
         $symbols = $inherited;
@@ -73,7 +73,11 @@ final class PortalClosureCalls
         foreach ($nodes as $node) {
             $collect($node);
         }
-        $visit = function (Node $node, array $guards = []) use (&$visit, $symbols, $file): void {
+        $visit = function (Node $node, array $guards = []) use (&$visit, $symbols, $file, $parentClass): void {
+            if ($node instanceof Node\Stmt\Class_) {
+                $this->scope($node->stmts, $file, [], null, $node->extends === null ? null : (string) $node->extends);
+                return;
+            }
             if ($node instanceof Node\Expr\Include_ && $this->source !== null) {
                 foreach ($this->source->dependencies($file, $node) as $dependency) {
                     $this->available += $this->source->available($dependency);
@@ -98,12 +102,22 @@ final class PortalClosureCalls
                         }
                     }
                 }
-                $this->scope($body, $file, $capture, $node);
+                $this->scope($body, $file, $capture, $node, $parentClass);
                 return;
             }
             if (($node instanceof Node\Expr\MethodCall || $node instanceof Node\Expr\StaticCall)
                 && $node->name instanceof Node\Identifier && !$node->isFirstClassCallable()) {
-                foreach ($this->methods[strtolower((string) $node->name)] ?? [] as $method) {
+                $methods = $this->methods[strtolower((string) $node->name)] ?? [];
+                // parent:: refers to this class's declared parent. A built-in
+                // parent's signature cannot be borrowed from an unrelated user
+                // method with the same name (notably callable constructors).
+                if ($node instanceof Node\Expr\StaticCall && $node->class instanceof Node\Name
+                    && strtolower((string) $node->class) === 'parent' && $parentClass !== null
+                    && class_exists($parentClass, false) && (new ReflectionClass($parentClass))->isInternal()
+                    && method_exists($parentClass, (string) $node->name)) {
+                    $methods = [new ReflectionMethod($parentClass, (string) $node->name)];
+                }
+                foreach ($methods as $method) {
                     $this->arguments('@method:' . $node->name, $node->getArgs(), $symbols, $file, $method);
                 }
             }
@@ -185,12 +199,13 @@ final class PortalClosureCalls
     }
 
     /** @param list<Node\Arg> $args @param array<string,list<Node\Expr>|true> $symbols */
-    private function arguments(string $name, array $args, array $symbols, string $file, ?Node\FunctionLike $method = null): void
+    private function arguments(string $name, array $args, array $symbols, string $file, Node\FunctionLike|ReflectionFunctionAbstract|null $method = null): void
     {
         $positions = [];
         $parameterNames = [];
-        if (isset($this->builtins[$name])) {
-            foreach ((new ReflectionFunction($name))->getParameters() as $position => $param) {
+        if (isset($this->builtins[$name]) || $method instanceof ReflectionFunctionAbstract) {
+            $reflection = $method instanceof ReflectionFunctionAbstract ? $method : new ReflectionFunction($name);
+            foreach ($reflection->getParameters() as $position => $param) {
                 if (str_contains((string) $param->getType(), 'callable')) { $positions[$position] = false; }
                 $parameterNames[$position] = $param->getName();
             }

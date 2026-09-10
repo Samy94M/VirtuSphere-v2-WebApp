@@ -25,7 +25,9 @@ if (PHP_SAPI !== 'cli') {
  * Ownership map:
  * - deploy_supervisor_policy.php    what to do this tick, as a pure function
  * - deploy_supervisor_process.php   proc_open/waitpid/signals behind one seam
- * - deploy_supervisor_loop.php      the clock, the files, the child, publishing
+ * - deploy_supervisor_local_state.php durable restart budget and lifetime lock
+ * - deploy_supervisor_publish.php   best-effort DB side-channel and reconnect
+ * - deploy_supervisor_loop.php      the clock, the liveness files and the child
  * - supervisor_heartbeat.php        this process's own liveness file
  */
 

@@ -159,7 +159,12 @@ function Get-VsApiHeaders {
 function ConvertTo-VsUtf8JsonBytes {
     param([Parameter(Mandatory)]$Value, [int]$Depth = 6)
     $json = ConvertTo-Json -InputObject $Value -Depth $Depth
-    return [Text.Encoding]::UTF8.GetBytes($json)
+    # PowerShell enumerates collections written by a function. A byte[] written
+    # directly therefore reaches Invoke-RestMethod as object[]; its body binder
+    # no longer takes the binary branch and converts that object to text. The
+    # unary comma is consumed by the function-output pipeline and emits the
+    # byte[] itself as one object, preserving both its CLR type and exact bytes.
+    return ,([Text.Encoding]::UTF8.GetBytes($json))
 }
 
 # Baut die Basis-URL. Das Schema kommt aus der Registry (Scheme=https), Default
@@ -618,6 +623,206 @@ function Get-VsContentDistributionState {
     return (Get-VsContentDistributionSnapshot -ApplicationName $ApplicationName -Application $Application -ExpectedSourceVersion $ExpectedSourceVersion).State
 }
 
+# Stable provider identities for the Application package and its one managed
+# Deployment Type. Application package/source versions are not a content
+# revision for Applications: MECM keeps the package version at 1 and gives
+# an updated Deployment Type a new ContentId. Callers therefore bind the
+# distribution observation to these provider-owned identifiers instead of
+# inferring completion from SourceVersion growth.
+function Get-VsApplicationContentIdentity {
+    param(
+        [Parameter(Mandatory)]$Application,
+        [Parameter(Mandatory)][string]$ExpectedName
+    )
+    foreach ($field in @('LocalizedDisplayName', 'ModelName', 'PackageID')) {
+        if (-not $Application.PSObject.Properties[$field]) {
+            return [pscustomobject]@{ State = 'unknown'; ModelName = ''; PackageId = '' }
+        }
+    }
+    $name = [string]$Application.LocalizedDisplayName
+    $modelName = [string]$Application.ModelName
+    $packageId = [string]$Application.PackageID
+    if ($name -ne $ExpectedName -or [string]::IsNullOrWhiteSpace($modelName) -or [string]::IsNullOrWhiteSpace($packageId)) {
+        return [pscustomobject]@{ State = 'unknown'; ModelName = ''; PackageId = '' }
+    }
+    return [pscustomobject]@{ State = 'known'; ModelName = $modelName; PackageId = $packageId }
+}
+
+function Get-VsDeploymentTypeContentIdentity {
+    param(
+        [Parameter(Mandatory)]$DeploymentType,
+        [Parameter(Mandatory)][string]$ExpectedName,
+        [Parameter(Mandatory)][string]$ExpectedApplicationModelName
+    )
+    foreach ($field in @('AppModelName', 'ModelName', 'CI_UniqueID', 'ContentId')) {
+        if (-not $DeploymentType.PSObject.Properties[$field]) {
+            return [pscustomobject]@{ State = 'unknown'; DeploymentTypeModelName = ''; DeploymentTypeId = ''; ContentId = '' }
+        }
+    }
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($field in @('LocalizedDisplayName', 'DeploymentTypeName')) {
+        if ($DeploymentType.PSObject.Properties[$field] -and -not [string]::IsNullOrWhiteSpace([string]$DeploymentType.$field)) {
+            [void]$names.Add([string]$DeploymentType.$field)
+        }
+    }
+    $appModelName = [string]$DeploymentType.AppModelName
+    $deploymentTypeModelName = [string]$DeploymentType.ModelName
+    $deploymentTypeId = [string]$DeploymentType.CI_UniqueID
+    $contentId = [string]$DeploymentType.ContentId
+    if ($names.Count -eq 0 -or $ExpectedName -notin @($names) -or $appModelName -cne $ExpectedApplicationModelName -or
+        [string]::IsNullOrWhiteSpace($deploymentTypeModelName) -or [string]::IsNullOrWhiteSpace($deploymentTypeId) -or
+        [string]::IsNullOrWhiteSpace($contentId)) {
+        return [pscustomobject]@{ State = 'unknown'; DeploymentTypeModelName = ''; DeploymentTypeId = ''; ContentId = '' }
+    }
+    return [pscustomobject]@{
+        State = 'known'; DeploymentTypeModelName = $deploymentTypeModelName
+        DeploymentTypeId = $deploymentTypeId; ContentId = $contentId
+    }
+}
+
+function ConvertTo-VsProviderUtcTicks {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return 0L }
+    try {
+        $date = if ($Value -is [datetime]) { [datetime]$Value } else {
+            [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value)
+        }
+        return $date.ToUniversalTime().Ticks
+    } catch {
+        Write-Debug $_
+        return -1L
+    }
+}
+
+# Per-DP successful-copy evidence. Unlike SMS_ObjectContentExtraInfo's package
+# aggregate, LastCopied identifies when the source files were last successfully
+# copied to each concrete DP. A content request stores this whole baseline and
+# completion requires every same target to report INSTALLED with a strictly
+# newer LastCopied value.
+function Get-VsDistributionCopySnapshot {
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]{8}$')][string]$PackageId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationModelName,
+        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]{3}$')][string]$SiteCode,
+        [string]$ProviderMachine = ''
+    )
+    try {
+        $cimParams = @{
+            Namespace = ('root\sms\site_{0}' -f $SiteCode)
+            ClassName = 'SMS_PackageStatusDistPointsSummarizer'
+            Filter = ("PackageID = '{0}'" -f $PackageId)
+            ErrorAction = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ProviderMachine)) { $cimParams['ComputerName'] = $ProviderMachine.Trim() }
+        $rows = @(Get-CimInstance @cimParams)
+    } catch {
+        Write-Debug $_
+        return [pscustomobject]@{ State = 'unknown'; Targets = @() }
+    }
+    $targets = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    foreach ($row in $rows) {
+        foreach ($field in @('PackageID', 'SecureObjectID', 'ServerNALPath', 'SiteCode', 'State', 'LastCopied')) {
+            if (-not $row.PSObject.Properties[$field]) { return [pscustomobject]@{ State = 'unknown'; Targets = @() } }
+        }
+        $nalPath = [string]$row.ServerNALPath
+        $rowSiteCode = [string]$row.SiteCode
+        $state = -1
+        $lastCopiedTicks = ConvertTo-VsProviderUtcTicks -Value $row.LastCopied
+        $targetKey = $rowSiteCode + "`n" + $nalPath
+        if ([string]$row.PackageID -cne $PackageId -or [string]$row.SecureObjectID -cne $ApplicationModelName -or
+            $rowSiteCode -cne $SiteCode -or [string]::IsNullOrWhiteSpace($nalPath) -or $seen.ContainsKey($targetKey) -or
+            -not [int]::TryParse([string]$row.State, [ref]$state) -or $state -lt 0 -or $state -gt 8 -or $lastCopiedTicks -lt 0) {
+            return [pscustomobject]@{ State = 'unknown'; Targets = @() }
+        }
+        $seen[$targetKey] = $row
+        [void]$targets.Add([pscustomobject]@{ SiteCode = $rowSiteCode; ServerNalPath = $nalPath; State = $state; LastCopiedTicks = $lastCopiedTicks })
+    }
+    return [pscustomobject]@{ State = 'known'; Targets = @($targets | Sort-Object SiteCode, ServerNalPath) }
+}
+
+function ConvertTo-VsDistributionBaselineJson {
+    param([Parameter(Mandatory)]$Snapshot)
+    if ([string]$Snapshot.State -ne 'known') { throw 'Verteilkopie-Baseline ist nicht sicher lesbar.' }
+    $baseline = @($Snapshot.Targets | Sort-Object SiteCode, ServerNalPath | ForEach-Object {
+        [ordered]@{ site_code = [string]$_.SiteCode; server_nal_path = [string]$_.ServerNalPath; last_copied_ticks = [long]$_.LastCopiedTicks }
+    })
+    $json = ConvertTo-Json -InputObject @($baseline) -Compress
+    if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 32768) { throw 'Verteilkopie-Baseline ist zu gross.' }
+    return $json
+}
+
+function Test-VsDistributionCopyBaselineReady {
+    param(
+        [Parameter(Mandatory)][ValidateSet('initial', 'update')][string]$RequestKind,
+        [Parameter(Mandatory)]$Snapshot
+    )
+    if ([string]$Snapshot.State -ne 'known') { return $false }
+    $targets = @($Snapshot.Targets)
+    if ($RequestKind -eq 'initial') { return $targets.Count -eq 0 }
+    if ($targets.Count -eq 0) { return $false }
+    return @($targets | Where-Object { [int]$_.State -ne 0 -or [long]$_.LastCopiedTicks -le 0 }).Count -eq 0
+}
+
+function Test-VsDistributionCopyAdvanced {
+    param(
+        [Parameter(Mandatory)][string]$BaselineJson,
+        [Parameter(Mandatory)]$CurrentSnapshot
+    )
+    if ([string]$CurrentSnapshot.State -ne 'known') { return $false }
+    if ($BaselineJson -notmatch '^\s*\[.*\]\s*$') { return $false }
+    $isEmptyBaseline = $BaselineJson -match '^\s*\[\s*\]\s*$'
+    try {
+        # Windows PowerShell 5.1 emits a JSON root array as one array object.
+        # Capturing that pipeline directly in @() nests it once, so a one-DP
+        # baseline looks like one item whose value is itself an array. Assign
+        # first, then materialize the parsed targets for the common PS5.1/PS7
+        # shape consumed below.
+        $parsedBaseline = $BaselineJson | ConvertFrom-Json -ErrorAction Stop
+    } catch { return $false }
+    if ($isEmptyBaseline) {
+        $baseline = @()
+    } else {
+        # `null`, `[null]` and nested empty arrays can all collapse to no
+        # pipeline value depending on the PowerShell engine. None of them is
+        # the explicit empty baseline written by our serializer.
+        if ($null -eq $parsedBaseline) { return $false }
+        $baseline = @($parsedBaseline)
+        if ($baseline.Count -eq 0) { return $false }
+    }
+    $current = @($CurrentSnapshot.Targets)
+    # Erstverteilung: Vorher existiert noch kein DP-Ziel. Danach muss mindestens
+    # ein wirklich installierter, erfolgreich kopierter Zielstand existieren.
+    if ($baseline.Count -eq 0) {
+        return $current.Count -gt 0 -and @($current | Where-Object { [int]$_.State -ne 0 -or [long]$_.LastCopiedTicks -le 0 }).Count -eq 0
+    }
+    if ($current.Count -ne $baseline.Count) { return $false }
+    $currentByPath = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    foreach ($target in $current) {
+        $path = [string]$target.ServerNalPath
+        $site = [string]$target.SiteCode
+        $key = $site + "`n" + $path
+        if ([string]::IsNullOrWhiteSpace($site) -or [string]::IsNullOrWhiteSpace($path) -or $currentByPath.ContainsKey($key)) { return $false }
+        $currentByPath[$key] = $target
+    }
+    $baselineKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($before in $baseline) {
+        if ($null -eq $before) { return $false }
+        if (-not $before.PSObject.Properties['site_code'] -or -not $before.PSObject.Properties['server_nal_path'] -or
+            -not $before.PSObject.Properties['last_copied_ticks']) { return $false }
+        $site = [string]$before.site_code
+        $path = [string]$before.server_nal_path
+        $ticks = 0L
+        $key = $site + "`n" + $path
+        if ([string]::IsNullOrWhiteSpace($site) -or [string]::IsNullOrWhiteSpace($path) -or
+            -not [long]::TryParse([string]$before.last_copied_ticks, [ref]$ticks) -or $ticks -lt 0 -or
+            -not $baselineKeys.Add($key) -or -not $currentByPath.ContainsKey($key)) { return $false }
+        $after = $currentByPath[$key]
+        if ([int]$after.State -ne 0 -or [long]$after.LastCopiedTicks -le $ticks) { return $false }
+    }
+    return $true
+}
+
 # Liegt diese Collection schon im VirtuSphere-Ordner?
 #
 # Auch hier gilt Unsicherheit als "ja": ein wiederholtes Move-CMObject auf ein
@@ -660,12 +865,24 @@ function Test-VsTemplateScriptCurrent {
         [Parameter(Mandatory)][string]$TemplateFile,
         [Parameter(Mandatory)][string]$PackageFile
     )
-    if (-not (Test-Path $TemplateFile)) { return $true }   # keine Vorlage, nichts zu tun
-    if (-not (Test-Path $PackageFile)) { return $false }   # erwartete generierte Datei fehlt
+    # Eine vorhandene paketeigene install.ps1 ist auch ohne Vorlage ein
+    # ausfuehrbares Bestandspaket. Fehlen beide Dateien, ist das Paket dagegen
+    # unvollstaendig und darf nicht als aktuell in die MECM-Definition gelangen.
+    if (-not (Test-Path -LiteralPath $TemplateFile -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $PackageFile -PathType Leaf)) { return $false }
+        try {
+            [void](Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256 -ErrorAction Stop)
+            return $true
+        } catch {
+            Write-Debug $_
+            return $false
+        }
+    }
+    if (-not (Test-Path -LiteralPath $PackageFile -PathType Leaf)) { return $false }   # erwartete generierte Datei fehlt
 
     try {
-        $template = (Get-FileHash -Path $TemplateFile -Algorithm SHA256 -ErrorAction Stop).Hash
-        $package = (Get-FileHash -Path $PackageFile -Algorithm SHA256 -ErrorAction Stop).Hash
+        $template = (Get-FileHash -LiteralPath $TemplateFile -Algorithm SHA256 -ErrorAction Stop).Hash
+        $package = (Get-FileHash -LiteralPath $PackageFile -Algorithm SHA256 -ErrorAction Stop).Hash
     } catch {
         Write-Debug $_
         return $false
@@ -722,7 +939,12 @@ function Get-VsPackageContentTrackingKey {
 function Get-VsPackageContentTracking {
     param([Parameter(Mandatory)][string]$ApplicationName)
     $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
-    try { $raw = Get-ItemProperty -LiteralPath $key -ErrorAction Stop } catch { return $null }
+    try {
+        if (-not (Test-Path -LiteralPath $key -ErrorAction Stop)) { return $null }
+        $raw = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+    }
     $state = [string]$raw.State
     $manifest = [string]$raw.Manifest
     $baseline = -1
@@ -733,8 +955,38 @@ function Get-VsPackageContentTracking {
         -not [int]::TryParse([string]$raw.SourceVersion, [ref]$sourceVersion) -or $sourceVersion -lt -1) {
         return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
     }
+    $schema = 0
+    if (-not $raw.PSObject.Properties['Schema'] -or -not [int]::TryParse([string]$raw.Schema, [ref]$schema) -or $schema -ne 2) {
+        return [pscustomobject]@{
+            State = 'legacy'; LegacyState = $state; Manifest = $manifest
+            BaselineSourceVersion = $baseline; SourceVersion = $sourceVersion
+        }
+    }
+    $requestKind = [string]$raw.RequestKind
+    $applicationModelName = [string]$raw.ApplicationModelName
+    $applicationPackageId = [string]$raw.ApplicationPackageId
+    $deploymentTypeId = [string]$raw.DeploymentTypeId
+    $deploymentTypeModelName = [string]$raw.DeploymentTypeModelName
+    $baselineContentId = [string]$raw.BaselineContentId
+    $contentId = [string]$raw.ContentId
+    $requestConfirmed = 0
+    $distributionBaseline = [string]$raw.DistributionBaseline
+    if ($requestKind -notin @('initial', 'update') -or
+        [string]::IsNullOrWhiteSpace($applicationModelName) -or [string]::IsNullOrWhiteSpace($applicationPackageId) -or
+        [string]::IsNullOrWhiteSpace($deploymentTypeModelName) -or [string]::IsNullOrWhiteSpace($deploymentTypeId) -or
+        [string]::IsNullOrWhiteSpace($baselineContentId) -or
+        ($state -in @('pending', 'complete') -and [string]::IsNullOrWhiteSpace($contentId)) -or
+        -not [int]::TryParse([string]$raw.RequestConfirmed, [ref]$requestConfirmed) -or $requestConfirmed -notin @(0, 1) -or
+        ($state -in @('pending', 'complete') -and $requestConfirmed -ne 1) -or
+        [string]::IsNullOrWhiteSpace($distributionBaseline) -or [Text.Encoding]::UTF8.GetByteCount($distributionBaseline) -gt 32768) {
+        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+    }
     return [pscustomobject]@{
         State = $state; Manifest = $manifest; BaselineSourceVersion = $baseline; SourceVersion = $sourceVersion
+        RequestKind = $requestKind; ApplicationModelName = $applicationModelName; ApplicationPackageId = $applicationPackageId
+        DeploymentTypeModelName = $deploymentTypeModelName; DeploymentTypeId = $deploymentTypeId
+        BaselineContentId = $baselineContentId; ContentId = $contentId
+        RequestConfirmed = ($requestConfirmed -eq 1); DistributionBaseline = $distributionBaseline
     }
 }
 
@@ -744,17 +996,39 @@ function Set-VsPackageContentTracking {
         [Parameter(Mandatory)][ValidateSet('intent', 'pending', 'complete')][string]$State,
         [Parameter(Mandatory)][ValidatePattern('^[A-F0-9]{64}$')][string]$Manifest,
         [ValidateRange(-1, [int]::MaxValue)][int]$BaselineSourceVersion = -1,
-        [ValidateRange(-1, [int]::MaxValue)][int]$SourceVersion = -1
+        [ValidateRange(-1, [int]::MaxValue)][int]$SourceVersion = -1,
+        [Parameter(Mandatory)][ValidateSet('initial', 'update')][string]$RequestKind,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationModelName,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationPackageId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeploymentTypeModelName,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeploymentTypeId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BaselineContentId,
+        [AllowEmptyString()][string]$ContentId = '',
+        [bool]$RequestConfirmed = $false,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DistributionBaseline
     )
+    if ($State -in @('pending', 'complete') -and -not $RequestConfirmed) {
+        throw ("Content-Tracking-State '{0}' erfordert einen bestaetigten MECM-Aufruf." -f $State)
+    }
     $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
     if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force -ErrorAction Stop | Out-Null }
     # State ist der Commit-Marker. Ein Abbruch waehrend der Einzelwrites ist
     # unlesbar/unknown und darf nie einen Contentstand als komplett ausgeben.
     New-ItemProperty -LiteralPath $key -Name State -Value 'invalid' -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name ApplicationName -Value $ApplicationName -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name Schema -Value 2 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name Manifest -Value $Manifest -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name BaselineSourceVersion -Value ([string]$BaselineSourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name SourceVersion -Value ([string]$SourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name RequestKind -Value $RequestKind -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name ApplicationModelName -Value $ApplicationModelName -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name ApplicationPackageId -Value $ApplicationPackageId -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name DeploymentTypeModelName -Value $DeploymentTypeModelName -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name DeploymentTypeId -Value $DeploymentTypeId -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name BaselineContentId -Value $BaselineContentId -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name ContentId -Value $ContentId -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name RequestConfirmed -Value ([int]$RequestConfirmed) -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name DistributionBaseline -Value $DistributionBaseline -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name State -Value $State -PropertyType String -Force -ErrorAction Stop | Out-Null
 }
 

@@ -109,6 +109,26 @@ function deploy_supervisor_decide(array $state, array $facts): array
     $now = (int) $facts['now'];
     $running = (bool) $facts['child_running'];
 
+    // Manual is a durable ownership latch. Even a requested supervisor stop
+    // must not rewrite it to `stopped`: after a later container start that
+    // would look like permission to start a replacement although the unknown
+    // old child was never reaped by this process.
+    if ($state['phase'] === VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL) {
+        if ($facts['shutdown_requested'] && !$running) {
+            return deploy_supervisor_result(
+                VIRTUSPHERE_SUPERVISOR_ACTION_SHUTDOWN,
+                $state,
+                'manual ownership latch preserved while supervisor exits'
+            );
+        }
+
+        return deploy_supervisor_result(
+            VIRTUSPHERE_SUPERVISOR_ACTION_MANUAL,
+            $state,
+            'manual intervention required before another child may start'
+        );
+    }
+
     // Shutdown outranks everything, including a cooldown that has not expired:
     // once PID 1 has been asked to stop, starting another child would leave a
     // process behind that nobody is going to reap.
@@ -120,12 +140,6 @@ function deploy_supervisor_decide(array $state, array $facts): array
         }
 
         return deploy_supervisor_stop_sequence($state, $now, 'shutdown requested');
-    }
-
-    if ($state['phase'] === VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL) {
-        // A state nothing automatic leaves. Saying so every tick is the point:
-        // the alternative is a supervisor that silently does nothing.
-        return deploy_supervisor_result(VIRTUSPHERE_SUPERVISOR_ACTION_MANUAL, $state, 'child could not be ended');
     }
 
     if ($state['phase'] === VIRTUSPHERE_SUPERVISOR_PHASE_STOPPING) {

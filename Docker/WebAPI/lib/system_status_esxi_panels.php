@@ -326,15 +326,15 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
  * The deviation section.
  *
  * $deviationCount is the count the page computed once and also handed to the
- * overview strip (system_status_deviation_count()); null means the scan could
- * not run, which is the same fact as "no ESXi inventory" and is therefore not
- * passed a second time as its own flag.
+ * overview strip (system_status_deviation_count()); null means no object kind
+ * is evaluable. The report keeps the distinct reasons: no configured source,
+ * or configured sources without one kind qualified across all of them.
  *
  * @param array<string,mixed> $view @param string[] $activeVlanNames
  */
 function system_status_render_deviations(array $view, array $activeVlanNames, array $user, string $reassignFrom, ?int $deviationCount, ?array $report = null, array $query = []): void
 {
-    $hasInventory = $deviationCount !== null;
+    $hasEvaluableEvidence = $deviationCount !== null;
     $deviations = (array) ($view['entries'] ?? []);
     $hasVlanDeviation = (bool) ($view['has_vlan'] ?? false);
     ?>
@@ -342,10 +342,10 @@ function system_status_render_deviations(array $view, array $activeVlanNames, ar
         <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount); ?></h2>
         <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
         <?php system_status_render_deviation_evidence($report); ?>
-        <?php if ($hasInventory) { ?>
+        <?php if ($hasEvaluableEvidence) { ?>
             <?php system_status_render_deviation_filters($view, $query); ?>
         <?php } ?>
-        <?php if (!$hasInventory) { ?><p class="muted"><?php echo h(__t('system_status.dev_no_inventory')); ?></p><?php } elseif ($deviations === []) { ?><p class="muted"><?php echo h((int) $view['total'] === 0 && ($view['filter'] !== 'all' || $view['query'] !== '') ? __t('system_status.dev_filter_none') : __t('system_status.dev_none')); ?></p><?php } else { ?>
+        <?php if (!$hasEvaluableEvidence) { system_status_render_deviation_unavailable($report, $user); } elseif ($deviations === []) { ?><p class="muted"><?php echo h(system_status_deviation_empty_message($view, $report)); ?></p><?php } else { ?>
             <div class="deviation-groups"><?php foreach ($deviations as $entry) { ?>
                 <article>
                     <h3>

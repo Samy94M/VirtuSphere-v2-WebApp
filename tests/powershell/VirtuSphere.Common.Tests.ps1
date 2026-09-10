@@ -48,6 +48,7 @@ BeforeAll {
     $psRoot = Join-Path $script:RepoRoot 'Powershell-MECM'
     $script:MecmCommon = Join-Path (Join-Path $psRoot 'mecm') 'VirtuSphere-Common.ps1'
     $script:ClientCommon = Join-Path (Join-Path $psRoot 'clients') 'VirtuSphere-Client-Common.ps1'
+    $script:ClientStaticIp = Join-Path (Join-Path $psRoot 'clients') 'client_staticip.ps1'
     $script:VectorFile = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'tests') 'fixtures') 'mac-vectors.json'
 
     # Beide Module definieren ConvertTo-VsNormalizedMac. Sie laufen nie in
@@ -203,6 +204,33 @@ Describe 'New-VsClientNetworkPlan (vollstaendige Vorabvalidierung)' {
         @($plan.Items).Count | Should -Be 2
         @($plan.Items | ForEach-Object Mac) | Should -Be @('00:11:22:33:44:55', '00:11:22:33:44:66')
         $plan.Items[0].Prefix | Should -Be 24
+    }
+
+    It 'verwendet nach der Planung den normalisierten Registry-Modus' {
+        $rawTarget = [pscustomobject]@{
+            Mac = '00:11:22:33:44:55'; Name = 'Server'; Mode = ' DHCP '
+            Ip = ''; Subnet = ''; Gateway = ''; Dns1 = ''; Dns2 = ''
+        }
+        $plan = Get-NetworkPlanForTest -Targets @($rawTarget) -Adapters @($script:NetworkAdapter1)
+
+        $plan.Valid | Should -BeTrue
+        $rawTarget.Mode | Should -Be ' DHCP ' -Because 'der publizierte Rohwert bleibt unveraendert'
+        $plan.Items[0].Mode | Should -Be 'dhcp'
+
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $script:ClientStaticIp, [ref]$tokens, [ref]$parseErrors)
+        @($parseErrors).Count | Should -Be 0
+        $modeReads = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                $node.Member.Value -eq 'Mode'
+        }, $true))
+        @($modeReads | Where-Object { $_.Expression.Extent.Text -eq '$cfg' }).Count |
+            Should -Be 0 -Because 'der Mutationspfad darf den unnormalisierten Target-Rohwert nicht erneut lesen'
+        @($modeReads | Where-Object { $_.Expression.Extent.Text -eq '$item' }).Count |
+            Should -BeGreaterThan 0 -Because 'der Mutationspfad muss den validierten Planmodus verwenden'
     }
 
     It 'blockiert vor Writes wenn eine zweite Soll-NIC fehlt' {

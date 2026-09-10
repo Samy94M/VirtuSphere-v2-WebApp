@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/deploy_supervisor_constants.php';
+require_once __DIR__ . '/deploy_supervisor_local_state.php';
 require_once __DIR__ . '/deploy_supervisor_policy.php';
 require_once __DIR__ . '/deploy_supervisor_process.php';
+require_once __DIR__ . '/deploy_supervisor_publish.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/log_redaction.php';
-require_once __DIR__ . '/repo/deploy_supervisor_state.php';
 require_once __DIR__ . '/supervisor_heartbeat.php';
 require_once __DIR__ . '/worker_heartbeat.php';
 require_once __DIR__ . '/worker_stop_signal.php';
@@ -54,8 +54,33 @@ function deploy_supervisor_main(array $argv): int
     worker_install_stop_handler('deploy-supervisor');
 
     $process = new DeploySupervisorProcess();
-    $state = deploy_supervisor_initial_state();
-    $publishedAt = 0;
+    $publisher = new DeploySupervisorPublisher();
+    $store = new DeploySupervisorLocalState(deploy_supervisor_state_directory());
+    try {
+        $store->acquire();
+    } catch (DeploySupervisorLockException $exception) {
+        deploy_supervisor_say('cannot acquire the lifetime lock: '
+            . virtusphere_redact_log_text($exception->getMessage()));
+
+        return 1;
+    }
+
+    $stateReadable = true;
+    $stateDirty = false;
+    try {
+        $state = $store->load();
+        $restored = deploy_supervisor_restore_local_state($state, time());
+        $stateDirty = $restored !== $state;
+        $state = $restored;
+    } catch (DeploySupervisorStateException $exception) {
+        // Preserve the unreadable file as evidence. This process stays alive
+        // and publishable in manual state, but never overwrites or starts.
+        $stateReadable = false;
+        $state = deploy_supervisor_initial_state();
+        $state['phase'] = VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL;
+        deploy_supervisor_say('durable state is unavailable; replacement starts are blocked: '
+            . virtusphere_redact_log_text($exception->getMessage()));
+    }
 
     while (true) {
         $now = time();
@@ -69,10 +94,50 @@ function deploy_supervisor_main(array $argv): int
             'child_heartbeat_age' => supervisor_child_heartbeat_age($now),
             'shutdown_requested' => worker_stop_requested(),
         ]);
-        $state = $decision['state'];
+        $candidate = $decision['state'];
+        $changed = $candidate !== $state;
+        $persisted = !$stateDirty && !$changed;
+        if ($stateReadable && ($stateDirty || $changed)) {
+            try {
+                // This is the start fence: the policy's running state and its
+                // child_started_at reservation reach durable storage before
+                // proc_open is allowed below.
+                $store->save($candidate);
+                $persisted = true;
+                $stateDirty = false;
+            } catch (DeploySupervisorStateException $exception) {
+                $persisted = false;
+                deploy_supervisor_say('durable state write failed; replacement starts are blocked: '
+                    . virtusphere_redact_log_text($exception->getMessage()));
+            }
+        }
 
+        if ($decision['action'] === VIRTUSPHERE_SUPERVISOR_ACTION_START && !$persisted) {
+            // Do not adopt the reserved-running candidate: without a start its
+            // next tick would look like a crashed child and consume another
+            // restart. The unchanged prior state lets this exact reservation
+            // be retried after storage recovers.
+            $decision = deploy_supervisor_result(
+                VIRTUSPHERE_SUPERVISOR_ACTION_WAIT_RETRY,
+                $state,
+                'start withheld until durable state can be reserved'
+            );
+        } else {
+            $state = $candidate;
+            $stateDirty = !$persisted;
+        }
+
+        // Persistence failure never becomes a reason to signal an existing
+        // child. TERM/KILL/shutdown/reap decisions still run from local process
+        // evidence; only a replacement start requires the durable fence.
         $done = deploy_supervisor_apply($process, $decision, $options);
-        deploy_supervisor_publish($state, $process, $now, $publishedAt, $decision['action']);
+        $publisher->publish(
+            $state,
+            getmypid() ?: null,
+            $process->pid(),
+            $now,
+            $decision['action']
+        );
 
         if ($done) {
             return 0;
@@ -123,10 +188,10 @@ function deploy_supervisor_apply(DeploySupervisorProcess $process, array $decisi
             // Said once per tick on purpose: a state nothing automatic leaves
             // has to keep saying so, or it becomes a supervisor that silently
             // does nothing.
-            deploy_supervisor_say('the worker process could not be ended; NOT starting a second one');
+            deploy_supervisor_say($decision['reason'] . '; NOT starting a second worker process');
             break;
         case VIRTUSPHERE_SUPERVISOR_ACTION_SHUTDOWN:
-            deploy_supervisor_say('worker process confirmed gone, supervisor exits');
+            deploy_supervisor_say($decision['reason'] . ', supervisor exits');
 
             return true;
         default:
@@ -135,41 +200,6 @@ function deploy_supervisor_apply(DeploySupervisorProcess $process, array $decisi
     }
 
     return false;
-}
-
-/**
- * Publishes the state for the portal, throttled, and never at the cost of the
- * watch.
- *
- * A status row is a side channel, and a side channel must not end the work it
- * only describes: if the database is gone, the supervisor keeps supervising and
- * says so once on STDERR. This is the same rule the worker's own db channel
- * follows, for the same reason.
- *
- * @param array<string,mixed> $state
- */
-function deploy_supervisor_publish(array $state, DeploySupervisorProcess $process, int $now, int &$publishedAt, string $action): void
-{
-    $due = ($now - $publishedAt) >= VIRTUSPHERE_SUPERVISOR_PUBLISH_INTERVAL_SECONDS;
-    // A state change is published immediately; only the quiet ticks are
-    // throttled. An operator watching a restart should not wait half a minute
-    // to see that it happened.
-    if (!$due && $action === VIRTUSPHERE_SUPERVISOR_ACTION_OBSERVE) {
-        return;
-    }
-
-    try {
-        $db = db();
-        repo_deploy_supervisor_publish($db, $state, getmypid() ?: null, $process->pid());
-        $publishedAt = $now;
-    } catch (Throwable $exception) {
-        static $announced = false;
-        if (!$announced) {
-            $announced = true;
-            fwrite(STDERR, '[deploy-supervisor] state not publishable, still supervising: '
-                . virtusphere_redact_log_text($exception->getMessage()) . "\n");
-        }
-    }
 }
 
 function deploy_supervisor_say(string $message): void

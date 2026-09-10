@@ -43,7 +43,11 @@ function Register-FastCheckGates {
         # Repo-Level-Contract-Tests (nginx/php-Config) sehen sonst ihre Dateien
         # nicht und wuerden skippen; die Fast-Lane laeuft ohne Skips.
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
-            $toolImages.php, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--fail-on-skipped')
+            '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
+            '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
+            '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
+            $toolImages.php, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--fail-on-skipped',
+            '--log-junit', '/qa-evidence/phpunit-unit.xml')
         Format-ToolResult $r 'Unit/Static-Suite gruen (ohne Skips)' 'PHPUnit Unit/Static rot oder geskippt'
     }
 

@@ -1,0 +1,3 @@
+services:
+  fixture:
+    image: fixture.invalid/never-run:1

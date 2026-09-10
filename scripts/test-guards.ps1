@@ -1026,6 +1026,14 @@ $cases += @(
         Edit-Fixture $fx 'docker-compose.yml' '      - DAC_READ_SEARCH' ("      - DAC_READ_SEARCH`n      - SYS_ADMIN")
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.cap-add\]' -InfraOnExit2
     } }
+    @{ Name = 'compose-hardening.php-kill-missing'; Body = {
+        # The root FPM master must signal its uid-33 children during shutdown.
+        # Removing KILL reproduces the measured SIGQUIT timeout / exit 137.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - KILL' '      # required FPM signal capability removed'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.cap-add\]' -InfraOnExit2
+    } }
     @{ Name = 'compose-hardening.depends-started-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture

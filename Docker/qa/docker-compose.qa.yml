@@ -12,10 +12,28 @@
 #   nginx-Konfiguration des Dev-Stacks anfassen.
 # - Der Code-Mount (Docker/WebAPI, Ansible) bleibt der Arbeitsbaum, denn genau
 #   dieser Stand soll bewiesen werden.
-# - Ports/Namen kommen aus qa.env (--env-file); env_file haengt qa.env NACH
-#   .env an, damit die QA-Werte pro Variable gewinnen.
+# - Ports/Namen und die gesamte App-Umgebung kommen ausschliesslich aus qa.env.
+# - Laufzeitdateien und App-Logs teilen keine Hostdaten mit dem Dev-Stack.
 # - restart "no": ein crashender Service soll im QA-Lauf sichtbar rot sein,
 #   nicht per Neustart kaschiert werden.
+
+x-qa-runtime: &qa-runtime
+  type: volume
+  source: qa-app-runtime
+  target: /var/www/html/var
+  volume:
+    nocopy: true
+x-qa-logs: &qa-logs
+  type: volume
+  source: qa-app-logs
+  target: /var/www/html/logs
+  volume:
+    nocopy: true
+x-qa-dotenv: &qa-dotenv
+  type: bind
+  source: ./Docker/qa/qa.env
+  target: /var/www/html/.env
+  read_only: true
 
 services:
   webserver:
@@ -26,14 +44,25 @@ services:
       - qa-ssl:/etc/nginx/ssl
       - qa-conf:/etc/nginx/virtusphere-conf.d
       - qa-nginx-logs:/var/log/nginx
+      - *qa-runtime
+      - *qa-logs
     restart: "no"
 
   php:
-    env_file:
+    env_file: !override
       - Docker/qa/qa.env
     volumes:
       - qa-ssl:/etc/nginx/ssl
       - qa-conf:/etc/nginx/virtusphere-conf.d
+      - *qa-runtime
+      - *qa-logs
+      - *qa-dotenv
+      - type: volume
+        source: qa-backup-status
+        target: /var/backups/virtusphere-status
+        read_only: true
+        volume:
+          nocopy: true
     # directory_ca_file() requires the CA cache directory to belong to the
     # calling uid with mode 0700. E2E portal requests run as www-data, while a
     # diagnostic docker exec defaults to root; sharing one ordinary /tmp child
@@ -44,13 +73,21 @@ services:
     restart: "no"
 
   deploy-worker:
-    env_file:
+    env_file: !override
       - Docker/qa/qa.env
+    volumes:
+      - *qa-runtime
+      - *qa-logs
+      - *qa-dotenv
     restart: "no"
 
   maintenance-worker:
-    env_file:
+    env_file: !override
       - Docker/qa/qa.env
+    volumes:
+      - *qa-runtime
+      - *qa-logs
+      - *qa-dotenv
     restart: "no"
 
   mysql:
@@ -212,3 +249,6 @@ volumes:
   qa-ssl:
   qa-conf:
   qa-nginx-logs:
+  qa-app-runtime:
+  qa-app-logs:
+  qa-backup-status:

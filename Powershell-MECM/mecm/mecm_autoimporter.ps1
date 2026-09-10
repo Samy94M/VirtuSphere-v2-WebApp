@@ -65,6 +65,7 @@ $intervalSeconds = Resolve-VsInterval -Source 'autoimporter' -Configured $config
 $SCRIPT_VERSION = 'autoimporter/2.0'
 
 $siteCode = $null
+$providerMachine = $null
 $lastFilesStamp = ''
 $loop = 0
 
@@ -96,6 +97,8 @@ while ($true) {
         if (-not $siteCode) {
             $siteCode = Initialize-VsCmSite -Config $config
             if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar.' }
+            $providerMachine = Get-VsProviderMachine -Config $config -ProviderMachine $config.ProviderMachine
+            if ([string]::IsNullOrWhiteSpace($providerMachine)) { throw 'SMS-Provider-Rechner nicht eindeutig aufloesbar.' }
             Write-VsLog -Message ("Site-Drive {0} aktiv" -f $siteCode)
 
             # Self-Healing: die VirtuSphere_Applications-Ordner (Applications
@@ -212,15 +215,26 @@ while ($true) {
                 $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
                 $templateScript = Join-Path $templatePath 'install.ps1'
                 $packageScript = Join-Path $pkgFolder 'install.ps1'
-                if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
+                $templateCurrent = Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript
+                if (-not $templateCurrent) {
                     try {
                         Copy-Item $templateScript -Destination $packageScript -Force -ErrorAction Stop
-                        Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen.'
+                        if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
+                            throw 'Kopie stimmt nach dem Schreiben nicht mit der Vorlage ueberein.'
+                        }
+                        $templateCurrent = $true
+                        Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen und per SHA-256 bestaetigt.'
                     } catch {
                         Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'package_template_failed' -Target $fullName
                     }
+                }
+                if (-not $templateCurrent) {
+                    # Insbesondere Template fehlt + Paketdatei fehlt: ohne das
+                    # Installationsskript darf keine ausfuehrbare MECM-Definition
+                    # angelegt oder aktualisiert werden.
+                    continue
                 }
 
                 # --- Application anlegen (falls neu) ---------------------------
@@ -309,17 +323,50 @@ while ($true) {
                     Add-VsRunCause -Causes $causes -Cause 'package_definition_drift' -Target $fullName
                     continue
                 }
+                # -Fast laesst bei Get-CMApplication lazy Properties aus. Fuer
+                # ModelName und PackageID, die den Contentauftrag binden, wird
+                # das eindeutige Objekt deshalb bewusst vollstaendig neu gelesen.
+                $contentApplications = @(Get-CMApplication -Name $fullName -ErrorAction Stop)
+                if ($contentApplications.Count -ne 1) {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Application ist fuer die Contentidentitaet nicht eindeutig vollstaendig lesbar.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+                $app = $contentApplications[0]
 
-                # --- Contentmanifest -> konkrete MECM-SourceVersion -----------
+                # --- Contentmanifest -> konkrete Application-/DT-Identitaet ---
                 # Tracking wird vor dem Update als Intent gespeichert. Dadurch
                 # loest ein Crash zwischen Update-CMDistributionPoint und ACK
-                # keine blinde zweite Redistribution aus. Nur eine einheitliche,
-                # gegenueber der Baseline neue SourceVersion darf das Manifest
-                # auf complete setzen. Die Verteilung ist absichtlich NICHT an
-                # generateOwnDeviceColletion gekoppelt.
+                # keine blinde zweite Redistribution aus. Bei Applications bleibt
+                # die Package-SourceVersion auch nach einem Contentupdate 1;
+                # MECM erzeugt stattdessen eine neue ContentId am Deployment
+                # Type. Manifestabschluss bindet deshalb Application ModelName +
+                # PackageID sowie CI_UniqueID + ContentId des exakten DT. Die
+                # Verteilung ist absichtlich NICHT an generateOwnDeviceColletion
+                # gekoppelt.
                 $packageManifest = Get-VsFilesManifestStamp -Path $pkgFolder
                 $tracking = Get-VsPackageContentTracking -ApplicationName $fullName
                 $snapshot = Get-VsContentDistributionSnapshot -ApplicationName $fullName -Application $app
+                $applicationIdentity = Get-VsApplicationContentIdentity -Application $app -ExpectedName $fullName
+                $deploymentTypeIdentity = if ($applicationIdentity.State -eq 'known') {
+                    Get-VsDeploymentTypeContentIdentity -DeploymentType $deploymentTypes[0] -ExpectedName $deploymentTypeName `
+                        -ExpectedApplicationModelName $applicationIdentity.ModelName
+                } else { [pscustomobject]@{ State = 'unknown'; DeploymentTypeModelName = ''; DeploymentTypeId = ''; ContentId = '' } }
+                if ($applicationIdentity.State -ne 'known' -or $deploymentTypeIdentity.State -ne 'known') {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Application-/Deployment-Type-Contentidentitaet ist nicht eindeutig lesbar; Content wird nicht veraendert.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+                $copySnapshot = Get-VsDistributionCopySnapshot -PackageId $applicationIdentity.PackageId `
+                    -ApplicationModelName $applicationIdentity.ModelName -SiteCode $siteCode -ProviderMachine $providerMachine
+                if ($copySnapshot.State -ne 'known') {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'DP-Kopiernachweis ist nicht sicher lesbar; Content wird nicht veraendert oder bestaetigt.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
                 if ($tracking -and $tracking.State -eq 'invalid') {
                     Write-VsLog -Level WARN -Context $fullName -Message 'Content-Tracking ist unvollstaendig oder unlesbar; keine Redistribution ohne geklaerten Intent.'
                     $scanWarnings++
@@ -327,10 +374,68 @@ while ($true) {
                     continue
                 }
 
+                if ($tracking -and $tracking.State -eq 'legacy') {
+                    # Auch ein alter complete-Eintrag enthaelt weder Application-
+                    # noch DT-/Contentidentitaet oder eine per-DP-LastCopied-
+                    # Baseline. Diese Evidenz kann nicht nachtraeglich aus einem
+                    # namensgleichen aktuellen Objekt konstruiert werden.
+                    Write-VsLog -Level WARN -Context $fullName -Message ("Altes Content-Tracking ({0}) besitzt keine Application-/Deployment-Type-/DP-Identitaetsgrenze; vor einer Migration ist manuelle Validierung erforderlich." -f $tracking.LegacyState)
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+
+                if ($tracking -and ($tracking.ApplicationModelName -cne $applicationIdentity.ModelName -or
+                    $tracking.ApplicationPackageId -cne $applicationIdentity.PackageId)) {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Application-Contentidentitaet weicht vom gespeicherten Auftrag ab; keine automatische Uebernahme eines namensgleichen Objekts.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+                if ($tracking -and $tracking.DeploymentTypeModelName -cne $deploymentTypeIdentity.DeploymentTypeModelName) {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Deployment-Type-Modellidentitaet weicht vom gespeicherten Auftrag ab; ein namensgleich neu angelegter DT wird nicht uebernommen.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+
+                if ($tracking -and $tracking.State -eq 'intent') {
+                    if (-not $tracking.RequestConfirmed) {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Content-Intent wurde nicht durch einen erfolgreich zurueckgekehrten MECM-Aufruf bestaetigt; keine automatische Wiederholung oder Uebernahme.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                        continue
+                    }
+                    $intentCanBind = $tracking.RequestKind -eq 'initial' -or $deploymentTypeIdentity.ContentId -cne $tracking.BaselineContentId
+                    if ($intentCanBind) {
+                        Set-VsPackageContentTracking -ApplicationName $fullName -State pending -Manifest $tracking.Manifest `
+                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion -1 -RequestKind $tracking.RequestKind `
+                            -ApplicationModelName $tracking.ApplicationModelName -ApplicationPackageId $tracking.ApplicationPackageId `
+                            -DeploymentTypeModelName $tracking.DeploymentTypeModelName -DeploymentTypeId $deploymentTypeIdentity.DeploymentTypeId `
+                            -BaselineContentId $tracking.BaselineContentId `
+                            -ContentId $deploymentTypeIdentity.ContentId -RequestConfirmed $true -DistributionBaseline $tracking.DistributionBaseline
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Angeforderte Deployment-Type-ContentId {0} gelesen; Verteilstatus wird im naechsten Durchlauf bestaetigt." -f $deploymentTypeIdentity.ContentId)
+                    } else {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Contentauftrag ist noch nicht als neue Deployment-Type-ContentId sichtbar (Baseline {0})." -f $tracking.BaselineContentId)
+                    }
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                    continue
+                }
+
+                if ($tracking -and ($tracking.DeploymentTypeModelName -cne $deploymentTypeIdentity.DeploymentTypeModelName -or
+                    $tracking.DeploymentTypeId -cne $deploymentTypeIdentity.DeploymentTypeId -or
+                    $tracking.ContentId -cne $deploymentTypeIdentity.ContentId)) {
+                    Write-VsLog -Level WARN -Context $fullName -Message 'Deployment-Type-/Contentidentitaet weicht vom gespeicherten Auftrag ab; externer oder weiterer Contentwechsel muss zuerst geklaert werden.'
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                    continue
+                }
+
                 $needsContentRequest = $null -eq $tracking -or $tracking.Manifest -cne $packageManifest
-                if ($needsContentRequest -and $tracking -and $tracking.State -in @('intent', 'pending')) {
-                    $previousConfirmed = $snapshot.State -eq 'succeeded' -and $null -ne $snapshot.SourceVersion -and
-                        [int]$snapshot.SourceVersion -gt [int]$tracking.BaselineSourceVersion
+                if ($needsContentRequest -and $tracking -and $tracking.State -eq 'pending') {
+                    $previousConfirmed = $snapshot.State -eq 'succeeded' -and
+                        (Test-VsDistributionCopyAdvanced -BaselineJson $tracking.DistributionBaseline -CurrentSnapshot $copySnapshot)
                     if (-not $previousConfirmed) {
                         Write-VsLog -Level WARN -Context $fullName -Message 'Quelle hat sich waehrend einer noch nicht bestaetigten Contentaktualisierung erneut geaendert; zuerst den laufenden/unklaren Stand in MECM klaeren.'
                         $scanWarnings++
@@ -352,51 +457,87 @@ while ($true) {
                         Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
                         continue
                     }
+                    if ($snapshot.State -eq 'in_progress') {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'Vorhandene Content-Verteilung laeuft noch; kein neuer Contentauftrag ueberlappt einen fremden oder aelteren Kopiervorgang.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                        continue
+                    }
                     $baselineSourceVersion = if ($null -eq $snapshot.SourceVersion) { -1 } else { [int]$snapshot.SourceVersion }
-                    Set-VsPackageContentTracking -ApplicationName $fullName -State intent -Manifest $packageManifest -BaselineSourceVersion $baselineSourceVersion
+                    $requestKind = if ($snapshot.State -eq 'not_started') { 'initial' } else { 'update' }
+                    if ($requestKind -eq 'initial' -and [string]::IsNullOrWhiteSpace($dpGroupName)) {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'DP-Gruppe fehlt; Erstverteilung wird ohne Voraussetzung nicht als Content-Intent gespeichert.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                        continue
+                    }
+                    if (-not (Test-VsDistributionCopyBaselineReady -RequestKind $requestKind -Snapshot $copySnapshot)) {
+                        Write-VsLog -Level WARN -Context $fullName -Message 'DP-Kopierbaseline passt nicht zum Start-/Updatezustand; kein Contentauftrag wird auf eine leere oder unvollstaendige Projektion gebaut.'
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                        continue
+                    }
+                    $distributionBaseline = ConvertTo-VsDistributionBaselineJson -Snapshot $copySnapshot
+                    Set-VsPackageContentTracking -ApplicationName $fullName -State intent -Manifest $packageManifest `
+                        -BaselineSourceVersion $baselineSourceVersion -RequestKind $requestKind `
+                        -ApplicationModelName $applicationIdentity.ModelName -ApplicationPackageId $applicationIdentity.PackageId `
+                        -DeploymentTypeModelName $deploymentTypeIdentity.DeploymentTypeModelName -DeploymentTypeId $deploymentTypeIdentity.DeploymentTypeId `
+                        -BaselineContentId $deploymentTypeIdentity.ContentId `
+                        -RequestConfirmed $false -DistributionBaseline $distributionBaseline
                     try {
                         if ($snapshot.State -eq 'not_started') {
-                            if ([string]::IsNullOrWhiteSpace($dpGroupName)) { throw 'DP-Gruppe fehlt; Erstverteilung kann nicht gestartet werden.' }
                             Start-CMContentDistribution -ApplicationName $fullName -DistributionPointGroupName $dpGroupName -ErrorAction Stop | Out-Null
                             Write-VsLog -Context $fullName -Message ("Contentversion/Erstverteilung an DP-Gruppe '{0}' angefordert." -f $dpGroupName)
                         } else {
                             Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName -ErrorAction Stop | Out-Null
                             Write-VsLog -Context $fullName -Message ("Neue Contentversion fuer Deployment Type '{0}' angefordert." -f $deploymentTypeName)
                         }
-                        Set-VsPackageContentTracking -ApplicationName $fullName -State pending -Manifest $packageManifest -BaselineSourceVersion $baselineSourceVersion
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                        Set-VsPackageContentTracking -ApplicationName $fullName -State intent -Manifest $packageManifest `
+                            -BaselineSourceVersion $baselineSourceVersion -RequestKind $requestKind `
+                            -ApplicationModelName $applicationIdentity.ModelName -ApplicationPackageId $applicationIdentity.PackageId `
+                            -DeploymentTypeModelName $deploymentTypeIdentity.DeploymentTypeModelName -DeploymentTypeId $deploymentTypeIdentity.DeploymentTypeId `
+                            -BaselineContentId $deploymentTypeIdentity.ContentId `
+                            -RequestConfirmed $true -DistributionBaseline $distributionBaseline
                     } catch {
                         Write-VsLog -Level WARN -Context $fullName -Message ("Contentversion konnte nicht sicher angefordert/bestaetigt werden; Intent bleibt zur manuellen Klaerung stehen: {0}" -f $_.Exception.Message)
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'package_content_unknown' -Target $fullName
+                        continue
                     }
+                    # Kein sofortiges ACK: der Provider kann Applicationrevision,
+                    # DT-ContentId und Distributionprojektion zeitversetzt zeigen.
+                    # Der naechste Scan bindet den Intent an genau eine ContentId.
+                    $scanWarnings++
+                    Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
                     continue
                 }
 
-                if ($tracking.State -in @('intent', 'pending')) {
-                    if ($snapshot.State -eq 'succeeded' -and $null -ne $snapshot.SourceVersion -and [int]$snapshot.SourceVersion -gt [int]$tracking.BaselineSourceVersion) {
+                if ($tracking.State -eq 'pending') {
+                    $copyAdvanced = Test-VsDistributionCopyAdvanced -BaselineJson $tracking.DistributionBaseline -CurrentSnapshot $copySnapshot
+                    if ($snapshot.State -eq 'succeeded' -and $copyAdvanced) {
+                        $confirmedSourceVersion = if ($null -eq $snapshot.SourceVersion) { -1 } else { [int]$snapshot.SourceVersion }
                         Set-VsPackageContentTracking -ApplicationName $fullName -State complete -Manifest $packageManifest `
-                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion ([int]$snapshot.SourceVersion)
-                        Write-VsLog -Context $fullName -Message ("Contentversion {0} vollstaendig verteilt; Manifest bestaetigt." -f $snapshot.SourceVersion)
+                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion $confirmedSourceVersion -RequestKind $tracking.RequestKind `
+                            -ApplicationModelName $tracking.ApplicationModelName -ApplicationPackageId $tracking.ApplicationPackageId `
+                            -DeploymentTypeModelName $tracking.DeploymentTypeModelName -DeploymentTypeId $tracking.DeploymentTypeId `
+                            -BaselineContentId $tracking.BaselineContentId -ContentId $tracking.ContentId `
+                            -RequestConfirmed $true -DistributionBaseline $tracking.DistributionBaseline
+                        Write-VsLog -Context $fullName -Message ("Deployment-Type-ContentId {0} vollstaendig verteilt; Manifest bestaetigt." -f $tracking.ContentId)
                     } else {
                         $contentCause = if ($snapshot.State -eq 'failed') { 'package_content_failed' } elseif ($snapshot.State -eq 'unknown') { 'package_content_unknown' } else { 'package_content_in_progress' }
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Contentversion noch nicht bestaetigt (Status {0}, SourceVersion {1}, Baseline {2})." -f $snapshot.State, $snapshot.SourceVersion, $tracking.BaselineSourceVersion)
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Deployment-Type-ContentId {0} noch nicht vollstaendig verteilt (Status {1}, Package-SourceVersion {2}, DP-Kopie neuer als Baseline: {3})." -f $tracking.ContentId, $snapshot.State, $snapshot.SourceVersion, $copyAdvanced)
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause $contentCause -Target $fullName
                         continue
                     }
                 } elseif ($tracking.State -eq 'complete') {
-                    if ($snapshot.State -ne 'succeeded' -or $null -eq $snapshot.SourceVersion -or [int]$snapshot.SourceVersion -lt [int]$tracking.SourceVersion) {
+                    $copyAdvanced = Test-VsDistributionCopyAdvanced -BaselineJson $tracking.DistributionBaseline -CurrentSnapshot $copySnapshot
+                    if ($snapshot.State -ne 'succeeded' -or -not $copyAdvanced) {
                         $contentCause = if ($snapshot.State -eq 'failed') { 'package_content_failed' } elseif ($snapshot.State -eq 'unknown') { 'package_content_unknown' } else { 'package_content_in_progress' }
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Verteilnachweis fuer gespeicherte SourceVersion {0} ist nicht mehr vollstaendig (Status {1}, gesehen {2})." -f $tracking.SourceVersion, $snapshot.State, $snapshot.SourceVersion)
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Verteilnachweis fuer gespeicherte ContentId {0} ist nicht mehr vollstaendig (Status {1})." -f $tracking.ContentId, $snapshot.State)
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause $contentCause -Target $fullName
                         continue
-                    }
-                    if ([int]$snapshot.SourceVersion -gt [int]$tracking.SourceVersion) {
-                        Set-VsPackageContentTracking -ApplicationName $fullName -State complete -Manifest $packageManifest `
-                            -BaselineSourceVersion $tracking.BaselineSourceVersion -SourceVersion ([int]$snapshot.SourceVersion)
                     }
                 }
 
@@ -488,6 +629,7 @@ while ($true) {
         $outcome = 'fail'
         $category = 'mecm_unavailable'
         $siteCode = $null
+        $providerMachine = $null
         $lastFilesStamp = ''
         $sleepSeconds = 60
     } finally {

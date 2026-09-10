@@ -7,6 +7,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/worker_database_connect.php';
 require_once __DIR__ . '/worker_stop_signal.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_mission.php';
@@ -47,6 +48,11 @@ function deploy_worker_main(array $argv): int
     $workerId = deploy_worker_id();
     worker_install_stop_handler(VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER);
     $db = deploy_worker_connect_db($options);
+    if ($db === null) {
+        fwrite(STDERR, "[deploy-worker] stopping before database use\n");
+
+        return 0;
+    }
 
     do {
         if (!$options['once'] && worker_stop_requested()) {
@@ -64,6 +70,11 @@ function deploy_worker_main(array $argv): int
             }
             fwrite(STDERR, '[deploy-worker] Database error, reconnecting: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
             $db = deploy_worker_connect_db($options);
+            if ($db === null) {
+                fwrite(STDERR, "[deploy-worker] stopping during database reconnect\n");
+
+                return 0;
+            }
             // Sleep before retrying. `continue` used to skip it, so a PERMANENT
             // SQL error (a dropped grant, a full disk, a schema mismatch) turned
             // the loop into a hot spin: it reconnected and failed thousands of
@@ -71,7 +82,10 @@ function deploy_worker_main(array $argv): int
             // the portal said anything at all. The reconnect helper waits on its
             // own attempts, but a successful reconnect followed by a failing query
             // never reached it.
-            sleep((int) $options['sleep']);
+            worker_idle_wait((int) $options['sleep']);
+            if (worker_stop_requested()) {
+                return 0;
+            }
             continue;
         }
         if ($options['once']) {
@@ -83,33 +97,18 @@ function deploy_worker_main(array $argv): int
     } while (true);
 }
 
-function deploy_worker_connect_db(array $options): mysqli
+function deploy_worker_connect_db(array $options): ?mysqli
 {
-    // In --loop mode the worker must survive MySQL restarts and slow stack
-    // startups instead of exiting; --once keeps failing fast for tooling.
-    $maxAttempts = $options['once'] ? 3 : 0;
-    $attempt = 0;
-
-    while (true) {
-        $attempt++;
-        try {
-            $db = db(true);
+    return worker_database_connect(
+        $options,
+        'deploy-worker',
+        static function (mysqli $db): void {
             // Every connect AND every reconnect: the gap in front of this
             // moment was unobserved, so the reaper waits out its grace before
             // it calls anybody else dead (deploy_reap_observer_is_blind).
             deploy_reap_observer_since(time());
-
-            return $db;
-        } catch (mysqli_sql_exception $exception) {
-            if ($maxAttempts > 0 && $attempt >= $maxAttempts) {
-                throw $exception;
-            }
-            fwrite(STDERR, '[deploy-worker] Database not reachable (attempt ' . $attempt . '): ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
-            // Waiting out a DB restart is a healthy worker state (AP8).
-            worker_heartbeat_touch();
-            sleep(min(30, 2 * $attempt));
         }
-    }
+    );
 }
 
 function deploy_worker_run_once(mysqli $db, string $workerId, array $options): bool

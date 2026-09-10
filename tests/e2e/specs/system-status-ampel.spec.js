@@ -379,8 +379,9 @@ echo 'JSON' . json_encode(['ids' => $rows]) . 'JSON';
     await expect(badge).toHaveClass(/badge-neutral/);
     await expect(badge).not.toHaveClass(/badge-success/);
     await expect(page.locator('#deviations')).toContainText(
-      /konnte nicht verglichen|nothing could be compared/,
+      /(Es ist keine ESXi-Quelle konfiguriert|No ESXi source is configured)\./,
     );
+    await expect(page.locator('#deviations a[href="credentials.php"]')).toHaveCount(1);
     // No deviation list and no repair form without a comparison behind them.
     await expect(page.locator('#deviations .deviation-groups')).toHaveCount(0);
     await expect(page.locator('#deviations details.repair-actions')).toHaveCount(0);

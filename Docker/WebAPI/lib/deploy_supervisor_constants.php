@@ -21,6 +21,16 @@ require_once __DIR__ . '/constants.php';
 // operator meets.
 const VIRTUSPHERE_SUPERVISOR_HEARTBEAT_FILE = '/tmp/virtusphere-supervisor-heartbeat';
 
+/**
+ * Durable supervisor state belongs below the bind-mounted WebAPI tree.
+ * `/tmp` is tmpfs in this container and therefore cannot carry a restart
+ * budget across a container restart.
+ */
+function deploy_supervisor_state_directory(): string
+{
+    return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'var' . DIRECTORY_SEPARATOR . 'deploy-supervisor';
+}
+
 // How often the supervisor wakes up. Short, because its whole job is watching.
 const VIRTUSPHERE_SUPERVISOR_TICK_SECONDS = 5;
 

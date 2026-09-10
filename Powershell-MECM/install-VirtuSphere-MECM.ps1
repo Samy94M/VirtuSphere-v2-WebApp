@@ -462,7 +462,10 @@ function Restore-VsInstallTransaction {
         [Parameter(Mandatory)][object]$RegistrySnapshot,
         [Parameter(Mandatory)][array]$TaskSnapshots,
         [AllowNull()][string]$BackupPath,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$ActivatedFiles
+        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$ActivatedFiles,
+        [AllowNull()][string]$TemplateBackupPath,
+        [AllowNull()][string]$TemplateDestination,
+        [bool]$TemplateActivationStarted = $false
     )
     $errors = New-Object System.Collections.Generic.List[string]
     $quiesced = $true
@@ -496,6 +499,18 @@ function Restore-VsInstallTransaction {
             foreach ($old in @(Get-ChildItem -LiteralPath $BackupPath -File -ErrorAction Stop)) {
                 Move-Item -LiteralPath $old.FullName -Destination (Join-Path $installDir $old.Name) -Force -ErrorAction Stop
             }
+        }
+        if ($TemplateActivationStarted) {
+            if ([string]::IsNullOrWhiteSpace($TemplateDestination) -or [string]::IsNullOrWhiteSpace($TemplateBackupPath)) {
+                throw 'Paketvorlagen-Rollback besitzt keine vollstaendigen Pfade.'
+            }
+            if (Test-Path -LiteralPath $TemplateDestination) {
+                Remove-Item -LiteralPath $TemplateDestination -Recurse -Force -ErrorAction Stop
+            }
+            if (-not (Test-Path -LiteralPath $TemplateBackupPath)) {
+                throw ("Paketvorlagen-Backup fehlt: {0}" -f $TemplateBackupPath)
+            }
+            Move-Item -LiteralPath $TemplateBackupPath -Destination $TemplateDestination -ErrorAction Stop
         }
         $filesRestored = $true
     } catch { [void]$errors.Add("Datei-Rollback: $($_.Exception.Message)") } }
@@ -542,6 +557,10 @@ $registryRollback = $null
 $taskRollbacks = @()
 $installBackup = $null
 $installStage = $null
+$templateStage = $null
+$templateBackup = $null
+$templateDest = Join-Path $PackagesRoot 'Package_Vorlage'
+$templateActivationStarted = $false
 $activatedNames = New-Object System.Collections.Generic.List[string]
 $finalExitCode = 0
 
@@ -684,13 +703,20 @@ function Wait-VsScheduledScriptStopped {
 # oder versionsfalsches Loggingmodul die Installation sichtbar, ohne zuerst die
 # funktionierende Altinstallation anzuhalten.
 $sourceDir = Join-Path $PSScriptRoot 'mecm'
+$templateSource = Join-Path $PSScriptRoot 'Package_Vorlage'
 $requiredServerFiles = @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1', 'VirtuSphere-MembershipJournal.ps1') + @($tasks | ForEach-Object { $_.Script })
 foreach ($name in $requiredServerFiles) {
     $requiredPath = Join-Path $sourceDir $name
     if (-not (Test-Path $requiredPath)) { throw ('MECM-Serverpaket unvollstaendig: {0} fehlt.' -f $requiredPath) }
 }
+$requiredTemplateFiles = @('install.ps1', 'config.json')
+foreach ($name in $requiredTemplateFiles) {
+    $requiredPath = Join-Path $templateSource $name
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Paketvorlage {0} fehlt.' -f $requiredPath) }
+}
 $installStage = Join-Path $installDir ('.virtusphere-stage-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $installStage -Force -ErrorAction Stop | Out-Null
+$templateStage = Join-Path $PackagesRoot ('.virtusphere-template-stage-' + [guid]::NewGuid().ToString('N'))
 try {
     $serverSources = @(Get-ChildItem -Path $sourceDir -Filter '*.ps1' -File -ErrorAction Stop)
     foreach ($source in $serverSources) {
@@ -699,6 +725,34 @@ try {
         if ((Get-FileHash -Algorithm SHA256 -Path $source.FullName).Hash -ne (Get-FileHash -Algorithm SHA256 -Path $staged).Hash) {
             throw ('MECM-Serverpaket-Pruefsumme weicht ab: {0}' -f $source.Name)
         }
+    }
+    New-Item -ItemType Directory -Path $templateStage -Force -ErrorAction Stop | Out-Null
+    $templateRoot = (Get-Item -LiteralPath $templateSource -Force -ErrorAction Stop)
+    if (-not $templateRoot.PSIsContainer -or ($templateRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw ("Paketvorlagen-Quelle ist kein echtes Verzeichnis: {0}" -f $templateSource)
+    }
+    $templateSources = @(Get-ChildItem -LiteralPath $templateSource -Recurse -File -Force -ErrorAction Stop |
+        Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName)
+    $templateDirectories = @(Get-ChildItem -LiteralPath $templateSource -Recurse -Directory -Force -ErrorAction Stop | Sort-Object FullName)
+    $templateDirectoryManifest = New-Object System.Collections.Generic.List[string]
+    foreach ($directory in $templateDirectories) {
+        $relative = $directory.FullName.Substring($templateRoot.FullName.TrimEnd('\').Length).TrimStart('\')
+        New-Item -ItemType Directory -Path (Join-Path $templateStage $relative) -Force -ErrorAction Stop | Out-Null
+        [void]$templateDirectoryManifest.Add($relative)
+    }
+    $templateManifest = New-Object System.Collections.Generic.List[object]
+    foreach ($source in $templateSources) {
+        $relative = $source.FullName.Substring($templateRoot.FullName.TrimEnd('\').Length).TrimStart('\')
+        $staged = Join-Path $templateStage $relative
+        $stagedParent = Split-Path -Parent $staged
+        if (-not (Test-Path -LiteralPath $stagedParent)) { New-Item -ItemType Directory -Path $stagedParent -Force -ErrorAction Stop | Out-Null }
+        Copy-Item -LiteralPath $source.FullName -Destination $staged -Force -ErrorAction Stop
+        $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source.FullName -ErrorAction Stop).Hash
+        $stagedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $staged -ErrorAction Stop).Hash
+        if ($source.Length -ne (Get-Item -LiteralPath $staged -ErrorAction Stop).Length -or $sourceHash -cne $stagedHash) {
+            throw ('Paketvorlagen-Pruefsumme weicht ab: {0}' -f $relative)
+        }
+        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $source.Length; Sha256 = $sourceHash })
     }
     $stagedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
     $stagedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
@@ -767,8 +821,36 @@ try {
         Move-Item -Path (Join-Path $installStage $name) -Destination (Join-Path $installDir $name) -Force -ErrorAction Stop
         $activatedNames.Add($name)
     }
+    $templateBackup = Join-Path $PackagesRoot ('.virtusphere-template-backup-' + [guid]::NewGuid().ToString('N'))
+    $templateLive = Get-Item -LiteralPath $templateDest -Force -ErrorAction Stop
+    if (-not $templateLive.PSIsContainer -or ($templateLive.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw ("Paketvorlagen-Ziel ist kein echtes Verzeichnis: {0}" -f $templateDest)
+    }
+    Move-Item -LiteralPath $templateDest -Destination $templateBackup -ErrorAction Stop
+    $templateActivationStarted = $true
+    Move-Item -LiteralPath $templateStage -Destination $templateDest -ErrorAction Stop
+
+    $liveTemplateFiles = @(Get-ChildItem -LiteralPath $templateDest -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)
+    if ($liveTemplateFiles.Count -ne $templateManifest.Count) {
+        throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Dateisatz.'
+    }
+    foreach ($entry in $templateManifest) {
+        $livePath = Join-Path $templateDest $entry.RelativePath
+        if (-not (Test-Path -LiteralPath $livePath -PathType Leaf) -or
+            (Get-Item -LiteralPath $livePath -ErrorAction Stop).Length -ne $entry.Length -or
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $livePath -ErrorAction Stop).Hash -cne $entry.Sha256) {
+            throw ('Aktivierte Paketvorlagen-Pruefsumme weicht ab: {0}' -f $entry.RelativePath)
+        }
+    }
+    $liveTemplateDirectories = @(Get-ChildItem -LiteralPath $templateDest -Recurse -Directory -Force -ErrorAction Stop | ForEach-Object {
+        $_.FullName.Substring($templateDest.TrimEnd('\').Length).TrimStart('\')
+    } | Sort-Object)
+    if (($liveTemplateDirectories -join "`n") -cne (@($templateDirectoryManifest | Sort-Object) -join "`n")) {
+        throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Verzeichnissatz.'
+    }
 } finally {
     if (Test-Path $installStage) { Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($templateStage -and (Test-Path -LiteralPath $templateStage)) { Remove-Item -LiteralPath $templateStage -Recurse -Force -ErrorAction SilentlyContinue }
 }
 $installedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
 $installedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
@@ -776,18 +858,7 @@ if ($installedVersion -ne $installedExpectedVersion -or $installedVersion -ne $i
     throw ('Installiertes Loggingmodul hat Version {0}, Common erwartet {1}, der Installer erwartet {2}. Aufgaben bleiben deaktiviert.' -f $installedVersion, $installedExpectedVersion, $installerVersion)
 }
 Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
-
-# Package-Vorlage (Standard-install.ps1 + config.json-Blaupause) bereitstellen.
-# Der Autoimporter kopiert Package_Vorlage\install.ps1 per Self-Healing ueber die
-# paketeigene install.ps1; ohne diese Vorlage liefe das Self-Healing ins Leere.
-$templateSource = Join-Path $PSScriptRoot 'Package_Vorlage'
-$templateDest   = Join-Path $PackagesRoot 'Package_Vorlage'
-if (Test-Path (Join-Path $templateSource 'install.ps1')) {
-    Copy-Item -Path (Join-Path $templateSource '*') -Destination $templateDest -Recurse -Force -Exclude '.gitkeep'
-    Write-Ok "Package-Vorlage nach $templateDest kopiert"
-} else {
-    Write-Warn "Package-Vorlage-Quelle fehlt ($templateSource) - Self-Healing der install.ps1 bleibt inaktiv."
-}
+Write-Ok "Package-Vorlage nach $templateDest aktiviert und per SHA-256 verifiziert"
 
 # --- Geplante Aufgaben ------------------------------------------------------
 $logComponents = @('device-sync', 'packages-sync', 'autoimporter', 'site-health')
@@ -957,15 +1028,22 @@ if ($installBackup -and (Test-Path -LiteralPath $installBackup)) {
     try { Remove-Item -LiteralPath $installBackup -Recurse -Force -ErrorAction Stop }
     catch { Write-Hint ("Altdatei-Backup konnte nach erfolgreicher Aktivierung nicht entfernt werden: {0}" -f $_.Exception.Message) }
 }
+if ($templateBackup -and (Test-Path -LiteralPath $templateBackup)) {
+    try { Remove-Item -LiteralPath $templateBackup -Recurse -Force -ErrorAction Stop }
+    catch { Write-Hint ("Paketvorlagen-Backup konnte nach erfolgreicher Aktivierung nicht entfernt werden: {0}" -f $_.Exception.Message) }
+}
 } catch {
     $installError = $_
     $rollbackErrors = @()
     if ($transactionStarted) {
         $tasksToRestore = if ($taskMutationStarted) { $taskRollbacks } else { @() }
-        $rollbackErrors = @(Restore-VsInstallTransaction -RegistrySnapshot $registryRollback -TaskSnapshots $tasksToRestore -BackupPath $installBackup -ActivatedFiles $activatedNames)
+        $rollbackErrors = @(Restore-VsInstallTransaction -RegistrySnapshot $registryRollback -TaskSnapshots $tasksToRestore -BackupPath $installBackup -ActivatedFiles $activatedNames `
+            -TemplateBackupPath $templateBackup -TemplateDestination $templateDest -TemplateActivationStarted $templateActivationStarted)
     }
     if ($installStage -and (Test-Path -LiteralPath $installStage)) { Remove-Item -LiteralPath $installStage -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($templateStage -and (Test-Path -LiteralPath $templateStage)) { Remove-Item -LiteralPath $templateStage -Recurse -Force -ErrorAction SilentlyContinue }
     if ($installBackup -and (Test-Path -LiteralPath $installBackup) -and $rollbackErrors.Count -eq 0) { Remove-Item -LiteralPath $installBackup -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($templateBackup -and (Test-Path -LiteralPath $templateBackup) -and $rollbackErrors.Count -eq 0) { Remove-Item -LiteralPath $templateBackup -Recurse -Force -ErrorAction SilentlyContinue }
     if ($rollbackErrors.Count -gt 0) {
         throw ("Installation fehlgeschlagen: {0} Rollback unvollstaendig: {1}" -f $installError.Exception.Message, ($rollbackErrors -join ' | '))
     }

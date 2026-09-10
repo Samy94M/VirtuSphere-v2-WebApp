@@ -2,6 +2,12 @@
 
 This page is the operating manual for the VirtuSphere QA battery: how to run each check and how to debug a red one locally. What a gate means and how to interpret its result lives in `docs/QUALITY-GATES.md`; the decisions behind the setup are ADR-0015 (baseline and skip policy), ADR-0028 (E2E tiers) and ADR-0031 (runner). It is intentionally container-first so checks work the same way on Windows hosts and in air-gapped LAN environments once Docker images and Composer vendor artifacts are present.
 
+Historical successes below apply only to their recorded source states. The
+[U13/U14 consolidated acceptance plan](audits/2026-09-10-u13-u14-qa-plan.md)
+joins the still-unexecuted acceptance of U07–U10, E1/E7/E9, U12/U17 and U13/U14
+with regression coverage of the previously accepted packages. Preparing or
+reviewing a test does not establish a passing result on the current tree.
+
 ## phpMyAdmin tools-profile smoke
 
 The existing `health-contract` gate starts phpMyAdmin only through the `tools`
@@ -85,7 +91,33 @@ Stage 9's VM identity is covered at four boundaries: `VmIdentityCollisionTest` p
 
 `scripts/test-guards.ps1` proves the guards themselves: every check runs once against the real repo (green), once against a mutated fixture copy (must turn red with the right `[check.case]` diagnostic ID) and once against a zero-match root (must not pass silently). Fixtures are wired through `VIRTUSPHERE_CHECK_ROOT`; the repo is never mutated. Exit codes: `0` all proven, `1` a guard failed to detect its mutation, `2` only infrastructure gaps (e.g. no host PHP for the php-lint hook case).
 
+The Release `restore-drill` follows the same root contract while keeping the
+checker trusted: `check.ps1` loads `restore_test.sh` from its own `scriptDir`,
+and the shell script reads the backup triplet, schema and PHP restore sources
+only from the normalized `VIRTUSPHERE_CHECK_ROOT`. Its first evidence line joins
+that root to the selected backup timestamp. Missing, empty or incomplete
+explicit roots fail with `[restore.root-*]`/`[restore.backup-*]` diagnostics and
+never fall back to backups beside the checker. An unset variable keeps the
+normal script-root default. An explicitly empty value is rejected by a direct
+shell invocation; the canonical runner normalizes an empty incoming value to
+its own default root before exporting it.
+
+`VirtuSphere.RestoreRoot.Tests.ps1` covers only this selection boundary. It
+builds harmless synthetic gzip/tar triplets for distinct A/B roots, routes the
+canonical runner's checker from A to data root B, and stops at a fake Docker
+`image inspect`. The suite proves no restore container starts in those cases;
+it does not prove the later mounts, import, migration, cleanup or smoke. Those
+remain the responsibility of an authorized full `restore-drill` against the
+synthetic QA backup.
+
 ### Container hardening and supply chain (AP8)
+
+PHP-FPM requires exactly `KILL`, `SETGID` and `SETUID`: the master runs as
+UID 0 and its children as UID 33. `KILL` permits the master to signal those
+children during shutdown. Without it, the measured idle SIGQUIT stop exhausted
+Docker's grace and ended with exit 137; adding only `KILL` restored exit 0
+with the same image, FPM configuration and grace. The exact capability guard
+rejects both a missing required capability and additional unapproved ones.
 
 The `compose-hardening` gate (all lanes) runs `scripts/check-compose-hardening.ps1`: it parses the resolved `docker compose --profile "*" config` semantically and pins the existing hardening as a contract — `read_only`+tmpfs, `cap_drop: ALL` plus the exact documented `cap_add` sets, `no-new-privileges`, PID/memory limits, restart policy, healthchecks, `service_healthy` start ordering, phpMyAdmin's `tools` profile and loopback binding, tag+digest pins on registry images, digest pins in every first-party `FROM`/`COPY --from`, and the absence of any Docker socket mount. Any loosening fails the build with a stable `[compose.<case>]` ID; the resolved config JSON carries interpolated secrets and is never printed or stored.
 
@@ -100,6 +132,17 @@ An exception list decays into a fix-deferral list without anyone deciding to let
 `offline-bundle` (Release lane) runs `scripts/build-offline-bundle.sh`: it saves the runtime images, builds `vendor.tar.gz` (`composer install --no-dev` inside the PHP image), downloads the Ansible collections for the air-gapped control node, adds the closed 8R-O durable-runner payload after verifying its own `runner/SHA256SUMS`, produces SBOMs and CVE reports, snapshots the source (`git archive`), writes `provenance.json`, `INSTALL.md` and a bundle-wide `SHA256SUMS` manifest, and then verifies itself with the bundled `verify.sh` — which needs only `sha256sum` and no network, matching how the target system verifies it offline. The runner installer and read-only preflight do not activate a product mode or change linger; their target-host output is still an open 8R-S artifact.
 
 ### Integration lane and the QA stack
+
+QA also isolates filesystem state: its WebAPI `var` and application logs use
+project-scoped volumes with copying disabled, and its read-only backup-status
+volume starts empty. The shared source mount therefore exposes no development
+runtime files through those paths. A temporary Compose initializer builds the
+PHP image and prepares only the QA log directory for FPM and the workers before
+services start. App services replace the inherited environment-file list with
+`qa.env`; their local dotenv file is masked by that same synthetic source.
+Separate PHPUnit and Composer containers likewise mask both dotenv locations
+and mount temporary runtime/log directories. Missing tool images never cause
+Composer to execute inside the development container.
 
 The QA PHP service mounts `/tmp/virtusphere-directory` as a nested tmpfs owned by `www-data` (`uid=33`, `gid=33`, mode `0700`). This preserves the strict ownership contract of `directory_ca_file()` and makes an earlier diagnostic `docker exec` as root harmless: root cannot replace the mountpoint, while portal requests can still create their per-CA files. Do not remove this mount or loosen the production ownership check; `DirectoryModuleContractTest` pins the QA-side arrangement.
 
@@ -832,7 +875,7 @@ php scripts/check-audit-contract.php   # Etappe 10C: Auditproducer nur ueber die
 
 `check-doc-semantics` (AP9) polices the operating docs the way `check-bounds-sync` polices portal texts: `PRE-SHIP-CHECKLIST.md` must stay an empty template (no `[x]`, no dated evidence), no active doc may hardcode test/migration counts or load metrics, and PHPStan-level, MySQL- and Node-version mentions must match their SSoT (`phpstan.neon.dist`, `docker-compose.yml`, `ci.yml`). Retired backup paths may only appear next to a retirement marker. Historical documents (`docs/audits/`, `docs/CHANGELOG.md`, ADRs) are exempt: they describe a dated state on purpose.
 
-Five more rules cover failure classes that were each found the hard way. A file path claimed in backticks needs a producer outside `docs/` (the go-live runbook sent the admin to an initial-password file nothing ever writes). Every `.env.example` key that compose interpolates without a default must be named in the go-live runbook, or nobody can set it without reading the compose file. A migration *range* spanning from the first migration to the current one is as stale as a count, even though both ends look like legitimate references, which is why this sentence cannot show you one. German documents write real umlauts, the same rule the portal catalog follows, with code spans and fenced blocks excluded because an ASCII identifier in backticks is a quoted value (`Uebersprungen` is a string a PowerShell script really compares against); `docs/INSTALLATION-ANLEITUNG.md` carries a named exemption until its own umlaut pass lands. And the hardware version in `createVMs-ESXi_playbook.yml` is checked against the ESXi support matrix: vmx-21 needs 8.0 Update 2, so a matrix that promises 7.0 for *creating* VMs promises a hard failure.
+Five more rules cover failure classes that were each found the hard way. A file path claimed in backticks needs a producer outside `docs/` (the go-live runbook sent the admin to an initial-password file nothing ever writes). Every `.env.example` key that compose interpolates without a default must be named in the go-live runbook, or nobody can set it without reading the compose file. A migration *range* spanning from the first migration to the current one is as stale as a count, even though both ends look like legitimate references, which is why this sentence cannot show you one. German documents write real umlauts, the same rule the portal catalog follows, with code spans and fenced blocks excluded because an ASCII identifier in backticks is a quoted value (`Uebersprungen` is a string a PowerShell script really compares against); `docs/INSTALLATION-ANLEITUNG.md` carries a named exemption until its own umlaut pass lands. And the hardware version in `createVMLaunch-ESXi_playbook.yml` is checked against the ESXi support matrix: vmx-21 needs 8.0 Update 2, so a matrix that promises 7.0 for *creating* VMs promises a hard failure.
 
 `check-file-size` turns the ADR-0006 target into a gate. A hook warning nobody has to answer is a budget nobody keeps: twenty-three files under `lib/` and `portal/` had grown past it, the largest bundling five independent transaction domains on 1220 lines. The scope is `lib/` and `portal/` (the machine-API root files are a frozen wire surface, the same reason PHPStan excludes them). `FILE_SIZE_ALLOWANCES` records every file that is over budget today with its exact size, the reason and the stage that splits it, which makes the list a ratchet in both directions: an unlisted file may not cross 400 lines (`file-size.oversize`), a listed file may not gain one line (`file-size.grown`), and one that came back under the budget must leave the list (`file-size.stale`). An empty scan is a finding, never a pass (`file-size.zero-match`). `php scripts/check-file-size.php --list` prints the current sizes against their allowances, which is how the table is maintained after a split.
 
