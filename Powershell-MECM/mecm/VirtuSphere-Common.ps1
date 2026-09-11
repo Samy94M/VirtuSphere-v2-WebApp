@@ -713,7 +713,8 @@ function Get-VsDistributionCopySnapshot {
             Filter = ("PackageID = '{0}'" -f $PackageId)
             ErrorAction = 'Stop'
         }
-        if (-not [string]::IsNullOrWhiteSpace($ProviderMachine)) { $cimParams['ComputerName'] = $ProviderMachine.Trim() }
+        # Like site health, query the local provider without requiring WinRM.
+        if (-not [string]::IsNullOrWhiteSpace($ProviderMachine) -and $ProviderMachine.Trim() -ne $env:COMPUTERNAME) { $cimParams['ComputerName'] = $ProviderMachine.Trim() }
         $rows = @(Get-CimInstance @cimParams)
     } catch {
         Write-Debug $_

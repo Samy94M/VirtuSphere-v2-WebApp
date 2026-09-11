@@ -282,6 +282,44 @@ Describe 'Get-VsProviderMachine (feste Aufloesungsreihenfolge)' {
     }
 }
 
+Describe 'Get-VsDistributionCopySnapshot transport' {
+    It 'reads the local provider without WinRM, including trimmed mixed-case names' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CimInstance {
+                param($Namespace, $ClassName, $Filter, $ComputerName, $ErrorAction)
+                if ($PSBoundParameters.ContainsKey('ComputerName')) { throw 'WinRM unavailable' }
+                [pscustomobject]@{
+                    PackageID = 'CGN0000E'; SecureObjectID = 'ScopeId_test/Application_test'
+                    ServerNALPath = 'local-dp'; SiteCode = 'CGN'; State = 0
+                    LastCopied = [datetime]'2026-09-11T09:00:00Z'
+                }
+            }
+            $previousComputerName = $env:COMPUTERNAME
+            try {
+                $env:COMPUTERNAME = 'VS-LOCAL'
+                Get-VsDistributionCopySnapshot -PackageId 'CGN0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
+                    -SiteCode 'CGN' -ProviderMachine ' vs-local '
+            } finally { $env:COMPUTERNAME = $previousComputerName }
+        }
+        $result.State | Should -Be 'known'
+        $result.Targets.Count | Should -Be 1
+        $result.Targets[0].LastCopiedTicks | Should -BeGreaterThan 0
+    }
+
+    It 'keeps remote provider routing' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CimInstance {
+                param($Namespace, $ClassName, $Filter, $ComputerName, $ErrorAction)
+                if ($ComputerName -ne 'remote-provider.invalid') { throw 'Wrong provider' }
+            }
+            Get-VsDistributionCopySnapshot -PackageId 'CGN0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
+                -SiteCode 'CGN' -ProviderMachine 'remote-provider.invalid'
+        }
+        $result.State | Should -Be 'known'
+        $result.Targets.Count | Should -Be 0
+    }
+}
+
 Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
     It 'ohne Site-Code sofort unknown/query_failed (keine Abfrage moeglich)' {
         $h = Invoke-InFileScope -Path $script:MecmCommon -Body {
