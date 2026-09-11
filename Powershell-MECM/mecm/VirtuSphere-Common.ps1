@@ -1826,7 +1826,9 @@ function Get-VsPackageSourceSelections {
     }
     $result = New-Object System.Collections.Generic.List[object]
     foreach ($product in @($groups.Keys | Sort-Object)) {
-        $items = @($groups[$product])
+        # Der Dictionarywert ist eine List[object]. @($list) trifft in Windows
+        # PowerShell 5.1 den fehlerhaften PSEnumerableBinder.
+        $items = $groups[$product].ToArray()
         $versions = @($items | ForEach-Object { [string]$_.version })
         $unsupported = @($versions | Where-Object { $null -eq (ConvertTo-VsPackageVersionParts -Version $_) })
         $duplicates = @($versions | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)

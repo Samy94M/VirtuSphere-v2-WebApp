@@ -766,7 +766,7 @@ Describe 'Installer A11: gemeinsame Aktivierungs- und Rollbackgrenze' {
         $restore = [regex]::Match($script:A11Text, '(?s)function Restore-VsInstallTransaction \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
         $disable = $restore.IndexOf('Disable-ScheduledTask')
         $wait = $restore.IndexOf('Wait-VsScheduledScriptStopped')
-        $fileRestore = $restore.IndexOf('foreach ($name in @($ActivatedFiles))')
+        $fileRestore = $restore.IndexOf('foreach ($name in $ActivatedFiles.ToArray())')
         $taskStart = $restore.IndexOf('Start-ScheduledTask')
         $disable | Should -BeGreaterThan -1
         $wait | Should -BeGreaterThan $disable

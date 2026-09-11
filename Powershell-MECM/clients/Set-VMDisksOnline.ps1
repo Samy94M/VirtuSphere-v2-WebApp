@@ -75,7 +75,7 @@ function Get-DiskOperations {
         $raw = Get-ItemProperty -Path $entry.PSPath -ErrorAction Stop
         [void]$result.Add((ConvertTo-DiskOperation -RegistryValue $raw -Path $entry.PSPath))
     }
-    return @($result)
+    return $result.ToArray()
 }
 
 function New-DiskOperation {

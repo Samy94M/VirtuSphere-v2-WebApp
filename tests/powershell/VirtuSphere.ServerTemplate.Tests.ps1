@@ -48,6 +48,13 @@ BeforeAll {
     $script:RestoreFunction = $restoreFunction
     if ($restoreFunction) { . ([scriptblock]::Create($restoreFunction.Extent.Text)) }
 
+    foreach ($functionName in @('New-VsRegistryRollbackSnapshot', 'New-VsTaskRollbackSnapshots')) {
+        $functionAst = $installerAst.Find(
+            { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName },
+            $true)
+        if ($functionAst) { . ([scriptblock]::Create($functionAst.Extent.Text)) }
+    }
+
     function New-TemplateTree {
         param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Label)
         [void][IO.Directory]::CreateDirectory($Root)
@@ -76,6 +83,40 @@ BeforeAll {
 }
 
 Describe 'Server installer Package_Vorlage transaction (U09)' {
+    It 'materialisiert alle transaktionalen Generic Lists ohne den PowerShell-Binderfehler' {
+        $installerText = Get-Content -LiteralPath $script:ServerInstaller -Raw
+
+        $installerText | Should -Match 'Values = \$values\.ToArray\(\)'
+        $installerText | Should -Match 'return \$snapshots\.ToArray\(\)'
+        $installerText | Should -Match 'foreach \(\$name in \$ActivatedFiles\.ToArray\(\)\)'
+        $installerText | Should -Match 'return \$errors\.ToArray\(\)'
+        $installerText | Should -Not -Match 'Values = @\(\$values\)'
+        $installerText | Should -Not -Match 'return @\(\$(snapshots|errors)\)'
+    }
+
+    It 'erstellt Registry- und Task-Snapshots mit echten List-object-Inhalten' {
+        $registryKey = New-Object psobject
+        $registryKey | Add-Member ScriptMethod GetValueNames { @('Alpha', 'Beta') }
+        $registryKey | Add-Member ScriptMethod GetValue { param($name, $default, $options) return ('value-' + $name) }
+        $registryKey | Add-Member ScriptMethod GetValueKind { param($name) return [Microsoft.Win32.RegistryValueKind]::String }
+
+        Mock Test-Path { $true }
+        Mock Get-Item { $registryKey }
+        Mock Get-Acl { 'acl-snapshot' }
+        Mock Get-ScheduledTask { [pscustomobject]@{ State = 'Running' } }
+        Mock Export-ScheduledTask { '<Task />' }
+
+        $registrySnapshot = New-VsRegistryRollbackSnapshot -Path 'HKCU:\Software\VirtuSphere-Test'
+        $taskSnapshots = @(New-VsTaskRollbackSnapshots -TaskSpecs @(
+            @{ Name = 'VirtuSphere MECM Test'; Script = 'test.ps1' }
+        ))
+
+        $registrySnapshot.Values.Count | Should -Be 2
+        $registrySnapshot.Values[0].Name | Should -Be 'Alpha'
+        $taskSnapshots.Count | Should -Be 1
+        $taskSnapshots[0].WasRunning | Should -BeTrue
+    }
+
     It 'extracts the actual stage, activation and rollback owners without executing the installer' {
         $script:InstallerParseErrors.Count | Should -Be 0
         $script:TemplateStageBlock | Should -Not -BeNullOrEmpty

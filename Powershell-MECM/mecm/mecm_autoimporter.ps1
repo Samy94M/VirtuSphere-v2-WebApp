@@ -164,7 +164,10 @@ while ($true) {
             }
             $sourceSelections = @(Get-VsPackageSourceSelections -Packages @($packageEntries | ForEach-Object { $_.Config }))
 
-            foreach ($entry in @($packageEntries)) {
+            # List[object] nicht ueber @($list) materialisieren: der
+            # PSEnumerableBinder von Windows PowerShell 5.1 wirft dabei
+            # "Die Argumenttypen stimmen nicht ueberein".
+            foreach ($entry in $packageEntries.ToArray()) {
                 $dir = $entry.Directory
                 $cfg = $entry.Config
                 $folders++

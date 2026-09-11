@@ -434,7 +434,11 @@ function New-VsRegistryRollbackSnapshot {
             Kind = [string]$key.GetValueKind($name)
         })
     }
-    return [pscustomobject]@{ Existed = $true; Values = @($values); Acl = (Get-Acl -LiteralPath $Path -ErrorAction Stop) }
+    # `@($genericList)` trifft in Windows PowerShell 5.1 den fehlerhaften
+    # PSEnumerableBinder ("Die Argumenttypen stimmen nicht ueberein"). Der
+    # Installer laeuft genau dort und muss den Snapshot deshalb ueber die
+    # typsichere List<T>-API materialisieren.
+    return [pscustomobject]@{ Existed = $true; Values = $values.ToArray(); Acl = (Get-Acl -LiteralPath $Path -ErrorAction Stop) }
 }
 
 function New-VsTaskRollbackSnapshots {
@@ -454,7 +458,7 @@ function New-VsTaskRollbackSnapshots {
             [void]$snapshots.Add([pscustomobject]@{ Name = $task.Name; Script = $task.Script; Existed = $false; Xml = ''; WasRunning = $false })
         }
     }
-    return @($snapshots)
+    return $snapshots.ToArray()
 }
 
 function Restore-VsInstallTransaction {
@@ -491,7 +495,7 @@ function Restore-VsInstallTransaction {
     }
 
     if ($quiesced) { try {
-        foreach ($name in @($ActivatedFiles)) {
+        foreach ($name in $ActivatedFiles.ToArray()) {
             $livePath = Join-Path $installDir $name
             if (Test-Path -LiteralPath $livePath) { Remove-Item -LiteralPath $livePath -Force -ErrorAction Stop }
         }
@@ -546,7 +550,7 @@ function Restore-VsInstallTransaction {
     } } elseif ($TaskSnapshots.Count -gt 0) {
         [void]$errors.Add('Aufgaben bleiben deaktiviert, weil Prozess-, Datei- oder Registry-Rollback nicht vollstaendig belegt ist.')
     }
-    return @($errors)
+    return $errors.ToArray()
 }
 
 $installMutex = $null
