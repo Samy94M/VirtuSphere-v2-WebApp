@@ -11,6 +11,54 @@ require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
+require_once __DIR__ . '/help_page.php';
+
+/** Presentation only: a start report is not proof that the process is still alive. */
+function system_status_run_badge(string $state, bool $started): string
+{
+    if (!$started) {
+        return heartbeat_badge($state);
+    }
+    $meta = virtusphere_heartbeat_meta($state);
+    return portal_badge((string) $meta['badge'], __t('system_status.run_completion_open'));
+}
+
+/** Explanations supplement the bounded technical detail; they never drive state. */
+function system_status_autoimporter_activity(string $event): string
+{
+    $key = match ($event) {
+        VIRTUSPHERE_RUN_EVENT_STARTED => 'run_completion_open',
+        VIRTUSPHERE_RUN_EVENT_COMPLETED => 'run_activity_completed',
+        default => 'run_activity_unknown',
+    };
+    return portal_badge('neutral', __t('system_status.' . $key));
+}
+
+function system_status_autoimporter_result(?string $outcome): string
+{
+    [$variant, $key] = match ($outcome) {
+        VIRTUSPHERE_RUN_OUTCOME_OK => ['success', 'run_result_ok'],
+        VIRTUSPHERE_RUN_OUTCOME_WARNING => ['warning', 'run_result_warning'],
+        VIRTUSPHERE_RUN_OUTCOME_FAIL => ['danger', 'run_result_fail'],
+        default => ['neutral', 'run_result_unknown'],
+    };
+    return portal_badge($variant, __t('system_status.' . $key));
+}
+
+function system_status_autoimporter_findings(string $detail, ?bool $distribution = null): array
+{
+    $findings = [];
+    foreach (['package_config_invalid', 'package_content_failed', 'package_content_in_progress',
+        'package_content_unknown', 'package_definition_drift', 'package_cleanup_failed'] as $code) {
+        if ($distribution !== null && str_starts_with($code, 'package_content_') !== $distribution) {
+            continue;
+        }
+        if (preg_match('/(?:^|;\s*)' . preg_quote($code, '/') . '\s+target=/u', $detail) === 1) {
+            $findings[] = __t('system_status.finding_' . $code);
+        }
+    }
+    return $findings;
+}
 
 // Maps a reportRun error category (sync or site) to a localized label.
 function system_status_run_error_label(?string $category): string
@@ -174,13 +222,16 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
             $event = $row !== null ? (string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT) : '';
             $isRunning = $event === VIRTUSPHERE_RUN_EVENT_STARTED;
             $isLegacy = $event === VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
+            $isAutoimporter = $entry['source'] === 'autoimporter';
             $detail = trim((string) ($row['last_detail'] ?? ''));
             $errorLabel = $row !== null ? system_status_run_error_label(isset($row['last_error_category']) ? (string) $row['last_error_category'] : null) : '';
             $summary = ($row !== null && !empty($row['last_summary'])) ? json_decode((string) $row['last_summary'], true) : null;
             ?>
             <article class="status-row">
-                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($state); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
-                <?php if ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
+                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_activity_heading')); ?></h4><?php } ?>
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo $isAutoimporter ? system_status_autoimporter_activity($event) : system_status_run_badge($state, $isRunning); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
+                <?php if ($isRunning) { ?><p class="muted"><?php echo h(__t('system_status.run_completion_hint')); ?></p><?php } ?>
+                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_result_heading')); ?></h4><p><?php echo system_status_autoimporter_result(!empty($row['last_result_at']) ? (string) ($row['last_status'] ?? '') : null); ?></p><p class="muted"><?php echo h(__t('system_status.run_result_scope')); ?></p><?php } elseif ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
                 <?php
                 // All six fields, always, in this order. They used to appear only
                 // when they had a value, so the number of columns differed per
@@ -217,6 +268,22 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
                     if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php }
                 } ?>
                 <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
+                <?php if ($entry['source'] === 'autoimporter' && !$suppressHints) {
+                    foreach (system_status_autoimporter_findings($detail, false) as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
+                } ?>
+                <?php if ($isAutoimporter) { ?>
+                    <h4><?php echo h(__t('system_status.run_distribution_heading')); ?></h4>
+                    <p class="muted"><?php echo h(__t('system_status.run_distribution_scope')); ?></p>
+                    <?php echo system_status_fact_list([
+                        ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
+                    ]);
+                    $distributionFindings = !empty($row['last_result_at']) ? system_status_autoimporter_findings($detail, true) : [];
+                    if ($distributionFindings === []) { ?><p><?php echo h(__t('system_status.run_distribution_unknown')); ?></p><?php }
+                    foreach ($distributionFindings as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
+                    if (!$suppressHints) {
+                    ?><p><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('system_status.autoimporter_help')); ?></a></p><?php
+                    }
+                } ?>
                 <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
             </article>
         <?php } ?>

@@ -83,9 +83,10 @@ BeforeAll {
             [Parameter(Mandatory)]$RequestCounters,
             [Parameter(Mandatory)][string]$Manifest,
             [Parameter(Mandatory)][string]$ContentId,
-            [Parameter(Mandatory)][ValidateSet('not_started', 'succeeded')][string]$AggregateState,
+            [Parameter(Mandatory)][ValidateSet('not_started', 'succeeded', 'failed', 'in_progress', 'unknown')][string]$AggregateState,
             [Parameter(Mandatory)][AllowEmptyCollection()][array]$CopyTargets,
-            [ValidateSet('none', 'initial', 'update')][string]$RequestFailure = 'none'
+            [ValidateSet('none', 'initial', 'update')][string]$RequestFailure = 'none',
+            [int]$TargetCount = -1
         )
         . $script:MecmCommon
 
@@ -93,7 +94,7 @@ BeforeAll {
         function Get-VsPackageContentTracking { param($ApplicationName) return $TrackingBox.Value }
         function Get-VsContentDistributionSnapshot {
             param($ApplicationName, $Application)
-            return [pscustomobject]@{ State = $AggregateState; SourceVersion = 1 }
+            return [pscustomobject]@{ State = $AggregateState; SourceVersion = 1; TargetCount = $(if ($TargetCount -lt 0) { $CopyTargets.Count } else { $TargetCount }) }
         }
         function Get-VsDistributionCopySnapshot {
             param($PackageId, $ApplicationModelName, $SiteCode, $ProviderMachine)
@@ -147,6 +148,158 @@ BeforeAll {
 
         & $script:U09ControllerBlock
         return $TrackingBox.Value
+    }
+}
+
+Describe 'Autoimporter: partial DP distribution never vetoes a new source' {
+    It 'updates 4/6 DPs once per manifest, supersedes pending content, and waits for all six copies' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $targets = @(1..6 | ForEach-Object {
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = $(if ($_ -le 4) { 0 } else { 3 }); LastCopiedTicks = 100L }
+        })
+        $argsA = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'failed'; CopyTargets = $targets }
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $requests.Update | Should -Be 1
+        $tracking.Value.RequestConfirmed | Should -BeTrue
+        $tracking.Value.State | Should -Be 'intent'
+        $argsA.ContentId = 'ContentA'
+        Invoke-U09ControllerScan @argsA | Out-Null
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        $requests.Update | Should -Be 1
+        # A second real source change need not wait for the offline targets.
+        $argsA.Manifest = ('B' * 64)
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $requests.Update | Should -Be 2
+        $tracking.Value.State | Should -Be 'intent'
+        $tracking.Value.BaselineContentId | Should -Be 'ContentA'
+        $argsA.ContentId = 'ContentB'
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $targets | ForEach-Object { $_.State = 0 }
+        $argsA.AggregateState = 'succeeded'
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $tracking.Value.State | Should -Be 'pending' -Because 'old copies cannot confirm the new content'
+        $targets | ForEach-Object { $_.LastCopiedTicks = 101L }
+        Invoke-U09ControllerScan @argsA | Out-Null
+        $tracking.Value.State | Should -Be 'complete'
+        $requests.Update | Should -Be 2
+        $requests.Initial | Should -Be 0
+    }
+
+    It 'allows a new manifest with DP state <DpState> and no previous successful copy' -ForEach @(
+        @{ DpState = 0 }, @{ DpState = 1 }, @{ DpState = 2 }, @{ DpState = 3 }, @{ DpState = 7 }, @{ DpState = 8 }
+    ) {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $DpState; LastCopiedTicks = 0L })
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState in_progress -CopyTargets $targets | Out-Null
+        $requests.Update | Should -Be 1
+        $tracking.Value.State | Should -Be 'intent'
+    }
+
+    It 'blocks removal or unreadable state <DpState>' -ForEach @(
+        @{ DpState = 4 }, @{ DpState = 5 }, @{ DpState = 6 }, @{ DpState = 9 }, @{ DpState = -1 }
+    ) {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $DpState; LastCopiedTicks = 100L })
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState failed -CopyTargets $targets | Out-Null
+        $requests.Update | Should -Be 0
+        $tracking.Value | Should -BeNullOrEmpty
+    }
+
+    It 'does not start on an unknown aggregate or incomplete DP projection' {
+        foreach ($case in @(@{ State = 'unknown'; Count = 1 }, @{ State = 'failed'; Count = 6 })) {
+            $tracking = [pscustomobject]@{ Value = $null }
+            $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+            $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 100L })
+            Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState $case.State -CopyTargets $targets -TargetCount $case.Count | Out-Null
+            $requests.Update | Should -Be 0
+            $tracking.Value | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not drop a missing target when superseding a pending request' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $targets = @(1..2 | ForEach-Object { [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = 3; LastCopiedTicks = 100L } })
+        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'failed'; CopyTargets = $targets }
+        Invoke-U09ControllerScan @scan | Out-Null
+        $scan.ContentId = 'ContentA'
+        Invoke-U09ControllerScan @scan | Out-Null
+        $scan.Manifest = ('B' * 64)
+        $scan.CopyTargets = @($targets[0])
+        Invoke-U09ControllerScan @scan | Out-Null
+        $requests.Update | Should -Be 1
+        $tracking.Value.Manifest | Should -Be ('A' * 64)
+        $tracking.Value.State | Should -Be 'pending'
+    }
+
+    It 'allows added targets after completion but still blocks loss of a previous target' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
+        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'succeeded'; CopyTargets = $targets }
+        Invoke-U09ControllerScan @scan | Out-Null
+        $scan.ContentId = 'ContentA'
+        Invoke-U09ControllerScan @scan | Out-Null
+        $targets[0].LastCopiedTicks = 101L
+        Invoke-U09ControllerScan @scan | Out-Null
+        $tracking.Value.State | Should -Be 'complete'
+
+        $scan.Manifest = ('B' * 64)
+        $scan.CopyTargets = @($targets[0], [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 50L })
+        Invoke-U09ControllerScan @scan | Out-Null
+        $requests.Update | Should -Be 2 -Because 'a newly required DP belongs in the new request baseline'
+
+        $tracking.Value = [pscustomobject]@{
+            State = 'complete'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
+            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":50}]'
+        }
+        $scan.CopyTargets = @($targets[0])
+        Invoke-U09ControllerScan @scan | Out-Null
+        $requests.Update | Should -Be 2 -Because 'loss of a previously required DP remains blocked'
+        $tracking.Value.State | Should -Be 'complete'
+    }
+
+    It 'binds initial targets before supersede or completion and never forgets a missing target' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'not_started'; CopyTargets = @() }
+        Invoke-U09ControllerScan @scan | Out-Null
+        $requests.Initial | Should -Be 1
+
+        $scan.ContentId = 'ContentA'
+        $scan.Manifest = ('B' * 64)
+        Invoke-U09ControllerScan @scan | Out-Null
+        $requests.Initial | Should -Be 1
+        $tracking.Value.Manifest | Should -Be ('A' * 64)
+        $tracking.Value.State | Should -Be 'intent'
+
+        $scan.Manifest = ('A' * 64)
+        $scan.AggregateState = 'in_progress'
+        $targets = @(1..2 | ForEach-Object { [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = 3; LastCopiedTicks = 0L } })
+        $scan.CopyTargets = $targets
+        Invoke-U09ControllerScan @scan | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        $tracking.Value.DistributionBaseline | Should -Match 'NAL_1'
+        $tracking.Value.DistributionBaseline | Should -Match 'NAL_2'
+
+        $scan.AggregateState = 'succeeded'
+        $targets | ForEach-Object { $_.State = 0; $_.LastCopiedTicks = 1L }
+        $scan.CopyTargets = @($targets[0])
+        Invoke-U09ControllerScan @scan | Out-Null
+        $tracking.Value.State | Should -Be 'pending'
+        $scan.CopyTargets = $targets
+        Invoke-U09ControllerScan @scan | Out-Null
+        $tracking.Value.State | Should -Be 'complete'
+        Invoke-U09ControllerScan @scan | Out-Null
+        $tracking.Value.State | Should -Be 'complete' -Because 'the bound zero-tick baseline remains the request evidence'
+        $requests.Initial | Should -Be 1
     }
 }
 
@@ -355,13 +508,13 @@ Describe 'U09 Contentidentitaet und DP-Kopiergrenze' {
         } | Should -BeFalse
     }
 
-    It 'unterscheidet die leere Baseline von JSON-null und ungueltigen Leerformen' {
+    It 'akzeptiert keine leere oder ungueltige Abschluss-Baseline' {
         $successfulCopy = [pscustomobject]@{ State = 'known'; Targets = @(
             [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 1L }
         ) }
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $successfulCopy) -Body {
             param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeTrue
+        } | Should -BeFalse
         $noCopy = [pscustomobject]@{ State = 'known'; Targets = @() }
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $noCopy) -Body {
             param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
@@ -963,8 +1116,8 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
 
     It 'A14a behaelt erkannte Alt-Versionen und fuehrt im Cleanup-Zweig keine MECM-Loeschung aus' {
         $text = Get-Content -Path $script:Importer -Raw
-        $text | Should -Match 'Alt-Version bleibt erhalten'
-        $text | Should -Match 'Eigentums-, Referenz- und Ersatznachweis'
+        $text | Should -Match 'Altobjekt bleibt erhalten'
+        $text | Should -Match 'Eigentum, vollstaendige Referenzpruefung und vollstaendig verteilten Ersatz'
 
         $tokens = $null
         $errors = $null
@@ -974,10 +1127,12 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
             param($node)
             $node -is [System.Management.Automation.Language.IfStatementAst] -and
                 $node.Extent.Text -match 'removeOldVersion' -and
-                $node.Extent.Text -match 'Alt-Version bleibt erhalten'
+                $node.Extent.Text -match 'Altobjekt bleibt erhalten'
         }, $true) | Sort-Object { $_.Extent.Text.Length } | Select-Object -First 1)
         $cleanupIf.Count | Should -Be 1
         $cleanupIf[0].Extent.Text | Should -Not -Match 'Remove-CM(?:Application|ApplicationDeployment|DeviceCollection)'
+        $text | Should -Match "HashSet\[string\].*StringComparer\]::Ordinal"
+        $text | Should -Match 'removeOldVersion.*cleanupProducts\.Add\(\$appName\)'
     }
 
     It 'jeder erhaltene Settingname ist ein echter Installer-Parameter' {

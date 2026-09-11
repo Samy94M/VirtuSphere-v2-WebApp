@@ -85,6 +85,27 @@ See `docs/adr/README.md`. ADR-0001 through ADR-0013 are the initial decision bas
 
 ## 5. Integration Contracts
 
+- The autoimporter portal card separates run activity, last completed scan
+  result and distribution findings in `system_status_mecm_panels.php`.
+  Activity is neutral and describes only the received run event, never process
+  liveness or the severity of the previous result. Distribution findings carry
+  the last completion timestamp and are not live DP telemetry. Missing or
+  truncated causes never prove complete distribution; open items never become
+  DP counts or ratios. Configuration and cleanup findings stay with the scan
+  result. The existing machine report contract remains unchanged.
+
+- Autoimporter content admission and completion are separate: failed or pending
+  DP copies do not veto a changed source manifest. One acknowledged request is
+  issued per manifest; a bound pending request may be superseded by a new
+  manifest on the same exact targets. Unknown identities, unacknowledged
+  intents, target loss and removal states remain blocked. After a completed
+  request, additional current targets join the next request baseline.
+  Completion still requires the bound content ID and fresh successful copies on every previous
+  DP. The importer never removes offline DPs or automatically deletes old
+  applications. The owners are the content controller in
+  `mecm_autoimporter.ps1` and its shared evidence helpers in
+  `VirtuSphere-Common.ps1`.
+
 - Legacy status strings remain exact: `1/5 Initializing`, `2/5 Registered`, `3/5 Deployed`, `4/5 OS Installing`, `5/5 OS Installed`.
 - `updated=1` means MECM pickup eligibility; `mecm_updateid.php` clears it after registration.
 - Normal VM edit must preserve existing interface MACs and `mecm_id`; the explicit `Reset MECM ID` action clears `mecm_id`, sets `updated=1`, and requeues the VM as `deployed/pending`. It is also the ONE point at which a new rollout hostname takes effect (ADR-0043): no deploy mode activates one. What MECM receives is `mecm_rollout_hostname`, frozen at the first binding, never `vm_name` and never the live desired value.

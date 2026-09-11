@@ -332,6 +332,29 @@ Describe 'Get-VsSupersededNamePattern' {
 Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
     BeforeAll { . $script:MecmCommon }
 
+    It 'blocks numeric-equivalent source versions independently of input order' {
+        foreach ($versions in @(@('1', '1.0'), @('1.0', '1'))) {
+            $selection = @(Get-VsPackageSourceSelections -Packages @($versions | ForEach-Object { [pscustomobject]@{ ProjectName = 'Agent'; version = $_ } }))
+            $selection[0].State | Should -Be 'blocked'
+            $selection[0].Blockers | Should -Contain 'duplicate_version:1'
+        }
+    }
+
+    It 'does not flag supplied or newer versions as cleanup failures' {
+        $selection = @(Get-VsPackageSourceSelections -Packages @(
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '1' },
+            [pscustomobject]@{ ProjectName = 'Agent'; version = '2' }
+        ))
+        $names = @(Get-VsPackageRetainedNames -ProductName Agent -SourceVersions @('2') -Selections $selection -Names @('Agent-1', 'Agent-2', 'Agent-3', 'Agent-0.9', 'Other-0.8'))
+        $names.Count | Should -Be 1
+        $names[0] | Should -Be 'Agent-0.9'
+    }
+
+    It 'keeps an unsupported old version explicit without guessing its order' {
+        $selection = @(Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))
+        @(Get-VsPackageRetainedNames -ProductName Agent -SourceVersions @('2') -Selections $selection -Names @('Agent-0.1b')) | Should -Contain 'Agent-0.1b'
+    }
+
     It 'ordnet numerische Segmente statt lexikalisch oder ueber begrenzte Integer' {
         (Compare-VsPackageVersion -Left '1.9' -Right '1.10') | Should -Be -1
         (Compare-VsPackageVersion -Left '2' -Right '10') | Should -Be -1
@@ -479,6 +502,22 @@ Describe 'Read-VsPackageConfig' {
         # Basisnamen 'Firefox-ESR'. Das ist gueltig und muss durchgehen.
         $dir = New-PackageFolder -Name 'firefox-esr' -Json '{"ProjectName":"Firefox-ESR","version":"115"}'
         (Read-Config -Folder $dir).ProjectName | Should -Be 'Firefox-ESR'
+    }
+
+    It 'rejects invalid JSON types or ambiguous names: <why>' -ForEach @(
+        @{ why = 'numeric version'; json = '{"ProjectName":"Agent","version":0.2}' },
+        @{ why = 'array version'; json = '{"ProjectName":"Agent","version":["0.2"]}' },
+        @{ why = 'object name'; json = '{"ProjectName":{},"version":"0.2"}' },
+        @{ why = 'wildcard name'; json = '{"ProjectName":"Agent*","version":"0.2"}' },
+        @{ why = 'version whitespace'; json = '{"ProjectName":"Agent","version":" 0.2"}' }
+    ) {
+        $dir = New-PackageFolder -Name ([guid]::NewGuid().ToString('N')) -Json $json
+        Read-Config -Folder $dir | Should -BeNullOrEmpty
+    }
+
+    It 'preserves supported legacy letter versions without inventing a cleanup order' {
+        $dir = New-PackageFolder -Name 'legacy-letter' -Json '{"ProjectName":"Agent-FINAL","version":"0.1b"}'
+        (Read-Config -Folder $dir).version | Should -Be '0.1b'
     }
 
     It 'weist eine version mit Bindestrich ab' {

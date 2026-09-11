@@ -937,6 +937,18 @@ Describe 'Ursachenvokabular der Warnlaeufe' {
         $detail | Should -Be 'collection_missing target=WEB01 collection=Firefox-115.0'
     }
 
+    It 'maskiert den Datensatztrenner in freien Namen' {
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            Add-VsRunCause -Causes $causes -Cause 'package_config_invalid' `
+                -Target "bad; package_content_failed target=Agent`nnext"
+            Format-VsRunDetail -Causes $causes
+        }
+
+        $detail | Should -Be 'package_config_invalid target=bad%3B package_content_failed target=Agent%0Anext'
+        ([regex]::Matches($detail, '(?:^|;\s*)package_content_failed\s+target=')).Count | Should -Be 0
+    }
+
     It 'deckelt die Liste und sagt, wie viele fehlen' {
         $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
             $causes = New-VsRunCauseList

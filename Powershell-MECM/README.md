@@ -160,9 +160,15 @@ Installers ohne den jeweiligen Parameter behält den eingestellten Wert.
 Die drei Sync-Aufgaben melden je Lauf einen **Ergebnisbericht** an
 `mecm_report.php?action=reportRun`: `started` vor der Arbeit, `completed` im
 `finally` mit Ergebnis (`ok`/`warning`/`fail`/`unknown`) und quellenspezifischen
-Zählern. Die Site-Health-Aufgabe sendet nur `completed`. Ein toter Task erscheint
-im *Systemstatus* als „Ausgefallen"; ein Alt-Skript, das nur `Send-VsHeartbeat`
-sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt". `Send-VsHeartbeat`
+Zählern. Die Site-Health-Aufgabe sendet nur `completed`. Der Systemstatus kann
+aus diesen Meldungen keinen laufenden oder gestoppten Prozess direkt beweisen.
+Die Autoimporter-Karte trennt den neutralen Laufzustand vom letzten Scanergebnis
+und den Verteilhinweisen dieses Abschlusses. Dauer und Zähler bleiben dem
+abgeschlossenen Scan zugeordnet. Ohne vollständige DP-Zahlen pro Paket zeigt
+das Portal keine DP-Quote; fehlende oder gekürzte Hinweise bestätigen keinen
+Verteilerfolg. Details erklärt die Hilfe auf der Systemstatus-Seite.
+Ein Alt-Skript, das nur `Send-VsHeartbeat` sendet, liefert keinen belegten
+Laufzustand oder Abschluss. `Send-VsHeartbeat`
 bleibt für Rückwärtskompatibilität erhalten, wird von den aktuellen Skripten aber
 nicht mehr genutzt.
 
@@ -367,6 +373,16 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   ausgefilterten temporären Dateien. Auch geänderte Nutzlast unter derselben
   Version löst deshalb einen Abgleich aus; reguläre Paketänderungen sollen
   weiterhin eine neue `version` erhalten.
+- **Neue Quelle bei offenen DPs:** Ein Fehler oder eine laufende Kopie auf
+  einzelnen DPs blockiert kein neues Inhaltsmanifest. Pro Manifest wird genau
+  ein bestätigter Updateaufruf gespeichert. Ein neuer Quellstand darf einen
+  bestätigten, an seine Content-ID gebundenen offenen Auftrag ersetzen; der alte
+  Stand wird dabei nicht als vollständig verteilt markiert. Ein unverändertes
+  Manifest löst keine automatische Redistribution pro Scan aus. Alle bisherigen
+  DP-Ziele bleiben erhalten. Fehlende Ziele, widersprüchliche Zielzahlen,
+  Löschzustände und unbekannte Identitäten blockieren weiterhin. Nach einem
+  abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die Baseline
+  des nächsten Auftrags aufgenommen.
 - **Contentabschluss:** Der Auftrag bindet Application und Deployment Type
   an die konkrete Content-ID. Bei Updates muss eine neue Content-ID sichtbar
   werden; eine steigende Application-Packageversion wird nicht vorausgesetzt.
@@ -374,15 +390,22 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   Baseline neueren erfolgreichen Kopierstand melden. Unbestätigte Aufrufe,
   unbekannte Identitäten und beschädigte Trackingdaten erlauben keine blinde
   Wiederholung. Die tatsächliche Verteilung ist im MECM-Labor abzunehmen.
-- **Validierung:** kaputtes JSON, fehlende Pflichtfelder (`ProjectName`,
-  `version`) oder ein unbekanntes `InstallationBehaviorType` → Ordner wird
-  übersprungen und protokolliert.
+- **Validierung:** `ProjectName` und `version` sind nichtleere JSON-Zeichenketten,
+  keine Zahlen, Listen oder Objekte. Wildcards und Rand-Leerraum sind ungültig;
+  die Version enthält keinen Leerraum oder Bindestrich. Bindestriche im
+  Projektnamen sind erlaubt. Werte werden nie still normalisiert. Ungültiges
+  JSON oder `InstallationBehaviorType` wird ebenfalls protokolliert und
+  übersprungen. `"0.2"` ist gültig, `0.2` und `"0.1-final"` sind ungültig.
+  Bestehendes `"0.1b"` bleibt importierbar, aber nicht numerisch bereinigbar.
 - Je Paket (`Name-Version`):
   - **Alt-Versionen** (bei `removeOldVersion: "true"`): werden mit dem exakten
     Muster `^Name-<Version>$` erkannt, aber vom normalen Importlauf nicht
     gelöscht. Name und Ordner beweisen weder Eigentum noch Ersatzbereitschaft.
-    Der Lauf meldet deshalb `package_cleanup_failed` und hält den Stamp zurück,
-    bis ein gesonderter, sicherer Bereinigungsplan verfügbar ist.
+    Nur erhaltene Altobjekte außerhalb der weiterhin gelieferten Quellen
+    melden `package_cleanup_failed`; parallele Quellen und höhere Versionen
+    sind keine Löschkandidaten. Numerisch gleiche Quellen wie `1` und `1.0`
+    blockieren eine eindeutige Zielauswahl. Der Plan bleibt bei fehlendem
+    Eigentum, Referenzen oder unvollständiger Ersatzverteilung gesperrt.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
     Install-Kommando
     `powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "install.ps1"`

@@ -572,7 +572,7 @@ function Get-VsContentDistributionSnapshot {
         Write-Debug $_
         return [pscustomobject]@{ State = 'unknown'; SourceVersion = $null }
     }
-    if (@($status).Count -eq 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $null } }
+    if (@($status).Count -eq 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $null; TargetCount = 0 } }
 
     $targeted = 0
     $success = 0
@@ -603,15 +603,15 @@ function Get-VsContentDistributionSnapshot {
     }
     $uniformSourceVersion = if ($sourceVersions.Count -eq 1) { [int]@($sourceVersions.Keys)[0] } else { $null }
     if ($null -ne $ExpectedSourceVersion -and ($null -eq $uniformSourceVersion -or $uniformSourceVersion -ne $expected)) {
-        return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion }
+        return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion; TargetCount = $targeted }
     }
-    if ($distErrors -gt 0) { return [pscustomobject]@{ State = 'failed'; SourceVersion = $uniformSourceVersion } }
-    if ($sourceVersions.Count -gt 1) { return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $null } }
-    if ($targeted -le 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $uniformSourceVersion } }
     $classified = $success + $distErrors + $inProgress + $unknown
     if ($classified -gt $targeted) { return [pscustomobject]@{ State = 'unknown'; SourceVersion = $uniformSourceVersion } }
-    if ($success -eq $targeted -and $inProgress -eq 0 -and $unknown -eq 0) { return [pscustomobject]@{ State = 'succeeded'; SourceVersion = $uniformSourceVersion } }
-    return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion }
+    if ($distErrors -gt 0) { return [pscustomobject]@{ State = 'failed'; SourceVersion = $uniformSourceVersion; TargetCount = $targeted } }
+    if ($sourceVersions.Count -gt 1) { return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $null; TargetCount = $targeted } }
+    if ($targeted -le 0) { return [pscustomobject]@{ State = 'not_started'; SourceVersion = $uniformSourceVersion; TargetCount = 0 } }
+    if ($success -eq $targeted -and $inProgress -eq 0 -and $unknown -eq 0) { return [pscustomobject]@{ State = 'succeeded'; SourceVersion = $uniformSourceVersion; TargetCount = $targeted } }
+    return [pscustomobject]@{ State = 'in_progress'; SourceVersion = $uniformSourceVersion; TargetCount = $targeted }
 }
 
 function Get-VsContentDistributionState {
@@ -743,10 +743,14 @@ function Get-VsDistributionCopySnapshot {
 }
 
 function ConvertTo-VsDistributionBaselineJson {
-    param([Parameter(Mandatory)]$Snapshot)
+    param([Parameter(Mandatory)]$Snapshot, [switch]$ZeroCopyTicks)
     if ([string]$Snapshot.State -ne 'known') { throw 'Verteilkopie-Baseline ist nicht sicher lesbar.' }
     $baseline = @($Snapshot.Targets | Sort-Object SiteCode, ServerNalPath | ForEach-Object {
-        [ordered]@{ site_code = [string]$_.SiteCode; server_nal_path = [string]$_.ServerNalPath; last_copied_ticks = [long]$_.LastCopiedTicks }
+        [ordered]@{
+            site_code = [string]$_.SiteCode
+            server_nal_path = [string]$_.ServerNalPath
+            last_copied_ticks = if ($ZeroCopyTicks) { 0L } else { [long]$_.LastCopiedTicks }
+        }
     })
     $json = ConvertTo-Json -InputObject @($baseline) -Compress
     if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 32768) { throw 'Verteilkopie-Baseline ist zu gross.' }
@@ -762,13 +766,22 @@ function Test-VsDistributionCopyBaselineReady {
     $targets = @($Snapshot.Targets)
     if ($RequestKind -eq 'initial') { return $targets.Count -eq 0 }
     if ($targets.Count -eq 0) { return $false }
-    return @($targets | Where-Object { [int]$_.State -ne 0 -or [long]$_.LastCopiedTicks -le 0 }).Count -eq 0
+    # Install failures/retries and pending copies do not veto a new manifest.
+    # Removal states (4..6) belong to a conflicting operator action.
+    return @($targets | Where-Object { [int]$_.State -notin @(0, 1, 2, 3, 7, 8) -or [long]$_.LastCopiedTicks -lt 0 }).Count -eq 0
 }
 
 function Test-VsDistributionCopyAdvanced {
+    param([Parameter(Mandatory)][string]$BaselineJson, [Parameter(Mandatory)]$CurrentSnapshot)
+    return Test-VsDistributionCopyEvidence -BaselineJson $BaselineJson -CurrentSnapshot $CurrentSnapshot -Requirement complete
+}
+
+# One parser and exact target comparison for both request and completion gates.
+function Test-VsDistributionCopyEvidence {
     param(
         [Parameter(Mandatory)][string]$BaselineJson,
-        [Parameter(Mandatory)]$CurrentSnapshot
+        [Parameter(Mandatory)]$CurrentSnapshot,
+        [ValidateSet('targets', 'contains', 'complete')][string]$Requirement = 'complete'
     )
     if ([string]$CurrentSnapshot.State -ne 'known') { return $false }
     if ($BaselineJson -notmatch '^\s*\[.*\]\s*$') { return $false }
@@ -792,12 +805,11 @@ function Test-VsDistributionCopyAdvanced {
         if ($baseline.Count -eq 0) { return $false }
     }
     $current = @($CurrentSnapshot.Targets)
-    # Erstverteilung: Vorher existiert noch kein DP-Ziel. Danach muss mindestens
-    # ein wirklich installierter, erfolgreich kopierter Zielstand existieren.
-    if ($baseline.Count -eq 0) {
-        return $current.Count -gt 0 -and @($current | Where-Object { [int]$_.State -ne 0 -or [long]$_.LastCopiedTicks -le 0 }).Count -eq 0
-    }
-    if ($current.Count -ne $baseline.Count) { return $false }
+    # An empty baseline cannot prove which initial targets existed. New initial
+    # requests bind their first visible target set with zero copy ticks.
+    if ($baseline.Count -eq 0) { return $false }
+    if (($Requirement -eq 'contains' -and $current.Count -lt $baseline.Count) -or
+        ($Requirement -ne 'contains' -and $current.Count -ne $baseline.Count)) { return $false }
     $currentByPath = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
     foreach ($target in $current) {
         $path = [string]$target.ServerNalPath
@@ -819,7 +831,7 @@ function Test-VsDistributionCopyAdvanced {
             -not [long]::TryParse([string]$before.last_copied_ticks, [ref]$ticks) -or $ticks -lt 0 -or
             -not $baselineKeys.Add($key) -or -not $currentByPath.ContainsKey($key)) { return $false }
         $after = $currentByPath[$key]
-        if ([int]$after.State -ne 0 -or [long]$after.LastCopiedTicks -le $ticks) { return $false }
+        if ($Requirement -eq 'complete' -and ([int]$after.State -ne 0 -or [long]$after.LastCopiedTicks -le $ticks)) { return $false }
     }
     return $true
 }
@@ -1328,9 +1340,16 @@ function Add-VsRunCause {
     )
     if ($null -eq $Causes) { return }
 
+    # Format-VsRunDetail separates records with "; ". Escape that delimiter
+    # inside free MECM/source names so one name cannot manufacture another
+    # structured cause when the portal reads the bounded detail.
+    $escapeValue = {
+        param([string]$Value)
+        return $Value.Trim().Replace('%', '%25').Replace(';', '%3B').Replace("`r", '%0D').Replace("`n", '%0A')
+    }
     $parts = @($Cause)
-    if (-not [string]::IsNullOrWhiteSpace($Target)) { $parts += ('target={0}' -f $Target.Trim()) }
-    if (-not [string]::IsNullOrWhiteSpace($Collection)) { $parts += ('collection={0}' -f $Collection.Trim()) }
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { $parts += ('target={0}' -f (& $escapeValue $Target)) }
+    if (-not [string]::IsNullOrWhiteSpace($Collection)) { $parts += ('collection={0}' -f (& $escapeValue $Collection)) }
     $Causes.Add(($parts -join ' '))
 }
 
@@ -1719,15 +1738,21 @@ function Read-VsPackageConfig {
         Write-VsLog -Level WARN -Context $context -Message 'config.json ist leer - uebersprungen.'
         return $null
     }
-    if ([string]::IsNullOrWhiteSpace($cfg.ProjectName) -or [string]::IsNullOrWhiteSpace($cfg.version)) {
-        Write-VsLog -Level WARN -Context $context -Message 'config.json ohne ProjectName/version - uebersprungen.'
+    if ($cfg.ProjectName -isnot [string] -or $cfg.version -isnot [string] -or
+        [string]::IsNullOrWhiteSpace($cfg.ProjectName) -or [string]::IsNullOrWhiteSpace($cfg.version)) {
+        Write-VsLog -Level WARN -Context $context -Message 'ProjectName und version muessen nichtleere JSON-Zeichenketten sein; keine Zahl, Liste oder Objekt. Paket uebersprungen.'
+        return $null
+    }
+    if ($cfg.ProjectName -cne $cfg.ProjectName.Trim() -or $cfg.version -cne $cfg.version.Trim() -or
+        $cfg.ProjectName -match '[\r\n*?\[\]]' -or $cfg.version -match '[\s*?\[\]]') {
+        Write-VsLog -Level WARN -Context $context -Message 'ProjectName/version enthalten Rand-Leerraum, Steuerzeichen oder Wildcards; version darf keinen Leerraum enthalten. Werte werden nicht automatisch umbenannt.'
         return $null
     }
     # Der Katalog trennt "Name-Version" am LETZTEN Bindestrich (lib/repo/catalog.php).
     # Eine version mit Bindestrich (z.B. "1.0-beta") wuerde die Basisnamen-Gruppierung
     # fuer Retire/Relink verschieben, daher hier hart ablehnen.
     if ([string]$cfg.version -match '-') {
-        Write-VsLog -Level WARN -Context $context -Message ('version "{0}" enthaelt einen Bindestrich - nicht erlaubt (verschiebt die Katalog-Gruppierung). Uebersprungen.' -f $cfg.version)
+        Write-VsLog -Level WARN -Context $context -Message ('version "{0}" enthaelt einen Bindestrich. Bindestriche sind nur in ProjectName erlaubt; version z.B. "0.2". Eine neue Version ergibt einen neuen Anwendungsnamen. Paket uebersprungen.' -f $cfg.version)
         return $null
     }
     # InstallationBehaviorType: zwei getrennte Entscheidungen.
@@ -1832,7 +1857,10 @@ function Get-VsPackageSourceSelections {
         $items = $groups[$product].ToArray()
         $versions = @($items | ForEach-Object { [string]$_.version })
         $unsupported = @($versions | Where-Object { $null -eq (ConvertTo-VsPackageVersionParts -Version $_) })
-        $duplicates = @($versions | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
+        # Numeric equivalents (1, 1.0) must not pick a target by directory order.
+        $duplicates = @($versions | Group-Object {
+            if ($null -ne (ConvertTo-VsPackageVersionParts -Version $_)) { $_ -replace '(\.0)+$', '' } else { $_ }
+        } | Where-Object Count -gt 1 | ForEach-Object Name)
         if ($unsupported.Count -gt 0 -or $duplicates.Count -gt 0) {
             $result.Add([pscustomobject]@{
                 ProductName = $product; State = 'blocked'; TargetVersion = ''; TargetName = ''
@@ -1853,6 +1881,24 @@ function Get-VsPackageSourceSelections {
         })
     }
     return $result.ToArray()
+}
+
+# Retained objects are not automatically obsolete: never flag a supplied source,
+# the selected target or a higher version as a deletion candidate.
+function Get-VsPackageRetainedNames {
+    param([string]$ProductName, [array]$SourceVersions, [array]$Selections, [AllowEmptyCollection()][array]$Names)
+    $selection = if ($Selections.Count -eq 1) { $Selections[0] } else { $null }
+    $sources = if ($selection) { @($selection.SourceVersions) } else { @($SourceVersions) }
+    $prefix = $ProductName + '-'
+    foreach ($name in @($Names | Sort-Object -Unique)) {
+        if (-not ([string]$name).StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+        $version = ([string]$name).Substring($prefix.Length)
+        if ($sources -ccontains $version) { continue }
+        if ($selection -and $selection.State -eq 'ready' -and $null -ne (ConvertTo-VsPackageVersionParts -Version $version)) {
+            if ((Compare-VsPackageVersion -Left $version -Right $selection.TargetVersion) -ge 0) { continue }
+        }
+        $name
+    }
 }
 
 function Get-VsPackageRetirementPlan {

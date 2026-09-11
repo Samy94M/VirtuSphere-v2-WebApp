@@ -582,7 +582,7 @@ der Sync-Aufgaben) und der MECM-Site-Status sind getrennt zu lesen.
 
 | Beobachtung | Bedeutung | Maßnahme |
 |---|---|---|
-| Integration rot/stale, Site-Status grün | MECM läuft, aber ein Sync-Reporter meldet nicht (Task tot oder Bericht abgelehnt) | Aufgabenplanung prüfen und die benannte Aufgabe starten; lokales Tageslog der Aufgabe lesen |
+| Integration rot/stale, Site-Status grün | MECM läuft, aber die Meldung eines Sync-Reporters ist stark überfällig oder wurde abgelehnt; daraus folgt allein kein Prozesszustand | Lokales Tageslog lesen; fehlen neue Einträge, Aufgabenplanung prüfen und die benannte Aufgabe starten |
 | Integration grün, Site-Status gelb | Datenfluss ok, MECM meldet eine Warnung (Status 1) | MECM-Konsole → Monitoring → System Status |
 | Integration grün, Site-Status rot | Datenfluss ok, MECM meldet Status 2 (kritisch) | MECM-Konsole → Monitoring → System Status; das ist ein MECM-Problem, kein VirtuSphere-Problem |
 | Site-Status grau (unbekannt) | Providerfehler (nicht erreichbar oder Zugriff verweigert), **nicht** „MECM kritisch" | Providername und SYSTEM-Berechtigung prüfen (Remote-Provider siehe unten); ein „nicht erreichbar" nach MECM-Reboot löst sich von selbst |
@@ -840,9 +840,10 @@ Wichtige Härtungen gegenüber den Altskripten:
   `mission`-Objekt aus `getDeviceList` statt N+1 `getMissionName`.
 - Die drei Sync-Aufgaben senden je Lauf einen **Ergebnisbericht** (`started`
   vor der Arbeit, `completed` mit `ok`/`warning`/`fail`/`unknown` im `finally`);
-  die Site-Health-Aufgabe meldet nur `completed`. Ein toter Task wird im Portal im
-  *Systemstatus* stale/rot; ein Alt-Skript, das nur Heartbeats sendet, erscheint
-  gelb als „Legacy: Ergebnis nicht bestätigt".
+  die Site-Health-Aufgabe meldet nur `completed`. Eine stark überfällige Meldung
+  wird im *Systemstatus* stale/rot, beweist aber allein keinen gestoppten Prozess.
+  Das lokale Tageslog zeigt den Fortschritt. Ein Alt-Skript, das nur Heartbeats
+  sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt".
 
 **Task neu starten** (MECM-Server): Aufgabenplanung öffnen → Task unter
 `\` auswählen → *Ausführen*. Oder per PowerShell:
@@ -1053,6 +1054,62 @@ Unbestätigte oder beschädigte Trackingdaten brauchen manuelle Klärung. Diese
 Contentpflege läuft unabhängig von `generateOwnDeviceColletion`; eine eigene
 Collection ist keine Voraussetzung für eine aktuelle Paketquelle.
 
+**Offline-DPs und neue Quellstände.** Auftragsannahme und vollständiger
+Verteilnachweis sind ab `autoimporter/2.1` getrennt. Die Skriptversion in der
+Portalzeile bestätigt nach dem Upgrade, dass die neue Generation meldet.
+Vier erfolgreiche und zwei fehlerhafte DPs
+verhindern keinen neuen Updateaufruf für ein geändertes Manifest. Die zwei DPs
+bleiben Ziele; der Importer entfernt sie nicht und meldet nicht alle sechs als
+erfolgreich. Bei unverändertem Manifest wird der bestätigte Auftrag nur
+beobachtet, nicht jede Minute neu gestartet. Ein weiterer Quellstand darf
+einen an seine Content-ID gebundenen offenen Auftrag ersetzen. Unbestätigte
+Intents, fremde Identitätswechsel, fehlende oder ersetzte Ziele,
+widersprüchliche Zielzahlen und DP-Löschzustände bleiben gesperrt.
+Nach einem abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die
+Baseline des nächsten Auftrags aufgenommen; der Verlust eines bisherigen Ziels
+bleibt gesperrt.
+Die Anforderungskriterien gehören zu `Test-VsDistributionCopyBaselineReady`,
+die gemeinsame Zielprüfung zu `Test-VsDistributionCopyEvidence`; der
+Controller in `mecm_autoimporter.ps1` entscheidet einmal pro Manifest.
+Der Abschluss bleibt an vollständig erfolgreiche Aggregatzähler und neuere
+Kopien aller bisherigen Ziele gebunden. MECM verwaltet die ausstehenden
+Kopien; falls seine Wiederholungen erschöpft sind, ist der konkrete
+Verteilfehler nach Wiederkehr des DPs in der MECM-Konsole zu prüfen.
+
+**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise beziehen sich auf den angezeigten letzten Abschluss, nicht auf den offenen Lauf. Der bestehende Bericht liefert keine vollständigen DP-Zahlen je Paket. Fehlende oder gekürzte Ursachen sind kein Erfolgsnachweis; offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben.
+
+**Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
+Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und
+Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
+Ein langer SHA-256-Dateiscan kann die Meldefrist überschreiten.
+„Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
+Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
+kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
+Ampellabels „Ausgefallen“ und „Verzögert“ bleiben aus Kompatibilitätsgründen
+erhalten; die Legende grenzt ihre Aussage auf Bericht und Laufergebnis ein.
+
+**Versionen und erhaltene Altobjekte.** Namen und Versionen sind
+JSON-Zeichenketten; Bindestriche gehören nur in `ProjectName`.
+Eine Versionsänderung erzeugt einen anderen Anwendungsnamen und wird nie
+automatisch vorgenommen. Buchstabenversionen ohne Bindestrich bleiben
+importierbar, die Bereinigungsplanung verlangt kanonische Zahlen mit Punkten.
+`1` und `1.0` sind numerisch gleich und kein eindeutiger Zielstand.
+Weiterhin gelieferte Quellversionen und höhere vorhandene Versionen werden
+nicht als Altobjekt zur Bereinigung gemeldet. Tatsächliche Altobjekte bleiben
+bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten;
+Offline-DPs können diesen Ersatznachweis offenhalten, ohne neue Inhalte zu
+blockieren. Der Importlauf entfernt keine Altobjekte.
+
+**Abnahme im MECM-Labor:** Bei sechs bestehenden Zielen zwei DPs offline
+lassen, eine Datei ändern und genau einen Updateaufruf nachweisen.
+Unverändert erneut scannen: kein weiterer Aufruf. Vor vollständiger
+Verteilung erneut ändern: neuer bestätigter Auftrag mit neuer Content-ID,
+kein falscher Abschluss des alten. Beide DPs zurückbringen und die
+Verteilung sowie die neueren Kopierzeiten aller sechs Ziele kontrollieren.
+Ein verschwundenes Ziel, eine externe Content-ID oder ein unbestätigter
+Aufruf muss weiterhin blockieren. Lokale Fixtures ersetzen diese Abnahme
+der realen Provider- und DP-Wirkung nicht.
+
 Alte Trackingdatensätze ohne den neuen Identitäts- und Kopiervertrag bleiben
 auch mit dem früheren Zustand `complete` zur manuellen Prüfung gesperrt. Sie
 belegen keine historische Content-ID und werden nicht automatisch auf das
@@ -1073,7 +1130,7 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
 | Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
-| Content-Verteilung scheitert oder bleibt unbekannt | Application-/DT-Contentidentität, vollständig erfolgreiche Aggregatzähler und der neuere Kopiernachweis jedes bisherigen DP-Ziels müssen zusammenpassen. Die Package-`SourceVersion` dient als Diagnose, ihr Anstieg ist kein Application-Abschlusskriterium. Unbekannte Identität oder Providerevidenz blockiert; Fehler werden nicht blind neu verteilt. | WARN mit Paket/Ursachencode |
+| Content-Verteilung bleibt offen oder einzelne DPs melden Fehler | Neue Manifeste dürfen einmal angefordert werden; gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität, Zielverlust und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag, WARN mit Paket/Ursachencode beim offenen Nachweis |
 | Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
 | `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry, kein offener Punkt | WARN |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
