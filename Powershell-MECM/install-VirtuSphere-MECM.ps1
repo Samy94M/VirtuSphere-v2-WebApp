@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Erstinstallation der VirtuSphere-MECM-Integration auf dem MECM-Server.
+    Installiert oder aktualisiert die VirtuSphere-MECM-Integration.
 
 .DESCRIPTION
     Schreibt die Konfiguration in die Registry, legt Verzeichnisse an,
@@ -20,6 +20,15 @@
     Idempotent: erneutes Ausfuehren aktualisiert Konfiguration und Skripte; die
     vier Intervalle behalten dabei ihren eingestellten Wert, wenn der jeweilige
     Parameter nicht angegeben wird (siehe .NOTES).
+
+    Fuer ein reines Update liest -Upgrade alle vorhandenen Werte aus der
+    Registry, fragt keinen Rueckkanal-Token ab und akzeptiert keine
+    Konfigurationsparameter. Dadurch besteht der normale Updateaufruf nur aus
+    einem Schalter.
+
+.PARAMETER Upgrade
+    Aktualisiert Skripte, Paketvorlage und Aufgaben mit der vollstaendigen
+    vorhandenen Registry-Konfiguration. Nur fuer eine bestehende Installation.
 
 .PARAMETER WebApi
     Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
@@ -65,34 +74,38 @@
     .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
         -PackagesShare \\MECM-01\VirtuSphere\Packages\files
 
+.EXAMPLE
+    .\install-VirtuSphere-MECM.ps1 -Upgrade
+
 .NOTES
     Die vier Intervalle behalten bei einem Re-Run ohne den jeweiligen Parameter
     ihren eingestellten Wert (wie -ProviderMachine). Ein Skript-Update setzt
     einen bewusst getunten Takt also nicht auf den Standard zurueck.
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Install')]
 param(
-    [Parameter(Mandatory)][string]$WebApi,
-    [ValidateSet('http', 'https')][string]$Scheme = 'http',
+    [Parameter(Mandatory, ParameterSetName = 'Upgrade')][switch]$Upgrade,
+    [Parameter(Mandatory, ParameterSetName = 'Install')][string]$WebApi,
+    [Parameter(ParameterSetName = 'Install')][ValidateSet('http', 'https')][string]$Scheme = 'http',
     # SHA-1-Fingerabdruck des Portal-Zertifikats, ohne Trennzeichen (so wie
     # certlm.msc ihn anzeigt). Nur mit -Scheme https sinnvoll und dann der EINZIGE
     # vorgesehene Weg, einem selbstsignierten Zertifikat zu vertrauen: hinterlegt
     # statt Pruefung abgeschaltet. Leer lassen, wenn das Zertifikat aus einer PKI
     # kommt, der dieser Server schon vertraut.
-    [ValidatePattern('^([0-9A-Fa-f]{40})?$')][string]$CertThumbprint = '',
-    [string]$PackagesRoot = 'D:\VirtuSphere\Packages',
-    [Parameter(Mandatory)][string]$PackagesShare,
-    [string]$ReportToken = '',
-    [string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
+    [Parameter(ParameterSetName = 'Install')][ValidatePattern('^([0-9A-Fa-f]{40})?$')][string]$CertThumbprint = '',
+    [Parameter(ParameterSetName = 'Install')][string]$PackagesRoot = 'D:\VirtuSphere\Packages',
+    [Parameter(Mandatory, ParameterSetName = 'Install')][string]$PackagesShare,
+    [Parameter(ParameterSetName = 'Install')][string]$ReportToken = '',
+    [Parameter(ParameterSetName = 'Install')][string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
     # Die Spannen spiegeln $script:VsIntervalBounds in mecm\VirtuSphere-Common.ps1
     # (Untergrenze je Aufgabe, Obergrenze aus dem Wire-Contract). Hier abzulehnen
     # statt spaeter still zu klemmen: sonst laeuft die Aufgabe in einem anderen
     # Takt als dem, den der Administrator gesetzt und die Statusseite zeigt.
-    [ValidateRange(5, 3600)][int]$DeviceSyncIntervalSeconds = 10,
-    [ValidateRange(10, 3600)][int]$PackagesSyncIntervalSeconds = 60,
-    [ValidateRange(30, 3600)][int]$ImporterIntervalSeconds = 60,
-    [string]$ProviderMachine = '',
-    [ValidateRange(60, 3600)][int]$SiteHealthIntervalSeconds = 300
+    [Parameter(ParameterSetName = 'Install')][ValidateRange(5, 3600)][int]$DeviceSyncIntervalSeconds = 10,
+    [Parameter(ParameterSetName = 'Install')][ValidateRange(10, 3600)][int]$PackagesSyncIntervalSeconds = 60,
+    [Parameter(ParameterSetName = 'Install')][ValidateRange(30, 3600)][int]$ImporterIntervalSeconds = 60,
+    [Parameter(ParameterSetName = 'Install')][string]$ProviderMachine = '',
+    [Parameter(ParameterSetName = 'Install')][ValidateRange(60, 3600)][int]$SiteHealthIntervalSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -224,6 +237,9 @@ $existingConfig = if (Test-Path $registryPath) {
 } else {
     $null
 }
+if ($Upgrade -and -not $existingConfig) {
+    throw 'Upgrade nicht moeglich: Es ist keine vorhandene VirtuSphere-MECM-Registry-Konfiguration installiert.'
+}
 
 function Get-VsExistingInstallerValue {
     param([Parameter(Mandatory)][string]$Name)
@@ -232,12 +248,6 @@ function Get-VsExistingInstallerValue {
     }
     return $null
 }
-
-# --- WebApi normalisieren (host:port, kein Schema/Pfad) ---------------------
-$WebApi = Convert-VsWebApi $WebApi
-$webApiHost = ($WebApi -split ':', 2)[0]
-$ipRef = [System.Net.IPAddress]::Any
-$webApiIsIp = [System.Net.IPAddress]::TryParse($webApiHost, [ref]$ipRef)
 
 # --- Rueckkanal-Token -------------------------------------------------------
 # Bestehenden Token lesen, BEVOR irgendetwas geschrieben wird: ein Re-Run ohne
@@ -254,7 +264,10 @@ $reportTokenInteractiveValue = $null
 #
 # Auf $PSBoundParameters, nicht auf den Wert: `-ReportToken ''` fiel sonst in
 # die Abfrage, obwohl der Aufrufer den Parameter ausdruecklich genannt hat.
-if (-not $PSBoundParameters.ContainsKey('ReportToken')) {
+if ($Upgrade) {
+    # Der Upgrade-Parametersatz besitzt ReportToken absichtlich nicht. Der
+    # bestehende Wert wird unten unveraendert aufgeloest.
+} elseif (-not $PSBoundParameters.ContainsKey('ReportToken')) {
     if ([Environment]::UserInteractive) {
         $reportTokenPrompted = $true
         $tokenPrompt = if ($tokenExists) { 'Rueckkanal-Token (leer lassen = bestehenden behalten)' } else { 'Rueckkanal-Token (im Portal generiert, leer lassen fuer ohne Token)' }
@@ -286,9 +299,11 @@ if ($tokenResolution.Source -eq 'kept') {
 # Resolve every remaining optional value through the same owner. Explicitly
 # empty ProviderMachine now means remove the override; omission keeps it.
 $textSettingMap = @{
+    WebApi         = 'VirtuSphere_WebAPI'
     Scheme         = 'Scheme'
     CertThumbprint = 'CertThumbprint'
     PackagesRoot   = 'PackagesRoot'
+    PackagesShare  = 'PackagesShare'
     DpGroupName    = 'DpGroupName'
     ProviderMachine = 'MECM_ProviderMachine'
 }
@@ -310,6 +325,21 @@ foreach ($parameterName in $textSettingMap.Keys) {
 }
 if ($configurationSources['MECM_ProviderMachine'] -eq 'kept') {
     Write-Ok 'Bestehenden SMS-Provider-Rechner behalten (Parameter nicht angegeben).'
+}
+if ([string]::IsNullOrWhiteSpace($WebApi)) {
+    throw 'WebApi fehlt: bei der Erstinstallation angeben; beim Upgrade muss VirtuSphere_WebAPI in der Registry vorhanden sein.'
+}
+if ([string]::IsNullOrWhiteSpace($PackagesShare)) {
+    throw 'PackagesShare fehlt: bei der Erstinstallation angeben; beim Upgrade muss PackagesShare in der Registry vorhanden sein.'
+}
+
+# --- WebApi normalisieren (host:port, kein Schema/Pfad) ---------------------
+$WebApi = Convert-VsWebApi $WebApi
+$webApiHost = ($WebApi -split ':', 2)[0]
+$ipRef = [System.Net.IPAddress]::Any
+$webApiIsIp = [System.Net.IPAddress]::TryParse($webApiHost, [ref]$ipRef)
+if ($Upgrade) {
+    Write-Ok 'Upgrade verwendet die vorhandene Registry-Konfiguration ohne interaktive Eingabe.'
 }
 
 $intervalBounds = @{

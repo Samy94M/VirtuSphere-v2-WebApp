@@ -69,6 +69,29 @@ Skripte. Die vier Intervalle und `MECM_ProviderMachine` behalten dabei ihren
 eingestellten Wert, wenn der jeweilige Parameter nicht angegeben wird; ein
 Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 
+## Update einer vorhandenen MECM-Installation
+
+Einen neuen, zusammengehörigen `Powershell-MECM`-Quellstand in ein frisches
+Stagingverzeichnis entpacken und in dessen Wurzel als Administrator ausführen:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade
+```
+
+Der Upgrade-Modus übernimmt WebAPI, Schema, Zertifikatfingerabdruck,
+Paketwurzel/-freigabe, DP-Gruppe, Provider, Rückkanal-Token und alle vier
+Intervalle aus `HKLM:\SOFTWARE\VirtuSphere\MECM`. Er fragt keinen Token ab und
+akzeptiert aufgrund seines eigenen Parametersatzes keine
+Konfigurationsänderungen. Fehlt die vorhandene Registry-Konfiguration oder einer
+der beiden Pflichtwerte `VirtuSphere_WebAPI`/`PackagesShare`, bricht er vor der
+Transaktion ab. Eine beabsichtigte Konfigurationsänderung verwendet weiterhin
+den normalen Erstinstallations-/Re-Run-Aufruf mit `-WebApi` und
+`-PackagesShare`.
+
+Der gleiche Mutex-, Staging-, Hash-, Aufgabenstopp-, Verifikations- und
+Rollbackpfad bleibt aktiv. Ein erfolgreiches Update endet mit Exit-Code 0; die
+Tageslogs liegen unter `%ProgramFiles%\VirtuSphere\Logs`.
+
 **Ergebnis beider Installer.** Sie unterscheiden zwei Klassen von Meldung. Ein
 **Blocker** (`!!`) heißt, dass die Gesamtabnahme des Laufs fehlgeschlagen ist. Er
 besagt nicht pauschal, dass vorher keinerlei lokale oder MECM-seitige Änderung

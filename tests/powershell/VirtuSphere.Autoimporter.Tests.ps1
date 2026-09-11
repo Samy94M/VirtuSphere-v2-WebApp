@@ -829,6 +829,34 @@ Describe 'Installer U09: Package_Vorlage teilt Stage-, Hash- und Rollbackgrenze'
 }
 
 Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert' {
+    It 'bietet einen parameterfreien und nichtinteraktiven Upgrade-Modus fuer eine bestehende Konfiguration' {
+        $script:InstallerText | Should -Match 'CmdletBinding\(DefaultParameterSetName = ''Install''\)'
+        $script:InstallerText | Should -Match 'Parameter\(Mandatory, ParameterSetName = ''Upgrade''\)\]\[switch\]\$Upgrade'
+        $script:InstallerText | Should -Match 'Parameter\(Mandatory, ParameterSetName = ''Install''\)\]\[string\]\$WebApi'
+        $script:InstallerText | Should -Match 'Parameter\(Mandatory, ParameterSetName = ''Install''\)\]\[string\]\$PackagesShare'
+        $script:InstallerText | Should -Match 'if \(\$Upgrade\) \{'
+        $script:InstallerText | Should -Match '} elseif \(-not \$PSBoundParameters\.ContainsKey\(''ReportToken''\)\) \{'
+        $script:InstallerText | Should -Match 'WebApi\s*=\s*''VirtuSphere_WebAPI'''
+        $script:InstallerText | Should -Match 'PackagesShare\s*=\s*''PackagesShare'''
+        $script:InstallerText | Should -Match 'Upgrade verwendet die vorhandene Registry-Konfiguration ohne interaktive Eingabe'
+    }
+
+    It 'trennt Upgrade und Konfigurationsparameter in den echten PowerShell-Parametersaetzen' {
+        $command = Get-Command -Name $script:Installer -ErrorAction Stop
+        $installSet = @($command.ParameterSets | Where-Object Name -eq 'Install')
+        $upgradeSet = @($command.ParameterSets | Where-Object Name -eq 'Upgrade')
+
+        $installSet.Count | Should -Be 1
+        $upgradeSet.Count | Should -Be 1
+        $installSet[0].IsDefault | Should -BeTrue
+        @($installSet[0].Parameters.Name) | Should -Contain 'WebApi'
+        @($installSet[0].Parameters.Name) | Should -Contain 'PackagesShare'
+        @($upgradeSet[0].Parameters.Name) | Should -Contain 'Upgrade'
+        @($upgradeSet[0].Parameters.Name) | Should -Not -Contain 'WebApi'
+        @($upgradeSet[0].Parameters.Name) | Should -Not -Contain 'PackagesShare'
+        @($upgradeSet[0].Parameters.Name) | Should -Not -Contain 'ReportToken'
+    }
+
     BeforeAll {
         $script:InstallerAst = Get-Ast -Path $script:Installer
 
@@ -866,8 +894,6 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         # Werte, die einen Re-Run bewusst NICHT ueberleben muessen, jeder mit dem
         # Grund. Zwei Tests lesen diese Liste, in beide Richtungen.
         $script:ReRunExempt = @{
-            'VirtuSphere_WebAPI'   = 'Pflichtparameter, wird bei jedem Lauf angegeben'
-            'PackagesShare'        = 'Pflichtparameter, wird bei jedem Lauf angegeben'
             'LogRoot'              = 'aus PackagesRoot abgeleitet, kein eigener Parameter'
             'MECM_SiteCode'        = 'wird erkannt, nicht eingestellt'
             'MECM_ProviderMachine' = 'hat seine eigene Erhaltung vor der Tabelle'
@@ -892,13 +918,21 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         # in den Read-Host, obwohl der Aufrufer den Parameter genannt hat.
         # Hier die Bedingung selbst filtern: das innerste if um den Read-Host
         # ist [Environment]::UserInteractive und beantwortet eine andere Frage.
-        $prompt = @($script:InstallerAst.FindAll({
+        $promptConditions = @($script:InstallerAst.FindAll({
             param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
                       $n.Extent.Text -match 'Read-Host' -and
-                      $n.Clauses[0].Item1.Extent.Text -match 'ReportToken'
-        }, $true))
-        $prompt.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $prompt[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+                      @($n.Clauses | Where-Object {
+                          $_.Item1.Extent.Text -match 'PSBoundParameters' -and
+                          $_.Item1.Extent.Text -match 'ReportToken'
+                      }).Count -gt 0
+        }, $true) | ForEach-Object {
+            $_.Clauses | Where-Object {
+                $_.Item1.Extent.Text -match 'PSBoundParameters' -and
+                $_.Item1.Extent.Text -match 'ReportToken'
+            } | ForEach-Object { $_.Item1.Extent.Text }
+        })
+        $promptConditions.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $promptConditions[0] | Should -Match 'PSBoundParameters'
     }
 
     It 'die Loeschung des Tokens steht im Log' {

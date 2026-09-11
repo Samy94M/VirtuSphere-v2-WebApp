@@ -199,6 +199,32 @@ behalten, mit ausdruecklichem `-ProviderMachine ''` den Override entfernen und
 wieder die Laufzeiterkennung verwenden. Der Installer loest diese Werte vor
 seiner ersten Konfigurationsschreiboperation genau einmal auf.
 
+### 4a. Künftige Updates mit vorhandener Konfiguration
+
+Den neuen, zusammengehörigen `Powershell-MECM`-Baum in ein frisches
+Stagingverzeichnis entpacken. Aus dessen Wurzel genügt in einer administrativen
+PowerShell:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade
+```
+
+`-Upgrade` übernimmt WebAPI, Schema, Zertifikatfingerabdruck, Paketpfade,
+DP-Gruppe, Provider, Rückkanal-Token und Intervalle vollständig aus
+`HKLM:\SOFTWARE\VirtuSphere\MECM`. Es gibt keine Tokenabfrage und keine lange
+Parameterkette. Der getrennte Parametersatz verhindert, dass ein vermeintlich
+reines Update nebenbei Konfigurationswerte überschreibt. Ohne vorhandene
+Registry-Konfiguration oder ohne `VirtuSphere_WebAPI` beziehungsweise
+`PackagesShare` bricht der Lauf vor seiner Transaktion ab.
+
+Die Quelle nicht über einen alten entpackten Baum kopieren. Commitgebundene ZIP
+oder verifiziertes Offline-Bundle in ein neues Verzeichnis entpacken, danach den
+Installer direkt aus diesem Verzeichnis starten. Der bestehende transaktionale
+Pfad staged und hasht den vollständigen Serverdateisatz und die Paketvorlage,
+stoppt die vier Aufgaben, aktiviert den neuen Stand und rollt bei einem Fehler
+auf Registry, Dateien, Vorlage und Aufgaben zurück. Exit-Code 0 plus laufende
+Aufgaben und frische Tageslogs bilden den Abschlussnachweis.
+
 Anschließend prüfen:
 
 ```powershell
