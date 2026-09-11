@@ -427,18 +427,61 @@ function New-VsRegistryRollbackSnapshot {
     }
     $key = Get-Item -LiteralPath $Path -ErrorAction Stop
     $values = New-Object System.Collections.Generic.List[object]
-    foreach ($name in @($key.GetValueNames())) {
-        [void]$values.Add([pscustomobject]@{
-            Name = [string]$name
-            Value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-            Kind = [string]$key.GetValueKind($name)
-        })
+    try {
+        foreach ($name in @($key.GetValueNames())) {
+            [void]$values.Add([pscustomobject]@{
+                Name = [string]$name
+                Value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                Kind = [string]$key.GetValueKind($name)
+            })
+        }
+        # Der Registry-Provider kann Get-Acl trotz eines unmittelbar zuvor
+        # erfolgreich geoeffneten Schluessels mit ItemNotFoundException
+        # beantworten. Das bereits geoeffnete RegistryKey ist die belastbare
+        # Quelle fuer denselben Security Descriptor.
+        $acl = $key.GetAccessControl()
+    } finally {
+        $key.Close()
     }
     # `@($genericList)` trifft in Windows PowerShell 5.1 den fehlerhaften
     # PSEnumerableBinder ("Die Argumenttypen stimmen nicht ueberein"). Der
     # Installer laeuft genau dort und muss den Snapshot deshalb ueber die
     # typsichere List<T>-API materialisieren.
-    return [pscustomobject]@{ Existed = $true; Values = $values.ToArray(); Acl = (Get-Acl -LiteralPath $Path -ErrorAction Stop) }
+    return [pscustomobject]@{ Existed = $true; Values = $values.ToArray(); Acl = $acl }
+}
+
+function Set-VsRegistrySecurityDescriptor {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][System.Security.AccessControl.RegistrySecurity]$Acl
+    )
+    $prefix = 'HKLM:\'
+    if (-not $Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Registry-ACL-Pfad liegt nicht unter HKLM: {0}" -f $Path)
+    }
+    $subKeyPath = $Path.Substring($prefix.Length)
+    if ([string]::IsNullOrWhiteSpace($subKeyPath)) {
+        throw 'Registry-ACL-Pfad darf nicht auf den HKLM-Wurzelknoten zeigen.'
+    }
+
+    $baseKey = $null
+    $key = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Default)
+        $rights = [System.Security.AccessControl.RegistryRights]::ReadPermissions -bor
+            [System.Security.AccessControl.RegistryRights]::ChangePermissions
+        $key = $baseKey.OpenSubKey(
+            $subKeyPath,
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            $rights)
+        if (-not $key) { throw ("Registry-Schluessel fuer ACL-Write nicht gefunden: {0}" -f $Path) }
+        $key.SetAccessControl($Acl)
+    } finally {
+        if ($key) { $key.Dispose() }
+        if ($baseKey) { $baseKey.Dispose() }
+    }
 }
 
 function New-VsTaskRollbackSnapshots {
@@ -532,7 +575,7 @@ function Restore-VsInstallTransaction {
             foreach ($value in $RegistrySnapshot.Values) {
                 New-ItemProperty -Path $registryPath -Name $value.Name -Value $value.Value -PropertyType $value.Kind -Force -ErrorAction Stop | Out-Null
             }
-            Set-Acl -LiteralPath $registryPath -AclObject $RegistrySnapshot.Acl -ErrorAction Stop
+            Set-VsRegistrySecurityDescriptor -Path $registryPath -Acl $RegistrySnapshot.Acl
         }
         $registryRestored = $true
     } catch { [void]$errors.Add("Registry-Rollback: $($_.Exception.Message)") }
@@ -597,7 +640,12 @@ if (-not (Test-Path $registryPath)) {
 # Der ReportToken liegt als Klartext in der Registry (die SYSTEM-Tasks brauchen
 # ihn zur Laufzeit). Daher die Vererbung abschalten und den Zugriff auf SYSTEM
 # und Administratoren begrenzen (idempotent bei Re-Run).
-$acl = Get-Acl -Path $registryPath
+$aclKey = Get-Item -LiteralPath $registryPath -ErrorAction Stop
+try {
+    $acl = $aclKey.GetAccessControl()
+} finally {
+    $aclKey.Close()
+}
 $acl.SetAccessRuleProtection($true, $false)
 # Der Key ist vollstaendig VirtuSphere-owned. SetAccessRuleProtection entfernt
 # nur geerbte Regeln; vorhandene breite explizite ACEs blieben sonst erhalten.
@@ -614,7 +662,7 @@ foreach ($sidValue in @('S-1-5-18', 'S-1-5-32-544')) {
         $identity, 'FullControl', 'ContainerInherit', 'None', 'Allow')
     $acl.AddAccessRule($rule)
 }
-Set-Acl -Path $registryPath -AclObject $acl
+Set-VsRegistrySecurityDescriptor -Path $registryPath -Acl $acl
 Write-Ok 'Registry-Berechtigungen gehaertet (nur SYSTEM und Administratoren)'
 
 Write-Step 'Schreibe Registry-Konfiguration'
@@ -1048,6 +1096,9 @@ if ($templateBackup -and (Test-Path -LiteralPath $templateBackup)) {
     if ($templateStage -and (Test-Path -LiteralPath $templateStage)) { Remove-Item -LiteralPath $templateStage -Recurse -Force -ErrorAction SilentlyContinue }
     if ($installBackup -and (Test-Path -LiteralPath $installBackup) -and $rollbackErrors.Count -eq 0) { Remove-Item -LiteralPath $installBackup -Recurse -Force -ErrorAction SilentlyContinue }
     if ($templateBackup -and (Test-Path -LiteralPath $templateBackup) -and $rollbackErrors.Count -eq 0) { Remove-Item -LiteralPath $templateBackup -Recurse -Force -ErrorAction SilentlyContinue }
+    if (-not $transactionStarted) {
+        throw ("Installation vor Beginn der Transaktion fehlgeschlagen; bestehender Registry-, Datei- und Aufgabenstand wurde nicht veraendert: {0}" -f $installError.Exception.Message)
+    }
     if ($rollbackErrors.Count -gt 0) {
         throw ("Installation fehlgeschlagen: {0} Rollback unvollstaendig: {1}" -f $installError.Exception.Message, ($rollbackErrors -join ' | '))
     }

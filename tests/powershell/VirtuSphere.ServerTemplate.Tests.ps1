@@ -48,7 +48,7 @@ BeforeAll {
     $script:RestoreFunction = $restoreFunction
     if ($restoreFunction) { . ([scriptblock]::Create($restoreFunction.Extent.Text)) }
 
-    foreach ($functionName in @('New-VsRegistryRollbackSnapshot', 'New-VsTaskRollbackSnapshots')) {
+    foreach ($functionName in @('New-VsRegistryRollbackSnapshot', 'Set-VsRegistrySecurityDescriptor', 'New-VsTaskRollbackSnapshots')) {
         $functionAst = $installerAst.Find(
             { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName },
             $true)
@@ -99,10 +99,11 @@ Describe 'Server installer Package_Vorlage transaction (U09)' {
         $registryKey | Add-Member ScriptMethod GetValueNames { @('Alpha', 'Beta') }
         $registryKey | Add-Member ScriptMethod GetValue { param($name, $default, $options) return ('value-' + $name) }
         $registryKey | Add-Member ScriptMethod GetValueKind { param($name) return [Microsoft.Win32.RegistryValueKind]::String }
+        $registryKey | Add-Member ScriptMethod GetAccessControl { return 'acl-snapshot' }
+        $registryKey | Add-Member ScriptMethod Close {}
 
         Mock Test-Path { $true }
         Mock Get-Item { $registryKey }
-        Mock Get-Acl { 'acl-snapshot' }
         Mock Get-ScheduledTask { [pscustomobject]@{ State = 'Running' } }
         Mock Export-ScheduledTask { '<Task />' }
 
@@ -113,8 +114,26 @@ Describe 'Server installer Package_Vorlage transaction (U09)' {
 
         $registrySnapshot.Values.Count | Should -Be 2
         $registrySnapshot.Values[0].Name | Should -Be 'Alpha'
+        $registrySnapshot.Acl | Should -Be 'acl-snapshot'
         $taskSnapshots.Count | Should -Be 1
         $taskSnapshots[0].WasRunning | Should -BeTrue
+    }
+
+    It 'umgeht den fehlerhaften Registry-Provider fuer ACL-Lesen und -Schreiben' {
+        $installerText = Get-Content -LiteralPath $script:ServerInstaller -Raw
+
+        $installerText | Should -Match '\$acl = \$key\.GetAccessControl\(\)'
+        $installerText | Should -Match 'RegistryRights\]::ChangePermissions'
+        $installerText | Should -Match '\$key\.SetAccessControl\(\$Acl\)'
+        $installerText | Should -Not -Match 'Get-Acl\s+-(Literal)?Path\s+\$registryPath'
+        $installerText | Should -Not -Match 'Set-Acl\s+-(Literal)?Path\s+\$registryPath'
+    }
+
+    It 'behauptet vor dem Transaktionsbeginn keinen ausgefuehrten Rollback' {
+        $installerText = Get-Content -LiteralPath $script:ServerInstaller -Raw
+
+        $installerText | Should -Match 'if \(-not \$transactionStarted\)'
+        $installerText | Should -Match 'vor Beginn der Transaktion fehlgeschlagen; bestehender Registry-, Datei- und Aufgabenstand wurde nicht veraendert'
     }
 
     It 'extracts the actual stage, activation and rollback owners without executing the installer' {

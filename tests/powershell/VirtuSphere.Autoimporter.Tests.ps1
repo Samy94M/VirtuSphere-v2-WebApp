@@ -748,7 +748,7 @@ Describe 'Installer A11: gemeinsame Aktivierungs- und Rollbackgrenze' {
         $registrySnapshot | Should -BeLessThan $registryWrite
         $taskSnapshot | Should -BeLessThan $registryWrite
         $script:A11Text | Should -Match 'GetValueKind'
-        $script:A11Text | Should -Match 'Get-Acl -LiteralPath \$Path -ErrorAction Stop'
+        $script:A11Text | Should -Match '\$acl = \$key\.GetAccessControl\(\)'
         $script:A11Text | Should -Match 'Export-ScheduledTask'
         $script:A11Text | Should -Match 'WasRunning'
     }
@@ -779,7 +779,7 @@ Describe 'Installer A11: gemeinsame Aktivierungs- und Rollbackgrenze' {
     It 'stellt exakte Registrywerte und alte Aufgaben wieder her und entfernt nur neu angelegte eigene Tasks' {
         $script:A11Text | Should -Match 'Remove-ItemProperty -LiteralPath \$registryPath'
         $script:A11Text | Should -Match 'New-ItemProperty -Path \$registryPath -Name \$value\.Name.*-PropertyType \$value\.Kind.*-ErrorAction Stop'
-        $script:A11Text | Should -Match 'Set-Acl -LiteralPath \$registryPath -AclObject \$RegistrySnapshot\.Acl -ErrorAction Stop'
+        $script:A11Text | Should -Match 'Set-VsRegistrySecurityDescriptor -Path \$registryPath -Acl \$RegistrySnapshot\.Acl'
         $script:A11Text | Should -Match 'Register-ScheduledTask -TaskName \$snapshot\.Name -Xml \$snapshot\.Xml -Force -ErrorAction Stop'
         $script:A11Text | Should -Match 'Unregister-ScheduledTask -TaskName \$snapshot\.Name -Confirm:\$false -ErrorAction Stop'
     }
