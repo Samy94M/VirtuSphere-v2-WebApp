@@ -343,6 +343,74 @@ final class MecmReportWireTest extends TestCase
         $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
     }
 
+    public function testLegacyHeartbeatInvalidatesCompletedAutoimporterResultUntilFreshCompletion(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        require_once dirname(__DIR__, 2) . '/lib/layout.php';
+        require_once dirname(__DIR__, 2) . '/lib/system_status_mecm_panels.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'autoimporter'");
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $this->runId(),
+            'interval_seconds' => 60, 'outcome' => 'fail', 'error_category' => 'partial_failure',
+            'duration_ms' => 1200, 'detail' => 'package_content_failed target=Agent-1',
+            'summary' => ['open_points' => 987654],
+        ]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertStringContainsString(__t('system_status.run_result_fail'), $this->renderRunRow($row, 'danger'));
+
+        [$status] = $this->post('/mecm_report.php?action=heartbeat', [
+            'source' => 'autoimporter', 'interval_seconds' => 60, 'detail' => 'legacy heartbeat',
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertSame('heartbeat', $row['last_event']);
+        foreach (['last_result_at', 'last_error_category', 'last_duration_ms', 'last_summary', 'last_run_id'] as $field) {
+            self::assertNull($row[$field], $field . ' belongs to the invalidated completion tuple');
+        }
+        self::assertSame(0, (int) $row['failure_streak']);
+        $html = $this->renderRunRow($row, 'ok');
+        self::assertStringContainsString(__t('system_status.run_result_unknown'), $html);
+        self::assertStringNotContainsString(__t('system_status.run_result_fail'), $html);
+        self::assertStringNotContainsString(__t('system_status.finding_package_content_failed'), $html);
+        self::assertStringNotContainsString('987654', $html);
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $this->runId(),
+            'interval_seconds' => 60, 'outcome' => 'warning', 'error_category' => 'partial_failure',
+            'detail' => 'package_content_unknown target=Agent-2',
+        ]);
+        self::assertSame(200, $status);
+        [$status] = $this->post('/mecm_report.php?action=heartbeat', [
+            'source' => 'autoimporter', 'interval_seconds' => 60,
+        ]);
+        self::assertSame(200, $status);
+        $freshRun = $this->runId();
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'started', 'run_id' => $freshRun,
+            'interval_seconds' => 60,
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertNull($row['last_result_at']);
+        self::assertStringContainsString(__t('system_status.run_result_unknown'), $this->renderRunRow($row, 'ok'));
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $freshRun,
+            'interval_seconds' => 60, 'outcome' => 'ok', 'duration_ms' => 25,
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertNotNull($row['last_result_at']);
+        self::assertStringContainsString(__t('system_status.run_result_ok'), $this->renderRunRow($row, 'ok'));
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'autoimporter'");
+    }
+
     private function runId(): string
     {
         return bin2hex(random_bytes(16));
@@ -355,6 +423,30 @@ final class MecmReportWireTest extends TestCase
         self::assertIsArray($row);
 
         return $row;
+    }
+
+    /** @return array<string,mixed> */
+    private function integrationRow(mysqli $db, string $source): array
+    {
+        $statement = $db->prepare('SELECT * FROM deploy_integration_heartbeats WHERE source = ?');
+        $statement->bind_param('s', $source);
+        $statement->execute();
+        $row = $statement->get_result()->fetch_assoc();
+        self::assertIsArray($row);
+
+        return $row;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function renderRunRow(array $row, string $state): string
+    {
+        ob_start();
+        try {
+            system_status_render_run_rows([['source' => 'autoimporter', 'state' => $state, 'row' => $row]]);
+            return (string) ob_get_contents();
+        } finally {
+            ob_end_clean();
+        }
     }
 
     public function testEveryWireSourceIsAcceptedAndReturnsItsShapeInternalSourcesRejected(): void

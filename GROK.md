@@ -2,13 +2,26 @@
 
 ## 1. Forbidden Patterns
 
+Read 1.1 for code/configuration changes and the affected topic sections below. Cross-area changes read every affected section. The section numbers 2 through 5 remain stable.
+
+### 1.1 Security and shared data
+
 - Interpolated SQL in `query()` or `mysqli_query()`.
 - Hardcoded credentials, weak secret defaults or `getenv(...) ?:` fallback for secrets.
 - PHP short tags `<?` instead of `<?php`.
 - Plaintext password storage.
-- POST writes without CSRF on new portal pages.
 - Inline `<script>`, `<style>`, `style=` or `on*=` handlers without a CSP nonce.
 - External `src=` or `href=` runtime assets.
+- Inline `str_starts_with($name, VIRTUSPHERE_TEMPLATE_PREFIX)` to detect a template. `mission_name_is_template()` (`lib/defaults.php`) is the one predicate; it trims first, matching how names are stored.
+- Re-inlining the catalog status filter list `['active','retired','all']`. `VIRTUSPHERE_CATALOG_FILTERS` (`lib/constants.php`) is the token SSoT; `portal_catalog_status_filter()` renders the shared `<select>`. Enforced by `tests/Static/CatalogFilterContractTest.php`.
+- Storing a raw free-text catalog status. The `os`/`package` repo validators fold known synonyms onto the canonical `Aktiv`/`Retired` via `catalog_normalize_status()` (`lib/repo/catalog.php`) on every write; unknown text from pre-retirement rows passes through (rewriting stored data is a migration decision, ADR-0035).
+- Raw `$db->begin_transaction()` in `Docker/WebAPI/lib/`. Transactions open through the re-entrant `repo_transaction()` (`lib/repo/helpers.php`): a raw `BEGIN` is invisible to its depth tracking, and MySQL answers a nested `BEGIN` by silently committing the outer transaction. Sole exception: the outermost request transactions in the machine-API entry scripts (`db_importMAC.php`, `mecm_packages.php`), which nothing nests; code inside those blocks must not call `repo_transaction()`-wrapped repos. `db_importMAC.php` opens exactly two, sequentially and never nested: the import transaction, and after its rollback the bounded observability transaction that records a rejected callback. The second one exists because a rejection must leave a trace and must leave no domain write, which is only possible on the far side of the rollback; `NetworkMacContractTest` pins the count at two so a third cannot appear unnoticed.
+- Reading an ownership/provenance field (`vm_creator`, `mission_creator`) out of a caller's payload. `repo_save_vm()` and `repo_create_mission()` own them: stamped from the acting user on create, preserved from the stored row on edit, never taken from `$vmData`/`$missionData`. Render them `readonly` **and** without a `name` attribute, because a readonly input still submits. `repo_validate_vm_payload()` keeps accepting `vm_creator` on purpose: mission import carries its own. A caller without a session user leaves the column empty rather than guessing an author.
+- A second UTF-8 byte limiter, or a byte-wise `substr()` on a freely assignable name. `virtusphere_bounded_utf8_bytes()` is the one helper; a cut inside a codepoint makes `json_encode(JSON_THROW_ON_ERROR)` throw at the last moment before a write.
+
+### 1.2 Portal presentation and forms
+
+- POST writes without CSRF on new portal pages.
 - New portal-visible strings hardcoded in PHP views, layout or validation paths instead of `__t('module.key')`.
 - Raw generic `$exception->getMessage()` rendered in portal flash or HTML output instead of `ValidationException` field messages or `portal_error_message()`.
 - Hardcoded translatable JavaScript labels instead of labels rendered through a CSP-nonced JSON island.
@@ -21,20 +34,6 @@
 - Treating a confirmation dialog as an authorization or validation gate. Without JavaScript the POST goes straight through, so `can()`, CSRF and validation stay in the POST handler.
 - Hand-building `<span class="badge badge-*">` markup. `portal_badge($variant, $label)` (`lib/layout.php`) is the one renderer; it escapes both, so pass the raw label. A badge that needs an extra attribute (`title`, `data-*`, the live `data-deploy-status`) is the only exception.
 - Hand-rolling `csrf_verify()` in a standard portal POST handler. `portal_guard_post($connection, $user)` (`lib/audit_events.php`) is the shared prologue; it derives the audit context from the script name. Only `login.php` (soft redirect), `logout.php` (custom body) and `session_ping.php` (JSON) keep their own check. Enforced by `tests/Static/PortalPostGuardContractTest.php`.
-- Inline `str_starts_with($name, VIRTUSPHERE_TEMPLATE_PREFIX)` to detect a template. `mission_name_is_template()` (`lib/defaults.php`) is the one predicate; it trims first, matching how names are stored.
-- Re-inlining the catalog status filter list `['active','retired','all']`. `VIRTUSPHERE_CATALOG_FILTERS` (`lib/constants.php`) is the token SSoT; `portal_catalog_status_filter()` renders the shared `<select>`. Enforced by `tests/Static/CatalogFilterContractTest.php`.
-- Storing a raw free-text catalog status. The `os`/`package` repo validators fold known synonyms onto the canonical `Aktiv`/`Retired` via `catalog_normalize_status()` (`lib/repo/catalog.php`) on every write; unknown text from pre-retirement rows passes through (rewriting stored data is a migration decision, ADR-0035).
-- Reintroducing the removed desktop token path in any form (token-issuing endpoints, plaintext machine tokens, `createVM`/`createOrUpdateVm`-style flows). Machine auth is the IP allowlist plus the optional hashed report-channel token (ADR-0035).
-- Normal VM edits that reset `mecm_id`, `updated` or machine-owned status transitions. Use only the explicit `Reset MECM ID` action for MECM requeue recovery.
-- Raw `$db->begin_transaction()` in `Docker/WebAPI/lib/`. Transactions open through the re-entrant `repo_transaction()` (`lib/repo/helpers.php`): a raw `BEGIN` is invisible to its depth tracking, and MySQL answers a nested `BEGIN` by silently committing the outer transaction. Sole exception: the outermost request transactions in the machine-API entry scripts (`db_importMAC.php`, `mecm_packages.php`), which nothing nests; code inside those blocks must not call `repo_transaction()`-wrapped repos. `db_importMAC.php` opens exactly two, sequentially and never nested: the import transaction, and after its rollback the bounded observability transaction that records a rejected callback. The second one exists because a rejection must leave a trace and must leave no domain write, which is only possible on the far side of the rollback; `NetworkMacContractTest` pins the count at two so a third cannot appear unnoticed.
-- `db_importMAC.php` requires `job_id` (ADR-0035) and validates it (exists, same mission, `running`/`cancelling`) before its raw request transaction, rechecks it with a locking read inside, and then uses only raw prepared statements for interface, VM-state, status-event and `result_json` writes. Do not call `repo_set_vm_state()` or any `repo_transaction()`-wrapped helper from that transaction.
-- Reading an ownership/provenance field (`vm_creator`, `mission_creator`) out of a caller's payload. `repo_save_vm()` and `repo_create_mission()` own them: stamped from the acting user on create, preserved from the stored row on edit, never taken from `$vmData`/`$missionData`. Render them `readonly` **and** without a `name` attribute, because a readonly input still submits. `repo_validate_vm_payload()` keeps accepting `vm_creator` on purpose: mission import carries its own. A caller without a session user leaves the column empty rather than guessing an author.
-- Executable work, output, environment mutation or current-directory changes at import scope in `scripts/lib/check/*.ps1`. These modules define functions only; `scripts/check.ps1` is the one public entry point and owns initialization, gate registration, selection, progress, JSON and exit.
-- A second Chromium cache resolver, a highest-revision scan or a user/revision-bound fallback. Runner and Playwright both consume `tests/e2e/lib/browser-resolver.js`, which uses an explicit override or the lockfile-installed `playwright-core` executable.
-- Visual capture against a shared/dev/production stack, with active jobs, with unverified Compose labels, or after runner/font metadata drift. The visual path may pause only the exact throwaway QA workers, restores their original state in `finally`, never updates a baseline on `infrastructure_error` and never captures real data.
-- Writing `tests/e2e/visual/baselines/` from anything but `scripts/update-visual-baselines.ps1`, raising the zero pixel tolerance, or masking an area the portal styles. A gate never updates a target image, the expected image set is derived from the runner contract, and every mask carries its reason and must still match a control.
-- A deploy queue decision derived from anything other than the complete `deploy_queue_blockers()` result for the normalized form state. Server render, live endpoint, preview and the immediate pre-write recheck consume the same discriminated union; a disabled button without its matching visible blocker is forbidden.
-- `FormData`, a hardcoded control list or per-field fallback for live deploy blockers. The client walks `form.elements` so disabled-but-filled wait values and an intentionally unchecked checkbox keep their meaning.
 - A second portal form-attribute API, a revived `form_input_class()`, or hand-written IDs/`aria-invalid`/`aria-describedby` for field errors and hints. `lib/forms.php` owns control, hint and error IDs plus their complete relationship; repeated rows include one scope and dynamic hints change the relationship only with visibility.
 - Hand-written `help.php#...` links. `help_url()` validates panels and sections against `VIRTUSPHERE_HELP_PANELS`/`VIRTUSPHERE_HELP_SECTIONS`, whose partials and rendered IDs are checked in both directions.
 - An unregistered portal JavaScript file or deploy module order outside `layout_app_scripts()`. The asset registry is bidirectional and owns the one order: form state before warnings, blockers and storage.
@@ -42,6 +41,11 @@
 - A JSON poller that queries before `session_write_close()`. It holds the session lock for the whole request and makes every other page of that session queue behind one open job log.
 - A second cursor derived from a filtered log read, or a follow mode active in a filtered view. That is what marks unseen full-log lines as read.
 - A live region over an Ansible log. `role="log"` with `aria-live="off"` plus one throttled `role="status"` summary; anything polite reads thousands of lines out loud.
+
+### 1.3 Deploy identity and runtime
+
+- A deploy queue decision derived from anything other than the complete `deploy_queue_blockers()` result for the normalized form state. Server render, live endpoint, preview and the immediate pre-write recheck consume the same discriminated union; a disabled button without its matching visible blocker is forbidden.
+- `FormData`, a hardcoded control list or per-field fallback for live deploy blockers. The client walks `form.elements` so disabled-but-filled wait values and an intentionally unchecked checkbox keep their meaning.
 - A second derivation of "is the deploy service alright". `deploy_service_health_snapshot()` is the only source for dashboard, deploy page, System status and the anonymous health endpoint, and its three axes are never folded into one word in a detail view.
 - A claim-state write that is not a compare-and-swap, or a claim gate outside `repo_claim_next_deploy_job()`. An operator, a second tab and the worker all write that row.
 - A deploy-service action that reaches the Ansible host. All five are database-only; the situation they exist for is the one where that host cannot be reached.
@@ -50,7 +54,6 @@
 - A hardcoded network/WDS mode list outside `vm_network_contract.php`, or treating the WDS-specific rule as the general VLAN rule. General empty/exact-duplicate mappings block Create, Full, Powercycle and Export; Start/Autostart warn. WDS zero/case/multiple blocks Full, Powercycle and Export but only warns for Create, Start and Autostart.
 - Queueing, staggering, retrying or starting remote work from a network verdict computed outside the shared scope aggregator. Queue/stagger must lock, materialize, validate and insert atomically; the worker rechecks after claim and before upload/SSH; retry recomputes its current scope after remote and identity fences.
 - Writing a worker `network_preflight` result separately from its terminal `failed/configuration_blocked` CAS, or dropping an explicit VM id that disappeared after queueing. Result and terminal state are one atomic decision; cancellation wins without that result and without claiming that a remote step ran.
-- Accepting a MAC callback from a non-export mode, terminal job, foreign attempt/generation/remote handle, case-insensitive VM/WDS match or different semantic fingerprint. V2 requires per-VM WDS evidence plus its callback fingerprint; only an identical replay of the same active execution is 200/no-op, and historical V1 is readable but never upgraded by guesswork.
 - A long-running CLI process that becomes a container's PID 1 without the shared stop handler (`lib/worker_stop_signal.php`), a second signal list next to it, a stop set that omits SIGQUIT, a container command wrapped in a shell, or an idle loop in a plain `sleep()`. PID 1 ignores unhandled signals and this image's inherited `STOPSIGNAL` is SIGQUIT, so each of those turns `docker stop` back into a SIGKILL on top of a running playbook.
 - Starting a replacement worker process before `waitpid` confirmed the old one ended, deriving that confirmation from a signal that was sent, or letting the supervisor read the database to decide a restart. A worker sitting out a database outage is healthy; killing it is how a database restart becomes a second VM on ESXi. A child that survives TERM and KILL is `manual`, never replaced.
 - Creating VMs with anything but one worker-driven unit per VM (ADR-0041): a looped `vmware_guest` task over a selection, a second create playbook kept as a fallback, a name-based recreate after a lost channel, a second stored copy of the async directory, or a synchronous create call. The job id in the derived `create.vm.<position>/async` plus the live identity read back is the only terminal evidence; the launch result file is not, and `async_status` is not, because it answers a vanished id with `finished` and no `failed`.
@@ -59,7 +62,20 @@
 - Shortening a preflight finding list anywhere but `lib/deploy_preflight_bounds.php`, or deriving a count from what was shown. A bounded list carries the complete total and what it omitted; the byte cap removes from the END of the canonical order and says `truncated_by_bytes`. The queue decision keeps reading the complete `deploy_queue_blockers()` result for the complete scope, so no bound can turn a blocker into a release.
 - Refusing a worker `network_preflight` result because of its size. It is bounded, never thrown: an exception there ends the job as `execution_failed`, which asserts that a playbook ran when the whole point of that verdict is that none did.
 - Queueing, staggering, retrying or starting a job whose scope exceeds `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` or `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM`. Above them a legal V2 callback can exceed its 1 MiB bound and answer 409 after the playbook already created the VMs, which is a failure no operator can repair. The union of a stagger group is the one exemption, because it becomes one job per VM.
-- A second UTF-8 byte limiter, or a byte-wise `substr()` on a freely assignable name. `virtusphere_bounded_utf8_bytes()` is the one helper; a cut inside a codepoint makes `json_encode(JSON_THROW_ON_ERROR)` throw at the last moment before a write.
+
+### 1.4 Machine boundaries
+
+- Reintroducing the removed desktop token path in any form (token-issuing endpoints, plaintext machine tokens, `createVM`/`createOrUpdateVm`-style flows). Machine auth is the IP allowlist plus the optional hashed report-channel token (ADR-0035).
+- Normal VM edits that reset `mecm_id`, `updated` or machine-owned status transitions. Use only the explicit `Reset MECM ID` action for MECM requeue recovery.
+- `db_importMAC.php` requires `job_id` (ADR-0035) and validates it (exists, same mission, `running`/`cancelling`) before its raw request transaction, rechecks it with a locking read inside, and then uses only raw prepared statements for interface, VM-state, status-event and `result_json` writes. Do not call `repo_set_vm_state()` or any `repo_transaction()`-wrapped helper from that transaction.
+- Accepting a MAC callback from a non-export mode, terminal job, foreign attempt/generation/remote handle, case-insensitive VM/WDS match or different semantic fingerprint. V2 requires per-VM WDS evidence plus its callback fingerprint; only an identical replay of the same active execution is 200/no-op, and historical V1 is readable but never upgraded by guesswork.
+
+### 1.5 QA and runner boundaries
+
+- Executable work, output, environment mutation or current-directory changes at import scope in `scripts/lib/check/*.ps1`. These modules define functions only; `scripts/check.ps1` is the one public entry point and owns initialization, gate registration, selection, progress, JSON and exit.
+- A second Chromium cache resolver, a highest-revision scan or a user/revision-bound fallback. Runner and Playwright both consume `tests/e2e/lib/browser-resolver.js`, which uses an explicit override or the lockfile-installed `playwright-core` executable.
+- Visual capture against a shared/dev/production stack, with active jobs, with unverified Compose labels, or after runner/font metadata drift. The visual path may pause only the exact throwaway QA workers, restores their original state in `finally`, never updates a baseline on `infrastructure_error` and never captures real data.
+- Writing `tests/e2e/visual/baselines/` from anything but `scripts/update-visual-baselines.ps1`, raising the zero pixel tolerance, or masking an area the portal styles. A gate never updates a target image, the expected image set is derived from the runner contract, and every mask carries its reason and must still match a control.
 
 ## 2. Architecture
 
@@ -73,7 +89,10 @@ The `data-confirm` attribute is the SSoT for portal confirmations (ADR-0013). It
 
 ## 3. Security Constraints
 
-- EnvBoot must fail fast if `APP_KEY`, `DB_PASS` or `MYSQL_ROOT_PASSWORD` are missing or weak.
+- EnvBoot must fail fast if the application secrets `APP_KEY` or `DB_PASS` are
+  missing or weak. `MYSQL_ROOT_PASSWORD` is validated only by the MySQL
+  bootstrap owner and host-side setup/backup/restore paths; PHP and workers do
+  not import or require it (A20).
 - CSP and security headers are centralized in `lib/headers.php`.
 - CSP and CSRF rules stay unchanged for localized portal pages. Inline scripts/styles still require a nonce, and POST writes still require CSRF.
 - Compose keeps phpMyAdmin loopback-only and does not mount the Docker socket into PHP.

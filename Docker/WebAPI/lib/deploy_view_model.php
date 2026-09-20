@@ -20,6 +20,7 @@ require_once __DIR__ . '/system_status.php';
 /** @return array<string,mixed> */
 function deploy_build_view_model(mysqli $connection, int $selectedMissionId): array
 {
+    $deployFormValues = deploy_form_state()['values'];
     $missions = array_values(array_filter(getMissions($connection), static function (array $mission): bool {
         return !mission_name_is_template((string) ($mission['mission_name'] ?? ''));
     }));
@@ -73,8 +74,9 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
     $storageIsland = deploy_storage_island($connection, $storageRows, $esxiCredentials);
 
     $selectedEsxiId = deploy_form_value('credential_esxi_id');
-    $deployBlockers = deploy_queue_blockers($connection, deploy_form_state()['values']);
-    $deployWarnings = deploy_queue_warnings($connection, deploy_form_state()['values']);
+    $deployPresentation = null;
+    $deployBlockers = deploy_queue_blockers($connection, $deployFormValues, $deployPresentation);
+    $deployWarnings = deploy_queue_warnings($connection, $deployFormValues);
     $canQueue = $deployBlockers === [];
     $initialHostWarning = $hostWarnings[$selectedEsxiId] ?? '';
     $initialCapabilityWarning = $capabilityWarnings[$selectedEsxiId] ?? '';
@@ -112,6 +114,8 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         'selectedMission',
         'missionVms',
         'deployBlockers',
+        'deployPresentation',
+        'deployFormValues',
         'deployWarnings',
         'selectedMissionDeviates',
         'hostWarnings',

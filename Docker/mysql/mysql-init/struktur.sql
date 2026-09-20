@@ -300,7 +300,8 @@ CREATE TABLE IF NOT EXISTS deploy_logs (
     context_json LONGTEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX deploy_logs_category_lookup (category),
+    -- O07: category-scoped cursor windows stop after the requested id range.
+    INDEX deploy_logs_category_lookup (category, id),
     INDEX deploy_logs_event_object_time (event_code, object_type, object_id, created_at),
     -- Etappe 15: the correlation id became a searched column (audit table, its
     -- count, and the jobs of one traced request). id trails the key because
@@ -422,6 +423,7 @@ CREATE TABLE IF NOT EXISTS deploy_credentials (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
     ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    ansible_test_started_at TIMESTAMP NULL DEFAULT NULL,
     UNIQUE KEY credential_name_type_unique (type, name),
     CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

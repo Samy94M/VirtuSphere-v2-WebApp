@@ -65,9 +65,34 @@ echo 'FINISHED';
 test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
+test('job start comes from its retained claim and history cards wrap without overlap', async ({ page }) => {
+  const job = seedJob('succeeded', 1);
+  runPhp(`
+$stmt = db()->prepare("INSERT INTO deploy_job_logs (job_id, seq, stream, line, created_at) VALUES (?, 2, 'system', 'Deploy job claimed by history-fixture', '2026-09-14 10:00:00')");
+$job = ${Number(job)};
+$stmt->bind_param('i', $job);
+$stmt->execute();
+echo 'SEEDED';
+`);
+  await page.setViewportSize({ width: 480, height: 900 });
+  await page.goto(`deploy_log.php?id=${job}`);
+  const history = page.locator('[data-deploy-history]');
+  await expect(history).toContainText('Job started');
+  await expect(history).toContainText('14.09.2026');
+  await expect(history).toContainText('No individual VM results');
+  const cards = await history.locator('.grid').boundingBox();
+  const steps = await history.locator('.panel').boundingBox();
+  expect(steps.y).toBeGreaterThan(cards.y + cards.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  const payload = await (await page.request.get(`deploy_log.php?id=${job}&format=json`)).json();
+  expect(payload.history_html).toContain('14.09.2026');
+  expect(payload.history_html).not.toContain('Deploy job claimed by history-fixture');
+});
+
 test('terminal polling still permits history and preserves its visible row at the DOM cap', async ({ page }) => {
   const job = seedJob('succeeded', 2600);
   await page.goto(`deploy_log.php?id=${job}`);
+  await expect(page.getByRole('button', { name: 'Copy Job ID' })).toBeVisible();
   await expect(page.locator('[data-deploy-log]')).toHaveAttribute('data-caught-up', '1');
   await page.locator('[data-deploy-log-older]').click();
   const rows = page.locator('[data-deploy-log-body] [data-log-seq]');

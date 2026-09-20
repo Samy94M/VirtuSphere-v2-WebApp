@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lang.php';
+require_once __DIR__ . '/copy_control.php';
 
 /**
  * How a correlation id is shown wherever a person reads one (ADR-0032).
@@ -42,10 +43,6 @@ function portal_correlation_id(string $correlationId, string $linkUrl = ''): str
         : '<code>' . h($correlationId) . '</code>';
 
     return '<span class="correlation-id">' . $value
-        . '<button type="button" class="button button-ghost copy-button"'
-        . ' data-copy-value="' . h($correlationId) . '"'
-        . ' data-copy-done="' . h(__t('logs.copy_done')) . '"'
-        . ' data-copy-failed="' . h(__t('logs.copy_failed')) . '">'
-        . h(__t('logs.copy')) . '</button>'
-        . '<span class="copy-status" role="status" data-copy-status hidden></span></span>';
+        . portal_copy_button(__t('common.copy_value', ['label' => __t('logs.th_correlation')]), $correlationId)
+        . '</span>';
 }

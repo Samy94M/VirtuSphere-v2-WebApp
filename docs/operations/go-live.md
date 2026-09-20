@@ -55,7 +55,9 @@ des Repos und müssen separat bereitstehen:
 | Report-Token (optional) | Schritt 5 | im Portal generiert |
 
 `APP_KEY`, `DB_PASS` und `MYSQL_ROOT_PASSWORD` kommen bewusst nicht per `git pull`
-mit; EnvBoot bricht hart ab, wenn sie fehlen oder schwach sind.
+mit. EnvBoot prüft die beiden App-Secrets; der MySQL-Bootstrap prüft Root- und
+App-DB-Passwort vor dem Serverstart. PHP und Worker erhalten das Rootpasswort
+nicht.
 
 ## Ansible-Host vorbereiten (vor Schritt 4)
 
@@ -104,7 +106,7 @@ Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.4). Die eigentlichen v
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
 erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
-Der Systemstatus benennt diesen Nachweis als **manuellen Volltest**. Nach dem
+Der Systemstatus benennt diesen Nachweis als **Volltest**. Nach dem
 Gültigkeitsfenster steht dort „Test veraltet": Das ist kein gemeldeter Fehler,
 sondern fehlender aktueller Gesamtnachweis. Der letzte vom Worker bearbeitete
 Missionsauftrag steht mit Ausgang, Zeit und direktem Jobprotokoll getrennt
@@ -168,7 +170,8 @@ Namenspräfix.
 
    | Schlüssel | Was zu tun ist |
    |---|---|
-   | `APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD` | starke, eigene Werte; EnvBoot bricht bei schwachen hart ab |
+   | `APP_ENV` | auf dem vorgesehenen Betriebswert lassen; kein Secret, aber Teil der expliziten PHP-/Workerumgebung |
+   | `APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD` | starke, eigene Werte; EnvBoot prüft die App-Secrets, der MySQL-Bootstrap beide DB-Passwörter vor dem Serverstart |
    | `APP_BIND_IP` | siehe unten, der am leichtesten übersehene Wert |
    | `WEB_HTTP_PORT` | `8021` bestätigen (die Portadresse des Portals) |
    | `WEB_HTTPS_PORT`, `PMA_PORT` | stehen lassen; ohne sie startet der Stack nicht, auch wenn HTTPS noch aus ist und phpMyAdmin nicht läuft. `PMA_PORT` ist der Port, auf dem phpMyAdmin **auf dem Host** erreichbar ist, nicht der Datenbankport |
@@ -220,11 +223,12 @@ genau diesen Host nicht hoch. Der `chmod` ist es **nicht**: Verzeichnisrechte si
 Hostzustand, den kein Archiv trägt, und deshalb steht er in
 `docs/operations/backup.md` als Restore-Schritt.
 
-1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` (PHP als uid 33) und
-   `Docker/logs/nginx` müssen für den Container-User schreibbar sein. Gehören sie
-   dem SSH-User, crash-loopen Worker und nginx (`Log directory is not writable`,
-   `error.log Permission denied`). Vor dem Start `chmod 0777` auf beide.
-   Docker Desktop umgeht das über seine VM, ein Linux-Host nicht. Dieselbe
+1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` muss für PHP als uid 33
+   schreibbar sein. Gehört es nur dem SSH-User, crash-loopen PHP und Worker
+   (`Log directory is not writable`). Vor dem Start `chmod 0777` auf dieses
+   Verzeichnis. nginx schreibt Access-/Error-Ausgaben in stdout/stderr; dafür
+   gibt es keinen schreibbaren Host-Logmount mehr. Docker Desktop umgeht
+   Bind-Mount-Rechte über seine VM, ein Linux-Host nicht. Dieselbe
    uid-33-Eigentümerschaft gilt für alles, was der PHP-Container dort anlegt: zum
    Lesen einer solchen Datei vom SSH-User aus braucht es `sudo cat`.
 2. **Docker-Default-Subnetz.** `docker compose up` legt ein Netz aus
@@ -243,7 +247,7 @@ Hostzustand, den kein Archiv trägt, und deshalb steht er in
    (`HTTP_PROXY`/`HTTPS_PROXY` groß und klein) je Service leeren und den
    webserver-Healthcheck-Test auf `wget -Y off` setzen.
 
-Start-Reihenfolge, die funktioniert: Log-`chmod`, Override anlegen,
+Start-Reihenfolge, die funktioniert: PHP-Log-`chmod`, Override anlegen,
 `docker compose up -d --force-recreate --wait`, dann Schritt 2.
 
 ## Schritt 2: Migrationen gegen die frische Produktions-DB
@@ -484,6 +488,11 @@ fail-closed; Create/Full werden vor Etappe 14B nicht remote aktiviert.
 
 ## Code auf den Host bringen und Releases nachziehen
 
+Der verbindliche Kompatibilitäts-, Wartungs- und Rückkehrvertrag steht in
+[`upgrade-recovery.md`](upgrade-recovery.md). Insbesondere werden neue Quellen
+nicht bei weiter claimenden Workern entpackt und ein Schemawechsel nicht ohne
+vorher bewiesenes Backup begonnen.
+
 Der Produktionshost erreicht GitHub nicht (ausgehender Proxy); interne
 LAN-Adressen gehen daran vorbei. Der Code läuft deshalb über den internen Gitea
 auf demselben Host, und der Sprung von der Entwicklungsmaschine dorthin geht per
@@ -553,3 +562,5 @@ neue Aktionen mit HTTP 400 ab, ein neues Portal nimmt alte Meldungen weiter an.
 - Backup/Restore: `docs/operations/backup.md`
 - MECM-Server-Skripte & Aufgaben: `Powershell-MECM/README.md`
 - Client-Anwendungen: `Powershell-MECM/clients/README.md`
+
+Der Ansible-Volltest kann zusätzlich automatisch laufen. Intervall, Aktivierung und Diagnose: [Automatischer Ansible-Volltest](ansible-full-test.md).

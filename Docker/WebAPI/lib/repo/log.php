@@ -228,8 +228,9 @@ function repo_log_filter(array $filter): array
     $conditions = [];
     $types = '';
     $params = [];
-    // Internal export cursors, never populated by request parsing.
-    foreach (['_max_id' => '<=', '_before_id' => '<'] as $key => $operator) {
+    // Internal repository cursors. Request values only reach these keys after
+    // strict parsing in log_filter.php; CSV export creates its own snapshot.
+    foreach (['_max_id' => '<=', '_before_id' => '<', '_after_id' => '>'] as $key => $operator) {
         if (isset($filter[$key])) {
             $conditions[] = 'l.id ' . $operator . ' ?';
             $types .= 'i';
@@ -376,20 +377,4 @@ function repo_recent_machine_api_denial_summary(mysqli $db, int $withinSeconds =
     return ['rows' => $rows, 'total' => $total, 'omitted' => max(0, $total - count($rows)), 'window_seconds' => $withinSeconds];
 }
 
-/** @param array<string,mixed> $filter The validated struct (lib/log_filter.php). */
-function repo_recent_logs(mysqli $db, array $filter, int $limit = 50, int $offset = 0): array
-{
-    $limit = max(1, min(500, $limit));
-    $offset = max(0, $offset);
-    $filter = repo_log_filter($filter);
-    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
-        . $filter['sql'] . ' ORDER BY l.id DESC LIMIT ? OFFSET ?';
-    $types = $filter['types'] . 'ii';
-    $params = [...$filter['params'], $limit, $offset];
-
-    $stmt = $db->prepare($sql);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-
-    return repo_fetch_all($stmt->get_result());
-}
+require_once __DIR__ . '/log_queries.php';

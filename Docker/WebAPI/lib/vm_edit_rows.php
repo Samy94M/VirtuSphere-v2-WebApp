@@ -14,11 +14,26 @@ function render_interface_row(array $interface, int|string $index, array $vlans,
     $mode = (string) ($interface['mode'] ?? VIRTUSPHERE_VM_DEFAULTS['interface_mode']);
     $type = (string) ($interface['type'] ?? VIRTUSPHERE_VM_DEFAULTS['interface_type']);
     $vlanError = $template ? '' : (string) ($fieldErrors['interfaces.' . $index . '.vlan'] ?? '');
+    $number = is_int($index) ? $index + 1 : 1;
+    $ipId = form_element_id('vm_edit', 'interface_ip', $scope);
+    $macId = form_element_id('vm_edit', 'interface_mac', $scope);
+    $ipValue = (string) ($interface['ip'] ?? '');
+    $macValue = (string) ($interface['mac'] ?? '');
+    $ipCopyLabel = __t('vm_edit.copy_configured_ip', ['number' => $number]);
+    $macCopyLabel = __t('vm_edit.copy_mac', ['number' => $number]);
+    $ipCopyTemplate = __t('vm_edit.copy_configured_ip', ['number' => ':number']);
+    $macCopyTemplate = __t('vm_edit.copy_mac', ['number' => ':number']);
     ?>
     <div class="form-row interface-row" data-repeat-row>
-        <p class="field-label" data-vm-network-row-label><?php echo h(__t('vm_edit.interface_legend', ['number' => is_int($index) ? $index + 1 : 1])); ?></p>
+        <p class="field-label" data-vm-network-row-label><?php echo h(__t('vm_edit.interface_legend', ['number' => $number])); ?></p>
         <input type="hidden" name="<?php echo $prefix; ?>[id]" value="<?php echo h((string) ($interface['id'] ?? 0)); ?>">
-        <label><?php echo h(__t('vm_edit.label_ip')); ?><input name="<?php echo $prefix; ?>[ip]"<?php echo form_control_attrs('vm_edit', 'interface_ip', $scope, false, ''); ?> value="<?php echo h($interface['ip'] ?? ''); ?>" data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>></label>
+        <div class="copy-field">
+            <label for="<?php echo h($ipId); ?>"><?php echo h(__t('vm_edit.label_ip')); ?></label>
+            <div class="copy-field-control">
+                <input name="<?php echo $prefix; ?>[ip]"<?php echo form_control_attrs('vm_edit', 'interface_ip', $scope, false, ''); ?> value="<?php echo h($ipValue); ?>" data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>>
+                <?php echo portal_copy_input_button($ipId, $ipValue, $ipCopyLabel, true, $ipCopyTemplate); ?>
+            </div>
+        </div>
         <label><?php echo h(__t('vm_edit.label_subnet')); ?><span class="compound-field"><input name="<?php echo $prefix; ?>[subnet]"<?php echo form_control_attrs('vm_edit', 'interface_subnet', $scope, false, ''); ?> value="<?php echo h($subnetInput); ?>" data-subnet-input data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>><select<?php echo form_control_attrs('vm_edit', 'interface_subnet_picker', $scope, false, ''); ?> data-subnet-picker data-dhcp-disable aria-label="<?php echo h(__t('vm_edit.subnet_mask')); ?>" <?php echo $canWrite ? '' : 'disabled'; ?>><option value=""><?php echo h(__t('vm_edit.mask')); ?></option><?php for ($mask = 0; $mask <= 30; $mask++) { $cidr = '/' . $mask; $value = vm_cidr_to_netmask($mask); ?><option value="<?php echo h($value); ?>" <?php echo $subnetPicker === $cidr ? 'selected' : ''; ?>><?php echo h($cidr); ?></option><?php } ?></select></span></label>
         <label><?php echo h(__t('vm_edit.label_gateway')); ?><input name="<?php echo $prefix; ?>[gateway]"<?php echo form_control_attrs('vm_edit', 'interface_gateway', $scope, false, ''); ?> value="<?php echo h($interface['gateway'] ?? ''); ?>" data-dhcp-disable <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_dns1')); ?><input name="<?php echo $prefix; ?>[dns1]"<?php echo form_control_attrs('vm_edit', 'interface_dns1', $scope, false, ''); ?> value="<?php echo h($interface['dns1'] ?? ''); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
@@ -29,7 +44,13 @@ function render_interface_row(array $interface, int|string $index, array $vlans,
         ], !$canWrite, form_control_attrs('vm_edit', 'interface_vlan', $scope, false, $vlanError), false); ?><?php echo form_error_html('vm_edit', 'interface_vlan', $scope, $vlanError); ?></label>
         <label><?php echo h(__t('vm_edit.label_mode')); ?><select name="<?php echo $prefix; ?>[mode]"<?php echo form_control_attrs('vm_edit', 'interface_mode', $scope, false, ''); ?> data-mode-select="<?php echo h(VIRTUSPHERE_INTERFACE_MODE_DHCP); ?>" <?php echo $canWrite ? '' : 'disabled'; ?>><?php foreach (VIRTUSPHERE_INTERFACE_MODES as $option) { ?><option value="<?php echo h($option); ?>" <?php echo $mode === $option ? 'selected' : ''; ?>><?php echo h($option); ?></option><?php } ?></select></label>
         <label><?php echo h(__t('vm_edit.label_type')); ?><select name="<?php echo $prefix; ?>[type]"<?php echo form_control_attrs('vm_edit', 'interface_type', $scope, false, ''); ?> <?php echo $canWrite ? '' : 'disabled'; ?>><?php foreach (VIRTUSPHERE_INTERFACE_TYPES as $option) { ?><option value="<?php echo h($option); ?>" <?php echo $type === $option ? 'selected' : ''; ?>><?php echo h($option); ?></option><?php } ?></select></label>
-        <label><?php echo h(__t('vm_edit.label_mac')); ?><input<?php echo form_control_attrs('vm_edit', 'interface_mac', $scope, false, ''); ?> value="<?php echo h($interface['mac'] ?? ''); ?>" readonly></label>
+        <div class="copy-field">
+            <label for="<?php echo h($macId); ?>"><?php echo h(__t('vm_edit.label_mac')); ?></label>
+            <div class="copy-field-control">
+                <input<?php echo form_control_attrs('vm_edit', 'interface_mac', $scope, false, ''); ?> value="<?php echo h($macValue); ?>" readonly>
+                <?php echo portal_copy_input_button($macId, $macValue, $macCopyLabel, false, $macCopyTemplate); ?>
+            </div>
+        </div>
         <?php if ($canWrite) { ?><button class="button button-danger" type="button" data-remove-row><?php echo h(__t('common.remove')); ?></button><?php } ?>
     </div>
     <?php

@@ -63,12 +63,9 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     <?php } elseif ($stateRow !== null && empty($stateRow['evidence_current'])) { ?>
                         <p class="status-action"><?php echo h(__t('system_status.ansible_invalidated_detail')); ?></p>
                     <?php } ?>
-                    <?php // A badge over a timestamp reads as "last poll" everywhere else in
-                          // the portal, and the preflight is the one status here that nothing
-                          // refreshes. The line says so, from the same helper the Credentials
-                          // page uses, so the two pages cannot describe the same row
-                          // differently. ?>
-                    <small class="status-cadence"><?php echo h(credential_cadence_ansible()); ?></small>
+                    <?php // Shared cadence uses the same configured interval on both pages. ?>
+                    <small class="status-cadence"><?php echo h(credential_cadence_ansible((int) $snapshot['ansible']['interval_hours'])); ?></small>
+                    <?php if (can('system.config', $user)) { ?><p class="hint"><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)); ?>"><?php echo h(__t('ansible_test.configure')); ?></a></p><?php } ?>
                     <?php if ($canManageCredentials || $canViewCredentialAudit) { ?>
                         <div class="actions">
                             <?php if ($canManageCredentials) { ?>

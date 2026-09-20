@@ -15,17 +15,26 @@ require_once __DIR__ . '/../lib/mission_transfer.php';
 require_once __DIR__ . '/../lib/system_status.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
+require_once __DIR__ . '/../lib/mission_details_page.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
+$workContext = portal_work_context($_GET);
 $missionId = request_int($_GET, 'id');
 $mission = repo_get_mission($connection, $missionId);
 if ($mission === null) {
     flash_set('error', __t('portal.mission_not_found'));
-    redirect_to('missions.php?type=missions');
+    redirect_to(portal_work_context_mission_list_url($workContext));
 }
 $isTemplate = mission_name_is_template((string) $mission['mission_name']);
+if (!isset($workContext['work_list_type'])) {
+    $workContext = portal_work_context(array_merge($workContext, [
+        'work_list_type' => $isTemplate ? 'templates' : 'missions',
+    ]));
+}
+$detailsUrl = mission_details_url($missionId, $workContext);
+$missionListUrl = portal_work_context_mission_list_url($workContext, $missionId);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
@@ -56,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
-            redirect_to('mission_details.php?id=' . $missionId);
+            redirect_to($detailsUrl);
         }
     }
 
@@ -101,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
             flash_set('success', __t('mission_details.flash_saved'));
-            redirect_to('mission_details.php?id=' . $missionId);
+            redirect_to($detailsUrl);
         }
         if ($action === 'clone_template') {
             $result = repo_clone_template_to_new_mission($connection, $missionId, request_string($_POST, 'target_mission_name'), (int) $user['id']);
@@ -110,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'target_mission_id' => (int) $result['target_mission_id'],
             ], (int) $user['id']);
             flash_set('success', __t('mission_details.flash_cloned', ['count' => (int) $result['created']]));
-            redirect_to('mission_details.php?id=' . $result['target_mission_id']);
+            redirect_to(mission_details_url((int) $result['target_mission_id'], ['work_list_type' => 'missions']));
         }
         if ($action === 'save_as_template') {
             $result = repo_save_mission_as_template($connection, $missionId, request_string($_POST, 'target_template_name'), (int) $user['id']);
@@ -119,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'target_mission_id' => (int) $result['target_mission_id'],
             ], (int) $user['id']);
             flash_set('success', __t('mission_details.flash_saved_as_template', ['count' => (int) $result['created']]));
-            redirect_to('mission_details.php?id=' . $result['target_mission_id']);
+            redirect_to(mission_details_url((int) $result['target_mission_id'], ['work_list_type' => 'templates']));
         }
     } catch (VmNetworkScopeActiveException $exception) {
         $message = __t('mission_details.err_wds_active_job');
@@ -128,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? ['url' => deploy_job_log_url($exception->jobId), 'label' => __t('mission_details.open_active_job')]
             : null;
         flash_set('error', $message, '', $action);
-        redirect_to('mission_details.php?id=' . $missionId);
+        redirect_to($detailsUrl);
     } catch (ValidationException $exception) {
         $message = portal_error_message($exception);
         if (($_POST['action'] ?? '') === 'clone_template') {
@@ -141,72 +150,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             form_remember('update', $_POST, $exception->errors());
         }
         flash_set('error', $message);
-        redirect_to('mission_details.php?id=' . $missionId);
+        redirect_to($detailsUrl);
     } catch (Throwable $exception) {
         $message = portal_error_message($exception);
         if (($_POST['action'] ?? '') === 'clone_template') {
             form_remember('clone', $_POST, ['target_mission_name' => $message]);
         } elseif (($_POST['action'] ?? '') === 'save_as_template') {
             form_remember('save_template', $_POST, ['target_template_name' => $message]);
+        } else {
+            // Optimistic-lock and other non-validation failures must preserve
+            // the editor just like validation does. The restored form remains
+            // explicitly unsaved until the browser compares it with a fresh,
+            // confirmed GET baseline.
+            form_remember('update', $_POST, []);
         }
         flash_set('error', $message);
-        redirect_to('mission_details.php?id=' . $missionId);
+        redirect_to($detailsUrl);
     }
 }
 
-// ESXi-owned VLAN catalog: offer active entries; the stored value stays selectable
-// even if retired/unknown (decoupling, ADR-0023). Datacenter/datastore are the
-// same kind of hard select over the inventory cache (see inventory_field.php).
-$vlans = repo_active_vlans($connection);
-// Through form_old() like every other field of this form: read straight from the
-// row, a failed validation elsewhere silently reverted a changed VLAN to the
-// stored one and nothing said so.
-$storedVlan = form_old('update', 'wds_vlan', (string) ($mission['wds_vlan'] ?? ''));
-$wdsImpact = repo_vm_network_preflight($connection, $missionId, [], $storedVlan);
-$wdsImpactCounts = [
-    VIRTUSPHERE_WDS_READY => 0,
-    VIRTUSPHERE_WDS_MISSION_MISSING => 0,
-    VIRTUSPHERE_WDS_PORTAL_MISSING => 0,
-    VIRTUSPHERE_WDS_PORTAL_CASE_MISMATCH => 0,
-    VIRTUSPHERE_WDS_PORTAL_AMBIGUOUS => 0,
-];
-foreach ($wdsImpact['wds'] as $verdict) {
-    $code = (string) ($verdict['code'] ?? '');
-    if (array_key_exists($code, $wdsImpactCounts)) {
-        $wdsImpactCounts[$code]++;
-    }
-}
-$datacenterOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATACENTER);
-$datastoreOptions = esxi_inventory_options($connection, VIRTUSPHERE_INVENTORY_KIND_DATASTORE);
-
-$datacenterValue = form_old('update', 'hypervisor_datacenter', (string) ($mission['hypervisor_datacenter'] ?? ''));
-$datastoreValue = form_old('update', 'hypervisor_datastorage', (string) ($mission['hypervisor_datastorage'] ?? ''));
-// The datastore is mandatory and has no fallback, so a lone unambiguous value is
-// preselected as a convenience. The datacenter deliberately gets NO preselect:
-// the deploy resolves an empty one from the target host, and pre-filling it would
-// store a copy of a derivable value - exactly the defect migration 0014 removed
-// one level below.
-if (!$isTemplate && $datastoreValue === '' && esxi_inventory_options_are_exact($datastoreOptions) && count($datastoreOptions['names']) === 1) {
-    $datastoreValue = $datastoreOptions['names'][0];
-}
-// Every possible deploy target reports the same single datacenter (a standalone
-// host's implicit `ha-datacenter`), so a stored value could not point anywhere
-// else and the deploy derives it. Hide the control, but keep posting the value:
-// an unrendered field would come back as '' and wipe an existing one. Same rule
-// as $hideVmDatacenter in vm_edit.php, and deliberately on the form_old value,
-// so a failed validation with a filled datacenter shows the field again.
-$hideMissionDatacenter = $datacenterValue === ''
-    && esxi_inventory_options_are_exact($datacenterOptions)
-    && count($datacenterOptions['names']) === 1;
-// Derived from what the two fields actually render, never from the credential
-// count: with six credentials of which one was pulled the list is flat, and the
-// note used to announce a grouping that was not on screen. A hidden datacenter
-// is not in the set, because a note may not describe a control nobody sees.
-$renderedLocationOptions = [$datastoreOptions];
-if (!$hideMissionDatacenter) {
-    $renderedLocationOptions[] = $datacenterOptions;
-}
-$locationNotes = esxi_inventory_location_notes($renderedLocationOptions);
+$viewState = mission_details_view_state($connection, $missionId, $mission, $isTemplate);
+['vlans' => $vlans, 'storedVlan' => $storedVlan, 'wdsImpactTotal' => $wdsImpactTotal,
+    'wdsImpactCounts' => $wdsImpactCounts,
+    'datacenterOptions' => $datacenterOptions, 'datastoreOptions' => $datastoreOptions,
+    'datacenterValue' => $datacenterValue, 'datastoreValue' => $datastoreValue,
+    'hideMissionDatacenter' => $hideMissionDatacenter, 'locationNotes' => $locationNotes] = $viewState;
 
 // One title per page for tab and heading, as vms.php already builds one. They
 // disagreed here: the tab said only "Missionsdetails" while the name sat far
@@ -221,11 +189,11 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
         <?php // Details and VMs are two pages of one mission, so they are page
               // navigation (lib/mission_nav.php), not buttons; the way back to
               // the list is a different move and stays one. ?>
-        <?php echo mission_detail_nav($missionId, $isTemplate, 'details'); ?>
+        <?php echo mission_detail_nav($missionId, $isTemplate, 'details', $workContext); ?>
         <div class="actions">
-            <a class="button button-secondary" href="<?php echo $isTemplate ? 'missions.php?type=templates' : 'missions.php?type=missions'; ?>"><?php echo h(__t('common.back')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($missionListUrl); ?>"><?php echo h(__t('common.back')); ?></a>
             <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('mission_details.open_deploy')); ?></a><?php } ?>
-            <form class="inline-form" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
+            <form class="inline-form" method="post" action="<?php echo h($detailsUrl); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="export">
                 <button class="button button-secondary" type="submit" title="<?php echo h(__t('mission_details.export_title')); ?>"><?php echo h(__t('mission_details.export_json')); ?></button>
@@ -237,7 +205,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
     <section class="panel">
         <?php // The name is the page heading now; this one names the section. ?>
         <h2><?php echo h($isTemplate ? __t('mission_details.heading_settings_template') : __t('mission_details.heading_settings_mission')); ?></h2>
-        <form class="stack" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
+        <form class="stack" method="post" action="<?php echo h($detailsUrl); ?>"<?php echo can('missions.write', $user) ? form_unsaved_attrs('mission-settings', form_has_state('update')) : ''; ?>>
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="update">
             <input type="hidden" name="edit_version" value="<?php echo h($mission['edit_version'] ?? ''); ?>">
@@ -249,7 +217,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                     'unknown_suffix' => __t('mission_details.vlan_not_in_inventory'),
                 ], !can('missions.write', $user), form_control_attrs('update', 'wds_vlan', null, [$wdsHintId], '')); ?>
                     <small class="hint" id="<?php echo h($wdsHintId); ?>"><?php echo h(__t('mission_details.wds_vlan_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_existing_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_impact', [
-                        'total' => count($wdsImpact['vms']),
+                        'total' => $wdsImpactTotal,
                         'ready' => $wdsImpactCounts[VIRTUSPHERE_WDS_READY],
                         'missing' => $wdsImpactCounts[VIRTUSPHERE_WDS_MISSION_MISSING] + $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_MISSING],
                         'case' => $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_CASE_MISMATCH],
@@ -368,14 +336,14 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                 </label>
                 <p class="hint form-grid-span-2" id="<?php echo h($delayHintId); ?>"><?php echo h(__t('mission_details.autostart_delay_hint')); ?></p>
             </div>
-            <?php if (can('missions.write', $user)) { ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
+            <?php if (can('missions.write', $user)) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
         </form>
     </section>
 
     <?php if ($isTemplate && can('missions.write', $user)) { ?>
         <section class="panel">
             <h2><?php echo h(__t('mission_details.copy_to_mission')); ?></h2>
-            <form class="form-grid" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
+            <form class="form-grid" method="post" action="<?php echo h($detailsUrl); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="clone_template">
                 <label><?php echo h(__t('mission_details.target_mission_name')); ?><input name="target_mission_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('clone', 'target_mission_name')); ?>"<?php echo form_control_attrs('clone', 'target_mission_name'); ?> required><?php echo form_error_html('clone', 'target_mission_name'); ?></label>
@@ -388,7 +356,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
         <section class="panel">
             <h2><?php echo h(__t('mission_details.save_as_template')); ?></h2>
             <p class="muted"><?php echo h(__t('mission_details.save_as_template_hint')); ?></p>
-            <form class="form-grid" method="post" action="mission_details.php?id=<?php echo h((string) $missionId); ?>">
+            <form class="form-grid" method="post" action="<?php echo h($detailsUrl); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_as_template">
                 <label><?php echo h(__t('mission_details.template_name')); ?><input name="target_template_name" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('save_template', 'target_template_name', VIRTUSPHERE_TEMPLATE_PREFIX . ($mission['mission_name'] ?? ''))); ?>"<?php echo form_control_attrs('save_template', 'target_template_name'); ?> required><?php echo form_error_html('save_template', 'target_template_name'); ?></label>

@@ -235,6 +235,37 @@
     margin: 0;
 }
 
+.deploy-preparation {
+    display: grid;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.deploy-preparation-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+}
+
+.deploy-preparation-head > * {
+    min-width: 0;
+    margin: 0;
+}
+
+.deploy-preparation-head h3,
+.deploy-preparation-head p {
+    margin: 0;
+}
+
+.deploy-preparation [data-deploy-blocker-summary] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+}
+
 .runtime-fact-links {
     display: flex;
     flex-wrap: wrap;
@@ -307,13 +338,22 @@ a.card:hover {
    status keeps its own space instead of pushing the id sideways when it
    appears. */
 
-.correlation-id {
+.correlation-id,
+.copy-control {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
 }
 
-.correlation-id .copy-button {
+.copy-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.correlation-id .copy-button,
+.copy-control .copy-button,
+.copy-field-control .copy-button {
     min-height: 26px;
     padding: 2px 8px;
     font-size: 0.8rem;

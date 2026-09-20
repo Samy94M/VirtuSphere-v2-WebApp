@@ -8,6 +8,7 @@ require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/request.php';
 require_once __DIR__ . '/portal_time.php';
 require_once __DIR__ . '/log_filter_vocabulary.php';
+require_once __DIR__ . '/log_cursor.php';
 
 /**
  * The one validated description of "which audit rows".
@@ -328,7 +329,7 @@ function log_filter_export_bounds(int $total): array
 /**
  * Rebuilds a logs.php URL from the struct plus explicit extras.
  *
- * Every link on the page (pagination, tab switch, reset, export, a correlation
+ * Every link on the page (cursor navigation, tab switch, reset, export, a correlation
  * jump) is one of these, so a filter field added to the struct cannot be
  * silently dropped from one of them: they all serialise through here, over one
  * parameter list (VIRTUSPHERE_LOG_FILTER_PARAMS). A rejected value is carried

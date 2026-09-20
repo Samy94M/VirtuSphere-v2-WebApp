@@ -74,6 +74,8 @@ declare(strict_types=1);
             <?php // Directly after the field explanation, because the cause line sits
                   // in the same card and is the only place a counter names a VM. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>
             <?php // Etappe 14D: Die sieben Identitaetscodes bekommen je eine
                   // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
                   // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
@@ -208,6 +210,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_system_status.esxi_test_ansible_p1')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_test_ansible_p2')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_test_ansible_p3')); ?></p>
+            <p><?php echo h(__t('ansible_test.help')); ?></p>
             <h4><?php echo h(__t('system_status.ansible_legend_heading')); ?></h4>
             <?php system_status_legend_items('ansible'); ?>
 

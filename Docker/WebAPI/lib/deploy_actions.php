@@ -19,9 +19,9 @@ require_once __DIR__ . '/repo/missions.php';
  * redirects, so the page shell has no action-specific branch.
  *
  * @param array<string,mixed> $user
- * @return array<string,mixed>
+ * @return null|array<string,mixed>
  */
-function deploy_handle_post(mysqli $connection, array $user, int $selectedMissionId): array
+function deploy_handle_post(mysqli $connection, array $user, int $selectedMissionId): ?array
 {
     $redirectBase = 'deploy.php' . ($selectedMissionId > 0 ? '?mission_id=' . $selectedMissionId : '');
 
@@ -32,6 +32,35 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
         // permission and audit line.
         if (in_array($action, VIRTUSPHERE_DEPLOY_RECOVERY_ACTIONS, true)) {
             deploy_handle_recovery_action($connection, $user, $action);
+        }
+        if ($action === 'check') {
+            // Read-only no-JavaScript refresh. deploy_form_state() reads this
+            // POST directly, and the normal view model recomputes the complete
+            // queue decision. No preview, redirect, audit or job write occurs.
+            return null;
+        }
+        if ($action === 'open_remedy') {
+            $draft = is_array($_POST['draft'] ?? null) ? $_POST['draft'] : null;
+            if ($draft === null) {
+                throw new ValidationException([], __t('portal.invalid_request'));
+            }
+            $queueInput = deploy_queue_normalize_input($draft);
+            $code = request_string($_POST, 'remedy_code');
+            $candidates = array_merge(
+                deploy_queue_blockers($connection, $queueInput),
+                deploy_queue_warnings($connection, $queueInput)
+            );
+            foreach ($candidates as $candidate) {
+                if ((string) ($candidate['code'] ?? '') !== $code) {
+                    continue;
+                }
+                $remedy = deploy_blocker_action_for_user($candidate, $user);
+                if ($remedy !== null && (string) ($remedy['type'] ?? '') === 'link') {
+                    deploy_form_draft_store($draft);
+                    redirect_to((string) $remedy['url']);
+                }
+            }
+            throw new ValidationException([], __t('portal.invalid_request'));
         }
         if ($action === 'start') {
             $queueInput = deploy_queue_normalize_input($_POST);
@@ -74,7 +103,10 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
                     'job_count' => (int) $result['count'],
                     'scheduled' => $schedule['base_utc'] !== null,
                 ], (int) $user['id']);
-                flash_set('success', __t('deploy.flash_group_queued', ['count' => $result['count']]));
+                flash_set('success', __t('deploy.flash_group_queued', ['count' => $result['count']]), '', [
+                    'url' => deploy_mission_url($missionIdPost) . '#deploy-jobs',
+                    'label' => __t('deploy.flash_open_jobs'),
+                ]);
                 redirect_to($redirectBase);
             }
 
@@ -85,10 +117,16 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
                 'scheduled' => $schedule['base_utc'] !== null,
             ], (int) $user['id']);
             if ($schedule['base_utc'] !== null) {
-                flash_set('success', __t('deploy.flash_scheduled'));
+                flash_set('success', __t('deploy.flash_scheduled', ['id' => $jobId]), '', [
+                    'url' => deploy_job_log_url($jobId),
+                    'label' => __t('deploy.flash_open_job_log'),
+                ]);
                 redirect_to($redirectBase);
             }
-            flash_set('success', __t('deploy.flash_queued'));
+            flash_set('success', __t('deploy.flash_queued', ['id' => $jobId]), '', [
+                'url' => deploy_job_log_url($jobId),
+                'label' => __t('deploy.flash_open_job_log'),
+            ]);
             redirect_to(deploy_job_log_url($jobId));
         }
 
@@ -106,8 +144,11 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
                 'moid' => (string) $adopted['vm_moid'],
                 'instance_uuid' => (string) $adopted['vm_instance_uuid'],
             ], (int) $user['id']);
+            if (is_array($_POST['draft'] ?? null)) {
+                deploy_form_draft_store($_POST['draft']);
+            }
             flash_set('success', __t('deploy.identity_adopted', ['name' => $adopted['vm_name']]));
-            redirect_to('deploy.php?mission_id=' . $missionIdPost . '&credential_esxi_id=' . $esxiId);
+            redirect_to('deploy.php?resume_draft=1');
         }
 
         if ($action === 'cancel') {
@@ -119,12 +160,18 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             $cancelOutcome = repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
             if ($cancelOutcome === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
                 audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
-                flash_set('success', __t('deploy.flash_cancel_requested'));
+                flash_set('success', __t('deploy.flash_cancel_requested'), '', [
+                    'url' => deploy_job_log_url($jobId),
+                    'label' => __t('deploy.flash_open_job_log'),
+                ]);
             } else {
                 audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                     'action' => 'cancelled',
                 ], (int) $user['id']);
-                flash_set('success', __t('deploy.flash_cancelled'));
+                flash_set('success', __t('deploy.flash_cancelled'), '', [
+                    'url' => deploy_job_log_url($jobId),
+                    'label' => __t('deploy.flash_open_job_log'),
+                ]);
             }
             redirect_to($redirectBase);
         }
@@ -149,7 +196,10 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED, 'deploy_job', $newJobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'retry_of_job_id' => $jobId,
             ], (int) $user['id']);
-            flash_set('success', __t('deploy.flash_retried'));
+            flash_set('success', __t('deploy.flash_retried', ['id' => $newJobId]), '', [
+                'url' => deploy_job_log_url($newJobId),
+                'label' => __t('deploy.flash_open_job_log'),
+            ]);
             redirect_to(deploy_job_log_url($newJobId));
         }
 

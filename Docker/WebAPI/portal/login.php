@@ -55,7 +55,7 @@ $nonce = h(virtusphere_csp_nonce());
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo h(__t('login.page_title')); ?></title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>">
-<?php layout_app_styles(); ?>
+<?php layout_app_styles('login.php'); ?>
     <script nonce="<?php echo $nonce; ?>">
         try {
             var theme = localStorage.getItem('virtusphere.theme');
@@ -64,7 +64,7 @@ $nonce = h(virtusphere_csp_nonce());
             }
         } catch (error) {}
     </script>
-    <?php layout_app_scripts($nonce); ?>
+    <?php layout_app_scripts($nonce, 'login.php'); ?>
 </head>
 <body class="login-page">
     <button class="button button-ghost theme-toggle login-theme-toggle" type="button" data-theme-toggle title="<?php echo h(__t('layout.theme_title')); ?>">

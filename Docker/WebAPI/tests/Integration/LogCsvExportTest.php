@@ -114,17 +114,23 @@ final class LogCsvExportTest extends TestCase
         $this->seed(120);
         $filter = $this->filter();
 
-        $table = repo_recent_logs($this->db, $filter, 50, 0);
+        $firstPage = repo_log_page($this->db, $filter, 50);
+        $table = $firstPage['rows'];
         $export = logs_export_rows($this->db, $filter, 120);
 
         self::assertCount(120, $export);
-        foreach (array_values($table) as $index => $row) {
+        foreach ($table as $index => $row) {
             self::assertSame((string) $row['id'], $export[$index][0], 'row ' . $index . ' differs between table and export');
         }
 
         // ... and the second page continues where the first left off, in the
         // same order the file has.
-        $secondPage = repo_recent_logs($this->db, $filter, 50, 50);
+        $secondPage = repo_log_page(
+            $this->db,
+            $filter,
+            50,
+            (int) $table[array_key_last($table)]['id']
+        )['rows'];
         self::assertSame((string) $secondPage[0]['id'], $export[50][0]);
     }
 

@@ -1,0 +1,965 @@
+# Paket-Wrapper und VM-Diagnose: Logging, Portal und Bedienkonzept
+
+Stand: 2026-09-13, Revision 7 mit Nutzerbestätigung: die Lösungsrichtung für späte Fehler, Replay, Reporter-Verteilung und Zeitbudgets ist in den Plan übernommen (Abschnitt 25). Diagnosefunktionen sind geplant, nicht implementiert oder ausgeliefert; bisherige README-/Hilfeänderungen siehe Abschnitt 18.
+Aktueller Auftrag: Plan und Prüfung von SSoT, Randfällen, Logik, Drift und QoL; in dieser Runde nur Plan und zugehörige Prüfevidenz ändern.
+
+Leseführung: P1–P4 besitzen lokale Logs, P5/P6 Wirevertrag und Lieferung, P7/P8 Portal und Abnahme. Abschnitt 19 besitzt die Zusammenführung mit Legacy-Clientphasen, Abschnitt 22 das Bedienkonzept, Abschnitt 23 die aufgenommenen Erweiterungen F1–F4. Abschnitt 24 dokumentiert die Gesamtprüfung; Abschnitt 25 besitzt die bestätigte Lösungsrichtung T1–T4 und die weiterhin ausstehende technische Beweislast. Historische Prüfevidenz bleibt historisch; eine Aufnahme in den Plan ist kein Implementierungsnachweis. Q1/Q2/Q3 sind geschlossen: Q3 erlaubt dauerhaft minimale Sperrmerker gemäß 25.2. B5 und P9b bleiben optionale, nicht mit F1–F4 beauftragte Erweiterungen.
+
+## 1. Abgestimmtes Ziel und Grenzen
+
+- Ein Gesamtlog pro Aufruf von `Powershell-MECM/Package_Vorlage/install.ps1`.
+- Pro Teilskript Start, Ergebnis oder Hash-Skip, Exit-Code bei tatsächlicher Ausführung, Dauer und Pfad zum bestehenden umgeleiteten Ausgabe-Log.
+- Die letzten fünf Durchläufe je Paketversion und vorhandenem Installationskontext behalten: je ein Wrapper-Log und ein Reporting-Log, normalerweise bis zu zehn Dateien. Keine Altersgrenze und kein zusätzliches Bytebudget. Unvollständige Dateipaare zählen als ein Durchlauf.
+- Bereinigung beim nächsten Aufruf; aktive Dateien schützen. Fehler der NEUEN Gesamtlogfunktion und Bereinigung dürfen weder Nutzlast verhindern noch deren Ergebnis verändern. Bestehende Fehler der Detail-Logumleitung oder ihrer Verzeichniserstellung behalten ihr bisheriges Verhalten.
+- Eigene Logs der Teilskripte und bisherige umgeleitete Ausgabe-Logs bleiben unverändert und werden nicht bereinigt.
+- Software Center startet den Wrapper. Teilskripte können geplante Aufgaben einrichten und mit 0 erfolgreich zurückkehren. Diese Aufgaben erledigen weitere Arbeiten unabhängig, auch nach Neustarts, und führen eigene Logs.
+- Wrapper-Erfolg bestätigt nur seine eigenen Schritte. Keine Überwachung, Wiederholung oder Statusbehauptung für die Hintergrundaufgaben; keine Änderung der Detection oder Neustartsteuerung.
+- Keine neue Konfigurationsoption, globale Installationssperre, Reparaturfunktion oder allgemeine Konfigurationshärtung in diesem Paket.
+
+Scope-Erweiterung nach Revision 2: zusätzlich Portal-Diagnose gemäß Abschnitt 9–14. Start, Ergebnis nach jedem bearbeiteten Teilskript einschließlich SKIP und Abschluss werden bestmöglich gemeldet. Keine Meldung vor jedem Kindprozess und kein Logstream. P1–P4 bleiben das lokale Logging-Paket; die frühere Aussage „keine zusätzliche Netzwerkkommunikation“ beschreibt nur die Logger-Funktionen. Der getrennte Reporter darf die jetzt ausdrücklich vereinbarten Ereignisse senden. Die eigenständige lokale Ausführung muss auch ohne funktionsfähigen Reporter möglich bleiben. Die frühere Entscheidung „kein weiteres Modul nötig“ gilt für lokale Logs, nicht als Verbot einer geordnet ausgelieferten Reporter-Abhängigkeit.
+
+Der im Gespräch genannte Pfad `Package/_Vorlage` existiert im untersuchten Checkout nicht. Tatsächlicher Owner ist `Package_Vorlage`. Dessen `powershell/` enthält hier nur `.gitkeep`; reale kundenspezifische Teilskripte wurden nicht geprüft. Deren Ablaufbeschreibung stammt vom Benutzer.
+
+## 2. SSoT-Befunde und Architekturentscheidung
+
+| Gegenstand | Bestehender Owner | Konsequenz |
+| --- | --- | --- |
+| Laufreihenfolge, Hash-Skip, Erfolg/Reboot, Detection | `Package_Vorlage/install.ps1` | Neue Meldungen lesen vorhandene Entscheidungen; keine zweite Klassifikation der Exit-Codes. |
+| Paketidentität | `config.json`: ProjectName und version; serverseitig `Read-VsPackageConfig` in `mecm/VirtuSphere-Common.ps1` | Kein neuer Identitätswert in Registry/config; technische Logpfade dürfen die fachliche Identität nicht verändern. |
+| Installationskontext und Logwurzel | Wrapper: ProgramData bzw. LOCALAPPDATA | Bestehende Auswahl verwenden; im Userfall getrennte Historie pro Benutzerprofil. |
+| Verteilung der Vorlage | Serverinstaller und `mecm_autoimporter.ps1` | Wrapper bleibt eigenständig. Autoimporter kopiert install.ps1; keine neue lose Laufzeitbibliothek voraussetzen. |
+| Server-/Client-Logging | `mecm/VirtuSphere-Logging.ps1`, `clients/VirtuSphere-Client-Logging.ps1`, PowerShell-Referenz R2 | Bestehende gespiegelte Logger verwenden Tagesdateien/30 Tage und sind nicht unmittelbar für diese Fünf-Läufe-Regel geeignet. Ihre Konstanten und Verträge nicht ändern. |
+| Fortschritt | QA-Vertrag A22 | `[n/total] RUN` vor der Entscheidung/Ausführung, danach `OK`, `FAIL` oder `SKIP`. Kein erfundener Gesamtwert vor erfolgreicher Auflistung. |
+| Prüfungen | `scripts/check.ps1`, Registry unter `scripts/lib/check/` | Keine zusätzlichen öffentlichen Runner. |
+
+Entscheidung: kleine private Wrapper-Funktionen in install.ps1, ein Konstanten-Owner für KeepCount=5 Durchläufe und ein gemeinsamer Formatter für beide Dateisenken/Konsole. Zwei Dateien bedeuten nicht zwei Loggerimplementierungen. Kein Kopieren des umfangreichen Server-/Client-Loggers und kein neuer allgemeiner Redaction-/Byte-Limiter. Die spezifische Ausnahme (Aufrufdateien/Anzahl statt Tagesdateien/Alter) bei Umsetzung in `docs/ai/reference/powershell.md` dokumentieren. Gemeinsame Semantik bleibt: diagnostisch, nicht auf dem Erfolgsstream, nicht fatal; die Logfunktionen erzeugen selbst keine Netzwerkkommunikation.
+
+## 3. Vorgeschlagene Umsetzung
+
+### P1: Laufidentität und Dateisenke
+
+- Unter vorhandener Logwurzel einen ausschließlich eigenen Bereich `PackageWrapper/<Identitaet>/` verwenden. Identität ist der volle SHA-256 über ein längenpräfixiertes Paar der UTF-8-Bytes von ProjectName/version (jede Länge als kulturunabhängige Dezimalzahl plus Doppelpunkt). Exakte konfigurierte Schreibweise, keine Normalisierung und kein optionaler Anzeigename im Ordner. Originalwerte stehen lesbar im Header. Keine zweite fachliche Identität ableiten: Änderungen der Schreibweise trennen die Loghistorie bewusst, auch wenn Windows die Registry-Schreibweise nicht unterscheidet.
+- Dateinamen `wrapper_<UTC-Zeit-mit-Millisekunden>_<GUID>.log` und `reporting_<derselbe-Zeitstempel>_<dieselbe-GUID>.log`. Run-ID und Dateistamm einmal vor beiden Initialisierungen erzeugen. Je Datei CreateNew, nie überschreiben; die Anlage des Paares ist nicht atomar. Originalname/version im Header, nicht ungeprüft als Pfad. Beide Dateien vor Reporterimport bestmöglich anlegen, damit auch fehlender/defekter Reporter diagnostizierbar ist.
+- UTF-8 mit BOM explizit festlegen, damit Windows-PowerShell-5.1-Werkzeuge die Datei eindeutig erkennen. Kleine Ereignisse sofort flushen. Dauer per Stopwatch, UTC-Zeitstempel in festem ISO-Format. Flush verbessert Sichtbarkeit, garantiert aber keine Persistenz bei Stromverlust.
+- Header: Schema-Version, Lauf-ID, Paketname/-version, Start, tatsächlicher Prozesskontext und PowerShell-Version. Keine vollständige config, Umgebungsvariablen, Credentials oder Teilskriptausgaben ins Gesamtlog kopieren.
+- Eine zentrale private Schreibfunktion; keine Erfolgsstream-Ausgabe. Kontrollzeichen in freien Anzeigefeldern neutralisieren. Keine freie Exception-/Konfigurationsserialisierung als angeblich sichere Diagnose; feste Fehlerkategorie und gezielte Metadaten bevorzugen.
+- Sinkausfall: nur die betroffene Dateisenke für den Rest des Aufrufs deaktivieren, einmal je Senke lokal warnen. Keine Wiederverbindungs-/Recovery-Schleife und keine Ersatzdatei. Die andere Senke und der Reporter bleiben unabhängig. Bei unvollständiger Initialisierung keine Historie bereinigen. Konsolendiagnose bestmöglich fortsetzen; Warn-/Dispose-Fehler intern abfangen, keine gegenseitigen rekursiven Loggeraufrufe. Geöffnete Handles bis zum Ende möglichst behalten, damit aktive Dateien geschützt bleiben; harte I/O-Ausfälle begrenzen diese Garantie.
+- Logger nach bestehender Konfigurationsprüfung und Auswahl der Logwurzel, aber vor dem ersten Registry-Schreibzugriff initialisieren. Die bestehenden Fachschritte nicht umsortieren. Vor gültiger Paketidentität ist paketweise Ablage nicht zuverlässig möglich: bestehende Konfigurationsfehler weiter auf Konsole und mit bestehendem Exit-Code melden. Keine zusätzliche anonyme Logfamilie erfinden. Bei nicht beschreibbarem Ziel ist eine Gesamtdatei nicht garantiert; auch unerwartete Identitätsdatentypen dürfen ausschließlich den neuen Logger deaktivieren, nicht neue Konfigurationsregeln einführen.
+
+### P2: Instrumentierung des vorhandenen Ablaufs
+
+- Skriptliste einmal mit unveränderter Auswahl/Sortierung ermitteln, daraus total und Index ableiten. Vor jeder Einheit einschließlich Hashprüfung RUN, danach genau ein beobachtetes Ergebnis. RUN bezeichnet die Bearbeitung des Schritts, nicht den bewiesenen Kindprozessstart. Nach erfolgreicher Inventur `[0/total]`; bei fehlgeschlagener Inventur total unbekannt, kein `0/0`. Bekannte leere Liste separat als bestehender Fehler.
+- `$LASTEXITCODE` unmittelbar nach dem Kindprozess sichern, bevor irgendeine neue Hilfsfunktion läuft. Vorhandene Erfolgsliste und Reboot-Rangfolge bleiben die einzigen Entscheider.
+- OK heißt erfolgreicher Aufruf; bei Hash-Skip kein erfundener Exit-Code und kein als neu ausgeführt gezählter Schritt.
+- Fehler unterscheiden: Startfehler ohne Exit-Code, Kindprozessfehler mit Code, Status-/Detection-Schreibfehler. Kindprozess-0 plus Markerfehler darf nicht als vollständig erfolgreicher Wrapper-Schritt erscheinen.
+- Detailpfad bezeichnet ausschließlich das bestehende Umleitungsziel. Bei Start-/Umleitungsfehlern nur als vorgesehenes Ziel bezeichnen; Existenz ist kein Beweis für vollständigen Inhalt. SKIP erhält keinen neu erzeugten Detail-Logpfad. Eigene Teilskript-Logpfade sind unbekannt und werden weder erraten noch durchsucht.
+- Abschluss aus beobachteten Schrittergebnissen bilden: OK, SKIP, FAIL, nicht bearbeitet; ihre Summe muss bei bekanntem total diesem entsprechen. Kind-Exit-Code separat speichern. OK erst nach erfolgreichem Schrittmarker-Schreiben, FAIL auch bei vorgelagertem Hash-/Invalidierungsfehler oder Markerfehler trotz Kind-Code 0. Ein späterer Gesamt-Detectionfehler ist ein Wrapperfehler und ändert bereits abgeschlossene Schrittergebnisse nicht. Detection-Schreibstatus nur `geschrieben`, `fehlgeschlagen` oder `nicht versucht`; ohne zusätzliche Prüfung keine Behauptung über aktuellen Registry-Bestand. Keine Erfolgsformulierung für Hintergrundaufgaben.
+- Stop: verbleibende Schritte als nicht bearbeitet zählen. Continue: Folgeschritte laufen unverändert, Gesamtfehler bleibt erhalten. 1641: vorhandenen Abbruch/Folgelauf bewahren. 3010 bleibt vorhandener Neustartwunsch.
+- Reguläre Abbrüche nach Loggerinitialisierung erhalten bestmöglich Abschluss. Vor bestehenden expliziten exits deren tatsächlich verwendeten Code für den Abschluss speichern; keine zweite Reboot-Rangfolge. Äußeres try/finally schließt Ressourcen; ein optionaler äußerer catch darf bisher unbehandelte Fehler nur diagnostizieren und unverändert weiterwerfen, nicht als Erfolg konsumieren. Für unbehandelte Exceptions keinen vermeintlich sicher vom Wrapper zurückgegebenen Code erfinden. Harte Prozessbeendigung/Stromverlust kann Abschluss verhindern; fehlender Abschluss bedeutet unvollständiges Protokoll, nicht bewiesenen Installationsfehler.
+- Keine umfassende Ablaufrefaktorierung nur zur Reduktion der Anzahl `exit`-Anweisungen; jede Anpassung gegen bestehende Rückgabepfade prüfen.
+
+### P3: Aufbewahrung von fünf Durchläufen
+
+- Erst nach Anlage und Header-Flush BEIDER neuen Dateien bereinigen. Snapshot anhand des exakt geparsten Dateistamms (Zeitstempel und Run-ID) gruppieren; fehlender Partner ist eine gültige unvollständige Gruppe. Gruppen absteigend nach UTC-Startzeit und ordinaler Run-ID sortieren, erste fünf sowie aktuellen Lauf schützen. Nur ältere Gruppen bereinigen, niemals beide Dateitypen getrennt auf fünf zählen. Bei normaler Uhr bleiben aktueller Lauf plus vier ältere; Uhrkorrektur darf zusätzlichen Schutz ergeben. Keine manipulationssichere reale Chronologie behaupten.
+- Nur unmittelbar im eigenen Identitätsordner liegende reguläre Dateien mit exakt eigenem Namensschema berücksichtigen. Keine Rekursion, kein Wildcard-Delete, keine fremden Logs.
+- Vor Erstellung UND Löschung absolute Zielgrenzen prüfen und Reparse-Points im verwalteten Pfad ablehnen. Einzelne Dateien mit LiteralPath löschen, nie rekursiv. Vor jeder Löschung erneut Metadaten prüfen. String-Präfixprüfung allein ist unzureichend (Verzeichnisgrenze beachten). Pfadprüfung allein schließt einen gleichzeitigen Pfadaustausch nicht aus: bei SYSTEM-Ausführung muss der eigene Logbereich gegen Änderungen durch unprivilegierte Benutzer geschützt sein. Keine ACL-Reparatur am bestehenden gemeinsamen Logordner; nur eigenen Unterbaum absichern. Kann dessen sicherer Betrieb nicht nachgewiesen werden, neuen Dateilogger/Bereinigung deaktivieren und warnen. Sicherheit der konkreten Dateisystemimplementierung bleibt Abnahmepunkt, keine Zusage allein aus LiteralPath.
+- Beide aktuellen Logs mit CreateNew, Schreibzugriff und FileShare.Read offen halten; kein Delete-Sharing und keine Handle-Vererbung. Vor Bereinigung einer alten Gruppe alle vorhandenen Partner gemeinsam so öffnen und bis Ende halten, dass aktive Writer ausgeschlossen sind und Löschen möglich bleibt; konkrete Windows-Handle-Strategie vor Umsetzung beweisen. Kann ein Partner nicht sicher gesperrt werden, gesamte Gruppe auslassen. Kein Öffnen/Schließen als vermeintlich atomarer Aktivitätstest. Keine Sperre der eigentlichen Paketinstallation einführen.
+- Bei aktiven/gesperrten Dateien oder fehlenden Rechten dürfen vorübergehend mehr als fünf Durchlaufgruppen bleiben. Nicht jüngere Logs ersatzweise löschen, um die Zahl zu erzwingen. Späterer Aufruf versucht erneut.
+- Nach Absturz freigegebene, unvollständige Gruppen zählen als historische Läufe. Das Löschen zweier Dateien ist nicht atomar: fällt die zweite Löschung aus, Rest behalten und später erneut bereinigen, nicht rekonstruieren. „Gemeinsam aufbewahren“ bedeutet gemeinsame Auswahl, keine garantierte atomare Paarlöschung. Keine zusätzliche Statusdatei nötig.
+- Wird eine Snapshot-Datei zwischenzeitlich durch einen anderen Wrapper gelöscht, ist das ein harmloser bereits erledigter Fall. Ein anderer Löschfehler erzeugt höchstens eine lokale Bereinigungswarnung pro Lauf, keine Fehlerschleife. Der Snapshot wird nicht wiederholt, um eine harte Fünfergrenze zu erzwingen.
+- Grenze gilt pro Paketversion/Profil, nicht für alle Versionen zusammen und nicht für den gesamten VirtuSphere-Logordner. Viele Versionen oder vorhandene Detail-Logs bleiben bewusst außerhalb dieses Budgets.
+
+### P4: QoL und Dokumentation
+
+- Logpfad am Anfang und Ende ausgeben; kurzer klarer Abschluss und nachvollziehbare Zähler.
+- Eindeutige Run-ID für lokale Zuordnung ohne zusätzliche Registry-Einträge oder Software-Center-UI; der getrennte Reporter verwendet dieselbe Run-ID gemäß P5, kein eigener Netzaufruf durch den Logger.
+- README erklärt Beispiel, Fundort, Fünf-Läufe-Regel, aktive-Dateien-Ausnahme und unabhängige Aufgabenlogs.
+- Keine Konsolenausgabe als sichtbaren Software-Center-Fortschritt bezeichnen.
+- Optional später, nicht Teil dieses Pakets: eindeutige Namen auch für bestehende Detail-Logs. Deren heutige Sekundenauflösung kann bei parallelen Aufrufen kollidieren; das neue Gesamtlog beseitigt diese bestehende Grenze nicht.
+
+## 4. Testmatrix und Abnahme
+
+| Fall | Nachweis |
+| --- | --- |
+| 1/5 Teilskripte, alle 0; 1707 | Paarige Fortschrittsereignisse, korrekte Zähler, unveränderte Detection/Exit-Codes. |
+| Alle oder einzelne Hash-Skips | Kein Kindprozessstart und kein erfundener Code; lokale RUN/SKIP-Ereignisse sowie vorgesehene step_result-Meldung bleiben erhalten. Passende Registry-Marker erhalten. |
+| Fehler + Stop / Continue | Restzählung und Abschluss stimmen; Continue kann Gesamtfehler nicht verdecken. |
+| 3010, 1641, Fehler plus Reboot | Bisherige Rangfolge, Abbruch und Folgelauf unverändert. |
+| Kind richtet Aufgabe ein und endet 0 | Wrapper meldet nur eigenen Erfolg; kein Warten/Prüfen der Aufgabe. Synthetisches Kind genügt für lokalen Test. |
+| Start-, Hash-, Auflistungs-, Registry-/Detectionfehler | Kein falscher OK-Abschluss, bestehendes Fachverhalten erhalten. |
+| Fehlende/defekte config oder leere Skriptliste | Bestehender Fehler; explizite Grenze vor Loginitialisierung beachten. |
+| Logordner nicht schreibbar, voller Datenträger, Flush-/Dispose-/Deletefehler | Neue Logging-Funktion beeinflusst Nutzlast, Exit-Code und Detection nicht; Warnung begrenzt. Bestehende Detail-Logfehler sind separat zu bewerten, nicht still semantisch ändern. |
+| 0/4/5/6/20 historische Durchläufe | Nach normalem neuen Aufruf maximal 5 Gruppen, normalerweise 10 Dateien, inklusive aktuellem Paar. |
+| Parallelstarts/identische Zeitstempel/aktive älteste Datei | Eindeutige Dateien, keine Löschung aktiver Logs; temporärer Überschuss statt Datenverlust. |
+| Fremddateien, andere Version/Projekt/Benutzer | Unberührt, kein Namenskollisions-Mischen. |
+| Leerzeichen, Umlaute, eckige Klammern, sehr lange Namen, Pfadsegmente, Reparse-Points | Sichere feste Identität, Literalpfade und keine Löschung außerhalb des eigenen Bereichs. |
+| Prozess hart beendet | Vorherige Ereignisse lesbar; kein erfundener Abschluss; Historie später bereinigbar. |
+| Header-Flush scheitert bei vorhandenen 6 Logs | Keine Historie bereinigt; Nutzlastverhalten entspricht Referenzlauf ohne neue Senke. |
+| Kind 0, Schrittmarkerfehler / Gesamtmarkerfehler | Erster Fall: Schritt FAIL mit Kind-Code 0. Zweiter Fall: Schritte OK, Wrapper FAIL. Summen konsistent. |
+| Uhr zurückgestellt; aktuelle Datei außerhalb Top 5 | Aktuelle Datei erhalten, stabiler Snapshot, begründeter temporärer Überschuss. |
+| Zwei Bereiniger löschen dieselbe Datei | Bereits entfernte Datei harmlos; jüngere/aktive Dateien bleiben geschützt. |
+| WarningPreference=Stop; Fehler in Flush/Dispose | Keine neue Ausnahme und kein Überschreiben des bereits entschiedenen Exit-Codes. |
+| Unprivilegiert vorangelegter SYSTEM-Logbereich, Verzeichnis-Austausch | Kein Schreiben/Löschen in umgeleitetem oder unsicherem Bereich; neue Senke deaktiviert. |
+| Unterschiedliche Spracheinstellungen, Unicode, Identitätsdatentyp ungültig | Deterministischer Hash für gültige identische Strings, keine zusätzliche Fachvalidierung durch Logging. |
+
+Bestehende verhaltensorientierte `VirtuSphere.PackageRepair.Tests.ps1` als Regression verwenden; gezielte neue Wrapper-Logging-Tests für echte temporäre Dateien und synthetische Kinder ergänzen. Fortschrittsvertrag in `VirtuSphere.ProgressReporting.Tests.ps1` erweitern. Keine echten Installationsskripte oder geplanten Aufgaben auf dem Arbeitsrechner ausführen.
+
+Die vorhandenen PackageRepair-Tests mocken Registry und `PowerShell.exe`. Sie belegen den Wrapper-Kontrollfluss, aber keine echten Prozesshandles, Windows-ACLs oder Dateisperren. Dafür getrennte temporäre Windows-Dateitests und harmlose Kindprozesse verwenden; FileShare-Verhalten nicht ausschließlich mocken. Testaufbau muss ProgramData/LOCALAPPDATA vor Wrapper-Aufruf isolieren und anschließend wiederherstellen, damit reale Logs weder entstehen noch bereinigt werden. Insbesondere neue .NET-Dateizugriffe umgehen bestehende Cmdlet-Mocks. Produktzustand (Child-Aufrufliste, Registry-Mutationen, Exit-Code) für gleiche Fixtures mit gesunder/defekter neuer Logsenke vergleichen. Testausgabe allein ist kein Beweis für Nichtbeeinflussung.
+
+Öffentlicher gezielter Einstieg nach Umsetzung: `scripts/check.ps1 -Gate powershell-syntax,powershell-tests`. Finale Fast-/Integration-/Release-Abdeckung entsprechend tatsächlichem Veröffentlichungsschritt aus kanonischer Registry auswählen; diese Planung behauptet keine ausgeführten Produktgates. Vor Rollout vorhandene Template-Staging-/Hash-/Content-Verträge mitprüfen. Änderungen am Wrapper können über den Autoimporter Paketcontent aktualisieren; erfolgreiche bereits erkannte Applications werden dadurch nicht automatisch erneut installiert.
+
+Externe Abnahme bei späterer Auslieferung: synthetisches MECM-Paket über Software Center im vorgesehenen System-/Userkontext starten; lokale Dateien, AppEnforce/AppDiscovery und Detection vergleichen. Keine Behauptung, dass Online-Doku oder lokale Pester-Tests den realen Standortlauf beweisen.
+
+## 5. Onlineprüfung: mehrere Primärquellen
+
+Abgerufen am 2026-09-13. Quellen begründen Mechanik; KeepCount=5 ist Benutzerentscheidung.
+
+1. [Microsoft: Configuration Manager log files](https://learn.microsoft.com/en-us/intune/configmgr/core/plan-design/hierarchy/log-files): AppEnforce erfasst Anwendungsinstallation, AppDiscovery die Erkennung. Eigenes Wrapperlog ergänzt diese Diagnose und wird nicht allein durch Dateierstellung eine Software-Center-Anzeige.
+2. [Microsoft: about_Automatic_Variables, Windows PowerShell 5.1](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables?view=powershell-5.1): LASTEXITCODE beschreibt das Prozessergebnis; ein erfolgreich beendeter File-Aufruf kann 0 liefern. Daraus folgt keine Aussage über unabhängig gestartete spätere Aufgaben.
+3. [Microsoft: about_Character_Encoding, Windows PowerShell 5.1](https://learn.microsoft.com/hr-hr/powershell/module/microsoft.powershell.core/about/about_character_encoding?view=powershell-5.1): Dateicmdlets haben unterschiedliche Defaults; explizite Kodierung verhindert gemischte/unlesbare Logs. Die englische Seite war beim Abruf nicht verfügbar, die offizielle lokalisierte Seite lieferte den englischen Fachtext.
+4. [Microsoft: Remove-Item / LiteralPath](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/remove-item?view=powershell-7.5): LiteralPath interpretiert keine Wildcards. Das ersetzt keine eigene Zielgrenzenprüfung. Umsetzung muss weiterhin 5.1-kompatibel sein.
+
+Dateisperr-/Parallelverhalten ist eine zu beweisende Implementierungsentscheidung, kein durch diese Quellen bereits bestandener Test.
+
+Ergänzend bei Revision 2 geprüft: [Microsoft: try/catch/finally](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_try_catch_finally?view=powershell-7.6) beschreibt Ressourcenfreigabe und finally bei regulären exits. Das begründet zentralen Abschluss/Dispose, aber keine Garantie bei Prozesskill; die Umsetzung muss das Verhalten unter Windows PowerShell 5.1 eigens testen.
+
+## 6. Historische Evidenz des lokalen Planungspakets
+
+- Gelesene lokale Quellen: Root-AGENTS; GROK 1.1/1.5/3; core/qa-Verträge; PowerShell-Referenz R1–R5; Workflow; ADR-0029; QA/QUALITY-GATES und Fast-Gateregistry; aktueller Wrapper und config; MECM-README-Paketabschnitt; Autoimporter-/Installer-Verweise; Client-Logger-Konstanten und vorhandene PackageRepair-Tests.
+- Implementierungspakete P1–P4: alle offen. Keine Produktdateien geändert, keine Produktchecks oder MECM-Labtests ausgeführt.
+- Planprüfung: Quellenverweise, Scope/SSoT, Exit-Code-Pfade, Retention-Isolation und Hintergrundaufgaben-Semantik geprüft. Dateimanifest mit SHA-256 separat im zugehörigen qa-artifacts-Ordner; gilt nur für gelesene Quellenstände, nicht als Testerfolg.
+- Nächster Schritt bei Implementierungsauftrag: Quellenmanifest auf Aktualität prüfen, P1/P2 umsetzen, dann P3/P4 und gezielte Tests. Kein erneutes Grundsatzgespräch erforderlich.
+- Keine blockierende fachliche Frage. Vorgeschlagene sichere Defaults: eigener Unterordner, UTF-8, GUID, offene Dateien schützen; fünf Durchlaufgruppen sind bei aktiven/schreibgeschützten Altdateien eine bestmögliche Bereinigung, keine harte Garantie.
+
+## 7. Warum diese Entscheidungen getroffen werden
+
+| Entscheidung | Warum / vermiedenes Problem | Bewusster Preis oder Grenze |
+| --- | --- | --- |
+| Nur Wrapperereignisse erfassen | Ein Kind kann lediglich eine geplante Aufgabe eingerichtet haben. Nur beobachtete Fakten vermeiden eine falsche Erfolgsaussage über spätere Arbeiten. | Kein zentraler Gesundheitsstatus aller Hintergrundaufgaben. |
+| Ereignislogger statt vollständigem Transcript | Gewünscht sind wenige gezielte Ablaufdaten. Ein Transcript würde historische Konsolenmeldungen, fremde Statuswerte und möglicherweise sensible Inhalte unselektiert übernehmen. | Konkrete Installerursachen bleiben in vorhandenen Detail-Logs. |
+| Eigener Unterordner | Die bestehenden Logger haben eigene Retention; gemeinsame Dateinamensmuster oder rekursives Löschen könnten deren Logs treffen. | Ein zusätzlicher Fundort, den Start-/Abschlussmeldung und README nennen. |
+| Genau fünf Aufrufe mit je zwei Logarten, ohne Alters-/Bytegrenze | Wenige Ereignisse je endlicher Skriptliste bleiben überschaubar. Eine gemeinsame Historie verhindert, dass Fehlerursache und Übertragungsdiagnose unterschiedliche Aufrufe behalten. | Normalerweise zehn Dateien, keine harte Speichergarantie über viele Versionen oder geschützte Gruppen hinweg. |
+| KeepCount nur im Wrapper | config, Registry und Logger-Twins als weitere Konfigurationsorte würden widersprüchliche Werte ermöglichen. | Änderung der Vorgabe braucht ein Vorlagenupdate. |
+| Eigenständige kleine Funktionen | Autoimporter verteilt die zentrale install.ps1 einzeln. Eine neue Bibliothek wäre eine zusätzliche Installations-/Upgradeabhängigkeit. | Explizit eigener Wrapper-Logvertrag, kein dritter vermeintlich identischer Logger-Zwilling. |
+| SHA-256 über eindeutiges Paar | Projekt-/Versionsnamen können Pfadzeichen enthalten oder nach Bereinigung kollidieren. Ein Hash verhindert, dass Fachwerte als Verzeichnisnavigation wirken. | Hashordner ist nicht selbst sprechend; Header und ausgegebener Logpfad liefern Orientierung. |
+| GUID plus CreateNew | Zwei Starts in derselben Millisekunde sollen keine Datei überschreiben. Zeitstempel allein ist keine Eindeutigkeit. | Etwas längerer Dateiname; keine verteilte Koordination erforderlich. |
+| Sofortiges Flush und offener Lesezugriff | Support kann den aktuellen Fortschritt lesen; ein Abbruch verliert weniger gepufferte Information. Offener Handle schützt gegen normale parallele Bereinigung. | Kein vollständiger Schutz bei Stromverlust oder verlorenem Handle. |
+| Ein Lauf, zwei unabhängige Dateien; bei Schreibfehler nur betroffene Senke deaktivieren | Wiederöffnen, Wiederanlegen oder Retryschleifen würden zusätzliche Zustände und mögliche Verzögerungen schaffen. | Bei temporärem Ausfall fehlt der Rest dieser Logart; andere Logart und Reporter können weiterarbeiten. |
+| Erfolgreichen Header vor Retention verlangen | Sonst könnte ein neuer defekter Logger alte, noch brauchbare Diagnose löschen, ohne Ersatz zu liefern. | Fehlgeschlagene Starts können eine unvollständige Datei hinterlassen. |
+| Top-5-Gruppensnapshot statt rekursiver Such-/Löschschleife | Klare Auswahl verhindert, dass parallele Änderungen weitere Durchläufe zu Löschkandidaten machen oder ein Paar unterschiedlich bewertet wird. | Temporärer Überschuss bei Parallelität, Sperren und Uhrkorrektur; Teilfehler beim Löschen bleiben möglich. |
+| Sicherer eigener Bereich bei SYSTEM | Privilegiertes Schreiben/Löschen darf nicht durch einen fremd veränderbaren Pfad auf andere Dateien gelenkt werden. LiteralPath löst nur Wildcards, nicht diesen Vertrauenskonflikt. | Wenn Sicherheit nicht herstellbar/nachweisbar ist, entfällt das zusätzliche Dateilog, nicht die Installation. |
+| OK erst nach Schrittmarker | Der Marker entscheidet über das spätere Überspringen. Kind-Code 0 allein beweist diesen abgeschlossenen Wrapper-Schritt nicht. | Kind- und Schrittergebnis müssen separat erkennbar sein. |
+| Fachliche Exit-Entscheidung wiederverwenden | Eine zweite Reboot-/Fehlerauswertung im Logger könnte Software Center ein anderes Ergebnis liefern oder melden. | Bei unbehandelter Exception gegebenenfalls unbekannter Gesamt-Exit-Code im Log. |
+| Vorprüfungsfehler ohne erzwungenen Dateilog | Ohne gültige Identität/Kontext gibt es keinen belastbaren Paketordner. Anonyme Fallbacks würden eine zweite Retentionlogik benötigen. | Das Ziel „ein Log je Aufruf“ gilt nur bei erfolgreicher Initialisierung; dies muss die README ehrlich sagen. |
+| Vorhandene Detail-Logs unverändert | Benutzer hat deren eigenständige Verantwortung bestätigt. Umbenennung, Einsammeln oder Bereinigung würde den vereinbarten Scope erweitern. | Bestehende Namenskollisionen und Detail-Sinkfehler bleiben als getrennte Grenzen bestehen. |
+
+## 8. Ergebnis der vertieften Planprüfung
+
+Diese Prüfung fand folgende Lücken in Revision 1; sie sind im Plan korrigiert, nicht im Produkt implementiert:
+
+| ID / Priorität | Befund, Auslöser und Auswirkung | Korrektur / Nachweis bei Umsetzung |
+| --- | --- | --- |
+| R01 / hoch | „Logging darf nicht abbrechen“ war zu breit: bestehendes New-Item und `*>` können bereits Fehler verursachen. Ein pauschaler Fix würde Fachverhalten ändern. | Nur neue Senke nicht fatal; Referenzvergleich der Fachzustände. |
+| R02 / hoch | Reparse-Check plus LiteralPath allein verhindert keinen Pfadaustausch während privilegierter Bereinigung. | Vertrauensgrenze für eigenen SYSTEM-Unterbaum, sichere Ablehnung, Windows-Dateisystemtests. |
+| R03 / hoch | Kind-Code 0 und späterer Markerfehler konnten gleichzeitig OK und FAIL ergeben; Detection-Schreibstatus war unscharf. | Genau ein Schrittergebnis, getrennte Kindcodes, konsistente Summen, separater Gesamtmarkerfehler. |
+| R04 / mittel | „Aktueller plus vier ältere“ war bei überlappenden Aufrufen und Uhrkorrektur kein eindeutiger Algorithmus. | Gemeinsamer Snapshot, feste Top 5, aktive/aktuelle Dateien zusätzlich geschützt. |
+| R05 / mittel | Retention nach Neuanlage hätte trotz kaputtem Header alte Logs löschen können. | Erst nach Header-Flush bereinigen, bei Sinkausfall keine Retention. |
+| R06 / mittel | Loggerinitialisierung, Dispose und Warnfehler konnten selbst Fach-Exceptions überdecken. | Exakte Initialisierungsstelle, bestmögliches finally, keine neuen Fehler aus Diagnosepfaden. |
+| R07 / mittel | Tests mit gemocktem PowerShell.exe belegen keine echten Locks; direkte .NET-I/O kann Cmdlet-Mocks umgehen. | Isolierte echte Dateitests, Umgebungsisolation, explizite PS-5.1-/Windows-Abnahme. |
+| R08 / gering | Identitätsserialisierung, Encoding, Recovery und Detailpfade bei SKIP waren offen. | Eindeutiges Byteformat, UTF-8-BOM, einfache Deaktivierung, keine erfundenen Detaildateien. |
+
+Verbleibende technische Beweislast für P1–P4: sichere Dateisystemoperationen/ACLs, Windows-Handlefreigabe und unveränderte Wrapper-Ergebnisse müssen während der Implementierung getestet werden. Der lokale Plan ist ausreichend entschieden, um damit zu beginnen; er ist kein Sicherheits- oder Laufzeitnachweis. Für die spätere Portal-Erweiterung gelten zusätzlich die Voraussetzungen und Umsetzungsschranken in Abschnitt 14.
+
+Prüfevidenz Revision 2: kanonischer Aufruf `scripts/check.ps1 -Gate doc-hygiene,doc-semantics` zunächst mit sh.exe/MSYS-Startabsturz (-1073741502); Runner klassifizierte beide als fail, tatsächlich kein auswertbarer Dokumentationsbefund. Wiederholung außerhalb der Sandbox: `[1/2] pass doc-hygiene`, `[2/2] pass doc-semantics`, Exit 0. Artefakt: `qa-artifacts/2026-09-13-package-wrapper-logging-plan/review-doc-gates-retry.json`. Diese Gates prüfen Agenten-/Betriebsdokumentation; datierte Auditpläne sind vom Semantikcheck ausgenommen. Sie ersetzen deshalb nicht die manuelle Gegenprüfung dieses Plans. Acht Befunde und Begründungstabelle auf Vollständigkeit geprüft; Produktquellen aus dem bisherigen Manifest unverändert. Abschließendes Manifest: `review-source-manifest.json` im selben Artefaktordner. Keine Produkt- oder Standorttests ausgeführt.
+
+## 9. Portal: vereinbarter Nutzen und geprüfter Ist-Stand
+
+Der Benutzer hat drei Funktionen ausgewählt: kompakte Fehlerübersicht, letzte Rückmeldung mit Zeitpunkt und Diagnosehinweise. Dazu sendet der Wrapper started, je bearbeitetem Schritt ein step_result und zuletzt completed. Fünf bearbeitete Schritte ergeben sieben fachliche Meldungen; frühe Abbrüche können weniger ergeben. Übertragungsversuche sind keine Garantie für Empfang. Die Meldungen betreffen nur den Wrapper, nicht geplante Aufgaben. Keine automatische Wiederholung der Installation, kein Download fremder Clientdateien, keine live übertragenen Logzeilen.
+
+| Befund aus dem Code | Entscheidung und Begründung |
+| --- | --- |
+| `mecm_report.php` besitzt reportPhase, heartbeat und reportRun. reportRun ist ein Serverkanal mit festem Quellenkatalog und optionalem Server-Reporttoken. | Additive neue Action `reportPackageRun` im vorhandenen Diagnosekanal planen. Keine neue Phase und kein missbrauchter Server-Quellenname: sonst würden Systemstatus und bestehende Run-Reports semantisch vermischt. Alte Actions und ihre Auth-/Wire-Verträge unverändert lassen. |
+| reportPhase verwendet bekannte MACs als Zulassung auch außerhalb der IP-Allowlist und sucht mit LIMIT 1. | Dieses historische Verhalten nicht als eindeutige Geräteauthentifizierung ausgeben und nicht ungeprüft kopieren. Für neue Paketberichte IP-Allowlist und eindeutige Gerätezuordnung verlangen; keine Verteilung des serverseitigen Reporttokens an Benutzerpakete. |
+| `clients/VirtuSphere-Client-Common.ps1` besitzt API-/Scheme-/TLS-/UTF-8-Helfer sowie publizierte Registry-Snapshots; Common lädt zwingend den benachbarten Client-Logger. | Keine zweite Adress-, Snapshot- oder Zertifikatslogik im Wrapper. Gemeinsame Helfer wiederverwenden, aber deren importseitige Logger-Abhängigkeit vollständig paketieren und Fehler isolieren. |
+| `portal/packages.php` ist ein lesender MECM-Katalog. `deploy_packages` besitzt basename/version; `deploy_vm_packages` beschreibt Auswahl, keinen Installationserfolg. | Diagnosedaten in eigene Tabellen. Katalogstatus Aktiv/Retired und Paketauswahl niemals aus Wrappermeldungen ändern. |
+| VM-Ansicht verwendet `lib/vm_edit_page.php` und `lib/vm_edit_status.php`; Clientphasen stehen dort bereits. | Paketbereich im gemeinsamen VM-Diagnoseeinstieg gemäß Abschnitt 19, keine zusätzliche globale Systemstatus-Achse. Clientphasen bleiben erkennbar getrennt. |
+| `core.js` besitzt bereits einen Copy-Mechanismus samt Fehlerbehandlung für fehlende Clipboard-API auf HTTP. | Bestehenden Mechanismus passend erweitern, kein zweites Copy-Widget. Immer auswählbaren Pfad als funktionierende Alternative anbieten. |
+
+## 10. SSoT und Lieferpakete für die Erweiterung
+
+### P5: Vertrag, Identität und Persistence
+
+Neue technische Owner (vorgeschlagene Dateinamen, bei Umsetzung gegen Repo-Konventionen bestätigen): `lib/package_run_report.php` für Validator/technischen Zustandsvertrag und Bounds; `lib/repo/package_runs.php` für Transaktionen, Deduplizierung, Reads und Aufbewahrung. Portalstatus-Mapping in einem Presenter unter `lib/` unter Nutzung der vorhandenen Badge-/Sprachhelper, nicht inline auf mehreren Seiten. PHP-Konstanten sind SSoT für Event-/Resultatwerte und Grenzen; gemeinsame Wire-Fixtures prüfen den PowerShell-Mirror.
+
+- Eigenes schema_version=1; Felder: run_id (GUID), event, event_seq, MAC-Kandidaten bzw. eindeutig gebundene Geräteidentität, rollout_revision, exakte ProjectName/version, lokaler Startzeitpunkt, Ereigniszeit, Kontext system/user. Keine Kennwörter, Token, vollständige config oder beliebigen Logtexte.
+- Eventsequenz monoton innerhalb eines Runs vergeben und auch bei fehlgeschlagenem Versand nicht wiederverwenden. Run-Metadaten nach erster Annahme unveränderlich; abweichende Revision, Identität, Paketversion oder Kontext unter derselben Run-ID sind Konflikte. Der optionale diagnostische Correlation-Header ersetzt weder fachliche Run-ID noch Gerätebindung.
+- started enthält bekannten total oder ausdrücklich unbekannt; step_result enthält Index, Skriptname, OK/SKIP/FAIL, optionale Fehlerkategorie, optionalen Kind-Exit-Code, Dauer und optionalen Detailpfad. completed enthält die bereits entschiedene Wrapperzusammenfassung, Gesamt-Exit-Code soweit bekannt, Ende, optionale Wrapper-/Reporting-Logpfade sowie die bounded Schrittübersicht. Ein zunächst unbekannter total darf nach erfolgreicher einmaliger Inventur bekannt werden; ein bekannter Wert darf sich nicht mehr ändern. Dies ist eine explizite Ausnahme von unveränderlichen Run-Metadaten, kein neuer Snapshot pro Meldung.
+- Dieselbe in-memory Ergebnisstruktur speist lokale Zusammenfassung und Reporter. Netzwerkstatus beeinflusst sie nicht. Lauf-ID bleibt auch ohne Dateilog verfügbar. Logpfade können fehlen und müssen als nicht verfügbar dargestellt werden.
+- Gesamt-Exit-Code und Kindergebnis strikt trennen: ein Kind 0 plus Markerfehler bleibt Wrapperfehler; 3010/1641 sind Neustarthinweise, keine roten Fehler allein wegen des numerischen Codes.
+- Neue Tabellen für Aufrufe und Schrittresultate, eindeutiger Run-Key plus eindeutiger Schrittindex je Run. Geräte-ID/Revision serverseitig gebunden, rohe Paketwerte als Snapshot erhalten. Optionale katalog_id nur bei genau einem exakten Treffer; kein Auto-Anlegen/Upsert des MECM-Katalogs durch Diagnose. Unbekannter Katalogeintrag wird als „Katalogzuordnung fehlt“ angezeigt, nicht verloren oder einem ähnlich benannten Paket zugeordnet.
+- Bestehende Katalog-Collation ist utf8mb4_unicode_ci. Exakten Diagnosetreffer deshalb ausdrücklich bytegenau vergleichen; SQL-Defaultgleichheit ist kein Beweis exakter Paketidentität. Der serverseitige Run-Key darf verschiedene Benutzeraufrufe auf demselben Gerät nicht vermischen: keine personenbezogene Freitextidentität nötig, GUID trennt Aufrufe; Kontext user beschreibt keine eindeutige Person und die UI behauptet das nicht.
+- `repo_transaction()` ist einziger Transaktionsowner. Revision unter derselben Transaktion prüfen wie Speicherung; Antwort erst nach Commit. Bestehenden Rollout-Fence und dessen fachliche Zuständigkeit prüfen; keine Änderung an mecm_id, updated, Lifecycle, ACK oder Status-Events.
+- Idempotente Schema-Migration und frische `Docker/mysql/mysql-init/struktur.sql` müssen konvergieren. Migrationsnummer erst bei Umsetzung reservieren. Indizes für VM/Revision/Paket/Run und Empfangszeit; bounded Reads statt N+1 und unbegrenzter History.
+
+**Zulassung und Identität:** Die neue Action verlangt serverseitig allowlisted REMOTE_ADDR sowie genau eine bekannte VM für die geprüften MACs und passende aktuelle rollout_revision. Mehrere MACs derselben VM sind zulässig; mehrere VM-Treffer, unbekannte Identität oder alte/neue Revision werden abgelehnt, niemals LIMIT-1 geraten. Revision aus dem publizierten Client-Snapshot zu Laufbeginn einfrieren. Snapshot gegen tatsächliche lokale Adapter plausibilisieren, nicht beim Abschluss neu auf die dann aktuelle Revision umetikettieren. Registry fehlt/unlesbar, SetupState nicht complete oder kein eindeutiger Snapshot: Reporter deaktiviert, lokale Installation läuft unverändert. Kein Namensfallback und keine spontane neue Geräteanmeldung.
+
+Diese Zulassung ist das bestehende LAN-Vertrauensmodell, kein kryptografischer Beweis der Clientidentität. Die legacy reportPhase-MAC-Ausnahme wird für die neue Action nicht übernommen. Standorte müssen die tatsächlichen Clientquellen erlauben; eine reine MECM-Serverfreigabe reicht nicht. Das ist eine explizite Rollout-Voraussetzung. Ein allgemeines Client-Token-/Zertifikatsprojekt gehört nicht zu diesem Auftrag.
+
+### P6: Reporter und Verteilung
+
+Reporter als optionaler Adapter getrennt von den privaten Logfunktionen. Er nutzt Common für die Standort-/Snapshot-/Transportbausteine und wird in isoliertem Scope geladen, damit Variablen/Preference-/TLS-Zustand nicht ungeprüft den Wrapper verändern. Benötigte Common- und Loggingdateien stammen aus ihren bestehenden Quellen, nicht manuell gepflegten Kopien unter der Vorlage. Dafür geordnetes Staging eines vollständigen SHA-256-geprüften Sets im bestehenden Template-/Autoimporterweg planen. Fresh install, Upgrade, fehlende Datei und gemischte Version nachweisen; Fehler schalten nur Reporting ab, nicht die Paketnutzlast. Common nicht per Suche in beliebigen ccmcache-Ordnern finden und nicht aus dem Netz herunterladen.
+
+PowerShell-Scope allein isoliert keine prozessglobalen .NET-TLS-Einstellungen. P6 muss solche Änderungen nachweisen und wiederherstellen oder den Transport geeignet kapseln. Snapshotwurzel einmal konsistent lesen, statt pro Feld über Get-VsSnapshotValue möglicherweise verschiedene währenddessen publizierte Snapshots zu kombinieren. Gemeinsamen Snapshot-Owner bei Bedarf um einen atomaren Lesehelper erweitern, nicht dessen Validierung im Reporter kopieren.
+
+Die Wrapperdatei bleibt für lokale Installation/Logs eigenständig. Der erweiterte Lieferumfang macht Anpassungen an Serverinstaller, Autoimporter und Template-/Content-Stamps nötig; die bisherige reine install.ps1-Kopie ist für diese Erweiterung nicht ausreichend. Vor Implementierung muss P6 den exakten Stage-/Rollback-/Hashsatz festlegen. Eine Alternative „Common einfach dot-sourcen“ ohne ausgelieferte Loggerdatei ist ausdrücklich verworfen, weil der aktuelle Common-Code dann wirft.
+
+Transportentscheidungen: ein unmittelbarer Versuch je fachlichem Ereignis, keine persistente Queue, keine Hintergrundaufgabe zum Nachliefern, keine Retry-Schleife pro Schritt. Fehler/Timeout werden lokal höchstens einmal pro Lauf zusammenfassend gewarnt und als Übertragungslücke erkennbar. Bei dauerhaftem Konfigurations-/Authfehler restliches Reporting deaktivieren; bei vorübergehendem Fehler nächstes reguläres Ereignis noch versuchen, solange das Gesamtzeitbudget reicht. Redirects zu fremden Hosts verweigern; vorhandene TLS-Prüfung nicht abschalten.
+
+Timeouts müssen tatsächliche Wandzeit einschließlich DNS/Verbindung/Lesen begrenzen, nicht nur einen scheinbar kurzen Invoke-RestMethod-Parameter setzen. Vorschlag: maximal 2 Sekunden je Ereignis, maximal 10 Sekunden kumulierte zusätzliche Wartezeit je Wrapper-Aufruf. Diese Werte sind technische Planvorgaben, durch PS-5.1-Ausfalltests zu bestätigen. Budget erschöpft: keine weiteren Versuche. Die Installation kann durch synchrone Meldungen kurz verzögert werden; „nicht fatal“ bedeutet nicht „ohne Verzögerung“. Keine Zusage verlustfreier Meldungen.
+
+### P7: Portal und Aufbewahrung
+
+Neue Diagnoseansicht aus VM-Panel und paketbezogenem Link erreichbar. Zunächst serverseitig gerendert mit sichtbarem „Aktualisieren“-Link; keine ungefragte zusätzliche Pollingarchitektur. Links erhalten Mission-/VM-/Listen-Kontext. Read-Zugriff entspricht bestehenden authentifizierten VM-/Katalogansichten; keine erfundene bestehende read-Permission. Jede spätere JSON-Leseaction muss dieselben Auth-/Objektprüfungen anwenden und Session vor Queries schließen.
+
+DB-Aufbewahrung ist von den fünf lokalen Durchläufen getrennt. Beschlossen durch Nutzerantwort auf Q1: 90 Tage ab unveränderlicher erster Serverannahme des Runs, auch für unabgeschlossene Runs. Kein zusätzlicher Fünf-Runs-Filter im Portal. Bereinigung erfolgt im bestehenden Maintenance-Owner, nicht durch Portal-GET. Q3 erlaubt dauerhaft nur Run-ID und Ablaufdatum als Sperrmerker; verbindlicher Umfang und technischer Entwurf in 25.2. Zusätzliche Mengen-/Annahmegrenzen müssen in P5 final festgelegt und getestet werden. Löschregeln dürfen ein späteres Replay nicht als neuen aktuellen Run wiederbeleben; unbekannte Altberichte und Restore haben die gesonderten Grenzen aus 25.2.
+
+## 11. Logik für verlorene, doppelte und verspätete Meldungen
+
+| Situation | Festgelegtes Verhalten / warum |
+| --- | --- |
+| Identische Meldung erneut empfangen | Eindeutiger Run/Event-Key, semantischer Payload-Fingerprint: 200/no-op; keine neue Zeile, kein neues fachliches Ergebnis. |
+| Gleicher Key, widersprüchlicher Inhalt | 409, keine Überschreibung. Sonst könnte ein Fehler nachträglich ohne neuen Versuch verschwinden. |
+| Schrittmeldung oder completed ohne empfangenen Start | Selbstbeschreibenden Run als unvollständig angelegt zulassen, wenn Identität/Revision gültig; `Startmeldung fehlt` kennzeichnen. Keine vorherigen Schritte erfinden. |
+| Einzelne step_result fehlen | completed enthält begrenzte Schrittübersicht und darf fehlende Ergebnisse ergänzen, vorhandenen widersprüchlichen Inhalt aber nicht ersetzen. Bis dahin Lücken ausdrücklich sichtbar. |
+| completed empfangen, danach älteres Ereignis | Terminales Ergebnis nicht zurückstufen; lediglich konfliktfreie fehlende Details desselben Runs ergänzen. |
+| Zwei parallele Aufrufe | Beide Run-IDs anzeigen. Nicht allein aus der letzten eingetroffenen Meldung einen angeblich aktuelleren Installationsversuch bestimmen. |
+| Alte Revision nach erneuter Bereitstellung | Reject/no-op ohne Bindung an neuen Rollout; historische Ansicht behält alte Revision getrennt. |
+| Fehler unter Continue, Abschluss fehlt | Bekannter Schrittfehler sichtbar plus „Abschluss nicht gemeldet“. Kein künstlicher Gesamt-Exit-Code. |
+| Start vorhanden, sonst Funkstille | „Start gemeldet; Abschluss nicht gemeldet“, nicht sicher „läuft“ oder „fehlgeschlagen“. Kein abgeleiteter Timeoutfehler ohne eigenen Vertrag. |
+| Kein Bericht vorhanden | „Keine Wrapper-Rückmeldung vorhanden“. Nicht „nicht installiert“ und kein Fehlerzähler für jede unbeobachtete VM. |
+| Uhr falsch / verspäteter Empfang | `Empfangen am` aus Serverzeit, `Client meldet Start/Ende` separat. Reihenfolge innerhalb Run aus Eventsequenz. Empfangszeit heißt niemals Installationszeit. |
+
+Ein reiner Zeitstempel oder clientseitiger GUID liefert keine beweisbare Reihenfolge verschiedener paralleler Runs. Daher `Zuletzt empfangene Meldung` anzeigen und mehrere Runs einzeln lassen. Für kompakte Fehlerübersichten nicht alle historischen Fehler als aktuell summieren: Fehler nach Run gruppieren, neuer gemeldeter Erfolg desselben Paket-/Gerätebereichs als separater Versuch sichtbar; bei Parallelität keine automatische „behoben“-Behauptung.
+
+## 12. Verständliche Bedienung und QoL
+
+- Gerät zuerst: Paketbereich in der gemeinsamen „VM-Diagnose“ gemäß Abschnitt 19 mit Paket/Version, Wrapper-Ergebnis, letztem gemeldetem Schritt und `Empfangen am`. Ein eindeutiger „Details“-Link öffnet die Diagnoseansicht dieses Runs.
+- Paketliste: Diagnose-Link öffnet gefilterte Geräteübersicht; Katalog-Aktiv/Retired steht separat und wird nicht farblich zum Installationsstatus umgedeutet.
+- Statussprache: „Wrapper erfolgreich“, „Wrapper fehlgeschlagen“, „Neustart angefordert“, „Neustart eingeleitet“, „Abschluss nicht gemeldet“, „Keine Rückmeldung“. Keine Aussage „Software vollständig eingerichtet“.
+- Schritttabelle zeigt OK/SKIP/FAIL in lokalisierten Worten; fehlende Schritte als „keine Rückmeldung“ oder bei vorhandenem Abschluss nachgewiesen „nicht bearbeitet“. Ein Null-Exit-Code erscheint nicht als Gedankenstrich, fehlender Code nicht als 0.
+- `3 von 5 Schritten gemeldet` statt „60 % installiert“: SKIPs und unterschiedliche Schrittdauer erlauben keinen Installationsprozentsatz.
+- Bei Fehler zuerst Skript, Fehlerkategorie und Kind-/Wrapper-Code, danach technische Details. Keine rohen Exceptions im HTML. Keine spekulative Ursache aus Exit-Code 1; Hinweis führt zu vorhandenem Detailpfad.
+- Pfade nur als Text und Copy-Aktion, nie file://-Link, Shellbefehl, UNC-Abruf oder serverseitiger Dateizugriff. Hinweis „Pfad auf CLIENT-01; Datei möglicherweise bereits bereinigt“. Pfadexistenz nicht als geprüft behaupten. Bei fehlendem Pfad keine funktionslose Schaltfläche.
+- Bestehenden Copy-Mechanismus in `portal/assets/core.js` und HTTP-Fallback verwenden; Tastaturfokus erhalten, kurze Erfolg-/Fehlermeldung. Ohne JavaScript bleibt Text selektierbar.
+- Letzte Empfangszeit und Ansicht-Aktualisierungszeit klar unterscheiden. Aktualisieren erhält Filter und Run-Auswahl; kein Sprung weg von gelesenen Fehlerdetails.
+- Leere Zustände trennen: noch keine Rückmeldungen, Filter ohne Treffer, alter Rollout, keine Katalogzuordnung. Jeweils konkrete nächste Diagnosehandlung, kein generischer grüner Zustand.
+- DE/EN über `__t()`, Zeitformat über `portal_format_timestamp()`, Badge über `portal_badge()`, Sortierung über `portal_sort_*`, kontextgerechte URL-/Help-Helper und registrierte lokale Assets. Keine neuen CSS-Farbliterale oder unregistrierten Skripte.
+- Keine Payloads oder vollständigen Clientlogs in Auditlog schreiben. Empfangsereignisse sind eigene Telemetrie, nicht pro Schritt ein Auditereignis. Bestehende Redaction-/Bounds-Owner für Diagnosetext verwenden; bekannte Secrets vor Persistenz entfernen, Pfade als untrusted Text behandeln.
+
+## 13. Neue Gegenbeispiele und Prüfmatrix
+
+| Prüffall | Erwarteter Nachweis |
+| --- | --- |
+| Portal/DNS/DB ausgefallen, Timeout und 429 | Installationsablauf/Registry/Exit-Code unverändert; kumulierte Mehrzeit innerhalb Budget, keine Retrylawine. |
+| Userinstallation ohne lesbaren HKLM-Snapshot | Lokal erfolgreich möglich; Reporting ausdrücklich nicht verfügbar, kein Token aus Serverkonfiguration kopiert. |
+| Nicht erlaubte IP, unbekannte/mehrdeutige MAC, falsche Revision | Kein Geräte-/Lifecycle-/Katalogwrite; definierte 4xx; lokale Fortsetzung. |
+| Zwei NICs derselben VM, MAC einer anderen VM im Kandidatensatz | Eindeutigkeit über ganzen Satz; kein first/last-wins. |
+| Lost start / lost step / lost completion / reordered / replay | Matrix in Abschnitt 11 als Unit- und DB-Integrationstest, Transaktion und Eindeutigkeitskonflikte eingeschlossen. |
+| Übertragung funktioniert, lokales Log nicht | Ergebnis trotzdem meldbar, Logpfad nicht verfügbar. |
+| Log funktioniert, Reporterimport fehlt/Version falsch | Lokales Logging und Fachablauf intakt. Fresh-/Upgrade-Set und rollback testen. |
+| Sehr viele Schritte / überlange Namen/Pfade / übergroßer Body | Zentrale Byte-/Schrittgrenzen; begrenzte Meldung mit omitted_count/truncated statt Installationsabbruch. completed meldet vollständige Zählwerte, keine behauptete vollständige Detailübersicht. |
+| Ereignisse pro VM/Tag und viele verschiedene Run-IDs | Serverseitige Raten-/Speichergrenzen, kein unbegrenztes DB-Wachstum, keine globalen Sperren für andere Geräte. |
+| Paket retired/gelöscht, VM verschoben/gelöscht, neuer Rollout | Snapshot bleibt fachlich lesbar oder definierte Löschpolitik; keine falsche Neuverknüpfung und keine verwaisten UI-Links. |
+| Browser ohne Login, falsche Mission/VM, manipulierte IDs | Keine fremden/unberechtigten Details, dieselben Objektprüfungen auf jeder Leseoberfläche. |
+| HTML/Steuerzeichen im Skriptnamen/Pfad, HTTP-Clipboard, DE/EN, Keyboard | Escaping, sichere Copy-Fallbacks, verständliche Zustände, keine falschen Links oder Statusfarben. |
+
+P8 umfasst Wire-Fixtures in `MachineApiWireTest`, dedizierte Validator-/Repo-/State-Tests, PS-5.1-Transport- und Logging-Regression, Schema fresh/upgrade und Portal-Browserfälle. Gates nur über `scripts/check.ps1`: PowerShell, passende PHP-Unit/Static/Integration-, Sprach-/Asset-/Dokumentationsgates aus aktueller Registry. Visuelle Abnahme ausschließlich synthetischer virtusphere-qa-Stack; keine realen Clientdaten/Baselineänderung. Reale Software-Center-Abnahme erst nach definiertem Lab-Rollout und geprüften Client-IP-Freigaben.
+
+## 14. Lückenregister, Reihenfolge und aktuelle Entscheidungslage
+
+| ID | Problem / Begründung | Erledigung vor Implementierung/Auslieferung |
+| --- | --- | --- |
+| P-01 | Bisheriger Template-Kopierweg liefert nur install.ps1; Common braucht Logger. | P6 vollständigen Stage-/Hash-/Rollback-/Content-Satz festlegen und testen. Lokale P1–P4 unabhängig umsetzbar. |
+| P-02 | Bekannte MAC ist kein Authnachweis; Kundenclients möglicherweise nicht allowlisted. | Neue Action mit Allowlist und Eindeutigkeit, Standortfreigaben vor Portal-Rollout prüfen. Legacyreporting nicht ändern. |
+| P-03 | Unbegrenzte Runhistorie und Replay nach Löschung waren bisher nicht geplant. | P5 konkrete globale Retention-/Raten-/Replay-Bounds gemeinsam im Serverkonstantenowner festlegen; Migration und Cleanup danach. Keine stille Verwendung der lokalen Fünferregel als globales DB-Budget. |
+| P-04 | „Kurzer Timeout“ kann unter PS 5.1 DNS-/Connectzeit unterschätzen. | Transport mit messbarer Gesamtabbruchfrist auswählen/prüfen; 2 s/10 s Budget ist Abnahmebedingung, kein schon bewiesener Wert. |
+| P-05 | Paket-ID und Geräteidentität fehlen im bisherigen Wrapper. | Publizierten Snapshot und exakt passendes Paketpaar nutzen; keine Live-Konfigänderung, kein Name-only-Fallback. |
+| P-06 | Letzte Empfangsreihenfolge beweist nicht neuesten parallelen Versuch. | Runbezogene Anzeige und klare Empfangszeit, keine automatische Heilungs-/Aktualitätsbehauptung. |
+| P-07 | Fortschritt nach jedem Schritt ist kein Nachweis des derzeit laufenden Schritts. | Nur letzten gemeldeten Schritt anzeigen, keinen daraus errechneten „läuft jetzt“-Text. |
+
+Reihenfolge: lokale P1–P4; danach P5 mit verbindlichem Wire-/Identitäts-/Boundsvertrag und passenden Fixtures; P6 Reporter/Verteilung; P7 Portal; P8 gemeinsame Regression und synthetische Abnahme. Server mit neuer Action vor Reporter verteilen; alter Server muss Reportingfehler lokal begrenzen. Bei Rücknahme Reporter deaktivierbar durch fehlende/ungeeignete Voraussetzungen, ohne lokale Installation zu verändern; keine automatische Schema-Rückmigration.
+
+Keine fachlichen Rückfragen an den Benutzer nötig. Die ausgewählten Funktionen sind klar. P-01/P-03/P-04 sind offen markierte technische Entscheidungspunkte für die Umsetzung, keine versteckten Erfolgsaussagen. Es wurde nur dieser Plan erweitert, keine produktive Schnittstelle, Datenbank oder Portalansicht verändert.
+
+Zusätzlich untersuchte Quellen Revision 3: Machine-/Portal-/Deploy-Verträge; machine-api/database/webapi/i18n/portal-Referenzen; `mecm_report.php`, `lib/machine_api.php`, `portal/packages.php`, `lib/vm_edit_page.php`, `lib/vm_edit_status.php`, `lib/vm_edit_panels.php`, `lib/permissions.php`, tatsächliche struktur.sql; Client-Common/getinfo, Clientinstaller-Verweise und Copy-Code-Verweise. Prüfung ist statische Plan-/Owneranalyse, kein Nachweis realer Clientkonfigurationen. Dokumentationsgate-Evidenz aus Revision 2 bleibt historische Evidenz und wird für Revision 3 separat aktualisiert.
+
+Revision-3-Prüfevidenz: kanonisch `doc-hygiene` und `doc-semantics` beide pass, Exit 0 (`qa-artifacts/2026-09-13-package-wrapper-logging-plan/portal-plan-doc-gates.json`). Diese Gates sind weiterhin keine vollständige semantische Prüfung datierter Auditpläne. Die manuelle Gegenprüfung hat insbesondere Common-Abhängigkeit, prozessglobale TLS-Effekte, Snapshotkonsistenz, neue Action statt bestehendem Serverreport, Katalog-Collation, HTTP-Copy-Fallback und getrennte Empfangs-/Clientzeit berücksichtigt. Quellenmanifest: `portal-plan-source-manifest.json`. Produktimplementierung und Produkt-/Labtests bleiben offen.
+
+## 15. Getrennte Logs: Zuständigkeiten, Randfälle und QoL (Revision 4)
+
+Ziel ist eine klare Diagnosefrage pro Datei: wrapper beantwortet „Was hat die Installation gemacht?“, reporting beantwortet „Welche Rückmeldungen wurden bestätigt?“. Die zwei Dateien sind keine zwei voneinander abgeleiteten Wahrheiten und keine Voraussetzung füreinander. Lokal bleibt die Installation maßgeblich; das Portal zeigt empfangene Berichte.
+
+### Ein Zustandsowner, zwei Senken
+
+- Run-ID, Dateistamm, KeepCount, Zeitformat und Formatfunktion genau einmal im lokalen Wrapper-Kontext. Reporter erhält diesen Kontext und einen nicht werfenden Diagnose-Callback; er erzeugt keine eigene Run-ID, Retention oder zweite Schema-Kopie.
+- Fachliche Schrittergebnisse bleiben im bestehenden Ergebnisobjekt. Transportergebnisse werden getrennt im Reporterkontext geführt, nicht durch Parsen eines Logs ermittelt. Erfolg/Fehler des Dateischreibens ist eine dritte, unabhängige Information.
+- wrapper enthält die bestehenden Installationsereignisse und abschließend höchstens einen Kommunikationshinweis plus Reporting-Logpfad. reporting enthält Header, Konfigurations-/Importstatus, Ereignisart und -sequenz, Sendeversuch, Dauer, bestätigtes Ergebnis oder Fehlerkategorie. Kein Kopieren aller Schrittergebnisse in beide Dateien.
+- Auch bei deaktiviertem Reporter erhält die Reporting-Datei, soweit möglich, eine klare Meldung wie „Nicht gesendet: kein veröffentlichter Gerätesnapshot“. Nicht erfolgte Versuche dürfen weder als Timeout noch als bestätigter Fehler erscheinen.
+- Common-Logger unverändert lassen. Reporter initialisiert ihn nicht als dritten Paket-Logkanal. Bestehende Common-Diagnoseausgaben und dessen harte Importabhängigkeit müssen in P6 geprüft werden; keine behauptete vollständige Zwei-Dateien-Lösung bei unkontrollierten zusätzlichen Dateisenken.
+
+### Bestätigung und Fehlersemantik
+
+| Ergebnis | Lokale Reporting-Meldung | Warum |
+| --- | --- | --- |
+| Erwartete HTTP-200-JSON-Antwort mit schema_version, identischer run_id/event_seq und accepted oder deduplicated | „Vom Portal bestätigt“ bzw. „Bereits gespeichert bestätigt“ | HTTP 200 allein könnte HTML von Proxy/Login oder eine falsche Antwort sein. API-Antwortschema in P5 entsprechend erweitern; nach DB-Commit antworten. Andere 2xx, insbesondere 202, sind keine bestätigte Speicherung dieses Vertrags. |
+| Timeout, Verbindungsabbruch nach Sendestart, ungültige oder unpassende Antwort | „Empfang unbestätigt“ mit Kategorie | Der Server könnte gespeichert haben, während seine Antwort verloren ging. Keine Behauptung „nicht angekommen“. |
+| Definierte 4xx-Ablehnung vom erwarteten Endpoint | „Vom Portal abgelehnt“, Status und begrenzter maschinenlesbarer Grund | Nicht mit erfolgreicher Speicherung oder lokaler Installation verwechseln. Ein beliebiger Proxy-Body ist keine fachliche Serverantwort. |
+| Voraussetzungen fehlen, Zeitbudget erschöpft, Reporter nicht ladbar | „Nicht gesendet“, konkreter lokaler Grund | Es gab keinen Versuch; fehlende Voraussetzungen sind keine Netzwerkausfallmessung. |
+| Reporting-Datei nicht schreibbar, Versand bestätigt | Einmal lokale Sinkwarnung, im Speicher weiterhin bestätigt | Schreiben eines Diagnoseprotokolls ist keine Voraussetzung für Netzwerkversand. |
+
+Keine Token, Headerwerte, vollständigen URLs mit Query/Zugangsdaten, vollständigen JSON-Bodies oder Antworttexte in reporting speichern. Endpunktname, Ereignisart, Sequenz, HTTP-Status und feste Fehlerkategorie genügen. Keine universelle Secret-Redaction neu erfinden; vorhandene Redaction nur bei tatsächlich benötigten freien Details nutzen. Das Log ist keine Outbox und wird nie als Replayquelle gelesen.
+
+### Abschlussreihenfolge
+
+1. Fachliches Wrapper-Ergebnis unverändert festlegen und lokal protokollieren; die eigentliche Exit-Entscheidung bleibt bestehen.
+2. Genau einen completed-Sendeversuch innerhalb des verbleibenden Budgets durchführen. Sein Payload enthält beide Logpfade nur soweit angelegt, aber nicht den noch unbekannten Erfolg dieses eigenen Sendeversuchs.
+3. Antwort/Timeout im Reporting-Log notieren, danach kurze lokale Kommunikationszusammenfassung im Wrapper-Log. Beispiel: „Portal: 6 bestätigt, 1 unbestätigt; siehe reporting_…“. Zähler beziehen sich auf tatsächlich erzeugte fachliche Meldungen; deaktiviertes Reporting getrennt benennen.
+4. Beide Handles bestmöglich schließen und ursprünglichen Exit-Code zurückgeben. Kein weiteres completed senden, nur um die Zustellung des ersten zu melden: das würde eine unendliche Bestätigungskette erzeugen.
+
+Die finale Wrapper-Zeile darf nach der fachlichen Abschlusszeile noch Kommunikationsdiagnose enthalten. Ein Reboot/Prozesskill dazwischen kann diese Zeilen verhindern. Das Portal erfährt vom fehlgeschlagenen Versand seines eigenen Abschlusses nicht zuverlässig; dort weiterhin nur empfangene Ergebnisse oder „Abschluss nicht gemeldet“. Ein später bestätigter completed-Bericht beweist nicht, dass jede frühere Einzelmeldung bestätigt war.
+
+### Aufbewahrung und Sicherheitsgrenzen
+
+- Fünf Run-Gruppen zählen, einschließlich einseitiger/verwaister Paare. Ein fehlendes reporting-Log rechtfertigt weder Löschung des wrapper-Logs noch Wiederanlage einer alten Datei.
+- Beide aktuellen Handles vor Reporterimport/Netzwerk halten; Initialisierung beider Senken getrennt behandeln. Scheitert ein Header, keine Historienbereinigung in diesem Lauf. Vorher erfolgreiches Log bleibt erhalten.
+- Gruppen mit widersprüchlichem Dateistamm, ungültigem Namensschema oder Reparse-Point nicht heuristisch reparieren oder löschen. Technische GUID-Kollision/CreateNew-Konflikt: nicht anhängen/überschreiben, betroffene Senke deaktivieren.
+- Für Löschgruppen die Sperren aller existierenden Partner bis zum Löschende halten. Ein Leser ohne Delete-Sharing kann ebenfalls schützen; kein erzwungenes Löschen. Diese Strategie braucht einen echten Windows-Test, keine Mock-Zusage. Paarlöschung bleibt nicht atomar.
+- Dateien eines alten Ein-Datei-Formats passen weiter in dieselbe Gruppierung. Keine Migration oder Umdatierung alter Logs. Berichtspfad im Portal bleibt historische Clientinformation und kann nach lokaler Bereinigung ins Leere zeigen.
+
+### Intuitive Diagnose
+
+Beide Header nennen Paket, Version, Lauf-ID, Logart und den Partnerdateinamen; existiert der Partner nicht, steht das ausdrücklich dabei. Portal bietet „Installationsprotokollpfad kopieren“ und „Kommunikationsprotokollpfad kopieren“ nur bei gemeldetem Pfad. Keine Zusage, dass die Datei aktuell existiert. Die vorhandenen Teilskript-Logpfade bleiben die dritte, fachliche Detailstufe.
+
+Supportreihenfolge in README: Paketfehler → wrapper und betroffenes Teilskript-Log; fehlende Portalmeldung → reporting; dort Timeout/unbestätigt → Portal mit Lauf-ID auf bereits gespeicherten Run prüfen. Das vermeidet eine erneute Installation allein wegen einer verlorenen Antwort. Auch bei erfolgreichem Reporting kann dessen lokales Log fehlen; auch bei zwei gesunden Logs kann das Portal offline sein.
+
+### Zusätzliche Abnahmefälle
+
+| Fall | Erwartung |
+| --- | --- |
+| wrapper defekt / reporting defekt / beide defekt | Fachablauf und erlaubter Sendeversuch unverändert, nur betroffene Senken aus; keine Warnrekursion. |
+| Fehlender Reporter oder fehlende Registry | Reporting-Log erklärt Nichtversand, soweit Logsenke verfügbar; keine aktive neue Aufgabe. |
+| Portal speichert, Antwort geht verloren | Lokal unbestätigt; Server dedupliziert identischen Replay in Vertragstests, kein falscher Installationsfehler. |
+| HTTP 200 mit HTML, falscher Run-ID oder falscher Sequenz | Keine Bestätigung, begrenzter Protokollfehler ohne Rohbody im Log. |
+| Fünf vollständige Paare plus neuer Lauf | Die fünf neuesten Gruppen bleiben, nicht fünf Dateien. |
+| Gemischte alte Einzeldateien, Paare, verwaistes reporting-Log | Jede eindeutige Run-Gruppe zählt einmal; keine willkürliche Partnerannahme. |
+| Ein Partner aktiv/gesperrt, anderer ungesperrt | Gesamte Gruppe geschützt; keine absichtliche Halbierung zur Erfüllung der Anzahl. |
+| Erste Löschung klappt, zweite scheitert | Restdatei bleibt, Warnung, später erneut versuchen; kein Rollback durch Kopieren. |
+| Kill vor/nach completed-Antwort | Nur tatsächlich geschriebene Zeilen und empfangene Meldungen gelten, keine erfundenen Bestätigungen. |
+| Viele Schritte und dauerhaft offline | Ein begrenzter Eintrag je Versuch/Nichtversandereignis, keine Poll-/Retryschleife; bestehendes Gesamtzeitbudget bleibt. |
+
+Prüfurteil Revision 4: Trennung sinnvoll; die zuvor genannten „maximal zehn Dateien“ sind ein Normalfall, keine harte Garantie bei Sperren/Uhrkorrektur/Sinkfehlern. Fachlicher Wrapperzustand, Transportzustand und Dateisenkenzustand sind jetzt ausdrücklich getrennt. Konkrete Windows-Gruppensperrung bleibt zusätzliche Beweislast in P3; Reporter-Abhängigkeiten und Server-Bounds bleiben offene P6/P5-Punkte. Produktcode unverändert.
+
+Prüfevidenz Revision 4: `scripts/check.ps1 -Gate doc-hygiene,doc-semantics` meldete beide Gates pass, Exit 0; Artefakt `qa-artifacts/2026-09-13-package-wrapper-logging-plan/split-logs-doc-gates.json`. Die spezifische Paar-/Transportlogik wurde manuell gegen den bestehenden Plan geprüft; die Dokumentationsgates ersetzen diesen Review nicht. Historische Manifeste unverändert behalten; neuer Quellenstand in `split-logs-source-manifest.json`. Keine Produkt-/Dateisperrtests ausgeführt.
+
+## 16. Einzelprüfung der neun Verfeinerungen (Revision 5)
+
+Diese Festlegungen konkretisieren P5–P8. Technische Vorschläge sind keine bereits implementierten Verträge. Nutzerentscheidung Q1 ist mit 90 Tagen beantwortet; frühere offene Fragen beziehen sich auf die damaligen Revisionen.
+
+### V1: Portal-Aufbewahrung
+
+**SSoT/Befund:** `lib/constants.php` definiert für bestehende Clientphasen 30 Tage, für VM-Statusereignisse 90 Tage. `lib/maintenance_tasks.php` ruft die jeweilige Repo-Bereinigung auf. Keiner dieser Werte ist automatisch der Vertrag für Paketberichte.
+
+**Vorgehen und warum:** Eigene Paketbericht-Konstanten, aber derselbe Maintenance-Owner und keine neue Schedulerinstanz. Frist ab unveränderlicher erster Serverannahme eines Runs statt letztem Ereignis: wiederholte Meldungen dürfen die Lebensdauer nicht unbegrenzt verlängern. Terminale und unbestätigte Runs werden nach derselben gewählten Frist bereinigt; Schweigen wird dabei nicht nachträglich zum Fehler. Bei VM-Löschung Daten über definierte FK-Politik entfernen; Paketentfernung darf Snapshottexte nicht vernichten. Die zusätzliche Annahme-/Mengenpolitik ist offen und muss auch viele Paketversionen berücksichtigen; keine vorgezogene Löschgrenze ist damit beschlossen.
+
+**Q1, beschlossen:** Der Benutzer hat ausdrücklich „90 Tage“ gewählt. Portal-Diagnosen bleiben nach der zeitlichen Aufbewahrungsregel 90 Tage ab erster Serverannahme verfügbar; danach bereinigt sie der Maintenance-Owner. Wiederholungen verlängern die Frist nicht. Warum diese Entscheidung festhalten: Sie bestimmt die verfügbare Supporthistorie unabhängig von den fünf lokalen Durchläufen. Annahme-/Mengenlimits bleiben separat zu konkretisieren (B1/P-03); dieser Absatz erlaubt keine stille Verkürzung der beschlossenen Frist. Nie empfangene Meldungen werden dadurch nicht nachträglich vollständig.
+
+**Randfälle/Lücke:** Die frühere Empfehlung von 1000 angenommenen Runs je VM ist kein beschlossener Grenzwert; maßgeblich sind die Kapazitätsklärung in Abschnitt 18 und die noch offene Abwägung B1. Der Vorschlag von 256 gespeicherten Schrittresultaten wird in 25.1 als D normale Details plus höchstens ein gesonderter erster Fehler präzisiert; Last-/Bodytests stehen aus. Begrenzungen müssen unbekannte Paketzuordnungen und unvollständige Runs berücksichtigen. Q1 ist mit 90 Tagen entschieden; ein zusätzlicher Fünf-Runs-Anzeigefilter im Portal folgt daraus nicht. Anzeige muss sagen, dass ältere Diagnosen bereinigt werden; nie „vollständige Installationshistorie“ behaupten.
+
+**Replay:** Ein gelöschter Run darf nicht als neuer aktueller Versuch erscheinen. Reiner Zeitvergleich mit Clientuhr reicht nicht. Q3 erlaubt inzwischen dauerhaft minimale Sperrmerker aus Run-ID und Ablaufdatum (25.2); die Diagnoseinhalte behalten die Q1-Frist von 90 Tagen. Die frühere Alternative nur zeitlich begrenzter Tombstones ist damit abgelöst. Aufnahme/Bereinigung müssen denselben Sperrmerker atomar berücksichtigen; Restore und noch nie angenommene Altberichte bleiben eigene Grenzen. Die normale V1 sendet nicht aus einer persistenten Queue nach. Keine absolute Replaygarantie außerhalb des konkret beschriebenen Speicher-/Identitätsvertrags behaupten.
+
+**Prüfung:** Fristgrenze, stehende/falsche Clientuhr, Duplikate verlängern Frist nicht, Grenze der noch festzulegenden Annahmepolitik, viele Versionen, fehlender Abschluss, Maintenanceausfall, Race zwischen Insert und Cleanup und Replay nach Löschung. Bereinigung darf nicht nur beim nächsten Bericht funktionieren.
+
+### V2: Reporter-Verteilung
+
+**SSoT:** Serverinstaller staged bereits den vollständigen Vorlagenbaum mit Sicherung; Autoimporter behandelt bisher die install.ps1 als zu kopierende Datei. Common und Client-Logger bleiben ihre jeweiligen Quellowner.
+
+**Entscheidung und warum:** Ein explizites Liefermanifest beschreibt Wrapper, Reporteradapter, Common und dessen notwendiges Loggingmodul mit Version/Hash. Generierte Kopien stammen aus vorhandenen Quellownern. Autoimporter muss das ganze manifestierte Set prüfen/aktualisieren und dessen Manifest in Content-Änderungserkennung einbeziehen. Teilskripte, media und paketindividuelle config werden nicht dabei überschrieben. Ohne vollständige Abhängigkeiten wäre das Reporting bereits beim Import defekt.
+
+**Edge Cases:** Fehlende/geänderte Datei, alte Common-Version, Content-Update noch unterwegs, Abbruch zwischen Kopieren und Aktivierung, aus altem ccmcache gestartetes Paket. Pro Paket vollständiges Set stagen und erst nach Hashprüfung aktivieren; kein globales Laufzeitmodul aus beliebigem Cache. Hash beweist Integrität gegenüber Manifest, nicht Authentizität eines fremd veränderbaren Manifests: bestehende ACL-/Verteilvertrauensgrenze bewahren.
+
+**QoL/Abnahme:** Reporting-Log nennt fehlende Komponente und Versionsabweichung ohne Rohstack. Server zuerst, Content danach. Testmatrix frischer/alter Server × frischer/alter Reporter plus fehlendes Modul. Fachausführung ohne Reporter muss nachweisbar erhalten bleiben. Exakte Lieferdateien und Aktivierungsmethode bleiben P6-Detailentscheidung, nicht ungeprüft aus dieser Liste implementieren.
+
+### V3: Zeitbudget
+
+**SSoT:** Ein Budgetowner im Reporter; bestehende Common-Adress-/TLS-Helfer nicht durch eine zweite Konfigurationslogik ersetzen. Eventzählung und Budgets nicht pro Logdatei verdoppeln.
+
+**Präzisierung:** Vorschlag weiterhin maximal 2 Sekunden pro Sendeversuch und 10 Sekunden insgesamt; davon 2 Sekunden ausschließlich für completed reservieren. Die ursprünglich übrigen 8 Sekunden werden im Prototypvorschlag 25.4 in 7,5 Sekunden Initialisierung/Start/Schritte und 0,5 Sekunden Beenden geteilt. Budget per monotonic Stopwatch, einschließlich Initialisierung/Adressfindung, nicht anhand verstellbarer Uhr. Restbudget kann Versuche verkürzen oder verhindern. completed hat keinen Anspruch auf Versand bei fehlender Identität/Auth, beendeter Transportkapsel oder hartem Prozessabbruch. Es liegen noch keine gemessenen Laufzeitgrenzen vor.
+
+**Warum:** Ohne Reserve könnten langsame Schrittmeldungen den aussagekräftigsten Abschluss verhindern. Synchrone Diagnose darf kurz verzögern, aber keinen unbegrenzten DNS-/Connect-/TLS-Hänger erzeugen. Abbruch des Requests bedeutet weiterhin „Empfang unbestätigt“, nicht „nicht gespeichert“.
+
+**Problem/Abnahme:** Invoke-RestMethod-Timeout ist noch kein Nachweis dieser Wandzeitgrenze. Gewählte Transportmechanik muss unter PS 5.1 echte DNS-/TLS-/Socket-Hänger abbrechen und Ressourcen freigeben. Ein nicht abbrechbarer Import fällt ebenfalls unter die Beweislast. Keine Hintergrund-Threads/Prozesse über den Wrapperabschluss hinaus. Budgetzahlen erst nach gemessener Ausfallmatrix als erfüllt melden.
+
+### V4: Meldungsvertrag
+
+**SSoT:** Neuer PHP-Validator plus gemeinsame Wire-Fixtures; kein zweiter Fehler-/Successcodekatalog neben dem Wrapper. `mecm_report.php` liest die Action bereits aus dem Queryparameter, wendet das globale 8192-Byte-Limit aber vor dem jeweiligen Actionzweig an. Die neue paketbezogene Bodygrenze kann deshalb anhand der sicher gelesenen Action vor begrenztem Bodylesen gewählt werden, ohne alte Actions still zu erweitern. Kein unbeschränktes Lesen mit erst nachträglicher Größenprüfung als Speicherschutz ausgeben.
+
+**Präzisierung:** started/step_result/completed mit stabilen Run-Metadaten; event_seq einmal vergeben. Antwort enthält schema_version, run_id, event_seq und accepted/deduplicated erst nach Commit. Pflicht-/Optional-/Null-Felder, Typen, UTC-Format und Bytegrenzen in Fixtures festhalten. Keine coercion von Arrays oder beliebigem JSON in Strings. Fehlender Kindcode bleibt null, 0 bleibt 0. HTTP-200 mit falscher Antwort ist unbestätigt.
+
+**Payload-Bounds als technische Vorschläge:** 64 KiB neuer Bodycap, D=256 normale Schrittresultate plus höchstens ein erster Fehler gemäß 25.1, 4 KiB je Diagnosepfad; zentrale bytegerechte Begrenzung aus vorhandenen Helpers. completed wird nach Bytes begrenzt, nicht nur nach Anzahl; Auslassungszahl und Vollständigkeitsflag verpflichtend. 25.1 trennt vorgeschlagenen payload_omitted_count vom serverseitig bekannten Detailbestand, damit zwei verschiedene Zählbereiche nicht vermischt werden. Pfad nicht still abschneiden und als kopierbar anbieten: übergroßen Pfad weglassen und Grund nennen. Identitätswerte nie kürzen; bei unzulässiger Identität nur Reporting auslassen, nicht Installation abbrechen. Große Skriptlisten führen zu ausgelassenen Diagnosedetails, nicht zu ausgelassenen Installationsschritten.
+
+**Lücke schließen:** Completed ergänzt fehlende, konfliktfreie Schritte; bei Widerspruch Transaktion vollständig zurückrollen und 409 statt Teilübernahme. Keine spätere STEP-Meldung darf den terminalen Wrapperzustand zurückstufen. Antwortverlust nach Commit als eigener Test. Fachliche Zusammenfassung und Detailvollständigkeit getrennt validieren; fehlende Details sind nicht automatisch fehlgeschlagene Schritte.
+
+### V5: Fehlerübersicht und Vergleich von Versuchen
+
+**SSoT:** Ein Repo-Snapshot und ein Presenter für VM-Panel und Paketübersicht; keine zweite SQL-/PHP-Auswertung der Bedeutung von „Fehler“ auf jeder Seite.
+
+**Entscheidung:** Übersicht sagt „Gemeldete Wrapperfehler“, zeigt Gerät/Paket/Run und Empfangszeit. Historische fehlgeschlagene Runs bleiben im Verlauf; Filter „Fehler“, „ohne Abschluss“ und „alle“ betreffen gemeldete Evidenz, nicht vermuteten Installationszustand. Neuer Erfolg bedeutet „weiterer Versuch erfolgreich gemeldet“, nicht automatisch „Fehler behoben“. Für eine Aussage „nach diesem Fehler“ ist eine beweisbare Reihenfolge nötig; Clientzeiten und Empfangsfolge allein genügen bei Parallelität nicht.
+
+**QoL:** Zwei Runs direkt nacheinander auflisten und jeweils Ergebnis/Datum/Version klar zeigen. Kein zusätzlicher komplexer Diff nötig. Pro Run genau eine Fehlerzeile mit aufklappbaren Schritten statt fünffacher Gerätefehlerzählung. Zähler über alle gefilterten Runs bestimmen, nicht nur über sichtbare Seite. Parallelität/unbestätigte Reihenfolge kennzeichnen; alte Revisionen standardmäßig separat erreichbar.
+
+**Tests:** Fehler→Erfolg, Erfolg→verspäteter Fehler, paralleler Fehler/Erfolg, mehrere Fehler in einem Run, Filter ohne Treffer, bereinigter älterer Run und verlorener Abschluss.
+
+### V6: Client-Voraussetzungen
+
+**SSoT:** Registry-/Snapshot-/API-/TLS-Owner in Common, serverseitige Allowlist und Rolloutfence. Wrapper liest keine zweite Kopie der Standortdaten aus paketindividueller config.
+
+**Entscheidung und warum:** Read-only Reporter-Vorprüfung mit festen Kategorien: keine API-Adresse, unlesbarer/unvollständiger Snapshot, fehlende/uneindeutige Identität, nicht unterstützte Schemaversion, Modul nicht verfügbar. Kein automatisches Schreiben von Registrydaten, keine Portalfreigabe und keine Zertifikatslockerung durch Diagnose. Eine fehlende Server-Allowlist lässt sich lokal erst anhand der Antwort als Ablehnung erkennen, nicht vorher zuverlässig vorhersagen.
+
+**QoL:** Reporting-Log beschreibt konkrete lokale Voraussetzung und verweist auf die Installations-/Standortdoku. Im Portal ohne eingegangenen Bericht nur „Keine Rückmeldung“, niemals eine erratene Konfigurationsursache. Site-Lab muss erlaubte Clientquellen und lesbare Registry auch für Benutzerinstallation prüfen. Hostname allein bindet kein Gerät.
+
+### V7: Wrapper- und Reporter-Version
+
+**SSoT:** Versionen im Liefermanifest; Wrapper-/Reporterartefakt jeweils zusätzlich SHA-256 im Manifest. Nicht `$config.version` verwenden: das ist die Softwarepaketversion, nicht die Version der Diagnoseimplementierung.
+
+**Entscheidung und warum:** Bei jedem Run Paketversion, Wrapperversion und Reporterversion getrennt erfassen. Manifestversionen einmal beim Laden festhalten; zwischen Schritten kein erneutes Auflösen. Fehlender Reporter: Version unbekannt, nicht 0 oder aktuelle Serverversion. Manuell geändertes Artefakt als Hashabweichung melden/deaktivieren gemäß Paketvertrag, nicht mit falschem Versionsetikett darstellen.
+
+**QoL/Tests:** Versionen unter „Technische Details“, nicht als Hauptstatus. Supportkopie enthält sie. Tests für alte/neue Kombinationen, fehlendes Manifest, Mischversion und Versionsfelder während Replay unveränderlich. Manifestprüfung nicht mehrfach je Meldung ausführen.
+
+### V8: Diagnosezusammenfassung kopieren
+
+**SSoT:** Derselbe autorisierte Run-View-Model wie die sichtbare Detailansicht; bestehender `data-copy-value`-Mechanismus in core.js. Ein Formatter für kompakten Text, kein zusätzlicher serverseitiger Export-/Dateilesepfad.
+
+**Inhalt:** Gerät, exakte Paketversion, Run-ID, Wrapper-/Reporterversion, beobachtetes Ergebnis, letzter gemeldeter Schritt, getrennte Kind-/Wrappercodes, Serverempfangszeit und verfügbare Logpfade. Bei unvollständigem Bericht entsprechende Kennzeichnung. Keine vollständigen Logs, Tokens, Benutzerkonten oder unbelegten Empfehlungen zur Neuinstallation.
+
+**QoL:** Ein Button „Diagnosezusammenfassung kopieren“, ausgewählter Run bleibt unverändert. Auf HTTP/ohne Clipboard bleibt derselbe Text auswählbar, hilfreiche Fehlermeldung statt stillem Fehlschlag. Bei JavaScript-Ausfall funktioniert Lesen/Markieren weiter. Kein automatisches Kopieren oder Senden an Support. Manuell auswählbarer Text ist die Grundlage, der Button nur Komfort.
+
+**Tests:** Deutsch/Englisch, Sonderzeichen und mehrzeilige Pfade, null/0, fehlende Pfade, Clipboardverweigerung, Tastatur, falsche Run-ID/fehlende Auth; kopierter Text entspricht sichtbarem Run, nicht zufällig neuester Meldung.
+
+### V9: Feste Anzeigebeispiele
+
+| Empfangene Evidenz | Haupttext | Zusatz / warum |
+| --- | --- | --- |
+| completed, Wrappercode 0 | Wrapper erfolgreich | „Nachgelagerte Aufgaben nicht geprüft“. Kein Software-Center-Status aus Telemetrie behauptet. |
+| Schritt FAIL mit Kindcode 1, completed Fehler | Wrapper fehlgeschlagen | Betroffener Schritt und Kindcode 1; Ursache nur aus Fehlerkategorie, nicht raten. |
+| Kind 0, Schrittmarker scheitert | Wrapper fehlgeschlagen | „Schrittstatus konnte nicht gespeichert werden“, Kindcode 0 getrennt zeigen. |
+| completed, Wrappercode 3010 | Wrapper erfolgreich – Neustart angefordert | Kein roter Fehler, keine Behauptung, dass Neustart bereits erfolgt ist. |
+| completed, Wrappercode 1641 | Neustart eingeleitet gemeldet | Nicht bearbeitete Schritte gemäß Abschluss; Folgelauf nicht als automatisch erfolgt darstellen. |
+| started oder Schritte, kein completed | Abschluss nicht gemeldet | „Letzter gemeldeter Schritt …“, keine Behauptung „läuft derzeit“ oder „Verbindung defekt“. |
+| Kein Run | Keine Wrapper-Rückmeldung vorhanden | Lokale Voraussetzungen/Reporting-Log prüfen; Installationsergebnis unbekannt. |
+| completed, Details begrenzt | Ergebnis wie gemeldet | Zusätzlich „Schrittdetails unvollständig: … ausgelassen“, keine vollständige Tabelle vortäuschen. |
+
+Diese Beispiele sind UI-Abnahmefälle, keine fest verdrahteten deutschen Texte. Umsetzung über bestehende Übersetzungs-/Badge-/Zeithelper mit DE/EN-Parität; Farben nie einzige Information. Gesamtzustand, Detailvollständigkeit und Empfangszeit bleiben getrennte Felder.
+
+### Entscheidungsliste und nächste Schritte
+
+- V2/V4/V6 definieren technische Umsetzungsvorgaben; vor Codeänderung genaue Manifest-/Wire-Fixtures fertigstellen.
+- V3 enthält messbare Budgetvorgaben, noch keinen erfolgreichen Nachweis. Abschlussreserve hat Vorrang vor weiteren Schrittmeldungen.
+- V5/V8/V9 konkretisieren Bedienung ohne neue Remoteaktionen. V7 wird in den Run-Vertrag aufgenommen.
+- V1/Q1 entschieden: 90 Tage. Mengen-/Replaygrenzen auf dieser Grundlage konsistent finalisieren; die lokalen fünf Durchläufe bleiben unverändert.
+- Produktcode bleibt unverändert. Der Plan hält offene Beweislast fest, statt aus Dokumentationschecks auf funktionierende Client-/Portalabläufe zu schließen.
+
+Prüfevidenz Revision 5: neun Einzelprüfungen vorhanden; kanonische doc-hygiene/doc-semantics beide pass, Exit 0 (`qa-artifacts/2026-09-13-package-wrapper-logging-plan/refinements-doc-gates.json`). Gates sind keine automatische Vollprüfung dieses datierten Plans. Zusätzlich Konstantenowner für Clientphasen/VM-Statusretention, vorhandenen Maintenance-Aufruf und Template-Staging geprüft. Quellenmanifest `refinements-source-manifest.json`. Historischer Prüfstand vor der Antwort auf Q1. Nachtrag: Nutzerantwort „90 Tage“ in P7 und V1 übernommen, Q1 geschlossen; keine Produktänderung. Diese reine Entscheidungsfortschreibung wurde auf konsistente Aufbewahrungsangaben geprüft, nicht als neuer Produkt-Gatelauf ausgegeben.
+
+## 17. Primärquellen und Empfehlungen zur weiteren Schärfung
+
+Recherche am 2026-09-13. Die folgenden Quellen sind Leitlinien, Spezifikationen bzw. Produktmuster; keine davon schreibt für VirtuSphere-Paketdiagnosen pauschal 90 Tage vor. NIST SP 800-92 (Final von 2006) behandelt Sicherheitslogmanagement und ist kein spezifischer MECM-Installationsstandard. OWASP-Empfehlungen werden passend auf Diagnosedaten angewandt, nicht als behauptete Zertifizierung. OpenTelemetry-Collector-Empfehlungen bedeuten keine Pflicht, einen Collector oder eine Queue in diese Anwendung einzubauen.
+
+| Primärquelle | Aussage und Bezug zum Plan |
+| --- | --- |
+| [NIST SP 800-92](https://csrc.nist.gov/pubs/sp/800/92/final) | Logmanagement nach organisatorischem Bedarf planen; Aufbewahrung und Infrastruktur gehören zusammen. Daraus keine konkrete 90-Tage-Frist oder pauschale Kapazität ableiten. |
+| [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) | Festgelegte Aufbewahrungsdauer beachten, Loggingausfälle dürfen die Anwendung nicht verhindern; Datenträgererschöpfung, sensible Daten und Eingabevalidierung berücksichtigen. Unterstützt getrennte Fach-/Diagnosefehler und Ausfalltests. |
+| [OpenTelemetry Collector Resiliency](https://opentelemetry.io/docs/collector/resiliency/) | Versandqueues und bei Bedarf Persistenz vermindern Datenverlust. Auch damit bleiben Kapazitäts-, Ausfall- und Retrygrenzen. Relevanz: der bewusst einfache Reporter ohne Queue kann keine vollständige Zustellung garantieren. |
+| [Microsoft Retry Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/retry) | Wiederholungen nach Fehlerart und Zeitbudget wählen, Idempotenz berücksichtigen. Ein Antwortverlust kann trotz ausgeführter Operation auftreten. Relevanz: stabiler Ereignisschlüssel, unbestätigte statt sicher verlorene Meldung, keine Auth-Retryschleifen. |
+| [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) | Ereigniszeit und Beobachtungszeit sind unterschiedliche Felder. Bestätigt getrennte Clientzeit/Serverempfangszeit; Beobachtungsreihenfolge beweist keine Reihenfolge paralleler Installationen. |
+
+### Empfehlungen (noch keine stillschweigende Änderung der akzeptierten Architektur)
+
+**B1 – 90 Tage als reguläre Frist für angenommene Diagnosen erhalten.** Empfehlung: keine frühzeitige Löschung bestätigter Runs allein wegen der bisher als Vorschlag genannten 1000-Runs-Grenze. Stattdessen Kapazität bemessen, einzelne Meldungen begrenzen, Last begrenzen und Kapazitätsengpässe sichtbar machen. Im harten Kapazitätsnotfall neue Telemetrie kontrolliert ablehnen statt bereits bestätigte Historie heimlich zu überschreiben. Clientinstallation läuft weiter; Reporting-Log zeigt Ablehnung, Portalbetrieb meldet Annahmeprobleme. Dies ist ein Abwägen zugunsten gespeicherter Evidenz, keine universelle Regel und keine Garantie gegen DB-/Datenträgerverlust. Die frühere 1000er-Zahl bleibt unverbindlich und soll vor Einführung durch Messung ersetzt werden.
+
+**Q2 – beschlossen:** Der Benutzer bestätigt beide Größen und erhöht die Planungsbasis auf 200 Clients sowie 200 Paketinstallationen insgesamt pro Tag. Die Werte werden nicht miteinander multipliziert; 200 Installationen sind die Tagesgesamtzahl, nicht die Anzahl pro Client. Q2 ist geschlossen. Für die Kapazitätsplanung zählt jeder erneute Wrapper-Aufruf als zusätzlicher Run. Rechenmodell: tägliche Runs × 90 × gemessene gespeicherte Bytes je Run einschließlich Schrittzeilen/Indizes, zusätzlich Betriebspuffer und separat benötigter Backup-/freier DB-Speicher. Keine Bytezahl aus JSON-Nutzlast als gemessene MySQL-Größe ausgeben. Synthetische typische/maximale Payloads messen und dann technische Limits bestimmen.
+
+**B2 – Aufbewahrung und Zustellung getrennt zusagen.** Empfehlung für V1: beim vereinbarten begrenzten Best-effort-Reporter bleiben; lokale Logs sind auch bei Portalausfall die Diagnosequelle. 90 Tage gelten für angenommene Portalberichte, nicht für nie empfangene Meldungen. Falls später vollständige Nachlieferung verlangt wird, braucht es einen getrennt entschiedenen persistenten Versandpuffer mit sicherem Trigger, Ablaufdatum, Bounds und Replayvertrag. Nicht die Reporting-Textdatei zur Outbox umfunktionieren und keine neue geplante Aufgabe ohne Scope-Entscheidung einführen.
+
+**B3 – Abschluss wichtiger als zusätzliche Erfolgsmeldungen.** Bestehende Abschlussreserve beibehalten. Fehlerdetails in der begrenzten completed-Übersicht vorrangig erhalten; exakte Schrittindizes bleiben unverändert, Detailauslassung wird markiert. Dies bestimmt die Payloadauswahl, garantiert bei ausgeschöpfter serverseitiger Schrittgrenze aber keine zusätzliche Speicherung; G1 bleibt zu lösen. Keine zweite Ergebnisberechnung. Zusätzliche Retries nur als später begründet getestete Änderung innerhalb desselben Gesamtbudgets; Microsofts Muster ist keine Aufforderung zu pauschalen Wiederholungen jedes Requests.
+
+**B4 – Replaygrenzen ehrlich festlegen.** Eindeutiger Run-/Event-Key plus Fingerprint löst Duplikate während gespeicherter Historie. Begrenzte Tombstones lösen keine unbegrenzt späten Wiederholungen. Für alte, nicht mehr zuordenbare Meldungen ist ein eigener Annahmefenster-/Serverbindungsvertrag erforderlich; ungeprüfte Clientzeit genügt nicht. Dies bleibt P5-Beweislast, keine durch Best Practices automatisch gelöste Lücke.
+
+**B5 – Administrative Abschaltung sauber planen.** Vorschlag: explizite standortweite ReportingEnabled-Einstellung im bestehenden geschützten Registry-Konfigurationsowner, zu Laufbeginn einmal lesen. Kein anderer Wert für lokale Logs, keine Schalterkopie pro Paketversion. false erzeugt lokal „Reporting administrativ deaktiviert“ und keine Netzwerkanfrage. Fehlender Wert und Rollout-Default müssen vor Umsetzung festgelegt werden; nicht durch absichtlich kaputte Dateien oder fehlende Freigaben abschalten. Diese neue Option erweitert die bisherige „keine neue Konfigurationsoption“-Grenze und ist daher hier ausdrücklich als Vorschlag, nicht bereits beschlossen, geführt.
+
+**B6 – Lieferung und UI bei den geprüften Grundlagen halten.** Vollständiges Manifest und vorhandenes Staging verwenden; keine Fremdmodule aus einem Cache suchen. Run-ID, Fachstatus, Empfangsstatus und Detailvollständigkeit separat darstellen. Statt eines vermeintlichen „aktuellen Installationszustands“ zeigt die UI gemeldete Versuche und deren Alter. Konkrete Anzeige-/Copy-Abnahmefälle aus V5/V8/V9 bleiben maßgeblich.
+
+Keine dieser Quellen begründet die vorgeschlagenen 2-/10-Sekunden-Budgets, fünf lokalen Runs oder 64-KiB-Grenze als Industriestandard. Das sind lokale Designvorgaben bzw. Vorschläge, deren Angemessenheit durch Last- und Ausfalltests zu belegen ist. Q1 bleibt mit 90 Tagen entschieden; Q2 ist mit 200 Clients und 200 Paketinstallationen insgesamt pro Tag entschieden.
+
+## 18. Beschlossene Planungsgröße und Dokumentationsabgleich
+
+- Auslegungsziel: 200 Clients, 200 Paketinstallationen insgesamt pro Tag, 90 Tage Portal-Aufbewahrung. Daraus folgen bei einem Wrapper-Aufruf je Installation 18.000 Runs im Zeitfenster. Wiederholungen kommen hinzu, sofern sie nicht bereits in der Tageszahl enthalten sind.
+- Rechenbeispiel mit fünf bearbeiteten Teilskripten: sieben fachliche Meldungen pro Run, 1.400 pro Tag und 126.000 innerhalb von 90 Tagen. Das sind mögliche Meldungen, keine garantierten Zustellungen und keine festgelegte Anzahl DB-Zeilen. Schrittzahl ist nur ein Beispiel, keine Paketgrenze.
+- 200 ist eine Planungsgröße, kein eingebautes Client-/Tageslimit und kein nachgewiesener Durchsatz. Keine Requests ab Nummer 201 allein aufgrund dieser Zahl abweisen. Lasttests müssen neben Tagesvolumen auch bis zu 200 gleichzeitig gestartete Clients als Burst-Szenario prüfen; ein Tagesmittel belegt keine Burstverträglichkeit. Fehlerversuche und Deduplizierung gesondert messen.
+- Speicherbudget aus tatsächlichen DB-Zeilen/Indizes und typischen/maximalen Schrittdetails messen, nicht aus Gerätezahl schätzen. Die bisherige 1000-Runs-pro-VM-Zahl bleibt ein unbestätigter Vorschlag; sie darf bei Konzentration der 200 täglichen Runs auf wenige Geräte die gewählte Historie nicht unbemerkt verkürzen.
+- SSoT der Auslegungszahlen ist dieser Plan bis zur Implementierung. Keine neue Runtime-Konstante nur für eine nicht implementierte Kapazitätszusage. MECM-README verweist auf diesen Abschnitt; Portalhilfe erläutert aktuellen Diagnoseweg und kennzeichnet die geplanten Funktionen ausdrücklich als noch nicht verfügbar. Dadurch keine duplizierten Kapazitätszahlen in DE-/EN-Katalogen.
+- Dokumentationsauftrag umfasst nun zusätzlich `Powershell-MECM/README.md`, Help-Partial und die bestehenden DE-/EN-Hilfekataloge. Installation, Reporter, Datenbank und Diagnoseansicht bleiben unimplementiert; nur Hilfetext/Rendering wird ergänzt. Keine offenen fachlichen Fragen zu Q1/Q2.
+
+Abnahme dieses Dokumentationspakets: `scripts/check.ps1 -Gate php-lint,lang-parity,doc-hygiene,doc-semantics` meldet viermal pass, Exit 0. Artefakt `qa-artifacts/2026-09-13-package-wrapper-logging-plan/capacity-help-gates.json`, Quellenmanifest `capacity-help-manifest.json`. Keine Performance-, Software-Center- oder visuelle Browserabnahme behauptet. Nächster Schritt bleibt das Schärfen/Umsetzen der offenen technischen P5/P6-Verträge; die Planungszahlen sind kein gemessener Durchsatz.
+
+## 19. Gemeinsame VM-Diagnose: Clientskripte und Paketberichte
+
+Nutzerwunsch: Die Rückmeldungen aus `Powershell-MECM/clients/` zusammen mit den geplanten Paketdiagnosen bei der VM zugänglich machen. Dieser Abschnitt ersetzt den Vorschlag zweier voneinander unabhängiger Diagnosebereiche durch einen gemeinsamen Einstieg mit getrennten Datenachsen. Keine Implementierung, neue Erreichbarkeitsprüfung oder Änderung der Clientaktionen in diesem Planungsschritt.
+
+**Ausführung ausdrücklich getrennt, durch Code bestätigt:** `install-VirtuSphere-Clients.ps1` erstellt eigene MECM-Anwendungen; `Get-VsClientInstallCommand()` in `mecm/VirtuSphere-ClientPackaging.ps1` baut den PowerShell-Aufruf direkt mit `$Spec.Script`. Die vier Clientskripte laufen NICHT durch `Package_Vorlage/install.ps1`. Die Clientpakete enthalten zusätzlich benötigte Common-/Loggingmodule, nicht nur die einzelne Phase. Die Reihenfolge wird über die Paketdefinitionen/Abhängigkeiten organisiert. Paket-Wrapper und Clientphasen teilen weder einen Elternprozess noch automatisch eine Run-ID. Zusammengeführt wird nur die Portaldiagnose. Die zwei neuen Wrapper-/Reporting-Logs und Fünf-Durchläufe-Retention gelten deshalb nicht automatisch für Clientphasen.
+
+### 19.1 Geprüfte Bedeutung der vorhandenen Quellen
+
+| Quelle | Tatsächliches Signal / Grenze | Zulässige Darstellung |
+| --- | --- | --- |
+| `client_getinfo.ps1` | Liest Konfiguration, veröffentlicht Registry-Snapshot und bestätigt Client-ready über eigenen ACK. started wird erst nach passendem MAC-Treffer gesendet. Fehler davor können ohne Portalereignis enden. | „Konfigurationsabruf: erfolgreich gemeldet“ bzw. vorhandenes Ereignis. Kein vollständiger Hardware-Istbestand und keine Erfolgsaussage für spätere Phasen. |
+| `client_hostname.ps1` | already-correct kann finished ohne started liefern. Nach Rename-Computer wird finished VOR geplantem Neustart gesendet; exit 1641 bestätigt keine erfolgreiche Rückkehr nach Reboot. | „Hostname-Schritt: erfolgreich gemeldet“. Detail als damalige Skriptmeldung. Kein „aktueller Hostname verifiziert“ ohne spätere strukturierte Beobachtung. |
+| `client_staticip.ps1` | Meldet applied/static/dhcp/failed/targets als Freitext. Ein Teil der Adapter kann geändert sein, obwohl Gesamtergebnis failed ist. Netzwerkwechsel kann den Rückkanal unterbrechen. | „Netzwerkkonfiguration: fehlgeschlagen gemeldet“ mit Hinweis, dass Teiländerungen möglich sind. Keine aus Meldungsverlust abgeleitete Rücknahme oder aktuelle IP-Adresse. |
+| `Set-VMDisksOnline.ps1` | Meldet resumed/new/existing; finished ist auch bei `optional: no disk work required` möglich. Es ist kein vollständiges Laufwerksinventar. | „Datenträgerphase: erfolgreich gemeldet“, nicht pauschal „Zusatzplatten vorhanden“. Originaldetail nur als Detailtext, nicht als neue Parser-SSoT. |
+| `Send-VsPhase` / `deploy_client_events` | MAC, phase, event, detail; Serverzeit in created_at. Keine persistierte phase_run_id oder rollout_revision. Dedupe nur jüngstes gleiches Event/Detail im Zeitfenster. | „Zuletzt empfangene Phasenmeldung“, Quelle und Datum. Historische Meldung nicht einer neuen Rolloutrevision zuordnen. |
+| Paketberichte | Geplante eigene Run-ID, Revision, Eventsequenz und Ergebnisstruktur. | Runbezogene Paketdiagnose nach P5–P8; nicht mit historischen Clientphasen zu einer Transaktion verschmelzen. |
+
+**Korrektur der früheren vereinfachten Beispiele:** Vier grüne Phasenmeldungen beweisen weder einen zusammenhängenden aktuellen Installationslauf noch einen aktuell erreichbaren oder vollständig konfigurierten Rechner. Eine vorhandene Detection kann einen Skriptaufruf überspringen; keine neue Meldung ist dann kein Fehler. VM-Lifecycle, MECM-Sync und Client-ready-ACK behalten ihre eigenen Writer und Bedeutungen.
+
+### 19.2 Ort und intuitive Struktur im Portal
+
+Gemeinsamer Bereich „VM-Diagnose“ im vorhandenen Statusbereich der realen VM (`vm_edit.php` über `vm_edit_page.php` / `vm_edit_status.php`). Keine zweite parallele Vier-Phasenleiste an anderer Stelle. Vorlage/neue noch nicht gespeicherte VM bekommt keine irreführende Clientdiagnose.
+
+1. **Rückmeldungen:** jüngster tatsächlich gespeicherter Empfang mit Quelle („Clientphase“ oder „Paketbericht“). Bezeichnung „Letzte Diagnosemeldung empfangen“, nicht „Online“, „Heartbeat“ oder „Zuletzt erreichbar“. Zeigt Kommunikation zu diesem Zeitpunkt, keine aktuelle Netzwerkprüfung. Abrufzeit der Portalansicht separat.
+2. **Client-Einrichtung:** feste vier Zeilen aus `VIRTUSPHERE_CLIENT_PHASES`; pro Zeile Phasenname, gemeldetes Ergebnis, Empfangszeit und Details. Nicht zu einem Prozentbalken oder Gesamtgrün verdichten. Für Legacydaten sichtbar „Rollout-Zuordnung nicht vorhanden“.
+3. **Softwarepakete:** vorhandene Planung für Run-Liste/Details, Fehler, Logpfade und Copy-Zusammenfassung in demselben Bereich. Ein Link mit bereits geprüfter VM führt zur VM-Diagnose. Der globale Paketkatalog besitzt keinen VM-Kontext und führt deshalb zur nach exakter Paketidentität gefilterten Run-Übersicht; erst die gewählte Zeile bestimmt VM und Run. Beide Einstiege verwenden dieselbe Detaildarstellung und erhalten ihren jeweiligen Navigationskontext.
+4. **Diagnosehilfe:** je Quelle passender Loghinweis. Clientphasen haben keinen vom Client gemeldeten konkreten Logdateipfad; nur dokumentierten Standardspeicherort anbieten, klar als Hinweis. Keine Wrapper-/Reporting-Datei für eine Clientphase erfinden.
+
+Standardansicht kompakt, Phasendetails und alte Paketversuche aufklappbar. Ein Aktualisieren-Einstieg erhält Filter/Fokus/gewählte Run-ID. Die Seite bleibt zunächst serverseitig gerendert; kein neues Polling nur durch Zusammenführung. Texte DE/EN, Zeitformat und Badges über vorhandene Helfer. Keine Farbe als einziges Signal. Bei späteren dynamischen Aktualisierungen kurze zugängliche Statusmeldung ohne Fokuswechsel, keine komplette Tabelle als dauernde Live-Ansage.
+
+### 19.3 SSoT und Kompatibilität
+
+- `repo_client_phase_summary()` / `repo_client_events_for_vm()` bleiben Owner der historischen Phasenreads. `virtusphere_client_phase_state()` besitzt die bestehende none/running/unconfirmed/finished/failed-Ableitung einschließlich 900-Sekunden-Grenze. Nicht in neuem Panel kopieren oder eigene 15-Minuten-Zahl einführen. Präsentation muss erklären, dass running nur „Start gemeldet“ bedeutet und keine Livenessprüfung ist.
+- Ein neues lesendes VM-Diagnose-View-Model kombiniert Phasenrepo und Paketrepo für die Darstellung, persistiert aber keinen dritten „VM-Gesamtgesundheit“-Wert. Jeder Bereich behält Datenquelle, Vollständigkeit, Zeitpunkt und Revision getrennt.
+- `reportPhase` nicht heimlich durch `reportPackageRun` ersetzen. Legacy-Authentifizierung, Payload und Empfangsreihenfolge bleiben erhalten. Paketberichte haben andere Zulassungs-/Idempotenzregeln. Deshalb kann eine Clientphase ankommen, während ein Paketbericht wegen fehlender IP-Freigabe abgelehnt wird; nicht als logischen Widerspruch oder bewiesenen Netzfehler darstellen.
+- MAC/Hostname/ESXi-Name/VM-ID sind nicht austauschbar. Die gemeinsame Seite wird über bestehende VM-ID/Objektprüfung geladen; historische Events werden nicht anhand sichtbarer Namen mit neuen Runs verbunden.
+- Portal-Sollhostname/IP-/Diskkonfiguration bleibt als Sollwert erkennbar. Keine Spalte „Ist“ mit Sollwerten oder geparstem Freitext befüllen. Für echte Istwerte wäre ein zusätzlicher versionierter strukturierter Bericht erforderlich, separat mit Fence und Konstantenvertrag geplant.
+- Clientphasen bleiben derzeit 30 Tage aufbewahrt, neue Paketberichte gemäß Beschluss 90 Tage. Zusammenführung verlängert die alte Frist nicht automatisch. Beide Herkunfts-/Aufbewahrungsgrenzen in Hilfe erläutern; „keine gespeicherte Phasenmeldung“ kann auch Bereinigung bedeuten. Der Zeitunterschied ist keine Aufforderung, alle Tabellen still auf 90 Tage umzustellen.
+- Clientlogger behalten ihren gespiegelten Tagesdatei-/30-Tage-Vertrag. Send-VsPhase protokolliert Transportfehler derzeit im Clientlog als „nicht zugestellt“; ein Timeout beweist dies nicht. Präzisere Formulierung gehört in eine gesonderte Common-Änderung mit Tests. API-Auflösung liegt vor dessen lokalem try: Nichtbeeinflussung durch sämtliche Auflösungsfehler ist gesondert zu prüfen, keine ungeprüfte Garantie aus „best effort“ im Kommentar.
+
+### 19.4 Edge Cases, Probleme und Gegenmaßnahmen
+
+| Fall | Ergebnis / Maßnahme |
+| --- | --- |
+| Neu ausgerollte VM, alte Phasenerfolge noch vorhanden | Legacybereich als nicht revisionsgebunden kennzeichnen. Kein „aktueller Rollout fertig“ aus MAX(id) je Phase. |
+| started fehlt, finished vorhanden | Terminale Phasenmeldung gültig zeigen; kein Fehler nur wegen fehlendem Start. Das kommt schon bei „Hostname bereits korrekt“ vor. |
+| Domänenrechner wird im Hostname-Skript übersprungen | Aktueller Code setzt lokale Detection und exit 0 ohne Phasenmeldung. Portal darf daraus weder Fehler noch bestätigten Hostnamen ableiten; lokale Diagnose beschreibt Skip. |
+| started nach finished durch Wiederholung/Verzögerung | Bestehende jüngste Empfangsmeldung nicht mit eigener neuer Reihenfolgelogik korrigieren; Verlauf zeigt beide. Ohne Run-ID keine zuverlässige Zuordnung. |
+| IP-Wechsel erfolgreich, Abschluss nicht angekommen | Unbestätigt belassen, lokales Netzwerklog prüfen. Keine automatische Netzwerkrücknahme oder erneute Installation anbieten. |
+| Netzwerkskript bearbeitet einige Adapter, anderer schlägt fehl | Fehler mit Hinweis auf mögliche Teiländerungen; kein „alle Adapter unverändert“. Strukturierte Einzeladapterwerte erst bei eigener Berichtserweiterung. |
+| Keine zusätzlichen Datenträger nötig | Erfolgreiche Datenträgerphase nicht zu „Platten fehlen“ oder „neue Platten eingerichtet“ umdeuten. |
+| Hostname-Erfolg vor Reboot, VM kehrt nicht zurück | Historische Meldung bleibt Erfolg des damaligen Schritts; kein aktuelles Online-/Isthostname-Badge. |
+| Vier Phasen grün, Paketfehler | Beide Tatsachen nebeneinander; keine gemeinsame grüne Gesamtampel. |
+| Paket erfolgreich, Phasen fehlen/abgelaufen | Paketbericht anzeigen, keine künstliche Abhängigkeit „alle vier Phasen müssen vorher grün sein“. |
+| Phasen laufen mehrfach oder parallel | Kein gemeinsamer Versuch aus zeitlicher Nähe/gleichem Hostnamen erraten. Paket-Run-ID gehört nicht automatisch zu einem Phasenaufruf. |
+| Client kann Identität nicht auflösen und meldet nichts | „Keine gespeicherte Rückmeldung“, nicht „Skript wurde nie gestartet“. Lokale Logs maßgeblich. |
+| VM gelöscht/verschoben, alter Link offen | Bestehende Mission-/VM-Prüfung, definierte Weiterleitung; keine Diagnose anderer VM mit ähnlichem Namen. |
+| Nur manche Abfragen scheitern | Vorhandene Daten nicht als vollständigen erfolgreichen Snapshot ausgeben; betroffenen Bereich mit Ladefehler kennzeichnen. Keine stale Daten als frisch markieren. |
+
+### 19.5 Best Practices aus mehreren Primärquellen
+
+Online geprüft am 2026-09-13:
+
+- [Microsoft: Clients überwachen](https://learn.microsoft.com/de-de/intune/configmgr/core/clients/manage/monitor-clients) unterscheidet Client-Onlinestatus, Aktivität und Clientprüfung. Online basiert auf dem eigenen Benachrichtigungskanal zum Management Point. Folgerung: VirtuSphere-Einrichtungsereignisse sind kein Ersatz dafür; keine fremden MECM-Fristen auf Portalberichte übertragen. Falls Online später gewünscht wird, Quelle und Aktualität separat definieren; kein neuer Ping in diesem Paket.
+- [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) trennt Timestamp von ObservedTimestamp. Folgerung: bei Legacyphasen nur vorhandene Serverempfangszeit anzeigen, keine Clientereigniszeit ergänzen, die nie übertragen wurde. Bei Paketberichten beide Zeiten getrennt halten.
+- [W3C/WAI: Status Messages, WCAG 2.2](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) erklärt zugängliche Statusänderungen ohne Fokusübernahme. Folgerung: Copy-/Aktualisierungsfeedback mit passenden Rollen, keine ständig angesagte vollständige Diagnosehistorie. Die Understanding-Seite erläutert das Erfolgskriterium; sie ist kein automatischer Konformitätsnachweis dieser geplanten Seite.
+
+### 19.6 Paketierung der Arbeit und Abnahme
+
+**P9a – gemeinsame lesende Ansicht:** Vorhandene Clientphasendarstellung in gemeinsamen Diagnoseeinstieg integrieren, Paketpanel hinzufügen, Herkunft/Zeit/Legacygrenze sichtbar halten. Keine neuen Clientmeldungen nötig. Veraltete Detailtexte dürfen nicht zum strukturierten Istwertparser werden. Bestehende Hilfe zu Clientphasen und neue Pakethilfe auf gleiche Bedeutungen ausrichten.
+
+**P9b – optionale spätere Berichtshärtung, noch nicht als Implementierung beauftragt:** Phase-Run-ID, rollout_revision, strukturierte Ergebnisdetails und ggf. angewendete Werte additiv übertragen/persistieren. Erst damit wäre eine zuverlässige aktuelle Rolloutgruppierung oder Istwertanzeige möglich. Eigene Wire-/Migrations-/Clientpackaging-Abnahme; historische Daten nicht rückwirkend mit IDs/Werten auffüllen. Das ist mehr als das Zusammenlegen von Panels und bleibt ausdrücklich getrennt.
+
+Abnahmematrix P9a: neue/leere VM, Template, alte Erfolge, 900-Sekunden-Grenze aus SSoT, completed ohne started, mehrere Versuche, fehlende Phasen nach Retention, unabhängige Paketfehler, falsche Mission-ID, DE/EN, HTTP-Copy-Fallback, Tastatur und schmale Ansicht. Quellübergreifender letzter Empfang zeigt korrekte Quelle; kein unbekannter Wert wird zu 0, online oder erfolgreich. Begrenzte Abfragen und keine N+1-Reads für die 200-Client-Planungsgröße.
+
+Prüfurteil: gemeinsamer VM-Einstieg empfohlen. Die größte Lücke ist fehlende Run-/Revisionsbindung der alten Phasen, gefolgt von fehlenden strukturierten Istwerten. P9a ist mit sichtbaren Grenzen planbar; P9b darf nicht als schon vorhandene Datenqualität vorausgesetzt werden. Kein zusätzlicher Nutzerentscheid für die gemeinsame Ansicht erforderlich. Tatsächliche Live-Erreichbarkeit und Vereinheitlichung der Retention wurden nicht hinzugefügt.
+
+Prüfevidenz: doc-hygiene/doc-semantics über `scripts/check.ps1` beide pass, Exit 0 (`qa-artifacts/2026-09-13-package-wrapper-logging-plan/unified-vm-diagnostics-gates.json`). Inhaltliche Grenzen zusätzlich manuell aus vier Clientskripten, Send-VsPhase, ClientPackaging, Phasenrepo/-schema, Statushelper und VM-Renderer abgeleitet. Quellenmanifest `unified-vm-diagnostics-manifest.json`. Keine produktive Ausführung, geänderte Clientdatei oder gemessene Onlineprüfung. Dokumentationsgates ersetzen keine semantische Abnahme des geplanten Views.
+
+## 20. Vertiefte Prüfung: Bedienung, SSoT und Drift
+
+Prüfung am 2026-09-13 gegen Portalverträge A26/A34/A38/A41, Portalreferenz R12/R34, Phasenrepo, VM-Renderer und Paketkatalog. Nur der Plan wird geändert. Die folgenden Präzisierungen ergänzen Abschnitt 19; sie beauftragen keine Produktimplementierung.
+
+| ID / Befund | Präzisierung und warum | Abnahmefall |
+| --- | --- | --- |
+| D1 – Aktualisieren im Editor | Diagnose-Aktualisierung darf keinen VM-Speichervorgang auslösen oder Eingaben still verwerfen. Bestehenden Unsaved-Changes-Owner verwenden; kein eigener Dialog und keine Formularwerte in URL/Storage. Bei abgebrochener Navigation bleiben Eingaben und Ansicht erhalten. Die zunächst serverseitige Ansicht verspricht keinen Live-Refresh. | VM ändern, Diagnose aktualisieren/öffnen, Navigation abbrechen; kein POST zum Speichern, kein Eingabeverlust. Ohne JS keine Garantie eines browserseitigen Schutzdialogs behaupten. |
+| D2 – Paketkatalog ohne VM | Globaler Paketlink öffnet eine paketgefilterte Run-Übersicht. VM-Link öffnet dieselben Daten mit VM-Filter, Run-Zeile die eindeutige Detailansicht. Ein gemeinsamer validierter Filter-/URL-Owner; vorhandenen portal_work_context nur für seine erlaubten Felder verwenden. Kein freies return_url und kein zufällig ausgewählter Client. | Ein Paket auf zwei VMs, zwei Browsertabs, Zurück mit Filter/Sortierung; fremde Mission/Run-Zuordnung erneut prüfen. |
+| D3 – Portal kennt nicht alle Versandfehler | Portal zeigt gespeicherte Ereignisse und deren Vollständigkeit. Lokale Ablehnung, DNS-Fehler oder Antwortverlust kennt es ohne spätere belegte Übermittlung nicht. Insbesondere kann completed nicht seine eigene erst danach bekannte Empfangsbestätigung enthalten. Deshalb keine erfundene grüne Anzeige „alle Meldungen zugestellt“ oder rote „Verbindung defekt“. Konkrete Versandursachen stehen im lokalen Reporting-Log. | Server speichert completed, Antwort geht verloren: Portal hat Abschluss, Client protokolliert unbestätigt. Beides ist gleichzeitig richtig. Kein zusätzlicher Bestätigungsbericht nur zur Auflösung dieses Unterschieds. |
+| D4 – Logpfad überlebt lokale Datei | Portal speichert einen damals gemeldeten Pfad. Nach weiteren fünf Runs kann die Datei fehlen, obwohl der Portalbericht noch innerhalb der 90 Tage liegt. Kennzeichnung „Logpfad auf dem Client, Verfügbarkeit nicht geprüft“; kopieren bleibt möglich, kein Download-/Öffnen-Versprechen. Benutzerkontext bei LOCALAPPDATA erklären, ohne Benutzerkonten zusätzlich zu sammeln. | Sechster Folgelauf, anderer angemeldeter Benutzer, fehlende Partnerdatei und lange/Sonderzeichenpfade. Pfade sind Text, keine ungeprüften URL-/UNC-Aktionen. |
+| D5 – Fehlend ist nicht gleich gelöscht | Leerer Treffer, durch Filter ausgeschlossene Runs, fehlende Meldung und Ladefehler bleiben unterscheidbar. Bei unbekannter Run-ID ohne Löschbeleg nicht „vor 90 Tagen gelöscht“ behaupten. Verständlicher Rückweg zur autorisierten Übersicht; keine automatische Ersetzung durch neuesten Run. | Offener Link nach Bereinigung, Tippfehler, DB-Lesefehler, leeres Filterergebnis; ausgewählte Diagnose nicht still austauschen. |
+| D6 – Historischer Erfolg wirkt aktuell | Phasenergebnis bleibt historisches Ergebnis, mit Herkunft und sichtbarem Empfangsdatum. Weder vier grüne Zeilen noch eine neue Paketmeldung aktualisieren das Alter anderer Phasen. Keine erfundene Freshness-Frist oder Gesamtampel. Bestehende Statusableitung wiederverwenden; Erklärung „Start gemeldet“ darf nicht „läuft jetzt“ versprechen. | Neuer Paketfehler neben altem Phasenerfolg, neuer Rollout mit Legacydaten, Grenzwert des bestehenden unconfirmed-Owners. |
+| D7 – Begrenzter Verlauf ist nicht vollständig | Bestehende Clientereignisliste lädt 20 Einträge, Repo begrenzt auf 100. UI benennt den Ausschnitt als „zuletzt gespeicherte Meldungen“, nicht komplette Historie. Paketfehlerzähler verwenden den gesamten definierten Filterbereich, nicht nur die sichtbaren Zeilen; unbekannte Gesamtzahl nicht erfinden. | Mehr als 20 Phasenereignisse; relevante frühere Meldung außerhalb der Tabelle; mehrere Fehler in einem Run zählen als ein fehlgeschlagener Run. |
+| D8 – Neue Meldungen während des Lesens | Gewählte Run-ID, offene Details und Supportkopie bleiben auf demselben Run. Neu eingegangene Daten ändern ihn nicht zu einem anderen Versuch. Gemeinsames View-Model trägt Datenstand; bei partiell gescheiterten Reads ist „letzter Empfang“ nur aus verfügbaren Quellen bestimmt und entsprechend gekennzeichnet. Gleichzeitige Quellen nicht anhand ihrer tabellenlokalen IDs chronologisch vergleichen. | Zwei parallele Runs, gleiche Serverzeit, neuer Empfang zwischen Übersicht und Detail, eine nicht verfügbare Quelle. |
+| D9 – Katalog ändert sich nach Installation | Exakte Paketidentität und Version aus dem Run-Snapshot erhalten. Katalogumbenennung, Ausmusterung oder neue Version darf Historie nicht umetikettieren. Fehlende Zuordnung sichtbar halten; keine Zusammenführung allein nach Anzeigename. Keine Installiert-Zähler aus Paketzuweisungen ableiten. | Gleiches Basename mit verschiedenen Versionen, geänderter Katalogeintrag, nicht mehr zuordenbares Paket. |
+
+### 20.1 Driftregister und konsistente Dokumentation
+
+- Tatsächlicher Plan-Drift korrigiert: Abschnitt 19.2 hatte beim Paketkatalog einen VM-Kontext impliziert, den die Seite nicht besitzt. Die Navigation ist nun nach Einstieg konkretisiert.
+- Tatsächlicher Formulierungsdrift korrigiert: V1 sprach noch von „wenn Q1 eine Zeitfrist wählt“ und empfahl 1000 Runs. Q1 ist geschlossen; der Absatz markiert die Zahl jetzt ausdrücklich als unbeschlossen und verweist auf B1/Abschnitt 18. Die endgültige Mengen-/Annahmepolitik bleibt offen, statt sie durch die redaktionelle Korrektur zu beschließen.
+- Hilfe DE/EN und MECM-README kennzeichnen die Paketdiagnose weiterhin als geplant. Für die gemeinsame VM-Ansicht müssen bei deren Umsetzung zusätzlich Clientphasenhilfe, Statusbeschriftungen und Diagnosehilfe gemeinsam abgeglichen werden. Kein vorgezogener Hilfetext, der eine heute fehlende Seite als nutzbar beschreibt.
+- Ein Status-/Diagnose-Presenter beliefert VM-Einstieg, Paketübersicht und Run-Details; Übersetzungen und Supportkopie lesen dasselbe Modell. Kein zweiter Writer für VM-Lifecycle, MECM-Sync, Client-ready oder einen abgeleiteten Gesamtzustand.
+- Grenzwerte bleiben bei ihren jeweiligen Besitzern: fünf lokale Wrapper-Durchläufe, bestehende Clientlog-/Phasenfristen und geplante 90 Tage Paketberichte sind unterschiedliche Regeln. Hilfe beschreibt ihren Geltungsbereich; Tests vergleichen Ownerwerte statt zusätzliche Zahlen in Renderern festzuschreiben.
+- Weiter offen vor Implementierung: Replay-/Annahmefenster, messbare Reportingbudgets, Speicher-/Lastnachweis, vollständiges Reporter-Staging und optionale P9b-Berichte. Eine verständliche Ansicht löst diese technischen Nachweise nicht.
+
+### 20.2 Nächster prüfbarer Planungsschritt
+
+Eine gemeinsame synthetische Fallmatrix für VM-Kurzansicht, paketgefilterte Übersicht und Run-Detail festlegen: normaler Erfolg, Schrittfehler, fehlender Abschluss, Legacyphasen, alter Bericht ohne lokale Datei, Parallelversuche und Ladefehler. Für jede Ansicht müssen „welches Gerät/welcher Versuch?“, „was ist belegt?“, „wie alt ist es?“ und „wo prüfe ich weiter?“ direkt beantwortbar sein. Detailansicht und kopierter Text müssen dieselbe Evidenz zeigen. Keine zusätzlichen fachlichen Nutzerfragen für diese Präzisierungen; offene optionale Funktionsentscheidungen bleiben im vorhandenen Register.
+
+Prüfevidenz Abschnitt 20: kanonische doc-hygiene/doc-semantics außerhalb der Sandbox beide pass, Exit 0 (portal-review-gates-host.json im bestehenden QA-Artefaktordner). Erster Lauf portal-review-gates.json meldete zweimal fail mit sh.exe/MSYS-Startabsturz -1073741502; als Umgebungsproblem analysiert, nicht als inhaltlicher Dokumentfehler. Quellenmanifest portal-review-manifest.json. Der abschließende Evidenzsatz wurde nachgetragen; datierte Audits sind vom Semantikgate ausgenommen. Inhaltliche Prüfung anhand der oben genannten Owner, keine Produkt-, Browser- oder Clientlaufzeitabnahme. Nächster Schritt: Fallmatrix aus 20.2 und offene P5/P6-Verträge konkretisieren.
+
+## 21. Online-Gegenprüfung und verbleibende Vertragslücken
+
+Am 2026-09-13 erneut gegen vier Primärquellen geprüft. RFC 9110 ist ein HTTP-Standard; Microsofts Retry Pattern und OWASP sind Gestaltungsempfehlungen, die W3C-Understanding-Seite erläutert WCAG. Keine dieser Quellen legt unsere fünf Durchläufe, 90 Tage, 200 Clients oder Reportingbudgets fest. Folgende Maßnahmen sind lokale Ableitungen für diesen Plan, keine behauptete Zertifizierung.
+
+### 21.1 Quellen und konkrete Folgerungen
+
+- [RFC 9110, Abschnitt 9.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2): Wiederholung nicht-idempotenter Requests braucht Kenntnis ihrer sicheren Wiederholbarkeit. Für reportPackageRun ist POST allein kein Duplikatschutz. Run-/Event-Key und atomare Konfliktprüfung müssen die zugesagte Wirkung liefern; die bestehende Entscheidung ohne automatische Retry-Schleife bleibt erhalten.
+- [Microsoft Retry Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/retry): Fehlerart, Wiederholbarkeit und zusätzliche Last berücksichtigen; erfolgreich verarbeitete Requests können ihre Antwort verlieren. Für uns: Empfangsbestätigung und Installationsergebnis trennen, keine zusätzliche Schleife in mehreren Transportebenen. Lasttests umfassen gleichzeitige Ausfälle, nicht nur erfolgreiche Tagesmittel.
+- [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html): Logging auf Ressourcenerschöpfung, Injection, fehlende Rechte und Laufzeitfehler prüfen. Für uns: eigene kleine strukturierte Ereignisse statt beliebiger Prozessausgabe; unabhängige Senken und realistische Fehlerproben. Aufbewahrungsanzahl allein ist kein Bytebudget.
+- [W3C: Understanding Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html): Dynamisches Statusfeedback muss ohne Fokusübernahme für Hilfstechnologien erkennbar sein. Für uns: kurze Copy-/Filter-Rückmeldung; kein Statusdialog, der Diagnosearbeit unterbricht. Eine normale serverseitige Seitennavigation ist keine nachträgliche Live-Meldung und benötigt kein künstliches Live-Region-Konzept.
+
+### 21.2 Einzelprüfung mit Owner, Gegenbeispiel und Begründung
+
+| ID / Priorität | Festlegung bzw. offene Beweislast | Gegenbeispiel / Abnahme |
+| --- | --- | --- |
+| E1 – vor P5: atomare Annahme | Bestehenden Transaktionsplan konkretisieren: gesamte eingehende Meldung einschließlich Summary auf Konflikte prüfen, dann zusammen speichern. Bei Konflikt keine vorherigen Teilzeilen stehen lassen. Erfolgsantwort erst nach Commit; Client bestätigt nur eine begrenzte, zum Run/Event passende Erfolgsantwort des neuen Protokolls. Status 200 mit HTML, fremder Run-ID oder ungültigem JSON ist keine bestätigte Annahme. Antwortschema/Felder vor Umsetzung als gemeinsame Fixtures festlegen. | Zwei gleichzeitige identische Requests, zwei unterschiedliche Bodies mit gleichem Key, DB-Fehler nach erster Schrittzeile, Commit erfolgreich und Antwort verloren. Keine Read-before-write-Deduplizierung ohne DB-Eindeutigkeit. |
+| E2 – vor P5: widersprüchliche Zusammenfassung | Ein Validator besitzt Indexbereich, eindeutige Schrittindizes, bekannte Ergebniswerte und Konsistenz von Gesamt-/Teilzählwerten. Inhaltliche Prüfung berücksichtigt den vorhandenen Wrappervertrag einschließlich Skip, Continue, Markerfehler und Neustart. Kein zweiter Algorithmus im Portal zur Berechnung eines vermeintlich besseren Exit-Codes. Widersprüchliche Meldung ablehnen und vorhandene Evidenz erhalten. | completed behauptet 2 Schritte, enthält Index 3; derselbe Index zweimal; gespeicherter FAIL wird durch Summary zu OK; ein FAIL trifft verspätet zu einer damit unvereinbaren Erfolgssummary ein. Teilweise Details können korrekt sein, widersprüchliche Details nicht. |
+| E3 – vor P5/P6: Versions- und Fingerprintvertrag | schema_version ist vorhanden, die Kompatibilitätsmatrix fehlt noch. Für v1 Pflicht-/optionale Felder, fehlend/null/0, unbekannte Felder/Enums sowie erlaubte Zahlenbereiche explizit definieren. JSON-Schlüsselreihenfolge darf keinen fachlichen Konflikt erzeugen; rohe JSON-Bytes sind kein semantischer Fingerprint. Identitätsstrings bleiben exakt, keine Unicode-/Großklein-Normalisierung aus Bequemlichkeit. | Alter Server/neuer Reporter, neuer Server/alter Reporter, unbekanntes Ergebnis, null statt 0, gleiche Nachricht mit anderer Schlüsselreihenfolge. Nicht unterstützte Telemetrie beendet nur Reporting, nicht Installation. Keine stille Herabstufung auf reportPhase. |
+| E4 – vor P6: Rückdruck ohne Wartefalle | Keine neuen Retries. Für 429/503 mit Retry-After eine begrenzte Transportregel festlegen: sofern gültig, vor dem erlaubten Zeitpunkt auch kein nächstes reguläres Ereignis senden; Installation läuft ohne eigens eingefügte Schlafpause weiter. Liegt completed vorher, lokal als nicht gesendet erfassen. Fehlender/ungültiger Header fällt auf das bestehende Ereignis-/Gesamtbudget zurück. Abschlussreserve berechtigt nicht zum Umgehen der Serversperre. | Retry-After länger als restlicher Run, ungültiges Datum, 200 Clients gleichzeitig, Fehler auf allen Events. Kein Hintergrundversand nach Wrapperende und keine zusätzlichen Wartezeiten wegen einer langen Servervorgabe. |
+| E5 – vor Auslieferung: ehrlicher Speicherumfang | Fünf Gruppen gelten pro Paketversion/Profil, aktive Gruppen können hinzukommen; eigene Kindlogs haben separate Regeln. Dies schützt nicht vor vielen Paketversionen oder einer einzelnen großen Datei. Kein neuer Byte-/Alterswert beschlossen. Logger übernimmt keine unbeschränkte stdout-/HTTP-Body-/Exception-Dump-Ausgabe; Feld-/Zeilenbegrenzung mit erkennbarer Auslassung vor Umsetzung konkretisieren. Löschung nie auf fremde Logs ausweiten. | Viele Versionen, voller Datenträger, gesperrte ältere Gruppen, sehr lange Fehlertexte. Zusätzliche Loggerausfälle dürfen den Fachablauf nicht verändern; bereits vorhandenes Verhalten der Kindlog-Umleitung wird dadurch nicht automatisch geändert. |
+| E6 – vor P7: verständlicher nächster Prüfschritt | Diagnosehinweise aus demselben strukturierten Fehlerkategorie-Owner wie der Presenter ableiten. Hauptansicht beantwortet Gerät, Versuch, Ergebnis, Empfangszeit und nächsten Prüfpunkt. Bei bekanntem Schrittfehler Detail-Log nennen, bei fehlendem Abschluss Wrapper-/Reporting-Logs nennen, bei unbekannter Ursache neutral bleiben. Freitext nicht als Handlung oder neue Ursache parsen. | Exit 1 ohne weitere Details darf nicht zu „Berechtigungen fehlen“ werden. Keine Rückmeldung darf nicht zur Anweisung „erneut installieren“ werden. DE/EN, Tastatur, HTTP-Copy und schmale Ansicht anhand derselben Fälle prüfen. |
+
+E4 ist eine technische Präzisierung für Rückdruck innerhalb des akzeptierten Best-effort-Modells; genaue Header-/Statusfixtures gehören zu P6. Keine persistente Queue, zusätzliche Aufgabe oder serverseitige Clientaktion wird hinzugefügt. E3 bleibt bewusst eine vor Implementierung zu schließende Vertragslücke, statt unbekannte Felder heute beiläufig als erlaubt oder verboten zu entscheiden.
+
+### 21.3 SSoT-/Driftbefund und nächste Arbeit
+
+- Konkreten Restdrift in P3 korrigiert: „mehr als fünf Dateien“ musste „mehr als fünf Durchlaufgruppen“ heißen. Die beiden Dateien eines Aufrufs gehören zusammen.
+- Berichtsvollständigkeit, Übertragungsbestätigung und Fachresultat bleiben drei Achsen. Gemeinsame Portalansicht vereinheitlicht Darstellung, nicht die unterschiedlichen reportPhase-/reportPackageRun-Verträge.
+- Die pauschale Revisionspflicht in der Machine-Referenz darf nicht als Beweis gelesen werden, dass die vorhandenen reportPhase-Zeilen bereits revisionsgebunden wären. Der aktuelle Handler/Schema liefern die in Abschnitt 19 dokumentierte Legacygrenze. P9a erfindet keine Revision; P9b bleibt gesondert.
+- Für die nächste Planrunde zuerst E1–E3 als konkrete Request-/Response- und Zustandsfixtures schließen, danach Fallmatrix der drei Portalansichten. Neue Funktionen sind dafür nicht erforderlich. Keine zusätzliche fachliche Nutzerentscheidung für diese Prüfung nötig; technische Nachweise bleiben offen.
+
+Ergänzende Grundlage zu E4: RFC 9110 Abschnitt 10.2.3 definiert Retry-After als Wartehinweis vor einer Folgeanfrage. Unsere Reaktion ohne Installationspause ist eine lokale Designableitung. Prüfevidenz: doc-hygiene und doc-semantics über scripts/check.ps1 beide pass, Exit 0; qa-artifacts/2026-09-13-package-wrapper-logging-plan/online-review-gates.json. Lauf wegen zuvor belegtem MSYS-Sandboxfehler direkt außerhalb der Sandbox. Quellenmanifest online-review-manifest.json. Evidenzsatz nach Gate ergänzt; datierter Auditplan ist von doc-semantics ausgenommen. Quellenvergleich und Gegenbeispiele sind manuelle Planprüfung, keine Produkt-/Client-/Browserabnahme.
+
+## 22. Bedienkonzept: priorisierte Diagnose und begrenzter Vergleich
+
+Der Benutzer beauftragt nach der kritischen Onlineprüfung die Aufnahme dieser Präzisierungen in den Plan. Geplant werden die kompakte Übersicht, sichtbare Filter, eindeutige Versuchsauswahl, Fehlerdetail und Supportkopie als erste Ausbaustufe. Der Vergleich wird als spätere, von nachgewiesener Vergleichbarkeit abhängige Ausbaustufe aufgenommen. Dies ist keine Freigabe zur Produktimplementierung. Abschnitt 22 konkretisiert V5/V8/V9, E6 und P7/P9a; er erzeugt keinen zweiten Plan oder Statusvertrag.
+
+### 22.1 Primärquellen, Aussage und Übertragungsgrenze
+
+Onlineprüfung aus dieser Sitzung am 2026-09-13; bewusst zusätzliche Quellen außerhalb von GOV.UK:
+
+| Quelle | Aussage der Quelle | Ableitung für VirtuSphere und Grenze |
+| --- | --- | --- |
+| [IBM Carbon: Filtering](https://carbondesignsystem.com/patterns/filtering/) | Auswahlmethode nach Aufgabe wählen; aktive Filter erkennbar machen und zurücksetzen können. Mehrere Kriterien lassen sich gemeinsam anwenden. | Wenige sichtbare Schnellfilter; zusätzliche kombinierbare Kriterien mit „Filter anwenden“. Kein Seitenreload für jede Zwischenwahl. Das Muster bestimmt weder unsere Statuswerte noch die fachliche Verknüpfung der Filter. |
+| [IBM Carbon: Data table](https://carbondesignsystem.com/components/data-table/usage/) | Tabellen unterstützen Sortieren, Filtern und aufklappbare Zusatzinformationen; Funktionen nach Nutzerbedarf ergänzen. | Paket, Version, Ergebnis, Empfangszeit und Fehlerhinweis sichtbar halten, technische Zusatzdaten aufklappen. Kein Import von Carbon/React, keine zweite Asset-/Komponentenbibliothek. |
+| [Microsoft: List/details](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/list-details) | Liste und ausgewählten Inhalt verbinden; getrennte oder nebeneinanderliegende Ansichten nach Platzangebot. | Eindeutiger Run, Auswahlmarkierung und verlässlicher Rückweg. Bestehende serverseitige Seiten bleiben möglich. Windows-spezifische Controls und Pixelgrenzen sind keine Portalvorgaben; keine Pflicht zum Split-Panel. |
+| [NN/g: Comparison Tables](https://www.nngroup.com/articles/comparison-tables/) | Gleiche Merkmale mit kurzen, konsistenten Werten gegenüberstellen; Unterschiede auffindbar machen. Kleine Ansichten begrenzen die Vergleichbarkeit. | Zunächst zwei bewusst gewählte Versuche anhand bekannter Felder vergleichen. Fehlende Evidenz als unbekannt zeigen, keine erfundenen Äquivalenzen. Die Quelle behandelt vor allem Produktvergleiche und beweist keine Gleichheit unserer Skripte. |
+| [NN/g: Progressive Disclosure](https://www.nngroup.com/articles/progressive-disclosure/) | Häufig benötigte Informationen zuerst, seltene Details auf Nachfrage; zu viele Ebenen erschweren Orientierung. | Fehler und nächster Prüfpunkt gehören in die offene Ansicht. Keine verschachtelte Folge aus mehreren Aufklappbereichen bis zum wichtigen Loghinweis. |
+| [W3C: Use of Color](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color) | Bedeutung darf nicht ausschließlich über Farbe vermittelt werden. | Ergebnis und Vergleichsunterschiede zusätzlich beschriften. Bestehende Badge-/Theme-/Sprachhelper verwenden; keine Rot-Grün-only-Anzeige. |
+
+SAP-Fiori-Seiten wurden recherchiert, waren im verwendeten Webzugriff aber nicht ausreichend inhaltlich auslesbar. Sie dienen hier nicht als tragender Nachweis. Die ergänzend gelesene [GOV.UK Error Summary](https://design-system.service.gov.uk/components/error-summary/) betrifft Formularvalidierung einschließlich Fokusübernahme; dieses Verhalten wird ausdrücklich nicht auf historische Installationsmeldungen übertragen. Designleitlinien sind keine gemessene Bedienungsabnahme unserer Anwendung.
+
+### 22.2 Ausbaustufe 1: kurze, verlässliche Diagnosewege
+
+| ID | Geplante Bedienung | Warum / Grenze |
+| --- | --- | --- |
+| U1 – Übersicht | Im VM-Diagnosebereich kurze Zusammenfassung „Gemeldete Fehler“ und separat „Ohne Abschlussmeldung“, jeweils mit Zeitraum/Revision und Link zur passenden Liste. Paketversuche und Legacyphasen bleiben erkennbar getrennt. | Kein gemeinsamer Zähler „offene Probleme“: Handlungsbedarf, aktuelle Erreichbarkeit und Behebung sind nicht bewiesen. Ein frisch gestarteter Run ohne Abschluss ist kein bewiesener Störfall. Null Treffer heißt keine passenden gespeicherten Meldungen, nicht „alles gesund“. |
+| U2 – Schnellfilter | „Alle“, „Mit gemeldetem Fehler“, „Ohne Abschlussmeldung“ als klar beschriftete Einstiege. Ein Run kann beiden letzten Ansichten angehören. Zusätzliche Kriterien werden zusammen angewandt; aktive Auswahl und Rücksetzen bleiben sichtbar. | Fehler und Vollständigkeit sind unabhängige Eigenschaften. „Mit gemeldetem Fehler“ umfasst bekannte Schritt- oder Wrapperfehler, ohne bei fehlendem Abschluss einen Wrappercode zu erfinden. Kein exklusives Status-Enum aus überlappenden Eigenschaften bauen. |
+| U3 – Fehlerdetail | „Erster bekannter fehlgeschlagener Schritt“ nach kleinstem bekannten fehlgeschlagenem Schrittindex, mit weiteren Fehlern und Hinweis auf unvollständige Details. Wrapperfehler ohne fehlgeschlagenen Schritt separat erklären. | Empfangsreihenfolge bestimmt nicht die Skriptfolge. Der erste bekannte Fehler ist keine bewiesene Grundursache. Bei fehlenden Schrittdetails nicht behaupten, davor sei alles erfolgreich gewesen. |
+| U4 – Nächster Prüfpunkt | Neben dem Fehler passende vorhandene Loghinweise und Copy-Aktion anbieten. Bei fehlendem Abschluss Wrapper-/Reporting-Log nennen; bei fehlendem konkreten Pfad nur dokumentierten Speicherort als Hinweis. | E6 besitzt die evidenzbasierte Zuordnung. Exit 1 allein rechtfertigt keine konkrete Fehlerursache. Keine Remoteaktion, Dateiabholung oder spekulative Empfehlung zur Neuinstallation. |
+| U5 – Auswahl und Supportkopie | Gerät, exaktes Paket, Run und Datenstand bleiben auf Detailseite und in der Supportkopie gleich. Copy-Text aus demselben gerenderten View-Model; eine bewusste Aktualisierung darf denselben Run mit neuem Datenstand zeigen. | Verhindert Kopie des inzwischen neuesten anderen Versuchs. Fehlende/ausgelassene Details, unbekannte Codes und nicht geprüfte Pfadverfügbarkeit bleiben im kopierten Text sichtbar. Bestehender HTTP-/No-JS-Fallback nach V8. |
+
+Filterlogik konkretisieren: Die drei Schnellfilter wählen jeweils eine Ansicht; deren Ergebnismengen dürfen sich überschneiden. Werden zusätzliche getrennte Kriterien „Fehler vorhanden“ und „Abschluss fehlt“ gemeinsam gesetzt, gilt UND zwischen diesen Kriterien. Zusätzliche Geräte-/Paket-/Revisionsfilter schränken ebenfalls ein. Keine Summierung der beiden überlappenden Zähler zu einer vermeintlichen Gesamtzahl betroffener Runs. Diese lokale Bedienentscheidung ist nicht durch Carbon vorgegeben.
+
+„Filter zurücksetzen“ entfernt vom Benutzer gesetzte Diagnosefilter, erhält aber den fest gebundenen VM-/Paketkontext des Einstiegs und gültigen Rückweg. Der erhaltene Kontext ist sichtbar; ein Wechsel zur globalen Übersicht ist eine eigene Navigation. Sortierung bleibt beim Filterwechsel erhalten, eine alte Listenposition wird zurückgesetzt. Ungültige eingegebene Filter dürfen nicht still eine breitere Abfrage erzeugen. Liste, Zähler und Hinweise verwenden denselben normalisierten Filter und abgegrenzten Datenbestand; keine Zähler nur aus sichtbaren Zeilen. Kein Freitextparser oder Sitzungsspeicher als zweite Filter-SSoT.
+
+### 22.3 Portalorte und Informationsreihenfolge
+
+- **VM:** bestehender Statusbereich mit gemeinsamer VM-Diagnose gemäß 19.2; darin Zusammenfassung, Client-Einrichtung und Softwarepakete. Kein neuer globaler Gesundheitsstatus.
+- **Paketkatalog:** Diagnose-Link zur nach exakter Paketidentität gefilterten Run-Übersicht. Der Katalog wählt keine VM stellvertretend aus.
+- **Run-Details:** Identität und gemeldetes Ergebnis, erster bekannter Fehler, nächster Prüfpunkt, vollständige verfügbare Schritttabelle. Komponentenstände und weitere technische Werte unter einem verständlich benannten Zusatzbereich.
+- **Hilfe:** Bedeutung der Anzeigen, Aufbewahrungsunterschiede und lokaler Diagnoseweg. Bei Umsetzung DE/EN und Clientphasen-/Pakethilfe gemeinsam abgleichen; heute noch fehlende Funktionen nicht als verfügbar beschreiben.
+
+Die Primäransicht soll nicht erst durch Aufklappen verraten, dass ein Fehler oder eine Berichtslücke vorliegt. Details sind normale Navigation oder native Aufklappbereiche nach bestehender Portalarchitektur. Kein Fokusfang beim Anzeigen alter Fehler, keine automatische Seitenerneuerung und keine neue Live-Region für die ganze Tabelle. Schutz ungespeicherter VM-Eingaben bleibt D1; Diagnosefilter dürfen kein VM-Speichern auslösen.
+
+### 22.4 Ausbaustufe 2: Vergleich nach geklärter Datenzuordnung
+
+V5 bleibt für die erste Ausbaustufe bei einzeln lesbaren Versuchen. Zusätzlich vorgemerkt wird eine explizite Auswahl zweier unterschiedlicher Run-IDs; die technische Abnahme der Vergleichbarkeit ist Voraussetzung. Kein automatisches „vorher/nachher“ aus Empfangszeit. Überschriften benennen Versuch A/B, Gerät, Paketversion und Revision.
+
+Zunächst vergleichbar sind gemeldetes Wrapperergebnis, vorhandene Codes, Berichtsvollständigkeit und vorhandene Dauer mit ihren jeweiligen Bedeutungen. Unterschiedliche Versionen oder Rolloutrevisionen werden sichtbar ausgewiesen. Skip, fehlende Werte und andere Arbeitsumfänge verhindern die Schlussfolgerung, ein kürzerer Run sei schneller oder optimiert. Reine Dauerunterschiede sind Messwerte, keine Ursachenanalyse.
+
+Ein automatischer Schrittdiff bleibt zurückgestellt: Schrittindex und Dateiname reichen nicht als versionsübergreifender Identitätsnachweis; auch ein gleicher Skripthash allein beweist keine gleichen Konfigurations-/Ausführungsbedingungen. Erst einen expliziten Zuordnungsvertrag und verfügbare Evidenz definieren. Bis dahin getrennte Schritttabellen statt künstlich gepaarter Zeilen. „Nur Unterschiede“ darf unbekannte/nicht vergleichbare Werte nicht als gleich ausblenden. Die Ansicht schreibt keinen Zustand „behoben“ und startet keinen neuen Versuch.
+
+### 22.5 SSoT, Abnahmefälle und Reihenfolge
+
+Paketrepo und gemeinsamer Diagnose-Presenter besitzen Filterprädikate, Anzeige und Fehlerauswahl; Legacyphasen behalten ihren bisherigen Owner. Keine pro Seite duplizierte Statusberechnung. URL-/Work-Context-, Sortier-, Zeit-, Sprach-, Badge- und Copy-Helper bleiben maßgeblich. Bestehende Katalogfilter werden nicht für Diagnosezustände zweckentfremdet; ein neues Diagnosefiltermodell darf keine zweite Katalogfilterimplementierung erzeugen.
+
+| Fall / Aufgabe | Erwartete Abnahme |
+| --- | --- |
+| Bekannter Schrittfehler, Abschluss fehlt | In beiden passenden Schnellansichten auffindbar; zwei Merkmale, ein Run. Kein erfundener finaler Exit-Code. |
+| Gerade gestarteter Run | Ohne Abschlussmeldung sichtbar, keine Behauptung eines Installationsfehlers oder einer Fristüberschreitung. |
+| Fehler von Schritt 4 kommt vor Fehler von Schritt 2 an | Bei beiden gespeicherten Meldungen Schritt 2 als erster bekannter fehlgeschlagener Schritt; fehlende frühere Details benannt. |
+| Wrapperfehler bei Kindcode 0 | Wrapperursache sichtbar, kein erfundener fehlgeschlagener Kindprozess. |
+| Filterkombination ohne Treffer / ungültiger Filter | Verständlicher Leerzustand mit passendem Rücksetzen bzw. Feldfehler; kein versteckter Filter, keine breitere Ersatzabfrage. |
+| Zwei Tabs mit verschiedenen Geräten/Filtern | Kontext bleibt pro URL; Zurück und Rücksetzen wechseln nicht unbemerkt Gerät oder Paket. |
+| Neuer Run während Copy / ausgewählter Run bereinigt | Supportkopie entspricht angezeigtem Run/Datenstand; fehlender Run führt nicht zu einem Ersatzversuch. |
+| Vergleich mit anderer Version, Skip oder fehlender Dauer | Unterschiede, unbekannte Werte und Grenzen sichtbar; keine Behoben-/Performancebehauptung. |
+| DE/EN, Tastatur, schmale Ansicht, HTTP ohne Clipboard | Identität, Fehler, nächster Prüfpunkt und Copy-Fallback erreichbar; Bedeutung nicht nur über Farbe; Fokus bleibt nachvollziehbar. |
+
+Reihenfolge: offene E1–E3-Verträge schließen; dann synthetische Beispiele für Übersicht, ausgewählten Run und Supportkopie gemeinsam ausarbeiten; Ausbaustufe 1 umsetzen/prüfen erst nach entsprechendem Implementierungsauftrag. Vergleich folgt nach eigener Zuordnungsprüfung. Bedienungsabnahme anhand realer Aufgaben: betroffenen Versuch finden, Aussagegrenzen richtig erklären, passendes Log benennen und dieselbe Diagnose kopieren. Keine erfundenen Zeitersparniswerte oder pauschales Urteil „intuitiv“, bevor diese Aufgaben geprüft sind. Keine zusätzlichen Nutzerfragen für die Aufnahme in den Plan.
+
+Prüfevidenz Abschnitt 22: doc-hygiene und doc-semantics über scripts/check.ps1 beide pass, Exit 0; Artefakt qa-artifacts/2026-09-13-package-wrapper-logging-plan/ux-plan-gates.json. Wegen belegtem MSYS-Startfehler direkt außerhalb der Sandbox ausgeführt. Quellenmanifest ux-plan-manifest.json im selben Ordner. Evidenzsatz nach Gate ergänzt; datierte Audits sind von doc-semantics ausgenommen. Inhaltlicher Abgleich mit V5/V8/V9, D1/D2/D8 und E6 manuell; keine Produkt-, Browser- oder Nutzungsabnahme. Geändert wurde ausschließlich der Plan zuzüglich Prüfartefakten.
+
+## 23. Aufgenommene funktionale Erweiterungen F1–F4
+
+Nutzerziel: Plan weiter schärfen und um sinnvolle Funktionen erweitern. Mit der anschließenden Zustimmung „ja alles super“ und dem Auftrag zur Quellen-/Gesamtprüfung werden F1–F4 in den geplanten Funktionsumfang aufgenommen. Umsetzung bleibt unbeauftragt. Sie bauen auf P7/P9a und Abschnitt 22 auf. Keine neue Überwachung nachgelagerter Aufgaben und keine Gleichsetzung alter Clientphasen mit Paket-Runs.
+
+| Funktion / Priorität | Konkrete Bedienung und Nutzen | Daten-/SSoT-Grenze und Abnahme |
+| --- | --- | --- |
+| F1 – hoch: gezielte Diagnosesuche | In der Diagnoseübersicht nach Run-ID, Paket und Gerät suchen. Eine aus dem lokalen Wrapper-Log kopierte Run-ID führt zum exakten Versuch. Dies verbindet lokale Fehlersuche mit dem Portal. | Run-ID exakt validieren; Namenssuche liefert erkennbare Treffer zur Auswahl, keine Identitätsbindung nach Name. Welche Namensart gesucht wird sichtbar benennen, etwa Portal-VM-Name statt ungeprüfter aktueller Windows-Hostname. Keine Volltextsuche in lokalen Logs. Nicht empfangene oder bereinigte Runs erzeugen einen ehrlichen Leerzustand; keine Suche in anderen Quellen vortäuschen. Suchfeld nutzt denselben validierten Diagnosefilterowner; Sonderzeichen, mehrere Namensgleiche und fremde VM-Kontexte prüfen. |
+| F2 – hoch: Diagnosezeitraum wählen | Zeitraum nach Serverempfang auswählen, etwa „Heute“ oder Von/Bis, kombiniert mit Paket-/Geräte-/Ergebnisfiltern. Hilft bei der Frage „Welche Meldungen kamen während unserer heutigen Verteilung an?“. | Festlegung für Run-Listen: nach erster Serverannahme filtern und genau so beschriften; Details zeigen zusätzlich letzten Empfang. Ein gestern gestarteter, heute abgeschlossener Run erscheint damit nicht automatisch unter „Heute“. Keine Beschriftung „heute installiert“. Portalzeitzone und halb offenes Tagesintervall verwenden, Sommerzeit berücksichtigen. Zeitraum filtert Historie und ändert keine 90-Tage-Frist. |
+| F3 – mittel: gleiche Fehlermerkmale auf anderen Geräten | Vom Fehler aus „Weitere Meldungen mit diesen Merkmalen“ öffnen. Vorbelegt werden exakte Paketversion, strukturierte Fehlerkategorie und bekannte Kind-/Wrappercodes. Zeigt, ob ähnliche Berichte bei mehreren Geräten vorliegen. | Gleiche Merkmale beweisen keine gemeinsame Ursache. Schrittname nur als zusätzliches sichtbares Suchmerkmal, nicht als versionsübergreifende Identität. Fehlende Kategorie nicht als Übereinstimmung behandeln. Gemeldete Runs und unterschiedliche VM-IDs getrennt zählen; fünf Versuche auf einer VM sind nicht fünf betroffene Geräte. Keine Fehlerquote aller Installationen aus unvollständiger Best-effort-Telemetrie berechnen. Exit 1, Teilberichte und fehlende Katalogbindung prüfen. |
+| F4 – hoch: Diagnose-Link kopieren | Zusätzlich zur Supportkopie einen Link zum exakt gewählten Run anbieten; gefilterte Übersichten über ihre URL als Browserlesezeichen wieder öffnen. Erspart das erneute Suchen beim Wechsel zwischen Supportfällen. | Keine öffentliche Freigabe, kein Versand an Dritte. Ziel prüft Anmeldung, Existenz und Objektkontext neu. Link auf einen Run zeigt den später verfügbaren Datenstand, ist kein unveränderlicher Export. Bereinigung bleibt möglich. Keine Tokens, Logtexte oder Formulareingaben in URLs; vorhandenen URL-/Copy-Owner erweitern. Fehlende Auth, Bereinigung und zwei parallele Browsertabs prüfen. |
+
+### 23.1 Umsetzungsreihenfolge und Aufwand
+
+F1/F2/F4 benötigen keine neuen Clientmeldungen, bauen aber auf dem noch zu implementierenden Paketberichtmodell auf. F3 nutzt ebenfalls geplante Daten; sein Nutzen hängt von stabilen Fehlerkategorien ab. Deshalb zuerst Suche, Zeitraum und präzise Links spezifizieren; die merkmalsbasierte Suche nach E3/E6 und Messung ihrer Abfragen. Keine zusätzliche Seite nur für F3: vorhandene Diagnoseübersicht mit sichtbaren Filtern wiederverwenden.
+
+Die [IBM-Carbon-Filterleitlinie](https://carbondesignsystem.com/patterns/filtering/) wurde für diese Runde erneut geprüft: passende Auswahlmethoden, sichtbarer Filterzustand und Rücksetzen stützen die Bediengestaltung. Die vier fachlichen Kandidaten und ihre Priorisierung sind unsere Ableitung, keine Vorgabe dieser Quelle. Der serverseitige Filter-/Queryvertrag braucht begrenzte Suchfelder und Lastnachweise auf der beschlossenen Planungsgröße; kein externer Suchdienst und keine neue Bibliothek notwendig.
+
+Bewusst vorerst zurückgestellt: automatische Fehlerursachenerkennung, Erfolgsquoten über alle MECM-Installationen, ungeprüfte Isthostname-/IP-Anzeigen sowie serverseitige Wiederholungsaktionen. Dafür fehlen entweder belastbare Eingangsdaten oder ein entsprechender Aktionsvertrag. Die bestehende spätere Vergleichsansicht aus 22.4 bleibt gesondert; F3 ist eine Merkmalsuche und kein automatischer Schrittdiff.
+
+### 23.2 Plan schärfen statt parallele Regeln ansammeln
+
+F1–F4 sind aufgenommen: ihre Felder, Labels und Abnahmefälle gehören zum vorhandenen P5/P7-/Diagnosefiltervertrag, diese Übersicht ist kein zweiter Implementierungsowner. Die nachfolgende Präzisierung macht Eingaben, Treffermengen und Leerzustände konkret. Die Funktionsauswahl ist geschlossen; vor Umsetzung bleiben technische Verträge und Nachweise offen. Eine weitere pauschale Erweiterung der Datenaufnahme folgt daraus nicht.
+
+Prüfevidenz Abschnitt 23: doc-hygiene/doc-semantics über scripts/check.ps1 beide pass, Exit 0; feature-candidates-gates.json im bestehenden QA-Artefaktordner. Quellenmanifest feature-candidates-manifest.json. Ausführung wegen bekanntem MSYS-Sandboxproblem direkt außerhalb der Sandbox. Dieser Evidenzsatz wurde danach ergänzt. Datierten Auditplan manuell mit Abschnitt 22 abgeglichen; Dokumentationsgates ersetzen keine fachliche/visuelle Abnahme und doc-semantics schließt datierte Audits aus. Nur Plan und Prüfartefakte geändert, kein Kandidat implementiert.
+
+### 23.3 Quellenprüfung: Best Practices und Standards
+
+Geprüft am 2026-09-13. Die Unterscheidung ist wesentlich: WCAG 2.2 ist eine W3C Recommendation; OpenTelemetry liefert eine Spezifikation für Telemetriedaten; OWASP und IBM liefern praktische Gestaltungsempfehlungen. Keine Quelle schreibt die vier VirtuSphere-Funktionen, unsere Retention oder konkrete Lastgrenzen als universellen Industriestandard vor. Abgeleitet werden passende Regeln, keine Zertifizierung und keine Pflicht zur Installation externer Komponenten.
+
+| Primärquelle | Relevante Aussage | Konsequenz / Übertragungsgrenze |
+| --- | --- | --- |
+| [IBM Carbon: Search](https://carbondesignsystem.com/patterns/search-pattern/) | Suchtyp und Platzierung hängen von Suchbereich, Datenmenge und Last ab; leere Treffer brauchen einen hilfreichen nächsten Schritt. | F1 wird bewusst ausgelöst, mit benanntem Suchbereich und verständlichem Leerzustand. Keine Anfrage pro Tastendruck oder gespeicherte Suchhistorie erforderlich. Carbons Empfehlung ohne sichtbares Label wird nicht übernommen: unser Formularowner und die eindeutige Unterscheidung von Run-ID und Namenssuche bleiben maßgeblich. |
+| [IBM Carbon: Filtering](https://carbondesignsystem.com/patterns/filtering/) | Aktive Filter sichtbar machen, Rücksetzen ermöglichen, mehrere Kriterien bei Bedarf gemeinsam anwenden. | F1–F3 nutzen dieselbe Filterdarstellung. Die Quelle bestimmt keine SQL-Verknüpfung, Identitätsnormalisierung oder Pflicht zur Suche über alle Geräte. |
+| [OpenTelemetry: Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) | Zeitpunkt des Ereignisses und Zeitpunkt seiner Beobachtung durch die Sammelstelle sind getrennt. | F2 benennt erste Serverannahme explizit. Dieser lokale Filter ist keine Gleichsetzung mit Installationsstart oder Clientereigniszeit und erfordert keinen OpenTelemetry-Collector. |
+| [OWASP: IDOR Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html) | Komplexe IDs/GUIDs ersetzen keine Objektzugriffsprüfung. | F1/F3/F4 prüfen Ziel und bestehenden Portalzugriff bei jedem Read; ein kopierter Link ist keine Freigabe. Keine neue bestehende read-Permission behaupten. |
+| [WCAG 2.2: Link Purpose](https://www.w3.org/TR/WCAG22/#link-purpose-in-context) | Linkziel muss aus Linktext oder zugeordnetem Kontext verständlich werden. | Run-Links erhalten eindeutigen Geräte-/Paket-/Versuchskontext. „Weitere Meldungen“ erklärt die übernommenen Kriterien; „Diagnose-Link kopieren“ ist von Text-/Logpfadkopie unterscheidbar. |
+
+### 23.4 Konkreter Bedien- und Datenvertrag für F1–F4
+
+**F1 – Suche und direkte Run-Auswahl:** Zwei klar unterscheidbare Wege im selben Diagnoseeinstieg: „Run-ID öffnen“ validiert eine GUID und öffnet den autorisierten konkreten Run; Namens-/Paketsuche liefert eine Ergebnisliste und erhält sichtbare Filter. Die direkte Run-Auswahl übernimmt keinen versteckten Zeit-/Fehlerfilter. In einem fest gebundenen VM-Kontext darf sie nicht unbemerkt eine andere VM öffnen; globale Suche bleibt ein ausdrücklich benannter anderer Einstieg. Auch ohne Dateilog gültige Run-ID nutzbar, sofern der Server den Run empfangen hat. Ungültige GUID nicht als Namenssuche interpretieren. Die GUID wird nach Parserregeln verglichen, Paket-/Geräteidentität nicht anhand Suchschreibweise umgebunden.
+
+Namenssuche nennt ausdrücklich Portal-VM-Name bzw. Paketname; aktueller Name ist kein historisch gemeldeter Windows-Isthostname. Unbekannte/umbenannte Pakete bleiben anhand ihrer gespeicherten Run-Identität auffindbar. Geplante Suche begrenzt Eingaben, Trefferfenster und Queryzeit; rohe Eingabe nicht still abschneiden. Parameterisierte SQL-Suche behandelt Prozent-/Unterstrichzeichen nach expliziter Literal-Suchregel, keine frei eingegebene SQL-/Regex-Syntax. Großkleintoleranz bei Namenssuche darf Auswahl erleichtern, ersetzt aber keine exakte Identitätsprüfung des gewählten Treffers. Exakte Suchlängen/Indexform als P7-Fixture festlegen, nicht willkürlich durch diesen Plan eine Zahl erfinden.
+
+**F2 – Datum und reproduzierbare Ansicht:** Basis der Run-Liste ist unveränderliche erste Serverannahme, sichtbar als „Erstmals empfangen“. Letzte gespeicherte Meldung bleibt ein separates Feld. Eine gestern erstmals angenommene Installation mit heutigem Abschluss gehört bei dieser Filterart zu gestern. Keine zweite unbeschriftete Zeitachse hinzufügen. „Heute“ wird bei Betätigung in konkrete Von-/Bis-Daten der Portalzeitzone aufgelöst; URL und sichtbare Felder tragen diese Daten. Ein morgen geöffnetes Lesezeichen beschreibt deshalb denselben ausgewählten Kalendertag. Erneutes „Heute“ wählt den neuen Tag. Das Datenangebot dieses Tages kann sich durch spätere Annahmen/Bereinigung verändern; der Link ist kein historischer Ergebnissnapshot.
+
+Datumsparser und UTC-Bereichsbildung sollen den vorhandenen Vertrag von `log_filter_local_range()`/`portal_timezone()` wiederverwenden bzw. unter einem gemeinsamen Datumsowner verallgemeinern, ohne Audit-spezifische Filterregeln zu kopieren. Lokales Tagesende ist der Beginn des nächsten Kalendertages, nicht pauschal plus 86400 Sekunden. Umgekehrte/ungültige Bereiche erzeugen Feldfehler; keine breitere Ersatzabfrage. Eine Fristbereinigung verändert die verfügbare Treffermenge, nicht die Bedeutung der Datumsauswahl.
+
+**F3 – gleiche Merkmale, eindeutiger Zählbereich:** „Auf anderen Geräten suchen“ öffnet die gemeinsame Paketdiagnoseübersicht, erhält exakte Paketidentität/-version, ausgewählten Zeitraum und bekannte Fehlerkategorie sowie die getrennten bekannten Kind-/Wrappercodes. Der bisherige VM-Filter wird ausschließlich für diesen expliziten Gerätewechsel entfernt; die Quell-VM wird ausgeschlossen. Geltender Portalzugriff wird neu geprüft. Revisionen verschiedener VMs sind keine gemeinsame Rollout-ID: keine Gleichsetzung oder Filterung anderer Geräte allein über dieselbe numerische rollout_revision. Treffer nennen ihre jeweilige Revision und Quelle. Legacyphasen mit fehlender Run-Bindung werden nicht eingemischt.
+
+Fehlt eine strukturierte Fehlerkategorie, keinen gleichwertigen Merkmalsvergleich behaupten. Stattdessen den vorhandenen allgemeineren Link zur Paketdiagnose anbieten, sichtbar ohne diese Einschränkung. Ein unbekannter Code wird nicht zu 0. Bekannte Kriterien sind auf der Zielseite sichtbar; nach manuellem Entfernen eines Kriteriums behauptet die Seite keine unveränderte Merkmalsgleichheit mehr. Beispiel: fünf passende Runs auf zwei anderen VMs ergeben fünf Runs und zwei Geräte, keine fünf Geräte, keine automatische Ursachenanalyse und keine Fehlerquote aller Installationen.
+
+**F4 – gezielter Link und Datenstand:** Canonical Run-Link aus dem Ziel-URL-Owner, ohne vorübergehende Suchtexte, Seitenposition oder beliebiges return_url. Der Link öffnet genau den Run, vorbehaltlich Existenz/Objektprüfung. Link bleibt unabhängig vom jeweiligen Einstiegsfilter nutzbar. Copy ist nur lokal im Browser; kein automatischer Versand, kein Token und keine öffentliche Share-Funktion. Bei HTTP/Clipboardverweigerung bleibt die URL auswählbar. Run-Link und Textkopie sind verschieden: der Link kann später aktualisierte Informationen zeigen; die Textkopie hält den bei ihrer Erzeugung sichtbaren Datenstand fest. Fehlender Run wird nicht automatisch durch einen neuen Versuch ersetzt.
+
+**SSoT für Liste und Zähler:** Ein normalisierter Diagnosefilter geht an den Paketrepo-Read; dieselben Prädikate und derselbe konsistente Lesestand speisen Liste, Run-Zahl und distinct VM-Zahl. Paging ist begrenzt und stabil (Cursor-/Sortiervertrag vor Umsetzung festlegen), keine Vollmenge in PHP nur für die Anzeige sortieren. Ein Filterfehler stoppt die Abfrage; ein Count-/DB-Fehler ergibt keinen Null-Erfolg. Rollup-Tabellen und eigene „ähnliche Fehler“-Statuswriter sind für F3 nicht vorgesehen.
+
+### 23.5 Funktionsabnahme
+
+| Fall | Erwartetes Ergebnis |
+| --- | --- |
+| Run-ID aus Wrapper-Log, anderer Zeitraum aktiv | Expliziter Run-ID-Einstieg findet den autorisierten Run unabhängig vom Zeitfilter; in gebundener falscher VM kein stiller Wechsel. |
+| Namensgleiche VMs, umbenanntes Paket, `%`/`_` im Suchtext | Sichtbare Trefferwahl, exakte Run-Bindung, definierte Literalsuche; keine automatische Identitätskorrektur. |
+| Heute-Link am nächsten Tag erneut öffnen | Derselbe gespeicherte Kalendertag sichtbar; keine heimliche Umdeutung zu einem neuen Tag. |
+| Zeitumstellung / gestern begonnen, heute beendet | Korrekte lokale Tagesgrenzen nach UTC; Filter trifft anhand erster Serverannahme. |
+| Gleicher Fehler auf Quell-VM und zwei anderen VMs | Quell-VM ausgeschlossen; nur andere VMs gezählt, Mehrfachversuche separat. Gleiche Revisionsnummern erzeugen keine gemeinsame Ausführung. |
+| Fehlende Kategorie oder unbekannter Kindcode | Fehlende Eingrenzung erkennbar bzw. allgemeiner Paketlink; unbekannt nicht als 0 verwenden. |
+| Link ohne Login / bereinigter Run / zwischenzeitlich geänderte VM-Zuordnung | Zielprüfung und verständlicher Rückweg; keine öffentliche Freigabe und kein Ersatzrun. |
+| Neue Meldung oder Bereinigung zwischen Listen-/Zählerreads | Gleicher abgegrenzter Lesestand oder expliziter Ladefehler; keine widersprüchliche Erfolgsübersicht. |
+
+## 24. Gesamtprüfung Revision 6: SSoT, Logik, Drift und QoL
+
+Geprüft wurden die Abschnitte 1–23 einschließlich historischer Einschränkungen. Beschlossene Funktionen und offene technische Beweislast bleiben getrennt. Diese Gesamtprüfung ist eine Plan-/Quellenprüfung, keine bestandene Laufzeit-, Security-, Performance- oder Bedienungsabnahme.
+
+### 24.1 Ergebnis je Bereich
+
+| Bereich | Ergebnis der Prüfung / Korrektur | Verbleibende Beweislast |
+| --- | --- | --- |
+| Scope und Quellenstatus (1–2, 6–9, 18–19) | Titel/Stand aktualisiert, Abschnitt 6 als historisch gekennzeichnet. Direkte Clientpakete, Wrapper und nachgelagerte Aufgaben bleiben getrennte Ausführungswege. Frühere Paketpanel-Texte auf gemeinsamen VM-Einstieg ausgerichtet. | Reale Kundenskripte liegen nicht in der Vorlage; keine tatsächlichen Task-/Software-Center-Läufe aus dieser Planprüfung ableiten. |
+| Lokales Logging (1–8, 15) | Verbliebene Fünf-Dateien-Formulierung zu Durchlaufgruppen korrigiert. Hash-Skip-Test unterscheidet nun Kindprozessstart von lokalem RUN und step_result. P4 behauptet kein allgemeines Telemetrieverbot mehr. | Reale Windows-Handles/ACLs, Parallelität, Bereinigung und unveränderte Exit-/Detectionpfade testen. Keine harte Speicherobergrenze behauptet. |
+| Ergebnis und Wire (10–11, 15–16, 21) | P5 nennt beide optionalen Logpfade. Unbekannter total darf einmal bekannt werden; danach unveränderlich. Wrappercode und Kindcode bleiben getrennt; kein zweiter Exit-Entscheider im Presenter. | E1–E3 mit konkreten Fixtures; terminale Konflikte, Replays und Auslassungen müssen dieselben Regeln erfüllen. |
+| Lieferung und Transport (10, 14–17) | Vollständiges Manifest, unabhängige Senken, API-/Snapshotowner und Zeitreserve bleiben konsistent. Kein Rückschluss vom Copy-Link auf Clientkommunikation. | P6 vollständige Datei-/Aktivierungs-/Rollbackliste, Importisolation und reale PS-5.1-Wandzeitgrenzen. B5 ist weiterhin nur optional. |
+| Aufbewahrung und Kapazität (3, 10, 16–18) | V1 enthielt noch eine behauptete Mengenobergrenze und Wiederöffnung von Q1. Korrigiert: 90 Tage entschieden, Annahmepolitik offen. Feste 1001.-Run-Abnahme durch spätere echte Grenzprüfung ersetzt. | P-03/B1: messbare Annahme-/Speichergrenzen, Replay nach Löschung, Maintenanceausfall. Quellen geben keine pauschale 1000er-Grenze vor. |
+| Status/Legacy (9, 12, 19–22) | Historische Phase ohne Revision bleibt historisch. „Start gemeldet“ ist keine Live-Aussage; Fehler und fehlender Abschluss überlappen. Teilabfragefehler nicht als leere gesunde VM darstellen. | Gemeinsamer Presenter, konsistente Reads, richtige Hilfe und synthetische Bedienfälle. |
+| Erweiterungen F1–F4 (23) | Aufnahme in Plan bestätigt; Suchbereich, Datumsbasis, Link-/Textkopieunterschied und Suche auf anderen Geräten festgelegt. Keine künstliche gemeinsame Revisionsgruppe über verschiedene VMs. | Such-/Sortier-/Cursorbounds, Indexnachweis, Ziel-/Filtervalidierung und Browserabnahme. |
+| SSoT-Mirrors/Dokumentation (2, 10, 16, 18, 22–23) | Wrapper entscheidet Ergebnis; PHP/Wire-Fixtures besitzen Protokoll; Repos besitzen Persistenz/Reads; Presenter besitzt Anzeige. Help/README bleiben als geplant erkennbar. | Bei Umsetzung PowerShell-Mirror, Fresh-/Upgrade-Schema, DE/EN und Hilfe gemeinsam prüfen. Keine Produktregel aus ungeprüfter externer Designempfehlung übernehmen. |
+
+### 24.2 Zusätzlich gefundene technische Lücken
+
+**G1 – Schrittgrenze gegen Abschlusspriorität (P5/E2):** Die vorgeschlagenen 256 gespeicherten Schritte kollidieren potenziell mit einem späteren Fehler, wenn vorherige Erfolgsmeldungen die Grenze belegt haben. Eine begrenzte completed-Payload allein löst die Speicherfrage nicht. Abschnitt 25.1 schlägt einen getrennt reservierten ersten Fehler und einen stets begrenzten Abschlusskern vor; dies präzisiert den früheren Grenzvorschlag, ist aber noch kein implementierter Vertrag. Abnahme: mehr Schritte als Detailcap, Fehler erst hinter der Grenze, anschließend replay/reordered. Keine Garantie aller Fehlerdetails beschlossen.
+
+**G2 – Nichtversand, Ablehnung und Bestätigung (P6/E1):** Ein HTTP-Status außerhalb des zugesagten Antwortvertrags, insbesondere eine bloße asynchrone 202-Annahme, darf nicht als Beweis gespeicherter Diagnosedaten gelten. Konkrete Erfolgs-/Ablehnungscodes und JSON-Felder in E1 abschließend festlegen. Ein fehlgeschlagener Request ist nicht rückwirkend „nicht gesendet“. Retry-After kann den Abschlussversuch trotz Reserve verhindern; dabei nicht warten oder die Installation wiederholen.
+
+**G3 – Letzter Empfang und Duplikate (P5/P7):** Anzeige meint die jüngste gespeicherte neue Meldung des definierten Quellenbereichs. Ein deduplizierter Request erzeugt keinen neuen fachlichen Empfangszeitpunkt und verlängert keine Retention. Clientphase und Paketbericht dürfen wegen unterschiedlicher Speicherung nicht als vollständiges Netzverkehrsprotokoll erscheinen. Abnahme: nur Duplikate, gleicher Serverzeitpunkt, Quelle teilweise nicht lesbar.
+
+**G4 – Feldlimit ist kein Dateigrößenlimit (P1/E5):** Die Entscheidung gegen zusätzliches lokales Bytebudget bleibt erhalten. Begrenzte einzelne Diagnosefelder verhindern unkontrollierte Dumps, garantieren aber weder Dateigröße noch Gesamtspeicher über viele Versionen. Bei Implementierung nicht unter dem Namen QoL eine neue Rotation oder Kürzung der fachlichen Identitätswerte einführen.
+
+**G5 – Retention und späte Details (P5/V1):** Run und Schritte haben denselben Lebenszyklus. Zeitfenster wird durch nachgereichte Details nicht neu gestartet. Annahme und Cleanup müssen bei gleichzeitigem Grenzübertritt eindeutig entscheiden; keine neue aktuelle Run-Zeile nach Teilbereinigung. Fehlender historischer Run bleibt ein nicht verfügbarer Treffer, kein bewiesener Installationsausfall.
+
+### 24.3 Quellenvergleich, Abnahmeumfang und nächster Schritt
+
+Der Abgleich vorhandener SHA-256-Manifeste ergab 52 Quelleneinträge (mit Überschneidungen), davon 46 unverändert. Sechs Abweichungen zu älteren Manifesten betreffen README, Portalvertrag/-referenz, VM-Page/-Panels und core.js. Die betroffenen Diagnose-/Navigations-/Copy-/Editorstellen wurden im aktuellen Stand erneut gelesen; ältere Evidenz wurde nicht als aktuelle Produktabnahme ausgegeben. Ergebnisdatei `full-plan-source-comparison-valid.json`. Der erste Vergleichslauf las aufgrund falscher Array-Formaterkennung null Einträge (`full-plan-source-comparison.json`); er ist keine gültige Evidenz und wurde durch den geprüften Lauf mit Nichtleer-Guard ersetzt. Historische Manifeste bleiben erhalten.
+
+Priorisierte offene Arbeit: P1–P4 sind fachlich geplant und benötigen Windows-Abnahme bei Umsetzung. Für Portal/Reporter zuerst E1–E3 und G1/G2/G5 in verbindliche Wire-/Datenfixtures überführen, danach P6-Lieferung/Zeitbudget und P7-Filter-/Readvertrag samt F1–F4 konkretisieren. Erst nach Implementierungsauftrag folgen Produktänderungen und deren kanonische QA. P9b (strukturierte Client-Istwerte/Revisionen), B5 (administrativer Schalter) und automatischer Schrittdiff bleiben gesondert. Keine offene Nutzerfrage zur Auswahl der vier Funktionen; offene Technik wird nicht durch einen pauschalen Best-Practice-Verweis als erledigt markiert.
+
+Abschließende Prüfevidenz Revision 6: scripts/check.ps1 mit doc-hygiene/doc-semantics beide pass, Exit 0; qa-artifacts/2026-09-13-package-wrapper-logging-plan/full-plan-review-gates.json. Direkt außerhalb der Sandbox wegen des zuvor belegten MSYS-Startproblems. Geltungsstatus der F-Tabelle und dieser Evidenzsatz danach redaktionell ergänzt; datierte Auditpläne sind vom Semantikgate ausgenommen. Manuelle Gesamtprüfung siehe 24.1/24.2, Quellenmanifest full-plan-review-manifest.json. Keine Produkt-/Browser-/Windows-/MECM-Abnahme behauptet. In dieser Runde nur Plan und Prüfartefakte geändert. Nächster Schritt sind die benannten Wire-/Speicher-/Lieferfixtures; es laufen keine Prüfsitzungen mehr.
+
+## 25. Technische Ausarbeitung Revision 7: Lösungen und überprüfbare Beweislast
+
+Auftrag: die vier offenen technischen Nachweise ausarbeiten, anhand aktueller Quellen kritisch prüfen und SSoT, Randfälle, Logik und Bedienung einbeziehen. Der Nutzer hat anschließend mit „okay übernehme in dne plan“ die Aufnahme bestätigt. Vereinbarte Lösungsrichtung: reservierter Platz für den ersten Fehler und Abschlusskern (T1), dauerhafte minimale Sperrmerker bei 90 Tagen Diagnoseaufbewahrung (T2/Q3), vollständige versionsgeprüfte Reporter-Verteilung (T3) und beaufsichtigter Reporter-Hilfsprozess mit messbaren Zeitbudgets (T4). Begründungen, Gegenbeispiele und Abnahmefälle gehören zur übernommenen Planung. Dies beauftragt keine Implementierung und ersetzt keine Vertrags-/Prototypabnahme. Detaillierte Wirefelder, Host-/Liefermechanik und Zahlen wie 256, 64 KiB oder 2/10 Sekunden bleiben konkret zu prüfende technische Planwerte, keine Industriestandards oder gemessenen Garantien. Die zusätzlichen Nachweise für Gerätegeneration und Restore sind als offene Voraussetzungen aufgenommen; eine bestimmte dort genannte technische Alternative ist damit noch nicht ausgewählt.
+
+### 25.1 T1 – Späte Fehler trotz ausgeschöpfter Detailgrenze
+
+**Problem und Empfehlung:** Eine einzige Obergrenze für alle gespeicherten Schritte lässt frühe Erfolge den Platz für einen späteren Fehler verbrauchen. Deshalb drei getrennte, begrenzte Speicherbereiche vorsehen: höchstens D normale Schrittdetails (Vorschlag D=256), zusätzlich höchstens einen kompakten ersten Schrittfehler, und einen Abschlusskern mit dem vorhandenen Wrapperresultat. Die Zusatzplätze gehören zum reservierten Budget jedes angenommenen Runs. Sie sind keine Erlaubnis, bei allgemeinem DB-Ausfall oder fehlender Zulassung dennoch Erfolg zu bestätigen.
+
+**Konkreter Vertragsentwurf für P5/E2/E3:**
+
+1. Normale Detailberechtigung richtet sich nach dem stabilen Schrittindex 1 bis D, nicht nach Ankunftsreihenfolge. Es gibt keine Verdrängung bereits bestätigter Schrittzeilen. Alle weiteren Installationsschritte werden unverändert ausgeführt und lokal protokolliert. Die Best-effort-Ereignisse nach jedem Schritt bleiben vorgesehen, solange das Transportbudget reicht.
+2. Der Ergebnisowner des Wrappers kennzeichnet genau seinen ersten fehlgeschlagenen Schritt mit `is_first_failure=true`. Das ist ein neues vorgeschlagenes Wirefeld, kein vom Portal aus der Empfangsreihenfolge errechneter Wert. Liegt dieser Schritt außerhalb 1 bis D, darf sein begrenzter Fehlerdatensatz den Zusatzplatz belegen. Ein zweiter angeblich erster Fehler mit anderer Identität ist ein Konflikt. Innerhalb 1 bis D wird derselbe Schritt bei Zählung/Anzeige nicht doppelt erfasst. Spätere Fehler haben keinen weiteren Sonderplatz.
+3. Der Abschlusskern enthält unabhängig von der Detailauswahl: Wrapperergebnis und -code, bekannten Gesamtumfang, bearbeitete Schritte, OK-/SKIP-/FAIL-Zähler, letzten bearbeiteten Index und den ersten Schrittfehler, falls vorhanden. Bei bekannter Inventur gilt bearbeitet = OK + SKIP + FAIL und nicht bearbeitet = total − bearbeitet. Ein Inventurfehler darf total unbekannt lassen. Fehler im abschließenden Detection-Marker können Wrapper-FAIL ohne Schritt-FAIL erzeugen; bestehende 3010-/1641-Semantik bleibt erhalten.
+4. Der erste Fehler enthält ausschließlich begrenzte strukturierte Angaben: Index, Skriptidentität, FAIL, vorhandene Fehlerkategorie, bekannten Kindcode und optionalen Detailpfad. Er ist eine Projektion derselben Ergebnisstruktur wie das lokale Log. Er darf im Abschluss fehlende Evidenz ergänzen, aber keine bereits bekannte gegenteilige Schrittinformation überschreiben. Fehlt der unmittelbare Fehlerbericht, kann der Abschluss ihn auf dem reservierten Platz nachtragen.
+5. completed wird zuerst aus gültigen Pflichtmetadaten, Abschlusskern und Fehlerhinweis aufgebaut. Erst danach kommen passende normale Schrittdetails hinzu, solange der tatsächliche UTF-8-Bodycap reicht. Ein übergroßer optionaler Pfad wird mit Auslassungsgrund weggelassen, nicht als abgeschnittener Pfad angeboten. Identitätsfelder haben validierte Grenzen und werden nie durch Trunkierung passend gemacht. Schon der minimale gültige Kern muss in den Cap passen; andernfalls ist der Vertrag fehlerhaft.
+6. Ereignisspeicher ebenfalls begrenzen: höchstens ein started, ein step_result je berechtigtem Schritt, gegebenenfalls ein zusätzliches erstes Fehlerereignis und ein completed. Damit höchstens D+3 persistierte Ereignis-Fingerprints, auch bei sehr vielen abgelehnten Meldungen. Ein fachliches Ereignis unter einer zweiten Sequenz darf keine weitere Zeile anlegen; v1 besitzt genau eine Sequenz pro fachlichem Ereignis. Semantisch identisches Replay unter demselben Key bleibt 200/deduplicated, anderer Inhalt 409 ohne Teilspeicherung. Durch completed ergänzte Details erzeugen keine erfundenen zusätzlichen Empfangsereignisse.
+7. Nicht speicherberechtigte weitere step_result erhalten einen eigenen begrenzten Fehlercode, Vorschlag HTTP 422 / `detail_limit`. Das bedeutet nur „dieses Detail nicht gespeichert“ und deaktiviert weder den ersten Fehlerplatz noch completed. Es ist weder accepted noch ein Installationsfehler. Abgelehnte Bodies/Digests dürfen nicht über eine unbegrenzte zweite Tabelle oder pro Ereignis erzeugte Auditlogs die Begrenzung umgehen. Geltende Zugriffs-/Ratenregeln bleiben zusätzlich wirksam.
+
+**Beispiel für die Portalansicht:** 300 bearbeitete Schritte, 299 OK, ein FAIL in Schritt 300; 256 normale Details plus der separat bekannte Fehler 300 ergeben 257 unterschiedliche bekannte Schrittresultate. Anzeige: „Wrapper fehlgeschlagen · erster gemeldeter Schrittfehler: 300 · 257 von 300 Schrittergebnissen gespeichert“. Die 43 fehlenden Details sind kein Beleg weiterer Fehler. Hat der Abschluss nur 20 normale Details übertragen und gingen weitere Einzelmeldungen verloren, ist die Zahl aus tatsächlich gespeicherten unterschiedlichen Indizes zu bestimmen; niemals pauschal 257 anzeigen.
+
+**Vollständigkeit und Reihenfolge:** Eine vom Client gemeldete Auslassungszahl beschreibt seine konkrete Nachricht, nicht automatisch den späteren DB-Gesamtbestand. P5 muss dafür `payload_omitted_count` und serverseitig abgeleitete Detailvollständigkeit klar unterscheiden. Fehlt completed, ist die Gesamtzahl bearbeiteter Schritte unbekannt, selbst wenn total=300 aus started bekannt ist. Ein verspätetes, kompatibles Detail kann die Vollständigkeit erhöhen, setzt einen abgeschlossenen Run aber nicht wieder auf gestartet. Der letzte Empfang ändert sich nur durch neu gespeicherte Evidenz. Ein verworfenes Detail oder identisches Replay aktualisiert ihn nicht.
+
+**Abnahme T1:** D−1, D und D+1 Schritte; erster Fehler vor/auf/hinter D; 300 Schritte mit Fehler erst 300; mehrere Fehler hinter D; FAIL nur wegen Detection-Marker; ausschließlich SKIP; Abbruch vor Inventur; Abschluss zuerst; verlorenes Fehlerereignis mit späterem Abschluss; verlorener Abschluss mit bereits gespeichertem ersten Fehler; doppeltes/abweichendes Ereignis; lange UTF-8-Pfade. Wenn Fehlerereignis und Abschluss beide fehlen, muss das Portal die Lücke zeigen. Der reservierte Platz garantiert Speichermöglichkeit, keine Zustellung. Der frühere Vorschlag „256 insgesamt“ wird durch D normale Details plus höchstens einen Fehlerhinweis präzisiert und muss vor Produktumsetzung in einem gemeinsamen Fixturevertrag bestätigt werden.
+
+### 25.2 T2 – Replay nach Bereinigung; Q3 entschieden
+
+**Nutzerentscheidung Q3:** Auf die ausdrücklich gestellte Frage nach dauerhaft minimalen Sperrmerkern antwortete der Nutzer „Ja, minimale Sperrmerker behalten (empfohlen)“. Diagnoseinhalte behalten ihre 90-Tage-Frist. Danach dürfen ausschließlich Run-ID und unveränderliches Ablaufdatum als technische Sperrmerker bestehen bleiben. Diese Ausnahme ist nun autorisiert; keine Paketnamen, Ergebnisse, Schritte, Logpfade oder zusätzliche Gerätezuordnung im dauerhaften Merker. Er ist kein im Portal durchsuchbarer historischer Diagnosebericht.
+
+**Warum:** Wurde ein Run mitsamt jeder Spur gelöscht, ist dieselbe GUID für den Server wieder unbekannt. Eine Clientuhr oder ein zufällig noch gleicher Hostname beweist nicht, ob die Meldung frisch ist. Ein Sperrmerker mit wiederum endlicher Frist würde die Lücke lediglich verschieben. Die gewählte Variante bewahrt die kleine Identität der schon angenommenen Runs und benötigt keinen zusätzlichen Vorab-Handshake pro Installation.
+
+**Konkreter Daten-/Transaktionsentwurf:**
+
+- P5 erhält eine globale eindeutige Run-ID-Sperrtabelle, konzeptionell `(run_id, expires_at)`. Die bestehende Run-Tabelle besitzt die Geräte-/Revisionsbindung während ihrer Aufbewahrung. Keine Cascade von der gelöschten Run- oder VM-Zeile auf die Sperrtabelle. `expires_at` wird bei erster Annahme einmal aus Serverzeit + 90 Tagen gesetzt. Ein Duplikat verlängert nichts.
+- Schon die erste erfolgreich angenommene Meldung legt Sperrmerker und Run in derselben `repo_transaction()` an. Kein späterer, absturzanfälliger Schritt „beim Löschen noch schnell einen Merker erzeugen“. Started muss dafür nicht zuerst eintreffen; ein gültiger Abschluss darf der erste Eingang sein.
+- Der Reportwriter und der Maintenance-Owner verwenden dieselbe Run-Sperre und dokumentierte Lockreihenfolge. Die Entscheidung zur Annahme verwendet eine einmal bestimmte Serverzeit nach Erwerb der maßgeblichen Sperren. Ab `expires_at <= decision_time` keine Annahme oder Fristverlängerung mehr. Eine vor dem Grenzzeitpunkt serialisierte, danach commitete Annahme wird beim anschließenden Cleanup mit entfernt. Keine Behauptung einer über alle Komponenten hinweg exakt zum Zeitstempel sichtbaren Löschung.
+- Noch aktive Run-ID mit passendem Metadaten-/Eventvertrag: wie P5 annehmen oder deduplizieren. Abgelaufener Merker: Vorschlag HTTP 410 / `report_expired`, ohne neuen Run. Merker ohne noch lebenden Run vor Ablauf ist ein inkonsistenter Zustand: keine automatische Neuanlage; als Speicherproblem behandeln. Niemals vermeintlich reparieren und dabei Replay zulassen.
+- Zulassungs- und Objektprüfungen bleiben Pflicht, bevor gegenüber unzulässigen Aufrufern Aussagen über eine bekannte Run-ID offengelegt werden. 410 beendet nur das Reporting dieses Runs; es verändert weder Software-Center-Code noch VM-Lifecycle. Eine Statusantwort behauptet keine sichere Zustellung früherer, nicht bestätigter Requests.
+- Maintenance löscht Run, Details, Ereignis-Fingerprints und gespeicherte Projektionen im gemeinsamen Lebenszyklus. Bereits abgelaufene Berichte werden auch bei ausgefallenem Cleanup nicht mehr in normalen Diagnoseansichten angezeigt. GET löscht nichts. Backups folgen ihrem eigenen bereits dokumentierten Lifecycle; 90 Tage in der Live-Diagnose bedeutet keine nachträgliche Umschreibung alter Backups.
+
+**Speicherfolgen und Grenzen:** Bei den beschlossenen 200 Installationen insgesamt pro Tag entstehen rechnerisch etwa 73.000 Merker pro 365 Tagen. Das ist eine Anzahl, keine gemessene Bytezahl. Binäre GUID, Zeitfeld, Indizes und realer DB-Overhead müssen gemessen werden; der Merkerbestand wächst über die 18.000 diagnostischen Runs des 90-Tage-Modells hinaus. B1 muss ein Budget für neue Run-Annahmen samt reservierter maximaler Detailbelegung vorsehen. Bei erreichtem Budget neue Runs kontrolliert ablehnen; vorhandene Merker niemals als Platzbeschaffung löschen. Abschluss/erster Fehler eines schon angenommenen Runs benötigen ihre bereits berücksichtigte Reserve. Allgemeine DB-Störungen bleiben möglich.
+
+**Zusätzlich entdeckte Identitätslücke:** Q3 verhindert die Wiederbelebung bereits angenommener Run-IDs. Ein noch nie angenommener alter Bericht ist dadurch nicht erkennbar. Außerdem enthält der heutige getDeviceInfos-/Client-Snapshot-Vertrag keine eigene nicht wiederverwendbare VM-Inkarnationskennung: `client_getinfo.ps1` erlaubt vm_name, vm_hostname, vm_domain, vm_os, mission_id und rollout_revision. Nach Löschen/Neuanlegen mit wiederverwendeter MAC und gleicher numerischer Revision kann die bislang geplante MAC-/Revisionsprüfung alte und neue Lebenszyklen nicht sicher unterscheiden. Namen oder Paketversion sind kein Ersatz. Vor P5 eine begrenzte Erweiterung mit einer serverseitig vergebenen Gerätegeneration prüfen, die bei jeder Neuanlage neu ist; diese darf nicht still in den heutigen Minimalvertrag eingeschoben werden. Dies ist eine Identitätsvoraussetzung, keine Wiederaufnahme von P9b-Istwerten oder nachgelagerten Installationsaufgaben.
+
+**Restore-Grenze:** Ein älteres Datenbankbackup kann sowohl Runs als auch später entstandene Sperrmerker verlieren. Ohne zusätzliche, gegen Restore geschützte Annahmegeneration kann T2 danach keine universelle Replayabwehr versprechen. Vor Auslieferung Restore-Fall entscheiden und abnehmen: entweder eine gesondert entworfene Generation für neue Annahmen nach Wiederherstellung samt Snapshotvertrag oder eine ausdrücklich dokumentierte Einschränkung. Keinesfalls heimlich Rolloutrevisionen erhöhen, alle VMs neu ausrollen oder ein neues Client-Authentifizierungssystem einführen. Diese technische Lücke bleibt offen; Q3 allein schließt sie nicht.
+
+**Abnahme T2:** Replay unmittelbar vor/auf/nach Ablauf; paralleles Cleanup und completed; Ablauf ohne laufende Maintenance; Cleanupabbruch und Neustart; identische/abweichende wiederholte Meldung; neue Run-ID im selben Paket; VM gelöscht und MAC erneut verwendet; Merker ohne Run; Annahmebudget erreicht; Restore aus Backup vor erster Run-Annahme. DB-Assertions müssen zeigen: kein zweiter Run, keine verlängerte Frist, kein Löschverlust der Merker, keine fachliche VM-Statusänderung. Ein alter Portal-Link zeigt neutral „Diagnose nicht verfügbar“, ohne daraus Erfolg oder Fehler abzuleiten.
+
+### 25.3 T3 – Vollständige Reporter-Verteilung aus den bestehenden Quellen
+
+**Geprüfter Ist-Stand:** Client-Common verlangt seine benachbarte Client-Logging-Datei und deren Vertragsversion. Der Serverinstaller besitzt bereits Staging, SHA-256-Nachlesen und Rollback für die Vorlage. Der Autoimporter synchronisiert hingegen gezielt install.ps1; sein gemeinsamer Manifesthelper bekommt zusätzlich nur `TemplateScript`, keine vollständige Reporter-Vorlage. Damit ist ein manuelles Hinzulegen des Adapters kein belastbarer Upgradepfad. Die bestehenden Schutzmechanismen sind wiederzuverwenden, ihre heutige Existenz beweist noch keine konsistente Auslieferung mehrerer Reporterdateien an laufende Leser.
+
+**Empfohlener Liefervertrag:** Ein unveränderliches, versioniertes Reporter-Bündel unter einem reservierten Ordner neben `powershell/`, etwa `reporting/<bundle_id>/`. Es darf nicht innerhalb `powershell/` liegen, weil dort Paketnutzlasten ausgewählt und ausgeführt werden. Der Reporter besitzt keine eigene Installation oder geplante Aufgabe auf dem Client.
+
+| Bestandteil | Einziger Quellowner / Verantwortung |
+| --- | --- |
+| Wrapper | `Powershell-MECM/Package_Vorlage/install.ps1`; lokale Logs bleiben ohne Reporter funktionsfähig. |
+| Reporteradapter und gegebenenfalls Prozesshost | Neue ausdrücklich benannte Quelldateien, Vorschlag unter `Powershell-MECM/clients/` als VirtuSphere-Package-Reporter.ps1 / VirtuSphere-Package-ReporterHost.ps1; von den bestehenden vier fachlichen Clientskripten getrennte Rolle. Endgültige Namen vor Umsetzung gegen Packaging-Konventionen prüfen. |
+| Clientkonfiguration/Snapshot | `Powershell-MECM/clients/VirtuSphere-Client-Common.ps1`; nötige reine Lesehelfer dort, keine zweite Registry-/Adressfindungslogik im Wrapper. |
+| Erforderliche Loggingabhängigkeit | `Powershell-MECM/clients/VirtuSphere-Client-Logging.ps1`; bestehende Logvertragsversion. Ihr Mitliefern erlaubt keine versehentliche zusätzliche aktive Logsenke für den Wrapper. |
+| Staging/Veröffentlichung | `install-VirtuSphere-MECM.ps1`, `mecm/mecm_autoimporter.ps1` und vorhandene Helper in `mecm/VirtuSphere-Common.ps1`; gemeinsamer vollständiger Dateisatz. |
+
+**Publikationsablauf als Entwurf:** Alle Dateien aus diesen Quellen in eine neue Generation schreiben, feste relative Pfade/Dateianzahl/Größen/Hashes und Vertragsversionen prüfen, erst dann einen kleinen Deskriptor auf die Generation umschalten. `bundle_id` kann aus dem kanonischen Inhaltsmanifest ohne dessen eigenes Hashfeld abgeleitet werden; kein zirkulärer Selbsthash. Der Deskriptor nennt zusätzlich die erwartete Wrapperversion/-prüfsumme. Beide Identitäten sind Diagnoseimplementierungsversionen, nicht config.version des Softwarepakets. Der Wrapper liest den Deskriptor einmal und lädt nur die dazu vollständig geprüfte Generation.
+
+Ein Dateiersatz ist keine Mehrdatei-Transaktion: gültige alte Generation während Staging verfügbar lassen; Fehler/Sharing-Verletzungen des Deskriptortauschs nachlesen und im vorhandenen Rollbackpfad behandeln. Windows ReplaceFile verlangt dasselbe Volume und dokumentiert auch Teilfehler. Ein API-Name allein beweist daher weder Stromausfallsicherheit noch atomaren Austausch eines ganzen Verzeichnisses. Wenn Wrapper und Deskriptor vorübergehend nicht zusammenpassen, bleibt Reporting aus und die Nutzlast läuft. Neue Generation zuerst bereitstellen, dann kompatible Wrapper-/Deskriptorstände veröffentlichen; kein Mischen einzelner Dateien aus alten und neuen Sets.
+
+Der Autoimporter muss vor seinem bestehenden Content-Update den vollständig geprüften Sollsatz besitzen. Der Template-/Content-Stamp muss Änderungen an Common, Logging und Adapter erkennen, auch wenn install.ps1 unverändert ist. Ein gestarteter Run hält seine ausgewählte Generation fest; Publisher dürfen sie nicht während des Imports entfernen. Die spätere Bereinigung alter Generationen braucht einen eigenen sicheren Leser-/Veröffentlichungsvertrag und gehört nicht zur Fünf-Loggruppen-Bereinigung. Bis dieser bewiesen ist, keine automatische Löschung möglicherweise benutzter Generationen. Alte Generationen nicht unbegrenzt in neue MECM-Inhalte hineinakkumulieren; das veröffentlichte Content-Set gezielt bilden.
+
+**Fehler und Bedienung:** Ein fehlendes/veraltetes/gemischtes Bündel erzeugt einmal einen verständlichen Hinweis im lokalen reporting-Log mit Bundle-ID und Grund. Installationsstatus bleibt unverändert. Ohne funktionierenden Reporter kann das Portal diese Ursache nicht selbst wissen; dort bleibt „keine/letzte Rückmeldung“, nicht „Reporterdatei fehlt“. Hashes belegen Übereinstimmung mit dem Manifest, keine Herkunft gegen einen Angreifer, der beides ersetzen könnte. Vorhandene ACL-/Verteilungsgrenzen sowie feste, gegen Traversal/Reparse geprüfte Pfade gelten weiter. Kein Download, beliebiger ccmcache-Fallback oder Ausführen frei gewählter Manifestpfade.
+
+**Abnahme T3:** Fresh install und Upgrade; ausschließlich Common geändert; ausschließlich Logging geändert; Adapter fehlt; Vertragsversion passt nicht; Hash passt nicht; Abbruch nach jeder Publikationsphase; gesperrter Deskriptor; zeitgleich laufender alter Wrapper; älterer MECM-Cache; neuer Wrapper/alter Reporter und umgekehrt. Belege umfassen die tatsächlich an MECM übergebene Dateiliste, Hashes vor/nach Staging und die getrennten Ergebnisse „Reporter nutzbar“ / „Paketnutzlast unverändert“. Ein erfolgreicher Serverinstaller allein erfüllt diesen Nachweis nicht.
+
+### 25.4 T4 – Tatsächliche Zeitbudgets und gekapselter Transport
+
+**Belegte Grenze:** Microsoft dokumentiert DNS-Auflösungen von 15 Sekunden oder mehr trotz kürzer gesetztem Timeout. Ein Wechsel von Invoke-RestMethod zu HttpClient mit demselben Zahlenwert beweist daher noch keinen rechtzeitigen Rücksprung zum Wrapper. Im vorhandenen Common kommen vor dem eigentlichen Bericht außerdem Health-Abfragen über Resolve-VsApi mit TimeoutSec=5 vor. Einfaches Dot-Sourcing in einem PowerShell-Scope isoliert auch die prozessglobalen TLS-Einstellungen nicht.
+
+**Empfehlung zur Erprobung:** Ein einzelner beaufsichtigter Reporter-Hilfsprozess pro Wrapper-Aufruf, ohne Nachlieferqueue und ohne geplante Aufgabe. Nur der Wrapper erzeugt die fachlichen Ergebnisse und schreibt sein Logpaar. Der Hilfsprozess bekommt begrenzte Ereignisnachrichten, führt ausschließlich den Transport aus und liefert begrenzte Bestätigungen zurück. Höchstens ein Ereignis gleichzeitig in Bearbeitung; kein unsichtbarer Rückstau während der Installation. Nach Wrapperende darf keine weitere Meldung mehr gesendet werden. Verbindung weiterhin ausschließlich Client zum Portal.
+
+**Beaufsichtigung statt nur Timeoutparameter:** Den Hilfsprozess möglichst vor seiner ersten Ausführung einem eigenen Windows Job Object zuordnen (suspendiert erstellen, zuordnen, dann starten). KILL_ON_JOB_CLOSE und ein nicht an den Helfer vererbter letzter Handle begrenzen das Weiterleben bei beendetem Wrapper. Ausschließlich der Reporter gehört in diesen eigenen Job; niemals Wrapper, Installationskindprozesse oder fremde PowerShell-Prozesse aufnehmen/beenden. Bereits bestehende MECM-Jobs, verschachtelte Jobs und das Scheitern der Zuordnung ausdrücklich prüfen. Kann sichere Kapselung nicht hergestellt werden, Reporting auslassen. Prozessstart, IPC und Beenden benötigen selbst begrenzte, nicht blind blockierende Operationen. Die konkrete Host-/Interop-Implementierung ist erst durch einen Windows-Prototyp zu wählen.
+
+**SSoT im Helfer:** Common um einen reinen, begrenzten Lesezugriff auf die bereits konfigurierte API-Adresse und den publizierten Snapshot ergänzen. Den heutigen aktiven Health-/Fallback-Resolver für diesen Reporter nicht unverändert aufrufen. Bestehende Clientskripte dürfen ihren Resolver behalten; der gemeinsame Konfigurationsowner bleibt derselbe. Kein zusätzlicher Health-Request pro Ereignis, keine neue Registrierung und kein Registry-Schreiben nur wegen einer Diagnosemeldung. Die Loggingabhängigkeit muss ohne versehentliches Öffnen ihrer eigenen Standardsenke verwendbar sein; das ist mit dem bestehenden Clientlogger-Vertrag nachzuweisen.
+
+Die Snapshotwurzel einmal zu merken reicht allein noch nicht: client_getinfo entfernt alte Snapshotwurzeln nach Veröffentlichung. Der neue gemeinsame Lesehelper muss alle benötigten Werte vollständig lesen, Veröffentlichungszustand und Generation auf Konsistenz prüfen und anschließend ein eigenes unveränderliches Datenobjekt liefern. Wird die Wurzel währenddessen entfernt oder der Snapshot unvollständig, Reporting deaktivieren; keine feldweise Mischung, kein ungeprüftes Neuaufsetzen unter einer anderen Revision. Ein späterer gültiger Rolloutwechsel darf die eingefrorene Identität des laufenden Wrappers nicht umetikettieren.
+
+**Budgetentwurf:** 2 Sekunden je Ereignis und 10 Sekunden kumulierter zusätzlicher Reporteraufwand bleiben Prüfziele. Die bisherige Aufteilung 8 Sekunden vor Abschluss plus 2 Sekunden für completed enthält noch keine explizite Beendigungsreserve. Vorschlag für den Prototyp: 7,5 Sekunden für Initialisierung/Start/Schritte, 2 Sekunden für completed, 0,5 Sekunden für kontrolliertes Beenden; zusammen weiterhin 10 Sekunden. Die zusätzliche Reserve ist eine Präzisierung des technischen Vorschlags, kein gemessener Wert. StopWatch misst aktive Diagnoseintervalle einschließlich Start, Hashprüfung, Import, Konfigurationslesen, Serialisierung, IPC, Request/Antwort und Aufräumen. Stundenlange Paketnutzlast zählt nicht als aufgebrauchtes Reportingbudget. Logger-I/O separat messen und nicht als Netzwerkzeit ausgeben.
+
+Versuch nur starten, wenn genügend Budget für seine begrenzte Bearbeitung und das sichere Beenden verbleibt. Wird ein hängender Helfer beendet, bleibt Reporting für diesen Aufruf aus; keine neue Prozess-/Retrykette, um die Abschlussreserve doch noch auszunutzen. Ein normal behandelter HTTP-Fehler kann das nächste reguläre Ereignis zulassen. 429/503 und gültiges Retry-After behalten E4; es wird keine Installationspause dafür eingefügt und completed umgeht die Sperre nicht. Fehlende Authentifizierung/Identität und Prozessabbruch können die Abschlussmeldung verhindern.
+
+**Ehrliche Zeitzusage:** Ein allgemeines Windows-System bietet keine mathematische Echtzeitgarantie bei Prozesssuspendierung, blockierter Platte oder fehlender CPU-Zuteilung. Zu beweisen sind die eigenen begrenzten Warte-/Abbruchpfade unter dokumentierten Betriebs- und Ausfallszenarien. Messwerte außerhalb der Ziele sind ein Befund, kein durch Mittelwerte verdeckter Erfolg. Wenn die sichere Kapselung im vorgesehenen MECM-Kontext die Ziele nicht schafft, Implementierung bzw. Budgets ausdrücklich neu bewerten; nicht die Zahl 2 durch Setzen eines Parameters als erfüllt markieren.
+
+**Messplan T4:** Windows PowerShell 5.1 im tatsächlichen Software-Center-Kontext, zusätzlich Benutzerkontext; PS-/OS-/CLR-Version, Bitness, Bundle-Hash, Testserver und Konfiguration erfassen. Pro Zelle Rohzeiten einschließlich Initialisierung/Abschluss/Beenden, maximale beobachtete Zeit und Verteilung ausweisen. Vorgeschlagen zunächst 30 Wiederholungen je Ausfallzelle sowie kalte und warme Starts; das ist eine Teststichprobe, kein statistischer Beweis einer universellen Obergrenze. Abnahmegrenzen werden vor dem Lauf festgelegt; Messwerte nicht nachträglich passend gerundet.
+
+| Fall | Erwartete Aussage / zwingende Prüfung |
+| --- | --- |
+| Normaler Empfang; 0, 1, 5 und mehr als D Schritte | Eigene Reporterzeit getrennt von Nutzlast; genau die bestätigten Ereignisse und Speicherregeln aus T1. |
+| DNS-Ausfall, blockierte Verbindung, TLS-Handshake hängt, Antwortkörper tröpfelt | Wrapper kann innerhalb der geprüften Beaufsichtigungsgrenzen fortsetzen; kein alleiniger TimeoutSec-Mock. |
+| Server commitet, Antwort geht verloren | Lokal „Annahme nicht bestätigt“, nicht „sicher nicht angekommen“; DB kann trotzdem das Ereignis besitzen. |
+| Zu große/ungültige Antwort, Redirect, 429/503 | Begrenztes Lesen, keine Hostweitergabe, kein Retry- oder Schlafpfad; echte Ursache im reporting-Log. |
+| Import/Dateilesen hängt, Helferstart scheitert, IPC wird voll | Fehler vor dem HTTP-Aufruf sind im Budget enthalten; keine gegenseitig blockierenden stdout-/Pipe-Puffer. |
+| Wrapper wird hart beendet, Helfer hängt, Nutzlast läuft | Kein verwaister Reporter und kein durch Reporter-Cleanup beendeter Installationsprozess. Harte Abbrüche garantieren keinen Abschluss. |
+| VM unter Last, 200 gleichzeitige Clients, Portal nicht erreichbar | Burst und Ausfall messen; Tagesmittel 1.400 Ereignisse bei fünf Schritten beweist keine Spitzenkapazität. |
+
+Ergebnisartefakte bei späterer Umsetzung: gemeinsame Wire-Fallmatrix, DB-Vorher-/Nachherzustände, vollständiges Liefermanifest, rohe Timingdatei und Prozess-/Lognachweise. Automatisierbare Prüfungen in passende bestehende Tests und den kanonischen scripts/check.ps1-Weg integrieren; kein zweiter öffentlicher Runner. Fehlendes MECM-Lab bleibt eine externe Abnahmelücke, nicht ein passing skip. In dieser Planrunde keine Prototyp-/Windows-/MECM-Ausführung.
+
+### 25.5 Onlinequellen und konkrete Übertragungsgrenzen
+
+Erneut am 2026-09-13 geprüft. Primärquellen von Microsoft, AWS, IETF und OWASP; keine GOV.UK-Quelle. Die folgenden technischen Entscheidungen sind unsere Ableitungen für dieses LAN-Portal.
+
+| Quelle | Belegt / Konsequenz für diesen Entwurf |
+| --- | --- |
+| [Microsoft: HttpClient.Timeout, .NET Framework](https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclient.timeout?view=netframework-4.8.1) | DNS kann einen kurzen Timeout überschreiten. T4 braucht einen messbar abbrechbaren Pfad; die Quelle verspricht kein 2-Sekunden-Verhalten unseres Codes. |
+| [Microsoft: Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) | Prozessgruppen, Kindvererbung, verschachtelte Jobs und KILL_ON_JOB_CLOSE sind dokumentiert. Daraus folgt die sorgfältige Begrenzung des Jobs auf den Reporter; sichere Einbindung unter MECM bleibt unser Testauftrag. |
+| [Microsoft: ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew) | Ersatz einer Datei auf demselben Volume und mögliche Teilfehler. Begründet Nachlesen/Rollback; kein Beleg eines atomaren ganzen Bündelupgrades. |
+| [Microsoft: Stopwatch](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.stopwatch?view=netframework-4.8.1) | Aufsummierte Messintervalle und Timerauflösung. Eignet sich für aktive Reportingintervalle; Messumgebung und beobachtete Grenzen bleiben zu dokumentieren. |
+| [AWS Builders' Library: Making retries safe with idempotent APIs](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/) | Identifikator und Änderung atomar speichern; abweichender Inhalt unter gleicher ID ist ein Fehler. Die Lebensdauer des Duplikatwissens ist eine eigenständige Entscheidung. AWS beschreibt auch begrenzte Zeiträume; dauerhafte minimale Merker sind unsere Q3-Entscheidung, kein AWS-Standard. Keine AWS-SDK-Retries oder Cloudabhängigkeit übernehmen. |
+| [RFC 9110: HTTP Semantics, 9.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2) | Idempotenz entsteht nicht allein aus POST. Unser Deduplizierungs-/Antwortvertrag muss die Wirkung festlegen; daraus folgt keine Pflicht zu Wiederholungen. |
+| [OWASP: Denial of Service Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html) | Requestgröße und Ressourcenbedarf begrenzen, günstige Prüfungen zuerst und Funktionsfähigkeit bei Teilausfall erhalten. Begründet getrennte Detail-/Kernbudgets und fehlertolerantes Reporting; legt D, Bytecaps oder Speicherfristen nicht fest. |
+
+### 25.6 Zusammengeführte Prüfung: SSoT, Lücken, Logik und QoL
+
+| Bereich | Gegenprüfung und verbleibende Konsequenz |
+| --- | --- |
+| Ergebnis-SSoT | T1 verwendet den Wrapperowner, einschließlich Markerfehler/Neustart/SKIP. Kein aus Portalzeilen neu errechneter MECM-Code. Nicht bearbeitete Schritte und fehlende Berichte sind unterschiedliche Mengen. |
+| Protokoll-SSoT | PHP-Validator und gemeinsame PowerShell-Fixtures besitzen Sonderplatz, Caps, semantische Fingerprints, Null-/Zahlengrenzen und Antwortcodes. Reservierung ohne Begrenzung der Ereignis-Fingerprints wäre eine neue Speicherlücke; in T1 explizit geschlossen als Entwurf. |
+| Retention-Drift | Q1 bleibt 90 Tage für Diagnoseinhalte. Q3 ist eine ausdrücklich bestätigte Ausnahme nur für zwei technische Merkerfelder. Keine heimliche Verlängerung der sichtbaren Historie; ursprüngliche V1-Replayalternative auf Q3 verwiesen. |
+| Identität und Restore | Bekannte gelöschte Run-ID, unbekannter Altbericht, neue VM mit alter MAC und zurückgesetzte DB sind vier unterschiedliche Fälle. T2 löst den ersten; die zusätzlichen Generationsverträge bleiben vor P5 offen. Nicht hinter „GUID eindeutig“ verstecken. |
+| Lieferung-SSoT | Common/Logging aus bestehenden Quellen; vollständiger Sollsatz statt nur Wrapperhash. Generationswechsel, laufende Leser und MECM-Content müssen zusammen geprüft werden. Keine wartbaren Schattenkopien unter der Vorlage. |
+| Budgetlogik | Reserve für Beenden bisher nicht ausdrücklich berücksichtigt; T4 enthält einen konkreten Vorschlag innerhalb derselben 10 Sekunden. Quoten, Rückdruck und nicht behebbarer Helferausfall können completed trotzdem verhindern. |
+| Empfang versus Installation | Timeout heißt fehlende Bestätigung, nicht sicherer Nichtempfang. Software-Center-Ergebnis stammt aus der Nutzlast; das Portal kennt nur gespeicherte Meldungen. Reporting-Log liefert lokale Zusatzdiagnose, soweit seine Senke funktioniert. |
+| Bedienung/QoL | VM-Diagnose, Paketliste, Detail und Supportkopie verwenden dieselben Zähler, Vollständigkeit und Zeitpunkte. Kurze Beispiele: „Schrittfehler 300“, „Details begrenzt“, „Abschluss fehlt“. Keine aus fehlenden Daten erfundene Ursache, kein unaufgeforderter Neuinstallationsknopf. |
+| Scope | Nachgelagerte Aufgaben weiterhin außerhalb des Wrappers. Direkte Clientskripte behalten ihre eigenen Phasenverträge/Logs. Prozesskapselung betrifft allein den Reporter während des Wrappers; kein neuer autonomer Agent. |
+
+**Status und nächste Reihenfolge:** Q3 entschieden; T1–T4 nach Nutzerbestätigung in den Plan übernommen, nicht implementiert oder bewiesen. Zuerst T1/T2 in konkrete gemeinsame Request-/Response- und DB-Fixtures überführen, dabei Gerätegeneration/Restore-Annahme verbindlich klären. Danach T3/T4 gemeinsam prototypisieren, weil Prozesshost, Abhängigkeiten und Startkosten denselben Lieferpfad betreffen. Erst auf dieser Grundlage Produktumsetzung und Laufzeitabnahme beauftragen. Keine weitere Nutzerfrage für diese Ausarbeitung offen; technische Machbarkeits- und Standortnachweise werden nicht an den Nutzer als vermeintliche reine Geschmacksentscheidung zurückgegeben.
+
+Prüfevidenz Revision 7: kanonische doc-hygiene/doc-semantics beide pass, Exit 0, Artefakt `qa-artifacts/2026-09-13-package-wrapper-logging-plan/technical-design-gates.json`. Ausführung wegen des zuvor belegten MSYS-Startproblems außerhalb der Sandbox. Der zusätzlich vorgesehene Tee-Logpfad erzeugte keine Datei; Fortschritt und Abschluss wurden über die laufende Exec-Sitzung beobachtet, keine nicht vorhandene Logdatei als Evidenz gewertet. Quellenmanifest `technical-design-sources.json`: 22 Quellen, davon 20 mit dem Revision-6-Manifest vergleichbar und unverändert. Manuelle Gegenprüfung der vier Entwürfe und Querverweise siehe 25.6; P7/V1 auf Q3 und frühere Detail-/Budgetvorschläge auf T1/T4 verwiesen. Dieser Evidenzsatz und die Messplanformulierung wurden nach dem Gate redaktionell ergänzt; datierte Auditpläne sind vom Semantikgate ausgenommen. Abschließende Dateifingerprints in `technical-design-final.json`. In dieser Runde nur Plan und Prüfartefakte geändert; keine Produkt-, Browser-, Windows- oder MECM-Abnahme. Keine laufende Prüfsitzung und keine unbeantwortete Nutzerfrage.

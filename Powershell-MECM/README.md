@@ -4,11 +4,18 @@ Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
 laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
 MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
 
-Der normale Paketimport löscht keine Altversion. Eine Bereinigung braucht einen
-separat geprüften Plan mit eindeutigem numerischem Zielstand, stabilen IDs,
-VirtuSphere-Ownership, fehlenden Referenzen und vollständig bereitem Ersatz.
+`removeOldVersion: "true"` fordert die automatische Entfernung ersetzter
+Altversionen an. Der Autoimporter plant und revalidiert dafür eindeutigen
+numerischen Zielstand, stabile IDs, VirtuSphere-Ownership, fehlende Referenzen
+sowie bestätigten und an die exakte Content-ID gebundenen Ersatzauftrag mit
+sicherer Zielprojektion und Deployment. Danach entfernt er alte Deployments,
+Applications und Collections in dieser Reihenfolge. Vollständiger DP-Erfolg ist
+keine Voraussetzung.
 Freie oder doppelte Versionsstrings, parallele Quellversionen und Altobjekte
 ohne Marker bleiben erhalten. Ein Portal-Retirement ist kein MECM-Löschauftrag.
+Eine gesperrte, mehrdeutige oder nicht numerisch ordnungsfähige Quellauswahl
+klassifiziert nur strikt belegbar ältere Bestände; sie erzeugt weder eine
+Altklassifikation für höhere oder gleichwertige Bestände noch eine Löschung.
 
 JSON wird explizit als UTF-8-`byte[]` gesendet. Die beiden ausgelieferten
 Server-/Client-Helper geben das Array als ein einziges Funktionsobjekt zurück,
@@ -92,6 +99,15 @@ Der gleiche Mutex-, Staging-, Hash-, Aufgabenstopp-, Verifikations- und
 Rollbackpfad bleibt aktiv. Ein erfolgreiches Update endet mit Exit-Code 0; die
 Tageslogs liegen unter `%ProgramFiles%\VirtuSphere\Logs`.
 
+`Common`, Autoimporter und Installer tragen zusätzlich denselben
+MECM-Serververtrag. Das Upgrade vergleicht ihn im Staging und nochmals im
+aktivierten Livebestand. Meldet ein bereits laufender Autoimporter eine
+unbekannte Common-Funktion wie `Get-VsPackageRetainedNames`, wurde zuvor nur ein
+Teil des Pakets ersetzt. Nicht die einzelne Datei nachkopieren: immer den
+vollständigen neuen `Powershell-MECM`-Baum mit dem Befehl oben installieren. Ein
+unpassender Stand endet danach sofort mit einer eindeutigen Vertragsmeldung,
+statt erst nach einem langen Paketscan an der ersten neuen Funktion zu scheitern.
+
 **Ergebnis beider Installer.** Sie unterscheiden zwei Klassen von Meldung. Ein
 **Blocker** (`!!`) heißt, dass die Gesamtabnahme des Laufs fehlgeschlagen ist. Er
 besagt nicht pauschal, dass vorher keinerlei lokale oder MECM-seitige Änderung
@@ -171,6 +187,9 @@ Ein Alt-Skript, das nur `Send-VsHeartbeat` sendet, liefert keinen belegten
 Laufzustand oder Abschluss. `Send-VsHeartbeat`
 bleibt für Rückwärtskompatibilität erhalten, wird von den aktuellen Skripten aber
 nicht mehr genutzt.
+Ein späterer Legacy-Heartbeat verwirft die Zuordnung eines früheren Abschlusses:
+sein Empfang setzt weder Ergebnis, Zeitpunkt, Zähler noch Detail dieses
+Abschlusses fort.
 
 **Logs:** `%ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<komponente>.log`.
 Server und Clients verwenden denselben versionierten Sechs-Feld-Vertrag:
@@ -383,6 +402,14 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   Löschzustände und unbekannte Identitäten blockieren weiterhin. Nach einem
   abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die Baseline
   des nächsten Auftrags aufgenommen.
+- **Deployment trotz offener DPs:** Sobald MECM den Erst- oder Updateauftrag
+  bestätigt hat, werden Collection sowie Required- und Available-Deployments
+  idempotent nachgezogen. Dafür muss noch kein DP erfolgreich sein. Geräte
+  können das Paket verwenden, sobald der ihnen zugeordnete DP den Inhalt
+  anbietet. Der offene Verteilzustand bleibt trotzdem Warnung und verhindert
+  den Manifestabschluss. Eine fehlende DP-Gruppe, unbestätigte Aufrufe,
+  Identitäts-/Projektionsunsicherheit, Zielverlust und DP-Löschzustände bleiben
+  harte Sperren.
 - **Contentabschluss:** Der Auftrag bindet Application und Deployment Type
   an die konkrete Content-ID. Bei Updates muss eine neue Content-ID sichtbar
   werden; eine steigende Application-Packageversion wird nicht vorausgesetzt.
@@ -399,13 +426,21 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   Bestehendes `"0.1b"` bleibt importierbar, aber nicht numerisch bereinigbar.
 - Je Paket (`Name-Version`):
   - **Alt-Versionen** (bei `removeOldVersion: "true"`): werden mit dem exakten
-    Muster `^Name-<Version>$` erkannt, aber vom normalen Importlauf nicht
-    gelöscht. Name und Ordner beweisen weder Eigentum noch Ersatzbereitschaft.
-    Nur erhaltene Altobjekte außerhalb der weiterhin gelieferten Quellen
-    melden `package_cleanup_failed`; parallele Quellen und höhere Versionen
-    sind keine Löschkandidaten. Numerisch gleiche Quellen wie `1` und `1.0`
-    blockieren eine eindeutige Zielauswahl. Der Plan bleibt bei fehlendem
-    Eigentum, Referenzen oder unvollständiger Ersatzverteilung gesperrt.
+    Muster `^Name-<Version>$` erkannt und nach einem unmittelbar revalidierten
+    Plan automatisch entfernt. Zuerst verschwinden ihre Deployments, danach
+    Applications und Collections. Name und Ordner allein beweisen weder Eigentum
+    noch Ersatzbereitschaft. Parallele Quellversionen und höhere Versionen sind
+    keine Löschkandidaten; numerisch gleiche Quellen wie `1` und `1.0` blockieren
+    eine eindeutige Zielauswahl. Fehlendes Eigentum, Referenzen, ein unbestätigter
+    oder noch ungebundener Ersatzauftrag sowie unsichere Zielprojektion melden
+    `package_cleanup_failed` und sperren die Entfernung.
+    Ein bestätigter und gebundener Ersatzauftrag mit geprüftem Deployment genügt
+    dagegen auch bei null erfolgreichen DPs; 100 Prozent Verteilerfolg sind
+    nicht erforderlich.
+    Kann die optionale Collection-/Application-Inventur nicht vollständig
+    gelesen werden, bleibt ihre Cleanup-Aussage unbekannt. Daraus folgt keine
+    Bereinigungsentscheidung; Content und unabhängige Pakete laufen bei eigener
+    tragfähiger Identitäts- und Providerevidenz weiter.
   - **Application anlegen** (falls neu) mit Script-Deployment-Type:
     Install-Kommando
     `powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "install.ps1"`
@@ -592,6 +627,28 @@ die App einmal in der Konsole.
 > mit Sicherung und nimmt ihn bei einem späteren Installationsfehler in denselben
 > Rollback auf. Ein unvollständig bestätigter Rollback lässt die Aufgaben
 > deaktiviert. Reale Datei-, ACL- und Datenträgerfehler bleiben Lababnahme.
+
+### Paketdiagnose: aktueller Stand und geplante Erweiterung
+
+Die Paketvorlage schreibt bereits die Ausgabe ausgeführter Teilskripte in
+einzelne Dateien unter `%ProgramData%\VirtuSphere\Logs` (Systeminstallation)
+beziehungsweise `%LOCALAPPDATA%\VirtuSphere\Logs` (Benutzerinstallation).
+Eigene Protokolle der Teilskripte bleiben deren Verantwortung. Für den
+MECM-Installationsaufruf und die Erkennung helfen zusätzlich `AppEnforce.log`
+und `AppDiscovery.log`. Ein erfolgreicher Wrapper-Aufruf bestätigt keine
+späteren Arbeiten einer geplanten Aufgabe.
+
+**Noch nicht implementiert:** Geplant sind getrennte Wrapper- und
+Reporting-Logs je Durchlauf sowie Start-, Schritt- und Abschlussmeldungen
+vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
+Empfangszeit und kopierbare Client-Logpfade anzeigen. Das Portal ruft dabei
+keine Dateien vom Client ab. Eine fehlende Rückmeldung beweist weder einen
+Installationsfehler noch einen Verbindungsfehler.
+
+Die beschlossene Auslegungsgröße, lokale und serverseitige Aufbewahrung,
+Randfälle und Abnahmekriterien stehen im
+[Paketdiagnoseplan, Abschnitt 18](../docs/audits/2026-09-13-package-wrapper-logging-plan.md#18-beschlossene-planungsgröße-und-dokumentationsabgleich).
+Diese Planung ist keine bereits gemessene Leistungs- oder Lieferzusage.
 
 ## Client-Skripte (`clients/`)
 

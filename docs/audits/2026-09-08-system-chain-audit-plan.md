@@ -1,8 +1,18 @@
 # Auditplan: VirtuSphere, PowerShell und die vollständige Integrationskette
 
-Erstellt: 08.09.2026. Auftrag: Fehler, Logikprobleme, fehlende Verträge, Drift, fehlende oder umgangene SSoT sowie konkrete QoL-Verbesserungen aufdecken. Zusätzlich den gesamten Stack auf Performance, Robustheit und geeignetes Self-Healing prüfen sowie Dokumentation und Portalhilfe fachlich mit dem tatsächlichen Verhalten abgleichen.
+Erstellt: 08.09.2026; fortgeschrieben: 12.09.2026. Auftrag der ersten Runde: Fehler, Logikprobleme, fehlende Verträge, Drift, fehlende oder umgangene SSoT sowie konkrete QoL-Verbesserungen aufdecken. Zusätzlich den gesamten Stack auf Performance, Robustheit und geeignetes Self-Healing prüfen sowie Dokumentation und Portalhilfe fachlich mit dem tatsächlichen Verhalten abgleichen.
 
-Dieser Plan ist für die Fortsetzung in einer neuen Session bestimmt. Er beschreibt die Auditmethode und Arbeitspakete. Fortschritt, Befunde, Entscheidungen und Nachweise werden ausschließlich im [Befundregister](2026-09-08-system-chain-audit-register.md) fortgeschrieben. Die Erstellung des Plans ist noch keine Produktprüfung.
+Dieser Plan ist für die gezielte Fortsetzung in einer neuen Session bestimmt. Er beschreibt die Auditmethode und Arbeitspakete. Fortschritt, Befunde, Entscheidungen und Nachweise der ursprünglichen Auditpakete werden ausschließlich im [Befundregister](2026-09-08-system-chain-audit-register.md) fortgeschrieben. Die Erstellung des Plans ist noch keine Produktprüfung.
+
+**Fortsetzungsstand:** AP00 bis AP13 sind am dokumentierten Auditstand bereits durchgeführt. U01 bis U17 sind implementiert; ihre und die übrigen offenen Laufzeit-, Gesamt-QA-, Standort- und Releaseabnahmen stehen im Befundregister sowie im [konsolidierten Session-Backlog](2026-09-12-consolidated-session-backlog.md). Dieser Plan verlangt deshalb keinen vollständigen Neuanfang. Eine spätere Session prüft nur den von Änderungen oder einer offenen Abnahme betroffenen Pfad erneut und hält die historische Evidenz von der aktuellen Handlungsanweisung getrennt.
+
+Der zusätzliche Fachreview des neueren Commits `dfdb4ca` steht als
+[Gesamtplan:M03](2026-09-12-consolidated-session-backlog.md#m03-fachreview-des-letzten-lokal-bekannten-commits)
+im Gesamtplan. Vier bestätigte Befunde betreffen AP04/AP07/AP11;
+drei offene Nachweisfragen präzisieren AP04/AP10/AP12 und M02/L01.
+Diese Reviewkarte besitzt die neuen IDs; die spätere Ergebnisfortschreibung
+referenziert sie ohne doppelte Befundpflege. Eine pauschale Wiederholung
+aller Auditpakete folgt daraus nicht.
 
 ## 1. Ziel, Umfang und Arbeitsweise
 
@@ -18,7 +28,7 @@ Rückmeldungen -> PHP-API -> DB -> Status, Logs und Handlungen im Portal
 
 Die Pfeile sind eine Prüfkarte, keine Behauptung direkter SQL-Zugriffe durch PowerShell. Tatsächliche Kommunikations- und Schreibwege werden in AP02 nachgewiesen. Serveraufgaben, Clientphasen, Installer, Paketvorlage und ausgelieferte gemeinsame Module gehören ausdrücklich zum Umfang.
 
-Die erste Runde liefert belegte Befunde und ausführbare Umsetzungspakete. Sie umfasst Quellprüfung, vorhandene Prüfungen, isolierte Reproduktionen und bei Bedarf gezielte neue Test-Fixtures. Produktkorrekturen werden daraus als nachgelagerte Pakete beschrieben; ein zusätzlicher Umsetzungsauftrag kann sie anschließend freigeben. Das Audit selbst wird ohne wiederholte Bestätigungsfragen innerhalb dieses Umfangs abgearbeitet.
+Die erste Runde lieferte belegte Befunde und ausführbare Umsetzungspakete. Sie umfasste Quellprüfung, vorhandene Prüfungen, isolierte Reproduktionen und gezielte Test-Fixtures. Die daraus entstandenen Produktkorrekturen U01 bis U17 sind implementiert; ein nachfolgender Auftrag entscheidet jeweils über die noch fehlenden Abnahmen. Frühere Audit- oder Umsetzungsfreigaben werden durch diesen Plan weder erneut erteilt noch erweitert.
 
 Erwartetes fachliches Verhalten zuerst aus Anforderungen und zuständigen Verträgen ableiten, danach mit Implementierung und Tests vergleichen. Stimmen Code und Test miteinander überein, beweist das allein noch keine korrekte Fachentscheidung. Unklare Anforderungen als konkrete Entscheidungsfrage erfassen.
 
@@ -60,7 +70,24 @@ Fehlende Tools, fehlende Labore und nicht ausgeführte Tests werden als Nachweis
 
 ## 4. Arbeitspakete
 
-Die Reihenfolge ist AP00 bis AP13. Nach AP02 können unabhängige Quellprüfungen vorgezogen werden, falls eine Laufzeitumgebung fehlt. AP09 erfasst die Performance-Baseline vor jeder späteren Optimierung. Dokumentationsbehauptungen aus AP11 werden bereits bei der jeweiligen Fachprüfung gesammelt. Abhängige Schlussfolgerungen bleiben offen. Ein Paket endet jeweils mit aktualisiertem Register, Evidenz und einem konkreten nächsten Schritt.
+Die Reihenfolge AP00 bis AP13 beschreibt die bereits abgeschlossene Gesamtprüfung. Für eine erneute gezielte Prüfung bestimmt der konkrete Änderungsumfang oder die offene Abnahme das Paket. AP09 erfasst eine Performance-Baseline nur bei einer messrelevanten Änderung; Dokumentationsbehauptungen aus AP11 werden bei der jeweiligen Fachprüfung gesammelt. Abhängige Schlussfolgerungen bleiben offen. Ein Folgepaket endet mit aktualisiertem Register, Evidenz und einem konkreten nächsten Schritt.
+
+| Paket | Lead bei erneuter gezielter Prüfung | Unabhängige Gegenprüfung | Eingang | Ausgabe |
+|---|---|---|---|---|
+| AP00 | Sol Medium | Terra Low prüft Inventar/Referenzen | aktueller Gitstand, Register, aktive Änderungen | abgegrenzter Prüfstand und Wiederholungsgrund |
+| AP01 | Sol Medium, exklusiver QA-Owner | Terra Low ordnet vorhandene Logs ein | Diff, Runner, frühere End-JSONs | tatsächliche Gateaussage oder klarer Infrastrukturfehler |
+| AP02 | Sol High | Astra High nur bei strittigem Vertrags- oder Kausalpfad | betroffene Writer/Reader und bestehende Matrix | aktualisierte SSoT-/Flussentscheidung |
+| AP03 | Sol High | Astra High bei ungelöster Create-/Cancel-/Retry-Kausalität | betroffener Job-, Worker- und Ansiblepfad | begrenzter Nebenläufigkeitsnachweis oder Laborlücke |
+| AP04 | Sol High | Astra High bei MECM-Vertragskonflikt | Serveraufgabe, API-Vertrag, sichere Evidenz | Fehlerpfad-/Provenienznachweis oder Standortfall |
+| AP05 | Sol High | Astra High bei ACK-, Reboot-, Netz- oder Storagekausalität | Client-/Installerpfad und Paketvertrag | konkrete SYSTEM-/Laborabnahme oder Lücke |
+| AP06 | Sol High | Astra High bei Lock-, Revision- oder Callbackkonflikt | Endpunkt, DB-Delta, einschlägige Tests | atomarer Vertragsnachweis oder Befund |
+| AP07 | Sol Medium | Astra High bei strittiger Evidenz- oder Recoveryaussage | Status-/Logowner und historische Evidenz | lesbare aktuelle Zustands- und Handlungsaussage |
+| AP08 | Sol Medium | Terra Low für Links, Eingaben, Filter und redaktionelle Checks | Operatorfall und betroffene Portalansicht | reproduzierbarer QoL-/Bediennachweis |
+| AP09 | Sol Medium, exklusiver QA-Owner; Sol High für Messdesign | Astra High nur für ungeklärte mehrschichtige Messkausalität | identisches Profil, Rohmessungen, Vergleichsstand | belastbare Messreihe oder begrenzte Messlücke |
+| AP10 | Sol High | Astra High bei begrenzter Selbstheilungsentscheidung | konkreter Fehlerpfad, Owner, Abbruchgrenze | sichere Wiederanlaufentscheidung oder manueller Fall |
+| AP11 | Sol Medium | Terra Low für Behauptungen, Links und DE/EN; Astra High nur bei Vertragswiderspruch | sichtbarer Text, Owner, tatsächlicher Codepfad | Behauptungsmatrix mit Korrekturquelle |
+| AP12 | Sol Medium, exklusiver QA-Owner bei Stackarbeit | Astra High bei Datenverlust-, Migrations- oder Vertrauensfrage | gezielter Betriebs-/Laborfall und Runbook | Laborprotokoll oder offen benannte Standortabnahme |
+| AP13 | Sol Medium | Astra High begrenzt vor QA/Publikation auf schwierige Fach-/Vertrags-/Kausalitätsgegenprüfung | betroffene Befunde, Gegenbeispiele, Rohbelege | konsolidierte Abnahmeentscheidung ohne Doppelprüfung |
 
 ### AP00: Prüfstand, Vorbefunde und Umgebung
 
@@ -153,6 +180,29 @@ Abnahme: Anzeige und nächste Handlung sind für repräsentative Fehler- und Rec
 3. Leere, typische und große synthetische Bestände prüfen: Listenbegrenzung, vollständige Zähler, stabile Sortierung, Queryzahl und Antwortgröße. Vorhandene Lastprofile und Grenzen konsumieren.
 4. DE/EN, Tastatur, Fokus, Feldfehler und umgebrochene Layouts prüfen; visuelle Nachweise ausschließlich über den vorgeschriebenen Visualpfad.
 5. Jeder QoL-Vorschlag benennt Benutzeraufgabe, konkrete Reibung, vorgeschlagene Änderung, Nutzen, Aufwand/Risiko und messbare Abnahme. Reine Geschmacksänderungen niedriger priorisieren.
+6. **QL01:** Bei einem Fehler bleiben Auswahl, Eingaben und Filter sichtbar beziehungsweise wiederherstellbar, damit der Operator den konkreten Fall korrigieren kann. **QL02:** Sammelaktionen erhalten eine Ergebnisübersicht pro explizit ausgewähltem Element, einschließlich Erfolg, Blockierung und nächster Handlung. **QL04:** Ein Versionskonflikt zeigt die konkrete fachliche Alt-/Neu-Änderung, jedoch keine Secrets oder fremden geschützten Werte. Alle drei Fälle bewahren RBAC, CSRF, `edit_version`, Scope und Formularvertrag.
+
+[Gesamtplan:UX01 „Bereitstellung vorbereiten: Blocker verständlich bündeln“](2026-09-12-consolidated-session-backlog.md#ux01-bereitstellung-vorbereiten-blocker-verständlich-bündeln) gehört zu AP08 und AP11: Der Nutzer bemängelt zu viele Meldungen und eine unklare Priorität; ein eigener Auftrag zur Vereinfachung fehlte bislang im Plan und ist nun ergänzt. Unabhängige Sperrursachen bleiben sichtbar, Details kompakt und die Entscheidung beim vorhandenen SSoT.
+
+[Gesamtplan:UX02 „Statuskarten ohne Textüberlauf“](2026-09-12-consolidated-session-backlog.md#ux02-statuskarten-ohne-textüberlauf)
+ergänzt den im Screenshot belegten Inhaltsoverflow und die fehlende
+Inhalts-/Visualabnahme der Systemstatusübersicht. Unter AP08 werden tatsächliche
+Textgrenzen, Zoom und sechs/sieben Karten geprüft; AP11 führt geänderte
+Positions-/Bedienhinweise nach. Weitere ähnliche Komponenten sind gezielte
+Prüfkandidaten, keine pauschal bestätigten Fehler.
+
+Die zusätzlich angenommenen [Gesamtplan:UX03 bis UX06](2026-09-12-consolidated-session-backlog.md#gemeinsame-bedienbausteine-für-ux03-bis-ux06)
+ergänzen AP08 um Kontext/Rückkehr auch nach Erfolg, Schutz ungespeicherter
+Änderungen vor dem Absenden, wirksame Werte samt Herkunft und beleggebundene
+Aktionsfolgen. Gemeinsame Form-/Navigations-/Wert-/Ergebnisbausteine konsumieren
+die bestehenden Fachowner. Zwei Tabs, verlorener Kontext, Rücknahme einer
+Änderung, Elternänderung, Vorschau versus Speichern und unklarer Commit sind
+verbindliche Gegenfälle aus dem QA-Plan. Browsergrenzen des Verlassensschutzes
+und No-JS-Verhalten getrennt ausweisen. Sol High prüft die Fachabbildung,
+Sol Medium führt die QA aus; Terra bearbeitet abgegrenzte Muster-/Dokuaufträge.
+Die Nutzenreihenfolge lautet UX01/UX02, UX03/UX04, UX05/UX06; F07 und F11
+folgen später und bleiben vollständig beauftragt. Abhängigkeiten und
+Fehlerkorrekturen bleiben maßgeblich.
 
 Abnahme: priorisierte QoL-Liste mit reproduzierbarem Bedienproblem; technische Details erscheinen im Portal nur, wenn sie eine Benutzerentscheidung unterstützen.
 
@@ -189,6 +239,8 @@ Abnahme: belegte Bewertung bestehender Erholungspfade, sichere konkrete Self-Hea
 5. Die Gegenrichtung prüfen: Fehlt für vorhandene Funktionen, Fehlerpfade, Grenzen oder notwendige manuelle Schritte eine Erklärung? Kann ein neuer Operator mit der Anleitung zum beschriebenen Ergebnis gelangen? Unbelegte Support-/Kompatibilitätsversprechen und nicht nachgewiesene Laborannahmen benennen.
 6. Bei Widerspruch nicht automatisch die Doku an den Code anpassen: Sollvertrag und Nutzeranforderung bestimmen, ob Produktcode, Text oder die Entscheidung geändert werden muss. Historische Befunde nicht nachträglich in einen erfundenen früheren Erfolg umschreiben.
 7. Automatisch prüfbare Beziehungen an bestehende Link-, Registry-, Sprach-, Bounds- und Semantikguards anschließen. Rein sprachliche oder fachliche Aussagen benötigen passende Verhaltensnachweise; ein Stringtest allein beweist ihre Wahrheit nicht.
+8. **QL03:** Jede als alt markierte Information nennt lesbar Zeit und Herkunft der letzten Evidenz. **QL05:** Ein unbekanntes Ergebnis führt zu einem lesenden Prüfweg mit klarer Evidenzquelle und nächster Handlung; dieser Weg darf keinen zweiten Write oder eine verdeckte Wiederholung auslösen. Beide Aussagen werden gegen den zuständigen Status-/Logowner und den tatsächlichen Berechtigungspfad belegt.
+9. **Gesamtplan:UX03–UX06:** Diagnose und Hilfe folgen dem gemeinsamen Inhaltsmuster aus UX06: Was ist passiert? Was bedeutet das für meinen Auftrag? Was kann ich jetzt tun? Vertiefende Hilfe-/Protokolllinks führen zum richtigen Objekt und Abschnitt. Bestehende Erklärungen erweitern; keine neue große Diagnoseoberfläche. Rückkehr, ungespeicherte Änderungen samt Browsergrenzen, wirksame Werte/Herkunft und lokale versus externe Wirkung an vollständigen Bedienwegen nach D01 prüfen. Gleiche Meldungen nicht durch zusätzliche Kästen oder neue Statuslisten vervielfältigen.
 
 Abnahme: Behauptungsmatrix mit richtig, falsch, unvollständig oder nicht nachgewiesen; konkrete Korrekturquelle und Abnahme pro Abweichung. Stichproben sind als Stichproben mit Restumfang bezeichnet und gelten nicht als Vollprüfung sämtlicher Texte.
 
@@ -211,36 +263,13 @@ Abnahme: Betriebs-/Distributionsbefunde und ein ausführbares Laborprotokoll. Of
 
 Abnahme: Jeder Auditbereich hat belegten Prüfstatus oder eine konkret begründete Lücke. Ein abgeschlossenes Audit kann offene Produktfehler enthalten; deren Behebung und eine Releasefreigabe sind eigene Aussagen.
 
-## 5. Modellempfehlung für die Auditpakete
+## 5. Modell- und Ausführungsvertrag
 
-Stand der Onlineprüfung: 08.09.2026. Sol bezeichnet hier `gpt-5.6-sol`, Astra `gpt-6-astra`. Die Zuordnung ist eine aus Aufgabenkomplexität und Fehlerfolgen abgeleitete Empfehlung, kein gemessener Modellvergleich für VirtuSphere. Sie ändert weder Modellkonfigurationen noch fachliche Abnahmekriterien.
+Die verbindliche aktuelle Zuordnung steht im [konsolidierten Session-Backlog, Abschnitt „Modell- und Ausführungsvertrag“](2026-09-12-consolidated-session-backlog.md#modell--und-ausführungsvertrag). Sie wird hier nicht erneut als globale Empfehlung definiert. Die Tabelle in Abschnitt 4 konkretisiert diese Politik allein für eine möglicherweise nötige gezielte AP-Fortsetzung.
 
-OpenAI beschreibt Sol als leistungsfähiges Modell für komplexe professionelle Arbeit und Astra als sein leistungsfähigstes Modell für besonders anspruchsvolle vollständige Abläufe. Beide unterstützen die hier empfohlenen Reasoning-Stufen. Quellen: [Sol-Modellbeschreibung](https://developers.openai.com/api/docs/models/gpt-5.6-sol), [Astra-Modellbeschreibung](https://developers.openai.com/api/docs/models/gpt-6-astra).
+Terra Low bearbeitet Inventar-, Log-, Link- und redaktionelle Prüfungen. Sol Medium führt als Hauptagent Orchestrierung und QA mit exklusivem Stack, eigener Logbeobachtung sowie Git-, Commit- und Pushprüfungen nur bei bereits bestehender Autorisierung. Sol High übernimmt komplexe Umsetzung, Fehleranalyse und Messdesign. Astra High ist ausschließlich eine begrenzte schwierige Fach-, Vertrags- oder Kausalitätsgegenprüfung vor QA oder Publikation; es führt keine Gitoperationen, Commit-/Pushprüfungen, QA-Läufe oder Logwarten aus. XHigh ist nur für einen begründeten ungelösten Analysefall zulässig; Max und Ultra sind kein Standard.
 
-Die [Modellauswahl für Codex/ChatGPT Work](https://learn.chatgpt.com/docs/models) empfiehlt Astra für zusammenhängende Abläufe mit anhaltendem Reasoning und Urteilsvermögen; Sol eignet sich ebenfalls für komplexe offene Aufgaben. Die [Astra-Modellführung](https://developers.openai.com/api/docs/guides/latest-model) beschreibt bessere Kohärenz über lange Aufgaben und teils geringeren Tokenbedarf. Daraus folgt keine feste Ersparnis je Auditpaket. Die verwendeten Quellen sind Herstellerdokumentation, kein unabhängiger VirtuSphere-Benchmark.
-
-| Paket | Federführung | Reasoning zum Start | Verteilung und Grund |
-|---|---|---|---|
-| AP00 | Sol | Medium | Gitstand, Vorbefunde und Umgebung strukturiert erfassen. |
-| AP01 | Sol | Medium | Bestehende Gates ausführen und echte Ergebnisse sichern; unklare fachliche Testlücken gezielt an Astra zur Gegenprüfung geben. |
-| AP02 | Astra | High | Fachregeln, Schreibwege, fehlende Owner und widersprüchliche SSoT über alle Schichten zusammenführen. Sol kann das Dateiinventar vorbereiten. |
-| AP03 | Astra | Extra High | Create, Cancel, Retry und externe Wirkung unter konkurrierenden Ausführungen sind der anspruchsvollste Zustandsautomatenbereich. Sol kann definierte Reproduktionen ausführen. |
-| AP04 | Astra | High | MECM-Provenienz, MembershipJournal, API-Konflikte und externe Teilerfolge gemeinsam beurteilen. Pester-/Analyzerläufe sind geeignete Sol-Arbeit. |
-| AP05 | Sol | High | Client-/Installerinventar, Packaging, Registry, Logging und vorhandene Tests abarbeiten. Astra High prüft anschließend die kritischen ACK-, Reboot-, Netzwerk- und Datenträgerübergänge anhand Code und Evidenz. |
-| AP06 | Astra | Extra High | Atomare Schreibmengen, Lockreihenfolgen, Revisionen, Identität und verspätete Callbacks verbinden. |
-| AP07 | Astra | High | Aussagekraft von Evidenz, Status und Recovery gegen den fachlichen Zustand prüfen. Sol kann Text-/Linkinventare vorbereiten. |
-| AP08 | Sol | High | Reproduzierbare Bedienabläufe, Eingabeerhalt, Berechtigungsdarstellung, Layout und QoL prüfen. Fachliche Zustandswidersprüche mit AP07 verbinden. |
-| AP09 | Sol | High | Messprofile, Baseline, Query-/Ressourcenbefunde und Nachmessungen führen. Astra High bewertet mehrschichtige Ursachen und Vorschläge, die Caching, Parallelität oder Konsistenz verändern. |
-| AP10 | Astra | Extra High | Self-Healing nur mit belastbarer Evidenz, begrenzten Aktionen, Idempotenz und Konvergenz beurteilen. Sol führt zuvor definierte Fehlerstimulation aus. |
-| AP11 | Sol | High | Behauptungen erfassen, Befehle/Links prüfen, DE/EN und dokumentierte Werte abgleichen. Astra High beurteilt Widersprüche zwischen Sollvertrag, Implementierung und behaupteter Recovery-/Statuswirkung. |
-| AP12 | Sol | High | Bestehende Betriebs-, Restore-, Distributions- und Releaseprüfungen ausführen. Astra High prüft neue Datenverlust-, Migrations-, Wiederanlauf- oder Vertrauensprobleme. |
-| AP13 | Astra | High | Befunde gegenprüfen, Lücken zwischen Paketen suchen und tragfähige Umsetzungspakete priorisieren. Extra High bei ungelösten schichtenübergreifenden Widersprüchen. |
-
-Für übersichtliche Ausführung ohne häufige Wechsel: AP00/AP01 mit Sol beginnen; AP02 bis AP07 als zusammenhängenden Astra-Analyseblock bearbeiten, wobei AP05 auch durch Astra erledigt werden kann. Danach Sol für AP08/AP09 und die Bestandsarbeit von AP11/AP12 verwenden; Astra übernimmt AP10 und die zusammengefasste Gegenprüfung in AP13. Abhängigkeiten aus Abschnitt 4 bleiben maßgeblich. Klar definierte Mess- und Testläufe benötigen keinen Modellwechsel allein wegen langer Laufzeit.
-
-Bei einer Übergabe erhält das nächste Modell den Prüfstand, relevante Owner/Codepfade, konkrete Vorbedingungen, rohe sichere Testevidenz, offene Gegenbeispiele und die noch ungeklärte Frage. Astra soll auch negative Ergebnisse und ausgewählte als sauber bewertete kritische Pfade prüfen; die reine Bestätigung einer Sol-Zusammenfassung reicht nicht. Ein zweites Modell ersetzt keinen Laufzeitnachweis.
-
-Die empfohlenen Reasoning-Stufen sind Startwerte. Die [offizielle Auswahlhilfe](https://learn.chatgpt.com/docs/models) empfiehlt die niedrigste Stufe, die die nötige Qualität erreicht; höhere Stufen benötigen mehr Zeit und Tokens. Max oder Ultra sind hier kein Standard. Nach den ersten Paketen anhand bestätigter Befunde, Fehlalarmen, übersehenen Gegenbeispielen, Nacharbeit und beobachtetem Verbrauch nachjustieren. Im Register pro Paket tatsächlich eingesetztes Modell/Reasoning und Gegenprüfung vermerken. Die Tabelle ist eine Planungshilfe und wechselt selbst kein Modell. Der Startauftrag in Abschnitt 7 fordert die interne Delegation ausdrücklich an; daraus entsteht kein Auftrag zur Anlage eigenständiger neuer Benutzertasks.
+Bei einer Übergabe erhält der nächste Bearbeiter Prüfstand, relevante Owner/Codepfade, konkrete Vorbedingungen, sichere Rohbelege, offene Gegenbeispiele und die ungeklärte Frage. Der Modellwechsel ersetzt keinen Laufzeitnachweis. Die tatsächlich eingesetzten Modelle und Reasoning-Stufen werden im Register nur dann festgehalten, wenn die Folgearbeit stattfindet.
 
 ## 6. Fortsetzung nach Unterbrechung
 
@@ -250,47 +279,37 @@ Die nächste Session liest zuerst Plan und Register, prüft anschließend den ak
 
 ## 7. Startauftrag für eine neue Session
 
-Die neue Session im Projekt `C:\projekte\VirtuSphere-v2-WebApp` mit **GPT-6 Astra / High** starten und den folgenden Text als Auftrag verwenden. Die Modellauswahl des Hauptagenten erfolgt vor dem Start im Client; der Text allein wechselt dessen Modell nicht.
-
-Parallele Subagenten und unterschiedliche Modell-/Reasoning-Einstellungen sind laut [offizieller Subagenten-Dokumentation](https://learn.chatgpt.com/docs/agent-configuration/subagents) unterstützt. In der vorbereitenden Session standen insgesamt vier Agentenplätze einschließlich Hauptagent zur Verfügung. Die neue Session muss ihre tatsächlich verfügbaren Werkzeuge, Modelle und Grenzen beachten. Mehrere Agenten benötigen zusätzliche Tokens; der Nutzen entsteht durch unabhängige Arbeit und klare Grenzen.
+Die neue Session im Projekt `C:\projekte\VirtuSphere-v2-WebApp` mit **GPT-5.6 Sol / Medium** starten und den folgenden Text als Auftrag verwenden. Die Modellauswahl des Hauptagenten erfolgt vor dem Start im Client; der Text allein wechselt dessen Modell nicht. Es wird keine neue Benutzertask angelegt.
 
 ```text
-Übernimm als Hauptagent die Orchestrierung des vollständigen VirtuSphere-Audits.
+Übernimm als Sol-Medium-Hauptagent die Orchestrierung einer gezielten
+Fortsetzung des VirtuSphere-Audits.
 
 Projekt: C:\projekte\VirtuSphere-v2-WebApp
 Plan: C:\projekte\VirtuSphere-v2-WebApp\docs\audits\2026-09-08-system-chain-audit-plan.md
 Register: C:\projekte\VirtuSphere-v2-WebApp\docs\audits\2026-09-08-system-chain-audit-register.md
 
-Lies zuerst Plan, Register und die aktuellen Repositoryregeln. Beginne bei
-AP00 oder beim dokumentierten nächsten offenen Schritt und arbeite bis AP13.
-Der Auftrag umfasst die gesamte Portal-/DB-/Worker-/Ansible-/ESXi-Kette,
-MECM-Server-PowerShell, Clientskripte, Installer und Machine APIs sowie
-Performance, Robustheit, geeignetes Self-Healing, QoL und die fachliche
-Wahrheit von Dokumentation und DE/EN-Portalhilfe.
+Lies zuerst Plan, Register, den konsolidierten Session-Backlog und die
+aktuellen Repositoryregeln. AP00 bis AP13 sind abgeschlossen, U01 bis U17
+implementiert. Beginne beim konkret dokumentierten offenen Abnahmefall oder
+bei einem durch einen neuen Diff betroffenen Pfad; starte keine vollständige
+Auditkampagne erneut. Halte historische Nachweise von aktuellen
+Handlungsanweisungen getrennt.
 
 DELEGATION UND MODELLE
-Ich beauftrage dich ausdrücklich, passende unabhängige Teilaufgaben an
-Subagenten zu delegieren und parallel auszuführen. Verwende interne
-Subagenten dieser Aufgabe, keine eigenständigen neuen Benutzertasks.
-Nutze bis zu drei Subagenten gleichzeitig neben dir, begrenzt durch das
-tatsächlich verfügbare Sitzungslimit. Halte Agenten nicht künstlich
-beschäftigt; verwende sie für konkrete, abgegrenzte Arbeit und nutze sie
-für passende Folgeaufgaben erneut. Unterdelegation koordinierst nur du.
-
-Verwende gpt-5.6-sol und gpt-6-astra mit den Reasoning-Einstellungen aus
-Abschnitt 5 des Plans. Gib Modell und Effort beim Start ausdrücklich an,
-soweit unterstützt. Prüfe Rollenprofile vor Nutzung auf abweichende
-Modelle, veraltete Anweisungen und unpassende QA-Ziele. Behaupte keinen
-Modellwechsel ohne tatsächliche Toolunterstützung. Fehlt ein gewünschtes
-Modell, benenne die Abweichung und setze geeignete Arbeit mit verfügbaren
-Mitteln fort; kritische fehlende Gegenprüfungen bleiben offen.
+Delegiere ausschließlich unabhängige, konkrete Teilaufgaben mit klarer
+Frage, Owner, Eingabe und Ausgabe. Verwende nur interne Subagenten dieser
+Aufgabe und lege keine neue Benutzertask an. Jede Delegation folgt dem
+Modell- und Ausführungsvertrag im konsolidierten Session-Backlog. Astra High
+kommt nur für eine begrenzte schwierige Fach-, Vertrags- oder
+Kausalitätsgegenprüfung vor QA oder Publikation in Betracht und führt weder
+Gitoperationen noch Commit-/Pushprüfungen, QA-Läufe oder Logwarten aus.
 
 ABHÄNGIGKEITEN UND VERANTWORTUNG
-Sichere zuerst Prüfstand und Isolation aus AP00. Danach dürfen vorhandene
-Prüfungen aus AP01 und unabhängige Quellanalysen parallel laufen.
-Verwende die gemeinsame Fluss-/SSoT-Karte aus AP02 für weitere Pakete.
-Beachte die Abhängigkeiten des Plans; unabhängige Teilprüfungen dürfen
-vorziehen, abhängige Schlussfolgerungen erst nach Vorliegen der Evidenz.
+Sichere für den konkreten Fall Prüfstand und Isolation nach AP00. Verwende
+die vorhandene Fluss-/SSoT-Karte aus AP02. Alle Abläufe, auch delegierte,
+halten dieselben Repository-, Evidenz-, Isolations- und Fortschrittsregeln
+ein; abhängige Schlussfolgerungen warten auf ihre Evidenz.
 
 Jeder Subagent erhält eine konkrete Frage, seinen Umfang, relevante
 Verträge und Quellen, den Prüfstand, klare Datei-/Artefaktzuständigkeit,
@@ -305,8 +324,8 @@ und Artefakten eindeutige Pfade und genau einen schreibenden Owner zu.
 Bewahre vorhandene Änderungen einschließlich ungetrackter Quelldateien.
 
 QA UND PARALLELITÄT
-Vergib die Nutzung des gemeinsamen virtusphere-qa-Stacks exklusiv an
-jeweils einen Agenten. Keine überlappenden Stackstarts, Migrationen,
+Es gibt genau einen exklusiven QA-Owner für den gemeinsamen
+virtusphere-qa-Stack. Keine überlappenden Stackstarts, Migrationen,
 Fixtures, Worker-Stopps, Browserprüfungen oder Restoreläufe. Performance-
 Messungen laufen ohne konkurrierende Tests; reduziere nötigenfalls auch
 andere Last auf dem Messhost. Quellanalysen dürfen parallel weiterlaufen.
@@ -318,8 +337,8 @@ Fordere je Ergebnis: Prüfstand, Datei/Funktion/Zeile, Sollvertrag,
 Auslöser, tatsächliches Verhalten, Reproduktion oder Kontrollfluss,
 Evidenzklasse, Auswirkung, Priorität und fehlende Abnahmen. Unterscheide
 Fehler, Hypothesen, QoL, Entscheidungen und Infrastrukturprobleme.
-Prüfe kritische Sol-Ergebnisse sowie ausgewählte als sauber bewertete
-Pfade mit Astra anhand Originalcode und sicherer Testevidenz nach.
+Hole Astra High nur für die begrenzte Gegenfrage ein, wenn ein schwieriger
+Fach-, Vertrags- oder Kausalitätsfall vor QA oder Publikation ungelöst bleibt.
 Dokumentiere die tatsächlich eingesetzten Modelle und Reasoning-Stufen.
 
 Richte vor langen Prüfungen live lesbare Logs ein. Prüfe mindestens
@@ -329,17 +348,16 @@ fortlaufend. Warte auf alle für eine Schlussfolgerung relevanten Agenten;
 führe währenddessen unabhängige eigene Arbeit weiter.
 
 ZIEL UND ABSCHLUSS
-Führe das Audit innerhalb des Plans ohne wiederholte Bestätigungsfragen
-aus. Das Ergebnis sind belegte Befunde, Abdeckungs-/Nachweislücken und
-priorisierte konkrete Umsetzungspakete. Produktkorrekturen bleiben der
-nachgelagerten Umsetzung vorbehalten; geeignete isolierte Reproduktionen
-und Test-Fixtures gehören zum Audit. Externe Abnahmen ohne verfügbare
-Zielumgebung als ausführbare Laborfälle vorbereiten und offen ausweisen.
+Führe ausschließlich die beauftragte gezielte Abnahme oder Diff-Folgeprüfung
+aus. Das Ergebnis sind aktuelle Belege, Abdeckungs-/Nachweislücken und ein
+konkreter nächster Schritt. Historische Freigaben werden nicht erneut erteilt;
+Commit, Push und Gitoperationen erfolgen nur bei bereits bestehender
+Autorisierung. Externe Abnahmen ohne Zielumgebung bleiben ausführbare
+Laborfälle.
 
-Beende die Arbeit nicht nach der ersten Befundliste. Prüfe Gegenbeispiele,
-Zusammenhänge und Vollständigkeit gemäß AP13. Bei Unterbrechung sichere
-im Register den Prüfstand, echte Ergebnisse, Agenten-/Prozessstatus,
-Artefakte und den nächsten konkreten Schritt. Gib abschließend den
-geprüften Umfang, priorisierte Befunde und verbleibende Grenzen an.
-Starte jetzt mit dem Lesen der Dateien und AP00.
+Prüfe Gegenbeispiele und die für den gezielten Fall nötigen Zusammenhänge.
+Bei Unterbrechung sichere im Register den Prüfstand, echte Ergebnisse,
+Agenten-/Prozessstatus, Artefakte und den nächsten konkreten Schritt. Gib
+abschließend den geprüften Umfang und die verbleibenden Grenzen an. Starte
+jetzt mit dem Lesen der Dateien und dem dokumentierten offenen Abnahmefall.
 ```

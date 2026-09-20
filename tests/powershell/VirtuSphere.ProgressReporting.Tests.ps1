@@ -13,6 +13,7 @@ BeforeAll {
     $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
     $script:CreateAsyncContract = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'qa-ansible') 'create-async-contract.py') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
+    $script:DocHygiene = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-doc-hygiene.sh') -Raw
     $script:PowerShellRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'run-pester.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
     $script:CollectionLock = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'verify-collection-lock.py') -Raw
@@ -25,6 +26,15 @@ BeforeAll {
 
 
 Describe 'Visible progress reporting contract' {
+    It 'streams the powercycle production-flow cases with bounded progress' {
+        $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/powercycle-sequence-contract.py') -Raw
+        $source | Should -Match 'enumerate\(CASES, 1\)'
+        $source | Should -Match '\] RUN '
+        $source | Should -Match '\] pass '
+        $source | Should -Match '\] fail '
+        $script:FastGates | Should -Match "powercycle-sequence-contract\.py'\) -Live"
+    }
+
     It 'binds future agents and multi-unit runners to the n/total convention' {
         $script:AgentGuide | Should -Match 'Progress reporting is a repository contract'
         $script:AgentGuide | Should -Match '\[n/total\] RUN'
@@ -89,6 +99,15 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] proven\s+\{2\}'"
     }
 
+    It 'reports each document boundary while preserving quiet hook operation' {
+        $script:DocHygiene | Should -Match 'for file in AGENTS\.md GROK\.md CLAUDE\.md README\.md'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] RUN doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] \$result doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] fail doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[ "\$quiet" -eq 1 \] \|\| echo'
+        $script:DocHygiene | Should -Match 'if \[ "\$quiet" -eq 0 \]; then'
+    }
+
     It 'counts the complete unmutated module fixture as an observable guard case' {
         $script:GuardRunner | Should -Match "Name = 'runner.ansible-module-contract.control'"
         $script:GuardRunner | Should -Match 'New-Fixture \$moduleContractFixtureFiles'
@@ -147,7 +166,7 @@ Describe 'Visible progress reporting contract' {
         $script:BackupRunner | Should -Match 'backup_progress_result (pass|fail)'
     }
 
-    It 'reports every explicitly approved MECM cleanup unit without polluting its result stream' {
+    It 'reports every automatically requested and revalidated MECM cleanup unit without polluting its result stream' {
         $script:MecmCommon | Should -Match '\$total\s*=\s*@\(\$CurrentPlan\.Items\)\.Count'
         $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] RUN cleanup'
         $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] pass cleanup'

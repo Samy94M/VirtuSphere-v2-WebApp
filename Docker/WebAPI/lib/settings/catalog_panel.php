@@ -6,6 +6,7 @@ declare(strict_types=1);
 /** @var string $esxiIntervalHours */
 /** @var array{state:string,credential_id:?int,configured_id:int,credentials:array<int,array<string,mixed>>} $esxiAnsibleResolution */
 /** @var string $esxiSelectedAnsible */
+/** @var int $ansibleTestIntervalHours */
 
 ?>
     <div class="stack" id="panel-catalog" role="tabpanel" aria-labelledby="tab-catalog" tabindex="0" data-tab-panel hidden>
@@ -59,5 +60,19 @@ declare(strict_types=1);
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
             </form>
             <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a></p>
+        </section>
+        <section class="panel">
+            <h2><?php echo h(__t('ansible_test.title')); ?></h2>
+            <p class="muted" id="<?php echo h(form_hint_id('ansible_test', 'ansible_test_interval_hours')); ?>"><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
+            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_ansible_test_interval">
+                <label><?php echo h(__t('ansible_test.interval')); ?>
+                    <input name="ansible_test_interval_hours" type="number" required step="1" min="<?php echo h((string) VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX); ?>" value="<?php echo h(form_old('ansible_test', 'ansible_test_interval_hours', (string) $ansibleTestIntervalHours)); ?>"<?php echo form_control_attrs('ansible_test', 'ansible_test_interval_hours', null, true); ?>>
+                    <?php echo form_error_html('ansible_test', 'ansible_test_interval_hours'); ?>
+                </label>
+                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
+            </form>
+            <p class="hint"><?php echo h(__t('ansible_test.behaviour')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('ansible_test.status_link')); ?></a></p>
         </section>
     </div>

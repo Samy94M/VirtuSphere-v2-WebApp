@@ -20,6 +20,12 @@
 # genau die Variablen ab, um die es geht.
 Set-StrictMode -Version 1.0
 
+# Gemeinsamer Laufzeitvertrag des MECM-Server-Dateisatzes. Skripte, die neuere
+# Common-Funktionen benoetigen, pruefen diesen Wert direkt nach dem Dot-Sourcing.
+# Der Installer vergleicht die Literale zusaetzlich im Staging und nach der
+# Aktivierung, damit ein gemischter Satz gar nicht erst gestartet wird.
+$script:VsMecmServerContractVersion = 2
+
 $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 
 # SSoT fuer den MECM-Ordnernamen der Paket-Collections/-Applications.
@@ -1045,6 +1051,14 @@ function Set-VsPackageContentTracking {
     New-ItemProperty -LiteralPath $key -Name State -Value $State -PropertyType String -Force -ErrorAction Stop | Out-Null
 }
 
+function Remove-VsPackageContentTracking {
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationName)
+    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
+    if (Test-Path -LiteralPath $key) {
+        Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+    }
+}
+
 # ---------------------------------------------------------------------------
 # MECM-Mitgliedschafts-Reconciliation (ADR-0034)
 # ---------------------------------------------------------------------------
@@ -1883,21 +1897,31 @@ function Get-VsPackageSourceSelections {
     return $result.ToArray()
 }
 
-# Retained objects are not automatically obsolete: never flag a supplied source,
-# the selected target or a higher version as a deletion candidate.
+# Retained objects are not automatically obsolete. Only a numeric version that
+# is strictly below the proven numeric source ceiling is an old-object finding.
+# Equal, newer and non-numeric inventory stays unclassified; a blocked selection
+# with any non-numeric source has no comparable ceiling at all.
 function Get-VsPackageRetainedNames {
     param([string]$ProductName, [array]$SourceVersions, [array]$Selections, [AllowEmptyCollection()][array]$Names)
     $selection = if ($Selections.Count -eq 1) { $Selections[0] } else { $null }
     $sources = if ($selection) { @($selection.SourceVersions) } else { @($SourceVersions) }
+    $comparisonTarget = $null
+    if ($selection -and $selection.State -eq 'ready') {
+        $comparisonTarget = [string]$selection.TargetVersion
+    } elseif ($selection -and $sources.Count -gt 0 -and
+        @($sources | Where-Object { $null -eq (ConvertTo-VsPackageVersionParts -Version $_) }).Count -eq 0) {
+        $comparisonTarget = [string]$sources[0]
+        foreach ($source in @($sources | Select-Object -Skip 1)) {
+            if ((Compare-VsPackageVersion -Left $source -Right $comparisonTarget) -gt 0) { $comparisonTarget = [string]$source }
+        }
+    }
     $prefix = $ProductName + '-'
     foreach ($name in @($Names | Sort-Object -Unique)) {
         if (-not ([string]$name).StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
         $version = ([string]$name).Substring($prefix.Length)
         if ($sources -ccontains $version) { continue }
-        if ($selection -and $selection.State -eq 'ready' -and $null -ne (ConvertTo-VsPackageVersionParts -Version $version)) {
-            if ((Compare-VsPackageVersion -Left $version -Right $selection.TargetVersion) -ge 0) { continue }
-        }
-        $name
+        if ($null -eq $comparisonTarget -or $null -eq (ConvertTo-VsPackageVersionParts -Version $version)) { continue }
+        if ((Compare-VsPackageVersion -Left $version -Right $comparisonTarget) -lt 0) { $name }
     }
 }
 
@@ -1906,6 +1930,7 @@ function Get-VsPackageRetirementPlan {
         [Parameter(Mandatory)]$Selection,
         [Parameter(Mandatory)]$Applications,
         [Parameter(Mandatory)]$Collections,
+        [AllowEmptyCollection()][array]$Deployments = @(),
         [Parameter(Mandatory)]$Replacement,
         [Parameter(Mandatory)]$References,
         [Parameter(Mandatory)][bool]$ReferenceScanComplete
@@ -1916,10 +1941,20 @@ function Get-VsPackageRetirementPlan {
         foreach ($reason in @($Selection.Blockers)) { $blockers.Add([string]$reason) }
     }
     if (-not $ReferenceScanComplete) { $blockers.Add('reference_scan_incomplete') }
+    # Retirement readiness follows the same boundary as deployment readiness:
+    # an acknowledged, bound content request is enough. Full success on every
+    # DP remains a distribution warning, not a veto for the removeOldVersion
+    # retirement plan. Unknown/unsafe target evidence and an unconfirmed request
+    # remain fail-closed. Requiring pending/complete keeps an unbound intent from
+    # retiring the previous usable generation.
+    $replacementContentState = [string]$Replacement.ContentState
+    $replacementDistributionState = [string]$Replacement.DistributionState
     if ([string]$Replacement.Name -cne [string]$Selection.TargetName -or
         -not [bool]$Replacement.Owned -or [int]$Replacement.DeploymentTypeCount -ne 1 -or
-        [string]$Replacement.ContentState -cne 'complete' -or
-        [string]$Replacement.DistributionState -cne 'succeeded' -or
+        -not [bool]$Replacement.RequestConfirmed -or
+        $replacementContentState -notin @('pending', 'complete') -or
+        $replacementDistributionState -notin @('failed', 'in_progress', 'succeeded') -or
+        -not [bool]$Replacement.DistributionEvidenceSafe -or
         -not [bool]$Replacement.DeploymentReady) {
         $blockers.Add('replacement_not_ready')
     }
@@ -1960,24 +1995,44 @@ function Get-VsPackageRetirementPlan {
         }
         $items.Add([pscustomobject]@{ Kind = 'collection'; Id = $id; Name = $name; Version = $version })
     }
-    $orderedItems = @($items | Sort-Object Kind, Name, Id)
+    # Deployments are explicit plan units and must disappear before their
+    # application. Collections follow last, after all assignments are gone.
+    foreach ($deployment in @($Deployments)) {
+        $name = [string]$deployment.ApplicationName
+        $id = [string]$deployment.DeploymentId
+        if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($id)) {
+            $blockers.Add('deployment_identity_unknown'); continue
+        }
+        $version = if ($name.StartsWith($prefix, [StringComparison]::Ordinal)) { $name.Substring($prefix.Length) } else { '' }
+        if ([string]::IsNullOrWhiteSpace($version) -or $null -eq (ConvertTo-VsPackageVersionParts -Version $version) -or
+            $sourceVersions -ccontains $version -or
+            (Compare-VsPackageVersion -Left $version -Right ([string]$Selection.TargetVersion)) -ge 0) { continue }
+        $items.Add([pscustomobject]@{
+            Kind = 'deployment'; Id = $id; Name = $name; Version = $version
+            CollectionName = [string]$deployment.CollectionName
+        })
+    }
+    $kindOrder = @{ deployment = 0; application = 1; collection = 2 }
+    $orderedItems = @($items | Sort-Object @{ Expression = { $kindOrder[[string]$_.Kind] } }, Name, Id)
     $orderedBlockers = @($blockers | Sort-Object -Unique)
     $state = if ($orderedBlockers.Count -eq 0) { 'ready' } else { 'blocked' }
-    $canonical = [ordered]@{ Schema = 1; ProductName = [string]$Selection.ProductName; TargetName = [string]$Selection.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers }
+    $canonical = [ordered]@{ Schema = 3; ProductName = [string]$Selection.ProductName; TargetName = [string]$Selection.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers }
     $json = ConvertTo-Json -InputObject $canonical -Depth 6 -Compress
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))).Replace('-', '').ToLowerInvariant()) } finally { $sha.Dispose() }
-    return [pscustomobject]@{ Schema = 1; ProductName = $canonical.ProductName; TargetName = $canonical.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers; PlanHash = $hash }
+    return [pscustomobject]@{ Schema = 3; ProductName = $canonical.ProductName; TargetName = $canonical.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers; PlanHash = $hash }
 }
 
 function Invoke-VsPackageRetirementPlan {
     param(
         [Parameter(Mandatory)]$ApprovedPlan,
         [Parameter(Mandatory)]$CurrentPlan,
+        [scriptblock]$RemoveDeployment,
         [Parameter(Mandatory)][scriptblock]$RemoveApplication,
         [Parameter(Mandatory)][scriptblock]$RemoveCollection
     )
-    if ([string]$ApprovedPlan.State -cne 'ready' -or [string]$CurrentPlan.State -cne 'ready' -or
+    if ([int]$ApprovedPlan.Schema -ne 3 -or [int]$CurrentPlan.Schema -ne 3 -or
+        [string]$ApprovedPlan.State -cne 'ready' -or [string]$CurrentPlan.State -cne 'ready' -or
         [string]$ApprovedPlan.PlanHash -cne [string]$CurrentPlan.PlanHash) {
         throw 'Bereinigungsplan ist blockiert oder veraltet; es wurde nichts entfernt.'
     }
@@ -1988,7 +2043,11 @@ function Invoke-VsPackageRetirementPlan {
         $position++
         Write-Host ("[{0}/{1}] RUN cleanup {2}:{3}" -f $position, $total, $item.Kind, $item.Id)
         try {
-            if ([string]$item.Kind -ceq 'application') { & $RemoveApplication $item }
+            if ([string]$item.Kind -ceq 'deployment') {
+                if (-not $RemoveDeployment) { throw 'Deployment-Removehandler fehlt.' }
+                & $RemoveDeployment $item
+            }
+            elseif ([string]$item.Kind -ceq 'application') { & $RemoveApplication $item }
             elseif ([string]$item.Kind -ceq 'collection') { & $RemoveCollection $item }
             else { throw ("Unbekannter Bereinigungstyp: {0}" -f $item.Kind) }
             $results.Add([pscustomobject]@{ Kind = $item.Kind; Id = $item.Id; Name = $item.Name; State = 'removed' })

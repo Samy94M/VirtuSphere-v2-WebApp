@@ -91,5 +91,4 @@ return [
     // The pull is a deploy job: without a running deploy service it is queued and
     // never executed.
     'cadence_esxi_no_worker' => 'no automatic pull, the deploy service is not running',
-    'cadence_manual' => 'manual full test, on click only, valid for :days days',
 ];

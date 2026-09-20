@@ -16,6 +16,10 @@ const VIRTUSPHERE_HELP_PANELS = [
 
 const VIRTUSPHERE_HELP_SECTIONS = [
     'help-backup' => 'stack',
+    'help-unsaved-changes' => 'overview',
+    'help-copying-values' => 'overview',
+    'help-effective-values' => 'missions',
+    'help-work-context' => 'missions',
     'help-status-overview' => 'system-status',
     'help-status-deploy' => 'system-status',
     'help-status-directory' => 'system-status',
@@ -35,6 +39,7 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // explain, because the explanation is four paragraphs long and would then
     // sit inside a card that a reader opens to count VMs.
     'help-create-progress' => 'deploy',
+    'help-action-outcomes' => 'deploy',
 ];
 
 function help_panel_visible(string $panel, array $user): bool

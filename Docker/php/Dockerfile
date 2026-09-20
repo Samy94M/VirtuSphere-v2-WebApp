@@ -1,10 +1,8 @@
-# Base and composer are pinned by digest (AP8): the tag documents the intended
-# line, the digest makes the base of every rebuild byte-identical. Bumping a
-# pin is a deliberate commit, never a side effect of a rebuild.
-FROM php:8.4-fpm@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2
+# Every stage uses the same digest-pinned PHP 8.4 base. Build dependencies live
+# only in extension-builder; the long-lived services use runtime, while Composer
+# and VCS/archive tools are available only in the explicitly built tooling stage.
+FROM php:8.4-fpm@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2 AS extension-builder
 
-# libfcgi-bin carries cgi-fcgi for the FPM ping healthcheck (docker-compose.yml
-# + fpm.d/zz-virtusphere.conf).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     linux-libc-dev \
     libpng-dev \
@@ -14,26 +12,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libldap2-dev \
     libxml2-dev \
     libzip-dev \
-    libfcgi-bin \
-    git \
-    zip \
-    unzip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && LDAP_MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
     && docker-php-ext-configure ldap --with-libdir="lib/${LDAP_MULTIARCH}" \
-    # pcntl is bundled with PHP (no download, air-gap safe) and exists for one
-    # reason: the deploy supervisor runs as PID 1, and PID 1 without an
-    # installed signal handler IGNORES SIGTERM. Without pcntl_signal a
-    # `docker stop` would sit out its whole grace period and then SIGKILL both
-    # the supervisor and the worker it is watching, in the middle of a playbook
-    # that is changing ESXi. Waiting for a child needs no pcntl
-    # (proc_get_status() reaps), and sending a signal needs only posix_kill;
-    # RECEIVING one is what this extension is here for.
+    # pcntl is bundled with PHP (no download, air-gap safe). The deploy
+    # supervisor is PID 1 and needs a real SIGTERM handler so Docker does not
+    # SIGKILL it and its active playbook after the grace period.
     && docker-php-ext-install gd ldap mysqli pcntl zip \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=composer:2@sha256:5946476338742b200bb9ff88f8be56275ddae4b3949c72305cb0dbf10cfcb760 /usr/bin/composer /usr/local/bin/composer
+FROM php:8.4-fpm@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2 AS runtime
+
+# Shared libraries only. Compilers, headers, Composer, git and archive tools
+# stay out of this stage. libfcgi-bin carries cgi-fcgi for the FPM healthcheck.
+# hadolint ignore=SC2086
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpng16-16t64 \
+    libjpeg62-turbo \
+    libfreetype6 \
+    libldap2 \
+    libzip5 \
+    libfcgi-bin \
+    && apt-mark manual libpng16-16t64 libjpeg62-turbo libfreetype6 libldap2 libzip5 libfcgi-bin \
+    # The upstream php:fpm image exposes its bootstrap tool list through
+    # PHPIZE_DEPS. Purging that exact owner-provided set removes compilers and
+    # headers from the final filesystem without maintaining a second list.
+    # Word splitting is intentional: PHPIZE_DEPS is the upstream-owned,
+    # whitespace-separated apt package list, not an application value.
+    && apt-get purge -y --auto-remove ${PHPIZE_DEPS} \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=extension-builder /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/
+COPY --from=extension-builder /usr/local/etc/php/conf.d/docker-php-ext-*.ini /usr/local/etc/php/conf.d/
+
 COPY conf.d/zz-virtusphere.ini /usr/local/etc/php/conf.d/
 COPY fpm.d/zz-virtusphere.conf /usr/local/etc/php-fpm.d/zz-virtusphere.conf
 
@@ -49,3 +60,13 @@ WORKDIR /var/www/html
 
 EXPOSE 9000
 CMD ["php-fpm"]
+
+FROM runtime AS tooling
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    zip \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2@sha256:5946476338742b200bb9ff88f8be56275ddae4b3949c72305cb0dbf10cfcb760 /usr/bin/composer /usr/local/bin/composer

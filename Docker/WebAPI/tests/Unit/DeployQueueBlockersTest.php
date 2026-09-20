@@ -56,4 +56,21 @@ final class DeployQueueBlockersTest extends TestCase
             ob_end_clean();
         }
     }
+
+    public function testPresentationUsesOnlyTheCompleteDecisionAndMaterializedScope(): void
+    {
+        $state = deploy_queue_normalize_input(['mode' => 'create']);
+        $ready = deploy_blocker_presentation($state, [], 4);
+        self::assertSame('ready', $ready['state']);
+        self::assertSame(__t('deploy.preparation_ready'), $ready['status']);
+        self::assertStringContainsString('4', $ready['context']);
+
+        $blocked = deploy_blocker_presentation($state, [
+            ['kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE, 'code' => 'a', 'message' => 'a'],
+            ['kind' => VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE, 'code' => 'b', 'message' => 'b'],
+        ], null);
+        self::assertSame('blocked', $blocked['state']);
+        self::assertSame(__t('deploy.preparation_blocked_many', ['count' => 2]), $blocked['status']);
+        self::assertSame(__t('deploy.preparation_context_unknown', ['mode' => deploy_mode_label('create')]), $blocked['context']);
+    }
 }

@@ -26,6 +26,8 @@
     var jumpButton = root.querySelector('[data-deploy-log-jump]');
     var retryButton = root.querySelector('[data-deploy-log-retry]');
     var terminalBlocks = root.querySelector('[data-deploy-terminal-blocks]');
+    var history = root.querySelector('[data-deploy-history]');
+    var phases = root.querySelector('[data-deploy-phases]');
     var cancelForm = root.querySelector('[data-deploy-cancel-form]');
     var scroller = root.querySelector('[data-deploy-log-scroller]');
     var progressCard = document.querySelector('[data-deploy-create-progress]');
@@ -445,6 +447,12 @@
                 cancelForm = null;
             }
             renderCreateProgress(payload.create_progress || null);
+            if (history && typeof payload.history_html === 'string' && history.innerHTML !== payload.history_html) {
+                history.innerHTML = payload.history_html;
+            }
+            if (phases && typeof payload.phases_html === 'string' && phases.innerHTML !== payload.phases_html) {
+                phases.innerHTML = payload.phases_html;
+            }
             if (Array.isArray(payload.logs)) { append(payload.logs); }
             if (payload.has_older) { setOlderState(true); }
             root.setAttribute('data-caught-up', payload.caught_up ? '1' : '0');

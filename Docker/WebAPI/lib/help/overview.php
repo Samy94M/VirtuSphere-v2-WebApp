@@ -17,4 +17,18 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_overview.workflow_step3')); ?></p>
             <p><?php echo h(__t('help_overview.workflow_step4')); ?></p>
         </section>
+
+        <section class="panel" id="help-unsaved-changes">
+            <h2><?php echo h(__t('help_overview.unsaved_heading')); ?></h2>
+            <p><?php echo h(__t('help_overview.unsaved_p1')); ?></p>
+            <p><?php echo h(__t('help_overview.unsaved_p2')); ?></p>
+            <p><?php echo h(__t('help_overview.unsaved_p3')); ?></p>
+        </section>
+
+        <section class="panel" id="help-copying-values">
+            <h2><?php echo h(__t('help_overview.copy_heading')); ?></h2>
+            <p><?php echo h(__t('help_overview.copy_p1')); ?></p>
+            <p><?php echo h(__t('help_overview.copy_p2')); ?></p>
+            <p><?php echo h(__t('help_overview.copy_p3')); ?></p>
+        </section>
     </div>

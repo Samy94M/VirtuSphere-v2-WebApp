@@ -117,7 +117,7 @@
                 return;
             }
             var accepted = dialog.returnValue === 'confirm';
-            var trigger = pending;
+            var request = pending;
             pending = null;
             dialog.returnValue = '';
 
@@ -127,45 +127,73 @@
             }
             opener = null;
 
-            if (accepted && trigger && trigger.isConnected) {
-                replayTrigger(trigger);
+            if (request && request.resultTarget && request.resultTarget.isConnected) {
+                request.resultTarget.dispatchEvent(new CustomEvent('virtusphere:confirm-result', {
+                    detail: {accepted: accepted},
+                }));
+            } else if (accepted && request && request.trigger && request.trigger.isConnected) {
+                replayTrigger(request.trigger);
             }
         });
 
-        requestConfirm = function (trigger) {
+        requestConfirm = function (trigger, options) {
             if (dialog.hasAttribute('open')) {
-                return;
+                return false;
             }
 
             // Cancelling the click also skipped the browser's constraint check,
             // so run it here. Asking "reset this password?" and only then
             // rejecting an empty field would waste the answer (users.php).
             var form = trigger.form;
-            if (form && !trigger.formNoValidate && typeof form.checkValidity === 'function' && !form.checkValidity()) {
+            if (!options && form && !trigger.formNoValidate && typeof form.checkValidity === 'function' && !form.checkValidity()) {
                 if (typeof form.reportValidity === 'function') {
                     form.reportValidity();
                 }
-                return;
+                return false;
             }
 
-            pending = trigger;
+            pending = options
+                ? {resultTarget: trigger}
+                : {trigger: trigger};
             opener = trigger;
-            message.textContent = (trigger.getAttribute('data-confirm') || '').trim();
+            message.textContent = options
+                ? options.message
+                : (trigger.getAttribute('data-confirm') || '').trim();
 
             // The accept button names the action it performs instead of saying
             // "OK". A trigger's own label is already localized; data-confirm-action
             // overrides it where that label would collide with the dismiss button
             // ("Abbrechen" on a deploy job).
-            var label = (trigger.getAttribute('data-confirm-action') || trigger.textContent || '').trim();
+            var label = options
+                ? options.label
+                : (trigger.getAttribute('data-confirm-action') || trigger.textContent || '').trim();
             accept.textContent = label !== '' ? label : defaultAcceptLabel;
 
-            var danger = trigger.classList.contains('button-danger');
+            var danger = options ? options.danger : trigger.classList.contains('button-danger');
             accept.classList.toggle('button-danger', danger);
             dialog.classList.toggle('modal-danger', danger);
 
             openDialog(dialog);
+            return true;
         };
     }
+
+    // Page-specific modules request the same dialog through a DOM event. The
+    // result returns to the requesting element, keeping the shared owner in
+    // this file without publishing a global callable or building another
+    // modal. Only already-rendered localized strings are accepted.
+    document.addEventListener('virtusphere:confirm-request', function (event) {
+        var detail = event.detail || {};
+        var target = event.target;
+        var message = typeof detail.message === 'string' ? detail.message.trim() : '';
+        var label = typeof detail.label === 'string' ? detail.label.trim() : '';
+        if (!requestConfirm || !(target instanceof Element) || message === '' || label === '') {
+            return;
+        }
+        if (requestConfirm(target, {message: message, label: label, danger: detail.danger === true})) {
+            event.preventDefault();
+        }
+    });
 
     // Global chrome clicks: theme toggle, sidebar nav toggle, and the shared
     // confirmation. Form-row editing (add/remove/toggle) is handled by forms.js
@@ -362,6 +390,14 @@
     }
 
     function initHashNavigation() {
+        // Native fragment navigation restores the scroll position, but it does
+        // not consistently move keyboard focus to a non-interactive table row.
+        // Tabbed panels own their initial fragment handling in initTabs(); all
+        // other pages use the same focus helper on first render as on a later
+        // hash change.
+        if (!document.querySelector('[data-tabs]') && currentHashId()) {
+            window.requestAnimationFrame(focusHashTarget);
+        }
         window.addEventListener('hashchange', function () {
             window.requestAnimationFrame(focusHashTarget);
         });
@@ -616,11 +652,7 @@
         });
     }
 
-    // Copy-to-clipboard for a diagnostic identifier (the correlation id in the
-    // audit table, in the CSV header row and on a job log). A correlation id is
-    // sixteen hex characters that an operator has to retype into a search field
-    // to follow a trace; a copy button is the difference between a usable trace
-    // and a transcription exercise.
+    // Copy-to-clipboard for displayed identities and diagnostic identifiers.
     //
     // A real <button> with a real label, so it is reachable with Tab and
     // activated with Enter and Space by the browser rather than by a key
@@ -636,6 +668,43 @@
     // that shrugs.
     function initCopyButtons() {
         var RESET_MS = 2000;
+
+        function sourceFor(button) {
+            var sourceId = button.getAttribute('data-copy-source') || '';
+            return sourceId === '' ? null : document.getElementById(sourceId);
+        }
+
+        function currentValue(button) {
+            if (!button.hasAttribute('data-copy-source')) {
+                return button.getAttribute('data-copy-value') || '';
+            }
+            var source = sourceFor(button);
+            if (!source) {
+                return '';
+            }
+            if (button.hasAttribute('data-copy-source-enabled')) {
+                var row = source.closest('[data-repeat-row]');
+                var mode = row ? row.querySelector('[data-mode-select]') : null;
+                var inactiveMode = mode
+                    && String(mode.value || '').trim().toLowerCase()
+                        === String(mode.getAttribute('data-mode-select') || '').trim().toLowerCase();
+                if (source.disabled || inactiveMode) {
+                    return '';
+                }
+            }
+            return typeof source.value === 'string' ? source.value : source.textContent || '';
+        }
+
+        function syncSourceButton(button) {
+            if (!button.hasAttribute('data-copy-source')) {
+                return;
+            }
+            button.hidden = currentValue(button) === '';
+        }
+
+        function syncSourceButtons() {
+            document.querySelectorAll('[data-copy-source]').forEach(syncSourceButton);
+        }
 
         function announce(button, message, ok) {
             var status = button.parentNode ? button.parentNode.querySelector('[data-copy-status]') : null;
@@ -654,24 +723,45 @@
         }
 
         document.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-copy-value]');
+            var button = event.target.closest('[data-copy-value], [data-copy-source]');
             if (!button) {
                 return;
             }
             event.preventDefault();
-            var value = button.getAttribute('data-copy-value') || '';
+            var value = currentValue(button);
             var done = button.getAttribute('data-copy-done') || '';
             var failed = button.getAttribute('data-copy-failed') || '';
+            if (value === '') {
+                syncSourceButton(button);
+                return;
+            }
             if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
                 announce(button, failed, false);
                 return;
             }
-            navigator.clipboard.writeText(value).then(function () {
-                announce(button, done, true);
-            }).catch(function () {
+            try {
+                navigator.clipboard.writeText(value).then(function () {
+                    announce(button, done, true);
+                }).catch(function () {
+                    announce(button, failed, false);
+                });
+            } catch (error) {
                 announce(button, failed, false);
-            });
+            }
         });
+
+        document.addEventListener('input', function (event) {
+            if (event.target && event.target.id) {
+                syncSourceButtons();
+            }
+        });
+        document.addEventListener('change', function () {
+            // Other handlers (notably the DHCP mode owner in forms.js) may
+            // enable/disable the source during this same event.
+            window.setTimeout(syncSourceButtons, 0);
+        });
+        syncSourceButtons();
+        window.setTimeout(syncSourceButtons, 0);
     }
 
     initConfirmDialog();

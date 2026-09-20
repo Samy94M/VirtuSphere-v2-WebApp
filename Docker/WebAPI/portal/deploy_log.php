@@ -13,6 +13,7 @@ require_once __DIR__ . '/../lib/deploy_log_recovery.php';
 require_once __DIR__ . '/../lib/deploy_log_create_release.php';
 require_once __DIR__ . '/../lib/deploy_create_progress.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
+require_once __DIR__ . '/../lib/deploy_log_history.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -123,6 +124,8 @@ if ($format === 'json') {
         // section with nothing done yet, so the browser removes the card
         // rather than showing it at zero.
         'create_progress' => deploy_create_progress_payload($connection, $job),
+        'history_html' => deploy_log_history_html($connection, $job),
+        'phases_html' => deploy_log_phases_html(deploy_log_phase_timeline(repo_deploy_job_log_step_markers($connection, (int) $job['id']))),
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
         'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds),
@@ -249,7 +252,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     </section>
 
     <section class="grid" aria-label="<?php echo h(__t('deploy.log_title')); ?>">
-        <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.kpi_job')); ?></span><span class="value"><?php echo h((string) $job['id']); ?></span></article>
+        <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.kpi_job')); ?></span><span class="value"><?php echo portal_copy_value((string) $job['id'], __t('deploy.kpi_job'), true); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
@@ -270,10 +273,11 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     <?php // Above the recovery and phase blocks on purpose: the question this
           // card answers ("which of the fifteen VMs exist") is the one the
           // incident was about, and it must not sit below four other panels. ?>
+    <div class="stack" data-deploy-history><?php echo deploy_log_history_html($connection, $job); ?></div>
     <?php deploy_log_render_create_progress($connection, $job, $user); ?>
     <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
     <?php deploy_log_render_create_release($connection, $job, $user); ?>
-    <?php deploy_log_render_phases($timeline); ?>
+    <div data-deploy-phases><?php deploy_log_render_phases($timeline); ?></div>
     <?php deploy_log_render_filter((int) $job['id'], $logFilter, $view['phase_names'], count($logs), $view['match_capped']); ?>
 
     <section class="panel">

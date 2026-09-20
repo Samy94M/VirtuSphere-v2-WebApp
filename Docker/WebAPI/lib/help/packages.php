@@ -16,6 +16,9 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_packages.packages_p2')); ?></p>
             <p><?php echo h(__t('help_packages.packages_p2b', ['days' => VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS])); ?></p>
             <p><?php echo h(__t('help_packages.packages_p3')); ?></p>
+            <h3><?php echo h(__t('help_packages.packages_diagnostics_heading')); ?></h3>
+            <p><?php echo h(__t('help_packages.packages_diagnostics_current')); ?></p>
+            <p><?php echo h(__t('help_packages.packages_diagnostics_planned')); ?></p>
         </section>
         <section class="panel">
             <h2><?php echo h(__t('help_packages.packages_os_heading')); ?></h2>

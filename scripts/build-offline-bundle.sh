@@ -2,8 +2,9 @@
 # Offline-Release-Bundle (AP8, Plan v2): baut aus dem lokalen Stand ein
 # vollstaendig offline verifizier- und installierbares Artefakt:
 #
-#   images/         docker save der Runtime-Images (per Image-ID dedupliziert)
+#   images/         docker save der Kern-Runtime-Images (per Image-ID dedupliziert)
 #   images.txt      Ref -> Tag -> Image-ID -> RepoDigest je gespeichertem Image
+#   tools/          optionales, separat verifizierbares phpMyAdmin-Teilbundle
 #   deps/           vendor.tar.gz (composer install --no-dev, im PHP-Image)
 #   collections/    ansible-galaxy collection download (Air-Gap-Ansible-Host)
 #   runner/         geschlossener 8R-O-Runner samt eigenem Pruefmanifest
@@ -95,7 +96,7 @@ fi
 # Zielnamen, und kein Altbestand kann ins Manifest wandern.
 STAGE="$OUT_PARENT/.$(basename "$OUT").stage-$$"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/images" "$STAGE/deps" "$STAGE/collections" "$STAGE/runner" "$STAGE/sbom" "$STAGE/reports"
+mkdir -p "$STAGE/images" "$STAGE/tools/images" "$STAGE/deps" "$STAGE/collections" "$STAGE/runner" "$STAGE/sbom" "$STAGE/reports"
 cleanup_stage() { rm -rf "$STAGE"; }
 trap cleanup_stage EXIT INT TERM
 ROOT_M=$(docker_path "$ROOT")
@@ -105,15 +106,25 @@ OUT_M=$(docker_path "$STAGE")
 TRIVY_REF=$(sed -n 's/.*"ref": "\(aquasec\/trivy@sha256:[0-9a-f]*\)".*/\1/p' "$ROOT/scripts/tool-lock.json")
 [ -n "$TRIVY_REF" ] || { echo "offline-bundle: kein trivy-Pin in scripts/tool-lock.json"; exit 2; }
 ANSIBLE_IMAGE=virtusphere-qa-ansible:latest
-PHP_IMAGE=virtusphere-v2-webapp-php
+PHP_IMAGE=virtusphere-php:8.4-tooling
 docker image inspect "$ANSIBLE_IMAGE" >/dev/null 2>&1 || { echo "offline-bundle: $ANSIBLE_IMAGE fehlt (docker build -f Docker/qa-ansible/Dockerfile -t $ANSIBLE_IMAGE .)"; exit 2; }
-docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 || { echo "offline-bundle: $PHP_IMAGE fehlt (docker compose build php)"; exit 2; }
+docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 || { echo "offline-bundle: $PHP_IMAGE fehlt (docker build --target tooling -t $PHP_IMAGE Docker/php)"; exit 2; }
 
-# --- 1) Runtime-Images: dedupe per Image-ID, save+gzip, Digest-Manifest -------
-echo "==> Images speichern"
+# --- 1) Images: ein Resolver, getrennte Kern-/Werkzeug-Manifeste --------------
+echo "==> Kern- und optionale Werkzeug-Images speichern"
+docker compose --project-directory "$ROOT" config --images | LC_ALL=C sort -u > "$STAGE/.core-refs"
+docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u > "$STAGE/.all-refs"
+comm -13 "$STAGE/.core-refs" "$STAGE/.all-refs" > "$STAGE/.tool-refs"
 : > "$STAGE/images.txt"
-SEEN_IDS=""
-docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u | while IFS= read -r ref; do
+: > "$STAGE/tools/images.txt"
+
+save_image_set() {
+    refs_file=$1
+    manifest=$2
+    archive_dir=$3
+    manifest_prefix=$4
+    SEEN_IDS=""
+    while IFS= read -r ref; do
     [ -n "$ref" ] || continue
     id=$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null) || { echo "offline-bundle: Image fehlt lokal: $ref (erst docker compose build/pull)"; exit 2; }
     case " $SEEN_IDS " in *" $id "*) echo "    skip (buildgleich): $ref"; continue;; esac
@@ -138,7 +149,7 @@ docker compose --project-directory "$ROOT" --profile "*" config --images | LC_AL
     tag="${ref%@*}"
     want="${ref#*@}"
     # Eine Referenz ohne Tag (die lokal gebauten Images heissen bei
-    # `compose config --images` nur "virtusphere-v2-webapp-php") normalisiert
+    # `compose config --images` nur einen lokalen Namen) normalisiert
     # Docker auf :latest, und genau das steht dann in RepoTags. Ohne diese
     # Normalisierung sucht die Zusicherung unten einen Tag, den es so nie gibt.
     case "$tag" in
@@ -152,17 +163,21 @@ docker compose --project-directory "$ROOT" --profile "*" config --images | LC_AL
             exit 2
         fi
     fi
-    docker save "$tag" | gzip > "$STAGE/images/$safe.tar.gz"
+    docker save "$tag" | gzip > "$archive_dir/$safe.tar.gz"
 
     # Das Archiv muss sich selbst beweisen: verify.sh hasht nur Dateien, und ein
     # leeres RepoTags faellt erst auf dem Zielhost auf, wo niemand mehr etwas
     # reparieren kann.
-    if ! gunzip -c "$STAGE/images/$safe.tar.gz" | tar -xOf - manifest.json 2>/dev/null | grep -q "\"$tag\""; then
-        echo "offline-bundle: [bundle.image-tag] images/$safe.tar.gz traegt den Tag $tag nicht; ein docker load daraus ergaebe ein namenloses Image." >&2
+    if ! gunzip -c "$archive_dir/$safe.tar.gz" | tar -xOf - manifest.json 2>/dev/null | grep -q "\"$tag\""; then
+        echo "offline-bundle: [bundle.image-tag] $manifest_prefix/$safe.tar.gz traegt den Tag $tag nicht; ein docker load daraus ergaebe ein namenloses Image." >&2
         exit 1
     fi
-    printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$tag" "$id" "${digest:-lokal-gebaut}" "images/$safe.tar.gz" >> "$STAGE/images.txt"
-done
+        printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$tag" "$id" "${digest:-lokal-gebaut}" "$manifest_prefix/$safe.tar.gz" >> "$manifest"
+    done < "$refs_file"
+}
+
+save_image_set "$STAGE/.core-refs" "$STAGE/images.txt" "$STAGE/images" "images"
+save_image_set "$STAGE/.tool-refs" "$STAGE/tools/images.txt" "$STAGE/tools/images" "images"
 
 # --- 1b) Roundtrip: loesen die Offline-Referenzen wirklich auf? -----------------
 #
@@ -173,20 +188,28 @@ done
 # Referenz muss unter genau diesem Tag im Bundle liegen. Ein Digest waere nach
 # docker load nicht aufloesbar und bleibt deshalb ein harter Befund.
 echo "==> Compose-Roundtrip mit Bundle-Tags"
-resolved=$(docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u)
-if printf '%s\n' "$resolved" | grep -q '@sha256:'; then
-    echo "offline-bundle: [bundle.roundtrip-digest] compose loest eine Digest-Referenz auf; der Zielhost koennte sie nach docker load nicht finden:" >&2
-    printf '%s\n' "$resolved" | grep '@sha256:' >&2
-    exit 1
-fi
-for res in $resolved; do
-    restag="$res"
-    case "$restag" in */*:*|*:*) : ;; *) restag="$restag:latest" ;; esac
-    if ! grep -q "$(printf '\t%s\t' "$restag")" "$STAGE/images.txt"; then
-        echo "offline-bundle: [bundle.roundtrip-missing] compose referenziert $res, aber das Bundle traegt keinen Tag $restag." >&2
+verify_image_set() {
+    refs_file=$1
+    manifest=$2
+    class=$3
+    if grep -q '@sha256:' "$refs_file"; then
+        echo "offline-bundle: [bundle.roundtrip-digest] Compose loest im $class-Satz eine Digest-Referenz auf; docker load koennte sie nicht finden." >&2
         exit 1
     fi
-done
+    while IFS= read -r res; do
+        [ -n "$res" ] || continue
+        restag="$res"
+        case "$restag" in */*:*|*:*) : ;; *) restag="$restag:latest" ;; esac
+        if ! grep -q "$(printf '\t%s\t' "$restag")" "$manifest"; then
+            echo "offline-bundle: [bundle.roundtrip-missing] $class referenziert $res, aber sein Manifest traegt keinen Tag $restag." >&2
+            exit 1
+        fi
+    done < "$refs_file"
+}
+
+verify_image_set "$STAGE/.core-refs" "$STAGE/images.txt" "Kern"
+verify_image_set "$STAGE/.tool-refs" "$STAGE/tools/images.txt" "Werkzeug"
+cat "$STAGE/images.txt" "$STAGE/tools/images.txt" > "$STAGE/.all-images"
 
 # --- 2) PHP-Abhaengigkeiten: vendor.tar.gz ohne Dev-Pakete --------------------
 echo "==> composer vendor (--no-dev) bauen"
@@ -287,7 +310,7 @@ while IFS="$(printf '\t')" read -r ref _tag _id _digest _file; do
         echo "offline-bundle: fixbare Critical/High-CVEs in $ref (reports/cve-$safe.txt)"
         CVE_FAILED=1
     fi
-done < "$STAGE/images.txt"
+done < "$STAGE/.all-images"
 if [ "$CVE_FAILED" -ne 0 ]; then
     echo "offline-bundle: ABBRUCH: ein Release-Artefakt mit fixbaren Critical/High-CVEs entsteht nicht (Ausnahmen nur befristet via .trivyignore.yaml)."
     exit 1
@@ -310,7 +333,8 @@ cat > "$STAGE/provenance.json" <<EOF
     "builder": "$(uname -s)/$(uname -m)",
     "dockerServer": "$DOCKER_VERSION",
     "trivy": "$TRIVY_REF",
-    "imageManifest": "images.txt"
+    "imageManifest": "images.txt",
+    "optionalToolsManifest": "tools/images.txt"
 }
 EOF
 
@@ -339,8 +363,9 @@ Alle Schritte laufen ohne Internetzugang.
    Sein JSON ist Evidenz fuer 8R-S, keine Freigabe aus sich selbst.
 7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
-   mit `virtusphere/docs/operations/go-live.md`. phpMyAdmin ist optional:
-   `docker compose --profile tools up -d phpmyadmin`.
+   mit `virtusphere/docs/operations/go-live.md`. Der Kernlauf lädt und startet
+   phpMyAdmin nicht. Das separat verifizierte Teilbundle wird bei Bedarf aus dem
+   entpackten Projektwurzelverzeichnis mit `sh tools/install.sh` installiert.
 
 NICHT `Docker/scripts/setup.sh` benutzen: es ruft `docker compose build` auf, und
 die Basis-Images sind digest-gepinnt und liegen nicht im Bundle. Auf einem Host
@@ -362,6 +387,31 @@ sha256sum -c SHA256SUMS
 echo "OK: Bundle vollstaendig offline verifiziert."
 EOF
 chmod +x "$STAGE/verify.sh"
+
+# Das optionale Werkzeugteilbundle hat ein eigenes Manifest und einen einzigen
+# Installationsowner. Es lädt ausschließlich seine Archive und startet nur das
+# explizite tools-Profil; der Kerninstaller bleibt davon unabhängig.
+cat > "$STAGE/tools/install.sh" <<'EOF'
+#!/bin/sh
+set -eu
+TOOLS_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+cd "$TOOLS_DIR"
+sha256sum -c SHA256SUMS
+for archive in images/*.tar.gz; do
+    [ -f "$archive" ] || { echo "tools-install: kein Werkzeug-Image im Teilbundle" >&2; exit 2; }
+    gunzip -c "$archive" | docker load
+done
+PROJECT_DIR=${1:-"$TOOLS_DIR/../virtusphere"}
+cd "$PROJECT_DIR"
+docker compose --profile tools up -d phpmyadmin
+EOF
+chmod +x "$STAGE/tools/install.sh"
+(
+    cd "$STAGE/tools"
+    find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | xargs -d '\n' sha256sum > SHA256SUMS
+)
+
+rm -f "$STAGE/.core-refs" "$STAGE/.all-refs" "$STAGE/.tool-refs" "$STAGE/.all-images"
 
 # --- 8) Manifest zuletzt: jede Datei ausser dem Manifest selbst ----------------
 echo "==> SHA256SUMS schreiben"

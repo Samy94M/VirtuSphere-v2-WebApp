@@ -33,7 +33,7 @@ final class DeployBlockerContractTest extends TestCase
     {
         $model = $this->blockerModules();
         $actions = $this->source('lib/deploy_actions.php');
-        self::assertStringContainsString('function deploy_queue_blockers(mysqli $db, array $input)', $model);
+        self::assertStringContainsString('function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation = null)', $model);
         self::assertStringContainsString("\$blocker['target_id']", $model);
         self::assertStringContainsString("\$blocker['action']", $model);
         self::assertStringContainsString('Unknown deploy blocker kind', $model);
@@ -63,6 +63,12 @@ final class DeployBlockerContractTest extends TestCase
         }
         self::assertStringNotContainsString('innerHTML', $client);
         self::assertStringNotContainsString('console.', $client);
+        self::assertStringContainsString("data-preparation-state', 'checking'", $client);
+        self::assertStringContainsString("data-preparation-state', 'unreliable'", $client);
+        self::assertStringContainsString("target.focus()", $client);
+        $view = $this->source('lib/deploy_queue_blocker_view.php');
+        self::assertSame(1, substr_count($view, 'aria-live="polite"'), 'only the concise preparation status may be live');
+        self::assertStringNotContainsString("__t('deploy.blocker_prefix')", $view, 'cause cards must not repeat the summary role');
     }
 
     /**
@@ -94,5 +100,27 @@ final class DeployBlockerContractTest extends TestCase
         // The render bound reaches the client from the same constant.
         self::assertStringContainsString('data-initial-limit', $view);
         self::assertStringContainsString("root.getAttribute('data-initial-limit')", $client);
+    }
+
+    public function testRemediesAreRecomputedAndCarryOnlyTheDeployDraft(): void
+    {
+        $actions = $this->source('lib/deploy_actions.php');
+        self::assertStringContainsString("\$action === 'open_remedy'", $actions);
+        self::assertStringContainsString('deploy_queue_blockers($connection, $queueInput)', $actions);
+        self::assertStringContainsString('deploy_queue_warnings($connection, $queueInput)', $actions);
+        self::assertStringContainsString('deploy_blocker_action_for_user($candidate, $user)', $actions);
+        self::assertStringContainsString('deploy_form_draft_store($draft)', $actions);
+
+        $state = $this->source('lib/deploy_form_state.php');
+        self::assertStringContainsString('VIRTUSPHERE_DEPLOY_QUEUE_FIELDS as $field', $state);
+        foreach (['_csrf', 'password', 'secret', 'pfx_password'] as $sensitive) {
+            self::assertStringNotContainsString("draft['{$sensitive}']", $state);
+        }
+
+        $client = $this->source('portal/assets/deploy_blockers.js');
+        self::assertStringContainsString("root.addEventListener('submit'", $client);
+        self::assertStringContainsString("actionField.value === 'open_remedy'", $client);
+        self::assertStringContainsString("actionField.value === 'adopt_vm'", $client);
+        self::assertStringContainsString('appendDraftFields(event.target)', $client);
     }
 }

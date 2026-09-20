@@ -64,6 +64,27 @@ echo 'CLEANED';
 `);
 }
 
+function seedPagination(count) {
+  return phpJson(`
+$db = db();
+$stmt = $db->prepare("INSERT INTO deploy_logs (ip, category, log_message, created_at, updated_at) VALUES (?, 'auth', ?, '2026-09-13 06:00:00', '2026-09-13 06:00:00')");
+$ip = '${IP}';
+$ids = [];
+for ($i = 0; $i < ${Number(count)}; ++$i) {
+    $message = 'e2e keyset fixture ' . $i;
+    $stmt->bind_param('ss', $ip, $message);
+    $stmt->execute();
+    $ids[] = (int) $db->insert_id;
+}
+echo 'JSON' . json_encode(['ids' => $ids]) . 'JSON';
+`);
+}
+
+async function visibleLogIds(page) {
+  return (await page.locator('table').first().locator('tbody tr td:first-child').allTextContents())
+    .map((value) => Number(value));
+}
+
 test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
@@ -171,4 +192,47 @@ test('the deploy job log names its own correlation id', async ({ page }) => {
   await expect(card.locator('code')).toHaveText(TRACE);
   await expect(card.locator(`a[href*="correlation=${TRACE}"]`), 'the id leads to its audit trace').toHaveCount(1);
   await expect(card.locator('.copy-button')).toBeVisible();
+});
+
+test('audit cursor windows survive inserts, reset with filters, and recover stale positions', async ({ page }) => {
+  const { ids } = seedPagination(123);
+  await page.goto(`logs.php?tab=security&category=auth&ip=${IP}`);
+
+  const newestIds = ids.slice(-50).reverse();
+  expect(await visibleLogIds(page)).toEqual(newestIds);
+  await expect(page.getByRole('link', { name: 'Older entries' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Newer entries' })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Older entries' }).click();
+  await expect(page).toHaveURL(/before=\d+/);
+  expect(await visibleLogIds(page)).toEqual(ids.slice(-100, -50).reverse());
+
+  // A concurrent insert must not leak into the previous window when the
+  // operator navigates back. It becomes its own newer window instead.
+  const inserted = seedPagination(3).ids;
+  await page.getByRole('link', { name: 'Newer entries' }).click();
+  expect(await visibleLogIds(page)).toEqual(newestIds);
+  await expect(page.getByRole('link', { name: 'Newer entries' })).toBeVisible();
+  await page.getByRole('link', { name: 'Newer entries' }).click();
+  expect(await visibleLogIds(page)).toEqual(inserted.slice().reverse());
+
+  // The GET form owns only filters. Submitting it cannot carry a cursor from
+  // the current window into a different result set.
+  const filter = page.locator('form[action="logs.php"]');
+  await expect(filter.locator('[name="before"], [name="after"]')).toHaveCount(0);
+  await filter.locator('input[name="q"]').fill('e2e keyset fixture');
+  await filter.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/q=e2e(?:\+|%20)keyset(?:\+|%20)fixture/);
+  expect(page.url()).not.toMatch(/[?&](?:before|after)=/);
+  expect(await visibleLogIds(page)).toEqual(inserted.slice().reverse().concat(newestIds.slice(0, 47)));
+
+  // Retention or deletion can exhaust a saved boundary. The page says so and
+  // offers the preserved filter at its newest position; it never fabricates a
+  // numeric page or silently widens the question.
+  await page.goto(`logs.php?tab=security&category=auth&ip=${IP}&before=${Math.min(...ids)}`);
+  await expect(page.locator('td.table-empty')).toContainText('position is no longer available');
+  const newest = page.getByRole('link', { name: 'Go to newest entries' });
+  await expect(newest).toBeVisible();
+  await expect(newest).toHaveAttribute('href', `logs.php?tab=security&ip=${IP}&category=auth`);
+  await expect(page.locator('.pagination-info')).toHaveCount(0);
 });

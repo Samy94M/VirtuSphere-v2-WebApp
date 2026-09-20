@@ -32,24 +32,29 @@ declare(strict_types=1);
 /** @var string $datacenterInheritLabel */
 /** @var bool $hideVmDatacenter */
 /** @var list<'host_choice'|'buckets'|'never_pulled'> $vmLocationNotes */
+/** @var array<string, array{value:string,source:string,parent:string}> $effectiveValues */
 /** @var array<int, array<string, mixed>> $interfaces */
 /** @var array<int, array<string, mixed>> $disks */
 /** @var string|null $progressWatchKind */
 /** @var array{kind:string,since:string,age_seconds:int,threshold_seconds:int}|null $progressAttention */
 /** @var string $progressWatchSince */
 /** @var bool $showProgressWatch */
+/** @var array<string, string> $workContext */
+/** @var string $vmListUrl */
+/** @var string $missionDetailsUrl */
+/** @var string $vmEditorUrl */
 ?>
 <div class="stack">
     <section class="panel">
         <div class="actions">
-            <a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vm_edit.back_to_vms')); ?></a>
-            <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vm_edit.mission_details')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($vmListUrl); ?>"><?php echo h(__t('vm_edit.back_to_vms')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.mission_details')); ?></a>
             <?php if ($canWrite && $vmId > 0 && !$isTemplate) { ?>
-                <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="reset_mecm_id">
                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-                    <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                    <input type="hidden" name="return_to" value="editor">
                     <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm_editing', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
                 </form>
                 <?php // Only for a VM MECM already knows: before the registration the
@@ -77,18 +82,19 @@ declare(strict_types=1);
                         <?php if ($transferAdds === [] && $transferRemoves === []) { ?>
                             <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_none')); ?></p>
                         <?php } ?>
-                        <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                        <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="action" value="transfer_mecm">
                             <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
                             <input type="hidden" name="assignment_revision" value="<?php echo h($transferState['revision']); ?>">
-                            <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                            <input type="hidden" name="return_to" value="editor">
                             <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_transfer_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_transfer_button')); ?></button>
                         </form>
                     </div>
                 <?php } ?>
             <?php } ?>
         </div>
+        <p class="muted"><?php echo h(__t('vm_edit.context_mission', ['name' => (string) ($mission['mission_name'] ?? '')])); ?></p>
     </section>
 
     <?php if ($showProgressWatch) { ?>
@@ -119,11 +125,11 @@ declare(strict_types=1);
             <?php } ?>
             <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
             <?php if ($canWrite) { ?>
-                <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="restart_progress_watch">
                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-                    <input type="hidden" name="return_to" value="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vmId); ?>">
+                    <input type="hidden" name="return_to" value="editor">
                     <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
                         ? 'vm_edit.progress_confirm_start'
                         : 'vm_edit.progress_confirm_restart')); ?>"><?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
@@ -163,7 +169,7 @@ declare(strict_types=1);
         </div>
     <?php } ?>
 
-    <form class="stack" method="post" action="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?><?php echo $vmId > 0 ? '&vm_id=' . h((string) $vmId) : ''; ?>">
+    <form class="stack" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '') : ''; ?>>
         <?php echo csrf_field(); ?>
         <input type="hidden" name="mission_id" value="<?php echo h((string) $missionId); ?>">
         <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
@@ -221,7 +227,7 @@ declare(strict_types=1);
                             'attributes' => form_control_attrs('vm_edit', 'vm_datacenter', null, false, ''),
                         ]); ?></label>
                     <?php } ?>
-                    <div id="<?php echo h($locationHintId); ?>">
+                    <div class="form-grid-full" id="<?php echo h($locationHintId); ?>">
                         <p class="hint"><span class="hint-subject"><?php echo h(implode(' / ', $locationHintSubject)); ?>:</span> <?php echo h(__t('vm_edit.location_hint')); ?></p>
                         <?php if ($vmLocationNotes !== []) { ?>
                             <?php // Exhaustive match, no default: a new note token has to be
@@ -304,7 +310,7 @@ declare(strict_types=1);
                     </div>
                     <?php if (!$missionAutostartOn) { ?>
                         <p class="hint" id="<?php echo h($autostartHintId); ?>"><span class="hint-subject"><?php echo h(__t('vm_edit.autostart_mission_off_subject')); ?>:</span> <?php echo h(__t('vm_edit.autostart_mission_off')); ?>
-                            <a href="mission_details.php?id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vm_edit.autostart_mission_link')); ?></a>
+                            <a href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.autostart_mission_link')); ?></a>
                         </p>
                     <?php } else { ?>
                         <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('vm_edit.autostart_hint')); ?></p>
@@ -318,6 +324,8 @@ declare(strict_types=1);
                 <?php $creatorValue = $vmId > 0 ? (string) ($vm['vm_creator'] ?? '') : (string) $user['name']; ?>
                 <label><?php echo h(__t('vm_edit.label_creator')); ?><input value="<?php echo h($creatorValue); ?>" placeholder="<?php echo h(__t('common.creator_unknown')); ?>" readonly></label>
             </div>
+
+            <?php portal_render_vm_effective_values($effectiveValues, $mission, $canWrite, $missionDetailsUrl); ?>
 
             <label><?php echo h(__t('vm_edit.label_notes')); ?><textarea name="vm_notes" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo h($vm['vm_notes'] ?? ''); ?></textarea></label>
         </section>
@@ -363,7 +371,7 @@ declare(strict_types=1);
             </div>
         </section>
 
-        <?php if ($canWrite) { ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
+        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
     </form>
 
     <?php render_vm_status_history($statusEvents); ?>

@@ -1,0 +1,241 @@
+# portal implementation reference
+
+Read only the owner sections relevant to the change. These detailed contracts are shared by all agent adapters. Paths refer to the repository or Docker/WebAPI as in the source contract. Commands in the reference identify underlying checks; the public execution entry remains scripts/check.ps1 according to AGENTS.md and docs/QA.md.
+
+## R1 Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF and later RBAC h
+
+Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF and later RBAC helpers. No CDN, no inline handlers, and no feature logic that calls the legacy token API.
+
+## R2 User-visible portal text uses __t('module.key') once lib/lang.php is installed. Add matching DE
+
+- User-visible portal text uses `__t('module.key')` once `lib/lang.php` is installed. Add matching DE/EN keys under `Docker/WebAPI/lang/{de,en}` and run `php scripts/lang-audit.php --ci`.
+
+## R3 If JavaScript needs translated labels, render them as a CSP-nonced JSON island from PHP and rea
+
+- If JavaScript needs translated labels, render them as a CSP-nonced JSON island from PHP and read them with `JSON.parse`; do not add German/English fallback strings in JS.
+
+## R4 POST handlers should preserve sticky form context with form_remember() for validation failures.
+
+- POST handlers should preserve sticky form context with `form_remember()` for validation failures. Do not discard field errors by replacing them with a generic flash.
+
+## R5 Control, hint and field-error IDs are generated only by lib/forms.php. Use form_control_attrs()
+
+- Control, hint and field-error IDs are generated only by `lib/forms.php`. Use `form_control_attrs()` for the control or a real `fieldset`/`role="group"`, `form_hint_id()` for the rendered explanation and `form_error_html()` for its error. Do not hand-write `aria-invalid`, `aria-describedby` or a `.field-error`; the helper has to combine hint and error without dropping either. A repeated row passes its row scope, and an HTML template keeps the same `__INDEX__` in names and IDs until one monotonic replacement fills both. A dynamic hint is added to `aria-describedby` exactly while it is visible.
+
+## R6 form_remember() covers one of the paths a form re-renders on, not all of them. The deploy queue
+
+- `form_remember()` covers one of the paths a form re-renders on, not all of them. The deploy queue form also re-renders on the schedule preview (a POST answered directly) and on a mission change (a GET, because the VM list, the storage table and the host warnings are server-side and per mission), and both used to reset every field to its default: a mission change carried only `mission_id`, and the preview render read a stash that path never writes, which also re-checked every VM while the preview above listed the chosen subset. `lib/deploy_form_state.php` chooses **one** source per render and `deploy_form_value()`/`deploy_form_vm_selection()` read it; the VM selection deliberately does not survive a mission change, because those checkboxes named another mission's rows. A navigating control carries its form by reading the live controls (`form.elements`, not `FormData`, which drops a disabled-but-filled field), never a hardcoded field list. `VIRTUSPHERE_DEPLOY_QUEUE_FIELDS` is the list the preview's confirm step re-posts, pinned against the form's real controls in both directions by `tests/Static/DeployFormStateContractTest.php`.
+
+## R7 A picker whose options are a union over several inventory sources groups by *risk*, not by orig
+
+- A picker whose options are a union over several inventory sources groups by *risk*, not by origin. An `<optgroup>` per credential answered "who reported this"; the operator's question at the field is "does this value survive the host choice I make later", and on a mixed fleet the two answers differ. `esxi_inventory_presence_buckets()` (`lib/esxi_inventory_options.php`) puts each name in exactly one of three buckets (on every credential, on some, on one), so a name shared by four hosts cannot appear four times and cannot carry `selected` four times, which the browser resolves silently by keeping the last. The denominator is the credentials with a successful pull, never the number of groups: a host that pulled and holds nothing produces no group, and counting groups promotes a foreign value to "everywhere". Keep the presentation split from the decision: `exact` alone preselects a lone value and hides a field, and a group label names both the credential's name and its address, because a fleet called `esxi1`..`esxi6` maps to no machine otherwise. Pinned by `tests/Unit/EsxiInventoryPresenceBucketsTest.php` and `tests/Unit/InventorySelectFieldTest.php`.
+
+## R8 Portal flash and HTML errors should use ValidationException for field messages and portal_error
+
+- Portal flash and HTML errors should use `ValidationException` for field messages and `portal_error_message()` for general exception mapping. Avoid raw generic `$exception->getMessage()` in user-facing output.
+
+## R9 Button/link visibility must use the same permission as the POST/action handler. Do not hand-rol
+
+- Button/link visibility must use the same permission as the POST/action handler. Do not hand-roll role checks.
+
+## R10 Deploy-job log reads use the three repository cursor helpers: newest initial tail, forward afte
+
+- Deploy-job log reads use the three repository cursor helpers: newest initial tail, forward `after_seq`, and older `before_seq`. A terminal status does not stop polling until `caught_up`; raw export streams bounded batches under the same `deploy.run` permission. The browser window must stay bounded and must say when loading history pauses live updates.
+- Drill-down return state for mission/template and VM lists is normalized by `portal_work_context()` and remains in the current URL. The six allowed scalars are list type, mission sort/direction, attention-only, and VM sort/direction. Do not store this navigation context globally or in the session and do not accept a path, host or free `return_to`; two tabs must remain independent. Build destinations with `mission_details_url()`, `portal_work_context_vm_list_url()` and `vm_edit_url()`. List rows own stable `mission-<id>`/`vm-<id>` fragments: native fragment navigation is the no-JavaScript baseline and `core.js` adds focus only when the row exists. A delete returns without the removed fragment. Context is display-only; every destination performs its normal authentication, permission and object lookup.
+
+## R11 A message that names a prerequisite, an instruction or another page carries the link to it. dep
+
+- A message that names a prerequisite, an instruction or another page carries the link to it. `deploy_queue_blockers()` is the one complete queue decision for the normalized form state; render, live JSON, preview and the immediate pre-write check all consume that list. Derive the disabled state, count, singular/plural text and jump target from it instead of rebuilding a subset. The live client serializes `form.elements`, including disabled-but-filled controls, debounces, aborts/stale-drops concurrent answers, checks the JSON content type and stops on `401`/`403`; the server remains authoritative without JavaScript. Structured blocker actions are gated on the target permission while the explanation remains visible. Build settings links with `settings_url()` (`lib/settings_page.php`) and help links with `help_url()` (`lib/help_page.php`), never by hand; both registries are checked against rendered panel/section ids in both directions. The label names the destination as the portal names it, never the foreign system it configures, and the sentence drops its own pointer once the link carries it.
+
+## R12 A badge over a timestamp reads as "last poll", because that is what it is everywhere else. Rend
+
+- A badge over a timestamp reads as "last poll", because that is what it is everywhere else. Render that shape only for a value something actually refreshes, or say in the row that nothing does (`credential_cadence_esxi()` / `credential_cadence_ansible()`). Enumerate every branch that stops the refresh, not just the happy one, and answer with the one the operator has to fix *first*; naming a per-credential pause while the global interval is 0 promises that un-pausing restores the cycle. Do not restate those branches in the display: the scheduler and the line must read the same predicate (`esxi_inventory_automation_blocker()`, SSoT `VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS`), or a blocker added to the worker alone leaves the row promising a cycle that no longer runs, which is the same defect one level up. Map the predicate's answer to a sentence with an exhaustive `match` and no default, and walk the constant in a test, so a new blocker breaks the build rather than the page. A result nothing refreshes must also age out of its own colour rather than staying green next to a months-old date, and only a *passing* result ages: greying out a known failure hides it (`ansible_preflight_ampel()`, `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS`).
+
+## R13 A visible disk provisioning type goes through disk_type_label() (lib/defaults.php), never the s
+
+- A visible disk provisioning type goes through `disk_type_label()` (`lib/defaults.php`), never the stored token: `thin`, `thick` and `eagerzeroedthick` are the wire values `vmware_guest` expects, and two of them read the same to anyone without VMware background. The help's storage-demand paragraph interpolated the constant directly and printed `eagerzeroedthick` in a sentence while every other place said "Eager Zeroed Thick"; `DiskTypeLabelTest` now walks the `__t()` calls of every help, form and portal renderer for that. The text says when the work happens (on demand, at first write, up front), never a fixed speed ranking, and never that the array realized what was requested: nothing reads that back.
+
+## R14 Render status/label badges with portal_badge($variant, $label) (lib/layout.php); it escapes bot
+
+- Render status/label badges with `portal_badge($variant, $label)` (`lib/layout.php`); it escapes both. Do not hand-write `<span class="badge badge-*">`. A badge needing an extra attribute (`title`, live `data-deploy-status`) stays literal.
+
+## R15 Open a POST handler with portal_guard_post($connection, $user) instead of an inline csrf_verify
+
+- Open a POST handler with `portal_guard_post($connection, $user)` instead of an inline `csrf_verify()`; it runs the CSRF check and names the page in the audit. Keep the per-action permission gate local. `login.php`/`logout.php`/`session_ping.php` are the exempt exceptions. Enforced by `tests/Static/PortalPostGuardContractTest.php`.
+
+## R16 The catalog status filter (os.php, packages.php, vlans.php) reads its tokens from VIRTUSPHERE_C
+
+- The catalog status filter (`os.php`, `packages.php`, `vlans.php`) reads its tokens from `VIRTUSPHERE_CATALOG_FILTERS`; render the shared `<select>` with `portal_catalog_status_filter()`, building the labels from static `__t()` literals at the call site. Enforced by `tests/Static/CatalogFilterContractTest.php`.
+
+## R17 A page-specific helper (parsers, row/panel renderers, a POST dispatcher) lives in a lib/<page>_
+
+- A page-specific helper (parsers, row/panel renderers, a POST dispatcher) lives in a `lib/<page>_*.php` module the page requires, keeping the page under the 400-line lint budget (ADR-0006), e.g. `lib/vm_edit_form.php`, `lib/system_status_page.php`, `lib/deploy_storage.php`. A large tabbed page may own focused renderers under `lib/<page>/`, as `settings.php` does. `__t()`/`h()` and the layout/badge helpers come from the portal bootstrap the page already loaded. The helper module is subject to the same budget; split it by data source rather than by size. A contract test that scans a renderer must glob both the page's direct modules and nested owner directory, never list one: `PortalActionInventory`, `PortalConfirmNamingContractTest` and `PhaseCContractTest` each named a single file, so a split once took moved forms out of confirm and post-guard contracts. The same rule decides which files a guard's NEGATIVE assertions cover: `FormAccessibilityContractTest` walked fifteen named paths, so the mission import preview kept two hand-written `.field-error` spans on a control with no id, no `aria-invalid` and no `aria-describedby` for five weeks. A named list may say what must stay migrated; what must never appear is asked of every renderer the glob finds, and membership in that named list is derived from the file's own use of `form_error_html()`/`form_error_id()`.
+
+## R18 Every action a portal form can POST must either carry data-confirm="<__t() question>" on its su
+
+- Every action a portal form can POST must either carry `data-confirm="<__t() question>"` on its submit button, or be listed in `SAFE_ACTIONS` in `tests/Static/PortalConfirmContractTest.php` with the reason it cannot lose anything. A new action fails the build until you decide which it is. That attribute is the only markup contract: the shared `<dialog class="modal modal-confirm">` in `lib/layout_modals.php`, rendered once by `layout_footer()`, plus its handler in `assets/core.js` render every confirmation (ADR-0013). Never call `window.confirm()`/`alert()`, and never build a second modal.
+
+## R19 Confirm on the destructive *branch*, not the button. A toggle asks before deactivating, not bef
+
+- Confirm on the destructive *branch*, not the button. A toggle asks before deactivating, not before activating; a generator asks only when it overwrites. Omit the attribute in the harmless branch; do not render `data-confirm=""`, because the selector matches a blank value.
+
+## R20 The confirmation is UX only. Keep can(), CSRF and validation in the POST handler; without JS th
+
+- The confirmation is UX only. Keep `can()`, CSRF and validation in the POST handler; without JS the request goes straight through. Name the target in the question (`:name`) so a row action cannot be confirmed for the wrong row. Every confirm message must be classified in `tests/Static/PortalConfirmNamingContractTest.php`: a row action goes in `ROW_ACTIONS` and carries `:name` in both catalogs, anything without a single target goes in `NO_TARGET` with its reason (a bulk action names a selection, not a row; a global switch has no row; a form whose target field is an *editable input* must stay generic, because a name rendered server-side would state a value the operator may have changed since). A new confirm fails the build until you decide which it is. The name is user input, so it reaches the dialog through `textContent`, never as markup.
+
+## R21 .button-danger selects the dialog's danger variant, so use it when the action destroys data. Co
+
+- `.button-danger` selects the dialog's danger variant, so use it when the action destroys data. Confirmation and danger fill are independent: an overwriting create confirms without the red fill.
+
+## R22 Add data-confirm-action="<__t() label>" only when the trigger's own label would collide with th
+
+- Add `data-confirm-action="<__t() label>"` only when the trigger's own label would collide with the dialog's dismiss button (a deploy job's "Abbrechen").
+
+## R23 Which stylesheets the portal loads, and in which order, is decided once in layout_app_styles()
+
+- Which stylesheets the portal loads, and in which order, is decided once in `layout_app_styles()` (`lib/layout.php`), used by the portal shell AND by `login.php`. The ORDER is the contract: equally specific rules are resolved by position, so the file order IS that position, `status.css` stays last, and the four domain sheets (`panels`, `tables`, `controls`, `feedback`) sit in the sequence their split was verified in. Never add a `<link rel="stylesheet">` beside the registry, never `@import` from a sheet (it bypasses the cache-busting version query, the registry and the air-gap), and never reintroduce a single component monolith. `PortalStyleRegistryContractTest` fails on a sheet that exists but is not loaded, on a registered sheet that does not exist, on a hand-written link and on a returning `components.css`. A CSS guard scans `CssRules::stylesheets()`, never one filename: two guards named `components.css` and would have gone quiet the moment their rules moved one file over.
+
+## R24 base.css is the only stylesheet allowed to NAME a colour; every other one asks for it with var(
+
+- `base.css` is the only stylesheet allowed to NAME a colour; every other one asks for it with `var(--token)`. That covers gradients, shadows, `var()` fallbacks, nested functions and data URLs, and `color-mix()` may only mix tokens. `transparent`, `currentColor` and the CSS-wide keywords are free. System colours (`Canvas`, `ButtonFace`, `Highlight`, ...) are allowed ONLY inside `@media (forced-colors: active)` and only in matching pairs, because forbidding them there would be the accessibility defect rather than a safeguard: in that mode the user agent owns the palette, and a system background without its paired foreground is how high contrast turns unreadable. `CssColorTokenContractTest` parses the sheets for this and reports stable ids (`color.hex`, `color.function`, `color.named`, `color.system-outside-forced-colors`, `color.system-unpaired`, `color.data-uri`).
+
+## R25 Where modal content sits is decided once in feedback.css, by .modal[open], .modal-box, .modal-m
+
+- Where modal content sits is decided once in `feedback.css`, by `.modal[open]`, `.modal-box`, `.modal-msg` and `.modal-actions`; `tests/Static/ModalAxisContractTest.php` pins it. Never align a message per dialog. `.modal-msg` derives alignment from the text length: `width: fit-content` plus auto inline margins recentre a one-line message, a wrapping one keeps its left edge. Its `overflow-wrap: anywhere` is load-bearing rather than cosmetic, because `:name` is user input and a clipped name defeats the naming rule above.
+
+## R26 __t() substitutes placeholders but does not pluralize. Pick the sentence by count (confirm_dele
+
+- `__t()` substitutes placeholders but does not pluralize. Pick the sentence by count (`confirm_delete_unused` / `_one` / `_many`) instead of writing "VM(s)".
+
+## R27 The two tabbed pages carry their tab differently, and both fall back to the *first* tab when it
+
+- The two tabbed pages carry their tab differently, and both fall back to the *first* tab when it is missing. `settings.php` keeps it in the fragment, `logs.php` in the query string; neither restores it on its own.
+
+## R28 On settings.php every POST redirect carries the fragment of the tab its form lives in (settings
+
+- On `settings.php` every POST redirect carries the fragment of the tab its form lives in (`settings.php#panel-<tab>`); `initTabs` in `assets/core.js` restores the tab from `location.hash`. The `$actionTabs` map next to the action dispatch is the SSoT, pinned both ways by `tests/Static/SettingsTabRedirectContractTest.php`. Without the anchor the redirect falls back to the first tab: sticky field errors render in a hidden panel and the one-time report token can go unseen.
+
+## R29 logs.php takes its tab from ?tab=<tab> and scopes the category filter to that tab, so a deep li
+
+- `logs.php` takes its tab from `?tab=<tab>` and scopes the category filter to that tab, so a deep link must name both. Build it with `log_category_url()` (`lib/repo/log.php`), which looks the tab up in `VIRTUSPHERE_LOG_TABS` rather than hardcoding it, so the link follows a category that later moves tabs. A hand-written `logs.php?category=mecm` lands on the default `security` tab, which does not contain `mecm`, so the filter is dropped without an error: the operator chasing a failed MECM sync reads sign-in rows instead. `tests/Static/LogDeepLinkContractTest.php` rejects a hand-written link, `LogTaxonomyTest` re-runs the page's own tab/category check against every URL the builder emits.- `system_status.php` is the third page a link reaches by fragment, and the quietest: a fragment naming a section it does not render is not an error, the browser simply stays at the top, so a message that just named a thing leads to a page not showing it. Build every one with `system_status_url()` (`lib/system_status.php`), never by hand; the named anchors are the `VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_*` constants, walked against the ids the `lib/system_status*.php` renderers emit by `tests/Static/SystemStatusDeepLinkContractTest.php`, which also rejects a hand-written `system_status.php#` outside the builder. `reassign` and the per-row `credential-<id>` stay outside that walk on purpose: one is a details element, the other is generated per row.
+
+## R30 Two links side by side, separated only by a space, read as one long link, and a place that has
+
+- Two links side by side, separated only by a space, read as one long link, and a place that has always shown at most one of them will grow a second without anyone noticing. Put the follow-ups of an alert in the shared `.alert-actions` row and separate them (the middle dot the status renderers already use for adjacent facts); a lone follow-up gets no separator, because it would then sit at the start of the row with nothing on its left. Neither a catalog walk nor a render walk finds this: the markup is already correct while the defect is there, so the assertion is the geometry, in a browser (`system-status.spec.js` requires a real horizontal gap between the two bounding boxes).
+
+## R31 A list export and the table above it must be ONE query, not two derivations of the same query s
+
+- A list export and the table above it must be ONE query, not two derivations of the same query string. `lib/log_filter.php` builds the validated filter struct once per request and `log_filter_repo_args()` produces the exact repository arguments; the table, its count and `lib/logs_export.php` all read that. A download is evidence, and evidence that quietly answers a slightly different question than the screen it was started from is worse than no download. The match count is established BEFORE the first row streams, because once output has begun no header can be added and no decision revised, and "was this capped" has to be known while it is still answerable. A cap is announced or it is a lie: the page says "the first N of M" before the download starts and the response carries `X-VirtuSphere-Total-Rows`, `-Export-Limit` and `-Truncated`. The file itself gets no note row, because a comment line contradicts the CSV's own header and every RFC 4180 reader parses it as a record. Exactly `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` matches is NOT truncated: every matching row is in the file, and saying otherwise sends an operator hunting for rows already in front of them. The cap is a diagnostic limit, never an authorization boundary; `users.manage` already decided this reader may see all of it.
+
+## R32 An export writes exactly one audit row, after its rows were read (so the file cannot contain it
+
+- An export writes exactly one audit row, after its rows were read (so the file cannot contain its own audit line) and before the stream starts (so a failing insert is an error page, not a corrupt file). Its context describes the EXPORT, never the filter's contents: counts, the limit, the truncation flag and a keyed fingerprint. `log_filter_fingerprint()` is an HMAC over the canonical filter with `envboot_app_key_bytes()`, not a bare digest: a handful of tabs, fourteen categories, a 32-bit IP space and a person's name are low-entropy enough that an unkeyed hash is a lookup table, and a row that promised to keep the search term out of the log would hand it to anyone who can read the row.
+
+## R33 portal_csv_guard() compares whole leading CHARACTERS, not bytes. Beyond =, +, -, @, TAB and CR
+
+- `portal_csv_guard()` compares whole leading CHARACTERS, not bytes. Beyond `=`, `+`, `-`, `@`, TAB and CR it neutralises LF and the full-width forms `＝＋－＠`: several importers and autocorrecting locales fold those onto their ASCII equivalents, so an ASCII-only guard sees CJK punctuation and passes a formula through. A byte comparison would both miss them and test a continuation byte on any value starting with another multibyte character, which would put a stray quote in front of a mission name beginning with an umlaut.
+
+## R34 A technical value stays raw everywhere it is stored or transported; only what a person reads pa
+
+- A technical value stays raw everywhere it is stored or transported; only what a person reads passes through a label helper. `lib/portal_status_display.php` owns the lifecycle and MECM axes, `lib/deploy_display.php` the job status, the deploy modes and the visible payload summary, and both read the shared `lang/{de,en}/status.php` catalog. The badge VARIANT keeps coming from the meta SSoT in `lib/status.php`, so colour and wording cannot drift apart; an unknown value gets a neutral localized sentence and NEVER its raw token, which is how `os_installing` reached an operator. Rendering an unknown value writes no `error_log`: a page renders many rows, and the drift is caught by `PortalStatusDisplayTest`'s constant walk at build time instead. `deploy_job_payload_summary()` stays the technical summary the retained job log keeps; `deploy_job_payload_display()` is its portal twin.
+
+## R35 A JSON poller resolves identity, permission and locale, then calls session_write_close() BEFORE
+
+- A JSON poller resolves identity, permission and locale, then calls `session_write_close()` BEFORE its first query. PHP holds the session lock for the whole request, and a two-second poll that drains without pause while `has_more` is set makes every other page of that session queue behind one open job log.
+
+## R36 A live view follows only while the reader is already at the end, which makes where it PUTS them
+
+- A live view follows only while the reader is already at the end, which makes where it PUTS them on the first render part of the same rule: the initial tail is the newest window, but its first row is its oldest line, so a view that opens there has a following reader who is not at the bottom, counts every batch as unseen and never moves. That is a live mode that is broken rather than paused, and no source-text contract can see it, because every follow line is present and correct; `deploy_log.js` therefore ends by scrolling a following reader to the end, `DeployJobLogReadContractTest` pins that shape and `deploy-log.spec.js` measures the geometry. The bottom test uses `VIRTUSPHERE_DEPLOY_LOG_BOTTOM_TOLERANCE_PX` rather than an equality: `scrollTop` is fractional while `scrollHeight` and `clientHeight` are rounded, so following would pause itself at the actual bottom on a scaled display. Scrolling up pauses following and shows how many lines were missed; only a deliberate return clears that counter. A background tab stops polling and comes back with exactly one catch-up, never with the polls it missed. A batch is appended in ONE DOM mutation.
+
+## R37 A log region is role="log" with aria-live="off" and a separate throttled role="status" summary.
+
+- A log region is `role="log"` with `aria-live="off"` and a separate throttled `role="status"` summary. An Ansible run emits thousands of lines, and a polite live region would queue every one of them and read log output for minutes; the role stays for navigation, the summarising sentence does the speaking.
+
+## R38 A filtered log view has no cursor and no follow. Handing the poller an after_seq that came from
+
+- A filtered log view has no cursor and no follow. Handing the poller an `after_seq` that came from a filtered read is what lets a follow mark unseen full-log lines as read, so the filtered page reports itself as caught up with nothing older, says in the page that it shows matches rather than the sequence, and leaves the raw download complete. Phases come from the step markers through `deploy_log_phase_timeline()` alone (`AnsibleCommandModuleContractTest` pins exactly one consumer) and render as their own block above the output, never as heading rows inside a bounded window that would outlive the lines they introduce.
+
+## R39 The deploy service has ONE snapshot, deploy_service_health_snapshot(), read by the dashboard, t
+
+- The deploy service has ONE snapshot, `deploy_service_health_snapshot()`, read by the dashboard, the deploy page, System status and the anonymous health endpoint. Its three axes are independent and all three are shown in every detail view: a compact badge is a summary and must not be the only place a fact appears, because `busy + pause_after_current` and `offline + manual_review` are both real. A claim pause, a job scheduled for later and a purely historical failure never make the service degraded. The claim axis is a persisted CAS on the runtime row and its gate sits INSIDE `repo_claim_next_deploy_job()`, not in the worker loop; the worker converts `pause_after_current` to `paused` in the same transaction as its terminal write, so a resume issued during that job wins. Every service action is database-only, carries `system.config`, CSRF, a confirm classification and one audit row, and none of them reaches the Ansible host.
+
+## R40 A finding list is shortened in exactly one place, lib/deploy_preflight_bounds.php, and only for
+
+- A finding list is shortened in exactly one place, `lib/deploy_preflight_bounds.php`, and only for a render or a stored document. The decision stays complete: `deploy_queue_blockers()` returns the whole union for the whole scope, and the disabled state, the count and the jump target still come from that. A bounded list carries the complete `total` plus what it left out, a candidate group adds `candidate_total`/`candidate_omitted_count`, and the numbers describe what EXISTS, never what was printed. Selection runs on the canonical total order in `vm_network_compare_findings()`, which ends in binary comparisons of the exact stored bytes, because a case tie between two ESXi names is where a folded comparison stops deciding and the server render, the live island and the stored result would each keep a different subset. An island over `VIRTUSPHERE_DEPLOY_PREFLIGHT_JSON_MAX_BYTES` drops entries from the END of that order and sets `truncated_by_bytes`; anything derived inside the payload, including the localized "N more" sentence, is computed inside the capping loop so it cannot name a number the response no longer matches. The server render and the browser both paint at most `VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT` entries and take that sentence from the response, because a translated string is never assembled in JS. The stored worker result is bounded the same way and never refused: throwing on size there ends the job as `execution_failed`, which asserts that a playbook ran when the verdict's whole point is that none did.
+
+## R41 A set of links that switches between ADDRESSES is page navigation, not an ARIA tab widget. role
+
+- A set of links that switches between ADDRESSES is page navigation, not an ARIA tab widget. `role="tab"` promises a panel swapped in place, arrow-key movement and a single tab stop, none of which a navigation has, so it stays out of the portal; `portal_page_nav()` (`lib/layout_presenters.php`) is the one implementation and marks exactly one entry with `aria-current="page"`, because two would say the reader is in two places and none would leave the set unanchored. `help.php` and `settings.php` are the real widgets and are named as the exception. The mission pairs live in `lib/mission_nav.php` so the two halves of a pair cannot drift apart. `PortalPageNavContractTest` scans the sources with their comments STRIPPED: every rule there is one a comment has a reason to name, and a guard that matches the explanation of a rule as a violation of it teaches people to stop writing the explanation.
+
+## R42 A pinned table column is opt-in and stays that way. Only the VM list carries .table-sticky-acti
+
+- A pinned table column is opt-in and stays that way. Only the VM list carries `.table-sticky-actions`/`.table-action-cell`, because only it is wide enough that the row actions leave the viewport while the row is still the one the operator means; `users.php` is exempt by decision, not by accident. The cell must paint an opaque background (it slides over its neighbours), repeat the row hover tint, clear the sticky header's z-index in both directions (body cell above the data cells, header cell above both), and be released below the wrap breakpoint, where a pinned column would hold a third of the viewport. Source scans cannot see any of that: `table-navigation.spec.js` measures it.
+
+## R43 An empty table means one of two opposite things and the page must not decide it inline. A catal
+
+- An empty table means one of two opposite things and the page must not decide it inline. A catalog its source has not filled yet points at MECM or ESXi and offers nothing to click; a filter that matched nothing points at a link on this page. `portal_catalog_empty_state()` answers both and carries the current sort through the way out, because dropping it re-sorts the table under a reader who only asked to see more rows. Under `status=all` no way out is offered, since it would lead to the same empty table. The status filter itself is `portal_catalog_status_filter()` on all three catalogs; walking `VIRTUSPHERE_CATALOG_FILTERS` to build a second control is what `CatalogFilterContractTest` now forbids.
+
+## R44 The audit log filter is one validated struct (lib/log_filter.php) and the repository takes it W
+
+- The audit log filter is one validated struct (`lib/log_filter.php`) and the repository takes it WHOLE. The tab and category fall back so a stale bookmark still shows rows; everything an operator types is refused instead, stays visible with a field error, and makes `log_filter_is_usable()` false, which stops the count, the table and the export from querying at all. Answering a wider question while the field still shows the value the operator believes is filtering is the one outcome worse than an error. A local day range is `[from 00:00, day after to 00:00)` in the portal timezone and the day after is `+1 day`, never `+86400`: the two DST days are 23 and 25 hours long. Event code, object type and result are validated against the audit registry (`lib/log_filter_vocabulary.php`, derived, never a second list); an over-long object id is refused, never truncated. Switching tabs and resetting both land on `log_filter_empty()`, because a filter chosen in one section matches nothing in another while still looking active. Every value the picker OFFERS carries a localized name plus its raw token (`logs_filter_vocabulary_label()`, keys `logs.eventcode_*`/`logs.objecttype_*`, walked against the registry in both directions by `LogFilterVocabularyLabelTest`). The identifier alone was unreadable, because no other surface shows it: not the audit table, not the CSV. It was also unreviewable, because a leaf whose whole text is `directory.bind_rejected` is byte for byte an untranslated `__t()` key, which is what `health-matrix.spec.js` reported it as. The token stays beside the name because a runbook, an ADR and `?event=` all name the code.
+
+## R45 The correlation id is rendered by exactly one presenter (portal_correlation_id(), lib/correlati
+
+- The correlation id is rendered by exactly one presenter (`portal_correlation_id()`, `lib/correlation_display.php`) in the audit table, the job log header and the CSV export, because its whole purpose is that a reader carries it from one to the next. The value stays selectable text and the copy button is an accelerator: a plain-HTTP LAN portal has no `navigator.clipboard` at all, so the failure is a normal branch with its own announced message, not a silent catch. The search is exact only (`virtusphere_correlation_id_is_valid()`); a substring match turns a diagnostic identity into free text. `log_filter_correlation_url()` drops every other filter, and inside a trace the id stops linking to itself. Beside an exact search the jobs of that request are listed with the two permissions separate: `users.manage` owns the row, `deploy.run` owns only the log link. The list is bounded, says when it cut, orders by job id alone (a staggered batch is written inside one second), and states the retention asymmetry, or an empty list reads as "this request enqueued nothing".
+
+## R46 Asset identity is the SHA-256 of the served bytes, never filemtime.
+
+- Every registry URL goes through `layout_asset_url()` and carries the complete
+  content digest. This lets nginx mark that URL immutable even when an offline
+  extraction preserves timestamps. A non-digest version never gets the long
+  cache policy. `/portal/assets/` is an explicit nginx location in both HTTP
+  and generated HTTPS: absent files are visible 404 responses rather than PHP
+  fallbacks, CSS/JavaScript are gzip-compressed, and dynamic/authenticated
+  routes remain outside the asset cache policy.
+
+## R47 Page-specific asset selection stays closed and order-preserving.
+
+- Add a rendered portal entrypoint to `VIRTUSPHERE_LAYOUT_PAGES` and classify
+  every non-common stylesheet/script in the two layout registries. Do not add a
+  page-local `<link>` or `<script>`. Selection removes entries from the global
+  order; it never reorders the survivors. `status.css` currently has exactly
+  two page consumers: System status owns its domain rules, while Deploy log
+  deliberately shares the fact-grid and technical-detail selectors. A new
+  feature hook and its module are classified together and held by
+  `PortalPageAssetSelectionTest` plus the browser action suite.
+
+## R48 Audit-log navigation uses id keysets, not numeric pages.
+
+- `log_cursor_from_query()` accepts exactly one positive decimal `before` or
+  `after` id. Invalid values never clamp or fall through to a wider/newest
+  query: the page shows a recovery route to the newest matching window.
+  `repo_log_page()` fetches one 51-row look-ahead window and always renders the
+  selected 50 rows in global `id DESC` order. An `after` traversal reads the
+  nearest newer rows ascending and reverses only that bounded result, so a
+  concurrent insert does not move the operator's previous window. Tab and
+  filter URLs omit cursors. Retention/deletion may exhaust a cursor; that is an
+  explicit state, never a fabricated page number. CSV export ignores the table
+  cursor and preserves its own `_max_id`/`_before_id` bounded snapshot.
+
+## R49 Unsaved-change state belongs to the open editor, not to persistence
+
+- `form_unsaved_attrs()` is the only server-side opt-in. Its key pairs the rendered editor with the same form in a read-only GET response after a failed POST; it does not identify a draft and must never be used as authorization or a save token. `form_unsaved_status_html()` renders the initially hidden, localized status next to the form action.
+- `assets/unsaved_changes.js` serializes only visible, named, enabled-or-disabled user controls into a deterministic in-memory snapshot. Hidden and button controls do not participate; password and file fields expose only whether they are empty. A reset, a dynamically added/removed row and a value change all recompute the same snapshot. An uncertain restored baseline remains dirty.
+- The module does not create a dialog or call `window.confirm()`. It asks `assets/core.js` for the existing layout dialog with `virtusphere:confirm-request` and receives one requester-bound result. Leaving links and other forms are replayed only after acceptance; the editor's own submit proceeds normally and does not falsely become clean. Native `beforeunload` covers browser-owned navigation that a custom dialog cannot safely suspend. Without JavaScript all forms and links retain their server-rendered behavior.
+
+## R50 Effective intended values have a closed source, not a guessed fallback
+
+- `portal_vm_effective_location()` calls the same functions that populate the Ansible serverlist. Non-empty VM value is `vm_override`, otherwise a non-empty mission value is `mission`. Datacenter alone may then be `target_host`, because the selected ESXi credential can provide its sole confirmed name at deploy time; Datastore has no such fallback and is `unavailable`. The editor does not invent `ha-datacenter`, and every sentence calls the result an intended value rather than observed ESXi state.
+- Autostart enablement comes from `ansible_vm_autostart()`: a disabled mission produces effective “No” while preserving and naming the VM preference. A blank/`-1` VM delay displays the normalized mission delay; numeric zero is an explicit VM override and must not collapse into blank. The server descriptor remains complete without JavaScript.
+- Live projection receives localized templates, the parent value and the control name in rendered data attributes. It may select among these declared variants but may not reproduce deploy defaults, inventory resolution or persistence. A reset button is absent without write authority, hidden without JavaScript and clears only Datastore, Datacenter or delay controls; it never targets the gated autostart boolean and never saves.
+
+## R51 One-shot action outcomes reuse the structured flash presenter
+
+- `flash_set()`/`flash_alert_html()` remain the shared result surface: escaped localized text, optional bounded technical detail and at most one normalized relative action. Deploy action handlers pass only IDs and counts returned by their existing repository owners. Job links use `deploy_job_log_url()`; a group link uses `deploy_mission_url()` plus the fixed `#deploy-jobs` fragment. No caller stores a second result state or infers worker/remote success from a successful POST.
+- `portal/vms.php` computes bulk display scope from the validated unique submitted IDs and the repository's `done`/closed `skipped` result. One or more skips select `warning`; zero skips select `success`. The message separates portal deletion, MECM re-queue and external effects, and the reset follow-up uses `system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)`. The help section `help-action-outcomes` owns the longer queue/cancel/retry/bulk explanation.
+
+## R52 Copy controls read the value the operator can currently see
+
+- `portal_copy_value()` emits selectable escaped text and the shared accelerator only for a non-empty static value. `portal_copy_input_button()` emits no cached field value: its `data-copy-source` points to the ID from `form_element_id()`/`form_control_attrs()`, and the delegated handler reads `.value` at activation time. Exact Unicode and punctuation are passed to `navigator.clipboard.writeText()` without trimming or concatenating the visible label.
+- Source-backed buttons are synchronized on input and after change handlers. Empty sources remain hidden; `data-copy-source-enabled` additionally reads the row's declared `data-mode-select` token and the source's disabled state, so DHCP cannot expose an inactive address even in a read-only legacy row. Repeat-row buttons carry a localized `:number` label template which the existing network-row owner updates with the row position.
+- The button is an optional accelerator. It neither submits a surrounding form nor moves focus, and failure is an explicit localized status rather than a caught success. With no JavaScript or Clipboard API, the static text/input remains selectable. `help-copying-values` in the Overview help owns this fallback explanation once.

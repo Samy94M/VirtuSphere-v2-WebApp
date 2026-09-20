@@ -172,11 +172,11 @@ final class CredentialStatusCadenceTest extends TestCase
         );
     }
 
-    public function testAnsibleSaysOnClickAndNamesTheExpiryWindow(): void
+    public function testAnsibleNamesTheDefaultScheduleAndExpiryWindow(): void
     {
         $text = credential_cadence_ansible();
         self::assertSame(
-            __t('credentials.cadence_manual', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]),
+            __t('ansible_test.cadence', ['hours' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]),
             $text
         );
         self::assertStringContainsString((string) VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS, $text);
@@ -193,6 +193,7 @@ final class CredentialStatusCadenceTest extends TestCase
                 credential_cadence_esxi(self::HOURS, $this->esxiState(), false),
                 credential_cadence_esxi(self::HOURS, $this->esxiState(['paused_until_credential_change' => 1]), true),
                 credential_cadence_ansible(),
+                credential_cadence_ansible(0),
             ];
             foreach ($texts as $text) {
                 // A missing key returns the key itself, and an unpassed

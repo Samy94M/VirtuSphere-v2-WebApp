@@ -40,7 +40,7 @@ function render_vm_ram_field(?array $vm, bool $canWrite, array $fieldErrors): vo
         $error = __t('vm_edit.ram_invalid');
     }
     ?>
-    <div role="group"<?php echo form_control_attrs('vm_edit', 'ram_group', null, true, ''); ?>>
+    <div class="ram-control-group" role="group"<?php echo form_control_attrs('vm_edit', 'ram_group', null, true, ''); ?>>
         <label for="<?php echo h(form_element_id('vm_edit', 'vm_ram')); ?>"><?php echo h(__t('vm_edit.label_ram')); ?></label>
         <div class="compound-field ram-field" data-ram-field data-ram-factors="<?php echo h(json_encode(VIRTUSPHERE_RAM_INPUT_FACTORS_MB, JSON_THROW_ON_ERROR)); ?>" data-ram-min="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['ram_mb_min']); ?>" data-ram-max="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['ram_mb_max']); ?>" data-ram-invalid="<?php echo h(__t('vm_edit.ram_invalid')); ?>" data-ram-rounded="<?php echo h(__t('vm_edit.ram_rounded')); ?>" data-ram-preview="<?php echo h(__t('vm_edit.ram_preview')); ?>">
             <input name="vm_ram" type="text" inputmode="decimal" maxlength="16" required data-ram-value<?php echo form_control_attrs('vm_edit', 'vm_ram', null, false, $error); ?> value="<?php echo h($state['value']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>>

@@ -56,7 +56,7 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
     <nav class="status-overview" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
         <?php foreach ($cards as [$anchor, $label, $state, $kind]) { ?>
             <a class="status-overview-card" href="<?php echo h(system_status_url((string) $anchor, $query)); ?>">
-                <span><?php echo h((string) $label); ?></span>
+                <span class="status-overview-label"><?php echo h((string) $label); ?></span>
                 <?php
                 echo match ($kind) {
                     'esxi' => esxi_state_badge((string) $state),

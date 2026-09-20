@@ -34,6 +34,7 @@ final class AnsiblePlaybookUploadTest extends TestCase
     {
         require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
         $uploaded = ansible_required_files();
+        self::assertContains('powercycle_vm_tasks.yml', $uploaded);
 
         foreach ($this->everyDispatchablePlaybook() as $mode => $playbook) {
             self::assertContains(

@@ -58,6 +58,8 @@ final class PortalConfirmContractTest extends TestCase
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
         'system_status.php:preview_vlan_reassign' => 'renders the exact write scope and writes nothing',
+        'deploy.php:check' => 're-renders the submitted queue form and its complete blockers; writes no job or audit event',
+        'deploy.php:open_remedy' => 'stores only the allowlisted queue draft and redirects to an action recomputed from the current blocker union',
         // Resuming can only ever start work that was already queued and cannot
         // lose anything; the pause in the other direction does carry a prompt.
         'system_status.php:deploy_claim_resume' => 'resumes job intake; nothing is deleted and nothing already running is affected',
@@ -86,6 +88,7 @@ final class PortalConfirmContractTest extends TestCase
         'settings.php:save_api' => 'overwrites a value shown in the same input',
         'settings.php:save_https_hsts' => 'toggles a response header; state is visible on the same badge and reversible with the same button',
         'settings.php:save_esxi_inventory' => 'overwrites a value shown in the same input',
+        'settings.php:save_ansible_test_interval' => 'overwrites the displayed reversible diagnostic interval; starts no deployment',
         'settings.php:save_password_policy' => 'overwrites a value shown in the same input',
         'settings.php:save_session' => 'overwrites a value shown in the same input',
         'settings.php:save_retire_threshold' => 'overwrites a value shown in the same input',

@@ -7,8 +7,8 @@ use PHPUnit\Framework\TestCase;
 require_once dirname(__DIR__, 2) . '/lib/status.php';
 
 /**
- * Traffic-light matrix for ansible_preflight_ampel. The preflight has no
- * scheduler, so a passing result ages out into 'stale' instead of staying green
+ * Traffic-light matrix for ansible_preflight_ampel. Regardless of the configured
+ * schedule, a passing result ages out into 'stale' instead of staying green
  * forever next to a months-old timestamp. $now is injected so the age branch is
  * deterministic.
  */

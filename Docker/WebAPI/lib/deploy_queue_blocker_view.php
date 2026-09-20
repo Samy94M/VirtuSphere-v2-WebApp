@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_preflight_bounds.php';
+require_once __DIR__ . '/deploy_display.php';
 
 /**
  * How a queue decision is shown and serialized: the blocker/warning render, the
@@ -21,17 +22,63 @@ require_once __DIR__ . '/deploy_preflight_bounds.php';
  *
  * @param list<array<string,mixed>> $blockers
  */
-function deploy_render_blockers(array $blockers, array $user, array $warnings = []): void
+/** @return array{state:string,status:string,context:string} */
+function deploy_blocker_presentation(array $state, array $blockers, ?int $scopeCount): array
 {
     $count = count($blockers);
+    $mode = deploy_mode_label((string) $state['mode']);
+
+    return [
+        'state' => $count === 0 ? 'ready' : 'blocked',
+        'status' => __t($count === 0
+            ? 'deploy.preparation_ready'
+            : ($count === 1 ? 'deploy.preparation_blocked_one' : 'deploy.preparation_blocked_many'), ['count' => $count]),
+        'context' => __t($scopeCount === null
+            ? 'deploy.preparation_context_unknown'
+            : ($scopeCount === 1 ? 'deploy.preparation_context_one' : 'deploy.preparation_context_many'), [
+            'mode' => $mode,
+            'count' => $scopeCount ?? 0,
+        ]),
+    ];
+}
+
+function deploy_render_remedy_form(array $action, string $code, array $formValues): void
+{
+    ?>
+    <form class="inline-form" method="post" action="deploy.php">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="open_remedy">
+        <input type="hidden" name="remedy_code" value="<?php echo h($code); ?>">
+        <?php echo deploy_form_draft_hidden_fields($formValues); ?>
+        <button class="button-as-link" type="submit"><?php echo h((string) $action['label']); ?></button>
+    </form>
+    <?php
+}
+
+function deploy_render_blockers(array $blockers, array $user, array $warnings = [], array $presentation = [], array $formValues = []): void
+{
+    $count = count($blockers);
+    if ($presentation === []) {
+        $presentation = deploy_blocker_presentation(
+            ['mode' => VIRTUSPHERE_DEPLOY_MODE_FULL],
+            $blockers,
+            null
+        );
+    }
     $shown = deploy_preflight_bounded_findings($blockers, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
     $shownWarnings = deploy_preflight_bounded_findings($warnings, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
     ?>
-    <div data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" data-hard-network-modes="<?php echo h(json_encode(deploy_modes_with_hard_network_gate(), JSON_THROW_ON_ERROR)); ?>" data-initial-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT); ?>" aria-live="polite">
-        <p data-deploy-blocker-summary<?php echo $count === 0 ? ' hidden' : ''; ?>>
-            <strong><?php echo h(__t($count === 1 ? 'deploy.blocker_count_one' : 'deploy.blocker_count_many', ['count' => $count])); ?></strong>
-            <a href="#deploy-blocker-1" data-deploy-blocker-jump><?php echo h(__t('deploy.blocker_jump')); ?></a>
-        </p>
+    <div class="deploy-preparation" data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" data-checking-message="<?php echo h(__t('deploy.preparation_checking')); ?>" data-unreliable-message="<?php echo h(__t('deploy.preparation_unreliable')); ?>" data-hard-network-modes="<?php echo h(json_encode(deploy_modes_with_hard_network_gate(), JSON_THROW_ON_ERROR)); ?>" data-initial-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT); ?>" data-preparation-state="<?php echo h((string) $presentation['state']); ?>">
+        <div class="deploy-preparation-head">
+            <div>
+                <h3><?php echo h(__t('deploy.preparation_heading')); ?></h3>
+                <p class="muted" data-deploy-preparation-context><?php echo h((string) $presentation['context']); ?></p>
+            </div>
+            <p data-deploy-blocker-summary role="status" aria-live="polite" aria-atomic="true">
+                <strong data-deploy-preparation-status><?php echo h((string) $presentation['status']); ?></strong>
+                <a href="#deploy-blocker-1" data-deploy-blocker-jump<?php echo $count === 0 ? ' hidden' : ''; ?>><?php echo h(__t('deploy.blocker_jump')); ?></a>
+            </p>
+        </div>
         <div data-deploy-blocker-list>
         <?php foreach ($shown['items'] as $index => $blocker) {
             $id = (string) ($blocker['target_id'] ?? ('deploy-blocker-' . ($index + 1)));
@@ -47,15 +94,14 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
                 // link would otherwise start the row with a separator to its left.
                 $help = is_array($blocker['help'] ?? null) ? $blocker['help'] : null;
                 ?>
-                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker>
-                    <strong><?php echo h(__t('deploy.blocker_prefix')); ?></strong>
+                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker tabindex="-1">
                     <?php echo h((string) $blocker['message']); ?>
                     <?php if ($action !== null && (string) $action['type'] !== 'link') {
                         throw new LogicException('Unknown deploy blocker action for ' . $kind . ': ' . (string) $action['type']);
                     } ?>
                     <?php if ($action !== null || $help !== null) { ?>
                         <div class="alert-actions">
-                            <?php if ($action !== null) { ?><a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a><?php } ?>
+                            <?php if ($action !== null) { deploy_render_remedy_form($action, (string) $blocker['code'], $formValues); } ?>
                             <?php if ($action !== null && $help !== null) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
                             <?php if ($help !== null) { ?><a href="<?php echo h((string) $help['url']); ?>" data-deploy-blocker-help><?php echo h((string) $help['label']); ?></a><?php } ?>
                         </div>
@@ -63,8 +109,8 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
                 </div>
             <?php } elseif ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) {
                 ?>
-                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker>
-                    <p><strong><?php echo h(__t('deploy.blocker_prefix')); ?></strong> <?php echo h((string) $blocker['message']); ?></p>
+                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker tabindex="-1">
+                    <p><?php echo h((string) $blocker['message']); ?></p>
                     <?php if ($action !== null && (string) $action['type'] === 'adopt') { ?>
                         <form class="inline-form" method="post" action="<?php echo h((string) $action['url']); ?>">
                             <?php echo csrf_field(); ?>
@@ -72,10 +118,11 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
                             <?php foreach ($action['fields'] as $field => $value) { ?>
                                 <input type="hidden" name="<?php echo h((string) $field); ?>" value="<?php echo h((string) $value); ?>">
                             <?php } ?>
+                            <?php echo deploy_form_draft_hidden_fields($formValues); ?>
                             <button class="button button-secondary" type="submit" data-confirm="<?php echo h((string) $action['confirm']); ?>"><?php echo h((string) $action['label']); ?></button>
                         </form>
                     <?php } elseif ($action !== null && (string) $action['type'] === 'link') { ?>
-                        <a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a>
+                        <?php deploy_render_remedy_form($action, (string) $blocker['code'], $formValues); ?>
                     <?php } elseif ($action !== null) {
                         throw new LogicException('Unknown deploy identity action: ' . (string) $action['type']);
                     } ?>
@@ -88,11 +135,12 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
         <?php if ($shown['omitted_count'] > 0) { ?>
             <p class="muted" data-deploy-blocker-omitted><?php echo h(__t('deploy.blocker_omitted', ['count' => $shown['omitted_count']])); ?></p>
         <?php } ?>
+        <h3 data-deploy-warning-heading<?php echo $warnings === [] ? ' hidden' : ''; ?>><?php echo h(__t('deploy.preparation_warnings')); ?></h3>
         <div data-deploy-warning-list>
         <?php foreach ($shownWarnings['items'] as $warning) { $action = deploy_blocker_action_for_user($warning, $user); ?>
             <div class="alert alert-warning" data-deploy-network-warning>
                 <strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h((string) $warning['message']); ?>
-                <?php if ($action !== null) { ?> <a href="<?php echo h((string) $action['url']); ?>"><?php echo h((string) $action['label']); ?></a><?php } ?>
+                <?php if ($action !== null && (string) $action['type'] === 'link') { deploy_render_remedy_form($action, (string) $warning['code'], $formValues); } ?>
             </div>
         <?php } ?>
         </div>

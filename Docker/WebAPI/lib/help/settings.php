@@ -5,6 +5,7 @@
 // label the tab itself renders, so the grouping cannot drift from the page
 // it explains. Sections inside a group are h3, mirroring the card order.
 declare(strict_types=1);
+require_once __DIR__ . '/../ansible_test_config.php';
 ?>
     <div class="stack" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -53,6 +54,10 @@ declare(strict_types=1);
                 'evidence_hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_esxi_p2_interval_zero')); ?></p>
+            <h3><?php echo h(__t('ansible_test.title')); ?></h3>
+            <p><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
+            <p><?php echo h(__t('ansible_test.behaviour')); ?></p>
+            <p><?php echo h(__t('ansible_test.help')); ?></p>
         </section>
 
         <section class="panel">

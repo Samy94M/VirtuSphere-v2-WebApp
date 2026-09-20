@@ -10,9 +10,8 @@ require_once __DIR__ . '/../Support/CssRules.php';
  * One registry decides which stylesheets the portal loads and in which order.
  *
  * Two things used to be able to drift apart silently. The portal shell and the
- * login page each linked their sheets by hand, and login.php was already one
- * behind: it never linked status.css, so a rule that page shares with the rest
- * of the portal would have rendered differently there with nothing to notice.
+ * login page each linked their sheets by hand. The registry now also owns the
+ * per-page selection, so a page cannot silently regain every domain sheet.
  * And a stylesheet added under assets/css but linked nowhere is dead weight
  * that still passes every other guard, because every CSS contract in this repo
  * reads the files it finds rather than the files the page loads.
@@ -122,7 +121,7 @@ final class PortalStyleRegistryContractTest extends TestCase
             'portal/login.php' => $this->source('portal/login.php'),
         ] as $relative => $source) {
             self::assertStringContainsString(
-                'layout_app_styles()',
+                'layout_app_styles(',
                 $source,
                 $relative . ' must load its stylesheets through the shared registry'
             );

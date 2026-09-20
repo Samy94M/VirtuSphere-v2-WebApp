@@ -45,6 +45,9 @@ function system_status_autoimporter_result(?string $outcome): string
     return portal_badge($variant, __t('system_status.' . $key));
 }
 
+/**
+ * @return list<string>
+ */
 function system_status_autoimporter_findings(string $detail, ?bool $distribution = null): array
 {
     $findings = [];
@@ -223,15 +226,24 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
             $isRunning = $event === VIRTUSPHERE_RUN_EVENT_STARTED;
             $isLegacy = $event === VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
             $isAutoimporter = $entry['source'] === 'autoimporter';
+            // A legacy heartbeat does not establish a completed-result tuple,
+            // even if a pre-fix row still contains stale V2 fields. A regular V2
+            // start may deliberately retain the preceding completed result.
+            $hasCompletedResult = $row !== null && !$isLegacy && !empty($row['last_result_at']);
             $detail = trim((string) ($row['last_detail'] ?? ''));
-            $errorLabel = $row !== null ? system_status_run_error_label(isset($row['last_error_category']) ? (string) $row['last_error_category'] : null) : '';
-            $summary = ($row !== null && !empty($row['last_summary'])) ? json_decode((string) $row['last_summary'], true) : null;
+            $completionDetail = !$isAutoimporter || $hasCompletedResult ? $detail : '';
+            $errorLabel = ($row !== null && (!$isAutoimporter || $hasCompletedResult))
+                ? system_status_run_error_label(isset($row['last_error_category']) ? (string) $row['last_error_category'] : null)
+                : '';
+            $summary = ($row !== null && (!$isAutoimporter || $hasCompletedResult) && !empty($row['last_summary']))
+                ? json_decode((string) $row['last_summary'], true)
+                : null;
             ?>
             <article class="status-row">
                 <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_activity_heading')); ?></h4><?php } ?>
                 <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo $isAutoimporter ? system_status_autoimporter_activity($event) : system_status_run_badge($state, $isRunning); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
                 <?php if ($isRunning) { ?><p class="muted"><?php echo h(__t('system_status.run_completion_hint')); ?></p><?php } ?>
-                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_result_heading')); ?></h4><p><?php echo system_status_autoimporter_result(!empty($row['last_result_at']) ? (string) ($row['last_status'] ?? '') : null); ?></p><p class="muted"><?php echo h(__t('system_status.run_result_scope')); ?></p><?php } elseif ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
+                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_result_heading')); ?></h4><p><?php echo system_status_autoimporter_result($hasCompletedResult ? (string) ($row['last_status'] ?? '') : null); ?></p><p class="muted"><?php echo h(__t('system_status.run_result_scope')); ?></p><?php } elseif ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
                 <?php
                 // All six fields, always, in this order. They used to appear only
                 // when they had a value, so the number of columns differed per
@@ -247,13 +259,13 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
                 // position is the contract, the label is the truth.
                 echo system_status_fact_list([
                     ['label' => __t('system_status.th_last_attempt'), 'html' => system_status_fact_time($row['last_attempt_at'] ?? null)],
-                    ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
+                    ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time((!$isAutoimporter || $hasCompletedResult) ? ($row['last_result_at'] ?? null) : null)],
                     $isLegacy
                         ? ['label' => __t('system_status.th_last_seen'), 'html' => system_status_fact_time($row['last_seen_at'] ?? null)]
                         : ['label' => __t('system_status.th_last_success'), 'html' => system_status_fact_time($row['last_success_at'] ?? null)],
                     ['label' => __t('system_status.th_last_failure'), 'html' => system_status_fact_time($row['last_failure_at'] ?? null)],
                     ['label' => __t('system_status.th_interval'), 'html' => $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'],
-                    ['label' => __t('system_status.th_duration'), 'html' => ($row !== null && $row['last_duration_ms'] !== null && $row['last_duration_ms'] !== '') ? h(portal_format_duration_ms((int) $row['last_duration_ms'])) : '&mdash;'],
+                    ['label' => __t('system_status.th_duration'), 'html' => ($row !== null && (!$isAutoimporter || $hasCompletedResult) && $row['last_duration_ms'] !== null && $row['last_duration_ms'] !== '') ? h(portal_format_duration_ms((int) $row['last_duration_ms'])) : '&mdash;'],
                 ]);
                 ?>
                 <?php if (is_array($summary) && $summary !== []) { ?>
@@ -268,23 +280,23 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
                     if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php }
                 } ?>
                 <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
-                <?php if ($entry['source'] === 'autoimporter' && !$suppressHints) {
-                    foreach (system_status_autoimporter_findings($detail, false) as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
+                <?php if ($isAutoimporter && !$suppressHints) {
+                    foreach (system_status_autoimporter_findings($completionDetail, false) as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
                 } ?>
                 <?php if ($isAutoimporter) { ?>
                     <h4><?php echo h(__t('system_status.run_distribution_heading')); ?></h4>
                     <p class="muted"><?php echo h(__t('system_status.run_distribution_scope')); ?></p>
                     <?php echo system_status_fact_list([
-                        ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
+                        ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($hasCompletedResult ? ($row['last_result_at'] ?? null) : null)],
                     ]);
-                    $distributionFindings = !empty($row['last_result_at']) ? system_status_autoimporter_findings($detail, true) : [];
+                    $distributionFindings = system_status_autoimporter_findings($completionDetail, true);
                     if ($distributionFindings === []) { ?><p><?php echo h(__t('system_status.run_distribution_unknown')); ?></p><?php }
                     foreach ($distributionFindings as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
                     if (!$suppressHints) {
                     ?><p><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('system_status.autoimporter_help')); ?></a></p><?php
                     }
                 } ?>
-                <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
+                <?php if ($completionDetail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($completionDetail); ?></pre></details><?php } ?>
             </article>
         <?php } ?>
     </div>

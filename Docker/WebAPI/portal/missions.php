@@ -13,6 +13,7 @@ require_once __DIR__ . '/../lib/mission_import_portal.php';
 require_once __DIR__ . '/../lib/missions_import_panel.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
+require_once __DIR__ . '/../lib/missions_page.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -23,6 +24,14 @@ $type = $type === 'templates' ? 'templates' : 'missions';
 $isTemplateView = $type === 'templates';
 $active = $isTemplateView ? 'templates' : 'missions';
 $title = $isTemplateView ? __t('missions.title_templates') : __t('missions.title_missions');
+$requestedMissionSort = request_string($_GET, 'sort', 'name');
+if (!in_array($requestedMissionSort, ['name', 'vms', 'attention'], true)) {
+    $requestedMissionSort = 'name';
+}
+$requestedMissionDir = request_string($_GET, 'dir', 'asc') === 'desc' ? 'desc' : 'asc';
+$requestedAttentionOnly = !$isTemplateView && request_string($_GET, 'attention') === '1';
+$workContext = portal_work_context_from_mission_list($type, $requestedMissionSort, $requestedMissionDir, $requestedAttentionOnly);
+$missionListActionUrl = portal_work_context_mission_list_url($workContext);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
@@ -53,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'name' => $name,
             ], (int) $user['id']);
             flash_set('success', $isTemplateView ? __t('missions.flash_created_template') : __t('missions.flash_created_mission'));
-            redirect_to('mission_details.php?id=' . $newMissionId);
+            redirect_to(mission_details_url($newMissionId, $workContext));
         } elseif ($action === 'delete') {
             $missionId = request_int($_POST, 'mission_id');
             if ($missionId <= 0) {
@@ -159,7 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $exception) {
         flash_set('error', portal_error_message($exception));
     }
-    redirect_to('missions.php?type=' . $type);
+    redirect_to($missionListActionUrl);
 }
 
 $rows = array_values(array_filter(getMissions($connection), static function (array $mission) use ($type): bool {
@@ -183,39 +192,9 @@ if ($attentionOnly) {
     'vms' => portal_sort_number('vm_count'),
     'attention' => portal_sort_number('progress_attention_count'),
 ], 'name');
+$workContext = portal_work_context_from_mission_list($type, $sort, $dir, $attentionOnly);
 
-// CSV list export (A3): read-only GET download of the current list. Streams and
-// exits before any layout output.
-if (($_GET['export'] ?? '') === 'csv') {
-    // Datastore and datacenter ride along here and nowhere else on this page:
-    // "which mission sits where" has no collective answer in the portal, and an
-    // operator with six hosts had to open every mission to build one. The export
-    // is the right place for that, precisely because the rendered list stays
-    // restrained. An empty datacenter is the derived case (resolved from the
-    // target host at deploy time), so the cell is empty rather than invented.
-    $header = [
-        __t('common.name'), __t('common.status'), __t('missions.th_datastore'),
-        __t('missions.th_datacenter'), __t('common.vms'), __t('missions.th_attention'), __t('common.updated'),
-    ];
-    $csvRows = [];
-    foreach ($rows as $mission) {
-        $csvRows[] = [
-            (string) ($mission['mission_name'] ?? ''),
-            (string) ($mission['mission_status'] ?? ''),
-            (string) ($mission['hypervisor_datastorage'] ?? ''),
-            (string) ($mission['hypervisor_datacenter'] ?? ''),
-            (string) ($mission['vm_count'] ?? 0),
-            (string) ($mission['progress_attention_count'] ?? 0),
-            portal_format_timestamp($mission['updated_at'] ?? ''),
-        ];
-    }
-    // A read-only list download, allowed for any signed-in user; logged as data
-    // egress like the full-mission JSON export, minus the per-record detail.
-    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED, 'mission_list', $isTemplateView ? 'templates' : 'missions', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-        'row_count' => count($csvRows),
-    ], (int) $user['id']);
-    portal_send_csv($isTemplateView ? 'vorlagen' : 'missionen', $header, $csvRows);
-}
+missions_export_csv_if_requested($connection, $user, $rows, $isTemplateView);
 
 // Missions with waiting scheduled jobs get a stronger delete confirmation, since
 // the deploy_jobs FK cascade would silently drop those scheduled jobs (B4.5).
@@ -307,7 +286,7 @@ layout_header($title, $user, $active, 'missions');
     <?php if (can('missions.write', $user)) { ?>
         <section class="panel">
             <h2><?php echo h($isTemplateView ? __t('missions.create_heading_template') : __t('missions.create_heading_mission')); ?></h2>
-            <form class="form-grid" method="post" action="missions.php?type=<?php echo h($type); ?>">
+            <form class="form-grid" method="post" action="<?php echo h($missionListActionUrl); ?>">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="create">
                 <label><?php echo h(__t('common.name')); ?><input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('create', 'mission_name')); ?>"<?php echo form_control_attrs('create', 'mission_name'); ?> required><?php echo form_error_html('create', 'mission_name'); ?></label>
@@ -348,7 +327,7 @@ layout_header($title, $user, $active, 'missions');
                 ?><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $mission) { ?>
-                    <tr>
+                    <tr id="mission-<?php echo h((string) $mission['id']); ?>">
                         <td><?php echo h($mission['mission_name'] ?? ''); ?>
                             <?php if (isset($deviatingMissions[(int) $mission['id']])) { ?>
                                 <span class="badge badge-warning" title="<?php echo h(__t('missions.deviation_title')); ?>"><?php echo h(__t('missions.deviation_badge')); ?></span>
@@ -360,10 +339,10 @@ layout_header($title, $user, $active, 'missions');
                             : '&mdash;'; ?></td>
                         <td><?php echo h(portal_format_timestamp($mission['updated_at'] ?? '')); ?></td>
                         <td class="actions">
-                            <a class="button button-secondary" href="mission_details.php?id=<?php echo h((string) $mission['id']); ?>"><?php echo h(__t('common.details')); ?></a>
-                            <a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $mission['id']); ?>"><?php echo h(__t('common.vms')); ?></a>
+                            <a class="button button-secondary" href="<?php echo h(mission_details_url((int) $mission['id'], $workContext)); ?>"><?php echo h(__t('common.details')); ?></a>
+                            <a class="button button-secondary" href="<?php echo h(portal_work_context_vm_list_url((int) $mission['id'], $workContext)); ?>"><?php echo h(__t('common.vms')); ?></a>
                             <?php if (can('missions.write', $user)) { ?>
-                                <form class="inline-form" method="post" action="missions.php?type=<?php echo h($type); ?>">
+                                <form class="inline-form" method="post" action="<?php echo h($missionListActionUrl); ?>">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="mission_id" value="<?php echo h((string) $mission['id']); ?>">

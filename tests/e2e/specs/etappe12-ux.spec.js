@@ -19,6 +19,12 @@ function blockerPayload(blockers, canQueue = false) {
     count: blockers.length,
     can_queue: canQueue,
     blockers,
+    warnings: [],
+    presentation: {
+      state: blockers.length === 0 ? 'ready' : 'blocked',
+      status: blockers.length === 0 ? 'Bereit zum Einreihen' : `${blockers.length} Voraussetzungen offen`,
+      context: 'Modus: Vollständige Pipeline · Geprüfter Umfang: 1 VM',
+    },
     labels: {
       prefix: 'Blocker:',
       count: blockers.length === 1 ? '1 Blocker verhindert das Einreihen.' : `${blockers.length} Blocker verhindern das Einreihen.`,
@@ -92,19 +98,123 @@ test.afterAll(async ({ browser }) => {
 
 test('live blocker list and queue button use the same endpoint verdict', async ({ page }) => {
   const ids = seed();
+  await page.setViewportSize({ width: 360, height: 900 });
   await page.goto(`deploy.php?mission_id=${ids.mission}&lang=de`);
   const form = page.locator('form:has([data-deploy-mission])');
   const summary = page.locator('[data-deploy-blocker-summary]');
-  await expect(summary).toContainText('2 Blocker');
+  await expect(summary).toContainText('2 Voraussetzungen offen');
+  await expect(page.locator('[data-deploy-preparation-context]')).toContainText('Geprüfter Umfang: 1 VM');
+  await expect(page.locator('[data-deploy-blocker-list]')).not.toContainText('Blocker:');
   await expect(page.locator('[data-deploy-queue-button]')).toBeDisabled();
+  await summary.getByRole('link', { name: 'Zum ersten Blocker' }).click();
+  await expect(page.locator('#deploy-blocker-1')).toBeFocused();
+  const preparationGeometry = await page.locator('[data-deploy-blockers]').evaluate((root) => {
+    const outer = root.getBoundingClientRect();
+    const children = [...root.querySelectorAll('.deploy-preparation-head > *')].map((node) => node.getBoundingClientRect());
+    return {
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+      contained: children.every((box) => box.left >= outer.left - 1 && box.right <= outer.right + 1),
+    };
+  });
+  expect(preparationGeometry.scrollWidth, 'the preparation area does not force horizontal scrolling').toBeLessThanOrEqual(preparationGeometry.clientWidth + 1);
+  expect(preparationGeometry.contained, 'the context and status wrap inside the mobile preparation area').toBe(true);
 
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   const responsePromise = page.waitForResponse((response) => response.url().includes('deploy_blockers.php'));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
   const response = await responsePromise;
   expect(response.headers()['content-type']).toContain('application/json');
-  await expect(summary).toBeHidden();
+  await expect(summary).toContainText('Bereit zum Einreihen');
+  await expect(summary.getByRole('link')).toBeHidden();
   await expect(page.locator('[data-deploy-queue-button]')).toBeEnabled();
+});
+
+// e2e-covers: deploy.php:open_remedy
+test('a recomputed remedy preserves the queue draft across another portal page', async ({ page }) => {
+  const ids = seed();
+  runPhp(`
+$id = ${Number(ids.mission)};
+$stmt = db()->prepare('DELETE FROM deploy_vms WHERE mission_id = ?');
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'EMPTY';
+`);
+  await page.goto(`deploy.php?mission_id=${ids.mission}&lang=de`);
+  const form = page.locator('#deploy-queue-form');
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+  await form.locator('select[name="mode"]').selectOption('powercycle');
+  const remedy = page.getByRole('button', { name: 'VMs der Mission öffnen' });
+  await expect(remedy).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/vms\.php\?mission_id=/),
+    remedy.click(),
+  ]);
+
+  await page.goto('deploy.php?lang=de');
+  const resumed = page.locator('#deploy-queue-form');
+  await expect(resumed.locator('select[name="mission_id"]')).toHaveValue(String(ids.mission));
+  await expect(resumed.locator('select[name="credential_esxi_id"]')).toHaveValue(String(ids.esxi));
+  await expect(resumed.locator('select[name="credential_ansible_id"]')).toHaveValue(String(ids.ansible));
+  await expect(resumed.locator('select[name="mode"]')).toHaveValue('powercycle');
+});
+
+test('preparation explanations remain visible while remedy actions follow the target permission', async ({ browser }, testInfo) => {
+  const ids = seed();
+  const url = `deploy.php?mission_id=${ids.mission}&credential_esxi_id=2147483647&credential_ansible_id=${ids.ansible}&lang=de`;
+  const userContext = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    storageState: ROLES.user.storageState,
+  });
+  try {
+    const userPage = await userContext.newPage();
+    await userPage.goto(url);
+    await expect(userPage.getByText('Der ausgewählte ESXi-Zugang ist nicht mehr verfügbar oder unvollständig.')).toBeVisible();
+    await expect(userPage.getByRole('button', { name: 'Zugangsdaten öffnen' })).toHaveCount(0);
+  } finally {
+    await userContext.close();
+  }
+
+  const adminContext = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    storageState: ROLES.admin.storageState,
+  });
+  try {
+    const adminPage = await adminContext.newPage();
+    await adminPage.goto(url);
+    await expect(adminPage.getByText('Der ausgewählte ESXi-Zugang ist nicht mehr verfügbar oder unvollständig.')).toBeVisible();
+    await expect(adminPage.getByRole('button', { name: 'Zugangsdaten öffnen' })).toBeVisible();
+  } finally {
+    await adminContext.close();
+  }
+});
+
+test('schedule-preview cancel returns to the unchanged editable queue form', async ({ page }) => {
+  const ids = seed();
+  const scheduledAt = localDatetimeAfter(26);
+  await page.goto(`deploy.php?mission_id=${ids.mission}&lang=de`);
+  const form = page.locator('#deploy-queue-form');
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+  await form.locator('input[name="start_mode"][value="scheduled"]').check();
+  await form.locator('input[name="scheduled_at"]').fill(scheduledAt);
+  await form.locator('[data-deploy-queue-button]').click();
+  const preview = page.getByRole('heading', { name: 'Zeitplan-Vorschau' });
+  await expect(preview).toBeVisible();
+  await page.getByRole('link', { name: 'Abbrechen' }).click();
+  await expect(page).toHaveURL(/#deploy-queue-form$/);
+  await expect(form.locator('select[name="credential_esxi_id"]')).toHaveValue(String(ids.esxi));
+  await expect(form.locator('select[name="credential_ansible_id"]')).toHaveValue(String(ids.ansible));
+  await expect(form.locator('input[name="scheduled_at"]')).toHaveValue(scheduledAt);
+  const jobs = phpJson(`
+$id = ${Number(ids.mission)};
+$stmt = db()->prepare('SELECT COUNT(*) AS count FROM deploy_jobs WHERE mission_id = ?');
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+  expect(Number(jobs.count), 'cancelling the preview queues nothing').toBe(0);
 });
 
 test('every live queue control refreshes blockers and disabled filled values survive', async ({ page }) => {
@@ -122,6 +232,7 @@ test('every live queue control refreshes blockers and disabled filled values sur
   expect(params.get('start_wait')).toBe('99');
   params = await changeAndReadBlockerRequest(page, () => form.locator('select[name="mode"]').selectOption('powercycle'));
   expect(params.get('mode')).toBe('powercycle');
+  await expect(page.locator('[data-deploy-preparation-context]')).toContainText('Aus- und einschalten mit MAC-Export');
   await expect(form.locator('input[name="start_wait"]')).toBeDisabled();
   expect(params.get('start_wait'), 'disabled-but-filled control remains in the live request').toBe('99');
   params = await changeAndReadBlockerRequest(page, () => form.locator('input[name="verbose"]').check());
@@ -174,6 +285,7 @@ test('single-flight discards an older response and renders text without HTML inj
   const firstRequest = page.waitForRequest((request) => request.url().includes('deploy_blockers.php?'));
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   await firstRequest;
+  await expect(page.locator('[data-deploy-preparation-status]')).toContainText('werden geprüft');
   const secondResponse = page.waitForResponse((response) => response.url().includes('deploy_blockers.php?'));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
   await secondResponse;
@@ -195,6 +307,7 @@ test('invalid content type fails closed and 403 stops later live requests', asyn
   await changeAndReadBlockerRequest(page, () => form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi)));
   await expect(page.locator('[data-deploy-queue-button]')).toBeDisabled();
   await expect(page.getByText(/Blocker konnten nicht aktuell geprüft werden/)).toBeVisible();
+  await expect(page.locator('[data-deploy-preparation-status]')).toHaveText('Nicht verlässlich aktuell geprüft');
 
   await page.unroute('**/deploy_blockers.php?*');
   requests = 0;
@@ -309,6 +422,41 @@ $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `);
   expect(Number(jobs.count)).toBe(0);
+});
+
+// e2e-covers: deploy.php:check
+test('no-JavaScript check refreshes corrected inputs without creating a job', async ({ browser }, testInfo) => {
+  const ids = seed();
+  const context = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    storageState: ROLES.admin.storageState,
+    javaScriptEnabled: false,
+  });
+  const page = await context.newPage();
+  await page.goto(`deploy.php?mission_id=${ids.mission}&lang=de`);
+  const form = page.locator('#deploy-queue-form');
+  await expect(page.locator('[data-deploy-queue-button]')).toBeDisabled();
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'load' }),
+    page.getByRole('button', { name: 'Eingaben neu prüfen' }).click(),
+  ]);
+  await expect(form.locator('select[name="credential_esxi_id"]')).toHaveValue(String(ids.esxi));
+  await expect(form.locator('select[name="credential_ansible_id"]')).toHaveValue(String(ids.ansible));
+  await expect(page.locator('[data-deploy-blocker-summary]')).toContainText('Bereit zum Einreihen');
+  await expect(page.locator('[data-deploy-queue-button]')).toBeEnabled();
+
+  const jobs = phpJson(`
+$id = ${Number(ids.mission)};
+$stmt = db()->prepare('SELECT COUNT(*) AS count FROM deploy_jobs WHERE mission_id = ?');
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+  expect(Number(jobs.count), 'the read-only check creates no deploy job').toBe(0);
+  await context.close();
 });
 
 test('server recheck queues a valid job with JavaScript disabled', async ({ browser }, testInfo) => {

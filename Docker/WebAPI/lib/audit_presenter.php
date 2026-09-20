@@ -38,7 +38,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED => 'directory search account bind rejected; automatic attempts paused',
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => $action . ' credential id ' . $id . audit_description_changes($context)
             . (!empty($context['selection_cleared']) ? '; inventory ansible selection cleared' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => 'tested credential id ' . $id . ': ' . ($context['outcome'] ?? $result) . audit_description_component($context),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => (!empty($context['scheduled']) ? 'scheduled full test for credential id ' : 'tested credential id ') . $id . ': ' . ($context['outcome'] ?? $result) . audit_description_component($context),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => 'esxi inventory auto-pull ' . $action . ' for credential id ' . $id . audit_description_reason($context),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED => $action . ' mission id ' . $id . audit_description_named($context)
             . (isset($context['vm_count']) ? ' (' . $context['vm_count'] . ' vms)' : '') . audit_description_changes($context),

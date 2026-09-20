@@ -75,7 +75,18 @@ BeforeAll {
     if ($controllerStart -lt 0 -or $controllerEnd -le $controllerStart) {
         throw 'U09-Controllerblock konnte nicht aus dem Autoimporter extrahiert werden.'
     }
-    $script:U09ControllerBlock = [scriptblock]::Create("do {`n" + $controllerSource.Substring($controllerStart, $controllerEnd - $controllerStart) + "`n} while (`$false)")
+    $script:U09ControllerBlock = [scriptblock]::Create("do {`n" + $controllerSource.Substring($controllerStart, $controllerEnd - $controllerStart) + "`n`$RequestCounters.ReconciliationReached = `$true`n} while (`$false)")
+
+    # Eine vollstaendige Iteration der produktiven Endlosschleife. Nur die
+    # aeussere while-Huelle wird entfernt; Paket-Inventar, Contentarbeit,
+    # Ergebnisbildung und finally-Abschluss bleiben der originale Quelltext.
+    $mainLoop = @((Get-Ast -Path $script:Importer).FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.WhileStatementAst] -and
+        $node.Condition.Extent.Text -eq '$true' -and $node.Extent.StartLineNumber -gt 70
+    }, $true))
+    if ($mainLoop.Count -ne 1) { throw 'Autoimporter-Hauptschleife konnte nicht eindeutig extrahiert werden.' }
+    $mainBody = $mainLoop[0].Body.Extent.Text
+    $script:AutoimporterCycleBlock = [scriptblock]::Create($mainBody.Substring(1, $mainBody.Length - 2))
 
     function Invoke-U09ControllerScan {
         param(
@@ -86,9 +97,15 @@ BeforeAll {
             [Parameter(Mandatory)][ValidateSet('not_started', 'succeeded', 'failed', 'in_progress', 'unknown')][string]$AggregateState,
             [Parameter(Mandatory)][AllowEmptyCollection()][array]$CopyTargets,
             [ValidateSet('none', 'initial', 'update')][string]$RequestFailure = 'none',
-            [int]$TargetCount = -1
+            [int]$TargetCount = -1,
+            [AllowEmptyString()][string]$DpGroupName = 'DP-Fixture'
         )
         . $script:MecmCommon
+
+        if (-not $RequestCounters.PSObject.Properties['ReconciliationReached']) {
+            $RequestCounters | Add-Member -MemberType NoteProperty -Name ReconciliationReached -Value $false
+        }
+        $RequestCounters.ReconciliationReached = $false
 
         function Get-VsFilesManifestStamp { param($Path) return $Manifest }
         function Get-VsPackageContentTracking { param($ApplicationName) return $TrackingBox.Value }
@@ -134,7 +151,7 @@ BeforeAll {
         $deploymentTypeName = 'Agent-1 Deployment'
         $siteCode = 'ABC'
         $providerMachine = 'provider.test.invalid'
-        $dpGroupName = 'DP-Fixture'
+        $dpGroupName = $DpGroupName
         $scanWarnings = 0
         $causes = New-Object System.Collections.Generic.List[object]
         $app = [pscustomobject]@{
@@ -148,6 +165,311 @@ BeforeAll {
 
         & $script:U09ControllerBlock
         return $TrackingBox.Value
+    }
+
+    function Invoke-AutoimporterCycleFixture {
+        param([Parameter(Mandatory)][ValidateSet('collection', 'application')][string]$CleanupFailureSource)
+        . $script:MecmCommon
+
+        $reports = New-Object System.Collections.Generic.List[object]
+        $logs = New-Object System.Collections.Generic.List[object]
+        $contentReads = [pscustomobject]@{ Agent = 0; Beta = 0 }
+        $cleanupErrorActions = New-Object System.Collections.Generic.List[string]
+        $observedSiteCodes = New-Object System.Collections.Generic.List[string]
+
+        function Initialize-VsCmSite { param($Config) return 'ABC' }
+        function Get-VsProviderMachine { param($Config, $ProviderMachine) return 'provider.fixture' }
+        function Get-CMFolder { param($FolderPath, $ErrorAction) return [pscustomobject]@{ Name = $FolderPath } }
+        function Get-VsFilesManifestStamp {
+            param($Path, $TemplateScript)
+            if ($Path -eq $basePath) { return 'fixture-scan-stamp' }
+            if ($Path -match 'agent') { return ('A' * 64) }
+            return ('B' * 64)
+        }
+        function Test-Path { param($Path, $LiteralPath) return $true }
+        function Get-ChildItem {
+            param($Path, [switch]$Directory)
+            return @(
+                [pscustomobject]@{ Name = 'broken'; FullName = 'C:\fixture\files\broken' },
+                [pscustomobject]@{ Name = 'agent'; FullName = 'C:\fixture\files\agent' },
+                [pscustomobject]@{ Name = 'beta'; FullName = 'C:\fixture\files\beta' }
+            )
+        }
+        function Read-VsPackageConfig {
+            param($Folder)
+            if ($Folder -match 'broken') { return $null }
+            $product = if ($Folder -match 'agent') { 'Agent' } else { 'Beta' }
+            return [pscustomobject]@{
+                ProjectName = $product; version = '1'; FolderName = $product.ToLowerInvariant()
+                removeOldVersion = 'true'; generateOwnDeviceColletion = 'false'; DeployTo = ''
+            }
+        }
+        function Get-CMDeviceCollection {
+            param($Name, $ErrorAction)
+            if ($Name -eq 'Agent-*') {
+                [void]$cleanupErrorActions.Add([string]$ErrorAction)
+                if ($CleanupFailureSource -eq 'collection') { throw 'collection inventory denied' }
+                return [pscustomobject]@{ Name = 'Agent-0.9' }
+            }
+            if ($Name -like '*-*') { [void]$cleanupErrorActions.Add([string]$ErrorAction) }
+            return @()
+        }
+        function Get-CMApplication {
+            param($Name, [switch]$Fast, $ErrorAction)
+            if ($Name.EndsWith('-*', [StringComparison]::Ordinal)) {
+                [void]$cleanupErrorActions.Add([string]$ErrorAction)
+                if ($Name -eq 'Agent-*' -and $CleanupFailureSource -eq 'application') { throw 'application inventory denied' }
+                if ($Name -eq 'Agent-*') { return [pscustomobject]@{ LocalizedDisplayName = 'Agent-0.9' } }
+                return @()
+            }
+            $product = $Name.Substring(0, $Name.LastIndexOf('-'))
+            $contentReads.$product = [int]$contentReads.$product + 1
+            return [pscustomobject]@{
+                LocalizedDisplayName = $Name; ModelName = ("ScopeId_A/Application_{0}" -f $product)
+                PackageID = if ($product -eq 'Agent') { 'ABC00001' } else { 'ABC00002' }
+            }
+        }
+        function Get-CMDeploymentType {
+            param($ApplicationName, $ErrorAction)
+            $product = $ApplicationName.Substring(0, $ApplicationName.LastIndexOf('-'))
+            $appModel = "ScopeId_A/Application_$product"
+            return [pscustomobject]@{
+                LocalizedDisplayName = "$ApplicationName Deployment"; AppModelName = $appModel
+                ModelName = "ScopeId_A/DeploymentType_$product"
+                CI_UniqueID = "ScopeId_A/DeploymentType_$product/Content1"; ContentId = 'Content1'
+            }
+        }
+        function Get-VsPackageContentTracking {
+            param($ApplicationName)
+            $product = $ApplicationName.Substring(0, $ApplicationName.LastIndexOf('-'))
+            return [pscustomobject]@{
+                State = 'complete'; Manifest = $(if ($product -eq 'Agent') { 'A' * 64 } else { 'B' * 64 })
+                BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
+                ApplicationModelName = "ScopeId_A/Application_$product"
+                ApplicationPackageId = $(if ($product -eq 'Agent') { 'ABC00001' } else { 'ABC00002' })
+                DeploymentTypeModelName = "ScopeId_A/DeploymentType_$product"
+                DeploymentTypeId = "ScopeId_A/DeploymentType_$product/Content1"
+                BaselineContentId = 'Old'; ContentId = 'Content1'; RequestConfirmed = $true
+                DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
+            }
+        }
+        function Get-VsContentDistributionSnapshot {
+            param($ApplicationName, $Application)
+            return [pscustomobject]@{ State = 'succeeded'; SourceVersion = 1; TargetCount = 1 }
+        }
+        function Get-VsDistributionCopySnapshot {
+            param($PackageId, $ApplicationModelName, $SiteCode, $ProviderMachine)
+            [void]$observedSiteCodes.Add([string]$SiteCode)
+            return [pscustomobject]@{ State = 'known'; Targets = @(
+                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
+            ) }
+        }
+        function Test-VsTemplateScriptCurrent { param($TemplateFile, $PackageFile) return $true }
+        function New-VsRunId { return 'fixture-run-id' }
+        function Get-VsRunDurationMilliseconds { param($StartedAt) return 25 }
+        function Send-VsRunReport {
+            param($Config, $Source, $RunEvent, $RunId, $IntervalSeconds, $Outcome, $ErrorCategory, $DurationMs, $Detail, $Summary, $ScriptVersion)
+            [void]$reports.Add([pscustomobject]@{
+                Event = $RunEvent; Outcome = $Outcome; Category = $ErrorCategory; Detail = $Detail; Summary = $Summary
+            })
+        }
+        function Write-VsLog {
+            param($Level, $Context, $Message)
+            [void]$logs.Add([pscustomobject]@{ Level = $Level; Context = $Context; Message = $Message })
+        }
+        function Write-Host { param($Object, $ForegroundColor) }
+        function Start-Sleep { param($Seconds) }
+
+        $config = [pscustomobject]@{ PackagesRoot = 'C:\fixture'; PackagesShare = '\\fixture\packages' }
+        $basePath = 'C:\fixture\files'
+        $templatePath = 'C:\fixture\Package_Vorlage'
+        $networkPath = $config.PackagesShare
+        $appFolderName = $script:VsApplicationsFolderName
+        $dpGroupName = 'DP-Fixture'
+        $intervalSeconds = 300
+        $SCRIPT_VERSION = 'autoimporter/fixture'
+        $siteCode = $null
+        $providerMachine = $null
+        $lastFilesStamp = ''
+        $loop = 0
+
+        & $script:AutoimporterCycleBlock
+        return [pscustomobject]@{
+            Reports = $reports.ToArray(); Logs = $logs.ToArray(); ContentReads = $contentReads
+            CleanupErrorActions = $cleanupErrorActions.ToArray(); ObservedSiteCodes = $observedSiteCodes.ToArray()
+        }
+    }
+}
+
+Describe 'M03-F02: optionale Altobjektinventare isolieren ihren Lesefehler' {
+    It 'meldet einen <source>-Lesefehler lokal, verarbeitet beide Pakete und schliesst den Lauf genau einmal ab' -ForEach @(
+        @{ source = 'collection' },
+        @{ source = 'application' }
+    ) {
+        $result = Invoke-AutoimporterCycleFixture -CleanupFailureSource $source
+        @($result.Reports | Where-Object Event -eq 'started').Count | Should -Be 1
+        $completed = @($result.Reports | Where-Object Event -eq 'completed')
+        $completed.Count | Should -Be 1
+        $completed[0].Outcome | Should -Be 'warning'
+        $completed[0].Category | Should -Be 'partial_failure'
+        $completed[0].Summary.folders | Should -Be 2
+        $completed[0].Summary.open_points | Should -Be 2
+        $completed[0].Detail | Should -Match 'package_config_invalid target=broken' -Because 'ein frueherer Befund darf durch den lokalen Lesefehler nicht verloren gehen'
+        $completed[0].Detail | Should -Match 'package_cleanup_failed target=Agent'
+        $completed[0].Detail | Should -Not -Match 'Agent-0\.9' -Because 'Teilbestand aus nur einer Quelle ist keine Cleanupentscheidung'
+        $result.ContentReads.Agent | Should -BeGreaterThan 0 -Because 'Contentarbeit des betroffenen Pakets laeuft weiter'
+        $result.ContentReads.Beta | Should -BeGreaterThan 0 -Because 'das unabhaengige Folgepaket wird weiter bearbeitet'
+        $result.ObservedSiteCodes.Count | Should -BeGreaterThan 0 -Because 'der Contentowner muss den Providerkontext tatsaechlich verbrauchen'
+        @($result.ObservedSiteCodes | Where-Object { $_ -ne 'ABC' }).Count | Should -Be 0 -Because 'ein optionaler Inventarfehler setzt den Providerkontext nicht zurueck'
+        $result.CleanupErrorActions | Should -Not -Contain 'SilentlyContinue'
+        $result.CleanupErrorActions | Should -Contain 'Stop'
+        @($result.Logs | Where-Object Message -match 'Automatische Altversionsbereinigung konnte nicht sicher geplant/revalidiert werden').Count | Should -Be 1
+    }
+
+    It 'haelt beide optionalen Abfragen auf ErrorAction Stop und unter lokaler Fehlerbehandlung' {
+        $text = Get-Content -LiteralPath $script:Importer -Raw
+        $text | Should -Match 'Get-CMDeviceCollection -Name \("\{0\}-\*" -f \$appName\) -ErrorAction Stop'
+        $text | Should -Match 'Get-CMApplication -Name \("\{0\}-\*" -f \$appName\) -ErrorAction Stop'
+        $text | Should -Not -Match 'Get-CMApplication -Name \("\{0\}-\*" -f \$appName\) -Fast' -Because 'die Referenzzaehler der Altanwendungen sind Lazy Properties und muessen vollstaendig gelesen werden'
+        $text | Should -Not -Match 'Get-CM(?:DeviceCollection|Application) -Name \("\{0\}-\*" -f \$appName\).*ErrorAction SilentlyContinue'
+    }
+}
+
+Describe 'Autoimporter: bestaetigter Contentauftrag gibt Collection und Deployments frei' {
+    It 'meldet die Generation mit getrennter Deploymentfreigabe' {
+        (Get-Content -LiteralPath $script:Importer -Raw) | Should -Match "\`$SCRIPT_VERSION\s*=\s*'autoimporter/2\.2'"
+    }
+
+    It 'verlangt denselben MECM-Serververtrag wie Common und der Installer prueft Staging und Livebestand' {
+        $importerText = Get-Content -LiteralPath $script:Importer -Raw
+        $commonText = Get-Content -LiteralPath $script:MecmCommon -Raw
+        $installerText = Get-Content -LiteralPath $script:Installer -Raw
+
+        $commonText | Should -Match '\$script:VsMecmServerContractVersion\s*=\s*2'
+        $importerText | Should -Match '\$script:VsRequiredMecmServerContractVersion\s*=\s*2'
+        $importerText | Should -Match 'Get-Variable -Name VsMecmServerContractVersion -Scope Script'
+        $importerText | Should -Match 'MECM-Serverpaket inkompatibel'
+        $importerText | Should -Match 'install-VirtuSphere-MECM\.ps1 -Upgrade'
+        foreach ($needle in @(
+            'stagedMecmServerVersion', 'stagedAutoimporterRequiredVersion',
+            'installedMecmServerVersion', 'installedAutoimporterRequiredVersion'
+        )) {
+            $installerText | Should -Match ([regex]::Escape($needle))
+        }
+    }
+
+    It 'erreicht den Deploymentabgleich direkt nach einer bestaetigten Erstverteilung ohne sichtbaren DP' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
+
+        $requests.Initial | Should -Be 1
+        $tracking.Value.State | Should -Be 'intent'
+        $tracking.Value.RequestConfirmed | Should -BeTrue
+        $requests.ReconciliationReached | Should -BeTrue -Because 'MECM hat den Auftrag quittiert; kein DP-Erfolg ist Voraussetzung fuer die Zuweisung'
+    }
+
+    It 'erreicht den Deploymentabgleich fuer einen bestaetigten Intent auch bevor ContentId oder Ziele sichtbar sind' {
+        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'intent'; Manifest = ('A' * 64); BaselineSourceVersion = -1; SourceVersion = -1; RequestKind = 'initial'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'ContentA'; ContentId = ''; RequestConfirmed = $true; DistributionBaseline = '[]'
+        } }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
+
+        $tracking.Value.State | Should -Be 'intent'
+        $requests.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'erreicht den Deploymentabgleich bei <AggregateState> auch wenn kein DP erfolgreich ist' -ForEach @(
+        @{ AggregateState = 'failed'; DpState = 3 },
+        @{ AggregateState = 'in_progress'; DpState = 2 }
+    ) {
+        $targets = @(1..2 | ForEach-Object {
+            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = $DpState; LastCopiedTicks = 100L }
+        })
+        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'pending'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = -1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
+            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_1","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_2","last_copied_ticks":100}]'
+        } }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState $AggregateState -CopyTargets $targets | Out-Null
+
+        $tracking.Value.State | Should -Be 'pending'
+        $requests.ReconciliationReached | Should -BeTrue -Because 'die offene Verteilung bleibt Warnung, ist aber kein Deployment-Veto'
+    }
+
+    It 'erreicht den Deploymentabgleich weiter wenn ein frueher vollstaendiger Stand spaeter DP-Fehler meldet' {
+        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 101L })
+        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'complete'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
+            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
+        } }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState failed -CopyTargets $targets | Out-Null
+
+        $tracking.Value.State | Should -Be 'complete'
+        $requests.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'blockiert den Deploymentabgleich bei unbekanntem Aggregat oder DP-Loeschzustand' {
+        foreach ($case in @(
+            @{ State = 'unknown'; DpState = 3 },
+            @{ State = 'failed'; DpState = 4 }
+        )) {
+            $tracking = [pscustomobject]@{ Value = $null }
+            $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+            $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $case.DpState; LastCopiedTicks = 100L })
+            Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+                -ContentId ContentA -AggregateState $case.State -CopyTargets $targets | Out-Null
+            $requests.ReconciliationReached | Should -BeFalse
+        }
+    }
+
+    It 'blockiert den Deploymentabgleich wenn ein gebundenes DP-Ziel verschwunden ist' {
+        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 100L })
+        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
+            State = 'pending'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = -1; RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
+            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
+            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":100}]'
+        } }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState failed -CopyTargets $targets | Out-Null
+
+        $requests.ReconciliationReached | Should -BeFalse
+    }
+
+    It 'blockiert den Deploymentabgleich ohne DP-Gruppe oder bestaetigten MECM-Aufruf' {
+        $tracking = [pscustomobject]@{ Value = $null }
+        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState not_started -CopyTargets @() -DpGroupName '' | Out-Null
+        $requests.ReconciliationReached | Should -BeFalse
+
+        $tracking.Value = $null
+        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
+            -ContentId ContentA -AggregateState not_started -CopyTargets @() -RequestFailure initial | Out-Null
+        $requests.ReconciliationReached | Should -BeFalse
     }
 }
 
@@ -1114,25 +1436,20 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         $text | Should -Match '\$dtParams\s*=\s*@\{'
     }
 
-    It 'A14a behaelt erkannte Alt-Versionen und fuehrt im Cleanup-Zweig keine MECM-Loeschung aus' {
+    It 'A14a fuehrt removeOldVersion nur ueber den revalidierten Plan und in sicherer Reihenfolge aus' {
         $text = Get-Content -Path $script:Importer -Raw
-        $text | Should -Match 'Altobjekt bleibt erhalten'
-        $text | Should -Match 'Eigentum, vollstaendige Referenzpruefung und vollstaendig verteilten Ersatz'
-
-        $tokens = $null
-        $errors = $null
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Importer, [ref]$tokens, [ref]$errors)
-        @($errors).Count | Should -Be 0
-        $cleanupIf = @($ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.IfStatementAst] -and
-                $node.Extent.Text -match 'removeOldVersion' -and
-                $node.Extent.Text -match 'Altobjekt bleibt erhalten'
-        }, $true) | Sort-Object { $_.Extent.Text.Length } | Select-Object -First 1)
-        $cleanupIf.Count | Should -Be 1
-        $cleanupIf[0].Extent.Text | Should -Not -Match 'Remove-CM(?:Application|ApplicationDeployment|DeviceCollection)'
-        $text | Should -Match "HashSet\[string\].*StringComparer\]::Ordinal"
-        $text | Should -Match 'removeOldVersion.*cleanupProducts\.Add\(\$appName\)'
+        $text | Should -Match 'cleanupRequestedProducts\.Add'
+        $text | Should -Match 'Get-VsPackageRetirementPlan'
+        $text | Should -Match 'Invoke-VsPackageRetirementPlan -ApprovedPlan \$approvedPlan -CurrentPlan \$currentPlan'
+        $text | Should -Match 'Remove-CMApplicationDeployment -DeploymentId'
+        $text | Should -Match 'Remove-CMApplication -Id'
+        $text | Should -Match 'Remove-CMCollection -Id'
+        $text | Should -Match 'Remove-VsPackageContentTracking -ApplicationName \$item\.Name; Remove-CMApplication' -Because 'ein Fehler beim Tracking-Cleanup darf nicht erst nach bereits geloeschter Application sichtbar werden'
+        $text | Should -Match 'SMS_CollectionDependencies'
+        $text | Should -Match 'NumberOfDependentTS'
+        $text | Should -Match 'DistributionEvidenceSafe = \$true'
+        $text | Should -Match 'DeploymentReady = \$replacementDeploymentReady'
+        (Get-Content -Path $script:MecmCommon -Raw) | Should -Match "replacementDistributionState -notin @\('failed', 'in_progress', 'succeeded'\)"
     }
 
     It 'jeder erhaltene Settingname ist ein echter Installer-Parameter' {

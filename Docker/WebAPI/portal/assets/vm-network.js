@@ -43,6 +43,12 @@
                     label.textContent = rowLabel;
                 }
             }
+            row.querySelectorAll('[data-copy-label-template]').forEach(function (button) {
+                button.setAttribute(
+                    'aria-label',
+                    String(button.getAttribute('data-copy-label-template') || '').replace(':number', String(index + 1))
+                );
+            });
             var select = row.querySelector('[data-vm-network-vlan]');
             if (!select) {
                 return;

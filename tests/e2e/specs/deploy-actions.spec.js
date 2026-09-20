@@ -141,12 +141,16 @@ test('start (scheduled): the preview must be confirmed, then a scheduled job is 
     page.waitForResponse((r) => r.url().includes('deploy.php') && r.request().method() === 'POST'),
     confirm.locator('button[type="submit"]').click(),
   ]);
-  await expect(page.locator('.alert-success').first(), 'the schedule is confirmed with a flash').toBeVisible();
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'the schedule is confirmed with a flash').toBeVisible();
 
   const jobs = missionJobs(seed.missionId);
   expect(jobs.length, 'exactly one job was queued').toBe(1);
   expect(jobs[0].status, 'the job waits as queued').toBe('queued');
   expect(jobs[0].scheduled_at, 'the job carries its start time').not.toBeNull();
+  await expect(outcome, 'queue persistence is not presented as execution').toContainText(String(jobs[0].id));
+  await expect(outcome, 'queue persistence is not presented as execution').toContainText(/not yet.*executed/i);
+  await expect(outcome.locator('.alert-actions a'), 'the next step opens this exact job').toHaveAttribute('href', `deploy_log.php?id=${jobs[0].id}`);
 
   // ADR-0032, matrix point 9: the browser-enqueued job carries the request's
   // correlation id, and the same id sits on the queue line and on the audit
@@ -199,6 +203,9 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `);
 
   await page.goto(`deploy.php?mission_id=${seed.missionId}&credential_esxi_id=${seed.esxi}`);
+  const queue = page.locator('#deploy-queue-form');
+  await queue.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  await queue.locator('select[name="mode"]').selectOption('powercycle');
   const adopt = page.locator('form:has(input[name="action"][value="adopt_vm"]) button');
   const dialog = page.locator('[data-confirm-dialog]');
   await expect(adopt, 'a foreign namesake exposes the explicit adoption action').toBeVisible();
@@ -211,9 +218,13 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 
   await adopt.click();
   await Promise.all([
-    page.waitForURL(new RegExp(`deploy\\.php\\?mission_id=${seed.missionId}`)),
+    page.waitForURL(/deploy\.php\?resume_draft=1/),
     dialog.locator('[data-confirm-accept]').click(),
   ]);
+  await expect(queue.locator('select[name="mission_id"]'), 'adoption restores the mission draft').toHaveValue(String(seed.missionId));
+  await expect(queue.locator('select[name="credential_esxi_id"]'), 'adoption restores the ESXi draft').toHaveValue(String(seed.esxi));
+  await expect(queue.locator('select[name="credential_ansible_id"]'), 'adoption restores the Ansible draft').toHaveValue(String(seed.ansible));
+  await expect(queue.locator('select[name="mode"]'), 'adoption restores the selected mode').toHaveValue('powercycle');
   const after = identity();
   expect(after.vm_moid).toBe('vm-e2e-44');
   expect(after.vm_instance_uuid).toBe('e2e-instance-uuid-44');
@@ -250,6 +261,9 @@ test('cancel: Cancel keeps the job queued, Confirm cancels it', async ({ page })
   const after = jobRow(jobId);
   expect(after.status, 'the job is cancelled').toBe('cancelled');
   expect(after.cancelled_at, 'the cancellation is timestamped').not.toBeNull();
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'cancellation does not promise rollback').toContainText(/does not roll back/i);
+  await expect(outcome.locator('.alert-actions a'), 'the log remains the evidence path').toHaveAttribute('href', `deploy_log.php?id=${jobId}`);
 });
 
 // e2e-covers: deploy.php:cancel_group
@@ -316,6 +330,11 @@ test('retry: Cancel creates nothing, Confirm queues a new job for the failed one
   const jobs = missionJobs(seed.missionId);
   expect(jobs.length, 'the retry queued a second job').toBe(2);
   expect(Number(jobs[0].id), 'the original job is untouched').toBe(failedId);
+  const newId = Number(jobs[1].id);
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'retry names the new queued job').toContainText(String(newId));
+  await expect(outcome, 'retry is not presented as execution').toContainText(/not yet.*executed/i);
+  await expect(outcome.locator('.alert-actions a')).toHaveAttribute('href', `deploy_log.php?id=${newId}`);
 });
 
 // e2e-covers: deploy_log.php:retry
@@ -414,14 +433,15 @@ echo 'JSON' . json_encode(['limit' => $limit, 'total' => $total]) . 'JSON';
     .toContainText(String(overLimit.total));
   await expect(page.locator('[data-deploy-queue-button]'), 'queueing stays disabled').toBeDisabled();
 
-  const repair = blocker.locator(`a[href="vms.php?mission_id=${seed.missionId}"]`);
+  const repair = blocker.getByRole('button', { name: 'Open the mission VMs' });
   const help = blocker.locator('a[data-deploy-blocker-help]');
   await expect(repair, 'the way to change the selection').toBeVisible();
   await expect(help, 'the way to the reason the ceiling exists').toBeVisible();
 
   const gap = await blocker.evaluate((node) => {
-    const links = [...node.querySelectorAll('.alert-actions a')].map((a) => a.getBoundingClientRect());
-    return links.length === 2 ? links[1].left - links[0].right : -1;
+    const actions = [...node.querySelectorAll('.alert-actions .button-as-link, .alert-actions a')]
+      .map((action) => action.getBoundingClientRect());
+    return actions.length === 2 ? actions[1].left - actions[0].right : -1;
   });
   expect(gap, 'repair and help stay visibly separate links').toBeGreaterThanOrEqual(10);
 

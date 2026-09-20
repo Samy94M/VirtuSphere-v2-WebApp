@@ -11,6 +11,8 @@ require_once __DIR__ . '/worker_database_connect.php';
 require_once __DIR__ . '/worker_stop_signal.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_mission.php';
+require_once __DIR__ . '/ansible_test_process.php';
+require_once __DIR__ . '/ansible_test_config.php';
 
 /**
  * The deploy worker's CLI shell: option parsing, the database connection with
@@ -54,6 +56,11 @@ function deploy_worker_main(array $argv): int
         return 0;
     }
 
+    $lastAnsibleScheduleCheck = 0;
+    $ansibleTestProcess = null;
+    register_shutdown_function(static function () use (&$ansibleTestProcess): void {
+        ansible_test_process_stop($ansibleTestProcess);
+    });
     do {
         if (!$options['once'] && worker_stop_requested()) {
             fwrite(STDERR, "[deploy-worker] stopping: no job in flight\n");
@@ -63,7 +70,23 @@ function deploy_worker_main(array $argv): int
         worker_heartbeat_touch();
         try {
             deploy_worker_report_alive($db);
+            ansible_test_process_reap($ansibleTestProcess);
             $claimed = deploy_worker_run_once($db, $workerId, $options);
+            if (!$claimed && !$options['once'] && !worker_stop_requested()
+                && time() - $lastAnsibleScheduleCheck >= VIRTUSPHERE_ANSIBLE_TEST_SCHEDULE_CHECK_SECONDS) {
+                $lastAnsibleScheduleCheck = time();
+                try {
+                    if ($ansibleTestProcess === null && ansible_test_interval_hours($db) > 0
+                        && deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
+                        $ansibleTestProcess = ansible_test_process_start();
+                    }
+                } catch (mysqli_sql_exception $exception) {
+                    throw $exception;
+                } catch (Throwable $exception) {
+                    // Diagnostics must not terminate the deployment worker.
+                    fwrite(STDERR, '[deploy-worker] Ansible full test: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
+                }
+            }
         } catch (mysqli_sql_exception $exception) {
             if ($options['once']) {
                 throw $exception;

@@ -1,5 +1,48 @@
 # ADR-0034: MECM-Provenienz und sichere Reconciliation
 
+## Amendment 6 (15.09.2026): Retirement wartet nicht auf 100 Prozent der DPs
+
+Der von `removeOldVersion=true` angeforderte automatische Retirement-Plan verwendet dieselbe
+Ersatzbereitschaft wie das Deployment: Der Contentauftrag muss bestätigt und an
+eine eindeutige Deployment-Type-/Contentidentität gebunden sein, die bekannte
+DP-Zielprojektion darf keinen Zielverlust oder Löschzustand enthalten und das
+Ersatz-Deployment muss geprüft vorhanden sein. `failed` oder `in_progress` auf
+einzelnen oder allen DPs bleibt dabei ein sichtbarer Verteilbefund, blockiert den
+Retirement-Plan aber nicht. Ein erfolgreicher DP oder 100 Prozent
+Verteilerfolg sind keine Voraussetzung.
+
+Ein noch ungebundener Intent, ein unbestätigter Aufruf, unbekannte
+Content-/Zielidentität, Zielverlust und Löschzustände bleiben fail-closed. Der
+Plan behält außerdem die unabhängigen Schutzgrenzen: eindeutige numerische
+Zielversion, exakte Ownership-Marker, vollständiger Referenzscan, referenzfreie
+Kandidaten, erneute Prüfung und identischer Planhash unmittelbar vor der ersten
+Löschung. Der Autoimporter erhebt den Plan unmittelbar zweimal und führt ihn nur
+bei identischem Hash aus; Deployment, Application und Collection sind explizite
+Einheiten in dieser Reihenfolge. Das Retirement-Plan-Schema steigt auf 3;
+Schema-1/2-Pläne sind unter der automatischen Semantik ungültig.
+
+## Amendment 5 (15.09.2026): Deploymentfreigabe nach bestätigtem Contentauftrag
+
+Auftragsannahme, Deploymentfreigabe und vollständiger Verteilnachweis sind drei
+getrennte Grenzen. Sobald `Start-CMContentDistribution` oder
+`Update-CMDistributionPoint` erfolgreich zurückgekehrt ist und der Autoimporter
+den Auftrag als bestätigt gespeichert hat, zieht er die eigene Collection, das
+Required-Deployment und ein konfiguriertes Available-Deployment idempotent nach.
+Dafür ist kein bereits erfolgreich kopierter DP erforderlich. Die Zuweisung
+bleibt damit auch erhalten, wenn alle DPs vorübergehend offline sind; Geräte
+können das Paket anwenden, sobald der ihnen zugeordnete DP den Inhalt anbietet.
+
+Der Verteilnachweis wird dadurch nicht abgeschwächt. `failed` und `in_progress`
+bleiben offene Punkte, verhindern den Manifest-Stamp und bleiben im Portal
+sichtbar. Vollständig verteilt ist der Stand weiterhin erst nach dem neueren
+erfolgreichen Kopiernachweis aller gebundenen Ziele. Eine fehlende DP-Gruppe,
+ein nicht bestätigter MECM-Aufruf, unbekannte Application-/Deployment-Type- oder
+Contentidentität, eine unvollständige beziehungsweise widersprüchliche
+Zielprojektion, Zielverlust und DP-Löschzustände bleiben vor nachgelagerten
+Mutationen fail-closed. Der Autoimporter entfernt nur die über
+`removeOldVersion=true` angeforderten und vollständig belegten Altobjekte; für
+ein unverändertes Manifest stößt er keine blinde Redistribution an.
+
 ## Amendment 2 (07.09.2026): schemagetreue Verteilung und konservative Membership-Leser
 
 Der Device-Sync behandelt eine Direct-Membership-Abfrage nun als dreiwertig:
@@ -161,16 +204,15 @@ sogar „bestehende Mitgliedschaften werden nie entfernt".
   überlebender Hand-Regel, wiederholter Device-Sync idempotent, Verteilung
   erfolgreich/in Arbeit/fehlgeschlagen korrekt gemeldet (Air-Gap-Checkliste).
 
-## Amendment 1 (2026-09-07): kein namensbasierter Autoimporter-Cleanup
+## Amendment 1 (2026-09-07, durch Amendment 6 ersetzt): kein namensbasierter Autoimporter-Cleanup
 
-`removeOldVersion` autorisiert im normalen Importlauf keine MECM-Loeschung mehr.
-Ein passender Name oder Paketordner beweist weder VirtuSphere-Eigentum noch, dass
-die neue Application samt Deployment Type, aktuellem Content, Verteilung und
-Referenzen als Ersatz bereitsteht. Der Autoimporter erkennt exakte Kandidaten,
-laesst Deployment, Collection und Application unveraendert und meldet den
-offenen Bereinigungsbedarf. Ein spaeterer A14b-Executor benoetigt einen vor der
-Ausfuehrung erneut validierten Plan mit stabilen IDs, Ownership, Referenzen und
-Ersatznachweis. Portal-Retirement und MECM-Loeschung bleiben getrennte Vorgaenge.
+Diese frühere Entscheidung ist für die Autorisierungsfrage ersetzt:
+`removeOldVersion=true` ist jetzt die ausdrückliche Löschanforderung. Unverändert
+gültig bleibt, dass ein Name oder Paketordner allein weder Eigentum noch
+Ersatzbereitschaft beweist. Der Autoimporter benötigt einen unmittelbar vor der
+Ausführung erneut validierten Plan mit stabilen IDs, Ownership, vollständigen
+Referenzabfragen und Ersatznachweis. Portal-Retirement und MECM-Löschung bleiben
+getrennte Vorgänge.
 
 ## Amendment 4 (2026-09-07): versionierter, revalidierter Bereinigungsplan
 
@@ -188,13 +230,16 @@ versionierten Ownership-Marker. Ein Name, ein Ordner oder ein Altbestand ohne
 Marker wird niemals nachträglich als Eigentum angenommen. Weiterhin in der
 Quelle liegende Versionen und vorhandene höhere Versionen bleiben erhalten.
 `Get-VsPackageRetirementPlan` verlangt für den eindeutigen Ersatz genau einen
-Deployment Type, bestätigtes Content-Tracking, vollständig erfolgreiche
-Verteilung und ein geprüftes Deployment. Kandidaten brauchen stabile CI- bzw.
+Deployment Type, einen bestätigten und gebundenen Contentauftrag, sichere
+Zielevidenz und ein geprüftes Deployment, aber keinen vollständigen
+DP-Verteilerfolg. Kandidaten brauchen stabile CI- bzw.
 Collection-IDs, den passenden Marker und dürfen keine Referenz besitzen.
 
-Der Plan besitzt einen SHA-256-Fingerabdruck über seine kanonische Form.
+Der Plan besitzt einen SHA-256-Fingerabdruck über seine kanonische Form und
+führt alte Application-Deployments vor Applications und Collections.
 `Invoke-VsPackageRetirementPlan` akzeptiert nur einen unmittelbar erneut
 erhobenen Plan mit identischem Fingerabdruck und bricht beim ersten
-Einzelfehler mit einem expliziten Ergebnis ab. Der normale Autoimporter ruft
-diesen Executor nicht auf. Ein späterer operativer Aufruf bleibt eine gesondert
-freizugebende MECM-Handlung; Portal-Retirement löst ihn nicht aus.
+Einzelfehler mit einem expliziten Ergebnis ab. Der Autoimporter ruft diesen
+Executor automatisch auf, wenn mindestens eine Paketquelle des Produkts
+`removeOldVersion=true` verlangt und der eindeutige höchste Quellstand als
+Ersatz belegt ist. Portal-Retirement löst diesen MECM-Vorgang nicht aus.

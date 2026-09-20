@@ -9,11 +9,11 @@
     compose config --format json, inklusive tools-Profil), nie per Regex ueber
     das YAML: gepinnt werden read_only+tmpfs, cap_drop ALL, die exakt
     dokumentierten cap_add-Sets, no-new-privileges, PID-/Memory-Limits,
-    Healthchecks, service_healthy-Startordnung, restart-Policy, die
+    Healthchecks, service_healthy-Startordnung, restart- und Logging-Policy, die
     Loopback-Bindung und das tools-Profil von phpMyAdmin, feste Tags und
     Build-Kontexte der lokal gehaerteten Runtime-Images sowie die Digest-Pins in
     den FROM-/COPY---from-Zeilen der First-Party-Dockerfiles. Der QA-Override (Docker/qa) aendert nur
-    env_file/volumes/restart und erbt die Haertung; geprueft wird die Basisdatei.
+    volumes/restart und erbt die Haertung; geprueft wird die Basisdatei.
 
     Das aufgeloeste config-JSON enthaelt interpolierte Secrets aus .env und wird
     deshalb weder gespeichert noch ausgegeben; Diagnosen nennen nur Service und
@@ -94,6 +94,8 @@ function Get-Prop {
 
 # --- Erwartungs-SSoT -----------------------------------------------------------
 $expectedServices = @('webserver', 'php', 'deploy-worker', 'maintenance-worker', 'mysql', 'phpmyadmin')
+$expectedLogDriver = 'json-file'
+$expectedLogOptions = @{ 'max-size' = '10m'; 'max-file' = '5' }
 $readOnlyServices = @('webserver', 'php', 'deploy-worker', 'maintenance-worker')
 $expectedCapAdd = @{
     'webserver'          = @('CHOWN', 'DAC_READ_SEARCH', 'SETGID', 'SETUID')
@@ -113,12 +115,13 @@ $dependsHealthy = @{
     'phpmyadmin'         = @('mysql')
 }
 $builtRuntimeImages = @{
+    php = @{ Tag = 'virtusphere-php:8.4-runtime'; Context = '/Docker/php'; Target = 'runtime' }
     mysql = @{ Tag = 'mysql:8.4-virtusphere'; Context = '/Docker/mysql' }
     phpmyadmin = @{ Tag = 'phpmyadmin:5.2.3-virtusphere'; Context = '/Docker/phpmyadmin' }
 }
 
 # Welche Umgebungsschluessel ein Service sehen DARF, nach Aufloesung durch
-# `docker compose config`. `$null` heisst "nicht gepinnt", nicht "beliebig".
+# `docker compose config`.
 #
 # Anlass: `env_file: .env` gab dem LAN-zugewandten nginx-Container und dem
 # phpMyAdmin-Container APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl keines der
@@ -128,14 +131,18 @@ $builtRuntimeImages = @{
 # versuchte also mysql:8023, wo nichts lauscht, und die Datenbankverbindung war
 # kaputt, waehrend die Oberflaeche erreichbar blieb.
 #
-# php und die beiden Worker sind bewusst NICHT gepinnt: sie sind die DB- und
-# Krypto-Seite, ihr Schluesselsatz zu enumerieren wuerde neue Interpolationen
-# einfuehren, die Regel 12 von check-doc-semantics.sh dann namentlich im Runbook
-# verlangt. Das ist eine eigene Aenderung, nicht diese.
 $expectedEnvKeys = @{
-    'webserver'  = @()
+    'webserver' = @()
+    'php' = @('ANSIBLE_SOURCE_DIR', 'APP_ENV', 'APP_KEY', 'APP_PUBLIC_BASE_URL',
+        'DB_HOST', 'DB_NAME', 'DB_PASS', 'DB_PORT', 'DB_USER', 'SEED_ADMIN_EMAIL',
+        'SEED_ADMIN_PASSWORD', 'SEED_ADMIN_USER', 'VIRTUSPHERE_DEBUG', 'WEB_HTTPS_PORT')
+    'deploy-worker' = @('ANSIBLE_SOURCE_DIR', 'APP_ENV', 'APP_KEY', 'APP_PUBLIC_BASE_URL',
+        'DB_HOST', 'DB_NAME', 'DB_PASS', 'DB_PORT', 'DB_USER', 'VIRTUSPHERE_DEBUG',
+        'VIRTUSPHERE_DEPLOY_WORKDIR')
+    'maintenance-worker' = @('APP_ENV', 'APP_KEY', 'DB_HOST', 'DB_NAME', 'DB_PASS',
+        'DB_PORT', 'DB_USER', 'VIRTUSPHERE_DEBUG')
     'phpmyadmin' = @('PMA_HOST', 'PMA_PORT')
-    'mysql'      = @('MYSQL_DATABASE', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD', 'MYSQL_USER')
+    'mysql' = @('MYSQL_DATABASE', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD', 'MYSQL_USER')
 }
 
 $servicesNode = Get-Prop $config 'services'
@@ -190,6 +197,21 @@ if ($findings.Count -eq 0) {
             }
         }
 
+        # Containerlogs bleiben pro Dienst auf 5 * 10 MiB begrenzt. Exakt statt
+        # nur "logging vorhanden", damit eine still entfernte Option rot wird.
+        $logging = Get-Prop $svc 'logging'
+        $driver = if ($null -ne $logging) { "$(Get-Prop $logging 'driver')" } else { '' }
+        if ($driver -ne $expectedLogDriver) {
+            Add-Finding 'logging' ('{0}: Logging-Treiber muss {1} sein' -f $name, $expectedLogDriver)
+        }
+        $options = if ($null -ne $logging) { Get-Prop $logging 'options' } else { $null }
+        foreach ($optionName in $expectedLogOptions.Keys) {
+            $actual = if ($null -ne $options) { "$(Get-Prop $options $optionName)" } else { '' }
+            if ($actual -ne $expectedLogOptions[$optionName]) {
+                Add-Finding 'logging' ('{0}: logging.options.{1} muss {2} sein' -f $name, $optionName, $expectedLogOptions[$optionName])
+            }
+        }
+
         # no-new-privileges.
         $secOpt = @(@(Get-Prop $svc 'security_opt') | ForEach-Object { "$_" })
         if ($secOpt -notcontains 'no-new-privileges:true') {
@@ -220,6 +242,18 @@ if ($findings.Count -eq 0) {
                 Add-Finding 'docker-socket' ('{0}: mountet den Docker-Socket ({1})' -f $name, $source)
             }
         }
+    }
+
+    $webVolumes = @(Get-Prop (Get-Prop $servicesNode 'webserver') 'volumes')
+    foreach ($vol in $webVolumes) {
+        if ($null -ne $vol -and "$(Get-Prop $vol 'target')" -eq '/var/log/nginx') {
+            Add-Finding 'nginx-log-mount' 'webserver: /var/log/nginx darf kein unrotiertes Host-/Volumeziel sein'
+        }
+    }
+
+    $mysqlCommand = @(@(Get-Prop (Get-Prop $servicesNode 'mysql') 'command') | ForEach-Object { "$_" })
+    if (($mysqlCommand -join ',') -ne 'mysqld,--skip-log-bin') {
+        Add-Finding 'mysql-binlog' 'mysql: command muss exakt [mysqld, --skip-log-bin] sein (ADR-0017: kein Replikations-/PITR-Verbraucher)'
     }
 
     # read_only + tmpfs fuer die First-Party-Services.
@@ -274,7 +308,8 @@ if ($findings.Count -eq 0) {
         }
     }
 
-    # MySQL/phpMyAdmin are locally hardened child images. Their stable tags
+    # The three PHP services share one versioned runtime target; MySQL and
+    # phpMyAdmin are locally hardened child images. Stable tags
     # survive docker save/load; reproducibility comes from the digest-pinned
     # FROM lines below plus the bundle checksum. Both the tag and build context
     # are part of the contract so an environment override cannot bypass them.
@@ -290,6 +325,26 @@ if ($findings.Count -eq 0) {
         if ($build) { $context = "$(Get-Prop $build 'context')" -replace '\\', '/' }
         if (-not $build -or -not $context.EndsWith($expected.Context, [System.StringComparison]::OrdinalIgnoreCase)) {
             Add-Finding 'built-image-context' ('{0}: Build-Kontext "{1}" endet nicht auf "{2}"' -f $name, $context, $expected.Context)
+        }
+        if ($expected.Target) {
+            $target = if ($build) { "$(Get-Prop $build 'target')" } else { '' }
+            if ($target -ne $expected.Target) {
+                Add-Finding 'built-image-target' ('{0}: Build-Target "{1}" statt "{2}"' -f $name, $target, $expected.Target)
+            }
+        }
+    }
+
+    # PHP is the sole build owner; both workers consume its exact stable tag.
+    # Giving every service a copied/merged build block makes BuildKit evaluate
+    # the same target three times and can produce distinct provenance records.
+    foreach ($name in @('php', 'deploy-worker', 'maintenance-worker')) {
+        $svc = Get-Prop $servicesNode $name
+        $image = "$(Get-Prop $svc 'image')"
+        if ($image -ne 'virtusphere-php:8.4-runtime') {
+            Add-Finding 'php-runtime-image' ('{0}: PHP-Laufzeitreferenz ist "{1}" statt virtusphere-php:8.4-runtime' -f $name, $image)
+        }
+        if ($name -ne 'php' -and $null -ne (Get-Prop $svc 'build')) {
+            Add-Finding 'php-worker-build' ('{0}: Worker darf keinen eigenen Build-Block besitzen; php ist alleiniger Buildowner' -f $name)
         }
     }
 }
@@ -308,13 +363,16 @@ foreach ($rel in $dockerfiles) {
         continue
     }
     $lineNo = 0
+    $knownStages = @()
     foreach ($line in [System.IO.File]::ReadAllLines($path)) {
         $lineNo++
-        if ($line -match '^\s*FROM\s+(\S+)') {
+        if ($line -match '^\s*FROM\s+(\S+)(?:\s+AS\s+(\S+))?') {
             $ref = $Matches[1]
-            if ($ref -notmatch $digestRe) {
+            $stageName = $Matches[2]
+            if (($knownStages -notcontains $ref) -and ($ref -notmatch $digestRe)) {
                 Add-Finding 'dockerfile-digest' ('{0}:{1} FROM {2} ohne @sha256-Digest' -f $rel, $lineNo, $ref)
             }
+            if ($stageName) { $knownStages += $stageName }
         }
         if ($line -match '^\s*COPY\s+--from=(\S+)') {
             $ref = $Matches[1]

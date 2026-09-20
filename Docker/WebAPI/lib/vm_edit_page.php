@@ -7,20 +7,31 @@ declare(strict_types=1);
 /** @var mysqli $connection Provided by portal/bootstrap.php. */
 /** @var array<string, mixed> $user Authenticated portal user from the shell. */
 
+$workContext = portal_work_context($_GET);
 $missionId = request_int($_GET, 'mission_id', request_int($_POST, 'mission_id'));
 $vmId = request_int($_GET, 'vm_id', request_int($_POST, 'vm_id'));
 $mission = repo_get_mission($connection, $missionId);
 if ($mission === null) {
     flash_set('error', __t('portal.mission_not_found'));
-    redirect_to('missions.php?type=missions');
+    redirect_to(portal_work_context_mission_list_url($workContext));
 }
 $isTemplate = mission_name_is_template((string) $mission['mission_name']);
+if (!isset($workContext['work_list_type'])) {
+    $workContext = portal_work_context(array_merge($workContext, [
+        'work_list_type' => $isTemplate ? 'templates' : 'missions',
+    ]));
+}
 
 $vm = $vmId > 0 ? repo_get_vm_bundle($connection, $vmId) : null;
 if ($vmId > 0 && ($vm === null || (int) $vm['mission_id'] !== $missionId)) {
     flash_set('error', __t('portal.vm_not_found'));
-    redirect_to('vms.php?mission_id=' . $missionId);
+    redirect_to(portal_work_context_vm_list_url($missionId, $workContext));
 }
+$vmListUrl = portal_work_context_vm_list_url($missionId, $workContext, $vmId > 0 ? $vmId : null);
+$missionDetailsUrl = mission_details_url($missionId, $workContext);
+$vmEditorUrl = $vmId > 0
+    ? vm_edit_url($missionId, $vmId, null, $workContext)
+    : portal_work_context_append_url('vm_edit.php?mission_id=' . $missionId, $workContext);
 
 $clientPhaseSummary = [];
 $clientEvents = [];
@@ -162,12 +173,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $osChanged = (string) ($vm['vm_os'] ?? '') !== $vmData['vm_os'];
             if ($before !== $after || $osChanged) {
                 flash_set('info', __t('vm_edit.flash_mecm_transfer_pending'), '', [
-                    'url' => 'vm_edit.php?mission_id=' . $missionId . '&vm_id=' . $savedVmId,
+                    'url' => vm_edit_url($missionId, $savedVmId, null, $workContext),
                     'label' => __t('portal.vm_mecm_transfer_button'),
                 ]);
             }
         }
-        redirect_to('vms.php?mission_id=' . $missionId);
+        redirect_to(portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
     } catch (Throwable $exception) {
         $error = portal_error_message($exception);
         if ($exception instanceof ValidationException) {
@@ -182,6 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $vm ??= [];
 $canWrite = can('vms.write', $user);
+$effectiveValues = portal_vm_effective_values($mission, $vm);
 $selectedPackages = array_map(static fn (array $row): int => (int) ($row['id'] ?? $row['package_id'] ?? 0), $vm['packages'] ?? []);
 // Pickers exclude retired catalog entries but keep values this VM already
 // uses (retired entries render with a suffix, E3).

@@ -369,7 +369,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         if ($stateRow !== null && !array_key_exists('evidence_current', $stateRow)) {
             $stateRow['evidence_current'] = true;
         }
-        $snapshot = ['ansible' => ['rows' => [[
+        $snapshot = ['ansible' => ['interval_hours' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'rows' => [[
             'credential' => ['id' => 5, 'name' => 'ansible-01', 'host' => '10.0.0.9'],
             'state_row' => $stateRow,
             'state' => $state,

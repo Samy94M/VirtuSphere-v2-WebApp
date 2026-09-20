@@ -79,7 +79,7 @@ function Find-Sh {
     return $null
 }
 $shExe = Find-Sh
-$phpImage = 'virtusphere-v2-webapp-php'
+$phpImage = 'virtusphere-php:8.4-tooling'
 $dockerAvailable = Test-Command 'docker'
 $phpImageAvailable = $false
 if ($dockerAvailable) {
@@ -336,6 +336,23 @@ $cases = @(
         $pad = ("Zeile fuer das Budget`n" * 80)
         [System.IO.File]::AppendAllText((Join-Path $fx 'CLAUDE.md'), $pad)
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.line-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.byte-budget'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        # One long line stays below the line budget but must not bypass context limits.
+        [System.IO.File]::WriteAllText((Join-Path $fx 'AGENTS.md'), ('x' * 40000), (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.byte-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.utf8-byte-budget'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        # Below the character count budget, above the UTF-8 byte budget.
+        [System.IO.File]::WriteAllText((Join-Path $fx 'CLAUDE.md'), ([string][char]0x00E4 * 1500), (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.byte-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.zero-match'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        [System.IO.File]::WriteAllText((Join-Path $fx 'AGENTS.md'), '', (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.empty-file\]'
     } }
 
     @{ Name = 'doc-semantics.green'; Body = {
@@ -969,7 +986,7 @@ $cases += @(
 # Compose-/Dockerfile-Haertungs-Contract (AP8): check-compose-hardening.ps1
 # liest VIRTUSPHERE_CHECK_ROOT selbst; die Fixtures brauchen eine .env (aus
 # .env.example kopiert, enthaelt keine Geheimnisse), weil compose config die
-# env_file-Direktiven aufloest.
+# expliziten Interpolationen aufloest.
 function Invoke-ComposeHardeningGuard {
     param([string]$FixtureRoot = '')
     $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
@@ -1000,7 +1017,15 @@ $cases += @(
         # Werte liest. Wiederhergestellt heisst das: die Regel muss es sehen.
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-ComposeFixture
-        Edit-Fixture $fx 'docker-compose.yml' '      - ./Docker/logs/nginx:/var/log/nginx' "      - ./Docker/logs/nginx:/var/log/nginx`n    env_file:`n      - .env"
+        Edit-Fixture $fx 'docker-compose.yml' '    logging: *container-logging' "    logging: *container-logging`n    env_file:`n      - .env"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-root-secret-drift'; Body = {
+        # App-Runtime und Worker duerfen das nur fuer MySQL/Hostwerkzeuge
+        # bestimmte Rootsecret auch dann nicht erhalten, wenn es in .env steht.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      WEB_HTTPS_PORT: ${WEB_HTTPS_PORT}' "      WEB_HTTPS_PORT: `${WEB_HTTPS_PORT}`n      MYSQL_ROOT_PASSWORD: `${MYSQL_ROOT_PASSWORD}"
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.pma-port-collision-drift'; Body = {
@@ -1013,6 +1038,18 @@ $cases += @(
         $fx = New-ComposeFixture
         Edit-Fixture $fx 'docker-compose.yml' '      PMA_PORT: ${DB_PORT}' '      # PMA_PORT entfernt'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.logging-bound-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    max-file: "5"' '    max-file: "50"'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.logging\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.mysql-binlog-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    command: ["mysqld", "--skip-log-bin"]' '    command: ["mysqld"]'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.mysql-binlog\]' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.read-only-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
@@ -1073,6 +1110,18 @@ $cases += @(
         $fx = New-ComposeFixture
         Edit-Fixture $fx 'docker-compose.yml' '      context: ./Docker/mysql' '      x-context-disabled: ./Docker/mysql'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-context\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-runtime-target-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    target: runtime' '    target: tooling'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-target\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-worker-build-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '  deploy-worker:' ("  deploy-worker:`n    build:`n      context: ./Docker/php`n      target: runtime")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.php-worker-build\]' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.dockerfile-digest-drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }

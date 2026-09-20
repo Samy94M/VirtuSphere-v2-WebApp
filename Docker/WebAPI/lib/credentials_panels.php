@@ -45,6 +45,7 @@ $deployWorkerAlive = integration_deploy_worker_alive_now($connection);
 $renderedAt = time();
 $esxiStates = repo_esxi_inventory_states($connection);
 $ansiblePreflightStates = repo_ansible_preflight_states($connection);
+$ansibleTestIntervalHours = ansible_test_interval_hours($connection);
 layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
 ?>
 <div class="stack">
@@ -135,7 +136,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState, $renderedAt); ?></a>
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                             <?php if ($pfState !== null && empty($pfState['evidence_current'])) { ?><small class="status-cadence"><?php echo h(__t('credentials.test_evidence_invalid')); ?></small><?php } ?>
-                            <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible()); ?></small>
+                            <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible($ansibleTestIntervalHours)); ?></small>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>

@@ -81,7 +81,7 @@ function deploy_log_filter_from_query(array $query, array $phaseNames): array
  * later reader cannot disagree about what was asked.
  *
  * @param array{q:string,source:string,phase:string,active:bool} $filter
- * @param array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>,current:?string} $timeline
+ * @param array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string} $timeline
  * @return array{needle:string,streams:list<string>,from_seq:?int,to_seq:?int}
  */
 function deploy_log_filter_repo_args(array $filter, array $timeline): array

@@ -838,9 +838,14 @@ try {
     }
     $stagedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
     $stagedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
+    $stagedMecmServerVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsMecmServerContractVersion'
+    $stagedAutoimporterRequiredVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'mecm_autoimporter.ps1') -VariableName 'VsRequiredMecmServerContractVersion'
     $installerVersion = Get-VsLoggingContractVersion
     if ($stagedVersion -ne $stagedExpectedVersion -or $stagedVersion -ne $installerVersion) {
         throw ('Logging-Vertrag des Stagings hat Version {0}, Common erwartet {1}, der Installer erwartet {2}.' -f $stagedVersion, $stagedExpectedVersion, $installerVersion)
+    }
+    if ($stagedMecmServerVersion -ne $stagedAutoimporterRequiredVersion) {
+        throw ('MECM-Serververtrag des Stagings hat Version {0}, der Autoimporter benoetigt {1}. Der Server-Dateisatz wird nicht aktiviert.' -f $stagedMecmServerVersion, $stagedAutoimporterRequiredVersion)
     }
 } catch {
     Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -936,8 +941,13 @@ try {
 }
 $installedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
 $installedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
+$installedMecmServerVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'VirtuSphere-Common.ps1') -VariableName 'VsMecmServerContractVersion'
+$installedAutoimporterRequiredVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installDir 'mecm_autoimporter.ps1') -VariableName 'VsRequiredMecmServerContractVersion'
 if ($installedVersion -ne $installedExpectedVersion -or $installedVersion -ne $installerVersion) {
     throw ('Installiertes Loggingmodul hat Version {0}, Common erwartet {1}, der Installer erwartet {2}. Aufgaben bleiben deaktiviert.' -f $installedVersion, $installedExpectedVersion, $installerVersion)
+}
+if ($installedMecmServerVersion -ne $installedAutoimporterRequiredVersion) {
+    throw ('Installierter MECM-Serververtrag hat Version {0}, der Autoimporter benoetigt {1}. Aufgaben bleiben deaktiviert.' -f $installedMecmServerVersion, $installedAutoimporterRequiredVersion)
 }
 Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
 Write-Ok "Package-Vorlage nach $templateDest aktiviert und per SHA-256 verifiziert"

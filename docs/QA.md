@@ -52,6 +52,17 @@ so the normal PHPUnit memory limit remains sufficient.
 
 ## Canonical Check Runner
 
+O08 measured the apparent overlap between `phpunit-unit` and the unfiltered
+`phpunit-full` before changing the runner. Exact JUnit identities showed that
+the full gate repeats every Unit/Static case and adds the Integration suite,
+but the repeated-case share remained below the predeclared implementation
+threshold. The runner therefore deliberately
+keeps the complete second execution. This is a measured retain decision, not a
+claim that the cases differ. Do not introduce a disjoint selection, persistent
+QA-state cache or database shard without a new plan whose threshold and
+standalone-gate behavior are fixed before a new baseline is measured. Raw
+counts and timings live in the O08 QA artifact, not in the quality-gate table.
+
 The Ansible module-contract guard family starts with a complete unmutated
 fixture, including both collection-lock Python owners and `requirements.yml`.
 Each negative mutation must reach its own diagnostic ID. The missing-library
@@ -119,7 +130,7 @@ Docker's grace and ended with exit 137; adding only `KILL` restored exit 0
 with the same image, FPM configuration and grace. The exact capability guard
 rejects both a missing required capability and additional unapproved ones.
 
-The `compose-hardening` gate (all lanes) runs `scripts/check-compose-hardening.ps1`: it parses the resolved `docker compose --profile "*" config` semantically and pins the existing hardening as a contract — `read_only`+tmpfs, `cap_drop: ALL` plus the exact documented `cap_add` sets, `no-new-privileges`, PID/memory limits, restart policy, healthchecks, `service_healthy` start ordering, phpMyAdmin's `tools` profile and loopback binding, tag+digest pins on registry images, digest pins in every first-party `FROM`/`COPY --from`, and the absence of any Docker socket mount. Any loosening fails the build with a stable `[compose.<case>]` ID; the resolved config JSON carries interpolated secrets and is never printed or stored.
+The `compose-hardening` gate (all lanes) runs `scripts/check-compose-hardening.ps1`: it parses the resolved `docker compose --profile "*" config` semantically and pins the existing hardening as a contract — `read_only`+tmpfs, `cap_drop: ALL` plus the exact documented `cap_add` sets, `no-new-privileges`, PID/memory limits, restart policy, healthchecks, `service_healthy` start ordering, phpMyAdmin's `tools` profile and loopback binding, the shared versioned PHP runtime target for FPM and both workers, tag+digest pins on registry images, digest pins in every external first-party `FROM`/`COPY --from`, and the absence of any Docker socket mount. Any loosening fails the build with a stable `[compose.<case>]` ID; the resolved config JSON carries interpolated secrets and is never printed or stored.
 
 `phpunit-full` owns the QA database while it runs. The gate stops the QA deploy and maintenance workers before PHPUnit creates queued, running and stale job fixtures, then restarts both in a `finally` path with Compose `--wait`. This keeps deliberately synthetic rows from being claimed or reaped by a real loop, and it guarantees later health and browser gates see healthy workers even when PHPUnit itself fails.
 
@@ -129,7 +140,7 @@ There are two ways to answer a fixable finding and only one of them is usually r
 
 An exception list decays into a fix-deferral list without anyone deciding to let it, and the file cannot tell you: a still-valid `expired_at` reads the same either way. Cleaning up the 38 entries before their 2026-09-30 expiry (2026-09-07) found that **not one** of them was an exception under this policy. 32 were carrying the gate, and trivy reported a concrete `FixedVersion` with `"Status": "fixed"` for every single one, so they were deferred fixes; the remaining 6 no longer appeared in any scanned image at all. The whole list came out, both groups were answered in the Dockerfiles, and `vulnerabilities:` is now empty. The check that separates the two cases costs one scan and is the one to run before renewing any date: scan each image **without** the ignore file, once with `--ignore-unfixed` and once without, and intersect the IDs with the `- id:` lines. What the flag hides is what genuinely has no fix; what survives it is a fix somebody has to pull into an image. A renewed date over a finding that has a fix does not buy time, it hides a patch that was already available.
 
-`offline-bundle` (Release lane) runs `scripts/build-offline-bundle.sh`: it saves the runtime images, builds `vendor.tar.gz` (`composer install --no-dev` inside the PHP image), downloads the Ansible collections for the air-gapped control node, adds the closed 8R-O durable-runner payload after verifying its own `runner/SHA256SUMS`, produces SBOMs and CVE reports, snapshots the source (`git archive`), writes `provenance.json`, `INSTALL.md` and a bundle-wide `SHA256SUMS` manifest, and then verifies itself with the bundled `verify.sh` — which needs only `sha256sum` and no network, matching how the target system verifies it offline. The runner installer and read-only preflight do not activate a product mode or change linger; their target-host output is still an open 8R-S artifact.
+`offline-bundle` (Release lane) runs `scripts/build-offline-bundle.sh`: one resolver emits the deduplicated core runtime images in `images.txt` and the optional phpMyAdmin payload in its separate `tools/images.txt`; `tools/install.sh` verifies that closed payload before loading or starting it. The gate builds `vendor.tar.gz` with the explicit PHP tooling image, downloads the Ansible collections for the air-gapped control node, adds the closed 8R-O durable-runner payload after verifying its own `runner/SHA256SUMS`, produces SBOMs and CVE reports, snapshots the source (`git archive`), writes provenance and install instructions, and then verifies itself with `verify.sh`. The core path never loads or starts phpMyAdmin. The runner installer and read-only preflight do not activate a product mode or change linger; their target-host output is still an open 8R-S artifact.
 
 ### Integration lane and the QA stack
 
@@ -169,6 +180,33 @@ not part of this path. Run the canonical Fast and Integration lanes for final
 acceptance; Integration exercises the functional Chromium suite and the exact
 deterministic light/dark visual harness. Etappe 12 does not create or update
 committed visual baselines; Etappe 17 introduced them and their update command.
+
+### O05 asset delivery contract
+
+`LayoutAssetVersionTest` changes a file's contents while restoring the same
+mtime and requires a different full SHA-256 version. `HttpsConfigTest` pins the
+shared gzip owner plus identical asset location and cache-header statements in
+the baked HTTP block and the portal-generated HTTPS block. Runtime acceptance
+uses only the exact `virtusphere-qa` stack: a versioned CSS/JavaScript request
+must return `Content-Encoding: gzip` and `Cache-Control: public,
+max-age=31536000, immutable`; the same unversioned URL and a missing asset must
+return `no-cache`, the latter with 404. A dynamic portal response must not gain
+the immutable asset policy. Generate the HTTPS block through
+`https_render_nginx_conf()`, validate the complete configuration with
+`nginx -t`, then repeat the header probes on the QA TLS port using only the
+committed synthetic certificate fixtures.
+
+### O06 page-specific asset registry
+
+`VIRTUSPHERE_LAYOUT_PAGES`, `layout_style_registry()` and
+`layout_script_registry()` form a closed page-to-asset mapping in
+`lib/layout.php`. `PortalPageAssetSelectionTest` pins the exact stylesheet and
+script subsequence for every rendered entrypoint and rejects an unclassified
+page. The existing bidirectional registry tests still compare every file on
+disk, forbid hand-written tags/imports and preserve deploy-module/cascade
+order. Final acceptance runs the complete Chromium action/page matrix and the
+reviewed light/dark visual baselines in the exact `virtusphere-qa` stack;
+source-only assertions do not prove that a removed module was truly unused.
 
 ### Etappe 14 form accessibility contract
 
@@ -586,13 +624,13 @@ offline suite can establish, and the release stays blocked on it.
 Run PHPUnit inside the PHP container:
 
 ```powershell
-docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html test
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling composer test
 ```
 
 Run PHPStan (level 5, baseline ratchet per ADR-0015) inside the PHP container:
 
 ```powershell
-docker exec virtusphere-v2-webapp-php-1 composer --working-dir=/var/www/html run stan
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling composer run stan
 ```
 
 Run the stdlib-only Ansible client and durable-runner protocol tests in an isolated Python container. The runner cases cover closed golden vectors, unknown fields, token/hash/path/symlink rejection, atomic result files, bounded redacted output, no duplicate launch decision, exact observer offsets/rotation rejection and a read-only preflight:
@@ -604,7 +642,7 @@ docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo:ro -w /repo python:3.
 Run the language catalog parity audit from the project image:
 
 ```powershell
-docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-v2-webapp-php php scripts/lang-audit.php --ci
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-php:8.4-tooling php scripts/lang-audit.php --ci
 ```
 
 Der deaktivierte 8R-O-3-Inventarconsumer wird gezielt in drei Schichten geprüft:
@@ -659,7 +697,7 @@ brauchen keine Datenbank, der Grenzvertrag muss das ganze Repo sehen (er liest
 docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Unit/MissionTransferDocumentTest.php tests/Unit/MissionImportPortalTest.php
 docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Static/MissionImportPreviewErrorContractTest.php
 docker compose exec -T php vendor/bin/phpunit --fail-on-skipped tests/Integration/MissionTransferRoundTripTest.php tests/Integration/MissionImportShapeContractTest.php
-docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-v2-webapp-php php vendor/bin/phpunit --fail-on-skipped tests/Static/MissionImportUploadLimitContractTest.php
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling php vendor/bin/phpunit --fail-on-skipped tests/Static/MissionImportUploadLimitContractTest.php
 ```
 
 Sie beweisen die gemeinsame Dokumentkanonisierung (kaputte Listen zählen nicht
@@ -757,7 +795,7 @@ Select-String -Path Docker\mysql\mysql-init\struktur.sql -Pattern 'deploy_interf
 Several contract tests read above that mount, because their subject lives there: `struktur.sql`, the E2E specs, the compose/setup scripts, the PHP ini drop-in. They **skip** in the container and only enforce in a run that sees the repo root, so a change to those files is proven by the command below, not by `composer test`. Which tests those are is not worth counting here - the number changes whenever a contract gains a repo-level source, and a stale count reads as a promise; `grep -l markTestSkipped Docker/WebAPI/tests/Static/*.php` lists the current set with its reason, and the Fast lane runs them all with `--fail-on-skipped`, so none of them can quietly stop enforcing:
 
 ```powershell
-docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-v2-webapp-php ./vendor/bin/phpunit --no-coverage tests/Static tests/Unit
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling ./vendor/bin/phpunit --no-coverage tests/Static tests/Unit
 ```
 
 Skipping is the deliberate choice over failing: the documented container command has to stay green, or a lane that is always red is a lane nobody reads. What must never happen is the third option, passing. `file_get_contents()` on a missing path returns false, and an empty haystack makes every `assertStringNotContainsString()` vacuously true, so these tests ask `is_file()` first and assert the file is non-empty before scanning it.
@@ -944,7 +982,7 @@ These live in `Docker/WebAPI/tests/Integration/` and need a running MySQL, so th
 - `HttpsConfigTest` pins the WP7 HTTPS admin flow, including that the redirect only fires while the generated listener config exists (the boot-quarantine lockout guard) and that the HTTP and generated HTTPS server blocks keep the same deny rules and fallback security headers. It reads `Docker/nginx/default.conf`, which is not mounted into the PHP container, so run it against a repo checkout:
 
 ```powershell
-docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-v2-webapp-php ./vendor/bin/phpunit --filter HttpsConfig
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling ./vendor/bin/phpunit --filter HttpsConfig
 ```
 
 ## Browser E2E (dev-host only)
@@ -1021,7 +1059,7 @@ The `visual` project is not a dev-stack screenshot command. It runs only as part
 powershell -NoProfile -File scripts\check.ps1 -Lane Integration -Gate qa-stack,e2e-portal -Json qa-artifacts/qa-visual.json
 ```
 
-The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, the desktop/wrap/mobile viewports, the captured pages, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation, hidden caret and the mask list. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS`, `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` and `VIRTUSPHERE_VISUAL_BASELINE_UPDATE` are refused, and the gate clears all three before calling the harness.
+The committed `visual/runner-contract.json` pins Windows/x64, OS release, Playwright and Chromium revisions/versions, Segoe UI font hashes, `de-DE`, `Europe/Berlin`, the desktop/wrap/mobile viewports, the captured pages or bounded component targets and their deterministic synthetic visual fixtures, `deviceScaleFactor=1`, CSS screenshot scale, clock/random seed, both themes, reduced motion, disabled animation, hidden caret and the mask list. Validation occurs before screenshots. Any mismatch is `infrastructure_error`; `UPDATE_SNAPSHOTS`, `VIRTUSPHERE_UPDATE_VISUAL_BASELINES` and `VIRTUSPHERE_VISUAL_BASELINE_UPDATE` are refused, and the gate clears all three before calling the harness.
 
 That Windows contract is still the last reviewed visual evidence. D01 on 08.09.2026 chose migration to the explicit `ubuntu-24.04` Integration runner because there is no matching maintained Windows runner, but the visual reference has not been activated on Linux. On Linux, `metadata.actual.json` records the stable distribution identity from `/etc/os-release` and diagnostic `fc-match` paths and hashes for regular/bold `system-ui` plus the regular generic sans-serif. Those diagnostics do not satisfy the old contract; they only supply measured candidates for the new one. The first normal Linux Integration run therefore remains an expected `infrastructure_error` and uploads those actual metadata. Copy only the measured platform, release, browser and chosen font-query values into a reviewed `runner-contract.json` change. Proposal workflow, writer invocation, manifest and PNG updates belong to a separate activation change after that contract review. Inspect every generated diff image before the replacement baseline is accepted. The migration is complete only after that human review. Do not edit `runner-contract.json` to guessed values and do not relabel the Windows manifest as Linux.
 
@@ -1029,7 +1067,9 @@ The runner proves exact QA Compose labels and zero queued/running/cancelling job
 
 #### Reviewed target baselines (Etappe 17)
 
-Comparing two runs of the same build proves the harness is deterministic and nothing else: a build whose every page had turned magenta would have passed it twice. Since Etappe 17 the pass criterion is the committed, reviewed PNG under `tests/e2e/visual/baselines/<theme>/<page>-<viewport>.png` — six images per theme, from `missions` and `deploy` across the desktop (1440), wrap (860, the shell's own `max-width` breakpoint, where the sidebar becomes a flat area) and mobile (390) viewports. The expected set is derived from the contract, so a capture that silently stopped being taken is a failure and not "nothing to report". `baselines/manifest.json` binds the set to the runner that produced it and carries a SHA-256 per file, a reason and a timestamp; a hand-swapped PNG or a set taken on another Chromium is caught before the first pixel comparison. A runner mismatch is `infrastructure_error`, a missing or altered image is a failure that a person has to answer.
+Comparing two runs of the same build proves the harness is deterministic and nothing else: a build whose every page had turned magenta would have passed it twice. Since Etappe 17 the pass criterion is the committed, reviewed PNG under `tests/e2e/visual/baselines/<theme>/<page>-<viewport>.png`. Missions and Deploy remain full-page targets; UX02 adds the bounded `.status-overview` component with deterministic, localized status variants including `Manuelle Klärung nötig`. All targets run across desktop (1440), wrap (860, the shell's own `max-width` breakpoint) and mobile (390), in both themes. The expected set is derived from the contract, so a capture that silently stopped being taken is a failure and not "nothing to report". `baselines/manifest.json` binds the set to the runner that produced it and carries a SHA-256 per file, a reason and a timestamp; a hand-swapped PNG or a set taken on another Chromium is caught before the first pixel comparison. A runner mismatch is `infrastructure_error`, a missing or altered image is a failure that a person has to answer.
+
+The UX02 contract extension deliberately makes the visual gate non-green until a person runs the writer below, reviews the six new System-status images and commits the resulting manifest together with them. The agent does not create or accept those target images. Existing Missions/Deploy PNGs remain evidence for their prior contract; they are not relabelled by hand to satisfy the expanded target set.
 
 Updating is a separate command, never a gate:
 
@@ -1168,7 +1208,7 @@ The baseline run is deferred to a dev host on purpose: this stack is air-gapped 
 The Claude hook delegates to the project script:
 
 ```powershell
-docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-v2-webapp-php sh scripts/lint-csp-patterns.sh --all-changed
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-php:8.4-tooling sh scripts/lint-csp-patterns.sh --all-changed
 ```
 
 `BLOCK:` findings are release blockers. `WARN:` findings are cleanup signals and can remain when they document legacy or staged refactor work. Vendor paths are excluded from the hook's project-code checks.
@@ -1188,3 +1228,11 @@ Vendored Composer packages can contain upstream trailing whitespace or blank EOF
 This repository already tracks `Docker/WebAPI/vendor` and the application must stay usable in air-gapped environments. When PHPUnit is updated through Composer, commit the matching `composer.json`, `composer.lock`, `vendor/composer/*` metadata and new `vendor/*` package directories together.
 
 Do not commit runtime logs, `.env`, MySQL data, `Docker/WebAPI/var/`, `Docker/WebAPI/.phpunit.result.cache` or other generated local state.
+
+## Sequential powercycle regression
+
+The canonical ansible-powercycle-selection gate also runs the production playbook
+and its shipped per-VM task file with local VMware action doubles. It checks
+ordered power-on/pause/power-off, a real seconds pause, external starts, empty
+and excluded selections, missing identity/state and fail-stop cleanup paths.
+No ESXi connection is made; real host state convergence remains a lab acceptance.

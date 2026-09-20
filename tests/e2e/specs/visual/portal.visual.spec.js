@@ -59,7 +59,7 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
   ].map((part) => String(part).padStart(2, '0')).join(':');
 
   const pages = contract.pages.map((entry) => ({
-    name: entry.name,
+    ...entry,
     url: entry.url.replace(':missionId', String(seeded.missionId)),
   }));
   // A mask covers a control the portal neither styles nor can regress. It must
@@ -73,6 +73,16 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
     for (const target of pages) {
       const response = await page.goto(target.url, { waitUntil: 'networkidle' });
       expect(response && response.ok()).toBeTruthy();
+      for (const badgeFixture of target.fixture?.overviewBadges || []) {
+        const badge = page.locator(`.status-overview-card[href="${badgeFixture.href}"] .badge`);
+        const count = await badge.count();
+        if (badgeFixture.optional && count === 0) continue;
+        expect(count, `visual fixture target ${badgeFixture.href}`).toBe(1);
+        await badge.evaluate((node, fixture) => {
+          node.className = fixture.className;
+          node.textContent = fixture.text;
+        }, badgeFixture);
+      }
       await expect(page.locator('[data-session-timer]')).toHaveAttribute(
         'data-expires-in',
         String(contract.sessionRemainingSeconds)
@@ -95,9 +105,11 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
         maskHits.set(entry.selector, maskHits.get(entry.selector) + count);
         if (count > 0) mask.push(locator);
       }
-      await page.screenshot({
+      const captureTarget = target.captureSelector ? page.locator(target.captureSelector) : page;
+      if (target.captureSelector) await expect(captureTarget).toBeVisible();
+      await captureTarget.screenshot({
         path: path.join(outputDir, `${target.name}-${viewport.name}.png`),
-        fullPage: true,
+        ...(target.captureSelector ? {} : { fullPage: true }),
         animations: contract.animations,
         caret: contract.caret,
         scale: contract.screenshotScale,

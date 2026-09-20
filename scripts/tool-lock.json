@@ -33,9 +33,10 @@
             "note": "lokal gebaut (Repo-Root-Kontext); ansible-core/ansible-lint/pyVmomi gepinnt+gehasht in Docker/qa-ansible/requirements.txt, Collection in Ansible/requirements.yml"
         },
         "php": {
-            "ref": "virtusphere-v2-webapp-php",
+            "ref": "virtusphere-php:8.4-tooling",
             "build": "Docker/php/Dockerfile",
-            "note": "Projekt-PHP-Image (Compose-Build); traegt php-lint/phpunit-unit und die Fallbacks fuer sh-/php-Checks"
+            "target": "tooling",
+            "note": "Explizites PHP-Tooling-Target fuer Composer, php-lint/phpunit-unit und sh-/php-Fallbacks; die drei Langzeitdienste verwenden ausschliesslich virtusphere-php:8.4-runtime"
         },
         "gitleaks": {
             "ref": "zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f",

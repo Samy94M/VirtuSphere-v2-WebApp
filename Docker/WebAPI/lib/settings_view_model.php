@@ -6,6 +6,7 @@ require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
+require_once __DIR__ . '/ansible_test_config.php';
 
 /** @return array<string,mixed> */
 function settings_build_view_model(mysqli $connection): array
@@ -60,6 +61,7 @@ function settings_build_view_model(mysqli $connection): array
     $currentTimezone = portal_timezone();
     $timezoneGroups = portal_timezone_choices($currentTimezone);
     $esxiIntervalHours = repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT);
+    $ansibleTestIntervalHours = ansible_test_interval_hours($connection);
     $esxiAnsibleResolution = esxi_inventory_ansible_resolution($connection);
     $esxiSelectedAnsible = form_old(
         'esxi',
@@ -122,6 +124,7 @@ function settings_build_view_model(mysqli $connection): array
         'esxiIntervalHours',
         'esxiAnsibleResolution',
         'esxiSelectedAnsible',
+        'ansibleTestIntervalHours',
         'sessionLifetimeMinutes',
         'passwordMinLength',
         'retentionRows',

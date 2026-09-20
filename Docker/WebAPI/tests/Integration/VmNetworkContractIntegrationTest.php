@@ -305,13 +305,14 @@ final class VmNetworkContractIntegrationTest extends TestCase
 
         // And the same list is visible as a queue blocker, not only as an
         // exception after the submit.
-        $blockers = deploy_queue_blockers($this->db, [
+        $queueInput = [
             'mission_id' => $this->missionId,
             'mode' => 'start',
             'credential_esxi_id' => $this->esxiId,
             'credential_ansible_id' => $this->ansibleId,
             'vm_ids' => $vmIds,
-        ]);
+        ];
+        $blockers = deploy_queue_blockers($this->db, $queueInput);
         self::assertContains('job_scope_limit', array_column($blockers, 'code'));
 
         // The operator has to be able to ACT on it, so the check goes all the
@@ -333,17 +334,21 @@ final class VmNetworkContractIntegrationTest extends TestCase
         self::assertSame(__t('deploy.blocker_help_network_contract'), (string) $scopeBlocker['help']['label']);
 
         ob_start();
-        deploy_render_blockers($blockers, ['id' => $this->userId, 'role' => 'admin'], []);
+        deploy_render_blockers($blockers, ['id' => $this->userId, 'role' => 'admin'], [], [], $queueInput);
         $html = (string) ob_get_clean();
         self::assertStringContainsString(htmlspecialchars((string) $scopeBlocker['message'], ENT_QUOTES), $html);
-        self::assertStringContainsString('vms.php?mission_id=' . $this->missionId, $html);
-        // Both links sit in ONE .alert-actions row with the middle dot between
-        // them. Two links separated only by a space read as one long link, and
-        // this blocker is the first place in the deploy list that has two.
+        // The remedy is revalidated server-side before redirecting, so the
+        // rendered action is a CSRF-protected POST that carries the allowlisted
+        // queue draft instead of a direct GET link. The help link remains next
+        // to it in the same action row.
         self::assertMatchesRegularExpression(
-            '#<div class="alert-actions">\s*<a href="vms\.php\?mission_id=' . $this->missionId . '">[^<]+</a>'
+            '#<div class="alert-actions">\s*<form class="inline-form" method="post" action="deploy\.php">'
+            . '.*name="_csrf".*name="action" value="open_remedy"'
+            . '.*name="remedy_code" value="job_scope_limit"'
+            . '.*name="draft\[mission_id\]" value="' . $this->missionId . '"'
+            . '.*<button class="button-as-link" type="submit">[^<]+</button>\s*</form>'
             . '\s*<span class="muted" aria-hidden="true">&middot;</span>'
-            . '\s*<a href="[^"]*help-network-contract" data-deploy-blocker-help>#',
+            . '\s*<a href="[^"]*help-network-contract" data-deploy-blocker-help>#s',
             $html
         );
         // And the live client must produce the same shape, or the row silently
