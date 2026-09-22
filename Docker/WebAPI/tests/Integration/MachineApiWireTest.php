@@ -151,12 +151,13 @@ final class MachineApiWireTest extends TestCase
             self::assertStringContainsString('application/json', strtolower($headers));
             $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
             self::assertIsArray($payload);
-            // Etappe 14D adds EXACTLY one key and changes the meaning of one
-            // (ADR-0019 amendment 3). The list stays spelled out rather than
+            // ADR-0044 adds exactly the two report generations to the previous
+            // minimal contract. The list stays spelled out rather than
             // derived: minimality is the property, and a derived list would
             // grow with the payload it is supposed to bound.
             self::assertSame(
-                ['interfaces', 'mission_id', 'rollout_revision', 'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
+                ['acceptance_generation', 'device_generation', 'interfaces', 'mission_id', 'rollout_revision',
+                    'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
                 $this->sortedKeys($payload)
             );
             // `vm_hostname` is the FROZEN snapshot, not the desired value. The
@@ -166,6 +167,12 @@ final class MachineApiWireTest extends TestCase
             self::assertNotSame($fixture['vm_hostname'], $payload['vm_hostname']);
             self::assertSame($fixture['vm_name'], $payload['vm_name'], 'vm_name stays the ESXi identity');
             self::assertSame($fixture['rollout_revision'], $payload['rollout_revision']);
+            self::assertSame((string) repo_scalar($db,
+                'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?',
+                'i', [$fixture['vm_id']]), $payload['device_generation']);
+            self::assertSame((string) repo_scalar($db,
+                'SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM deploy_package_report_state WHERE id = 1'),
+                $payload['acceptance_generation']);
             self::assertSame([
                 'dns1', 'dns2', 'gateway', 'ip', 'mac', 'mode', 'subnet', 'type', 'vlan',
             ], $this->sortedKeys($payload['interfaces'][0]));

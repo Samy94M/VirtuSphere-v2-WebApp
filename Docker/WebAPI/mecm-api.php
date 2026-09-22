@@ -107,10 +107,15 @@ try {
         // it. The explicit POST to mecm_client_ack.php owns the 5/5 transition.
         // Still the exact minimal contract: the same five base fields plus the
         // interfaces, with `vm_hostname` aliased onto the frozen rollout
-        // snapshot (Etappe 14D) and exactly `rollout_revision` added. The client
+        // snapshot (Etappe 14D), the rollout fence and the two ADR-0044 report
+        // generations. The client
         // renames Windows to what it reads here, so it has to read the name this
         // rollout was handed, not a desired value that may have moved since.
-        $stmt = $connection->prepare('SELECT vm_name, mecm_rollout_hostname AS vm_hostname, vm_domain, vm_os, mission_id, mecm_rollout_revision AS rollout_revision FROM deploy_vms WHERE id = ? LIMIT 1');
+        $stmt = $connection->prepare('SELECT v.vm_name, v.mecm_rollout_hostname AS vm_hostname, v.vm_domain, v.vm_os, v.mission_id,
+            v.mecm_rollout_revision AS rollout_revision,
+            LOWER(BIN_TO_UUID(v.package_report_generation)) AS device_generation,
+            LOWER(BIN_TO_UUID(s.acceptance_generation)) AS acceptance_generation
+            FROM deploy_vms v CROSS JOIN deploy_package_report_state s WHERE v.id = ? AND s.id = 1 LIMIT 1');
         $stmt->bind_param('i', $vmId);
         $stmt->execute();
         $data = $stmt->get_result()->fetch_assoc() ?: [];

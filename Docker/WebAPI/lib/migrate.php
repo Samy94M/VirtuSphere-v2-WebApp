@@ -21,6 +21,7 @@ require_once __DIR__ . '/migrations/0052_ansible_preflight_generation.php';
 require_once __DIR__ . '/migrations/0053_edit_versions.php';
 require_once __DIR__ . '/migrations/0054_log_keyset_pagination.php';
 require_once __DIR__ . '/migrations/0055_ansible_test_schedule.php';
+require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1221,6 +1222,7 @@ SQL;
     '0053_edit_versions' => migrate_0053_edit_versions(...),
     '0054_log_keyset_pagination' => migrate_0054_log_keyset_pagination(...),
     '0055_ansible_test_schedule' => migrate_0055_ansible_test_schedule(...),
+    '0056_package_report_foundation' => migrate_0056_package_report_foundation(...),
 ];
 try {
     $db = db();

@@ -12,7 +12,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A62 mecm-api.php: read surface with getDeviceList and the minimal, side-effect-free getDeviceInfos&
 
-- `mecm-api.php`: read surface with `getDeviceList` and the minimal, side-effect-free `getDeviceInfos&mac=...`; `getMissionName` was retired by ADR-0019.
+- `mecm-api.php`: read surface with `getDeviceList` and the minimal, side-effect-free `getDeviceInfos&mac=...`; `getMissionName` was retired by ADR-0019. The bootstrap payload additively includes ADR-0044 `device_generation` and `acceptance_generation`, both canonical lowercase UUIDs, so the package reporter can carry its VM-incarnation and post-restore fences.
 
 ## A63 mecm_client_ack.php: POST-only, idempotent client-ready acknowledgement by known MAC; sole writ
 
@@ -30,6 +30,6 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 - `db_importMAC.php`: Ansible MAC import; payload `{ "mission_id": 123, "job_id": 45, "results": [...] }`, `job_id` required (ADR-0035). New writes use strict result V2 with per-VM exact WDS evidence and semantic callback fingerprint; historical V1 remains readable. The request/result/response bounds are centralized in `lib/mac_import_constants.php`, and callback fencing must preserve the existing endpoint envelope and HTTP meanings.
 
-## A67 mecm_report.php: report channel (ADR-0018), POST-only; action=reportPhase (client phase events
+## A67 mecm_report.php: report channel (ADR-0018/ADR-0044), POST-only
 
-- `mecm_report.php`: report channel (ADR-0018), POST-only; `action=reportPhase` (client phase events by MAC), `action=heartbeat` (legacy sync-loop heartbeats) and `action=reportRun` (additive: per-run `started`/`completed` results from the three sync tasks plus `completed`-only `mecm-site-health` from `SMS_SummarizerSiteStatus`, 0=ok/1=warning/2=critical/else unknown). Display-only: `last_event` drives the badge, arrival order is truth (sequential client, dedup only on an identical completed `run_id`), provider faults are grey and red is reserved for MECM-confirmed status 2; migration 0025 adds columns additively with no backfill. Optional `X-VirtuSphere-Token` header (heartbeat/reportRun), checked only when a token hash is configured.
+- `mecm_report.php`: report channel, POST-only. The existing `reportPhase`, `heartbeat` and `reportRun` contracts remain as defined by ADR-0018; the optional `X-VirtuSphere-Token` still applies only to `heartbeat` and `reportRun`. Additive `reportPackageRun` is the ADR-0044 package-wrapper channel: IP-allowlist only, strict V1 JSON up to 64 KiB, unique MAC-set resolution, rollout/device/restore-generation fences and transactional replay semantics. Its successful response repeats `schema_version`, `run_id`, `event` and `event_seq` plus exact `accepted`/`deduplicated` booleans. It never changes VM lifecycle, integration heartbeat state or package catalog state and emits no per-report audit event.

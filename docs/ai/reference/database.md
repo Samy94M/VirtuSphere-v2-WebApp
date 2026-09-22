@@ -36,3 +36,16 @@ made MariaDB prefer the shorter index and inspect thousands of rows for a
 same index. The portal orders audit windows by the primary identity, not by the
 non-unique timestamp; do not introduce OFFSET or a second competing category
 index.
+
+## R7 Package-report identity, replay and retention
+
+Migration 0056 and the matching fresh schema own ADR-0044 persistence. Each
+`deploy_vms` row receives one immutable `package_report_generation`; the
+singleton `deploy_package_report_state.acceptance_generation` is rotated only
+by the supported restore workflow. A first accepted event creates the permanent
+minimal `(run_id, expires_at)` marker and its diagnostic run in one transaction.
+Diagnostic runs, events and step projections share the immutable 90-day expiry
+and may be purged; markers are never cascaded or removed by routine retention.
+The repository admits indices 1..256 as normal details, one distinct
+first-failure projection and one completion core, with closed event fingerprints
+and no replay-based timestamp extension.
