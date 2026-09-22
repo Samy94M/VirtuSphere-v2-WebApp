@@ -1,7 +1,7 @@
 # ADR-0044: Package-wrapper reports are fenced by VM incarnation and restore generation
 
 Date: 2026-09-21
-Status: Accepted; server persistence, retention and restore fencing implemented
+Status: Accepted; server persistence, retention, restore fencing and reporter distribution foundation implemented
 
 ## Context
 
@@ -74,3 +74,10 @@ execution, detection, VM lifecycle, MECM identity or Software Center exit codes.
   `Docker/WebAPI/tests/fixtures/package-report-v1.json`. Stateful cases in that
   file become repository/integration tests when persistence is added; their
   presence alone is not a database or endpoint proof.
+- The reporter delivery set is content-addressed and versioned beside package
+  payloads, never inside `powershell/`. Its manifest is derived from the client
+  Common, client Logging, reporter adapter and process host source owners. The
+  server installer stages and verifies the complete tree; the autoimporter
+  publishes the generation before wrapper and descriptor and includes the whole
+  template in content change detection. Runtime transport remains disabled until
+  supervised-process and timing acceptance is implemented.

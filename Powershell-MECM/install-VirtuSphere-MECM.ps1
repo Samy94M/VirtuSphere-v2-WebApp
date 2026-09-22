@@ -786,6 +786,7 @@ function Wait-VsScheduledScriptStopped {
 # funktionierende Altinstallation anzuhalten.
 $sourceDir = Join-Path $PSScriptRoot 'mecm'
 $templateSource = Join-Path $PSScriptRoot 'Package_Vorlage'
+$reporterSource = Join-Path $PSScriptRoot 'clients'
 $requiredServerFiles = @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1', 'VirtuSphere-MembershipJournal.ps1') + @($tasks | ForEach-Object { $_.Script })
 foreach ($name in $requiredServerFiles) {
     $requiredPath = Join-Path $sourceDir $name
@@ -795,6 +796,19 @@ $requiredTemplateFiles = @('install.ps1', 'config.json')
 foreach ($name in $requiredTemplateFiles) {
     $requiredPath = Join-Path $templateSource $name
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Paketvorlage {0} fehlt.' -f $requiredPath) }
+}
+$requiredReporterFiles = @(
+    'VirtuSphere-Client-Common.ps1',
+    'VirtuSphere-Client-Logging.ps1',
+    'VirtuSphere-Package-Reporter.ps1',
+    'VirtuSphere-Package-ReporterHost.ps1'
+)
+foreach ($name in $requiredReporterFiles) {
+    $requiredPath = Join-Path $reporterSource $name
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Reporterquelle {0} fehlt.' -f $requiredPath) }
+}
+if (Test-Path -LiteralPath (Join-Path $templateSource 'reporting')) {
+    throw 'Package_Vorlage/reporting darf keine eingecheckte Kopie enthalten; der Installer erzeugt sie aus den kanonischen Clientquellen.'
 }
 $installStage = Join-Path $installDir ('.virtusphere-stage-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $installStage -Force -ErrorAction Stop | Out-Null
@@ -836,6 +850,79 @@ try {
         }
         [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $source.Length; Sha256 = $sourceHash })
     }
+
+    # T3: Das Reporterbundle wird ausschliesslich aus den kanonischen
+    # Clientquellen erzeugt. bundle_id ist der SHA-256 ueber den sortierten
+    # Dateipfad-/Laengen-/Hashvertrag, also ohne Manifest-Selbsthash.
+    $reporterEntries = New-Object System.Collections.Generic.List[object]
+    foreach ($name in @($requiredReporterFiles | Sort-Object)) {
+        $source = Get-Item -LiteralPath (Join-Path $reporterSource $name) -Force -ErrorAction Stop
+        $hash = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        [void]$reporterEntries.Add([pscustomobject]@{ path = $name; length = [long]$source.Length; sha256 = $hash })
+    }
+    $bundleBasis = @($reporterEntries.ToArray() | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.length, $_.sha256 }) -join "`n"
+    $bundleSha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bundleId = ([BitConverter]::ToString($bundleSha.ComputeHash([Text.Encoding]::UTF8.GetBytes($bundleBasis))).Replace('-', '')).ToLowerInvariant()
+    } finally { $bundleSha.Dispose() }
+
+    $reportingStage = Join-Path $templateStage 'reporting'
+    $bundleStage = Join-Path $reportingStage $bundleId
+    New-Item -ItemType Directory -Path $bundleStage -Force -ErrorAction Stop | Out-Null
+    [void]$templateDirectoryManifest.Add('reporting')
+    [void]$templateDirectoryManifest.Add(('reporting\{0}' -f $bundleId))
+    foreach ($entry in $reporterEntries.ToArray()) {
+        $sourcePath = Join-Path $reporterSource $entry.path
+        $stagedPath = Join-Path $bundleStage $entry.path
+        Copy-Item -LiteralPath $sourcePath -Destination $stagedPath -Force -ErrorAction Stop
+        if ((Get-Item -LiteralPath $stagedPath -Force -ErrorAction Stop).Length -ne $entry.length -or
+            (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne $entry.sha256) {
+            throw ('Reporterbundle-Pruefsumme weicht ab: {0}' -f $entry.path)
+        }
+        $relative = 'reporting\{0}\{1}' -f $bundleId, $entry.path
+        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $entry.length; Sha256 = $entry.sha256.ToUpperInvariant() })
+    }
+
+    $commonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsClientCommonContractVersion'
+    $commonExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsExpectedClientLoggingContractVersion'
+    $loggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Logging.ps1') -VariableName 'VsClientLoggingContractVersion'
+    $adapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterContractVersion'
+    $adapterSchema = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReportSchemaVersion'
+    $adapterExpectedCommonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedCommonContractVersion'
+    $adapterExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedLoggingContractVersion'
+    $hostContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostContractVersion'
+    $hostExpectedAdapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostExpectedAdapterContractVersion'
+    if ($adapterSchema -ne 1 -or
+        $commonExpectedLoggingContract -ne $loggingContract -or
+        $adapterExpectedCommonContract -ne $commonContract -or
+        $adapterExpectedLoggingContract -ne $loggingContract -or
+        $hostExpectedAdapterContract -ne $adapterContract) {
+        throw 'Reporterbundle-Vertragsversionen sind untereinander oder mit Schema V1 nicht kompatibel.'
+    }
+    $manifestObject = [ordered]@{
+        schema_version = 1
+        bundle_id = $bundleId
+        contracts = [ordered]@{ common = $commonContract; logging = $loggingContract; adapter = $adapterContract; host = $hostContract }
+        files = @($reporterEntries.ToArray())
+    }
+    $manifestPath = Join-Path $bundleStage 'manifest.json'
+    [IO.File]::WriteAllText($manifestPath, (($manifestObject | ConvertTo-Json -Depth 5) + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    [void]$templateManifest.Add([pscustomobject]@{ RelativePath = ('reporting\{0}\manifest.json' -f $bundleId); Length = $manifestItem.Length; Sha256 = $manifestHash })
+
+    $wrapperHash = (Get-FileHash -LiteralPath (Join-Path $templateStage 'install.ps1') -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    $descriptorObject = [ordered]@{
+        schema_version = 1
+        bundle_id = $bundleId
+        wrapper_sha256 = $wrapperHash
+        contracts = $manifestObject.contracts
+    }
+    $descriptorPath = Join-Path $reportingStage 'current.json'
+    [IO.File]::WriteAllText($descriptorPath, (($descriptorObject | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $descriptorItem = Get-Item -LiteralPath $descriptorPath -Force -ErrorAction Stop
+    $descriptorHash = (Get-FileHash -LiteralPath $descriptorPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    [void]$templateManifest.Add([pscustomobject]@{ RelativePath = 'reporting\current.json'; Length = $descriptorItem.Length; Sha256 = $descriptorHash })
     $stagedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
     $stagedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
     $stagedMecmServerVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsMecmServerContractVersion'

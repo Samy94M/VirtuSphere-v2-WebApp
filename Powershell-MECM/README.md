@@ -616,13 +616,15 @@ behalten ihre alte Kommandozeile: Autoimporter und Clients-Installer setzen
 `InstallCommand` nur beim Anlegen. Wer die neue Zeile rückwirkend will, löscht
 die App einmal in der Konsole.
 
-> **Hinweis Self-Healing:** Die Standard-`install.ps1` und eine
-> `config.json`-Blaupause liefert der Installer aus `Package_Vorlage/` nach
+> **Hinweis Self-Healing:** Die Standard-`install.ps1`, eine
+> `config.json`-Blaupause und das versionierte Reporter-Lieferbundle liefert der Installer nach
 > `<PackagesRoot>\Package_Vorlage`. Beim Anlegen eines Pakets überschreibt
-> `Package_Vorlage\install.ps1` die paketeigene `install.ps1`. Das ist
+> der Autoimporter die paketeigene `install.ps1` und synchronisiert die in
+> `reporting\current.json` ausgewählte, vollständig gehashte Generation. Das ist
 > beabsichtigt (einheitliche Standard-Installation). SSoT ist der Repo-Ordner
-> `Package_Vorlage/`; Anpassungen dort vornehmen und den Installer erneut
-> ausführen, nicht die Kopie auf dem Server. Der Serverinstaller staged und
+> `Package_Vorlage/` für den Wrapper; Common, Client-Logging, Reporteradapter
+> und Prozesshost stammen dagegen ausschließlich aus `clients/`. Keine
+> generierten Kopien unter `Package_Vorlage/reporting` einchecken. Der Serverinstaller staged und
 > hasht den vollständigen Vorlagenbaum auf dem Paketdateisystem, aktiviert ihn
 > mit Sicherung und nimmt ihn bei einem späteren Installationsfehler in denselben
 > Rollback auf. Ein unvollständig bestätigter Rollback lässt die Aufgaben
@@ -638,9 +640,16 @@ MECM-Installationsaufruf und die Erkennung helfen zusätzlich `AppEnforce.log`
 und `AppDiscovery.log`. Ein erfolgreicher Wrapper-Aufruf bestätigt keine
 späteren Arbeiten einer geplanten Aufgabe.
 
-**Noch nicht implementiert:** Geplant sind getrennte Wrapper- und
-Reporting-Logs je Durchlauf sowie Start-, Schritt- und Abschlussmeldungen
-vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
+**Liefergrundlage implementiert, Laufzeit noch nicht aktiviert:** Der
+Serverinstaller erzeugt aus den vier kanonischen Clientquellen eine
+inhaltsadressierte Reporter-Generation mit vollständigem Manifest und
+Wrapperbindung. Der Autoimporter berücksichtigt diesen gesamten Satz im
+Änderungsstempel, stellt die Generation vor dem Wrapper bereit und schaltet den
+kleinen Deskriptor zuletzt um. Paket-`config.json`, `powershell/` und ältere
+Reporter-Generationen bleiben unangetastet. Adapter und Host senden derzeit
+noch nichts; Prozesskapselung, Zeitbudgets und Wrapper-Anbindung sind die nächste
+Etappe. Danach folgen getrennte Wrapper- und Reporting-Logs je Durchlauf sowie
+Start-, Schritt- und Abschlussmeldungen vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
 Empfangszeit und kopierbare Client-Logpfade anzeigen. Das Portal ruft dabei
 keine Dateien vom Client ab. Eine fehlende Rückmeldung beweist weder einen
 Installationsfehler noch einen Verbindungsfehler.

@@ -25,6 +25,8 @@
 # Begruendung in mecm\VirtuSphere-Common.ps1.
 Set-StrictMode -Version 1.0
 
+$script:VsClientCommonContractVersion = 1
+
 # --- Eingebaute Notfalladressen (Laufzeitwerte kommen aus der Registry) ------
 $script:VsDefaultDnsApi = 'virtusphere.lan:8021'   # DNS-Alias im Deploy-Netz
 $script:VsFallbackIpApi = ''                        # z. B. '10.0.0.5:8021' (optional)

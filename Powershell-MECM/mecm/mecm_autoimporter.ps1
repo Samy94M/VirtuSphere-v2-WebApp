@@ -18,8 +18,9 @@
 #  - LogonRequirementType korrigiert (WhetherOrNotUserLoggedOn)
 #  - kein Clear-Host (laeuft ohne Konsole), Heartbeat je Durchlauf
 #
-# Hinweis: Die Vorlage <PackagesRoot>\Package_Vorlage\install.ps1 ueberschreibt
-# bewusst die paketeigene install.ps1 (Self-Healing der Standard-Installation).
+# Hinweis: Der verwaltete Satz aus <PackagesRoot>\Package_Vorlage (install.ps1
+# plus versioniertes reporting-Buendel) heilt sich bei jedem Scan selbst. Die
+# paketeigene config.json und powershell-Nutzlast werden nie ueberschrieben.
 # ============================================================================
 
 $script:VsRequiredMecmServerContractVersion = 2
@@ -129,9 +130,10 @@ while ($true) {
         }
 
         # Change-Detection: nur bei geaendertem files-Baum voll scannen. Das
-        # Vorlagen-Skript zaehlt mit (B7): eine neue Vorlage muss den Abgleich
-        # in jeden Paketordner ausloesen, nicht erst die naechste config.json.
-        $stamp = Get-VsFilesManifestStamp -Path $basePath -TemplateScript (Join-Path $templatePath 'install.ps1')
+        # Der vollstaendige verwaltete Vorlagensatz zaehlt mit (B7/T3): eine
+        # Aenderung an Common, Logging, Adapter, Host, Manifest, Deskriptor oder
+        # Wrapper muss den Abgleich ausloesen, nicht erst die naechste config.json.
+        $stamp = Get-VsFilesManifestStamp -Path $basePath -TemplatePath $templatePath
         if ($stamp -eq $lastFilesStamp) {
             # Unveraendert: ein gelungener No-op-Lauf.
             $unchanged = 1
@@ -190,26 +192,21 @@ while ($true) {
                 $fullName = "{0}-{1}" -f $appName, $version
                 $folderName = $cfg.FolderName
 
-                # --- Self-Healing der install.ps1 (bei JEDEM Scan) -------------
+                # --- Self-Healing des Vorlagensatzes (bei JEDEM Scan) ----------
                 #
                 # Nicht mehr nur bei $isNew: die Vorlage gewinnt laut Vertrag, aber der
                 # $isNew-Zweig gab ihr genau einen Versuch. Ein Fehlschlag dort war
                 # endgueltig, weil die Application danach existierte. Wiederholt wird,
                 # solange der Inhalt abweicht, und ein Fehlschlag ist ein offener Punkt.
                 $pkgFolder = Join-Path (Join-Path $config.PackagesRoot 'files') $folderName
-                $templateScript = Join-Path $templatePath 'install.ps1'
-                $packageScript = Join-Path $pkgFolder 'install.ps1'
-                $templateCurrent = Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript
+                $templateCurrent = Test-VsPackageTemplateSetCurrent -TemplateRoot $templatePath -PackageRoot $pkgFolder
                 if (-not $templateCurrent) {
                     try {
-                        Copy-Item $templateScript -Destination $packageScript -Force -ErrorAction Stop
-                        if (-not (Test-VsTemplateScriptCurrent -TemplateFile $templateScript -PackageFile $packageScript)) {
-                            throw 'Kopie stimmt nach dem Schreiben nicht mit der Vorlage ueberein.'
-                        }
+                        Sync-VsPackageTemplateSet -TemplateRoot $templatePath -PackageRoot $pkgFolder
                         $templateCurrent = $true
-                        Write-VsLog -Context $fullName -Message 'Vorlagen-install.ps1 uebernommen und per SHA-256 bestaetigt.'
+                        Write-VsLog -Context $fullName -Message 'Vorlagensatz samt Reporter-Generation uebernommen und per SHA-256 bestaetigt.'
                     } catch {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagen-install.ps1 nicht kopiert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagensatz nicht vollstaendig publiziert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
                         $scanWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'package_template_failed' -Target $fullName
                     }

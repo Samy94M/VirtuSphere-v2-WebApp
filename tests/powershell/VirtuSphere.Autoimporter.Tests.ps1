@@ -181,7 +181,7 @@ BeforeAll {
         function Get-VsProviderMachine { param($Config, $ProviderMachine) return 'provider.fixture' }
         function Get-CMFolder { param($FolderPath, $ErrorAction) return [pscustomobject]@{ Name = $FolderPath } }
         function Get-VsFilesManifestStamp {
-            param($Path, $TemplateScript)
+            param($Path, $TemplatePath)
             if ($Path -eq $basePath) { return 'fixture-scan-stamp' }
             if ($Path -match 'agent') { return ('A' * 64) }
             return ('B' * 64)
@@ -264,7 +264,8 @@ BeforeAll {
                 [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
             ) }
         }
-        function Test-VsTemplateScriptCurrent { param($TemplateFile, $PackageFile) return $true }
+        function Test-VsPackageTemplateSetCurrent { param($TemplateRoot, $PackageRoot) return $true }
+        function Sync-VsPackageTemplateSet { param($TemplateRoot, $PackageRoot) }
         function New-VsRunId { return 'fixture-run-id' }
         function Get-VsRunDurationMilliseconds { param($StartedAt) return 25 }
         function Send-VsRunReport {
@@ -703,7 +704,7 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         $source | Should -Match 'Get-VsContentDistributionSnapshot'
         $source | Should -Not -Match 'Test-VsContentDistributed'
         $source | Should -Match 'Test-VsInOrgFolder'
-        $source | Should -Match 'Test-VsTemplateScriptCurrent'
+        $source | Should -Match 'Test-VsPackageTemplateSetCurrent'
     }
 
     It 'jeder Verteilzustand ausser succeeded haelt den Stamp zurueck' {
@@ -715,15 +716,15 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         foreach ($needle in @('package_content_in_progress', 'package_content_unknown', 'package_content_failed')) {
             $source | Should -Match $needle
         }
-        # Der Stamp umfasst das Vorlagen-Skript: eine neue Vorlage loest den
-        # Scan aus, nicht erst die naechste config.json.
-        $source | Should -Match 'Get-VsFilesManifestStamp -Path \$basePath -TemplateScript'
+        # Der Stamp umfasst den ganzen verwalteten Vorlagenbaum: auch eine nur
+        # in Common/Logging/Adapter geaenderte Generation loest den Scan aus.
+        $source | Should -Match 'Get-VsFilesManifestStamp -Path \$basePath -TemplatePath'
     }
 
     It 'das Vorlagen-Skript wird ausserhalb des $isNew-Zweigs abgeglichen' {
         $if = Get-IfByCondition -Path $script:Importer -ConditionText '$isNew'
         $if | Should -Not -BeNullOrEmpty
-        $if.Clauses[0].Item2.Extent.Text | Should -Not -Match 'Test-VsTemplateScriptCurrent'
+        $if.Clauses[0].Item2.Extent.Text | Should -Not -Match 'Test-VsPackageTemplateSetCurrent'
     }
 }
 

@@ -1,6 +1,13 @@
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $script:ServerInstaller = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-MECM.ps1'
+    $script:reporterSource = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'clients'
+    $script:requiredReporterFiles = @(
+        'VirtuSphere-Client-Common.ps1',
+        'VirtuSphere-Client-Logging.ps1',
+        'VirtuSphere-Package-Reporter.ps1',
+        'VirtuSphere-Package-ReporterHost.ps1'
+    )
     $tokens = $null
     $parseErrors = $null
     $installerAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ServerInstaller, [ref]$tokens, [ref]$parseErrors)
@@ -48,7 +55,7 @@ BeforeAll {
     $script:RestoreFunction = $restoreFunction
     if ($restoreFunction) { . ([scriptblock]::Create($restoreFunction.Extent.Text)) }
 
-    foreach ($functionName in @('New-VsRegistryRollbackSnapshot', 'Set-VsRegistrySecurityDescriptor', 'New-VsTaskRollbackSnapshots')) {
+    foreach ($functionName in @('Get-VsDeclaredScriptInteger', 'New-VsRegistryRollbackSnapshot', 'Set-VsRegistrySecurityDescriptor', 'New-VsTaskRollbackSnapshots')) {
         $functionAst = $installerAst.Find(
             { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName },
             $true)
