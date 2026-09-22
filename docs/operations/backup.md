@@ -89,7 +89,7 @@ Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, 
 1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
 3. Import des jüngsten Dumps, danach `FLUSH PRIVILEGES` (wie der Neustart im Ernstfall) und die Arbeitsprobe des App-Users; ein Alt-Archiv (`--all-databases`) wird erkannt und durchläuft den unten dokumentierten Grant-Reparaturschritt
-4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach Schema-Fingerprint gegen das frische `struktur.sql`
+4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach AD-Konvergenz und Rotation der Paketbericht-Annahmegeneration sowie Schema-Fingerprint gegen das frische `struktur.sql`
 5. Invarianten und Rowcounts (Benutzer, Migrationstracking, keine verwaisten Interfaces/VMs/Jobs)
 6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
 7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung einer nicht freigegebenen IP (eingefrorene 403-Antwort von `mecm-api.php`)
@@ -122,9 +122,9 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
    SQL
    ```
    `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
-5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen und erst dann `docker compose up -d`. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a).
-6. AD-Restore-Konvergenz ausführen: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`. Das deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; Details stehen in `docs/operations/active-directory.md`.
-7. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
+5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a). Zunächst ausschließlich PHP samt seiner MySQL-Abhängigkeit starten: `docker compose up -d --wait php`. Ohne Webserver ist die Maschinen-API während der Konvergenz noch nicht erreichbar.
+6. Restore-Konvergenz vor dem Webserverstart ausführen: zuerst `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`, danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/package_report_restore_converge.php`. Der erste Schritt deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; der zweite rotiert die Paketbericht-Annahmegeneration, sodass Berichte aus dem Backup oder vom späteren verlorenen Live-Stand nicht als aktuelle Evidenz angenommen werden. Beide Befehle müssen erfolgreich enden; Details zur Verzeichnisanmeldung stehen in `docs/operations/active-directory.md`.
+7. Erst jetzt den übrigen Stack starten: `docker compose up -d --wait`. Danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
 ## Was deckt das Backup ab, was kommt aus Git
 

@@ -29,6 +29,7 @@ BeforeAll {
             'Docker\mysql\mysql-init\struktur.sql',
             'Docker\WebAPI\lib\migrate.php',
             'Docker\WebAPI\lib\directory_restore_converge.php',
+            'Docker\WebAPI\lib\package_report_restore_converge.php',
             'Docker\WebAPI\tests\tools\restore-drill-probe.php'
         )) {
             $path = Join-Path $Root $relative
@@ -187,6 +188,8 @@ Describe 'Restore drill check-root contract' {
         $restore | Should -Match '< "\$SCHEMA_SQL"'
         ([regex]::Matches($restore, '-v "\$REPO_MOUNT:/repo"')).Count | Should -Be 3
         $restore | Should -Match 'run_php "\$APP_KEY" /repo/Docker/WebAPI/lib/migrate\.php'
+        $restore | Should -Match 'run_php "\$APP_KEY" /repo/Docker/WebAPI/lib/package_report_restore_converge\.php'
+        $restore | Should -Match '\$generation_before" != "\$generation_after"'
         $restore | Should -Match 'PROBE=/repo/Docker/WebAPI/tests/tools/restore-drill-probe\.php'
         $runtime | Should -Match '\$scriptPath = \(Join-Path \$scriptDir \$ScriptName\)'
         $runtime | Should -Match '''VIRTUSPHERE_CHECK_ROOT=/checkroot'''

@@ -138,6 +138,13 @@ case "$1" in
         ;;
     esac
     case "$*" in
+      *deploy_package_report_state*)
+        if [ -f "$state/package-generation-rotated" ]; then
+          printf '22222222-2222-4222-8222-222222222222\n'
+        else
+          printf '11111111-1111-4111-8111-111111111111\n'
+        fi
+        ;;
       *information_schema.tables*) printf '10\n' ;;
       *'SELECT 1'*) printf '1\n' ;;
       *'-N -e'*) printf '1\n' ;;
@@ -148,6 +155,7 @@ case "$1" in
   run)
     case "$*" in
       *'base64_encode(random_bytes(32))'*) printf 'ZmFrZS13cm9uZy1rZXk=\n' ;;
+      *package_report_restore_converge.php*) touch "$state/package-generation-rotated" ;;
       *--check*) printf 'pending=0\n' ;;
     esac
     exit 0

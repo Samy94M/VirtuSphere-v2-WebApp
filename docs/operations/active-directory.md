@@ -85,3 +85,5 @@ laufen. Der Schritt deaktiviert die AD-Anmeldung, erhöht die Revision und macht
 alle früheren Controllerfreigaben unwirksam. Danach Konfiguration, CA,
 Zielumgebung und HTTPS prüfen, Controller neu testen und AD bewusst wieder
 aktivieren. `scripts/restore_test.sh` beweist diesen Schritt im isolierten Drill.
+Der vollständige Restore-Ablauf in `backup.md` führt ihn vor dem Webserverstart
+aus und rotiert anschließend separat die Paketbericht-Annahmegeneration.

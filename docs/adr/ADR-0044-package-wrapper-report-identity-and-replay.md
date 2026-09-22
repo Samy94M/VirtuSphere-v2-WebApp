@@ -1,7 +1,7 @@
 # ADR-0044: Package-wrapper reports are fenced by VM incarnation and restore generation
 
 Date: 2026-09-21
-Status: Accepted; wire validator and fixtures implemented, persistence not yet activated
+Status: Accepted; server persistence, retention and restore fencing implemented
 
 ## Context
 
@@ -63,7 +63,8 @@ execution, detection, VM lifecycle, MECM identity or Software Center exit codes.
   acceptance-generation extension before a reporter can be enabled. The values
   fence evidence; they do not strengthen the LAN allowlist into cryptographic
   client authentication.
-- The restore runbook and drill must prove generation rotation. A restored client
+- The restore runbook and drill prove generation rotation before the webserver
+  starts. A restored client
   snapshot becomes stale and reporting stays unavailable until refreshed; the
   package payload is unaffected.
 - Minimal replay markers grow with accepted run IDs. Capacity admission may reject

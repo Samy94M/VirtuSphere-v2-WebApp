@@ -42,10 +42,13 @@ index.
 Migration 0056 and the matching fresh schema own ADR-0044 persistence. Each
 `deploy_vms` row receives one immutable `package_report_generation`; the
 singleton `deploy_package_report_state.acceptance_generation` is rotated only
-by the supported restore workflow. A first accepted event creates the permanent
+by `lib/package_report_restore_converge.php` in the supported restore workflow,
+after migrations and before the webserver starts. A first accepted event creates
+the permanent
 minimal `(run_id, expires_at)` marker and its diagnostic run in one transaction.
 Diagnostic runs, events and step projections share the immutable 90-day expiry
-and may be purged; markers are never cascaded or removed by routine retention.
+and are purged by the maintenance retention job; markers are never cascaded or
+removed by routine retention.
 The repository admits indices 1..256 as normal details, one distinct
 first-failure projection and one completion core, with closed event fingerprints
 and no replay-based timestamp extension.

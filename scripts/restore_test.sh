@@ -73,6 +73,7 @@ SCHEMA_SQL="$CHECK_ROOT/Docker/mysql/mysql-init/struktur.sql"
 for required in \
   Docker/WebAPI/lib/migrate.php \
   Docker/WebAPI/lib/directory_restore_converge.php \
+  Docker/WebAPI/lib/package_report_restore_converge.php \
   Docker/WebAPI/tests/tools/restore-drill-probe.php
 do
   [ -f "$CHECK_ROOT/$required" ] \
@@ -376,6 +377,14 @@ run_php "$APP_KEY" /repo/Docker/WebAPI/lib/migrate.php --check | grep -q 'pendin
   || fail "migrate --check meldet offene Migrationen nach dem Restore."
 run_php "$APP_KEY" /repo/Docker/WebAPI/lib/directory_restore_converge.php \
   || fail "AD-Restore-Konvergenz konnte die Verzeichnisanmeldung nicht sicher deaktivieren."
+generation_before=$(drill_sql "SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM \`$DB_NAME\`.deploy_package_report_state WHERE id = 1") \
+  || fail "Paketbericht-Annahmegeneration ist vor der Restore-Konvergenz nicht lesbar."
+run_php "$APP_KEY" /repo/Docker/WebAPI/lib/package_report_restore_converge.php \
+  || fail "Paketbericht-Restore-Konvergenz konnte die Annahmegeneration nicht rotieren."
+generation_after=$(drill_sql "SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM \`$DB_NAME\`.deploy_package_report_state WHERE id = 1") \
+  || fail "Paketbericht-Annahmegeneration ist nach der Restore-Konvergenz nicht lesbar."
+[ -n "$generation_before" ] && [ -n "$generation_after" ] && [ "$generation_before" != "$generation_after" ] \
+  || fail "Paketbericht-Annahmegeneration wurde beim Restore nicht nachweisbar rotiert."
 
 echo "Pruefe Schema-Konvergenz gegen struktur.sql ..."
 drill_sql "DROP DATABASE IF EXISTS vs_drill_fresh; CREATE DATABASE vs_drill_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null

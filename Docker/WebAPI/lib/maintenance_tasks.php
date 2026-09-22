@@ -14,6 +14,7 @@ require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/repo/catalog.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
+require_once __DIR__ . '/repo/package_run_maintenance.php';
 
 /**
  * The maintenance worker's interval jobs. Lives outside lib/maintenance_worker.php
@@ -102,8 +103,11 @@ function maintenance_worker_run_jobs(mysqli $db, array &$state, bool $force, arr
             // VM editor and, with it, this retention - before Etappe 8 the
             // table only ever shrank through a VM delete.
             $purgedStatusEvents = repo_purge_vm_status_events($db);
-            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs + $purgedStatusEvents > 0) {
-                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . ' finished system jobs, ' . $purgedStatusEvents . " status events\n");
+            // Package diagnostics expire from their immutable first-acceptance
+            // deadline. Their minimal replay markers deliberately never do.
+            $purgedPackageRuns = repo_purge_expired_package_runs($db);
+            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs + $purgedStatusEvents + $purgedPackageRuns > 0) {
+                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . ' finished system jobs, ' . $purgedStatusEvents . ' status events, ' . $purgedPackageRuns . " package report runs\n");
             }
         });
     }

@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/package_run_report.php';
+require_once dirname(__DIR__, 2) . '/lib/package_report_restore_converge.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/package_runs.php';
 
 final class PackageRunRepositoryTest extends TestCase
@@ -18,6 +19,7 @@ final class PackageRunRepositoryTest extends TestCase
         '018f2f49-5e41-4d55-8f05-8f55a5335003',
         '018f2f49-5e41-4d55-8f05-8f55a5335004',
         '018f2f49-5e41-4d55-8f05-8f55a5335005',
+        '018f2f49-5e41-4d55-8f05-8f55a5335006',
     ];
 
     private mysqli $db;
@@ -25,6 +27,7 @@ final class PackageRunRepositoryTest extends TestCase
     private int $vmId;
     private string $deviceGeneration;
     private string $acceptanceGeneration;
+    private string $acceptanceRotatedAt;
 
     protected function setUp(): void
     {
@@ -37,6 +40,10 @@ final class PackageRunRepositoryTest extends TestCase
         $this->acceptanceGeneration = (string) repo_scalar(
             $this->db,
             'SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM deploy_package_report_state WHERE id = 1'
+        );
+        $this->acceptanceRotatedAt = (string) repo_scalar(
+            $this->db,
+            'SELECT rotated_at FROM deploy_package_report_state WHERE id = 1'
         );
         $name = self::PROJECT . '-MISSION';
         repo_execute($this->db, 'INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)', 'ss', [$name, 'active']);
@@ -56,8 +63,8 @@ final class PackageRunRepositoryTest extends TestCase
         if (!isset($this->db)) {
             return;
         }
-        repo_execute($this->db, 'UPDATE deploy_package_report_state SET acceptance_generation = UUID_TO_BIN(?) WHERE id = 1',
-            's', [$this->acceptanceGeneration]);
+        repo_execute($this->db, 'UPDATE deploy_package_report_state SET acceptance_generation = UUID_TO_BIN(?), rotated_at = ? WHERE id = 1',
+            'ss', [$this->acceptanceGeneration, $this->acceptanceRotatedAt]);
         $this->cleanup();
     }
 
@@ -134,6 +141,30 @@ final class PackageRunRepositoryTest extends TestCase
             'SELECT COUNT(*) FROM deploy_package_runs WHERE run_id = UUID_TO_BIN(?)', 's', [self::RUNS[3]]));
     }
 
+    public function testRoutineRetentionPurgesOnlyExpiredDiagnosticsAndKeepsReplayMarkers(): void
+    {
+        $expired = $this->validated($this->base(self::RUNS[0]));
+        $live = $this->validated($this->base(self::RUNS[5]));
+        self::assertSame(200, repo_package_report_record($this->db, $this->vmId, $expired)['status']);
+        self::assertSame(200, repo_package_report_record($this->db, $this->vmId, $live)['status']);
+        repo_execute($this->db,
+            'UPDATE deploy_package_run_markers SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MICROSECOND) WHERE run_id = UUID_TO_BIN(?)',
+            's', [self::RUNS[0]]);
+
+        self::assertSame(1, repo_purge_expired_package_runs($this->db));
+        self::assertSame(0, (int) repo_scalar($this->db,
+            'SELECT COUNT(*) FROM deploy_package_runs WHERE run_id = UUID_TO_BIN(?)', 's', [self::RUNS[0]]));
+        self::assertSame(1, (int) repo_scalar($this->db,
+            'SELECT COUNT(*) FROM deploy_package_runs WHERE run_id = UUID_TO_BIN(?)', 's', [self::RUNS[5]]));
+        self::assertSame(2, (int) repo_scalar($this->db,
+            'SELECT COUNT(*) FROM deploy_package_run_markers WHERE run_id IN (UUID_TO_BIN(?), UUID_TO_BIN(?))',
+            'ss', [self::RUNS[0], self::RUNS[5]]));
+        self::assertSame(['status' => 410, 'error' => 'report_expired'],
+            repo_package_report_record($this->db, $this->vmId, $expired));
+        self::assertSame(['status' => 200, 'accepted' => false, 'deduplicated' => true],
+            repo_package_report_record($this->db, $this->vmId, $live));
+    }
+
     public function testCompletionCannotContradictAlreadyStoredDetailCounts(): void
     {
         $base = $this->base(self::RUNS[3]);
@@ -156,7 +187,9 @@ final class PackageRunRepositoryTest extends TestCase
 
     public function testRestoreGenerationRejectsOldEvidenceAndAcceptsANewRunWithTheCurrentGeneration(): void
     {
-        repo_execute($this->db, 'UPDATE deploy_package_report_state SET acceptance_generation = UUID_TO_BIN(UUID()), rotated_at = UTC_TIMESTAMP(6) WHERE id = 1');
+        $rotation = package_report_restore_converge($this->db);
+        self::assertSame($this->acceptanceGeneration, $rotation['previous']);
+        self::assertNotSame($rotation['previous'], $rotation['current']);
         $old = $this->validated($this->base(self::RUNS[4]));
         self::assertSame(['status' => 409, 'error' => 'acceptance_generation_mismatch'],
             repo_package_report_record($this->db, $this->vmId, $old));
