@@ -11,6 +11,106 @@ function Get-VsPackageReporterHostContractVersion {
     return $script:VsPackageReporterHostContractVersion
 }
 
+# The wall clock is consulted only once to translate an HTTP-date into a
+# duration. Subsequent admission decisions use the run's monotonic clock and
+# never sleep or hold up package execution for Retry-After.
+function Get-VsPackageReportRetryUntilMs {
+    param(
+        [Parameter(Mandatory)][int]$StatusCode,
+        [AllowNull()][string]$RetryAfter,
+        [Parameter(Mandatory)][DateTimeOffset]$ReceivedAtUtc,
+        [Parameter(Mandatory)][long]$MonotonicNowMs
+    )
+
+    if ($StatusCode -ne 429 -and $StatusCode -ne 503) { return $null }
+    if ([string]::IsNullOrEmpty($RetryAfter) -or $RetryAfter.Length -gt 128 -or
+        $MonotonicNowMs -lt 0) { return $null }
+    $delayMs = [long]0
+    if ($RetryAfter -cmatch '\A[0-9]+\z') {
+        # Any larger valid decimal exceeds this run's lifetime. Saturate
+        # instead of treating it as malformed and sending the next event.
+        if ($RetryAfter.Length -gt 15) { return [long]::MaxValue }
+        $seconds = [long]0
+        if (-not [long]::TryParse($RetryAfter, [ref]$seconds)) { return [long]::MaxValue }
+        if ($seconds -gt ([long]::MaxValue / 1000)) { return [long]::MaxValue }
+        $delayMs = $seconds * 1000
+    } else {
+        $date = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParseExact($RetryAfter, 'r',
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$date)) { return $null }
+        $delta = $date - $ReceivedAtUtc
+        if ($delta.Ticks -le 0) { return $null }
+        $delayMs = [long][Math]::Ceiling($delta.TotalMilliseconds)
+    }
+    if ($delayMs -le 0) { return $null }
+    if ($MonotonicNowMs -gt [long]::MaxValue - $delayMs) { return [long]::MaxValue }
+    return ($MonotonicNowMs + $delayMs)
+}
+
+function New-VsPackageReportBudget {
+    $monotonic = [Diagnostics.Stopwatch]::StartNew()
+    return [pscustomobject]@{
+        MonotonicClock = $monotonic
+        ActiveClock = (New-Object Diagnostics.Stopwatch)
+        RetryUntilMs = $null
+    }
+}
+
+function Get-VsPackageReportAttemptTimeoutMs {
+    param(
+        [Parameter(Mandatory)][object]$Budget,
+        [Parameter(Mandatory)][ValidateSet('started', 'step_result', 'completed')][string]$ReportEvent
+    )
+
+    if ($null -ne $Budget.RetryUntilMs -and
+        $Budget.MonotonicClock.ElapsedMilliseconds -lt [long]$Budget.RetryUntilMs) { return 0 }
+    # 7.5 seconds for setup/start/steps, 2 seconds reserved for completion,
+    # and 0.5 seconds reserved for controlled teardown: 10 seconds total.
+    $cutoffMs = if ($ReportEvent -eq 'completed') { 9500 } else { 7500 }
+    $availableMs = $cutoffMs - [long]$Budget.ActiveClock.ElapsedMilliseconds
+    if ($availableMs -lt 100) { return 0 }
+    return [int][Math]::Min(2000, $availableMs)
+}
+
+# Run-level admission in the isolated host. In particular, a Retry-After
+# response suppresses completed too; it never delays the package payload.
+function Invoke-VsPackageReportBudgetedAttempt {
+    param(
+        [Parameter(Mandatory)][object]$Budget,
+        [Parameter(Mandatory)][object]$ApiConfiguration,
+        [Parameter(Mandatory)][object]$ReportRequest
+    )
+
+    $reportEvent = [string]$ReportRequest.ReportEvent
+    if (@('started', 'step_result', 'completed') -cnotcontains $reportEvent) {
+        return [pscustomobject]@{ Attempted = $false; Confirmed = $false; Deduplicated = $false; Reason = 'invalid_request'; StatusCode = $null }
+    }
+    $timeoutMs = Get-VsPackageReportAttemptTimeoutMs -Budget $Budget -ReportEvent $reportEvent
+    if ($timeoutMs -le 0) {
+        $reason = if ($null -ne $Budget.RetryUntilMs -and
+            $Budget.MonotonicClock.ElapsedMilliseconds -lt [long]$Budget.RetryUntilMs) {
+            'backpressure'
+        } else { 'budget_exhausted' }
+        return [pscustomobject]@{ Attempted = $false; Confirmed = $false; Deduplicated = $false; Reason = $reason; StatusCode = $null }
+    }
+
+    $Budget.ActiveClock.Start()
+    try {
+        $result = Invoke-VsPackageReportHttp -ApiConfiguration $ApiConfiguration `
+            -ReportRequest $ReportRequest -TimeoutMs $timeoutMs
+    } finally {
+        $Budget.ActiveClock.Stop()
+    }
+    if (($result.StatusCode -eq 429 -or $result.StatusCode -eq 503) -and $result.RetryAfter) {
+        $deadline = Get-VsPackageReportRetryUntilMs -StatusCode $result.StatusCode `
+            -RetryAfter $result.RetryAfter -ReceivedAtUtc ([DateTimeOffset]::UtcNow) `
+            -MonotonicNowMs $Budget.MonotonicClock.ElapsedMilliseconds
+        if ($null -ne $deadline) { $Budget.RetryUntilMs = $deadline }
+    }
+    return $result
+}
+
 # Called only by the later isolated reporter process. The request timeout is
 # defense in depth, not a wall-clock guarantee for DNS/TLS or a replacement
 # for the wrapper-owned job object and cumulative Stopwatch budget.
