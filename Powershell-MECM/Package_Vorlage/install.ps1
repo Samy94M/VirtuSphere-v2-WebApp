@@ -33,6 +33,241 @@ $script:VsPackageRunId = ([guid]::NewGuid()).ToString('D').ToLowerInvariant()
 $script:VsPackageRunStartedUtc = [DateTime]::UtcNow
 $script:VsPackageRunStamp = $script:VsPackageRunStartedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
 
+# The package is executable content. Resolve only the installer-owned closed
+# generation, never a path supplied by config.json or by a manifest entry.
+# This is a read-only precondition for the later supervised reporter start.
+function Get-VsPackageVerifiedReporterBundle {
+    param([Parameter(Mandatory)][string]$PackageRoot)
+
+    try {
+        $expectedNames = @(
+            'VirtuSphere-Client-Common.ps1',
+            'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1',
+            'VirtuSphere-Package-ReporterHost.ps1'
+        ) | Sort-Object
+        $reporting = Join-Path $PackageRoot 'reporting'
+        $descriptorPath = Join-Path $reporting 'current.json'
+        $wrapperPath = Join-Path $PackageRoot 'install.ps1'
+        foreach ($directory in @($PackageRoot, $reporting)) {
+            $item = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        }
+        foreach ($path in @($wrapperPath, $descriptorPath)) {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        }
+        if ((Get-Item -LiteralPath $descriptorPath -Force).Length -gt 8192) { return $null }
+        $descriptor = Get-Content -LiteralPath $descriptorPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ((@($descriptor.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+            'bundle_id|contracts|schema_version|wrapper_sha256' -or
+            ($descriptor.schema_version -isnot [int] -and $descriptor.schema_version -isnot [long]) -or $descriptor.schema_version -ne 1 -or
+            $descriptor.bundle_id -isnot [string] -or $descriptor.bundle_id -cnotmatch '\A[0-9a-f]{64}\z' -or
+            $descriptor.wrapper_sha256 -isnot [string] -or $descriptor.wrapper_sha256 -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+        if ((Get-FileHash -LiteralPath $wrapperPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+            $descriptor.wrapper_sha256) { return $null }
+
+        $bundleRoot = Join-Path $reporting $descriptor.bundle_id
+        $bundleItem = Get-Item -LiteralPath $bundleRoot -Force -ErrorAction Stop
+        if (-not $bundleItem.PSIsContainer -or ($bundleItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        $manifestPath = Join-Path $bundleRoot 'manifest.json'
+        $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+        if ($manifestItem.PSIsContainer -or ($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $manifestItem.Length -gt 16384) { return $null }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ((@($manifest.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+            'bundle_id|contracts|files|schema_version' -or
+            ($manifest.schema_version -isnot [int] -and $manifest.schema_version -isnot [long]) -or $manifest.schema_version -ne 1 -or
+            $manifest.bundle_id -cne $descriptor.bundle_id) { return $null }
+        foreach ($contractSet in @($descriptor.contracts, $manifest.contracts)) {
+            if ($null -eq $contractSet -or
+                (@($contractSet.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'adapter|common|host|logging') { return $null }
+            foreach ($name in @('common', 'logging', 'adapter', 'host')) {
+                $value = $contractSet.PSObject.Properties[$name].Value
+                if (($value -isnot [int] -and $value -isnot [long]) -or $value -ne 1) { return $null }
+            }
+        }
+
+        $entries = @($manifest.files)
+        if ($entries.Count -ne $expectedNames.Count) { return $null }
+        $basis = New-Object 'System.Collections.Generic.List[string]'
+        $verifiedPaths = New-Object 'System.Collections.Generic.List[string]'
+        for ($index = 0; $index -lt $expectedNames.Count; $index++) {
+            $entry = $entries[$index]
+            if ($null -eq $entry -or
+                (@($entry.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'length|path|sha256' -or
+                $entry.path -isnot [string] -or $entry.path -cne $expectedNames[$index] -or
+                ($entry.length -isnot [int] -and $entry.length -isnot [long]) -or $entry.length -lt 0 -or
+                $entry.sha256 -isnot [string] -or $entry.sha256 -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+            $sourcePath = Join-Path $bundleRoot $entry.path
+            $sourceItem = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+            if ($sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                $sourceItem.Length -ne [long]$entry.length -or
+                (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne $entry.sha256) { return $null }
+            [void]$basis.Add(('{0}|{1}|{2}' -f $entry.path, [long]$entry.length, $entry.sha256))
+            [void]$verifiedPaths.Add($sourcePath)
+        }
+        $actualNames = @(Get-ChildItem -LiteralPath $bundleRoot -Force -ErrorAction Stop | Sort-Object Name | ForEach-Object Name)
+        $allowedNames = @($expectedNames + 'manifest.json' | Sort-Object)
+        if (($actualNames -join '|') -cne ($allowedNames -join '|')) { return $null }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $calculatedId = ([BitConverter]::ToString($sha.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes(($basis.ToArray() -join "`n")))).Replace('-', '')).ToLowerInvariant()
+        } finally { $sha.Dispose() }
+        if ($calculatedId -cne $descriptor.bundle_id) { return $null }
+        return [pscustomobject]@{ BundleId = $descriptor.bundle_id; Root = $bundleRoot; Files = $verifiedPaths.ToArray() }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+# Create the worker suspended, bind only that new process to a private job,
+# then let its first instruction run. A failed assignment terminates the
+# suspended child. The wrapper alone retains the non-inherited job handle.
+function Start-VsPackageReporterJobProcess {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$PipeName
+    )
+
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z' -or
+        -not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { return $null }
+    $powerShellPath = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { return $null }
+    try {
+        if (-not ('VirtuSphere.PackageReporterJobProcess' -as [type])) {
+            Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace VirtuSphere {
+    public sealed class PackageReporterJobProcess : IDisposable {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct STARTUPINFO {
+            public uint cb;
+            public IntPtr lpReserved, lpDesktop, lpTitle;
+            public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars;
+            public uint dwFillAttribute, dwFlags;
+            public ushort wShowWindow, cbReserved2;
+            public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION {
+            public IntPtr hProcess, hThread;
+            public uint dwProcessId, dwThreadId;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BASIC_LIMIT_INFORMATION {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public IntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+            public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct EXTENDED_LIMIT_INFORMATION {
+            public BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+        [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+        private static extern bool CreateProcessW(string application, StringBuilder commandLine,
+            IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+            uint creationFlags, IntPtr environment, string currentDirectory,
+            ref STARTUPINFO startup, out PROCESS_INFORMATION process);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern IntPtr CreateJobObject(IntPtr security, string name);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int infoClass,
+            ref EXTENDED_LIMIT_INFORMATION limits, uint size);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern uint ResumeThread(IntPtr thread);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        private IntPtr job, process;
+        public uint ProcessId { get; private set; }
+        private PackageReporterJobProcess(IntPtr jobHandle, IntPtr processHandle, uint pid) {
+            job = jobHandle; process = processHandle; ProcessId = pid;
+        }
+        public bool IsRunning { get { return process != IntPtr.Zero && WaitForSingleObject(process, 0) == 0x102; } }
+        public bool WaitForExit(uint milliseconds) {
+            return process != IntPtr.Zero && WaitForSingleObject(process, milliseconds) == 0;
+        }
+        public static PackageReporterJobProcess Start(string exe, string script, string pipeName) {
+            IntPtr jobHandle = IntPtr.Zero;
+            PROCESS_INFORMATION child = new PROCESS_INFORMATION();
+            bool created = false;
+            try {
+                jobHandle = CreateJobObject(IntPtr.Zero, null);
+                if (jobHandle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                EXTENDED_LIMIT_INFORMATION limits = new EXTENDED_LIMIT_INFORMATION();
+                limits.BasicLimitInformation.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                if (!SetInformationJobObject(jobHandle, 9, ref limits,
+                    (uint)Marshal.SizeOf(typeof(EXTENDED_LIMIT_INFORMATION))))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                STARTUPINFO startup = new STARTUPINFO();
+                startup.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
+                string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -File \"" +
+                    script + "\" -VsReporterPipeName " + pipeName;
+                if (!CreateProcessW(exe, new StringBuilder(args), IntPtr.Zero, IntPtr.Zero,
+                    false, 0x08000004, IntPtr.Zero, null, ref startup, out child))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                created = true;
+                if (!AssignProcessToJobObject(jobHandle, child.hProcess))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (ResumeThread(child.hThread) == 0xffffffff)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                PackageReporterJobProcess result = new PackageReporterJobProcess(jobHandle, child.hProcess, child.dwProcessId);
+                jobHandle = IntPtr.Zero;
+                child.hProcess = IntPtr.Zero;
+                return result;
+            } catch {
+                if (created) {
+                    TerminateProcess(child.hProcess, 1);
+                    WaitForSingleObject(child.hProcess, 500);
+                }
+                throw;
+            } finally {
+                if (child.hThread != IntPtr.Zero) CloseHandle(child.hThread);
+                if (child.hProcess != IntPtr.Zero) CloseHandle(child.hProcess);
+                if (jobHandle != IntPtr.Zero) CloseHandle(jobHandle);
+            }
+        }
+        public void Dispose() {
+            if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
+            if (process != IntPtr.Zero) { CloseHandle(process); process = IntPtr.Zero; }
+            GC.SuppressFinalize(this);
+        }
+        ~PackageReporterJobProcess() { Dispose(); }
+    }
+}
+'@
+        }
+        return [VirtuSphere.PackageReporterJobProcess]::Start($powerShellPath, $ScriptPath, $PipeName)
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
 function ConvertTo-VsPackageLogText {
     param(
         [AllowNull()]
