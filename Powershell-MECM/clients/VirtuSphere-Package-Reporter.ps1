@@ -97,6 +97,199 @@ function New-VsPackageReportStartedRequest {
     }
 }
 
+# One result per processed wrapper step. The caller owns the stable sequence
+# number and first-failure decision; a server detail-limit refusal is not an
+# installation failure and does not suppress a later completion report.
+function New-VsPackageReportStepRequest {
+    param(
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][object]$Snapshot,
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$PackageVersion,
+        [Parameter(Mandatory)][string]$ClientStartedAt,
+        [Parameter(Mandatory)][string]$EventAt,
+        [Parameter(Mandatory)][string]$Context,
+        [AllowNull()][object]$Total = $null,
+        [Parameter(Mandatory)][object]$EventSeq,
+        [Parameter(Mandatory)][object]$StepIndex,
+        [Parameter(Mandatory)][string]$ScriptName,
+        [Parameter(Mandatory)][string]$Result,
+        [Parameter(Mandatory)][object]$IsFirstFailure,
+        [AllowNull()][object]$ErrorCategory = $null,
+        [AllowNull()][object]$ChildExitCode = $null,
+        [AllowNull()][object]$DurationMs = $null,
+        [AllowNull()][object]$DetailPath = $null
+    )
+
+    try {
+        if (($EventSeq -isnot [int] -and $EventSeq -isnot [long]) -or $EventSeq -le 0 -or
+            ($StepIndex -isnot [int] -and $StepIndex -isnot [long]) -or $StepIndex -le 0 -or
+            ($null -ne $Total -and $StepIndex -gt $Total) -or
+            $ScriptName.Length -eq 0 -or $ScriptName.Length -gt 255 -or
+            $ScriptName -cne $ScriptName.Trim() -or $ScriptName -match '[\x00-\x1F\x7F]' -or
+            ($Result -cne 'ok' -and $Result -cne 'skip' -and $Result -cne 'fail') -or
+            $IsFirstFailure -isnot [bool] -or ($IsFirstFailure -and $Result -cne 'fail')) { return $null }
+
+        foreach ($detail in @(@($ErrorCategory, 255), @($DetailPath, 1024))) {
+            $value = $detail[0]
+            if ($null -ne $value -and ($value -isnot [string] -or $value.Length -eq 0 -or
+                    $value.Length -gt $detail[1] -or $value -cne $value.Trim() -or
+                    $value -match '[\x00-\x1F\x7F]')) { return $null }
+        }
+        if ($null -ne $ChildExitCode -and
+            (($ChildExitCode -isnot [int] -and $ChildExitCode -isnot [long]) -or
+                $ChildExitCode -lt [int]::MinValue -or $ChildExitCode -gt [int]::MaxValue)) { return $null }
+        if ($null -ne $DurationMs -and
+            (($DurationMs -isnot [int] -and $DurationMs -isnot [long]) -or $DurationMs -lt 0)) { return $null }
+
+        $started = New-VsPackageReportStartedRequest -RunId $RunId -Snapshot $Snapshot `
+            -ProjectName $ProjectName -PackageVersion $PackageVersion -ClientStartedAt $ClientStartedAt `
+            -EventAt $EventAt -Context $Context -Total $Total
+        if ($null -eq $started) { return $null }
+        $body = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($started.BodyBytes)) -ErrorAction Stop
+        $body.event = 'step_result'
+        $body.event_seq = $EventSeq
+        $stepFields = [ordered]@{
+                step_index = $StepIndex
+                script_name = $ScriptName
+                result = $Result
+                is_first_failure = $IsFirstFailure
+                error_category = $ErrorCategory
+                child_exit_code = $ChildExitCode
+                duration_ms = $DurationMs
+                detail_path = $DetailPath
+            }
+        foreach ($field in $stepFields.GetEnumerator()) {
+            $body | Add-Member -MemberType NoteProperty -Name $field.Key -Value $field.Value -ErrorAction Stop
+        }
+        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $body -Compress -Depth 4))
+        if ($bytes.Length -gt 65536) { return $null }
+        return [pscustomobject]@{ BodyBytes = $bytes; RunId = $RunId; ReportEvent = 'step_result'; EventSeq = $EventSeq }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+# Completion carries the wrapper's decided outcome, not a second calculation
+# from whichever step messages happened to reach the server. The first failure
+# is the reserved compact projection, including when its step report was lost.
+function New-VsPackageReportCompletedRequest {
+    param(
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][object]$Snapshot,
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][string]$PackageVersion,
+        [Parameter(Mandatory)][string]$ClientStartedAt,
+        [Parameter(Mandatory)][string]$EventAt,
+        [Parameter(Mandatory)][string]$Context,
+        [AllowNull()][object]$Total = $null,
+        [Parameter(Mandatory)][object]$EventSeq,
+        [Parameter(Mandatory)][string]$WrapperResult,
+        [AllowNull()][object]$WrapperExitCode = $null,
+        [Parameter(Mandatory)][string]$DetectionResult,
+        [Parameter(Mandatory)][object]$ProcessedCount,
+        [Parameter(Mandatory)][object]$OkCount,
+        [Parameter(Mandatory)][object]$SkipCount,
+        [Parameter(Mandatory)][object]$FailCount,
+        [AllowNull()][object]$LastProcessedIndex = $null,
+        [AllowNull()][object]$FirstFailure = $null,
+        [Parameter(Mandatory)][object]$PayloadOmittedCount,
+        [AllowNull()][object]$WrapperLogPath = $null,
+        [AllowNull()][object]$ReportingLogPath = $null
+    )
+
+    try {
+        if (($EventSeq -isnot [int] -and $EventSeq -isnot [long]) -or $EventSeq -le 0 -or
+            @('ok', 'failed', 'reboot_required', 'reboot_initiated') -cnotcontains $WrapperResult -or
+            @('written', 'failed', 'not_attempted') -cnotcontains $DetectionResult) { return $null }
+        foreach ($count in @($ProcessedCount, $OkCount, $SkipCount, $FailCount, $PayloadOmittedCount)) {
+            if (($count -isnot [int] -and $count -isnot [long]) -or $count -lt 0) { return $null }
+        }
+        if ([decimal]$ProcessedCount -ne ([decimal]$OkCount + [decimal]$SkipCount + [decimal]$FailCount) -or
+            ($null -ne $Total -and $ProcessedCount -gt $Total) -or
+            (($ProcessedCount -eq 0) -ne ($null -eq $LastProcessedIndex)) -or
+            ($null -ne $LastProcessedIndex -and
+                (($LastProcessedIndex -isnot [int] -and $LastProcessedIndex -isnot [long]) -or
+                    $LastProcessedIndex -le 0 -or ($null -ne $Total -and $LastProcessedIndex -gt $Total))) -or
+            (($FailCount -eq 0) -ne ($null -eq $FirstFailure))) { return $null }
+        if ($null -ne $WrapperExitCode -and
+            (($WrapperExitCode -isnot [int] -and $WrapperExitCode -isnot [long]) -or
+                $WrapperExitCode -lt [int]::MinValue -or $WrapperExitCode -gt [int]::MaxValue)) { return $null }
+        foreach ($path in @($WrapperLogPath, $ReportingLogPath)) {
+            if ($null -ne $path -and ($path -isnot [string] -or $path.Length -eq 0 -or
+                    $path.Length -gt 1024 -or $path -cne $path.Trim() -or
+                    $path -match '[\x00-\x1F\x7F]')) { return $null }
+        }
+
+        $failureBody = $null
+        if ($null -ne $FirstFailure) {
+            if ($FirstFailure -isnot [pscustomobject]) { return $null }
+            $allowed = @('step_index', 'script_name', 'error_category', 'child_exit_code', 'detail_path')
+            foreach ($property in $FirstFailure.PSObject.Properties) {
+                if ($allowed -cnotcontains $property.Name) { return $null }
+            }
+            if (@($FirstFailure.PSObject.Properties.Name) -cnotcontains 'step_index' -or
+                @($FirstFailure.PSObject.Properties.Name) -cnotcontains 'script_name') { return $null }
+            $index = $FirstFailure.step_index
+            $name = $FirstFailure.script_name
+            if (($index -isnot [int] -and $index -isnot [long]) -or $index -le 0 -or
+                ($null -ne $Total -and $index -gt $Total) -or
+                $name -isnot [string] -or $name.Length -eq 0 -or $name.Length -gt 255 -or
+                $name -cne $name.Trim() -or $name -match '[\x00-\x1F\x7F]') { return $null }
+            $category = if (@($FirstFailure.PSObject.Properties.Name) -ccontains 'error_category') { $FirstFailure.error_category } else { $null }
+            $exit = if (@($FirstFailure.PSObject.Properties.Name) -ccontains 'child_exit_code') { $FirstFailure.child_exit_code } else { $null }
+            $path = if (@($FirstFailure.PSObject.Properties.Name) -ccontains 'detail_path') { $FirstFailure.detail_path } else { $null }
+            foreach ($textAndMax in @(@($category, 255), @($path, 1024))) {
+                $value = $textAndMax[0]
+                if ($null -ne $value -and ($value -isnot [string] -or $value.Length -eq 0 -or
+                        $value.Length -gt $textAndMax[1] -or $value -cne $value.Trim() -or
+                        $value -match '[\x00-\x1F\x7F]')) { return $null }
+            }
+            if ($null -ne $exit -and (($exit -isnot [int] -and $exit -isnot [long]) -or
+                    $exit -lt [int]::MinValue -or $exit -gt [int]::MaxValue)) { return $null }
+            $failureBody = [ordered]@{
+                step_index = $index
+                script_name = $name
+                error_category = $category
+                child_exit_code = $exit
+                detail_path = $path
+            }
+        }
+
+        $started = New-VsPackageReportStartedRequest -RunId $RunId -Snapshot $Snapshot `
+            -ProjectName $ProjectName -PackageVersion $PackageVersion -ClientStartedAt $ClientStartedAt `
+            -EventAt $EventAt -Context $Context -Total $Total
+        if ($null -eq $started) { return $null }
+        $body = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($started.BodyBytes)) -ErrorAction Stop
+        $body.event = 'completed'
+        $body.event_seq = $EventSeq
+        $completionFields = [ordered]@{
+            wrapper_result = $WrapperResult
+            wrapper_exit_code = $WrapperExitCode
+            detection_result = $DetectionResult
+            processed_count = $ProcessedCount
+            ok_count = $OkCount
+            skip_count = $SkipCount
+            fail_count = $FailCount
+            last_processed_index = $LastProcessedIndex
+            first_failure = $failureBody
+            payload_omitted_count = $PayloadOmittedCount
+            wrapper_log_path = $WrapperLogPath
+            reporting_log_path = $ReportingLogPath
+        }
+        foreach ($field in $completionFields.GetEnumerator()) {
+            $body | Add-Member -MemberType NoteProperty -Name $field.Key -Value $field.Value -ErrorAction Stop
+        }
+        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $body -Compress -Depth 5))
+        if ($bytes.Length -gt 65536) { return $null }
+        return [pscustomobject]@{ BodyBytes = $bytes; RunId = $RunId; ReportEvent = 'completed'; EventSeq = $EventSeq }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
 # A 200 status alone is not proof that this exact event reached the writer.
 # The supervised host supplies only its bounded response, never an arbitrary
 # page body or a response from a different run. This library performs no I/O.
