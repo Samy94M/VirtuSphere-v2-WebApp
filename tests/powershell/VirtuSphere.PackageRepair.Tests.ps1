@@ -55,7 +55,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         Set-RepairStepMarker '02.ps1'
 
         Mock Test-Path {
-            $fileSystemPath = [string]$Path
+            $fileSystemPath = if ($LiteralPath) { [string]$LiteralPath } else { [string]$Path }
             if (-not [System.IO.Path]::IsPathRooted($fileSystemPath)) {
                 $fileSystemPath = Join-Path (Get-Location).Path $fileSystemPath
             }
@@ -105,6 +105,107 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         $global:VirtuSpherePackageRepairFixture.Children.Count | Should -Be 0
         $global:VirtuSpherePackageRepairFixture.RemoveCount | Should -Be 0
         $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
+    }
+
+    It 'writes a paired UTF-8 BOM run record with skips and one completed summary' {
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+
+        $runLogs = @(Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') -File -Recurse)
+        @($runLogs | Where-Object Name -like 'wrapper_*.log').Count | Should -Be 1
+        @($runLogs | Where-Object Name -like 'reporting_*.log').Count | Should -Be 1
+        foreach ($file in $runLogs) {
+            $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            @($bytes[0..2]) | Should -Be @(0xef, 0xbb, 0xbf)
+        }
+
+        $wrapper = $runLogs | Where-Object Name -like 'wrapper_*.log' | Select-Object -First 1
+        $reporting = $runLogs | Where-Object Name -like 'reporting_*.log' | Select-Object -First 1
+        $wrapperRecords = @(Get-Content -LiteralPath $wrapper.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+        $reportingRecords = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+        @($wrapperRecords.event) | Should -Be @('header', 'inventory', 'step_run', 'step_result', 'step_run', 'step_result', 'completed')
+        @($wrapperRecords | Where-Object event -eq 'step_result').outcome | Should -Be @('SKIP', 'SKIP')
+        $completed = $wrapperRecords | Where-Object event -eq 'completed'
+        $completed.exit_code | Should -Be 0
+        $completed.detection_status | Should -Be 'written'
+        $completed.total | Should -Be 2
+        $completed.processed | Should -Be 2
+        $completed.skip | Should -Be 2
+        @($reportingRecords.event) | Should -Be @('header', 'reporting_disabled')
+        $wrapperRecords[0].run_id | Should -Be $reportingRecords[0].run_id
+        $wrapperRecords[0].partner_file | Should -Be $reporting.Name
+        $reportingRecords[0].partner_file | Should -Be $wrapper.Name
+    }
+
+    It 'retains five paired run groups and leaves a locked older group intact' {
+        1..5 | ForEach-Object { Invoke-RepairWrapper; $script:WrapperExit | Should -Be 0 }
+        $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
+        $groupsBefore = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+        $groupsBefore.Count | Should -Be 5
+        $oldestWrapper = Get-ChildItem -LiteralPath $logRoot -Filter 'wrapper_*.log' -File -Recurse | Sort-Object Name | Select-Object -First 1
+        $lock = New-Object IO.FileStream($oldestWrapper.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
+            $groupsLocked = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+            $groupsLocked.Count | Should -Be 6
+        } finally {
+            $lock.Dispose()
+        }
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+        $groupsAfter = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+        $groupsAfter.Count | Should -Be 5
+        @($groupsAfter | Where-Object Count -ne 2).Count | Should -Be 0
+    }
+
+    It 'continues the package decision when the managed log ACL cannot be checked' {
+        Mock Get-Acl { throw 'acl unavailable' }
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+        $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
+        $global:VirtuSpherePackageRepairFixture.Children.Count | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
+    }
+
+    It 'accepts read-only Users access without disabling package logs' {
+        $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
+        $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+        $readRule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $usersSid,
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($readRule)
+        $global:VirtuSpherePackageRepairFixture.LogAcl.Access.Count | Should -Be 1
+        Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
+
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+        $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
+        Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Not -Match 'deaktiviert'
+        @(Get-ChildItem -LiteralPath $logRoot -File -Recurse).Count | Should -Be 2
+    }
+
+    It 'disables package logs for writable Users access without changing detection' {
+        $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
+        $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+        $writeRule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $usersSid,
+            [Security.AccessControl.FileSystemRights]::Write,
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($writeRule)
+        Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
+
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+        $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
+        Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
     }
 
     It 'removes old detection before changed content, including failure and reboot <Code>' -TestCases @(

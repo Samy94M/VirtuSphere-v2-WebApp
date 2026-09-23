@@ -1525,11 +1525,13 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
         # Registry-Pfad wurde zu "...\Packages\-", und alle Teilskripte liefen
         # trotzdem als SYSTEM. MECM faengt das erst ueber die nicht erfuellte
         # Detection ab, also nach der Ausfuehrung.
-        $loops = @($script:TemplateAst.FindAll({
-            param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst]
+        $payloadLoops = @($script:TemplateAst.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.ForEachStatementAst] -and
+                $n.Extent.Text -match '^foreach\s*\(\s*\$scriptFile\s+in\s+\$dir_script\s*\)'
         }, $true))
-        $loops.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $firstLoop = ($loops | Sort-Object { $_.Extent.StartOffset })[0].Extent.StartOffset
+        $payloadLoops.Count | Should -Be 1 -Because 'nur die Teilskript-Schleife ist die fachliche Ausfuehrungsgrenze'
+        $firstLoop = $payloadLoops[0].Extent.StartOffset
 
         $exitsBefore = @($script:TemplateAst.FindAll({
             param($n) $n -is [System.Management.Automation.Language.ExitStatementAst]

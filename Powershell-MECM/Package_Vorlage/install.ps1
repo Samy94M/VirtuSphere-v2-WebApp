@@ -21,6 +21,342 @@ Set-StrictMode -Version 1.0
 # Wichtig damit alle relativen Pfade (.\powershell\, .\config.json) korrekt aufgeloest werden.
 Set-Location $PSScriptRoot
 
+$script:VsPackageLogSchemaVersion = 1
+$script:VsPackageLogKeepCount = 5
+$script:VsPackageLogSinks = @{}
+$script:VsPackageLogPaths = @{}
+$script:VsPackageLogWarnings = @{}
+$script:VsPackageRunResults = New-Object System.Collections.Generic.List[object]
+$script:VsPackageRunStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:VsPackageRunCompleted = $false
+$script:VsPackageRunId = ([guid]::NewGuid()).ToString('D').ToLowerInvariant()
+$script:VsPackageRunStartedUtc = [DateTime]::UtcNow
+$script:VsPackageRunStamp = $script:VsPackageRunStartedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
+
+function ConvertTo-VsPackageLogText {
+    param(
+        [AllowNull()]
+        [object]$Value,
+
+        [int]$MaximumLength = 512
+    )
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    $text = [regex]::Replace($text, '[\x00-\x1f\x7f]', ' ')
+    if ($MaximumLength -gt 0 -and $text.Length -gt $MaximumLength) {
+        return $text.Substring(0, $MaximumLength)
+    }
+    return $text
+}
+
+function Get-VsPackageIdentityHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectName,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $ascii = [System.Text.Encoding]::ASCII
+    $buffer = New-Object System.IO.MemoryStream
+    try {
+        foreach ($value in @($ProjectName, $Version)) {
+            $valueBytes = $utf8.GetBytes($value)
+            $lengthBytes = $ascii.GetBytes(($valueBytes.Length.ToString([Globalization.CultureInfo]::InvariantCulture) + ':'))
+            $buffer.Write($lengthBytes, 0, $lengthBytes.Length)
+            $buffer.Write($valueBytes, 0, $valueBytes.Length)
+        }
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($buffer.ToArray()))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $buffer.Dispose()
+    }
+}
+
+function Test-VsPackageLogAccess {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $broadWriteSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-32-546')
+    $unsafeRights = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+            try {
+                $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+            } catch {
+                return $false
+            }
+            if ($broadWriteSids -contains $sid -and (($rule.FileSystemRights -band $unsafeRights) -ne 0)) {
+                return $false
+            }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Write-VsPackageLog {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('wrapper', 'reporting')][string]$Sink,
+        [Parameter(Mandatory = $true)][string]$Event,
+        [hashtable]$Fields = @{}
+    )
+
+    $writer = $script:VsPackageLogSinks[$Sink]
+    if ($null -eq $writer) { return }
+
+    try {
+        $record = [ordered]@{
+            schema_version = $script:VsPackageLogSchemaVersion
+            timestamp_utc = [DateTime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+            elapsed_ms = [Math]::Floor($script:VsPackageRunStopwatch.Elapsed.TotalMilliseconds)
+            run_id = $script:VsPackageRunId
+            event = ConvertTo-VsPackageLogText -Value $Event -MaximumLength 64
+        }
+        foreach ($key in @($Fields.Keys | Sort-Object)) {
+            $value = $Fields[$key]
+            if ($value -is [string]) {
+                $limit = if ($key -in @('project_name', 'package_version', 'detail_path')) { 0 } else { 512 }
+                $value = ConvertTo-VsPackageLogText -Value $value -MaximumLength $limit
+            }
+            $record[[string]$key] = $value
+        }
+        $writer.WriteLine(($record | ConvertTo-Json -Compress -Depth 4))
+    } catch {
+        $script:VsPackageLogSinks[$Sink] = $null
+        if (-not $script:VsPackageLogWarnings.ContainsKey($Sink)) {
+            $script:VsPackageLogWarnings[$Sink] = $true
+            try { Write-Warning "VirtuSphere $Sink-Log ist ausgefallen; Paketablauf wird fortgesetzt." } catch { $null = $_ }
+        }
+        try { $writer.Dispose() } catch { $null = $_ }
+    }
+}
+
+function Open-VsPackageLogSink {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ValidateSet('wrapper', 'reporting')][string]$Kind,
+        [Parameter(Mandatory = $true)][string]$PartnerName,
+        [Parameter(Mandatory = $true)][string]$ProjectName,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    try {
+        $stream = New-Object System.IO.FileStream(
+            $Path,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::Read,
+            4096,
+            [System.IO.FileOptions]::WriteThrough
+        )
+        try {
+            $writer = New-Object System.IO.StreamWriter($stream, (New-Object System.Text.UTF8Encoding($true)))
+            $writer.AutoFlush = $true
+            $script:VsPackageLogSinks[$Kind] = $writer
+            $script:VsPackageLogPaths[$Kind] = $Path
+            Write-VsPackageLog -Sink $Kind -Event 'header' -Fields @{
+                log_kind = $Kind
+                partner_file = $PartnerName
+                project_name = $ProjectName
+                package_version = $Version
+                started_utc = $script:VsPackageRunStartedUtc.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+                process_id = $PID
+                process_identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+                powershell_version = [string]$PSVersionTable.PSVersion
+            }
+            return ($null -ne $script:VsPackageLogSinks[$Kind])
+        } catch {
+            try { $stream.Dispose() } catch { $null = $_ }
+            throw
+        }
+    } catch {
+        $script:VsPackageLogSinks[$Kind] = $null
+        if (-not $script:VsPackageLogWarnings.ContainsKey($Kind)) {
+            $script:VsPackageLogWarnings[$Kind] = $true
+            try { Write-Warning "VirtuSphere $Kind-Log konnte nicht angelegt werden; Paketablauf wird fortgesetzt." } catch { $null = $_ }
+        }
+        return $false
+    }
+}
+
+function Invoke-VsPackageLogRetention {
+    param(
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true)][string]$CurrentStem
+    )
+
+    $directoryInfo = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (($directoryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'PackageWrapper-Logordner ist ein Reparse-Point.'
+    }
+    $directoryFull = [IO.Path]::GetFullPath($directoryInfo.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $pattern = '^(wrapper|reporting)_(?<stamp>\d{8}T\d{9}Z)_(?<run>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log$'
+    $groups = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $directoryFull -File -Force -ErrorAction Stop)) {
+        $match = [regex]::Match($file.Name, $pattern, [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if (-not $match.Success) { continue }
+        $parsedStamp = [DateTime]::MinValue
+        if (-not [DateTime]::TryParseExact(
+            $match.Groups['stamp'].Value,
+            "yyyyMMdd'T'HHmmssfff'Z'",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal,
+            [ref]$parsedStamp
+        )) { continue }
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        if ([string]::Compare($file.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) { continue }
+        $stem = '{0}_{1}' -f $match.Groups['stamp'].Value, $match.Groups['run'].Value
+        if (-not $groups.ContainsKey($stem)) {
+            $groups[$stem] = [pscustomobject]@{ Stem = $stem; Stamp = $match.Groups['stamp'].Value; Run = $match.Groups['run'].Value; Files = New-Object System.Collections.Generic.List[object] }
+        }
+        $groups[$stem].Files.Add($file)
+    }
+
+    $ordered = @($groups.Values | Sort-Object Stamp, Run -Descending)
+    $protected = @($ordered | Select-Object -First $script:VsPackageLogKeepCount | ForEach-Object { $_.Stem })
+    if ($protected -notcontains $CurrentStem) { $protected += $CurrentStem }
+    $warned = $false
+    foreach ($group in @($ordered | Where-Object { $protected -notcontains $_.Stem })) {
+        $locks = New-Object System.Collections.Generic.List[object]
+        try {
+            $lockFailed = $false
+            foreach ($file in $group.Files.ToArray()) {
+                try {
+                    $fresh = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    if (($fresh.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                        [string]::Compare($fresh.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) {
+                        $lockFailed = $true
+                        break
+                    }
+                    $locks.Add((New-Object System.IO.FileStream(
+                        $fresh.FullName,
+                        [IO.FileMode]::Open,
+                        [IO.FileAccess]::ReadWrite,
+                        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+                    )))
+                } catch {
+                    $lockFailed = $true
+                    break
+                }
+            }
+            if ($lockFailed) { continue }
+            foreach ($file in $group.Files.ToArray()) {
+                try {
+                    $fresh = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    if (($fresh.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                        [string]::Compare($fresh.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) {
+                        throw 'Logdatei hat die Zielgrenze verlassen.'
+                    }
+                    [IO.File]::Delete($fresh.FullName)
+                } catch [System.Management.Automation.ItemNotFoundException] {
+                    # Ein paralleler Bereiniger war schneller.
+                    $null = $_
+                } catch {
+                    if (-not $warned) {
+                        $warned = $true
+                        Write-Warning 'Alte VirtuSphere-PackageWrapper-Logs konnten nicht vollstaendig bereinigt werden.'
+                    }
+                }
+            }
+        } finally {
+            foreach ($handle in $locks) { try { $handle.Dispose() } catch { $null = $_ } }
+        }
+    }
+}
+
+function Add-VsPackageStepResult {
+    param(
+        [int]$Index,
+        [string]$ScriptName,
+        [ValidateSet('OK', 'SKIP', 'FAIL')][string]$Outcome,
+        [string]$Category,
+        [AllowNull()][object]$ChildExitCode,
+        [AllowNull()][string]$DetailPath,
+        [long]$DurationMs
+    )
+
+    $result = [pscustomobject]@{
+        index = $Index
+        script_name = ConvertTo-VsPackageLogText -Value $ScriptName -MaximumLength 260
+        outcome = $Outcome
+        category = $Category
+        child_exit_code = $ChildExitCode
+        detail_path = $DetailPath
+        duration_ms = $DurationMs
+    }
+    $script:VsPackageRunResults.Add($result)
+    $displayTotal = if ($null -ne $knownStepTotal) { $knownStepTotal } else { '?' }
+    Write-Host "[$Index/$displayTotal] $Outcome $ScriptName" -ForegroundColor Gray
+    Write-VsPackageLog -Sink wrapper -Event 'step_result' -Fields @{
+        index = $Index
+        script_name = $result.script_name
+        outcome = $Outcome
+        category = $Category
+        child_exit_code = $ChildExitCode
+        detail_path = $DetailPath
+        duration_ms = $DurationMs
+    }
+}
+
+function Complete-VsPackageRun {
+    param(
+        [AllowNull()][object]$ExitCode,
+        [Parameter(Mandatory = $true)][string]$Result,
+        [Parameter(Mandatory = $true)][ValidateSet('written', 'failed', 'not_attempted')][string]$DetectionStatus,
+        [AllowNull()][object]$Total
+    )
+
+    if ($script:VsPackageRunCompleted) { return }
+    $script:VsPackageRunCompleted = $true
+    $ok = @($script:VsPackageRunResults | Where-Object outcome -eq 'OK').Count
+    $skip = @($script:VsPackageRunResults | Where-Object outcome -eq 'SKIP').Count
+    $fail = @($script:VsPackageRunResults | Where-Object outcome -eq 'FAIL').Count
+    $processed = $ok + $skip + $fail
+    $notProcessed = if ($null -ne $Total) { [Math]::Max(0, ([int]$Total - $processed)) } else { $null }
+    Write-VsPackageLog -Sink wrapper -Event 'completed' -Fields @{
+        result = $Result
+        exit_code = $ExitCode
+        detection_status = $DetectionStatus
+        total = $Total
+        processed = $processed
+        ok = $ok
+        skip = $skip
+        fail = $fail
+        not_processed = $notProcessed
+        duration_ms = [Math]::Floor($script:VsPackageRunStopwatch.Elapsed.TotalMilliseconds)
+    }
+    Write-VsPackageLog -Sink reporting -Event 'reporting_disabled' -Fields @{ reason = 'transport_not_integrated' }
+    $wrapperPath = $script:VsPackageLogPaths['wrapper']
+    $reportingPath = $script:VsPackageLogPaths['reporting']
+    Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
+    if ($wrapperPath) { Write-Host "Wrapper-Log: $wrapperPath" -ForegroundColor Cyan }
+    if ($reportingPath) { Write-Host "Reporting-Log: $reportingPath" -ForegroundColor Cyan }
+}
+
+function Close-VsPackageLogSink {
+    foreach ($kind in @('wrapper', 'reporting')) {
+        $writer = $script:VsPackageLogSinks[$kind]
+        if ($null -ne $writer) {
+            try { $writer.Dispose() } catch { $null = $_ }
+            $script:VsPackageLogSinks[$kind] = $null
+        }
+    }
+}
+
 # Konfigurationsdatei einlesen und PRUEFEN, bevor irgendein Teilskript laeuft.
 #
 # Ohne diese Pruefung lief das Skript mit $config = $null weiter: der
@@ -92,6 +428,65 @@ if ($config.InstallationBehaviorType -eq 'InstallForUser') {
     $logDirectory = Join-Path $env:ProgramData 'VirtuSphere\Logs'
 }
 
+# Die vorhandenen Teilskript-Logs und die neuen Gesamtlogs teilen nur die
+# Logwurzel. PackageWrapper verwaltet ausschliesslich seinen eigenen Unterbaum.
+if (!(Test-Path $logDirectory)) {
+    New-Item -Path $logDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+}
+$packageLogReady = $true
+try {
+    $packageIdentity = Get-VsPackageIdentityHash -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    $packageWrapperRoot = Join-Path $logDirectory 'PackageWrapper'
+    $packageLogDirectory = Join-Path $packageWrapperRoot $packageIdentity
+    $logRootInfo = Get-Item -LiteralPath $logDirectory -Force -ErrorAction Stop
+    if (($logRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not (Test-VsPackageLogAccess -Path $logRootInfo.FullName)) {
+        throw 'Gemeinsame Logwurzel ist fuer PackageWrapper nicht sicher.'
+    }
+    foreach ($directory in @($packageWrapperRoot, $packageLogDirectory)) {
+        if (!(Test-Path -LiteralPath $directory)) {
+            New-Item -Path $directory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+        $directoryInfo = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        if (($directoryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Verwalteter PackageWrapper-Pfad ist ein Reparse-Point: $directory"
+        }
+        if (-not (Test-VsPackageLogAccess -Path $directoryInfo.FullName)) {
+            throw "Verwalteter PackageWrapper-Pfad besitzt keine sichere ACL: $directory"
+        }
+    }
+} catch {
+    $packageLogReady = $false
+    try { Write-Warning 'VirtuSphere-PackageWrapper-Logs sind fuer diesen Lauf deaktiviert; der Paketablauf wird fortgesetzt.' } catch { $null = $_ }
+}
+
+$currentLogStem = '{0}_{1}' -f $script:VsPackageRunStamp, $script:VsPackageRunId
+$wrapperLogName = "wrapper_$currentLogStem.log"
+$reportingLogName = "reporting_$currentLogStem.log"
+$wrapperLogInitialized = $false
+$reportingLogInitialized = $false
+if ($packageLogReady) {
+    $wrapperLogInitialized = Open-VsPackageLogSink -Path (Join-Path $packageLogDirectory $wrapperLogName) -Kind wrapper -PartnerName $reportingLogName -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    $reportingLogInitialized = Open-VsPackageLogSink -Path (Join-Path $packageLogDirectory $reportingLogName) -Kind reporting -PartnerName $wrapperLogName -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    if (-not $reportingLogInitialized) {
+        Write-VsPackageLog -Sink wrapper -Event 'partner_unavailable' -Fields @{ partner_file = $reportingLogName }
+    }
+    if (-not $wrapperLogInitialized) {
+        Write-VsPackageLog -Sink reporting -Event 'partner_unavailable' -Fields @{ partner_file = $wrapperLogName }
+    }
+    if ($wrapperLogInitialized -and $reportingLogInitialized) {
+        try {
+            Invoke-VsPackageLogRetention -Directory $packageLogDirectory -CurrentStem $currentLogStem
+        } catch {
+            Write-Warning 'Alte VirtuSphere-PackageWrapper-Logs konnten in diesem Lauf nicht sicher bereinigt werden.'
+        }
+    }
+}
+
+Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
+if ($script:VsPackageLogPaths['wrapper']) { Write-Host "Wrapper-Log: $($script:VsPackageLogPaths['wrapper'])" -ForegroundColor Cyan }
+if ($script:VsPackageLogPaths['reporting']) { Write-Host "Reporting-Log: $($script:VsPackageLogPaths['reporting'])" -ForegroundColor Cyan }
+
 ############ Ab hier nichts aendern
 
 # Exit-Codes eines Teilskripts, die als ERFOLG gelten. Genau einmal im Quelltext,
@@ -122,6 +517,10 @@ $rebootCode = 0
 $Fullsuccess = $true
 $restartInitiated = $false
 $completedSteps = 0
+$detectionStatus = 'not_attempted'
+$knownStepTotal = $null
+
+try {
 
 Write-Host @"
 
@@ -150,12 +549,6 @@ if (!(Test-Path $registryPath)) {
     New-Item -Path $registryPath -Force -ErrorAction Stop
 }
 
-# Log-Verzeichnis erstellen falls nicht vorhanden
-# -ItemType Directory: Gibt an dass ein Ordner erstellt werden soll, kein Schluessel oder Datei.
-if (!(Test-Path $logDirectory)) {
-    New-Item -Path $logDirectory -ItemType Directory -Force -ErrorAction Stop
-}
-
 # Alle PowerShell-Skripte im powershell-Unterordner alphabetisch abarbeiten
 # Get-ChildItem: Listet Dateien und Ordner auf - entspricht dem dir-Befehl in CMD.
 # -Filter *.ps1: Nur Dateien mit der Endung .ps1 werden zurueckgegeben.
@@ -163,8 +556,12 @@ if (!(Test-Path $logDirectory)) {
 #   Wichtig: 01.check-dcready.ps1 muss vor 02.dc-dns-konfig.ps1 laufen.
 #   Die Nummerierung im Dateinamen steuert die Reihenfolge.
 $dir_script = @(Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction Stop | Sort-Object Name)
+$knownStepTotal = $dir_script.Count
+Write-VsPackageLog -Sink wrapper -Event 'inventory' -Fields @{ total = $knownStepTotal }
+Write-Host "[0/$knownStepTotal] Paket-Skripte inventarisiert." -ForegroundColor Gray
 if ($dir_script.Count -eq 0) {
     Write-Host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
+    Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
     exit 1
 }
 
@@ -173,7 +570,10 @@ if ($dir_script.Count -eq 0) {
 # nur beim foreach-Statement ist das auch ohne PowerShell-Detailwissen ablesbar.
 # Genau diese Frage - "wirkt das $false ueberhaupt nach draussen?" - entscheidet
 # hier darueber, ob MECM eine fehlgeschlagene Installation als Erfolg meldet.
+$stepIndex = 0
 foreach ($scriptFile in $dir_script) {
+    $stepIndex++
+    $stepStopwatch = [Diagnostics.Stopwatch]::StartNew()
     # Zeitstempel fuer den Log-Dateinamen
     # Get-Date -Format: Formatiert das aktuelle Datum und die Uhrzeit als Text.
     # Das Format yyyy-MM-dd_HH-mm-ss erzeugt z.B. "2025-04-08_14-30-00"
@@ -183,6 +583,8 @@ foreach ($scriptFile in $dir_script) {
     $scriptName      = $scriptFile.Name        # z.B. "01.check-dcready.ps1"
     $scriptFullPath  = $scriptFile.FullName    # Vollstaendiger Pfad inkl. Laufwerk und Ordner
     $logPath         = Join-Path $logDirectory "$($scriptName)_$currentDateTime.log"
+    Write-Host "[$stepIndex/$knownStepTotal] RUN $scriptName" -ForegroundColor Gray
+    Write-VsPackageLog -Sink wrapper -Event 'step_run' -Fields @{ index = $stepIndex; total = $knownStepTotal; script_name = $scriptName }
     # Join-Path: Verbindet Pfadteile korrekt mit dem richtigen Trennzeichen (\).
     # Ergebnis z.B.: C:\Program Files\VirtuSphere\Logs\01.check-dcready.ps1_2025-04-08_14-30-00.log
 
@@ -195,7 +597,14 @@ foreach ($scriptFile in $dir_script) {
     # bereits an die Paketversion gebunden; der Hash verhindert zusaetzlich,
     # dass ein nachtraeglich unter derselben Version geaendertes Teilskript nach
     # einem Reboot oder Reparaturlauf blind uebersprungen wird.
-    $scriptHash = (Get-FileHash -LiteralPath $scriptFullPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    try {
+        $scriptHash = (Get-FileHash -LiteralPath $scriptFullPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    } catch {
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'hash_failed' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
+        Complete-VsPackageRun -ExitCode $null -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+        throw
+    }
     $successMarkerPrefix = "Erfolg:$scriptHash - "
 
     # Pruefen ob das Skript bereits erfolgreich ausgefuehrt wurde
@@ -233,11 +642,15 @@ foreach ($scriptFile in $dir_script) {
             }
         } catch {
             Write-Host "Detection-Marker konnte vor der Reparatur nicht invalidiert werden: $($_.Exception.Message)" -ForegroundColor Red
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'detection_invalidation_failed' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
+            Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
             exit 1
         }
 
         $success = 'Fehler'
         $stepFailed = $false
+        $stepCategory = 'child_exit'
         $childExitCode = $null
         try {
             Write-Host "Fuehre Skript aus." -ForegroundColor Green
@@ -285,6 +698,7 @@ foreach ($scriptFile in $dir_script) {
             } else {
                 $stepFailed = $true
                 $Fullsuccess = $false
+                $stepCategory = 'child_exit'
                 Write-Host "Fehler beim Ausfuehren von Skript $scriptName. Exit-Code: $childExitCode" -ForegroundColor Red
             }
 
@@ -296,6 +710,7 @@ foreach ($scriptFile in $dir_script) {
             $success = "Fehler"
             $stepFailed = $true
             $Fullsuccess = $false
+            $stepCategory = 'child_start_failed'
             Write-Host "Ausnahme beim Ausfuehren von Skript $scriptName`: $($_.Exception.Message)" -ForegroundColor Red
         }
 
@@ -310,18 +725,26 @@ foreach ($scriptFile in $dir_script) {
             Set-ItemProperty -Path $registryPath -Name $registryValueName -Value "${success}:$scriptHash - $currentDateTime" -ErrorAction Stop
         } catch {
             Write-Host "Schrittstatus fuer $scriptName konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'status_write_failed' -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
+            Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
             exit 1
         }
 
         if ($stepFailed) {
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category $stepCategory -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
             if ($ErrorAction -eq 'Stop') {
                 Write-Host "ErrorAction ist auf Stop. Exit" -ForegroundColor DarkYellow
+                Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
                 exit 1
             }
             Write-Host "ErrorAction ist auf Continue. Fahre mit naechstem Skript fort..." -ForegroundColor DarkYellow
             continue
         }
 
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome OK -Category 'child_success' -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
         $completedSteps++
         if ($childExitCode -eq 1641) {
             # Der Neustart laeuft bereits. Keine weitere Nutzlast starten und
@@ -333,6 +756,8 @@ foreach ($scriptFile in $dir_script) {
 
     } else {
         write-host "Skript $scriptFullPath wurde bereits erfolgreich ausgefuehrt. Skip" -ForegroundColor Gray
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome SKIP -Category 'hash_match' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
         $completedSteps++
     }
 }
@@ -347,8 +772,11 @@ foreach ($scriptFile in $dir_script) {
 if ($Fullsuccess -and -not $restartInitiated -and $completedSteps -eq $dir_script.Count) {
     try {
         Set-ItemProperty -Path $registryPath -Name "Version" -Value $config.version -ErrorAction Stop
+        $detectionStatus = 'written'
     } catch {
+        $detectionStatus = 'failed'
         Write-Host "Detection-Marker konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+        Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
         exit 1
     }
 }
@@ -369,14 +797,27 @@ write-host "install.ps1 finish" -ForegroundColor Magenta
 # Deployment-Type sie versteht (er steht auf RebootBehavior = 'BasedOnExitCode').
 if (-not $Fullsuccess) {
     write-host "Mindestens ein Teilskript ist fehlgeschlagen - Exit-Code 1." -ForegroundColor Red
+    Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
     exit 1
 }
 if ($restartInitiated) {
     Write-Host 'Neustart wurde bereits eingeleitet - Exit-Code 1641 wird an MECM weitergereicht.' -ForegroundColor Yellow
+    Complete-VsPackageRun -ExitCode 1641 -Result 'reboot_initiated' -DetectionStatus $detectionStatus -Total $knownStepTotal
     exit 1641
 }
 if ($rebootCode -ne 0) {
     write-host "Alle Teilskripte erfolgreich, ein Neustart ist noetig - Exit-Code $rebootCode wird an MECM weitergereicht." -ForegroundColor Yellow
+    Complete-VsPackageRun -ExitCode $rebootCode -Result 'reboot_required' -DetectionStatus $detectionStatus -Total $knownStepTotal
     exit $rebootCode
 }
+Complete-VsPackageRun -ExitCode 0 -Result 'success' -DetectionStatus $detectionStatus -Total $knownStepTotal
 exit 0
+} catch {
+    if (-not $script:VsPackageRunCompleted) {
+        Write-VsPackageLog -Sink wrapper -Event 'wrapper_exception' -Fields @{ category = 'unhandled_exception' }
+        Complete-VsPackageRun -ExitCode $null -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    }
+    throw
+} finally {
+    Close-VsPackageLogSink
+}

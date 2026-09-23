@@ -630,15 +630,28 @@ die App einmal in der Konsole.
 > Rollback auf. Ein unvollständig bestätigter Rollback lässt die Aufgaben
 > deaktiviert. Reale Datei-, ACL- und Datenträgerfehler bleiben Lababnahme.
 
-### Paketdiagnose: aktueller Stand und geplante Erweiterung
+### Paketdiagnose: lokale Laufprotokolle und Reporter-Lieferung
 
-Die Paketvorlage schreibt bereits die Ausgabe ausgeführter Teilskripte in
-einzelne Dateien unter `%ProgramData%\VirtuSphere\Logs` (Systeminstallation)
-beziehungsweise `%LOCALAPPDATA%\VirtuSphere\Logs` (Benutzerinstallation).
-Eigene Protokolle der Teilskripte bleiben deren Verantwortung. Für den
-MECM-Installationsaufruf und die Erkennung helfen zusätzlich `AppEnforce.log`
-und `AppDiscovery.log`. Ein erfolgreicher Wrapper-Aufruf bestätigt keine
-späteren Arbeiten einer geplanten Aufgabe.
+Jeder gültig konfigurierte Wrapper-Aufruf erzeugt eine gemeinsame Run-ID und
+bestmöglich zwei UTF-8-Protokolle mit demselben UTC-/GUID-Stamm:
+`wrapper_<stamm>.log` für Inventur, RUN, OK/SKIP/FAIL und Abschluss sowie
+`reporting_<stamm>.log` für den getrennten Kommunikationspfad. Sie liegen pro
+exakter Paketname-/Versionsidentität unter
+`%ProgramData%\VirtuSphere\Logs\PackageWrapper\<sha256>` (Systeminstallation)
+beziehungsweise `%LOCALAPPDATA%\VirtuSphere\Logs\PackageWrapper\<sha256>`
+(Benutzerinstallation). Beide Pfade und die Run-ID stehen am Anfang und Ende
+der Konsole. Ein Ausfall einer Senke stoppt weder die andere Senke noch die
+Paketinstallation.
+
+Der Wrapper behält normalerweise die fünf neuesten Durchlaufgruppen, also je
+Gruppe beide Partnerdateien. Gesperrte/aktive oder nicht sicher prüfbare Gruppen
+werden ausgelassen; deshalb können vorübergehend mehr als fünf Gruppen liegen.
+Die Ausgabe tatsächlich ausgeführter Teilskripte bleibt in den bisherigen
+einzelnen Dateien direkt unter der Logwurzel, und eigene Protokolle der
+Teilskripte bleiben deren Verantwortung. Für den MECM-Installationsaufruf und
+die Erkennung helfen zusätzlich `AppEnforce.log` und `AppDiscovery.log`. Ein
+erfolgreicher Wrapper-Aufruf bestätigt keine späteren Arbeiten einer geplanten
+Aufgabe.
 
 **Liefergrundlage implementiert, Laufzeit noch nicht aktiviert:** Der
 Serverinstaller erzeugt aus den vier kanonischen Clientquellen eine
@@ -647,9 +660,9 @@ Wrapperbindung. Der Autoimporter berücksichtigt diesen gesamten Satz im
 Änderungsstempel, stellt die Generation vor dem Wrapper bereit und schaltet den
 kleinen Deskriptor zuletzt um. Paket-`config.json`, `powershell/` und ältere
 Reporter-Generationen bleiben unangetastet. Adapter und Host senden derzeit
-noch nichts; Prozesskapselung, Zeitbudgets und Wrapper-Anbindung sind die nächste
-Etappe. Danach folgen getrennte Wrapper- und Reporting-Logs je Durchlauf sowie
-Start-, Schritt- und Abschlussmeldungen vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
+noch nichts; das Reporting-Log nennt deshalb `transport_not_integrated`.
+Prozesskapselung, Zeitbudgets und Wrapper-Anbindung sind die nächste Etappe.
+Danach folgen Start-, Schritt- und Abschlussmeldungen vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
 Empfangszeit und kopierbare Client-Logpfade anzeigen. Das Portal ruft dabei
 keine Dateien vom Client ab. Eine fehlende Rückmeldung beweist weder einen
 Installationsfehler noch einen Verbindungsfehler.

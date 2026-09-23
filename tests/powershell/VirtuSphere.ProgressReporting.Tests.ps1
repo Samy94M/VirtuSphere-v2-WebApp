@@ -20,12 +20,20 @@ BeforeAll {
     $script:CollectionLockContract = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'collection-lock-contract.py') -Raw
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
+    $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
     $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
 }
 
 
 Describe 'Visible progress reporting contract' {
+    It 'reports each package step around the existing hash and child decision' {
+        $script:PackageWrapper | Should -Match '\[0/\$knownStepTotal\]'
+        $script:PackageWrapper | Should -Match '\[\$stepIndex/\$knownStepTotal\] RUN \$scriptName'
+        $script:PackageWrapper | Should -Match '\[\$Index/\$displayTotal\] \$Outcome \$ScriptName'
+        $script:PackageWrapper | Should -Match "'SKIP'|Outcome SKIP"
+    }
+
     It 'streams the powercycle production-flow cases with bounded progress' {
         $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/powercycle-sequence-contract.py') -Raw
         $source | Should -Match 'enumerate\(CASES, 1\)'

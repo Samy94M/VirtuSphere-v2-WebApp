@@ -484,9 +484,10 @@ Describe 'E5 - Die Paketvorlage liest config.json ungeprueft' -Tag 'Haertung' {
         # Registry-Pfad wird zu "...\Packages\-", und alle Teilskripte laufen
         # trotzdem als SYSTEM.
         $ast = Get-PsAst -Path $script:Template
-        $loops = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.ForEachStatementAst])
-        $loops.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $firstLoop = ($loops | Sort-Object { $_.Extent.StartOffset })[0].Extent.StartOffset
+        $loops = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.ForEachStatementAst]) `
+            -Where { $_.Variable.Extent.Text -eq '$scriptFile' -and $_.Condition.Extent.Text -match '\$dir_script' }
+        $loops.Count | Should -Be 1 -Because 'die Pruefung muss die Teilskript-Schleife statt Hilfsfunktions-Schleifen finden'
+        $firstLoop = $loops[0].Extent.StartOffset
 
         $exitsBefore = Find-Ast -Ast $ast `
             -Type ([System.Management.Automation.Language.ExitStatementAst]) `
