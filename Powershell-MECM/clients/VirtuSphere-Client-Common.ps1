@@ -102,6 +102,41 @@ function Get-VsApiUrl {
     return ('{0}://{1}{2}' -f (Get-VsApiScheme), $Api, $Path)
 }
 
+# Package reports use only the already configured address. A missing or broken
+# registry value is not an invitation to probe DNS/IP fallbacks or rewrite it.
+function Get-VsPackageReportApiConfiguration {
+    try {
+        $stored = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
+        $api = [string]$stored.WebAPI
+        if ($api -cnotmatch '\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(:([0-9]+))?\z') { return $null }
+        $port = [regex]::Match($api, ':([0-9]+)$')
+        if ($port.Success -and ([int64]$port.Groups[1].Value -lt 1 -or [int64]$port.Groups[1].Value -gt 65535)) { return $null }
+
+        $scheme = $script:VsDefaultScheme
+        if ($stored.PSObject.Properties['Scheme']) {
+            $scheme = [string]$stored.Scheme
+            if ($scheme -notin @('http', 'https')) { return $null }
+            $scheme = $scheme.ToLowerInvariant()
+        }
+
+        $thumbprint = ''
+        if ($stored.PSObject.Properties['CertThumbprint']) {
+            $thumbprint = ([string]$stored.CertThumbprint -replace '\s', '').ToUpperInvariant()
+            if ($thumbprint -and $thumbprint -cnotmatch '^[0-9A-F]{40}$') { return $null }
+        }
+
+        return [pscustomobject]@{
+            Api = $api
+            Scheme = $scheme
+            CertThumbprint = $thumbprint
+            ReportUrl = ('{0}://{1}/mecm_report.php?action=reportPackageRun' -f $scheme, $api)
+        }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
 function Initialize-VsClientBootstrap {
     param([Parameter(Mandatory)][string]$ManifestPath)
     try {
