@@ -5,10 +5,13 @@ BeforeAll {
     $errors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile($wrapper, [ref]$tokens, [ref]$errors)
     if ($errors.Count -ne 0) { throw 'Wrapper source does not parse.' }
-    $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq 'Start-VsPackageReporterJobProcess' }, $true)
-    if ($null -eq $definition) { throw 'Reporter job owner is missing.' }
-    . ([scriptblock]::Create($definition.Extent.Text))
+    foreach ($name in @('Start-VsPackageReporterJobProcess', 'Start-VsPackageReporterPipeSession',
+            'Close-VsPackageReporterPipeSession', 'Invoke-VsPackageReporterPipeExchange')) {
+        $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name }, $true)
+        if ($null -eq $definition) { throw "Reporter process owner is missing: $name" }
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
 }
 
 Describe 'T4 reporter process starts suspended inside its private kill-on-close job' {
@@ -41,5 +44,31 @@ Describe 'T4 reporter process starts suspended inside its private kill-on-close 
             Start-Sleep -Milliseconds 25
         }
         Get-Process -Id $job.ProcessId -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+    }
+
+    It 'authenticates the actual bundle worker and reads one bounded ready handshake' {
+        $bundleRoot = Join-Path $TestDrive 'bundle'
+        $null = New-Item -ItemType Directory -Path $bundleRoot -Force
+        $clients = Join-Path $repoRoot 'Powershell-MECM/clients'
+        $paths = @('VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1', 'VirtuSphere-Package-ReporterHost.ps1') |
+            ForEach-Object {
+                $destination = Join-Path $bundleRoot $_
+                Copy-Item -LiteralPath (Join-Path $clients $_) -Destination $destination
+                $destination
+            }
+        $bundle = [pscustomobject]@{ Root = $bundleRoot; Files = $paths }
+        $session = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle -TimeoutMs 2000
+        $session | Should -Not -BeNullOrEmpty
+        try {
+            $session.Job.IsRunning | Should -BeTrue
+            $response = Invoke-VsPackageReporterPipeExchange -Session $session `
+                -Message ([pscustomobject]@{ event = 'unknown'; event_seq = 1 }) -TimeoutMs 2000
+            $response.schema_version | Should -Be 1
+            $response.reason | Should -Be 'invalid_request'
+            $response.confirmed | Should -BeFalse
+        } finally {
+            Close-VsPackageReporterPipeSession -Session $session
+        }
     }
 }

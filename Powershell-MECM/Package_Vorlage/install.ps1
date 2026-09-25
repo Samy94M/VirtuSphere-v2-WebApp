@@ -32,6 +32,12 @@ $script:VsPackageRunCompleted = $false
 $script:VsPackageRunId = ([guid]::NewGuid()).ToString('D').ToLowerInvariant()
 $script:VsPackageRunStartedUtc = [DateTime]::UtcNow
 $script:VsPackageRunStamp = $script:VsPackageRunStartedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
+$script:VsPackageReporterSession = $null
+$script:VsPackageReporterActiveClock = New-Object Diagnostics.Stopwatch
+$script:VsPackageReporterDisableReason = 'not_initialized'
+$script:VsPackageReporterNextSeq = 2
+$script:VsPackageReporterOmittedCount = 0
+$script:VsPackageReporterFirstFailure = $null
 
 # The package is executable content. Resolve only the installer-owned closed
 # generation, never a path supplied by config.json or by a manifest entry.
@@ -201,6 +207,8 @@ namespace VirtuSphere {
         private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
         [DllImport("kernel32.dll", SetLastError=true)]
         private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out uint pid);
 
         private IntPtr job, process;
         public uint ProcessId { get; private set; }
@@ -210,6 +218,10 @@ namespace VirtuSphere {
         public bool IsRunning { get { return process != IntPtr.Zero && WaitForSingleObject(process, 0) == 0x102; } }
         public bool WaitForExit(uint milliseconds) {
             return process != IntPtr.Zero && WaitForSingleObject(process, milliseconds) == 0;
+        }
+        public bool IsExpectedPipeClient(IntPtr pipe) {
+            uint pid;
+            return process != IntPtr.Zero && GetNamedPipeClientProcessId(pipe, out pid) && pid == ProcessId;
         }
         public static PackageReporterJobProcess Start(string exe, string script, string pipeName) {
             IntPtr jobHandle = IntPtr.Zero;
@@ -264,6 +276,119 @@ namespace VirtuSphere {
         return [VirtuSphere.PackageReporterJobProcess]::Start($powerShellPath, $ScriptPath, $PipeName)
     } catch {
         Write-Debug $_
+        return $null
+    }
+}
+
+# The parent owns the only server pipe and authenticates the connecting PID
+# against the process created in its private job. All waits are bounded; a
+# failed handshake closes the job before disposing the pipe.
+function Start-VsPackageReporterPipeSession {
+    param(
+        [Parameter(Mandatory)][object]$VerifiedBundle,
+        [Parameter(Mandatory)][ValidateRange(1, 2000)][int]$TimeoutMs
+    )
+
+    $pipe = $null
+    $reader = $null
+    $writer = $null
+    $job = $null
+    $ready = $false
+    try {
+        $workerPath = Join-Path $VerifiedBundle.Root 'VirtuSphere-Package-ReporterHost.ps1'
+        if (@($VerifiedBundle.Files) -cnotcontains $workerPath) { return $null }
+        $pipeName = 'virtusphere-report-' + ([guid]::NewGuid()).ToString('N')
+        $security = New-Object IO.Pipes.PipeSecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security.AddAccessRule((New-Object IO.Pipes.PipeAccessRule($sid,
+            [IO.Pipes.PipeAccessRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow)))
+        $pipe = [IO.Pipes.NamedPipeServerStream]::new($pipeName,
+            [IO.Pipes.PipeDirection]::InOut, 1, [IO.Pipes.PipeTransmissionMode]::Byte,
+            [IO.Pipes.PipeOptions]::Asynchronous, 16384, 16384, $security)
+        $job = Start-VsPackageReporterJobProcess -ScriptPath $workerPath -PipeName $pipeName
+        if ($null -eq $job) { return $null }
+        $connection = $pipe.WaitForConnectionAsync()
+        if (-not $connection.Wait($TimeoutMs) -or
+            -not $job.IsExpectedPipeClient($pipe.SafePipeHandle.DangerousGetHandle())) { return $null }
+        $encoding = New-Object Text.UTF8Encoding($false, $true)
+        $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
+        $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)
+        $writer.AutoFlush = $true
+        $hello = $reader.ReadLineAsync()
+        if (-not $hello.Wait($TimeoutMs) -or
+            $hello.Result -cne '{"schema_version":1,"state":"ready"}') { return $null }
+        $ready = $true
+        return [pscustomobject]@{ Pipe = $pipe; Reader = $reader; Writer = $writer; Job = $job; Disabled = $false }
+    } catch {
+        Write-Debug $_
+        return $null
+    } finally {
+        if (-not $ready) {
+            if ($job) { $job.Dispose() }
+            if ($writer) { $writer.Dispose() }
+            if ($reader) { $reader.Dispose() }
+            if ($pipe) { $pipe.Dispose() }
+        }
+    }
+}
+
+function Close-VsPackageReporterPipeSession {
+    param([AllowNull()][object]$Session)
+    if ($null -eq $Session) { return }
+    # The job handle is first: even a blocked worker loses its life before
+    # stream disposal can wait for an outstanding I/O completion.
+    try { $Session.Job.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Writer.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Reader.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Pipe.Dispose() } catch { Write-Debug $_ }
+}
+
+function Invoke-VsPackageReporterPipeExchange {
+    param(
+        [Parameter(Mandatory)][object]$Session,
+        [Parameter(Mandatory)][object]$Message,
+        [Parameter(Mandatory)][ValidateRange(1, 2000)][int]$TimeoutMs
+    )
+
+    if ($Session.Disabled -or -not $Session.Job.IsRunning) { return $null }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $json = ConvertTo-Json -InputObject $Message -Compress -Depth 6 -ErrorAction Stop
+        if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 16384) { throw 'reporter IPC message too large' }
+        $send = $Session.Writer.WriteLineAsync($json)
+        if (-not $send.Wait($TimeoutMs)) { throw 'reporter IPC write timed out' }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { throw 'reporter IPC budget exhausted' }
+        $flush = $Session.Writer.FlushAsync()
+        if (-not $flush.Wait($remaining)) { throw 'reporter IPC flush timed out' }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { throw 'reporter IPC budget exhausted' }
+        $read = $Session.Reader.ReadLineAsync()
+        if (-not $read.Wait($remaining)) { throw 'reporter IPC read timed out' }
+        $line = $read.Result
+        if ($null -eq $line -or [Text.Encoding]::UTF8.GetByteCount($line) -gt 1024) {
+            throw 'reporter IPC response invalid'
+        }
+        $answer = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+        if ((@($answer.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+                'attempted|confirmed|deduplicated|event|event_seq|reason|schema_version|status_code' -or
+            $answer.schema_version -ne 1 -or $answer.event -cne $Message.event -or
+            $answer.event_seq -ne $Message.event_seq -or
+            $answer.attempted -isnot [bool] -or $answer.confirmed -isnot [bool] -or
+            $answer.deduplicated -isnot [bool] -or
+            $answer.reason -isnot [string] -or $answer.reason -cnotmatch '\A[a-z_]{1,32}\z' -or
+            ($null -ne $answer.status_code -and
+                (($answer.status_code -isnot [int] -and $answer.status_code -isnot [long]) -or
+                    $answer.status_code -lt 100 -or $answer.status_code -gt 599))) {
+            throw 'reporter IPC response contract mismatch'
+        }
+        return $answer
+    } catch {
+        Write-Debug $_
+        $Session.Disabled = $true
+        Close-VsPackageReporterPipeSession -Session $Session
         return $null
     }
 }
@@ -513,6 +638,100 @@ function Invoke-VsPackageLogRetention {
     }
 }
 
+function Invoke-VsPackageReporterEvent {
+    param(
+        [Parameter(Mandatory)][object]$Message,
+        [Parameter(Mandatory)][ValidateSet('started', 'step_result', 'completed')][string]$ReportEvent
+    )
+
+    if ($null -eq $script:VsPackageReporterSession) { return $null }
+    $cutoff = if ($ReportEvent -eq 'completed') { 9500 } else { 7500 }
+    $available = $cutoff - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+    if ($available -lt 100) {
+        $script:VsPackageReporterDisableReason = 'budget_exhausted'
+        return $null
+    }
+    $timeoutMs = [int][Math]::Min(2000, $available)
+    $script:VsPackageReporterActiveClock.Start()
+    try {
+        $answer = Invoke-VsPackageReporterPipeExchange -Session $script:VsPackageReporterSession `
+            -Message $Message -TimeoutMs $timeoutMs
+        if ($null -eq $answer) {
+            $script:VsPackageReporterDisableReason = 'ipc_unconfirmed'
+            $script:VsPackageReporterSession = $null
+            return $null
+        }
+        Write-VsPackageLog -Sink reporting -Event 'report_attempt' -Fields @{
+            report_event = $ReportEvent
+            event_seq = $Message.event_seq
+            attempted = $answer.attempted
+            confirmed = $answer.confirmed
+            deduplicated = $answer.deduplicated
+            reason = $answer.reason
+            status_code = $answer.status_code
+        }
+        if ($ReportEvent -eq 'started' -and -not $answer.attempted -and
+            $answer.reason -notin @('backpressure', 'budget_exhausted')) {
+            $script:VsPackageReporterDisableReason = $answer.reason
+            Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+            $script:VsPackageReporterSession = $null
+        }
+        return $answer
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'reporter_exception'
+        Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+        $script:VsPackageReporterSession = $null
+        return $null
+    } finally {
+        $script:VsPackageReporterActiveClock.Stop()
+    }
+}
+
+function Start-VsPackageReporterForRun {
+    param([Parameter(Mandatory)][int]$Total)
+
+    $script:VsPackageReporterActiveClock.Start()
+    try {
+        $bundle = Get-VsPackageVerifiedReporterBundle -PackageRoot $PSScriptRoot
+        if ($null -eq $bundle) {
+            $script:VsPackageReporterDisableReason = 'bundle_unavailable'
+            return
+        }
+        $remaining = 7500 - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        if ($remaining -lt 100) {
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
+            return
+        }
+        $script:VsPackageReporterSession = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle `
+            -TimeoutMs ([int][Math]::Min(2000, $remaining))
+        if ($null -eq $script:VsPackageReporterSession) {
+            $script:VsPackageReporterDisableReason = 'supervisor_unavailable'
+            return
+        }
+        $script:VsPackageReporterDisableReason = ''
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'initialization_error'
+        return
+    } finally {
+        $script:VsPackageReporterActiveClock.Stop()
+    }
+    $context = if ($config.InstallationBehaviorType -eq 'InstallForUser') { 'user' } else { 'system' }
+    $started = [pscustomobject]@{
+        event = 'started'
+        event_seq = 1
+        run_id = $script:VsPackageRunId
+        project_name = [string]$config.ProjectName
+        package_version = [string]$config.version
+        client_started_at = $script:VsPackageRunStartedUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+        event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+        context = $context
+        total = $Total
+    }
+    $null = Invoke-VsPackageReporterEvent -Message $started -ReportEvent 'started'
+}
+
 function Add-VsPackageStepResult {
     param(
         [int]$Index,
@@ -545,6 +764,37 @@ function Add-VsPackageStepResult {
         detail_path = $DetailPath
         duration_ms = $DurationMs
     }
+    $firstFailure = $false
+    $wireDetailPath = if ([string]::IsNullOrEmpty($DetailPath)) { $null } else { $DetailPath }
+    if ($Outcome -eq 'FAIL' -and $null -eq $script:VsPackageReporterFirstFailure) {
+        $firstFailure = $true
+        $script:VsPackageReporterFirstFailure = [pscustomobject]@{
+            step_index = $Index
+            script_name = $ScriptName
+            error_category = $Category
+            child_exit_code = $ChildExitCode
+            detail_path = $wireDetailPath
+        }
+    }
+    $seq = $script:VsPackageReporterNextSeq
+    $script:VsPackageReporterNextSeq++
+    if ($null -ne $script:VsPackageReporterSession) {
+        $message = [pscustomobject]@{
+            event = 'step_result'
+            event_seq = $seq
+            event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+            step_index = $Index
+            script_name = $ScriptName
+            result = $Outcome.ToLowerInvariant()
+            is_first_failure = $firstFailure
+            error_category = $Category
+            child_exit_code = $ChildExitCode
+            duration_ms = $DurationMs
+            detail_path = $wireDetailPath
+        }
+        $answer = Invoke-VsPackageReporterEvent -Message $message -ReportEvent 'step_result'
+        if ($null -eq $answer -or -not $answer.attempted) { $script:VsPackageReporterOmittedCount++ }
+    }
 }
 
 function Complete-VsPackageRun {
@@ -574,9 +824,53 @@ function Complete-VsPackageRun {
         not_processed = $notProcessed
         duration_ms = [Math]::Floor($script:VsPackageRunStopwatch.Elapsed.TotalMilliseconds)
     }
-    Write-VsPackageLog -Sink reporting -Event 'reporting_disabled' -Fields @{ reason = 'transport_not_integrated' }
     $wrapperPath = $script:VsPackageLogPaths['wrapper']
     $reportingPath = $script:VsPackageLogPaths['reporting']
+    try {
+        if ($null -ne $script:VsPackageReporterSession) {
+            $wireResult = if ($Result -eq 'success') { 'ok' } else { $Result }
+            $lastIndex = if ($processed -gt 0) { $script:VsPackageRunResults[$processed - 1].index } else { $null }
+            $message = [pscustomobject]@{
+                event = 'completed'
+                event_seq = $script:VsPackageReporterNextSeq
+                event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+                wrapper_result = $wireResult
+                wrapper_exit_code = $ExitCode
+                detection_result = $DetectionStatus
+                processed_count = $processed
+                ok_count = $ok
+                skip_count = $skip
+                fail_count = $fail
+                last_processed_index = $lastIndex
+                first_failure = $script:VsPackageReporterFirstFailure
+                payload_omitted_count = $script:VsPackageReporterOmittedCount
+                wrapper_log_path = $wrapperPath
+                reporting_log_path = $reportingPath
+            }
+            $null = Invoke-VsPackageReporterEvent -Message $message -ReportEvent 'completed'
+        }
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'completion_exception'
+    } finally {
+        if ($null -ne $script:VsPackageReporterSession) {
+            $script:VsPackageReporterActiveClock.Start()
+            try { Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession } finally {
+                $script:VsPackageReporterActiveClock.Stop()
+                $script:VsPackageReporterSession = $null
+            }
+        }
+    }
+    if ($script:VsPackageReporterDisableReason) {
+        Write-VsPackageLog -Sink reporting -Event 'reporting_disabled' -Fields @{
+            reason = $script:VsPackageReporterDisableReason
+        }
+    }
+    Write-VsPackageLog -Sink reporting -Event 'reporting_budget' -Fields @{
+        active_ms = $script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        target_ms = 10000
+        exceeded = ($script:VsPackageReporterActiveClock.ElapsedMilliseconds -gt 10000)
+    }
     Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
     if ($wrapperPath) { Write-Host "Wrapper-Log: $wrapperPath" -ForegroundColor Cyan }
     if ($reportingPath) { Write-Host "Reporting-Log: $reportingPath" -ForegroundColor Cyan }
@@ -794,6 +1088,7 @@ $dir_script = @(Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction Stop |
 $knownStepTotal = $dir_script.Count
 Write-VsPackageLog -Sink wrapper -Event 'inventory' -Fields @{ total = $knownStepTotal }
 Write-Host "[0/$knownStepTotal] Paket-Skripte inventarisiert." -ForegroundColor Gray
+Start-VsPackageReporterForRun -Total $knownStepTotal
 if ($dir_script.Count -eq 0) {
     Write-Host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
     Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal

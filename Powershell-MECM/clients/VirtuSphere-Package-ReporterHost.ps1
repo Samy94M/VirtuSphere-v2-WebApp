@@ -2,6 +2,7 @@
 # Prozesshost-Vertrag des Paket-Reporters (ADR-0044). T3 verteilt diesen Host
 # als Teil eines unveraenderlichen Bundles. Prozesskapselung, IPC und Transport
 # werden in T4 implementiert und vor Aktivierung im Wrapper gesondert gemessen.
+param([string]$VsReporterPipeName)
 Set-StrictMode -Version 1.0
 
 $script:VsPackageReporterHostContractVersion = 1
@@ -234,3 +235,150 @@ function Invoke-VsPackageReportHttp {
         return $result
     }
 }
+
+function Invoke-VsPackageReportWorkerMessage {
+    param(
+        [Parameter(Mandatory)][object]$State,
+        [Parameter(Mandatory)][object]$Message
+    )
+
+    $reportEvent = [string]$Message.event
+    $seq = $Message.event_seq
+    $answer = [pscustomobject]@{
+        schema_version = 1
+        event = $reportEvent
+        event_seq = $seq
+        attempted = $false
+        confirmed = $false
+        deduplicated = $false
+        reason = 'invalid_request'
+        status_code = $null
+    }
+    if (@('started', 'step_result', 'completed') -cnotcontains $reportEvent -or
+        ($seq -isnot [int] -and $seq -isnot [long]) -or $seq -lt 1) { return $answer }
+
+    $request = $null
+    $State.Budget.ActiveClock.Start()
+    try {
+        if ($reportEvent -ceq 'started') {
+            if ($null -ne $State.Run -or $seq -ne 1) { return $answer }
+            $State.Snapshot = Get-VsPackageReportSnapshot
+            $State.Api = Get-VsPackageReportApiConfiguration
+            if ($null -eq $State.Snapshot -or $null -eq $State.Api) {
+                $answer.reason = if ($null -eq $State.Snapshot) { 'identity_unavailable' } else { 'api_unavailable' }
+                return $answer
+            }
+            $request = New-VsPackageReportStartedRequest -RunId $Message.run_id `
+                -Snapshot $State.Snapshot -ProjectName $Message.project_name `
+                -PackageVersion $Message.package_version -ClientStartedAt $Message.client_started_at `
+                -EventAt $Message.event_at -Context $Message.context -Total $Message.total
+            if ($null -eq $request) { return $answer }
+            $State.Run = [pscustomobject]@{
+                RunId = $Message.run_id
+                ProjectName = $Message.project_name
+                PackageVersion = $Message.package_version
+                ClientStartedAt = $Message.client_started_at
+                Context = $Message.context
+                Total = $Message.total
+            }
+        } else {
+            if ($null -eq $State.Run) { return $answer }
+            $common = @{
+                RunId = $State.Run.RunId
+                Snapshot = $State.Snapshot
+                ProjectName = $State.Run.ProjectName
+                PackageVersion = $State.Run.PackageVersion
+                ClientStartedAt = $State.Run.ClientStartedAt
+                EventAt = $Message.event_at
+                Context = $State.Run.Context
+                Total = $State.Run.Total
+                EventSeq = $seq
+            }
+            if ($reportEvent -ceq 'step_result') {
+                $request = New-VsPackageReportStepRequest @common -StepIndex $Message.step_index `
+                    -ScriptName $Message.script_name -Result $Message.result `
+                    -IsFirstFailure $Message.is_first_failure -ErrorCategory $Message.error_category `
+                    -ChildExitCode $Message.child_exit_code -DurationMs $Message.duration_ms `
+                    -DetailPath $Message.detail_path
+            } else {
+                $request = New-VsPackageReportCompletedRequest @common `
+                    -WrapperResult $Message.wrapper_result -WrapperExitCode $Message.wrapper_exit_code `
+                    -DetectionResult $Message.detection_result -ProcessedCount $Message.processed_count `
+                    -OkCount $Message.ok_count -SkipCount $Message.skip_count -FailCount $Message.fail_count `
+                    -LastProcessedIndex $Message.last_processed_index -FirstFailure $Message.first_failure `
+                    -PayloadOmittedCount $Message.payload_omitted_count `
+                    -WrapperLogPath $Message.wrapper_log_path -ReportingLogPath $Message.reporting_log_path
+            }
+        }
+    } catch {
+        Write-Debug $_
+        return $answer
+    } finally {
+        $State.Budget.ActiveClock.Stop()
+    }
+    if ($null -eq $request) { return $answer }
+    $result = Invoke-VsPackageReportBudgetedAttempt -Budget $State.Budget `
+        -ApiConfiguration $State.Api -ReportRequest $request
+    $answer.attempted = [bool]$result.Attempted
+    $answer.confirmed = [bool]$result.Confirmed
+    $answer.deduplicated = [bool]$result.Deduplicated
+    $answer.reason = [string]$result.Reason
+    $answer.status_code = $result.StatusCode
+    return $answer
+}
+
+# Invoked only by the suspended-and-job-bound worker launch. Connecting first
+# lets the wrapper authenticate this exact process before any registry or
+# module import; an import fault leaves no successful ready handshake.
+function Start-VsPackageReportPipeWorker {
+    param([Parameter(Mandatory)][string]$PipeName)
+
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z') { return }
+    $pipe = $null
+    $reader = $null
+    $writer = $null
+    try {
+        $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', $PipeName,
+            [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous)
+        $pipe.Connect(1500)
+        . (Join-Path $PSScriptRoot 'VirtuSphere-Client-Common.ps1')
+        . (Join-Path $PSScriptRoot 'VirtuSphere-Package-Reporter.ps1')
+        if ($script:VsClientCommonContractVersion -ne 1 -or
+            (Get-VsClientLoggingContractVersion) -ne 1 -or
+            (Get-VsPackageReporterContractVersion) -ne $script:VsPackageReporterHostExpectedAdapterContractVersion -or
+            -not (Test-VsPackageReporterDependencies -CommonContractVersion 1 -LoggingContractVersion 1)) { return }
+        $encoding = New-Object Text.UTF8Encoding($false, $true)
+        $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
+        $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)
+        $writer.AutoFlush = $true
+        $writer.WriteLine('{"schema_version":1,"state":"ready"}')
+        $state = [pscustomobject]@{
+            Budget = (New-VsPackageReportBudget)
+            Snapshot = $null
+            Api = $null
+            Run = $null
+        }
+        while ($pipe.IsConnected) {
+            $line = $reader.ReadLine()
+            if ($null -eq $line -or $line -ceq '{"action":"stop"}') { break }
+            if ([Text.Encoding]::UTF8.GetByteCount($line) -gt 16384) { break }
+            try {
+                $message = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+                $answer = Invoke-VsPackageReportWorkerMessage -State $state -Message $message
+                $writer.WriteLine((ConvertTo-Json -InputObject $answer -Compress -Depth 4))
+                if ($message.event -ceq 'completed') { break }
+            } catch {
+                Write-Debug $_
+                break
+            }
+        }
+    } catch {
+        Write-Debug $_
+    } finally {
+        if ($writer) { $writer.Dispose() }
+        if ($reader) { $reader.Dispose() }
+        if ($pipe) { $pipe.Dispose() }
+    }
+}
+
+if ($VsReporterPipeName) { Start-VsPackageReportPipeWorker -PipeName $VsReporterPipeName }

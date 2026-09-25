@@ -2,6 +2,7 @@
 # No registry provider or child payload is reached by these tests.
 BeforeAll {
     $script:Template = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Powershell-MECM/Package_Vorlage/install.ps1'
+    $script:ReporterClients = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Powershell-MECM/clients'
     function PowerShell.exe {
         param([switch]$NoProfile, [string]$ExecutionPolicy, [switch]$NonInteractive, [string]$File)
         throw 'A child process must be mocked.'
@@ -24,6 +25,163 @@ BeforeAll {
         param([string]$Name)
         $hash = (Get-FileHash -LiteralPath (Join-Path $script:StepsRoot $Name) -Algorithm SHA256).Hash.ToLowerInvariant()
         $global:VirtuSpherePackageRepairFixture.Registry["RepairFixture-$Name"] = "Erfolg:$hash - previous run"
+    }
+    function Add-RepairReporterBundle {
+        param([AllowNull()][int]$LoopbackPort = 0)
+        $reporting = Join-Path $script:PackageRoot 'reporting'
+        $null = New-Item -ItemType Directory -Path $reporting -Force
+        $names = @('VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1', 'VirtuSphere-Package-ReporterHost.ps1') | Sort-Object
+        $staging = Join-Path $reporting 'staging'
+        $null = New-Item -ItemType Directory -Path $staging
+        foreach ($name in $names) {
+            Copy-Item -LiteralPath (Join-Path $script:ReporterClients $name) -Destination (Join-Path $staging $name)
+        }
+        # The synthetic Common can address only this test's loopback listener;
+        # neither case can send to a configured real server on the test host.
+        if ($LoopbackPort -gt 0) {
+            $override = @'
+function Get-VsPackageReportSnapshot {
+    return [pscustomobject]@{
+        MacCandidates = @('00:50:56:AA:BB:CC')
+        RolloutRevision = [int]3
+        DeviceGeneration = '018f2f49-5e41-4d55-8f05-8f55a5334102'
+        AcceptanceGeneration = '018f2f49-5e41-4d55-8f05-8f55a5334103'
+    }
+}
+function Get-VsPackageReportApiConfiguration {
+    return [pscustomobject]@{
+        Api = '127.0.0.1:__PORT__'
+        Scheme = 'http'
+        CertThumbprint = ''
+        ReportUrl = 'http://127.0.0.1:__PORT__/mecm_report.php?action=reportPackageRun'
+    }
+}
+'@.Replace('__PORT__', [string]$LoopbackPort)
+        } else {
+            $override = 'function Get-VsPackageReportSnapshot { return $null }'
+        }
+        Add-Content -LiteralPath (Join-Path $staging 'VirtuSphere-Client-Common.ps1') -Value $override
+        $entries = @($names | ForEach-Object {
+            $item = Get-Item -LiteralPath (Join-Path $staging $_)
+            [pscustomobject]@{
+                path = $_
+                length = [long]$item.Length
+                sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        })
+        $basis = @($entries | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.length, $_.sha256 }) -join "`n"
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bundleId = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($basis))).Replace('-', '')).ToLowerInvariant()
+        } finally { $sha.Dispose() }
+        $bundleRoot = Join-Path $reporting $bundleId
+        $reportingPrefix = [IO.Path]::GetFullPath($reporting).TrimEnd('\') + '\'
+        if (-not [IO.Path]::GetFullPath($staging).StartsWith($reportingPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [IO.Path]::GetFullPath($bundleRoot).StartsWith($reportingPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Synthetic reporter move left its TestDrive reporting root.'
+        }
+        Move-Item -LiteralPath $staging -Destination $bundleRoot
+        $contracts = [ordered]@{ common = 1; logging = 1; adapter = 1; host = 1 }
+        $manifest = [ordered]@{ schema_version = 1; bundle_id = $bundleId; contracts = $contracts; files = $entries }
+        $descriptor = [ordered]@{
+            schema_version = 1
+            bundle_id = $bundleId
+            wrapper_sha256 = (Get-FileHash -LiteralPath (Join-Path $script:PackageRoot 'install.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+            contracts = $contracts
+        }
+        [IO.File]::WriteAllText((Join-Path $bundleRoot 'manifest.json'), (($manifest | ConvertTo-Json -Depth 5) + "`n"), (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $reporting 'current.json'), (($descriptor | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+    }
+    function Start-RepairReportServer {
+        param([ValidateSet('ack', 'backpressure', 'stall')][string]$Mode = 'ack')
+        $reservation = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, 0)
+        $reservation.Start()
+        try { $port = ([Net.IPEndPoint]$reservation.LocalEndpoint).Port } finally { $reservation.Stop() }
+        $ready = Join-Path $script:PackageRoot 'report-server.ready'
+        $job = Start-Job -ArgumentList @($port, $ready, $Mode) -ScriptBlock {
+            param([int]$Port, [string]$Ready, [string]$Mode)
+            $listener = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, $Port)
+            $listener.Start()
+            $received = New-Object 'System.Collections.Generic.List[object]'
+            try {
+                [IO.File]::WriteAllText($Ready, 'ready')
+                $expectedCount = if ($Mode -eq 'ack') { 4 } else { 1 }
+                for ($requestIndex = 0; $requestIndex -lt $expectedCount; $requestIndex++) {
+                    $pending = [Diagnostics.Stopwatch]::StartNew()
+                    while (-not $listener.Pending() -and $pending.ElapsedMilliseconds -lt 12000) {
+                        Start-Sleep -Milliseconds 25
+                    }
+                    if (-not $listener.Pending()) { throw "Synthetic HTTP event $requestIndex did not arrive." }
+                    $client = $listener.AcceptTcpClient()
+                    try {
+                        $client.ReceiveTimeout = 3000
+                        $client.SendTimeout = 3000
+                        $stream = $client.GetStream()
+                        $headerBytes = New-Object 'System.Collections.Generic.List[byte]'
+                        while ($headerBytes.Count -lt 8192) {
+                            $next = $stream.ReadByte()
+                            if ($next -lt 0) { throw 'Request header ended early.' }
+                            $headerBytes.Add([byte]$next)
+                            $count = $headerBytes.Count
+                            if ($count -ge 4 -and $headerBytes[$count - 4] -eq 13 -and
+                                $headerBytes[$count - 3] -eq 10 -and $headerBytes[$count - 2] -eq 13 -and
+                                $headerBytes[$count - 1] -eq 10) { break }
+                        }
+                        $headers = [Text.Encoding]::ASCII.GetString($headerBytes.ToArray())
+                        $match = [regex]::Match($headers, '(?im)^Content-Length:\s*(\d+)\s*$')
+                        if (-not $match.Success) { throw 'Missing Content-Length.' }
+                        $length = [int]$match.Groups[1].Value
+                        if ($length -lt 1 -or $length -gt 65536) { throw 'Request size out of bounds.' }
+                        $payload = New-Object byte[] $length
+                        $offset = 0
+                        while ($offset -lt $length) {
+                            $read = $stream.Read($payload, $offset, $length - $offset)
+                            if ($read -le 0) { throw 'Request body ended early.' }
+                            $offset += $read
+                        }
+                        $body = [Text.Encoding]::UTF8.GetString($payload) | ConvertFrom-Json
+                        [void]$received.Add([pscustomobject]@{ event = $body.event; seq = $body.event_seq; body = $body })
+                        if ($Mode -eq 'stall') {
+                            Start-Sleep -Seconds 8
+                            continue
+                        }
+                        if ($Mode -eq 'ack') {
+                            $ack = [ordered]@{ schema_version = 1; run_id = $body.run_id; event = $body.event;
+                                event_seq = $body.event_seq; accepted = $true; deduplicated = $false }
+                            $response = [Text.Encoding]::UTF8.GetBytes(($ack | ConvertTo-Json -Compress))
+                            $status = '200 OK'
+                            $extra = ''
+                        } else {
+                            $response = [Text.Encoding]::UTF8.GetBytes('{}')
+                            $status = '503 Service Unavailable'
+                            $extra = "Retry-After: 30`r`n"
+                        }
+                        $head = [Text.Encoding]::ASCII.GetBytes(
+                            "HTTP/1.1 $status`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($response.Length)`r`n$extra" +
+                            "Connection: close`r`n`r`n")
+                        $stream.Write($head, 0, $head.Length)
+                        $stream.Write($response, 0, $response.Length)
+                        $stream.Flush()
+                    } finally {
+                        $client.Dispose()
+                    }
+                }
+                return $received.ToArray()
+            } finally {
+                $listener.Stop()
+            }
+        }
+        for ($attempt = 0; $attempt -lt 120 -and -not (Test-Path -LiteralPath $ready) -and
+            $job.State -notin @('Completed', 'Failed', 'Stopped'); $attempt++) {
+            Start-Sleep -Milliseconds 25
+        }
+        if (-not (Test-Path -LiteralPath $ready)) {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            throw 'Synthetic report server did not become ready.'
+        }
+        return [pscustomobject]@{ Port = $port; Job = $job }
     }
 }
 
@@ -131,10 +289,110 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         $completed.total | Should -Be 2
         $completed.processed | Should -Be 2
         $completed.skip | Should -Be 2
-        @($reportingRecords.event) | Should -Be @('header', 'reporting_disabled')
+        @($reportingRecords.event) | Should -Be @('header', 'reporting_disabled', 'reporting_budget')
+        $reportingRecords[1].reason | Should -Be 'bundle_unavailable'
+        $reportingRecords[2].active_ms | Should -BeGreaterOrEqual 0
         $wrapperRecords[0].run_id | Should -Be $reportingRecords[0].run_id
         $wrapperRecords[0].partner_file | Should -Be $reporting.Name
         $reportingRecords[0].partner_file | Should -Be $wrapper.Name
+    }
+
+    It 'preserves detection and exit when a verified worker lacks a published identity' {
+        Add-RepairReporterBundle
+        Invoke-RepairWrapper
+        $script:WrapperExit | Should -Be 0
+        $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+            -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+        $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+        @($records.event) | Should -Be @('header', 'report_attempt', 'reporting_disabled', 'reporting_budget')
+        $records[1].report_event | Should -Be 'started'
+        $records[1].attempted | Should -BeFalse
+        $records[1].reason | Should -Be 'identity_unavailable'
+        $records[2].reason | Should -Be 'identity_unavailable'
+        $records[3].active_ms | Should -BeLessThan 10000
+    }
+
+    It 'sends started, both skips and completion once to a synthetic loopback receiver' {
+        $server = Start-RepairReportServer
+        try {
+            Add-RepairReporterBundle -LoopbackPort $server.Port
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
+            $done = Wait-Job -Job $server.Job -Timeout 10
+            if ($null -eq $done) {
+                $diagnosticLog = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                    -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+                $diagnosticRecords = @(Get-Content -LiteralPath $diagnosticLog.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+                Write-Host ('Synthetic receiver incomplete: state={0}, attempts={1}, reasons={2}' -f
+                    $server.Job.State, @($diagnosticRecords | Where-Object event -eq 'report_attempt').Count,
+                    (@($diagnosticRecords | Where-Object event -eq 'report_attempt' | ForEach-Object reason) -join ','))
+            }
+            $done | Should -Not -BeNullOrEmpty
+            $events = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+            @($events.event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
+            @($events.seq) | Should -Be @(1, 2, 3, 4)
+            $events[1].body.result | Should -Be 'skip'
+            $events[2].body.result | Should -Be 'skip'
+            $events[3].body.wrapper_result | Should -Be 'ok'
+            $events[3].body.processed_count | Should -Be 2
+            $events[3].body.skip_count | Should -Be 2
+            $events[3].body.first_failure | Should -BeNullOrEmpty
+            $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+            $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+            @($records | Where-Object event -eq 'report_attempt').Count | Should -Be 4
+            @($records | Where-Object event -eq 'report_attempt' | ForEach-Object confirmed) | Should -Be @($true, $true, $true, $true)
+            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+        } finally {
+            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'does not bypass server Retry-After for steps or completion' {
+        $server = Start-RepairReportServer -Mode backpressure
+        try {
+            Add-RepairReporterBundle -LoopbackPort $server.Port
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
+            (Wait-Job -Job $server.Job -Timeout 5) | Should -Not -BeNullOrEmpty
+            $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+            @($received.event) | Should -Be @('started')
+            $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+            $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+            $attempts = @($records | Where-Object event -eq 'report_attempt')
+            @($attempts.report_event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
+            @($attempts.reason) | Should -Be @('http_status', 'backpressure', 'backpressure', 'backpressure')
+            @($attempts.attempted) | Should -Be @($true, $false, $false, $false)
+            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+        } finally {
+            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'keeps package success when a report response stalls beyond the IPC deadline' {
+        $server = Start-RepairReportServer -Mode stall
+        try {
+            Add-RepairReporterBundle -LoopbackPort $server.Port
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            Invoke-RepairWrapper
+            $watch.Stop()
+            $script:WrapperExit | Should -Be 0
+            $watch.ElapsedMilliseconds | Should -BeLessThan 10000
+            (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty
+            $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+            @($received.event) | Should -Be @('started')
+            $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+            $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+            ($records | Where-Object event -eq 'reporting_disabled').reason | Should -Be 'ipc_unconfirmed'
+            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+        } finally {
+            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'retains five paired run groups and leaves a locked older group intact' {
