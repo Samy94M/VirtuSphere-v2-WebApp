@@ -88,9 +88,11 @@ return [
     'result_failure' => 'Failure',
     'result_recovered' => 'Recovered',
     'err_result' => 'This result is not known.',
-    'page_prev' => 'Previous',
-    'page_next' => 'Next',
-    'page_info' => 'Page :page of :total',
+    'cursor_newer' => 'Newer entries',
+    'cursor_older' => 'Older entries',
+    'cursor_info' => 'Newest entries first',
+    'cursor_stale' => 'This position is no longer available.',
+    'cursor_newest' => 'Go to newest entries',
     // The audit vocabulary the filter offers, one label per registered event
     // code and object type. Derived and exhaustive: LogFilterVocabularyLabelTest
     // walks the audit registry in both directions, so a new code fails the build

@@ -1,5 +1,23 @@
 # Dot-sourced check module. Importing defines functions only.
 
+function Get-QaAppEnvFile {
+    # Der QA-Owner braucht MYSQL_ROOT_PASSWORD fuer den MySQL-Service und
+    # Schemawerkzeuge. PHP-Testprozesse bekommen dagegen eine zur Laufzeit aus
+    # derselben SSoT abgeleitete Datei ohne das Rootsecret.
+    $target = Join-Path $artifactDir 'qa-app-runtime.env'
+    if (Test-Path -LiteralPath $target) { return $target }
+
+    $lines = @(Get-Content -LiteralPath $qaEnvFile | Where-Object {
+        $_ -notmatch '^\s*MYSQL_ROOT_PASSWORD='
+    })
+    if ($lines.Count -eq 0 -or @($lines | Where-Object { $_ -match '^\s*DB_PASS=' }).Count -ne 1) {
+        throw 'QA-App-Umgebung konnte nicht eindeutig aus qa.env abgeleitet werden.'
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($target, [string[]]$lines, $utf8NoBom)
+    return $target
+}
+
 function Invoke-QaCompose {
     param([string[]]$Arguments)
     return Invoke-Tool 'docker' (@('compose', '-p', $qaProject,
@@ -193,7 +211,7 @@ function Find-Sh {
     return $null
 }
 
-# Ein Repo-Shellskript ausfuehren: Host-sh, sonst Projekt-PHP-Image (enthaelt sh).
+# Ein Repo-Shellskript ausfuehren: Host-sh, sonst das explizite PHP-Tooling-Image.
 function Invoke-CheckShell {
     param([string]$ScriptName, [string[]]$Arguments = @())
     $scriptPath = (Join-Path $scriptDir $ScriptName) -replace '\\', '/'
@@ -220,7 +238,7 @@ function Invoke-CheckShell {
     return $null
 }
 
-# Ein Repo-PHP-Skript ausfuehren: Host-php, sonst Projekt-PHP-Image.
+# Ein Repo-PHP-Skript ausfuehren: Host-php, sonst das PHP-Tooling-Image.
 function Invoke-CheckPhp {
     param([string]$ScriptName, [string[]]$Arguments = @())
     if (Test-Command 'php') {
@@ -240,15 +258,16 @@ function Invoke-CheckPhp {
 # Composer im App-Kontext: primaer ein frisches docker run mit dem aktuellen
 # Pruef-Root. Ein parallel laufender Dev-Container kann aus einem anderen
 # Checkout gemountet sein und darf deshalb nie die bevorzugte Beweisquelle
-# sein. Das Projekt-Image bringt composer mit, vendor/ kommt aus dem Mount.
+# sein. Nur das Tooling-Target bringt Composer mit; vendor/ kommt aus dem Mount.
 # Ein fehlendes Toolimage ist Infrastrukturfehler, kein Auftrag an den Dev-Stack.
 function Invoke-AppComposer {
     param([string[]]$Arguments)
     if (Test-DockerImage $toolImages.php) {
+        $qaAppEnvFile = Get-QaAppEnvFile
         return Invoke-Tool 'docker' (@('run', '--rm',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
             '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
-            '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
+            '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
             '-e', 'COMPOSER_CACHE_DIR=/tmp/composer-cache', '-e', 'COMPOSER_ALLOW_SUPERUSER=1',
             # Der Mount gehoert dem Host-User, composer laeuft als root: ohne
             # safe.directory verweigert git die Versionsermittlung und composer

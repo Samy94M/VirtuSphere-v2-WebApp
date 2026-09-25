@@ -91,5 +91,4 @@ return [
     // Der Abruf ist ein Bereitstellungsauftrag: ohne laufenden Deploy-Dienst wird
     // er eingereiht und nie ausgeführt.
     'cadence_esxi_no_worker' => 'kein automatischer Abruf, der Bereitstellungsdienst läuft nicht',
-    'cadence_manual' => 'manueller Volltest, nur auf Klick, :days Tage gültig',
 ];

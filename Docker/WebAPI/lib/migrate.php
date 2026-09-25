@@ -19,16 +19,17 @@ require_once __DIR__ . '/migrations/0050_mecm_rollout_hostname.php';
 require_once __DIR__ . '/migrations/0051_correlation_lookup_index.php';
 require_once __DIR__ . '/migrations/0052_ansible_preflight_generation.php';
 require_once __DIR__ . '/migrations/0053_edit_versions.php';
+require_once __DIR__ . '/migrations/0054_log_keyset_pagination.php';
+require_once __DIR__ . '/migrations/0055_ansible_test_schedule.php';
+require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
         fwrite(STDOUT, $message . PHP_EOL);
         return;
     }
-
     echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . "<br>\n";
 }
-
 function migrator_statement_count(mysqli_stmt $stmt, string $context): int
 {
     $result = $stmt->get_result();
@@ -36,10 +37,8 @@ function migrator_statement_count(mysqli_stmt $stmt, string $context): int
     if (!is_array($row) || !array_key_exists('c', $row)) {
         throw new RuntimeException('Migration check returned no count: ' . $context);
     }
-
     return (int) $row['c'];
 }
-
 function migrator_query_row(mysqli $db, string $sql, string $context): array
 {
     $result = $db->query($sql);
@@ -796,8 +795,8 @@ SQL;
     '0023_ansible_preflight_state' => function (mysqli $db): void {
         // Persist the on-demand Ansible preflight result so the credential row and
         // the system status page can show a badge instead of a one-shot flash.
-        // On-demand only (no scheduler): last_checked_at is shown verbatim and the
-        // reader judges staleness. last_status is a plain VARCHAR (the
+        // last_checked_at is the outcome time; the shared presenter owns its
+        // freshness. last_status is a plain VARCHAR (the
         // 'ok'/'warning'/'failed' set lives in lib/repo/ansible_preflight.php),
         // not a DB ENUM, so no ADR-0016 mirror is owed. Additive, idempotent.
         $db->query("CREATE TABLE IF NOT EXISTS deploy_ansible_preflight_state (
@@ -1221,6 +1220,9 @@ SQL;
     '0051_correlation_lookup_index' => migrate_0051_correlation_lookup_index(...),
     '0052_ansible_preflight_generation' => migrate_0052_ansible_preflight_generation(...),
     '0053_edit_versions' => migrate_0053_edit_versions(...),
+    '0054_log_keyset_pagination' => migrate_0054_log_keyset_pagination(...),
+    '0055_ansible_test_schedule' => migrate_0055_ansible_test_schedule(...),
+    '0056_package_report_foundation' => migrate_0056_package_report_foundation(...),
 ];
 try {
     $db = db();

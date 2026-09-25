@@ -420,7 +420,7 @@ final class AuditProducerContractTest extends TestCase
 
         self::assertStringContainsString('log_filter_from_query($_GET)', $page);
         self::assertStringContainsString('repo_count_logs($connection, $filter)', $page, 'the count reads the struct');
-        self::assertStringContainsString('repo_recent_logs($connection, $filter,', $page, 'the table page reads the struct');
+        self::assertStringContainsString('repo_log_page($connection, $filter,', $page, 'the table page reads the struct');
         self::assertStringContainsString('repo_count_logs($connection, $filter)', $export);
         self::assertStringContainsString('logs_export_rows($connection, $filter,', $export);
 
@@ -449,7 +449,7 @@ final class AuditProducerContractTest extends TestCase
         self::assertStringContainsString('log_filter_is_usable($filter)', $page);
         self::assertStringContainsString('$usable && ($_GET[\'export\'] ?? \'\') === \'csv\'', $page, 'the export is gated on the same answer');
         self::assertMatchesRegularExpression('/\$total = \$usable \? repo_count_logs/', $page);
-        self::assertMatchesRegularExpression('/\$rows = \$usable \? repo_recent_logs/', $page);
+        self::assertMatchesRegularExpression('/\$logPage = \$usable && !\$cursor\[.invalid.\]\s+\? repo_log_page/', $page);
     }
 
     /** @return array<string, string> relative path => source */

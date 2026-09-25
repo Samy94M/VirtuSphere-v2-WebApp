@@ -48,7 +48,8 @@ try {
     // The complete decision for the complete scope. `count` and `can_queue` are
     // derived from it BEFORE any bound applies: a mission whose findings do not
     // fit into one response is still a mission that must not be queued.
-    $blockers = deploy_queue_blockers($connection, $state);
+    $presentation = null;
+    $blockers = deploy_queue_blockers($connection, $state, $presentation);
     $warnings = deploy_queue_warnings($connection, $state);
     $count = count($blockers);
 
@@ -71,6 +72,7 @@ try {
         'total' => $boundedBlockers['total'],
         'omitted_count' => $boundedBlockers['omitted_count'],
         'warnings' => $serializedWarnings,
+        'presentation' => $presentation,
         'warning_total' => $boundedWarnings['total'],
         'warning_omitted_count' => $boundedWarnings['omitted_count'],
         'labels' => [

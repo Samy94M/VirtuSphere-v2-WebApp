@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/esxi_automation.php';
 
@@ -10,9 +11,8 @@ require_once __DIR__ . '/esxi_automation.php';
  * Credentials page: the cadence note that sits under a status badge.
  *
  * The status column renders a badge over a timestamp, which everywhere else in
- * the portal means "the last time we polled". Only ESXi rows are polled; the
- * Ansible preflight runs on click and never repeats, so both shapes looked the
- * same while promising different things. One short line per row says whether
+ * the portal means "the last time we polled". ESXi inventory and Ansible full
+ * tests have independently configurable schedules. One short line says whether
  * the value renews itself, which is what an operator reads the timestamp for
  * in the first place.
  *
@@ -63,11 +63,12 @@ function credential_cadence_esxi(int $intervalHours, ?array $esxiState, bool $an
 }
 
 /**
- * The Ansible preflight has no scheduler at all, so this says so and names the
- * window after which the recorded result stops counting as evidence. Nothing
- * about the ESXi automation changes this line.
+ * Ansible scheduling and evidence expiry remain independent. A stopped service
+ * or disabled schedule does not prolong the validity of old evidence.
  */
-function credential_cadence_ansible(): string
+function credential_cadence_ansible(int $intervalHours = VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT): string
 {
-    return __t('credentials.cadence_manual', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]);
+    return __t($intervalHours === 0 ? 'ansible_test.cadence_off' : 'ansible_test.cadence', [
+        'hours' => $intervalHours, 'days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS,
+    ]);
 }

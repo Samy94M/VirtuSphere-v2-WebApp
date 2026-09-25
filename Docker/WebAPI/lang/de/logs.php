@@ -89,9 +89,11 @@ return [
     'result_failure' => 'Fehlschlag',
     'result_recovered' => 'Erholt',
     'err_result' => 'Dieses Ergebnis ist nicht bekannt.',
-    'page_prev' => 'Zurück',
-    'page_next' => 'Weiter',
-    'page_info' => 'Seite :page von :total',
+    'cursor_newer' => 'Neuere Einträge',
+    'cursor_older' => 'Ältere Einträge',
+    'cursor_info' => 'Neueste Einträge zuerst',
+    'cursor_stale' => 'Diese Position ist nicht mehr verfügbar.',
+    'cursor_newest' => 'Zu den neuesten Einträgen',
     // The audit vocabulary the filter offers, one label per registered event
     // code and object type. Derived and exhaustive: LogFilterVocabularyLabelTest
     // walks the audit registry in both directions, so a new code fails the build

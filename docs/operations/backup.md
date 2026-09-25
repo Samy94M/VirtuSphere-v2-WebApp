@@ -8,7 +8,7 @@ VirtuSphere schreibt pro vollständigem Lauf ein Tripel nach `Docker/backups/` (
 
 Die Override-Datei ist host-spezifisch und nicht in Git, und genau deshalb liegt sie im Archiv: der Produktionshost braucht sie zum Starten (Subnetz-Pin, damit die Docker-Bridge das SSH nicht abschneidet, geleerte Proxy-Umgebung je Service). Ein Restore ohne sie bringt den Stack nicht hoch, obwohl beide Archive intakt sind.
 
-Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte der Log-Verzeichnisse**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen, sonst kann der Fehlerhandler nicht schreiben (Begruendung in `docs/operations/go-live.md`, Schritt 1a).
+Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte des PHP-Logverzeichnisses**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen, sonst kann der Fehlerhandler nicht schreiben (Begruendung in `docs/operations/go-live.md`, Schritt 1a). nginx schreibt nicht mehr in einen Host-Logmount, sondern in die begrenzten Docker-Streams.
 
 ## Backup ausführen
 
@@ -16,7 +16,7 @@ Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt
 sh scripts/backup.sh
 ```
 
-Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Dateimuster; ein Restore braucht deshalb weiterhin das vollständige Zeitstempel-Tripel.
+Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Dateimuster; ein Restore braucht deshalb weiterhin das vollständige Zeitstempel-Tripel. MySQL-Binlogs sind deaktiviert: Es gibt keinen Replikations- oder Point-in-Time-Recovery-Verbraucher, und der zugesagte Wiederherstellungspunkt ist ausschließlich ein erfolgreich geprüftes Backuptripel. Vorhandene historische Binlogdateien niemals direkt im Datenverzeichnis löschen.
 
 Die Backup-Dateien enthalten Secrets (`.env`, DB-Inhalte inkl. verschlüsselter Credentials). `Docker/backups/` gehört auf ein zugriffsbeschränktes Ziel (`chmod 700`) und sollte zusätzlich auf einen zweiten Host synchronisiert werden (Pull vom Backup-Host, nicht Push vom App-Host).
 
@@ -89,7 +89,7 @@ Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, 
 1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
 3. Import des jüngsten Dumps, danach `FLUSH PRIVILEGES` (wie der Neustart im Ernstfall) und die Arbeitsprobe des App-Users; ein Alt-Archiv (`--all-databases`) wird erkannt und durchläuft den unten dokumentierten Grant-Reparaturschritt
-4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach Schema-Fingerprint gegen das frische `struktur.sql`
+4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach AD-Konvergenz und Rotation der Paketbericht-Annahmegeneration sowie Schema-Fingerprint gegen das frische `struktur.sql`
 5. Invarianten und Rowcounts (Benutzer, Migrationstracking, keine verwaisten Interfaces/VMs/Jobs)
 6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
 7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung einer nicht freigegebenen IP (eingefrorene 403-Antwort von `mecm-api.php`)
@@ -100,6 +100,10 @@ Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`,
 Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt (E5): sie waren ein zweiter, unvalidierter Pfad und brechen jetzt absichtlich mit einem Verweis hierher ab.
 
 ## Echter Restore (Desaster-Fall)
+
+Der vollständige Versions-, Schema- und Rückkehrvertrag steht ergänzend in
+[`upgrade-recovery.md`](upgrade-recovery.md). Das Rootpasswort bleibt in diesem
+Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
 
 1. Stack stoppen: `docker compose down`.
 2. Defekte Daten wegräumen: `Docker/mysql/mysql-data/` sichern/leeren.
@@ -118,9 +122,9 @@ Die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind st
    SQL
    ```
    `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
-5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs Docker/logs/nginx` setzen und erst dann `docker compose up -d`. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die Rechte läuft er, kann aber nicht protokollieren (siehe `go-live.md`, Schritt 1a).
-6. AD-Restore-Konvergenz ausführen: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`. Das deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; Details stehen in `docs/operations/active-directory.md`.
-7. Verifizieren: `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
+5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a). Zunächst ausschließlich PHP samt seiner MySQL-Abhängigkeit starten: `docker compose up -d --wait php`. Ohne Webserver ist die Maschinen-API während der Konvergenz noch nicht erreichbar.
+6. Restore-Konvergenz vor dem Webserverstart ausführen: zuerst `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`, danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/package_report_restore_converge.php`. Der erste Schritt deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; der zweite rotiert die Paketbericht-Annahmegeneration, sodass Berichte aus dem Backup oder vom späteren verlorenen Live-Stand nicht als aktuelle Evidenz angenommen werden. Beide Befehle müssen erfolgreich enden; Details zur Verzeichnisanmeldung stehen in `docs/operations/active-directory.md`.
+7. Erst jetzt den übrigen Stack starten: `docker compose up -d --wait`. Danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
 ## Was deckt das Backup ab, was kommt aus Git
 

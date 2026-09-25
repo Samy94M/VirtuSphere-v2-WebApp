@@ -31,20 +31,30 @@ require_once __DIR__ . '/helpers.php';
  * handful of rows even for a long run, because the worker writes exactly one
  * pair per playbook step.
  *
- * @return list<array{seq:int,line:string}>
+ * @return list<array{seq:int,line:string,created_at:string}>
  */
 function repo_deploy_job_log_step_markers(mysqli $db, int $jobId): array
 {
     $prefix = VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX . '%';
-    $stmt = $db->prepare('SELECT seq, line FROM deploy_job_logs WHERE job_id = ? AND line LIKE ? ORDER BY seq ASC LIMIT ?');
+    $stmt = $db->prepare('SELECT seq, line, created_at FROM deploy_job_logs WHERE job_id = ? AND line LIKE ? ORDER BY seq ASC LIMIT ?');
     $limit = VIRTUSPHERE_DEPLOY_LOG_MARKER_LIMIT;
     $stmt->bind_param('isi', $jobId, $prefix, $limit);
     $stmt->execute();
 
     return array_map(
-        static fn (array $row): array => ['seq' => (int) $row['seq'], 'line' => (string) $row['line']],
+        static fn (array $row): array => ['seq' => (int) $row['seq'], 'line' => (string) $row['line'], 'created_at' => (string) $row['created_at']],
         repo_fetch_all($stmt->get_result())
     );
+}
+
+/** First worker claim, retained independently of the visible log window. */
+function repo_deploy_job_started_at(mysqli $db, int $jobId): ?string
+{
+    $value = repo_scalar($db,
+        'SELECT created_at FROM deploy_job_logs WHERE job_id = ? AND stream = ? AND line LIKE ? ORDER BY seq ASC LIMIT 1',
+        'iss', [$jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by %']
+    );
+    return is_string($value) && $value !== '' ? $value : null;
 }
 
 /**

@@ -155,7 +155,7 @@ final class LogFilterQueryTest extends TestCase
     {
         return array_map(
             static fn (array $row): string => (string) $row['log_message'],
-            repo_recent_logs($this->db, $filter, 100, 0)
+            repo_recent_logs($this->db, $filter, 100)
         );
     }
 

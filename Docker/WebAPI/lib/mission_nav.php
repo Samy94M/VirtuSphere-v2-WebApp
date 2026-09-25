@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/portal_work_context.php';
 
 /**
  * The two mission navigations, each rendered from one place.
@@ -39,13 +40,13 @@ function mission_list_nav(string $type): string
  * $current is 'details' or 'vms'; anything else marks neither, which is the
  * honest answer for a page that is not one of the two.
  */
-function mission_detail_nav(int $missionId, bool $isTemplate, string $current): string
+function mission_detail_nav(int $missionId, bool $isTemplate, string $current, array $workContext = []): string
 {
     return portal_page_nav(
         $isTemplate ? __t('missions.nav_label_template_detail') : __t('missions.nav_label_mission_detail'),
         [
-            ['href' => mission_details_url($missionId), 'label' => __t('missions.nav_details'), 'current' => $current === 'details'],
-            ['href' => 'vms.php?mission_id=' . $missionId, 'label' => __t('common.vms'), 'current' => $current === 'vms'],
+            ['href' => mission_details_url($missionId, $workContext), 'label' => __t('missions.nav_details'), 'current' => $current === 'details'],
+            ['href' => portal_work_context_vm_list_url($missionId, $workContext), 'label' => __t('common.vms'), 'current' => $current === 'vms'],
         ]
     );
 }

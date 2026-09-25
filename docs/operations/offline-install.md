@@ -53,12 +53,13 @@ Container referenziert; `prune` würde genau sie entfernen, und auf diesem Host
 gibt es keinen Weg, sie zurückzuholen.
 
 Warum das ein eigener Absatz ist: `docker load` stellt **keinen RepoDigest**
-wieder her. Deshalb referenziert Compose die gehärteten MySQL- und
+wieder her. Deshalb referenziert Compose die gehärteten PHP-, MySQL- und
 phpMyAdmin-Child-Images über feste lokale Tags, die `docker save`/`docker load`
 erhält. Ihre Upstream-Basen bleiben in den Dockerfiles per Digest gepinnt; auf
 dem Air-Gap-Host hängt die Integrität der fertigen Images an der Prüfsumme aus
-Schritt 1. Der Bundle-Build beweist vor der Ausgabe, dass jeder von Compose
-aufgelöste Tag tatsächlich in `images.txt` und einem Image-Archiv liegt.
+Schritt 1. Der Bundle-Build beweist vor der Ausgabe, dass jeder Kern-Tag in
+`images.txt` liegt. Das optionale phpMyAdmin-Image steht ausschließlich in
+`tools/images.txt` und wird durch den Kernweg weder geladen noch gestartet.
 
 ## Schritt 3: Quellcode und Abhängigkeiten entpacken
 
@@ -149,7 +150,8 @@ kann. In `.env` dann zwingend selbst setzen:
 | Schlüssel | Warum |
 |---|---|
 | `APP_KEY` | EnvBoot bricht ohne oder mit schwachem Wert hart ab |
-| `DB_PASS`, `MYSQL_ROOT_PASSWORD` | dito |
+| `DB_PASS` | EnvBoot und der MySQL-Bootstrap lehnen einen fehlenden oder schwachen Wert ab |
+| `MYSQL_ROOT_PASSWORD` | ausschließlich MySQL/Host-Backup; der MySQL-Bootstrap lehnt einen fehlenden oder schwachen Wert vor dem Serverstart ab, PHP und Worker erhalten ihn nicht |
 | `APP_BIND_IP` | die LAN-Adresse des Hosts (oder `0.0.0.0`). Der Vorlagenwert `127.0.0.1` bindet nur an Loopback: der Stack ist gesund, jede hostlokale Probe antwortet, und aus dem LAN ist das Portal trotzdem nicht erreichbar |
 | `APP_PUBLIC_BASE_URL` | die Rückrufadresse, die der Ansible-Host für die MAC-Meldung benutzt. Ohne auflösbaren Namen die IP eintragen, sonst läuft der Deploy sauber durch und die MACs kommen nie an |
 
@@ -164,7 +166,7 @@ Vor dem ersten Start (siehe `docs/operations/go-live.md`, Schritt 1a, dort mit
 Begründung):
 
 ```bash
-chmod 0777 virtusphere/Docker/WebAPI/logs virtusphere/Docker/logs/nginx
+chmod 0777 virtusphere/Docker/WebAPI/logs
 ```
 
 Auf einem echten Linux-Host außerdem eine lokale `docker-compose.override.yml`
@@ -195,7 +197,31 @@ weiter: Backup einrichten (Schritt 3), **erstes Admin-Konto anlegen und das
 Portal im Browser öffnen** (Schritt 4.1 und 4.2), IP-Freigaben füllen, MECM
 anbinden.
 
+## Optionales phpMyAdmin-Werkzeug
+
+Der normale Installationsweg oben ist vollständig ohne phpMyAdmin. Erst ein
+bewusster Werkzeugaufruf prüft das eigene Teilmanifest, lädt dessen einziges
+Image und startet das weiterhin loopbackgebundene `tools`-Profil:
+
+```bash
+cd <bundle-verzeichnis>
+sh tools/install.sh
+```
+
+Bei einem neuen Bundle denselben Befehl erneut ausführen; das neue Teilmanifest
+und Image werden vor dem Ersetzen geprüft. Entfernen stoppt und löscht nur den
+Werkzeugcontainer, nicht MySQL oder das Portal:
+
+```bash
+cd virtusphere
+docker compose --profile tools rm -sf phpmyadmin
+```
+
 ## Releases nachziehen
+
+Vor jedem Update gilt zusätzlich die ausführbare Matrix und Wartungsfolge in
+[`upgrade-recovery.md`](upgrade-recovery.md). Ein verifiziertes Bundle allein
+autorisiert noch keine gemischten Portal-/Schema-/Workerstände.
 
 Ein Update ist derselbe Weg ohne die erstmalige Runner-, `.env`- und
 Hosteinrichtung aus Schritt 4 bis 6: neues Bundle prüfen, Images

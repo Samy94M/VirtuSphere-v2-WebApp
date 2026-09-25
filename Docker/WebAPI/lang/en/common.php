@@ -44,6 +44,14 @@ return [
     'duration_hour' => ':count hour',
     'duration_hours' => ':count hours',
     'mecm_queued' => 'Queued for MECM',
+    'unsaved_clean' => 'No unsaved changes.',
+    'unsaved_dirty' => 'Unsaved changes.',
+    'unsaved_message' => 'This form has unsaved changes. Leave this page and discard them?',
+    'unsaved_leave' => 'Leave page',
+    'copy' => 'Copy',
+    'copy_value' => 'Copy :label',
+    'copy_done' => 'Copied',
+    'copy_failed' => 'Copying is not available. Select the displayed value manually.',
 
     // Connection failures (VIRTUSPHERE_INVENTORY_ERROR_*): portal wording.
     'conn_dns' => 'The host ":host" could not be resolved. Check the host name.',

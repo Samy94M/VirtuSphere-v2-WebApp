@@ -3,8 +3,9 @@
  *
  * Split out of the shared component rules (ADR-0013) because these are proper names of one
  * page, not shared vocabulary: .status-row, .inventory-card, .deviation-groups
- * and their kin are rendered by portal/system_status.php and the
- * lib/system_status_*panels.php modules and by nothing else. Loaded AFTER
+ * and their kin are rendered by portal/system_status.php and its panel modules.
+ * The deploy log deliberately reuses .status-facts and .technical-details and
+ * is therefore the one additional page classified for this sheet. Loaded AFTER
  * the four domain sheets in lib/layout.php, so a status rule that is specificity-equal
  * with its counterpart there still wins; StatusSpacingContractTest pins that
  * order.
@@ -100,9 +101,10 @@
    page whose whole complaint is that it spends its area on air. */
 .status-overview-card {
     display: flex;
+    flex-direction: column;
     min-width: 0;
-    align-items: center;
-    justify-content: space-between;
+    align-items: flex-start;
+    justify-content: flex-start;
     gap: var(--space-2);
     padding: var(--space-3);
     border: 1px solid var(--border);
@@ -110,6 +112,21 @@
     background: var(--surface);
     color: var(--text);
     text-decoration: none;
+}
+
+.status-overview-label {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+
+/* Badges stay single-line elsewhere. Only overview cards opt into complete,
+   bounded status text; an unbroken technical token is the final fallback. */
+.status-overview-card .badge {
+    align-self: flex-start;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .status-overview-card:hover {
@@ -361,9 +378,8 @@
     font-weight: 700;
 }
 
-/* Five cards need a step the four never did: below this the labels ("ESXi
-   inventory", "Internal services") wrap inside a fifth of the content width and
-   the strip grows taller than the section it summarises. */
+/* Six fixed cards plus an optional directory card need explicit wrap steps:
+   below these widths the labels would otherwise compete for narrow columns. */
 @media (max-width: 1180px) {
     .status-overview {
         grid-template-columns: repeat(3, minmax(0, 1fr));

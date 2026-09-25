@@ -33,6 +33,8 @@ Accessibility and responsiveness are part of the baseline, not add-ons:
 
 Operational status must name the evidence it actually represents. A badge is not a generic “works” verdict: its label and timestamp identify the check that produced it, while materially narrower runtime evidence is shown as a separate fact with its own outcome, time and diagnostic link. One signal must never silently refresh or recolour another. Staleness means missing current evidence, not failure, and is written that way; known failures do not age into neutral. Colour is never the only distinction. If an operator can repair or renew a state from the portal, the status row carries the permission-gated action and the existing audit/log route instead of requiring knowledge of another page.
 
+The System-status overview keeps each title above its status badge inside one linked card. Both remain left aligned and fully visible; the local card badge may wrap at words and, only as a final containment fallback, inside an unbroken token. The global badge contract remains single-line. Cards derive their height from content, preserve the shared focus outline and use the responsive grid rather than clipping, ellipsis or smaller text to force a fixed row.
+
 Restrained ("dezent") glassmorphism is part of the baseline (Paket D). A single token set in `base.css` (`--glass-bg`, `--glass-border`, `--glass-blur`, `--glass-shadow`, plus a subtle `--bg-accent-glow` body gradient, per theme) drives it — no scattered values. Glass (translucent background + `backdrop-filter`) applies only to the structural/chrome surfaces: sidebar, topbar, panels/cards, alerts and modals (`.modal-box`). **Data surfaces stay solid** — tables (`.table-wrap`) and form controls keep an opaque `--surface` background so contrast is unaffected. Rules: at most two stacked blur layers; both light and dark are styled and stay WCAG-AA on the glass; a `@supports not (backdrop-filter)` fallback swaps every glass surface back to opaque `--surface` (no grey haze). All assets stay local (no external blur/image); no inline styles.
 
 Spacing and form layout follow shared primitives, not per-page margins, so density stays comfortable without going cramped. The primitives are named: `base.css` `:root` carries a four-step spacing scale (`--space-1` … `--space-4`) plus `--radius-md`, in the light block only, because a distance is not a colour and must not move with the theme toggle. The scale is *derived from its callers*, never set in advance — a step nothing uses is the same drift as a rule without markup, only in the direction no guard sees, so it is dropped rather than kept for later. Two rules make it hold: **(1) the distance belongs to the container, not to the child.** A block that stacks its parts is a `display: grid` with a `gap`; the parts hand their own margins back entirely rather than being reset in bulk, because a blanket `.block p { margin: 0 }` outranks the (0,1,0) of the very hint rules it is meant to leave alone — that cascade trap is what left two `margin-top` declarations on the System status page dead and unnoticed through a full cleanup. **(2) A page whose blocks are proper names gets its own stylesheet** next to the four domain sheets (`status.css` for the System status block), linked *after* all of them, and shared vocabulary stays behind: the panel shell, `.empty-state`, `.section-heading-actions`, and anything a second page renders from the same helper. A page sheet owns inner rhythm, never the shell. A panel's vertical rhythm comes from the stack/grid gap and the shared `.panel > p`/heading margins; forms use `.form-grid` (labelled fields, four columns) and `.form-grid-full` (a full-width section) instead of hand-rolled widths. The durable rules: (1) a label sits above its control with a small gap (`label > input/select/textarea` `margin-top`), never flush. (2) Checkboxes and radios keep their intrinsic size and never inherit the text-field `width:100%`/`min-height` (a bare toggle in a table header must not render as a large box); this is enforced globally in `base.css`. (3) Repeated toggles go in a `.checkbox-grid` (multi-column), not a stack of full-width bordered bars. Its two variants are chosen by what the options are, not by how many there are: an open-ended list whose length depends on data (catalog packages, a mission's VMs) keeps the `auto-fit` stretch, while a fixed option set that belongs to the fields around it adds `.checkbox-grid-aligned` and mirrors the `.form-grid` tracks, so each option box is exactly as wide as the inputs above it (the VM editor's Hot-Add pair). An option card carries its selected state in the outlined/tinted pattern (accent border plus a light accent wash), never a solid fill. (4) Inside a `.form-grid-full` the individual controls do not run the whole panel width: single toggle/radio rows size to their label and a standalone field caps at a comfortable field width (~22rem); only multi-column grids stretch, and explanatory `.hint` prose stops at a readable measure (~78ch) instead of spanning the panel. (5) Row action buttons live in a `td.actions` cell that stays a real table-cell and is never `display:flex` — a flex `<td>` does not stretch to the row height, so its bottom border floats up at the button height and the row separator breaks into detached stubs under the column (worst when data cells wrap, e.g. long OS names). The buttons lay out inline and compact; a cell that instead carries form controls (the user-admin role/password inputs) opts into vertical stacking with `.actions-stack`. New form or table layout is verified with the light/dark Playwright screenshot pass before shipping, since spacing regressions are visual and are not caught by the PHP or lint checks.
@@ -95,8 +97,95 @@ aggregator again, with the last check immediately before the repository write.
 This keeps no-JavaScript operation complete and prevents a forged enabled button
 from bypassing the queue rules.
 
+UX01 keeps that decision intact but gives it one preparation summary. Its state
+is derived only from the complete union, while mode and materialized VM count
+describe the normalized scope. Individual cause cards no longer repeat a
+generic prefix; they retain canonical order and every action. Only the concise
+ready/blocked/checking/unreliable sentence is an `aria-live` region. With
+JavaScript disabled, a separate `action=check` submitter renders corrected
+inputs and the same decision without preview, redirect, audit or job write;
+`action=start` remains the only queue submitter and still rechecks before every
+write.
+
+Remedy navigation is a CSRF-protected POST whose server recomputes the named
+cause from the current complete blocker and warning union before using its
+permission-filtered link. It stores only the allowlisted queue fields in the
+session for at most one hour; secrets and CSRF tokens never enter that draft or
+a return URL. The draft is consumed once when deployment is opened again.
+Identity adoption carries the same draft and returns directly to it. Cancelling
+a schedule preview is an in-document jump to the still-rendered POST form and
+therefore neither discards values nor creates another server action.
+
 Help navigation follows the same deep-link discipline as settings, logs and
 System status. `help_url()` validates a closed panel/section registry against
 the partials and rendered ids. When `core.js` opens a fragment inside a hidden
 help panel, it activates that panel and focuses the nested target, so keyboard
 and assistive-technology users land at the content the link promised.
+
+Mission and VM drill-down navigation uses a bounded URL context rather than a
+session-wide last-page value. Six closed scalar fields preserve mission/template
+list type, filter and ordering plus VM ordering independently in each tab. No
+free return URL, form value, bulk selection, secret or CSRF token is carried.
+Canonical URL helpers rebuild every destination, and object/permission checks
+remain local to that destination. Stable mission/VM row fragments provide the
+no-JavaScript return target; the shared hash handler only enhances them with
+focus. A removed or missing row never receives an invented focus target.
+
+Unsaved-change protection is an opt-in editor behavior, not draft persistence.
+Mission settings and the VM editor compare their visible named controls with an
+in-memory confirmed baseline; dynamic rows and disabled visible values count,
+while hidden values, button values and the contents of password/file fields do
+not. A failed POST begins dirty and may recover only a matching baseline from a
+read-only same-origin GET; uncertainty never produces a saved claim. Links and
+cross-form submits reuse the single shared confirmation dialog through DOM
+events, while browser reload/back/close uses native `beforeunload`. The editor's
+own submit is never labelled saved before the server accepts it. No URL,
+session, localStorage or sessionStorage carries a form snapshot, and no-JS
+operation keeps the ordinary server contracts without promising the warning.
+
+Effective-value summaries are projections of existing deploy owners, not a new
+configuration layer. The VM editor names whether Datastore, Datacenter and
+autostart come from the VM, the mission or a later target-host resolution, and
+calls them intended values rather than an observed ESXi state. A missing
+Datacenter may remain unresolved until a credential is chosen; a missing
+Datastore has no host fallback. Mission-off autostart remains effectively off
+while its VM preference is preserved, and blank delay differs from explicit
+zero. The server renders the complete truth for no-JavaScript operation; a
+page-specific module only reflects live controls. Its reset accelerator clears
+an already-inheritable control and emits normal change events, never writes or
+submits on its own.
+
+Action outcomes reuse the one-shot structured flash surface rather than adding
+toasts or a second status model. A successful portal write names only the local
+transition it committed: queued and scheduled jobs are not described as
+executed, cancellation does not imply rollback, and retry creates a newly named
+job. The one optional action points to the existing read owner, normally the
+exact job log or filtered job list. Bulk VM results name processed and selected
+scope; any skipped target changes the semantic variant to warning. Portal-row
+deletion, MECM re-queue and external hypervisor/MECM effects remain explicitly
+different claims. This is complete server-rendered content; JavaScript remains
+limited to the pre-action confirmation already owned by the shared dialog.
+
+## Amendment (2026-09-12): page-specific assets preserve the one global order
+
+The stylesheet and script registries now classify the closed set of rendered
+portal entrypoints. Common shell assets remain universal; table/status sheets
+and feature modules name only the pages that render their vocabulary or hooks.
+Selection is subtraction from the existing global order, never a second order.
+An unknown page fails closed so a new entrypoint cannot silently receive every
+module or none. `status.css` stays intact and is selected for both System status
+and Deploy log: the latter intentionally reuses its fact-grid and technical
+detail rules, so moving those declarations merely to reduce a request would be
+a cascade change without corresponding product value.
+
+## Amendment (2026-09-13): copying is an accelerator over visible text
+
+VM identities, configured network values and job IDs use one server-rendered
+copy control and the existing delegated `core.js` handler. The displayed text or
+input remains the value owner and stays selectable without JavaScript. A static
+display copies exactly its escaped visible value; an editor button references
+the form control and reads its current value only when activated, so an edit
+cannot leave a stale copy payload behind. Empty and DHCP-disabled configured-IP
+values expose no action. Clipboard absence or refusal is a visible localized
+failure and never a success claim. Controls inside forms are non-submit buttons,
+keep keyboard focus and give repeated IP/MAC values an adapter-specific name.

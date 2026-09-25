@@ -44,6 +44,14 @@ return [
     'duration_hour' => ':count Stunde',
     'duration_hours' => ':count Stunden',
     'mecm_queued' => 'Für MECM vorgemerkt',
+    'unsaved_clean' => 'Keine ungespeicherten Änderungen.',
+    'unsaved_dirty' => 'Ungespeicherte Änderungen.',
+    'unsaved_message' => 'Dieses Formular enthält ungespeicherte Änderungen. Seite verlassen und Änderungen verwerfen?',
+    'unsaved_leave' => 'Seite verlassen',
+    'copy' => 'Kopieren',
+    'copy_value' => ':label kopieren',
+    'copy_done' => 'Kopiert',
+    'copy_failed' => 'Kopieren ist nicht verfügbar. Den angezeigten Wert bitte von Hand markieren.',
 
     // Verbindungsfehler (VIRTUSPHERE_INVENTORY_ERROR_*): Klartext für das Portal.
     'conn_dns' => 'Der Host ":host" konnte nicht aufgelöst werden. Prüfen Sie den Hostnamen.',

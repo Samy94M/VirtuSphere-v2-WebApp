@@ -7,6 +7,8 @@ declare(strict_types=1);
 /** @var string $redirectBase */
 /** @var list<array<string,mixed>> $deployBlockers */
 /** @var list<array<string,mixed>> $deployWarnings */
+/** @var array{state:string,status:string,context:string} $deployPresentation */
+/** @var array<string,mixed> $deployFormValues */
 /** @var array<string,mixed> $user */
 /** @var bool $selectedMissionDeviates */
 /** @var int $selectedMissionId */
@@ -56,7 +58,7 @@ if ($deployPreview !== null) { ?>
             <?php foreach (array_keys(deploy_form_vm_selection() ?? []) as $vid) { ?><input type="hidden" name="vm_ids[]" value="<?php echo h((string) (int) $vid); ?>"><?php } ?>
             <div class="actions">
                 <button class="button" type="submit"><?php echo h(__t('deploy.preview_confirm')); ?></button>
-                <a class="button button-secondary" href="<?php echo h($redirectBase); ?>"><?php echo h(__t('common.cancel')); ?></a>
+                <a class="button button-secondary" href="#deploy-queue-form"><?php echo h(__t('common.cancel')); ?></a>
             </div>
         </form>
     </section>
@@ -70,13 +72,12 @@ if ($deployPreview !== null) { ?>
           // an operator has already entered. The sentence says which of the two
           // it will be. ?>
     <p class="muted"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></p>
-    <?php deploy_render_blockers($deployBlockers, $user, $deployWarnings); ?>
+    <?php deploy_render_blockers($deployBlockers, $user, $deployWarnings, $deployPresentation, $deployFormValues); ?>
     <?php if ($selectedMissionDeviates) { ?>
         <div class="alert alert-warning"><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>
     <?php } ?>
-    <form class="form-grid" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
+    <form class="form-grid" method="post" id="deploy-queue-form" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
         <?php echo csrf_field(); ?>
-        <input type="hidden" name="action" value="start">
         <input type="hidden" name="vm_selection_mission_id" value="<?php echo h((string) $selectedMissionId); ?>">
         <label><?php echo h(__t('deploy.label_mission')); ?>
             <select name="mission_id" required data-deploy-mission <?php echo $missions === [] ? 'disabled' : ''; ?>>
@@ -104,20 +105,12 @@ if ($deployPreview !== null) { ?>
                 <?php } ?>
             </select>
         </label>
-        <?php if ($hostWarnings !== []) { ?>
-            <script type="application/json" data-deploy-host-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($hostWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
-            <p class="alert alert-warning form-grid-full" role="status" data-deploy-host-warning <?php echo $initialHostWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialHostWarning); ?></span></p>
-        <?php } ?>
-        <?php if ($capabilityWarnings !== []) { ?>
-            <script type="application/json" data-deploy-capability-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($capabilityWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
-            <p class="alert alert-warning form-grid-full" role="status" data-deploy-capability-warning <?php echo $initialCapabilityWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialCapabilityWarning); ?></span></p>
-        <?php } ?>
         <?php
         $selectedMode = deploy_form_value('mode', VIRTUSPHERE_DEPLOY_MODE_FULL);
         $staggerLockHintId = form_hint_id('schedule', 'mode_stagger_lock');
         $staggerLockActive = (int) deploy_form_value('stagger_minutes') > 0;
         ?>
-        <label><?php echo h(__t('deploy.label_mode')); ?>
+        <label class="form-grid-row-start"><?php echo h(__t('deploy.label_mode')); ?>
             <select name="mode"<?php echo form_control_attrs('schedule', 'mode', null, $staggerLockActive ? [$staggerLockHintId] : false, ''); ?> required
                     data-stagger-modes="<?php echo h(implode(',', VIRTUSPHERE_DEPLOY_STAGGER_MODES)); ?>"
                     data-powercycle-modes="<?php echo h(implode(',', ansible_modes_using_powercycle())); ?>"
@@ -145,13 +138,21 @@ if ($deployPreview !== null) { ?>
                 <small class="hint" id="<?php echo h($startWaitHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_hint', ['max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX])); ?></small>
                 <small class="hint" id="<?php echo h($startWaitLockHintId); ?>" data-start-wait-lock<?php echo $startModeActive ? ' hidden' : ''; ?>><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_lock_hint')); ?></small>
             </label>
-            <?php $verboseHintId = form_hint_id('schedule', 'verbose_group'); ?>
-            <div class="field-stack" role="group"<?php echo form_control_attrs('schedule', 'verbose_group', null, [$verboseHintId], ''); ?>>
+        </div>
+        <?php $verboseHintId = form_hint_id('schedule', 'verbose_group'); ?>
+        <div class="field-stack" role="group"<?php echo form_control_attrs('schedule', 'verbose_group', null, [$verboseHintId], ''); ?>>
                 <span class="field-label"><?php echo h(__t('deploy.verbose_heading')); ?></span>
                 <label class="checkbox-item"><input type="checkbox" name="verbose" value="1" <?php echo deploy_form_value('verbose') === '1' ? 'checked' : ''; ?>> <?php echo h(__t('deploy.label_verbose')); ?></label>
-            </div>
             <p class="hint" id="<?php echo h($verboseHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_verbose')); ?>:</span> <?php echo h(__t('deploy.verbose_hint')); ?></p>
         </div>
+        <?php if ($hostWarnings !== []) { ?>
+            <script type="application/json" data-deploy-host-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($hostWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
+            <p class="alert alert-warning form-grid-full" role="status" data-deploy-host-warning <?php echo $initialHostWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialHostWarning); ?></span></p>
+        <?php } ?>
+        <?php if ($capabilityWarnings !== []) { ?>
+            <script type="application/json" data-deploy-capability-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($capabilityWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
+            <p class="alert alert-warning form-grid-full" role="status" data-deploy-capability-warning <?php echo $initialCapabilityWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialCapabilityWarning); ?></span></p>
+        <?php } ?>
         <?php $vmSelectionHintId = form_hint_id('schedule', 'vm_selection'); ?>
         <div class="form-grid-full" role="group"<?php echo form_control_attrs('schedule', 'vm_selection', null, [$vmSelectionHintId], ''); ?>>
             <span class="field-label"><?php echo h(__t('deploy.label_vms')); ?></span>
@@ -210,6 +211,9 @@ if ($deployPreview !== null) { ?>
             </label>
             <p class="hint" id="<?php echo h($scheduleHintId); ?>"><?php echo h(__t('deploy.schedule_tz_hint', ['tz' => portal_timezone()])); ?></p>
         </div>
-        <div class="actions actions-row"><button class="button" type="submit" data-deploy-queue-button <?php echo $canQueue ? '' : 'disabled'; ?>><?php echo h(__t('deploy.queue_button')); ?></button></div>
+        <div class="actions actions-row">
+            <noscript><button class="button button-secondary" type="submit" name="action" value="check"><?php echo h(__t('deploy.preparation_check')); ?></button></noscript>
+            <button class="button" type="submit" name="action" value="start" data-deploy-queue-button <?php echo $canQueue ? '' : 'disabled'; ?>><?php echo h(__t('deploy.queue_button')); ?></button>
+        </div>
     </form>
 </section>

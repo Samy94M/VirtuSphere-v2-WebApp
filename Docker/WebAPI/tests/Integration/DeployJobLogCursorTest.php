@@ -174,6 +174,18 @@ final class DeployJobLogCursorTest extends TestCase
         }
     }
 
+    public function testStartTimeUsesOnlyThisJobsSystemClaimAndSurvivesTailPaging(): void
+    {
+        $jobId = $this->job(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, null);
+        self::assertNull(repo_deploy_job_started_at($this->db, $jobId));
+        $stmt = $this->db->prepare("INSERT INTO deploy_job_logs (job_id, seq, stream, line, created_at) VALUES (?, 1, 'ansible', 'Deploy job claimed by spoof', '2026-09-14 09:00:00'), (?, 2, 'system', 'Deploy job claimed by worker', '2026-09-14 10:00:00')");
+        $stmt->bind_param('ii', $jobId, $jobId);
+        $stmt->execute();
+        $this->insertLines($jobId, 3, 1705);
+        self::assertSame('2026-09-14 10:00:00', repo_deploy_job_started_at($this->db, $jobId));
+        self::assertGreaterThan(2, repo_deploy_job_log_initial_tail($this->db, $jobId)['oldest_seq']);
+    }
+
     private function job(string $status, ?string $worker): int
     {
         $payload = json_encode(['mode' => VIRTUSPHERE_DEPLOY_MODE_INVENTORY], JSON_THROW_ON_ERROR);

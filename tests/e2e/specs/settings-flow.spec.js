@@ -14,22 +14,23 @@ test.use({ storageState: ROLES.admin.storageState });
 // Setting keys are split across constants.php (bootstrap) and
 // deploy_constants.php (not in the bootstrap), so both helpers load the latter.
 const SETTING_LIBS = ['lib/deploy_constants.php', 'lib/repo/settings.php'];
+const ANSIBLE_TEST_LIBS = ['lib/ansible_test_config.php', 'lib/repo/settings.php'];
 
-function readSetting(constName, fallback = '') {
+function readSetting(constName, fallback = '', libs = SETTING_LIBS) {
   return phpJson(`
 $v = repo_setting_value(db(), constant('${constName}'), '${fallback}');
 echo 'JSON' . json_encode(['v' => $v]) . 'JSON';
-`, SETTING_LIBS).v;
+`, libs).v;
 }
 
-function writeSetting(constName, value) {
-  runPhp(`repo_set_setting(db(), constant('${constName}'), '${String(value)}'); echo 'OK';`, SETTING_LIBS);
+function writeSetting(constName, value, libs = SETTING_LIBS) {
+  runPhp(`repo_set_setting(db(), constant('${constName}'), '${String(value)}'); echo 'OK';`, libs);
 }
 
-function phpConst(name) {
+function phpConst(name, libs = ['lib/deploy_constants.php']) {
   // The bounds constants live in deploy_constants.php, which the bootstrap
   // does not pull in on its own.
-  return phpJson(`echo 'JSON' . json_encode(['v' => constant('${name}')]) . 'JSON';`, ['lib/deploy_constants.php']).v;
+  return phpJson(`echo 'JSON' . json_encode(['v' => constant('${name}')]) . 'JSON';`, libs).v;
 }
 
 /** A valid value different from `current`, inside [min, min+1]. */
@@ -237,6 +238,29 @@ test('save_esxi_inventory: persists a changed interval', async ({ page }) => {
     expect(Number(readSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS')), 'the interval persisted').toBe(next);
   } finally {
     writeSetting('VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS', before);
+  }
+});
+
+// e2e-covers: settings.php:save_ansible_test_interval
+test('save_ansible_test_interval: persists a changed diagnostic interval', async ({ page }) => {
+  const key = 'VIRTUSPHERE_SETTING_ANSIBLE_TEST_INTERVAL_HOURS';
+  const before = readSetting(
+    key,
+    String(phpConst('VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT', ANSIBLE_TEST_LIBS)),
+    ANSIBLE_TEST_LIBS
+  );
+  const next = otherValue(
+    before,
+    phpConst('VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MIN', ANSIBLE_TEST_LIBS)
+  );
+  try {
+    await openTab(page, 'catalog');
+    const form = settingsForm(page, 'save_ansible_test_interval');
+    await form.locator('input[name="ansible_test_interval_hours"]').fill(String(next));
+    await submitAndReturnToTab(page, form, 'catalog');
+    expect(Number(readSetting(key, '', ANSIBLE_TEST_LIBS)), 'the diagnostic interval persisted').toBe(next);
+  } finally {
+    writeSetting(key, before, ANSIBLE_TEST_LIBS);
   }
 });
 

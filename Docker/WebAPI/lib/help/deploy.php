@@ -134,6 +134,13 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.create_progress_p5')); ?></p>
         </section>
 
+        <section class="panel" id="help-action-outcomes">
+            <h2><?php echo h(__t('help_deploy.action_outcomes_heading')); ?></h2>
+            <p><?php echo h(__t('help_deploy.action_outcomes_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.action_outcomes_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.action_outcomes_p3')); ?></p>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.log_view_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.log_view_p1')); ?></p>

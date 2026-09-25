@@ -90,6 +90,44 @@ final class SystemStatusOverviewContractTest extends TestCase
         );
     }
 
+    public function testCardContentStacksAndOnlyItsBadgeMayWrap(): void
+    {
+        $renderer = $this->source('lib/system_status_panels.php');
+        $css = $this->source('portal/assets/css/status.css');
+
+        self::assertStringContainsString('class="status-overview-label"', $renderer);
+        self::assertSame(1, preg_match('/^\.status-overview-card \{(.*?)\}/ms', $css, $card));
+        self::assertMatchesRegularExpression('/flex-direction:\s*column;/', $card[1]);
+        self::assertMatchesRegularExpression('/align-items:\s*flex-start;/', $card[1]);
+
+        self::assertSame(1, preg_match('/^\.status-overview-card \.badge \{(.*?)\}/ms', $css, $badge));
+        self::assertMatchesRegularExpression('/max-width:\s*100%;/', $badge[1]);
+        self::assertMatchesRegularExpression('/white-space:\s*normal;/', $badge[1]);
+        self::assertMatchesRegularExpression('/overflow-wrap:\s*anywhere;/', $badge[1]);
+        self::assertDoesNotMatchRegularExpression(
+            '/^\.badge\s*\{[^}]*white-space:\s*normal;/ms',
+            $css,
+            'wrapping is a local overview-card exception, not a global badge contract change'
+        );
+    }
+
+    public function testVisualFixtureUsesTheRealLongestDeployStatus(): void
+    {
+        $translations = require $this->repoRoot() . '/lang/de/system_status.php';
+        $contractPath = dirname($this->repoRoot(), 2) . '/tests/e2e/visual/runner-contract.json';
+        $contract = json_decode((string) file_get_contents($contractPath), true, 32, JSON_THROW_ON_ERROR);
+        $pages = array_column($contract['pages'], null, 'name');
+
+        self::assertArrayHasKey('system-status', $pages);
+        self::assertSame('.status-overview', $pages['system-status']['captureSelector']);
+        $badges = array_column($pages['system-status']['fixture']['overviewBadges'], null, 'href');
+        self::assertSame(
+            $translations['service_attention_manual'],
+            $badges['system_status.php#deploy-service']['text'],
+            'the reviewed geometry must render the actual localized long deploy status'
+        );
+    }
+
     public function testTheCountIsProducedInExactlyOnePlace(): void
     {
         $producer = $this->source('lib/system_status.php');

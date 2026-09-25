@@ -134,6 +134,10 @@ final class AnsibleVmIdentityContractTest extends TestCase
         $source = file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $file);
         self::assertIsString($source);
 
+        if ($file === 'powercycleVMs-ESXi_playbook.yml') {
+            $source .= "\n" . file_get_contents(ansible_source_dir() . '/powercycle_vm_tasks.yml');
+        }
+
         return $source;
     }
 }

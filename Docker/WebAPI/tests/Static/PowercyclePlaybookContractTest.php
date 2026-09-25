@@ -41,7 +41,8 @@ final class PowercyclePlaybookContractTest extends TestCase
         $path = ansible_source_dir() . DIRECTORY_SEPARATOR . self::PLAYBOOK;
         self::assertFileExists($path);
 
-        return (string) file_get_contents($path);
+        return (string) file_get_contents($path) . "\n"
+            . file_get_contents(ansible_source_dir() . '/powercycle_vm_tasks.yml');
     }
 
     /**
@@ -131,6 +132,9 @@ final class PowercyclePlaybookContractTest extends TestCase
         );
 
         self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_to_start }}"'), 'power-on uses the vetted candidate list exactly once');
+        self::assertStringContainsString('include_tasks: ./powercycle_vm_tasks.yml', $source);
+        self::assertStringContainsString('loop_var: powercycle_vm', $source);
+        self::assertStringContainsString('loop: "{{ [powercycle_vm] }}"', $source);
         self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_started_by_run | default([]) }}"'), 'cleanup uses confirmed successful starts exactly once');
 
         // force: true is the cleanup's hard power-off (fresh VMs have no guest

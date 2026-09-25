@@ -40,7 +40,7 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         'createVMStatus-ESXi_playbook.yml' => 1,
         'exportVMs-Informations-ESXi_playbook.yml' => 1,
         'inventoryESXi_playbook.yml' => 7,
-        'powercycleVMs-ESXi_playbook.yml' => 1,
+        'powercycle_vm_tasks.yml' => 1,
     ];
 
     public function testIgnoreErrorsOnlyWhereClassifiedAndAlwaysRegistered(): void
@@ -260,6 +260,7 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         $paths = glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_playbook.yml');
         self::assertIsArray($paths);
         self::assertNotEmpty($paths, 'No playbooks found (zero-match must not pass).');
+        $paths = array_merge($paths, glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_tasks.yml') ?: []);
 
         $playbooks = [];
         foreach ($paths as $path) {

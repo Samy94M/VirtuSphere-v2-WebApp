@@ -8,6 +8,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/settings_page.php';
+require_once __DIR__ . '/ansible_test_config.php';
 
 /**
  * Guarding and permission checks stay in the page shell. This dispatcher owns
@@ -34,6 +35,7 @@ function settings_handle_post(mysqli $connection, array $user): never
         'clear_token' => 'machine-api',
         'save_retire_threshold' => 'catalog',
         'save_esxi_inventory' => 'catalog',
+        'save_ansible_test_interval' => 'catalog',
         'save_timezone' => 'system',
         'save_session' => 'system',
         'save_password_policy' => 'system',
@@ -88,6 +90,30 @@ function settings_handle_post(mysqli $connection, array $user): never
                 flash_set('success', __t('settings.timezone_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
+            }
+        }
+    } elseif ($action === 'save_ansible_test_interval') {
+        $hours = ansible_test_parse_interval(request_trimmed($_POST, 'ansible_test_interval_hours'));
+        if ($hours === null) {
+            $message = __t('ansible_test.invalid', ['min' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MIN,
+                'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX]);
+            form_remember('ansible_test', $_POST, ['ansible_test_interval_hours' => $message]);
+            flash_set('error', $message);
+        } else {
+            try {
+                repo_transaction($connection, static function () use ($connection, $hours, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_ANSIBLE_TEST_INTERVAL_HOURS, (string) $hours);
+                    if (!audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting',
+                        VIRTUSPHERE_SETTING_ANSIBLE_TEST_INTERVAL_HOURS, VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                        ['action' => 'updated', 'new_value' => (string) $hours], (int) $user['id'])) {
+                        throw new RuntimeException('Ansible interval audit could not be stored.');
+                    }
+                });
+                flash_set('success', __t('settings.saved'));
+            } catch (Throwable $exception) {
+                $message = portal_error_message($exception);
+                form_remember('ansible_test', $_POST, ['ansible_test_interval_hours' => $message]);
+                flash_set('error', $message);
             }
         }
     } elseif ($action === 'save_esxi_inventory') {

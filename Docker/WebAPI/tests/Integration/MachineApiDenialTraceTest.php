@@ -44,10 +44,10 @@ final class MachineApiDenialTraceTest extends TestCase
 
     protected function tearDown(): void
     {
-        $this->restoreClientIpAllowlistIfTouched();
         if (isset($this->db)) {
             $this->clearTrace();
         }
+        $this->restoreClientIpAllowlistIfTouched();
     }
 
     /** @return iterable<string, array{0:string}> */

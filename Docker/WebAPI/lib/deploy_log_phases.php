@@ -31,7 +31,7 @@ require_once __DIR__ . '/ansible_command_modes.php';
  *
  * @param list<array<string,mixed>> $logs rows carrying at least `seq` and `line`
  * @return array{
- *     phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>,
+ *     phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,
  *     current: ?string
  * }
  */
@@ -52,6 +52,8 @@ function deploy_log_phase_timeline(array $logs): array
                 'begin_seq' => $seq,
                 'end_seq' => null,
                 'complete' => false,
+                'started_at' => isset($row['created_at']) ? (string) $row['created_at'] : null,
+                'finished_at' => null,
             ];
             $openIndex = count($phases) - 1;
             continue;
@@ -62,6 +64,7 @@ function deploy_log_phase_timeline(array $logs): array
         if ($openIndex !== null && $phases[$openIndex]['playbook'] === $marker['playbook']) {
             $phases[$openIndex]['end_seq'] = $seq;
             $phases[$openIndex]['complete'] = true;
+            $phases[$openIndex]['finished_at'] = isset($row['created_at']) ? (string) $row['created_at'] : null;
             $openIndex = null;
         }
     }
@@ -79,7 +82,7 @@ function deploy_log_phase_timeline(array $logs): array
  * markers already bound it. An open phase has no upper bound, which is exactly
  * right while it is still producing lines.
  *
- * @param array{phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>, current: ?string} $timeline
+ * @param array{phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>, current: ?string} $timeline
  * @return array{0: int, 1: ?int}|null null when the job never entered that phase
  */
 function deploy_log_phase_range(array $timeline, string $playbook): ?array
@@ -99,7 +102,7 @@ function deploy_log_phase_range(array $timeline, string $playbook): ?array
  * filter answers "show me this phase", and two identical options would be two
  * ways to ask the same question with different answers.
  *
- * @param array{phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>, current: ?string} $timeline
+ * @param array{phases: list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>, current: ?string} $timeline
  * @return list<string>
  */
 function deploy_log_phase_names(array $timeline): array

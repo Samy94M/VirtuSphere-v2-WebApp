@@ -46,7 +46,7 @@ function ansible_required_files(): array
         // belongs to a mode; the other five would be the exact repeat of the
         // inventory-playbook defect if they were only dispatched.
         VIRTUSPHERE_CREATE_ARTIFACTS,
-        [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT]
+        [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, 'powercycle_vm_tasks.yml']
     )));
 }
 

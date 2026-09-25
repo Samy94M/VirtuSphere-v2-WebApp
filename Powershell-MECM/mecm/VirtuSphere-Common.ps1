@@ -20,6 +20,12 @@
 # genau die Variablen ab, um die es geht.
 Set-StrictMode -Version 1.0
 
+# Gemeinsamer Laufzeitvertrag des MECM-Server-Dateisatzes. Skripte, die neuere
+# Common-Funktionen benoetigen, pruefen diesen Wert direkt nach dem Dot-Sourcing.
+# Der Installer vergleicht die Literale zusaetzlich im Staging und nach der
+# Aktivierung, damit ein gemischter Satz gar nicht erst gestartet wird.
+$script:VsMecmServerContractVersion = 2
+
 $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 
 # SSoT fuer den MECM-Ordnernamen der Paket-Collections/-Applications.
@@ -904,7 +910,11 @@ function Test-VsTemplateScriptCurrent {
 }
 
 function Get-VsFilesManifestStamp {
-    param([Parameter(Mandatory)][string]$Path, [string]$TemplateScript = '')
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$TemplateScript = '',
+        [string]$TemplatePath = ''
+    )
     if (-not (Test-Path -LiteralPath $Path)) { return 'missing' }
     $root = (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName.TrimEnd('\', '/')
     $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
@@ -935,9 +945,186 @@ function Get-VsFilesManifestStamp {
             $parts.Add(('template|{0}' -f $templateHash))
         } else { $parts.Add('template|absent') }
     }
+    if ($TemplatePath) {
+        if (Test-Path -LiteralPath $TemplatePath -PathType Container) {
+            $templateRoot = (Get-Item -LiteralPath $TemplatePath -Force -ErrorAction Stop).FullName.TrimEnd('\', '/')
+            $templateFiles = @(Get-ChildItem -LiteralPath $templateRoot -Recurse -File -Force -ErrorAction Stop |
+                Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName)
+            foreach ($file in $templateFiles) {
+                $relative = $file.FullName.Substring($templateRoot.Length).TrimStart('\', '/').Replace('\', '/')
+                $beforeLength = $file.Length
+                $beforeTicks = $file.LastWriteTimeUtc.Ticks
+                $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+                $after = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
+                    throw ("Paketvorlagendatei hat sich waehrend des Scans geaendert: {0}" -f $relative)
+                }
+                $parts.Add(('template/{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
+            }
+            $afterTemplateNames = @(Get-ChildItem -LiteralPath $templateRoot -Recurse -File -Force -ErrorAction Stop |
+                Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName | ForEach-Object { $_.FullName })
+            if ((@($templateFiles.FullName) -join "`n") -cne ($afterTemplateNames -join "`n")) {
+                throw 'Paketvorlagendateiliste hat sich waehrend des Scans geaendert.'
+            }
+        } else { $parts.Add('template-tree|absent') }
+    }
     $payload = $parts -join "`n"
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($payload))).Replace('-', '')) } finally { $sha.Dispose() }
+}
+
+# Prueft den vollstaendigen, von der Vorlage verwalteten Paketdateisatz. Die
+# paketeigene config.json und Nutzlast unter powershell/ gehoeren ausdruecklich
+# nicht dazu. Alte reporting-Generationen duerfen vorhanden bleiben, weil ein
+# bereits gestarteter Wrapper seine Generation bis zum Ende festhaelt.
+function Test-VsPackageTemplateSetCurrent {
+    param(
+        [Parameter(Mandatory)][string]$TemplateRoot,
+        [Parameter(Mandatory)][string]$PackageRoot
+    )
+    try {
+        $descriptorPath = Join-Path (Join-Path $TemplateRoot 'reporting') 'current.json'
+        $wrapperPath = Join-Path $TemplateRoot 'install.ps1'
+        if (-not (Test-Path -LiteralPath $wrapperPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $descriptorPath -PathType Leaf)) { return $false }
+        $descriptor = Get-Content -LiteralPath $descriptorPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$descriptor.schema_version -ne 1 -or
+            [string]$descriptor.bundle_id -notmatch '^[0-9a-f]{64}$' -or
+            [string]$descriptor.wrapper_sha256 -notmatch '^[0-9a-f]{64}$') { return $false }
+        $templateWrapperHash = (Get-FileHash -LiteralPath $wrapperPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        if ($templateWrapperHash -cne [string]$descriptor.wrapper_sha256) { return $false }
+
+        $bundleRoot = Join-Path (Join-Path $TemplateRoot 'reporting') ([string]$descriptor.bundle_id)
+        $manifestPath = Join-Path $bundleRoot 'manifest.json'
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$manifest.schema_version -ne 1 -or [string]$manifest.bundle_id -cne [string]$descriptor.bundle_id) { return $false }
+        foreach ($contractName in @('common', 'logging', 'adapter', 'host')) {
+            $manifestContract = $manifest.contracts.PSObject.Properties[$contractName]
+            $descriptorContract = $descriptor.contracts.PSObject.Properties[$contractName]
+            if ($null -eq $manifestContract -or $null -eq $descriptorContract -or
+                [int]$manifestContract.Value -lt 1 -or [int]$manifestContract.Value -ne [int]$descriptorContract.Value) { return $false }
+        }
+        $entries = @($manifest.files)
+        if ($entries.Count -lt 1) { return $false }
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach ($entry in $entries) {
+            $relative = [string]$entry.path
+            $length = 0L
+            if ($relative -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.ps1$' -or
+                -not $seen.Add($relative) -or
+                -not [long]::TryParse([string]$entry.length, [ref]$length) -or $length -lt 0 -or
+                [string]$entry.sha256 -notmatch '^[0-9a-f]{64}$') { return $false }
+            $source = Join-Path $bundleRoot $relative
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return $false }
+            $item = Get-Item -LiteralPath $source -Force -ErrorAction Stop
+            if ($item.Length -ne $length -or
+                (Get-FileHash -LiteralPath $source -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne [string]$entry.sha256) { return $false }
+        }
+        $orderedEntryNames = @($entries | ForEach-Object { [string]$_.path })
+        if (($orderedEntryNames -join "`n") -cne (@($orderedEntryNames | Sort-Object) -join "`n")) { return $false }
+        $bundleBasis = @($entries | ForEach-Object { '{0}|{1}|{2}' -f $_.path, ([long]$_.length), $_.sha256 }) -join "`n"
+        $bundleSha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $calculatedBundleId = ([BitConverter]::ToString($bundleSha.ComputeHash([Text.Encoding]::UTF8.GetBytes($bundleBasis))).Replace('-', '')).ToLowerInvariant()
+        } finally { $bundleSha.Dispose() }
+        if ($calculatedBundleId -cne [string]$descriptor.bundle_id) { return $false }
+        $bundleNames = @(Get-ChildItem -LiteralPath $bundleRoot -File -Force -ErrorAction Stop | Sort-Object Name | ForEach-Object { $_.Name })
+        $manifestNames = @(@($entries | ForEach-Object { [string]$_.path }) + 'manifest.json' | Sort-Object)
+        if (($bundleNames -join "`n") -cne ($manifestNames -join "`n")) { return $false }
+
+        foreach ($relative in @('install.ps1', 'reporting/current.json', ('reporting/{0}/manifest.json' -f $descriptor.bundle_id)) +
+            @($entries | ForEach-Object { 'reporting/{0}/{1}' -f $descriptor.bundle_id, $_.path })) {
+            $templateFile = Join-Path $TemplateRoot $relative
+            $packageFile = Join-Path $PackageRoot $relative
+            if (-not (Test-Path -LiteralPath $packageFile -PathType Leaf) -or
+                (Get-Item -LiteralPath $templateFile -Force -ErrorAction Stop).Length -ne (Get-Item -LiteralPath $packageFile -Force -ErrorAction Stop).Length -or
+                (Get-FileHash -LiteralPath $templateFile -Algorithm SHA256 -ErrorAction Stop).Hash -cne
+                    (Get-FileHash -LiteralPath $packageFile -Algorithm SHA256 -ErrorAction Stop).Hash) { return $false }
+        }
+        return $true
+    } catch {
+        Write-Debug $_
+        return $false
+    }
+}
+
+# Publiziert eine Reporter-Generation zuerst und schaltet ihren Deskriptor
+# zuletzt um. config.json und powershell/ bleiben Paketinhalt des Operators.
+# Eine alte Generation wird absichtlich nicht geloescht; dafuer fehlt ein
+# sicherer Leser-/Lebenszeitvertrag.
+function Sync-VsPackageTemplateSet {
+    param(
+        [Parameter(Mandatory)][string]$TemplateRoot,
+        [Parameter(Mandatory)][string]$PackageRoot
+    )
+    if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
+        throw ("Paketordner fehlt: {0}" -f $PackageRoot)
+    }
+    $descriptorSource = Join-Path (Join-Path $TemplateRoot 'reporting') 'current.json'
+    $descriptor = Get-Content -LiteralPath $descriptorSource -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $bundleId = [string]$descriptor.bundle_id
+    if ($bundleId -notmatch '^[0-9a-f]{64}$') { throw 'Reporter-Deskriptor enthaelt keine gueltige Bundle-ID.' }
+    $sourceBundle = Join-Path (Join-Path $TemplateRoot 'reporting') $bundleId
+    $targetReporting = Join-Path $PackageRoot 'reporting'
+    $targetBundle = Join-Path $targetReporting $bundleId
+    New-Item -ItemType Directory -Path $targetReporting -Force -ErrorAction Stop | Out-Null
+    if (Test-Path -LiteralPath $targetBundle -PathType Container) {
+        $sourceFiles = @(Get-ChildItem -LiteralPath $sourceBundle -File -Force -ErrorAction Stop | Sort-Object Name)
+        $targetFiles = @(Get-ChildItem -LiteralPath $targetBundle -File -Force -ErrorAction Stop | Sort-Object Name)
+        if (($sourceFiles.Name -join "`n") -cne ($targetFiles.Name -join "`n")) {
+            throw 'Vorhandene Reporter-Generation hat nicht den erwarteten vollstaendigen Dateisatz.'
+        }
+        foreach ($sourceFile in $sourceFiles) {
+            $targetFile = Join-Path $targetBundle $sourceFile.Name
+            if ($sourceFile.Length -ne (Get-Item -LiteralPath $targetFile -Force -ErrorAction Stop).Length -or
+                (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -cne
+                    (Get-FileHash -LiteralPath $targetFile -Algorithm SHA256 -ErrorAction Stop).Hash) {
+                throw ('Vorhandene Reporter-Generation ist beschaedigt: {0}' -f $sourceFile.Name)
+            }
+        }
+    } else {
+        $stageBundle = Join-Path $targetReporting ('.stage-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Copy-Item -LiteralPath $sourceBundle -Destination $stageBundle -Recurse -Force -ErrorAction Stop
+            Move-Item -LiteralPath $stageBundle -Destination $targetBundle -ErrorAction Stop
+        } finally {
+            if (Test-Path -LiteralPath $stageBundle) { Remove-Item -LiteralPath $stageBundle -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    $wrapperSource = Join-Path $TemplateRoot 'install.ps1'
+    $wrapperTarget = Join-Path $PackageRoot 'install.ps1'
+    Copy-Item -LiteralPath $wrapperSource -Destination $wrapperTarget -Force -ErrorAction Stop
+
+    $descriptorTarget = Join-Path $targetReporting 'current.json'
+    $descriptorTemp = Join-Path $targetReporting ('.current-' + [guid]::NewGuid().ToString('N') + '.json')
+    $descriptorBackup = Join-Path $targetReporting ('.previous-' + [guid]::NewGuid().ToString('N') + '.json')
+    $descriptorExisted = Test-Path -LiteralPath $descriptorTarget -PathType Leaf
+    $descriptorReplaced = $false
+    $descriptorPublished = $false
+    try {
+        Copy-Item -LiteralPath $descriptorSource -Destination $descriptorTemp -Force -ErrorAction Stop
+        if ($descriptorExisted) {
+            [IO.File]::Replace($descriptorTemp, $descriptorTarget, $descriptorBackup, $true)
+            $descriptorReplaced = $true
+        } else {
+            Move-Item -LiteralPath $descriptorTemp -Destination $descriptorTarget -ErrorAction Stop
+        }
+        $descriptorPublished = $true
+        if (-not (Test-VsPackageTemplateSetCurrent -TemplateRoot $TemplateRoot -PackageRoot $PackageRoot)) {
+            throw 'Publizierter Paketvorlagensatz stimmt nach dem Umschalten nicht mit der Quelle ueberein.'
+        }
+    } catch {
+        if ($descriptorReplaced -and (Test-Path -LiteralPath $descriptorBackup -PathType Leaf)) {
+            [IO.File]::Replace($descriptorBackup, $descriptorTarget, $null, $true)
+        } elseif ($descriptorPublished -and -not $descriptorExisted) {
+            Remove-Item -LiteralPath $descriptorTarget -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    } finally {
+        Remove-Item -LiteralPath $descriptorTemp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $descriptorBackup -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-VsPackageContentTrackingKey {
@@ -1043,6 +1230,14 @@ function Set-VsPackageContentTracking {
     New-ItemProperty -LiteralPath $key -Name RequestConfirmed -Value ([int]$RequestConfirmed) -PropertyType DWord -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name DistributionBaseline -Value $DistributionBaseline -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name State -Value $State -PropertyType String -Force -ErrorAction Stop | Out-Null
+}
+
+function Remove-VsPackageContentTracking {
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationName)
+    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
+    if (Test-Path -LiteralPath $key) {
+        Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1883,21 +2078,31 @@ function Get-VsPackageSourceSelections {
     return $result.ToArray()
 }
 
-# Retained objects are not automatically obsolete: never flag a supplied source,
-# the selected target or a higher version as a deletion candidate.
+# Retained objects are not automatically obsolete. Only a numeric version that
+# is strictly below the proven numeric source ceiling is an old-object finding.
+# Equal, newer and non-numeric inventory stays unclassified; a blocked selection
+# with any non-numeric source has no comparable ceiling at all.
 function Get-VsPackageRetainedNames {
     param([string]$ProductName, [array]$SourceVersions, [array]$Selections, [AllowEmptyCollection()][array]$Names)
     $selection = if ($Selections.Count -eq 1) { $Selections[0] } else { $null }
     $sources = if ($selection) { @($selection.SourceVersions) } else { @($SourceVersions) }
+    $comparisonTarget = $null
+    if ($selection -and $selection.State -eq 'ready') {
+        $comparisonTarget = [string]$selection.TargetVersion
+    } elseif ($selection -and $sources.Count -gt 0 -and
+        @($sources | Where-Object { $null -eq (ConvertTo-VsPackageVersionParts -Version $_) }).Count -eq 0) {
+        $comparisonTarget = [string]$sources[0]
+        foreach ($source in @($sources | Select-Object -Skip 1)) {
+            if ((Compare-VsPackageVersion -Left $source -Right $comparisonTarget) -gt 0) { $comparisonTarget = [string]$source }
+        }
+    }
     $prefix = $ProductName + '-'
     foreach ($name in @($Names | Sort-Object -Unique)) {
         if (-not ([string]$name).StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
         $version = ([string]$name).Substring($prefix.Length)
         if ($sources -ccontains $version) { continue }
-        if ($selection -and $selection.State -eq 'ready' -and $null -ne (ConvertTo-VsPackageVersionParts -Version $version)) {
-            if ((Compare-VsPackageVersion -Left $version -Right $selection.TargetVersion) -ge 0) { continue }
-        }
-        $name
+        if ($null -eq $comparisonTarget -or $null -eq (ConvertTo-VsPackageVersionParts -Version $version)) { continue }
+        if ((Compare-VsPackageVersion -Left $version -Right $comparisonTarget) -lt 0) { $name }
     }
 }
 
@@ -1906,6 +2111,7 @@ function Get-VsPackageRetirementPlan {
         [Parameter(Mandatory)]$Selection,
         [Parameter(Mandatory)]$Applications,
         [Parameter(Mandatory)]$Collections,
+        [AllowEmptyCollection()][array]$Deployments = @(),
         [Parameter(Mandatory)]$Replacement,
         [Parameter(Mandatory)]$References,
         [Parameter(Mandatory)][bool]$ReferenceScanComplete
@@ -1916,10 +2122,20 @@ function Get-VsPackageRetirementPlan {
         foreach ($reason in @($Selection.Blockers)) { $blockers.Add([string]$reason) }
     }
     if (-not $ReferenceScanComplete) { $blockers.Add('reference_scan_incomplete') }
+    # Retirement readiness follows the same boundary as deployment readiness:
+    # an acknowledged, bound content request is enough. Full success on every
+    # DP remains a distribution warning, not a veto for the removeOldVersion
+    # retirement plan. Unknown/unsafe target evidence and an unconfirmed request
+    # remain fail-closed. Requiring pending/complete keeps an unbound intent from
+    # retiring the previous usable generation.
+    $replacementContentState = [string]$Replacement.ContentState
+    $replacementDistributionState = [string]$Replacement.DistributionState
     if ([string]$Replacement.Name -cne [string]$Selection.TargetName -or
         -not [bool]$Replacement.Owned -or [int]$Replacement.DeploymentTypeCount -ne 1 -or
-        [string]$Replacement.ContentState -cne 'complete' -or
-        [string]$Replacement.DistributionState -cne 'succeeded' -or
+        -not [bool]$Replacement.RequestConfirmed -or
+        $replacementContentState -notin @('pending', 'complete') -or
+        $replacementDistributionState -notin @('failed', 'in_progress', 'succeeded') -or
+        -not [bool]$Replacement.DistributionEvidenceSafe -or
         -not [bool]$Replacement.DeploymentReady) {
         $blockers.Add('replacement_not_ready')
     }
@@ -1960,24 +2176,44 @@ function Get-VsPackageRetirementPlan {
         }
         $items.Add([pscustomobject]@{ Kind = 'collection'; Id = $id; Name = $name; Version = $version })
     }
-    $orderedItems = @($items | Sort-Object Kind, Name, Id)
+    # Deployments are explicit plan units and must disappear before their
+    # application. Collections follow last, after all assignments are gone.
+    foreach ($deployment in @($Deployments)) {
+        $name = [string]$deployment.ApplicationName
+        $id = [string]$deployment.DeploymentId
+        if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($id)) {
+            $blockers.Add('deployment_identity_unknown'); continue
+        }
+        $version = if ($name.StartsWith($prefix, [StringComparison]::Ordinal)) { $name.Substring($prefix.Length) } else { '' }
+        if ([string]::IsNullOrWhiteSpace($version) -or $null -eq (ConvertTo-VsPackageVersionParts -Version $version) -or
+            $sourceVersions -ccontains $version -or
+            (Compare-VsPackageVersion -Left $version -Right ([string]$Selection.TargetVersion)) -ge 0) { continue }
+        $items.Add([pscustomobject]@{
+            Kind = 'deployment'; Id = $id; Name = $name; Version = $version
+            CollectionName = [string]$deployment.CollectionName
+        })
+    }
+    $kindOrder = @{ deployment = 0; application = 1; collection = 2 }
+    $orderedItems = @($items | Sort-Object @{ Expression = { $kindOrder[[string]$_.Kind] } }, Name, Id)
     $orderedBlockers = @($blockers | Sort-Object -Unique)
     $state = if ($orderedBlockers.Count -eq 0) { 'ready' } else { 'blocked' }
-    $canonical = [ordered]@{ Schema = 1; ProductName = [string]$Selection.ProductName; TargetName = [string]$Selection.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers }
+    $canonical = [ordered]@{ Schema = 3; ProductName = [string]$Selection.ProductName; TargetName = [string]$Selection.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers }
     $json = ConvertTo-Json -InputObject $canonical -Depth 6 -Compress
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))).Replace('-', '').ToLowerInvariant()) } finally { $sha.Dispose() }
-    return [pscustomobject]@{ Schema = 1; ProductName = $canonical.ProductName; TargetName = $canonical.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers; PlanHash = $hash }
+    return [pscustomobject]@{ Schema = 3; ProductName = $canonical.ProductName; TargetName = $canonical.TargetName; State = $state; Items = $orderedItems; Blockers = $orderedBlockers; PlanHash = $hash }
 }
 
 function Invoke-VsPackageRetirementPlan {
     param(
         [Parameter(Mandatory)]$ApprovedPlan,
         [Parameter(Mandatory)]$CurrentPlan,
+        [scriptblock]$RemoveDeployment,
         [Parameter(Mandatory)][scriptblock]$RemoveApplication,
         [Parameter(Mandatory)][scriptblock]$RemoveCollection
     )
-    if ([string]$ApprovedPlan.State -cne 'ready' -or [string]$CurrentPlan.State -cne 'ready' -or
+    if ([int]$ApprovedPlan.Schema -ne 3 -or [int]$CurrentPlan.Schema -ne 3 -or
+        [string]$ApprovedPlan.State -cne 'ready' -or [string]$CurrentPlan.State -cne 'ready' -or
         [string]$ApprovedPlan.PlanHash -cne [string]$CurrentPlan.PlanHash) {
         throw 'Bereinigungsplan ist blockiert oder veraltet; es wurde nichts entfernt.'
     }
@@ -1988,7 +2224,11 @@ function Invoke-VsPackageRetirementPlan {
         $position++
         Write-Host ("[{0}/{1}] RUN cleanup {2}:{3}" -f $position, $total, $item.Kind, $item.Id)
         try {
-            if ([string]$item.Kind -ceq 'application') { & $RemoveApplication $item }
+            if ([string]$item.Kind -ceq 'deployment') {
+                if (-not $RemoveDeployment) { throw 'Deployment-Removehandler fehlt.' }
+                & $RemoveDeployment $item
+            }
+            elseif ([string]$item.Kind -ceq 'application') { & $RemoveApplication $item }
             elseif ([string]$item.Kind -ceq 'collection') { & $RemoveCollection $item }
             else { throw ("Unbekannter Bereinigungstyp: {0}" -f $item.Kind) }
             $results.Add([pscustomobject]@{ Kind = $item.Kind; Id = $item.Id; Name = $item.Name; State = 'removed' })

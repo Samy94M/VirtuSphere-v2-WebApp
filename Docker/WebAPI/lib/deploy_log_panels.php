@@ -8,10 +8,18 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/deploy_log_phases.php';
 
+/** Share the phase rendering between the initial page and its live updates. */
+function deploy_log_phases_html(array $timeline): string
+{
+    ob_start();
+    deploy_log_render_phases($timeline);
+    return (string) ob_get_clean();
+}
+
 /**
  * The steps this job ran, in order, with the one that is still open marked.
  *
- * @param array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>,current:?string} $timeline
+ * @param array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string} $timeline
  */
 function deploy_log_render_phases(array $timeline): void
 {
@@ -28,6 +36,10 @@ function deploy_log_render_phases(array $timeline): void
                     ?>
                     <li>
                         <span class="phase-name"><?php echo h($phase['playbook']); ?></span>
+                        <span class="muted"><?php echo h(__t('deploy_history.phase_times', [
+                            'start' => portal_format_timestamp($phase['started_at'] ?? null),
+                            'end' => portal_format_timestamp($phase['finished_at'] ?? null),
+                        ])); ?></span>
                         <?php
                         // Three distinguishable outcomes, never a colour alone:
                         // an unfinished step is not the same thing as the one

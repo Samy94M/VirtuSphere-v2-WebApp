@@ -1,5 +1,57 @@
 # Befundregister: VirtuSphere und PowerShell-Integrationskette
 
+## Konsolidierter Übergabestand nach gemeinsamer QA, 10.09.2026
+
+Abgleich der abgeschlossenen Aufgabe `01a08b70-80e5-7d91-bcae-e9b17c53e2ad`
+(„VirtuSphere QA durchführen“) mit Git, Originalcode und gespeicherten
+Endnachweisen. Diese Fortschreibung startet keine Prüfungen oder Container.
+Alle U01–U17 sind implementiert; die nachstehenden Nachweisgrenzen bleiben
+Bestandteil des Abschlusses. Ältere Offen-Markierungen weiter unten sind
+historische Zwischenstände, soweit sie hier ausdrücklich fortgeschrieben sind.
+
+Der Benutzer hat in der QA-Aufgabe Commit/Push sowie die lokalen Migrationen
+ausdrücklich freigegeben und Performance/Visuals vom Abschluss ausgenommen.
+Commit `8f403511d12ad56228ba6f4752b75418e11f1b0e` ist laut
+`qa-artifacts/implementation-u13-u14/20260910-joint/git-final.json` nach
+Remote-main gepusht. Beim jetzigen lesenden Abgleich stimmen HEAD und der
+lokal gespeicherte `origin/main` überein; keine erneute Remoteabfrage.
+Der Checkout bleibt `codex/audit-round2-u05-u06-u15-u16`. Der Arbeitsbaum war
+vor dieser Registerfortschreibung sauber. Diese neue Dokumentationsänderung
+wird in diesem Abgleich weder committet noch gepusht.
+
+### Erledigt und anhand gespeicherter Belege abgeglichen
+
+| Bereich | Ergebnis und Gültigkeitsgrenze |
+|---|---|
+| PowerShell 5.1/7 | `ps51-04` und `ps7-01` jeweils vollständig grün mit 658 regulären Tests, zusätzlich 35 historische Erfolge und fünf ausdrücklich offene Handproben. Spätere Restore-/Backup-Korrekturen wurden unter beiden Engines mit 29/29 ausgewählten Tests nachgeprüft; deren Teilgate-Exit 1 wegen globaler Coverage ist kein grüner Gesamtgate. Integration später mit 668 regulären Tests. |
+| PHP und Verträge | Integration: 1721 Unit-/Static-Tests und 2187 vollständige PHP-Tests ohne Fehler/Skips; 106/106 Guard-Nachweise. Spätere PHPStan-/Fixturekorrekturen gezielt grün; Schlussprüfung `final-drift-01` 9/9. |
+| Browser | Ursprünglich 265 bestanden/zwei fehlgeschlagen; die korrigierte Auswahl besteht in `browser-target-04` mit 13/13. Das kombinierte E2E-Gate bleibt dort wegen ausgeschlossener Visuals `not_applicable`, nicht vollständig pass. |
+| Supervisor und Worker | Sieben Supervisorfälle plus separater erfolgreicher DB-Reconnect-Nachlauf; sechs reale Worker-Startup-/DB-unerreichbar-Signalproben erfolgreich. Keine Aussage für beliebige blockierende Systemaufrufe oder externe Deploywirkung. |
+| PHP-Stop | Kontrollierter Capability-Vergleich belegt die neue Idle-Reproduktion; enger KILL-Fix und Gegenproben umgesetzt. Tatsächlicher QA-PHP-Service beendet Idle und den belegten Request bei pausierter DB mit Exit 0. Die ursprüngliche unbeobachtete 137-Ursache bleibt dadurch nicht rückwirkend bewiesen. |
+| Backup/Restore | Producerexit und identitätsgesichertes Cleanup zusätzlich korrigiert. `restore-drill-01` bestanden, intern 9/9; 35 Tabellen, Schema/Migrationen bis 0053, Kryptoroundtrip und Smoke. Leere synthetische Fach-/Credentialdaten begrenzen den Nachweis; POSIX-Modi nicht bewiesen. |
+| Restkorrekturen | E9-Anwenderpfad nutzt den kanonischen Planmodus; E1/E7/E9-Automatik und Transportmatrix ausgeführt. Der redaktionelle VLAN-Kommentar ist korrigiert. Diese Punkte sind nicht länger offene Implementierungen. |
+| Lokaler Betrieb | Entwicklungs-DB-Migrationen 0052/0053 ausgeführt, pending=0. Nach dokumentiertem Cleanup QA gestoppt, eigene Proben entfernt, QA-Volumes erhalten und fünf Entwicklungsdienste gesund. Dies ist gespeicherte Abschlussevidenz, keine neue Zustandsabfrage. |
+
+### Noch offen und nächster Schritt
+
+| Offener Punkt | Konkrete nächste Abnahme |
+|---|---|
+| Performance / U13 / AP09 | Exklusive S/T/L-, Cold-/Warm-, Query- und Session-A/B-Messungen nach dem gesicherten U13-Messplan. Vom letzten Auftrag ausdrücklich ausgenommen; keine gemessene Performancefreigabe. |
+| Visuals und gemeinsame Regression | Visuelle Bildvergleiche wurden ausdrücklich ausgenommen. Der vollständige Integrationslauf bleibt 37 pass/2 fail, mit nachfolgenden gezielten Korrekturen/Nachweisen; kein vollständig grüner finaler Fast-/Integrations-/Browser-Gesamtlauf behauptet. In einer neuen freigegebenen Abnahme Visuals und die erforderliche gemeinsame Regression auf festgehaltenem Stand durchführen. |
+| PHP-Fix im Entwicklungsbetrieb | Capability-Konfiguration wird erst bei regulärer Neuerstellung des Entwicklungs-PHP-Containers wirksam. Diese Neuerstellung wurde nicht durchgeführt und ist kein Teil dieser Statusfortschreibung. |
+| Vollständige Release-/Supply-Chain-/Air-Gap-Abnahme | Ganze Release-Lane und Offline-/SBOM-/CVE-/Bundle-/Digestnachweise; ein ausgewähltes grünes Restore-Gate ersetzt diese Abnahme nicht. |
+| Reale Labore und Upgrade | MECM-/DP-/Share-/Membershipwirkung, Windows/SYSTEM/Detection/Reboot/Netz/Disks, ESXi/Ansible/Identität und Standort-AD/LDAPS nach Paketprotokollen. Fünf PowerShell-Handproben und manuelle Klärung alter U09-Trackingstände bleiben enthalten. |
+| Restore-Betriebsgrenzen | Restriktive POSIX-Rechte, vorhandene verschlüsselte Credentials/Fachdaten und Standort-AD-Neufreigabe auf geeignetem synthetischem beziehungsweise freigegebenem Laborstand nachweisen. |
+| Breitere Bedien-/Textabnahme und Endbericht | Vollständige DE/EN-/No-JS-/Rechte-/Fokusmatrix und dokumentierte U14-Korpuslücken abarbeiten; abschließend Restergebnisse konsolidieren. Keine Vollprüfung jedes Textes oder Standortbefehls aus dem thematischen Review ableiten. |
+
+Priorität für die Fortsetzung: zuerst neue Freigabe für die bewusst ausgesetzten
+Visual-/Regressions- und Performanceabschnitte, danach vollständige Release-
+und erreichbare Laborabnahmen. Nicht verfügbare Labore bleiben ausdrücklich
+offen und blockieren unabhängige lokale Arbeit nicht. Kein ursprüngliches
+U-Paket muss pauschal neu implementiert werden; neue Fehler werden einzeln
+belegt und korrigiert. Rohbelege verbleiben im gitignorierten QA-Artefaktroot;
+der Push des Quellstands ist keine Sicherung dieser lokalen Nachweise.
+
 ## Gemeinsame lokale QA, 10.09.2026, abgeschlossen im freigegebenen Umfang
 `final-drift-01`: neun gezielte Gates bestanden, Exit 0: Sprachparität,
 ENUM-/PHP-Version-/Bounds-Synchronität, Dateigrößen, Audit-Contract,
@@ -1389,3 +1441,574 @@ Finaler Dateiabgleich: sieben persistierte Blöcke/3.284 Manifestpfade, 3.280 by
 Abschlussgates: `final-doc-drift.json`, `final-doc-drift-live.log` und `final-doc-drift-logs/`, alle sechs pass; `git diff --check` sauber, keine UTF-8-Ersatzzeichen im Register. Quellberichte bleiben datierte Zwischenaufnahmen; für später ausgeführte Reproduktionen, Evidenzpromotionen und abgeschlossene Läufe sind dieses Register und die jeweiligen Rohartefakte maßgeblich.
 
 QA-Abschluss: zwölf zuvor laufende Container des exakten Projekts virtusphere-qa erfolgreich gestoppt; `qa-final-stop.json`. Keine laufenden QA-Container, keine verbliebenen vs-restore-/vs-audit-Container beim Endabgleich. Volumes/Daten und lokale Belege erhalten, andere Projekte unverändert. Kein Auditprozess zur Fortsetzung erforderlich; der nächste Arbeitsauftrag ist die priorisierte Umsetzung und die genannten Abnahmen.
+
+## Fortsetzung des konsolidierten Abarbeitungsplans am 12.09.2026
+
+### R00: Quellen, Nachweise und Arbeitsbasis
+
+Status: **lokal abgeschlossen**. Vor dem ersten M03-Produktdiff wurde der
+tatsächliche Stand erneut festgestellt. Der Hauptcheckout blieb auf Branch
+`codex/audit-round2-u05-u06-u15-u16` bei
+`8f403511d12ad56228ba6f4752b75418e11f1b0e`; ein read-only
+`git ls-remote origin HEAD refs/heads/main` belegte beide Remotereferenzen bei
+`dfdb4caf003833efcd56ccf4c4cb3d93f416fdba`. `8f40351` ist dessen Vorfahr. Die
+bereits vorhandenen Änderungen an Instruktions-, Audit-, CIM- und Testowner
+bleiben erhalten; insbesondere werden die drei Überlappungen `GROK.md`,
+`Powershell-MECM/mecm/VirtuSphere-Common.ps1` und
+`tests/powershell/VirtuSphere.RunReport.Tests.ps1` nicht überschrieben.
+
+Die beiden gesicherten U13-Produktoriginale stimmen weiterhin mit den im
+U13-Codebericht genannten SHA-256-Werten überein. Aktuelle Produktdateien,
+korrigierter Load-Harness und S/T/L-Fixtures wurden ebenfalls gehasht. Das
+vollständige Quellmanifest, die Hashes, Quellzuordnung und die Grenze für die
+späteren isolierten Before-/After-Kopien stehen unter
+`qa-artifacts/consolidated-session-backlog/20260912-r00-source-basis.md`.
+Keine QA-, Performance-, Container-, Commit- oder Pushoperation gehörte zu
+R00. Nächster konkreter Schritt: die vier bestätigten M03-Befunde auf der
+gezielt zusammengeführten `dfdb4ca`-Basis korrigieren, danach M01/Q01.
+
+### M01: Prüflücken des Autoimporterstands
+
+Status: **lokal abgeschlossen; fünf ausdrücklich manuelle Härtungsproben und
+die Standortlabore bleiben extern**. Die fehlenden `dfdb4ca`-Dateien für den
+transaktionalen MECM-Installer, die Datenträger-Wiederaufnahme und deren
+Generic-List-/RunReport-/Templateproben wurden in den Arbeitsstand übernommen.
+Der E8-Test wurde an den tatsächlichen PowerShell-AST eines `if/elseif` hinter
+`$Upgrade` gebunden, ohne die Token- oder Upgradeentscheidung zu ändern.
+
+Die zuvor dokumentierte Testinfrastrukturlücke ist geschlossen:
+`VirtuSphere.RestoreRoot.Tests.ps1` verwendet denselben `Find-Sh`-Owner wie
+`check.ps1` und hält im Fake-Shell-Fall das echte Git-Bash-`usr/bin` hinter dem
+Fake-Binärpfad erreichbar. Dadurch bleiben Fake-Docker und die beauftragte
+Prüfwurzel beweisbar, während `dirname`, `sha256sum` und die übrigen
+POSIX-Bordmittel tatsächlich ausführbar sind. Die isolierte Diagnose bestand
+15/15 RestoreRoot-Fälle; der kanonische Fast-Nachweis bestand anschließend alle
+708 Pester-Fälle bei 78,82 % Coverage gegen 75 % Floor. Das separate
+Härtungsregister meldete 35 grün und fünf deklarierte Handproben, nicht fünf
+automatisch bestandene Laborfälle.
+
+Quellen: `Powershell-MECM/clients/Set-VMDisksOnline.ps1`,
+`Powershell-MECM/install-VirtuSphere-MECM.ps1`,
+`tests/powershell/VirtuSphere.GenericListCompatibility.Tests.ps1`,
+`VirtuSphere.RunReport.Tests.ps1`, `VirtuSphere.ServerTemplate.Tests.ps1`,
+`VirtuSphere.Haertung2026-08.Tests.ps1` und `VirtuSphere.RestoreRoot.Tests.ps1`.
+Maßgebliche Endbelege: `20260912-q01-fast.json` und
+`20260912-q01-integration.json` unter
+`qa-artifacts/consolidated-session-backlog/`; das frühere rote
+`20260912-m01-powershell-final.json` bleibt als offen korrigierter
+Zwischenbefund erhalten und ist keine Endabnahme.
+
+### M03: Fachreview und Korrektur von `dfdb4ca`
+
+Status: **vier lokale Befunde abgeschlossen; M03-Q01 bis Q03 bleiben als
+konkrete Provider-/Produktentscheidungen offen**.
+
+- M03-F01: Ein Legacy-Heartbeat verwirft die nicht mehr zuordenbare
+  Abschluss-Tuple aus Ergebniszeit, Fehlerkategorie, Dauer, Summary, Run-ID und
+  Streak. Auch ein erster V2-Start nach einem Altstand bereinigt die Tuple. Ein
+  Endpoint-MySQL-Renderer-Test beweist `completed fail -> heartbeat` sowie
+  `completed warning -> heartbeat -> started -> fresh completed`; weder alter
+  Erfolg noch alte Zähler oder Verteilhinweise werden rekonstruiert.
+- M03-F02: Collection- und Application-Altinventar werden jeweils mit
+  `ErrorAction Stop` lokal abgegrenzt. Ein Lesefehler erzeugt genau einen
+  offenen Punkt je Produkt, erlaubt keine Cleanupentscheidung und lässt die
+  unabhängige Contentarbeit sowie weitere Pakete bis zum einen Abschluss
+  fortlaufen.
+- M03-F03: `package_content_failed` bleibt als grober bestehender Wirecode
+  erhalten. Producer-/Presenter-Gegenproben unterscheiden fehlende DP-Gruppe,
+  tatsächlich gemeldeten DP-Fehler und unbekannte Projektion, ohne aus dem
+  groben Code eine konkrete Ursache zu erfinden; DE/EN und Hilfe nennen das
+  Tageslog als Detailquelle.
+- M03-F04: Nur strikt ältere, numerisch beweisbare Bestände werden als
+  Altobjekte eingeordnet. Numerisch gleiche oder höhere sowie nichtnumerische
+  Versionen bleiben bei gesperrter/unklarer Auswahl unklassifiziert; beide
+  Quellreihenfolgen sind geprüft.
+
+Der getrennte Sol-High-Vertragsreview fand nach Schließen der beiden
+Testnachweislücken keine weitere Produktregression. Machine-Wire und technische
+Statuswerte blieben unverändert. Geänderte Owner umfassen
+`lib/repo/heartbeats.php`, `lib/system_status_mecm_panels.php`, die DE/EN-
+Systemstatus- und Hilfekataloge, `mecm_autoimporter.ps1`,
+`VirtuSphere-Common.ps1`, PHP-/PowerShell-Gegenproben sowie MECM-README,
+Integration und Troubleshooting. PHP-Unit, Sprachparität, Dokumentgates und der
+vollständige PowerShell-Gate sind grün.
+
+Offen und nicht als lokal bewiesen: M03-Q01 braucht im MECM-Labor eine
+DP-Kopie, die tatsächlich an ihre Content-ID gebunden werden kann; Q02 braucht
+die vollständige angeforderte Zielmenge vor der ersten Bindung; Q03 braucht die
+Produktentscheidung und Mehrscan-/Performanceprobe für reine MECM-/DP-
+Änderungen ohne Dateistamp. Kein automatischer Retry und keine behauptete
+Gesamtverteilung wurden daraus abgeleitet.
+
+### Q01: gemeinsame Ausgangsregression
+
+Status: **lokal abgeschlossen auf dem festgehaltenen M01/M03-Stand**. Fast
+bestand 31/31 Gates ohne Fail, Infrastrukturfehler oder Skip
+(`20260912-q01-fast.json`). Die vollständige Integration bestand zunächst
+38/39 Gates; 266 Browserfälle waren grün und ein Geometriestest zählte die neu
+beauftragte separate Autoimporter-Verteilachse fälschlich als siebte Spalte der
+sechs Spalten umfassenden Lauf-Faktenliste. Der Test wurde auf die direkte primäre
+`.status-facts`-Liste jeder Karte begrenzt; Produktdarstellung und CSS blieben
+unverändert. Der kanonische e2e-Nachlauf bestand danach 267/267 Fälle und traf
+die reviewten Sollbaselines beider Themes bei Nulltoleranz
+(`20260912-q01-e2e-rerun.json`, Visualartefakt
+`qa-artifacts/visual-baselines-20260912-141709`).
+
+Die übrigen 38 Integrationgates des vollständigen Laufs sind durch
+`20260912-q01-integration.json` gebunden: vollständiges PHPUnit ohne Skips,
+Schema-Konvergenz, Health-/Isolation, Visualvertrag und Guard-Harness mit
+110/110 bewiesenen Grün-/Negativ-/Zero-Match-Fällen. Die durch den Testselector
+geänderte Browserdatei betrifft keinen dieser 38 Belege. Der vorherige durch
+den PC-Neustart abgebrochene Lauf besitzt bewusst kein End-JSON und wird nicht
+gezählt. Nächster Schritt: den synthetischen QA-Stack geordnet entfernen und
+P01 ohne konkurrierende Quelländerung oder Laufzeitprüfung exklusiv ausführen.
+
+### P01: U13-Performanceabnahme
+
+Status: **U13 lokal abgeschlossen; AP09-Restumfang und spätere betroffene
+Nachmessungen bleiben offen**. Der autoritative isolierte Lauf
+`p01-u13-20260912-final14` endete nach 63/63 Einheiten mit Exitcode 0. Er nutzte
+denselben korrigierten und gehashten Harness für die gesicherten Before-/After-
+Quellen, identische Datenbanksnapshots je Profil und getrennte, portlose
+Compose-Projekte. Als zulässiger Produktdiff waren ausschließlich
+`lib/repo/vms_legacy.php` und `portal/deploy_blockers.php` vorhanden. Vollständige
+Relationsprojektionen, die verifizierte authentisierte Zielseite und die
+tatsächlichen VM-Zeilen waren für S, T und L fachlich gleich.
+
+Die qualifizierte Queryanzahl sank bei S von 31 auf 4, bei T von 121 auf 4 und
+bei L von 3001 auf 7. Über je drei warme Wiederholungen betrug der Median der
+VM-p95-Werte S 191,99 ms vor und 187,92 ms nach der Änderung, T 296,86 ms und
+182,96 ms sowie L 4969,29 ms und 364,88 ms. Bei L verletzten alle drei
+Before-Warmreihen das unveränderte Gate; alle drei After-Reihen bestanden. Die
+L-Reihen lieferten insgesamt 336 akzeptierte VM-Samples und 103 Drops vor der
+Änderung gegenüber 1448 Samples und null Drops danach. Alle zwölf getrennten
+Same-/Independent-Sessionfälle bestanden. Die L-Kaltmessung des Zielendpunkts
+lag bei 2346,18 ms vor und 442,23 ms nach der Änderung.
+
+Manifest, Rohsummaries, Querybelege, DB-Snapshots, Projektionen,
+Klassifikationen und Livefortschritt liegen unter
+`qa-artifacts/consolidated-session-backlog/p01-u13-20260912-final14/`; die
+bewertete Zusammenfassung steht in `20260912-p01-u13-performance.md` im selben
+Artefaktstamm. Eine kontrollierte Suche fand keine ausgeschriebenen
+Authorization-, Cookie-, Session-, Passwort- oder CSRF-Werte. Nach dem Cleanup
+liefen nur die fünf unveränderten Entwicklungsservices, alle gesund; keine
+Messcontainer blieben zurück. Host-RAM und selektiver Page-Cache wurden mangels
+stabiler, nichtdestruktiver Docker-Desktop-Grenze bewusst nicht behauptet.
+
+Noch offen innerhalb P01 sind große Joblogs/DOM/Hidden-Tab-Verhalten,
+repräsentative Ressourcenmessung und externer Durchsatz sowie die gezielten
+Nachmessungen nach tatsächlich betroffenen O-Paketen. Diese Grenzen mindern
+nicht den lokal abgeschlossenen U13-Vorher-/Nachhervergleich.
+
+### O01: Datenbank-Rootsecret auf den Datenbankowner begrenzt
+
+Status: **lokal abgeschlossen**. PHP-FPM, Deploy-Worker und
+Maintenance-Worker erhalten in Compose nur noch ihre explizit erlaubten
+Appvariablen; weder das Rootsecret noch eine vollständige Runtime-Dotenv-Datei
+werden an diese Dienste übergeben. EnvBoot importiert
+`MYSQL_ROOT_PASSWORD` auch aus einer lesbaren Dotenv-Datei nicht und verlangt
+es nicht als App-Laufzeitvoraussetzung. Der MySQL-Owner prüft dagegen Root- und
+App-DB-Passwort vor seinem Upstream-Entrypoint. Weil das gepinnte Upstream-Image
+kein geerbtes `Config.Cmd` veröffentlicht, setzt das Kindimage den Serverstart
+ausdrücklich auf `mysqld`; der erste QA-Start hat diese fehlende Startangabe
+korrekt als Infrastrukturfehler sichtbar gemacht und der Nachlauf beweist die
+Korrektur.
+
+Der reale QA-Negativnachweis las ausschließlich Variablennamen und
+Mountzielpfade: MySQL besaß beide Bootstrapvariablen; PHP und beide Worker
+meldeten jeweils `root-absent` und `dotenv-absent`. Compose-Härtung enthält eine
+Gegenprobe, die ein Rootsecret im PHP-Dienst rot macht. Der gezielte Endlauf
+`20260912-o01-integration-rerun.json` bestand 13/13 Gates, darunter Unit/Static
+ohne Skips, vollständiges PHPUnit ohne Skips, Migrationen, Schema-Konvergenz,
+Health und beide Dokumentgates. Der im ersten Lauf zuletzt ausgeführte
+Guard-Harness bestand 111/111 Fälle; PowerShell bestand 708/708 plus das
+separate Härtungsregister. Bewertete Details und Aussagegrenzen stehen in
+`qa-artifacts/consolidated-session-backlog/20260912-o01-x01-report.md`.
+
+### X01: Update- und Recoveryvertrag
+
+Status: **Matrix, Upgradefolge und Migrationsklassifikation lokal
+abgeschlossen; Unterbrechungs- und Altstandabnahme teilweise offen**. Das neue
+Runbook `docs/operations/upgrade-recovery.md` bindet Quellen, Schema, Images,
+Worker, PowerShell-/Ansiblepakete, Konfiguration, Assets und Liefermanifest an
+eine gemeinsame Releaseidentität. Es definiert zulässige konsistente Stände,
+verbietet Mischbetrieb, ordnet aktive Claims und veraltete Browserabsichten ein
+und klassifiziert jede Migration des geprüften Stands statt ein pauschales
+Downgrade zu versprechen.
+
+Der kanonische aktuelle Restore-Drill bestand 1/1 in 53,2 Sekunden
+(`20260912-x01-restore-drill.json`): Manifest, Restore, Migration/Schema,
+Invarianten, APP_KEY-Bindung und App-Smoke waren grün. Noch nicht geschlossen
+sind die gezielten Unterbrechungsproben für Runtime-/Workerwechsel und
+Assetauslieferung sowie ein älterer konsistenter Release-Stand mit noch
+geöffneter neuerer Browserseite. Echte Standort-AD-Neufreigabe bleibt wie zuvor
+ein externer Laborpunkt. Diese Restpunkte gehen an B02/Q02; der aktuelle
+Restore-Drill wird nicht als Altstand- oder Browsernachweis umetikettiert.
+
+### O02: Begrenzte Container- und nginx-Protokolle
+
+Status: **lokal abgeschlossen**. Alle sechs langfristigen Compose-Dienste
+verwenden dieselbe `json-file`-Policy mit `max-size=10m` und `max-file=5`.
+Sowohl der festen HTTP-Konfiguration als auch dem vom Portal erzeugten
+HTTPS-Block schreibt nginx Access-/Error-Ausgaben nach stdout/stderr; der
+unrotierte Host- und QA-Mount `/var/log/nginx` ist entfernt. Diagnose erfolgt
+über `docker compose logs`, während die getrennten persistenten PHP-Dateien
+unter `Docker/WebAPI/logs` ihren bisherigen Owner behalten.
+
+Die reale Docker-Probe schrieb 65 MB synthetische Ausgabe. Danach bestanden
+genau fünf Dateien mit zusammen 44.888.821 Byte. Nach Neustart und weiteren
+65 MB bestanden weiterhin genau fünf Dateien mit zusammen 49.777.380 Byte;
+`docker logs --tail 1` lieferte den jüngsten Abschlussmarker. Eine zweite
+isolierte Probe belegte ein 4-KiB-`/var/log/nginx`-tmpfs vollständig, bestätigte
+den fehlgeschlagenen Zusatzwrite und erhielt trotzdem einen laufenden nginx mit
+`/nginx-health = ok`. Der erste Aufbau dieser Probe war wegen des fehlenden
+isolierten DNS-Alias `php` rot und wurde mit einer Wegwerf-TCP-Gegenstelle
+korrigiert; er war kein Logpfad-Produktfehler. Sämtliche Probecontainer und das
+Wegwerfnetz wurden entfernt.
+
+### O03: MySQL-Binlogpolitik
+
+Status: **lokal abgeschlossen**. ADR-0017 sagt logische, zeitstempelgebundene
+Backuptripel zu und schließt Point-in-Time-Recovery aus; weder Replikation noch
+ein anderer Binlogverbraucher existiert. MySQL startet deshalb explizit mit
+`mysqld --skip-log-bin`. Vor der Änderung meldete der unveränderte
+Entwicklungscontainer `@@log_bin = 1`; der isolierte QA-Stand meldete danach
+`@@log_bin = 0`. Die Einstellung löscht keine historischen Binlogdateien und
+erteilt ausdrücklich keine Erlaubnis zur direkten Dateilöschung.
+
+Gemeinsame Endbelege: `20260912-o02-o03-focused.json` bestand 8/8 Gates,
+`20260912-o02-o03-integration.json` 7/7 einschließlich vollständigem PHPUnit,
+Schema, Health und Restore-Drill, und `20260912-o02-o03-contracts.json` 2/2 mit
+708/708 Pester-Tests sowie 113/113 bewiesenen Guardfällen. Die neuen
+`logging-bound-drift`- und `mysql-binlog-drift`-Fälle sind darin ausdrücklich
+bewiesen. Rohwerte, Grenzen und Quellowner fasst
+`qa-artifacts/consolidated-session-backlog/20260912-o02-o03-report.md`
+zusammen.
+
+### O04: Gemeinsames PHP-Runtimeimage und getrennte Werkzeuge
+
+Status: **O04a/O04b lokal abgeschlossen; O04c implementiert, finaler
+Release-Archivnachweis offen**. `php`, `deploy-worker` und
+`maintenance-worker` verwenden dasselbe schlanke, mehrstufig gebaute
+Runtimeimage; nur der PHP-Dienst besitzt den Compose-Buildblock. Composer,
+Git, Compiler, ZIP-Werkzeuge und PHP-Header liegen ausschließlich im
+separaten Tooling-Target. Das gemessene Runtimeimage ist gegenüber dem
+vorherigen PHP-Image um 58.111.755 Byte beziehungsweise rund 10,2 % kleiner.
+
+Der Offline-Builder trennt Kernimages und optionale Werkzeugimages in eigene
+Manifeste, Prüfsummen und Installationspfade. phpMyAdmin wird dadurch weder
+mit dem Kern installiert noch gestartet und kann später gezielt ergänzt
+werden. Der reale `--release`-Archivlauf bleibt bis zu einem autorisierten,
+sauberen Commitstand offen, weil der Release-Guard einen schmutzigen oder
+uncommitteten Baum vertragsgemäß abweist.
+
+Die fokussierten, Integrations-, Restore- und Einzelbuild-Nachweise sowie
+Messwerte und Grenzen stehen in
+`qa-artifacts/consolidated-session-backlog/20260912-o04-x01-report.md`.
+
+### X01: Gezielte Unterbrechungsproben
+
+Status: **lokale Web-/Runtime-/Worker-Proben abgeschlossen; externe
+Release-, Browser- und AD/Labor-Nachweise offen**. Im exakten synthetischen
+`virtusphere-qa`-Stack wurden nginx, PHP-FPM und beide Worker gezielt
+unterbrochen und wiederhergestellt. Der Assetinhalt blieb über den
+Webserver-Neustart bytegleich, `/nginx-health` blieb beim PHP-Ausfall
+erreichbar, Portalzugriffe scheiterten geschlossen und erholten sich danach,
+und ein Worker-Ausfall beeinträchtigte die Portalantwort nicht. Beide Worker
+kehrten gesund zurück und teilten weiterhin exakt das PHP-Runtimeimage.
+
+Die Probe erzeugte keine externen Jobs; Stack und Volumes wurden anschließend
+entfernt. Die noch offenen externen X01-Anteile benötigen die im
+konsolidierten Backlog benannten realen Zielsysteme beziehungsweise die
+persönliche Freigabe-/Browserdurchführung.
+
+### O05: Assetkompression, Cachepolitik und Invalidierung
+
+Status: **lokal abgeschlossen**. `layout_asset_url()` leitet die Version aus
+dem vollständigen SHA-256-Inhalt ab; eine fokussierte Gegenprobe änderte die
+Bytes bei identischem mtime und erhielt eine andere Version. nginx besitzt
+eine gemeinsame gzip-Konfiguration und getrennte Assetlocations im festen
+HTTP- sowie generierten HTTPS-Block. Nur eine vollständige Digestversion wird
+langfristig als `immutable` ausgeliefert. Unversionierte und fehlende Assets
+tragen `no-cache`, fehlende Pfade antworten direkt mit 404, dynamische
+Portalantworten behalten ihre eigene kurzlebige Sessioncachepolitik.
+
+Beide Protokolle wurden im exakten synthetischen `virtusphere-qa`-Stack real
+abgerufen; der HTTPS-Block stammte dabei aus dem produktiven Generator und die
+TLS-Dateien aus den eingecheckten QA-Fixtures. Der erste Stackaufbau fand einen
+ungequoteten nginx-Regex mit `{64}` und scheiterte sichtbar; nach der Korrektur
+bestanden `nginx -t`, HTTP und HTTPS. Der vollständige Nachweis einschließlich
+Fehlerlauf und Cleanup steht in
+`qa-artifacts/consolidated-session-backlog/20260912-o05-report.md`.
+
+### O06: Seitenspezifische Portalassets
+
+Status: **lokal abgeschlossen**. Die 18 gerenderten Portalseiten sind in
+`VIRTUSPHERE_LAYOUT_PAGES` geschlossen klassifiziert. Stylesheet- und
+Skriptregistry wählen daraus eine Teilfolge der einen bestehenden Reihenfolge;
+eine unbekannte Seite bricht ab. `core.js`, Themes und gemeinsame Shellregeln
+bleiben überall. Tabellen-, Status- und Funktionsmodule laden nur auf ihren
+tatsächlichen Verbrauchern. Die gemeinsam genutzten `.status-facts`- und
+`.technical-details`-Regeln begründen, warum `status.css` sowohl auf
+Systemstatus als auch im Auftragsprotokoll bleibt.
+
+Der frühere globale Satz umfasste 16 CSS-/JS-Dateien mit 183.225 Rohbytes.
+Login, Account und Missionsdetails laden jetzt sieben Dateien mit 90.922
+Rohbytes; Deploy zwölf mit 125.334, Deploy-Log zehn mit 133.369 und der
+VM-Editor zehn mit 117.528. Das sind Quellgrößen vor HTTP-Kompression, keine
+behaupteten Ladezeitwerte. Die vollständige Chromium-Aktions-/Seitenmatrix,
+Health und die reviewten Light-/Dark-Sollbilder bestanden im exakten
+synthetischen QA-Stack. Details stehen in
+`qa-artifacts/consolidated-session-backlog/20260912-o06-report.md`.
+
+### O07: Begrenzte Keysetnavigation für Auditlogs
+
+Status: **lokal abgeschlossen**. Ein vor der Messung fixierter Plan verglich im
+exakten synthetischen QA-Stack OFFSET- und Keysetzugriffe auf 100.000
+Auditzeilen. Das Latenzkriterium löste nicht aus, das strukturelle Kriterium
+aber eindeutig: Der exakte Kategoriefilter las für 50 Ergebnisse mit OFFSET
+5.000 passende Zeilen, der Kandidat mit `(category, id)` nur 51. Migration 0054
+und Frischschema besitzen deshalb dieselbe Indexform.
+
+Die Portalliste verwendet nun ausschließlich begrenzte `before`-/`after`-
+Fenster in globaler `id DESC`-Ordnung. Gleichzeitige Inserts, Filterwechsel,
+ungültige oder durch Retention veraltete Cursor sowie der unabhängige
+CSV-Snapshot sind ausdrücklich abgedeckt. Fast-, vollständige Integrations-
+und echte Chromium-Prüfungen bestanden einschließlich unveränderter
+Light-/Dark-Baselines. Messung, Grenzen und Artefakte stehen in
+`qa-artifacts/consolidated-session-backlog/20260913-o07-report.md`.
+
+### O08: PHPUnit-Lane bewusst unverändert
+
+Status: **lokal entschieden: beibehalten**. Der vor der Auswertung gesicherte
+Messplan verglich die JUnit-Identitäten statt nur Dateinamen oder Summen. Jeder
+Unit-/Static-Fall erschien im ungefilterten Vollrun exakt einmal; daneben stand
+die Integration-Suite, ohne fehlende, doppelte oder unzuordenbare Identität.
+Auch die Assertionszahl jedes überlappenden Falls war gleich. Der Anteil der
+wiederholten Fälle blieb mit 78,8 Prozent jedoch unter dem vorher festgelegten
+Änderungskriterium von 80 Prozent. Diese Grenze wurde nach dem knappen Ergebnis
+nicht verschoben.
+
+Der Runner, seine Gate-IDs und Artefakte bleiben daher unverändert;
+`phpunit-full` bedeutet auch beim Einzelaufruf weiterhin die vollständige
+Suite. Es gibt kein Sharding der gemeinsam mutierten QA-Datenbank und keinen
+neuen persistenten Cache für Umgebung, Sitzungen, Zugangsdaten, Datenbankstand
+oder Testergebnisse. Messplan, Rohzahlen, Umgebungsvergleich und künftiger
+Trigger stehen in
+`qa-artifacts/consolidated-session-backlog/20260913-o08-report.md`.
+
+### UX02: Statuskarten ohne Textüberlauf
+
+Status: **Produktkorrektur lokal abgeschlossen; persönliche Sollbildfreigabe
+offen**. Die Übersicht stapelt Titel und Status innerhalb derselben anklickbaren
+Karte. Nur ihr lokales Badge darf an Wörtern und als letzter Ausweg innerhalb
+eines langen Einzelwerts umbrechen; der globale Badgevertrag, Zustandsowner,
+Berechtigungen und Sprungziele bleiben unverändert. Der veraltete Fünf-Karten-
+Kommentar nennt nun sechs feste und eine optionale Karte.
+
+Unit/Static und PHPStan bestanden. Die vollständige Chromium-Suite prüfte den
+Inhalt bei 320 bis 1600 Pixeln, bei 200 Prozent Textgröße, auf Überdeckung,
+gepolsterte Grenzen, horizontalen Überlauf, Fokus und tatsächliches Sprungziel;
+auch die bisherigen reviewten Sollbilder blieben bei Nulltoleranz grün. Der
+erweiterte visuelle Vertrag verlangt zusätzlich sechs isolierte
+Systemstatusbilder mit dem echten Text `Manuelle Klärung nötig`. Diese Bilder
+darf nur ein Mensch mit `scripts/update-visual-baselines.ps1` erzeugen und nach
+Diffprüfung annehmen. Bericht und Nachweise stehen in
+`qa-artifacts/consolidated-session-backlog/20260913-ux02-report.md`.
+
+### UX01: Bereitstellung vorbereiten – Kernkorrektur
+
+Status: **lokal vollständig umgesetzt und automatisiert geprüft; persönliche
+Bedienabnahme offen**. Ein gemeinsamer Vorbereitungskopf leitet Bereitschaft
+oder vollständige Zahl offener Voraussetzungen ausschließlich aus
+`deploy_queue_blockers()` ab und ergänzt normalisierten Modus sowie
+materialisierten VM-Umfang. Einzelgründe behalten Ordnung, Vollständigkeit,
+Bounds und berechtigte Abhilfen, wiederholen aber nicht mehr „Blocker:“.
+Warnungen bleiben getrennt. Nur der kurze Status ist live; Prüf- und
+unzuverlässiger Zustand sind ausdrücklich sichtbar.
+
+Ohne JavaScript bewertet `action=check` korrigierte Eingaben nach CSRF/RBAC im
+gleichen Render neu und erzeugt weder Vorschau, Auftrag, Audit noch Redirect.
+`action=start` bleibt der getrennte Queueweg mit sämtlichen Rechecks. Abhilfen
+werden nach CSRF aus dem aktuellen vollständigen Entscheidungsverbund und der
+Zielberechtigung neu bestimmt. Ein höchstens einstündiger, einmalig verbrauchter
+Sitzungsentwurf enthält nur erlaubte Queuefelder und keine Secrets oder
+CSRF-Token. Externe Abhilfe, Identity-Adopt und Preview-Abbruch erhalten die
+Eingaben; Rollen ohne Zielrecht sehen weiterhin den Grund, nicht die Aktion.
+
+Die vollständige Unit-/Static-Suite ohne Skips, PHPStan, Sprach-/Dokugates und
+alle 273 funktionalen Chromium-Fälle bestanden. Das kombinierte Browsergate
+endete danach ausschließlich am separat offenen UX02-Sollbildmanifest als
+`infrastructure_error`. Offen bleibt die beobachtete persönliche Bedienprobe.
+Details: `qa-artifacts/consolidated-session-backlog/20260913-ux01-report.md`.
+
+### UX03: Arbeitskontext und Rückkehr
+
+Status: **lokal vollständig umgesetzt und automatisiert geprüft**. Missionen
+und Vorlagen tragen ausschließlich sechs geschlossene, normalisierte
+Darstellungsfelder in ihren URLs durch Details, VM-Liste und VM-Editor. Es gibt
+keinen globalen oder sitzungsweiten Rücksprungwert, keine freie Ziel-URL und
+keine Übernahme von Formular-, Secret-, Auswahl- oder CSRF-Daten. Direkte,
+alte oder manipulierte Links fallen auf den normalen berechtigten Elterneinstieg
+zurück; Identität, Recht und Objektbestand werden am Ziel erneut geprüft.
+
+Erfolgreiches Speichern führt zur erhaltenen VM-Liste und zur stabilen
+`#vm-<id>`-Zeile, der Detailrückweg entsprechend zu `#mission-<id>`. Native
+Fragmente bleiben der No-JS-Rückweg; `core.js` ergänzt beim ersten Rendern den
+Tastaturfokus auch für nicht interaktive Tabellenzeilen. Der VM-Editor benennt
+die wirkliche Missionsbeziehung sichtbar. Nebenbei wurde der kanonische
+VM-Editor-Helper auf den tatsächlich gelesenen Parameter `vm_id` korrigiert.
+
+Unit/Static ohne Skips bestanden mit 1761 Tests; PHPStan, PHP-Lint,
+JavaScript-Syntax, Sprachparität sowie beide Dokumentgates waren grün. Die neue
+Browser-Spezifikation bestand gezielt 4/4 Fälle. Der anschließende kanonische
+Gesamtlauf ließ alle funktionalen Chromiumfälle passieren und erreichte den
+nachgelagerten Visual-Harness; dort endete er ausschließlich als
+`infrastructure_error`, weil der UX02-Vertrag 18 Sollbilder fordert, das
+persönlich reviewte Manifest aber weiterhin 12 enthält. Die sechs fehlenden
+Systemstatusbilder bleiben UX02 zugeordnet. Entwurf, Gegenfälle und
+Nachweisgrenzen: `qa-artifacts/consolidated-session-backlog/20260913-ux03-report.md`.
+
+### UX04: Ungespeicherte Änderungen schützen
+
+Status: **für Missionseinstellungen und VM-Editor lokal vollständig umgesetzt
+und automatisiert geprüft**. Beide Editoren vergleichen sichtbare benannte
+Formwerte mit einem bestätigten, nur im Dokument gehaltenen Ausgangszustand.
+Exakte Rücknahme und dynamische Zeilen werden erkannt. Hidden-/Buttonwerte sind
+ausgeschlossen; Passwort-/Dateifelder liefern nur leer/geändert. Es gibt keinen
+Formsnapshot in URL, PHP-Sitzung oder Browserstorage.
+
+Interne Navigation nutzt per DOM-Handshake den einzigen gemeinsamen Dialog;
+Reload, Browser-Zurück und Schließen den nativen `beforeunload`-Schutz. Ein
+Abbruch behält Wert und Fokus. Ein Fehler-Rerender bleibt dirty, bis ein
+read-only GET denselben Editor als bestätigte Basis liefert; Unsicherheit wird
+nicht als gespeichert beschönigt. Der generische Missions-Konfliktweg bewahrt
+dazu jetzt ebenfalls seine zulässigen Updatewerte im vorhandenen PRG-Formstate.
+Ohne JavaScript funktionieren Formulare und Links weiter, während die versteckte
+Statuszeile keine Erkennung behauptet.
+
+Der gezielte Chromiumlauf bestand 5/5 Fälle. Der Fast-Abschluss bestand 6/6
+Gates einschließlich 1.768 Unit-/Static-Tests ohne Skip. Die kanonische isolierte
+Browserabnahme ließ alle funktionalen Fälle bis zum Visual-Harness passieren und
+endete ausschließlich an der bekannten UX02-Infrastrukturlücke: sechs persönlich
+zu reviewende Systemstatusbaselines fehlen weiterhin. Der QA-Stack und seine
+Volumes wurden anschließend vollständig entfernt. Details:
+`qa-artifacts/consolidated-session-backlog/20260913-ux04-report.md`.
+
+### UX05: Wirksame Werte und Herkunft anzeigen
+
+Status: **für den VM-Editor lokal vollständig umgesetzt und automatisiert
+geprüft**. Datastore, Datacenter, Autostart sowie Start- und Stoppverzögerung
+werden durch die bestehenden Ansible- und Repository-Owner entschieden. Der
+gemeinsame Presenter zeigt wirksamen Sollwert, Herkunft und eine vorhandene
+VM-Überschreibung, behauptet aber keinen beobachteten ESXi-Istwert und führt
+keine zweite Vererbungskette ein.
+
+Leere Werte, die ausdrückliche Verzögerung `0`, fehlende Quellen und ein noch
+nicht über den Zielhost auflösbares Datacenter bleiben getrennt. Das
+Missionsautostarttor kann die Wirkung auf Nein setzen, ohne den erhaltenen
+VM-Wunsch zu verschweigen. Zulässiges Zurücksetzen leert nur die Formulareingabe,
+setzt den Fokus zurück und löst den UX04-Änderungszustand aus; gespeichert wird
+erst über den unveränderten serverseitigen Schreibweg. Ohne JavaScript bleibt
+die serverseitige Herkunft sichtbar, während keine inerte Rücksetzaktion
+angeboten wird. Gleiches gilt für eine Presenter-Verwendung ohne Schreibrecht.
+
+Der gezielte Chromiumlauf bestand 5/5 Fälle. Die finale Fast-Lane bestand 6/6
+Gates mit vollständiger Unit-/Static-Suite ohne Skip, PHPStan, Sprach-/Dokugates
+und JavaScript-Syntax. Die kanonische isolierte Browserabnahme ließ die
+funktionalen Fälle bis zum Visual-Harness passieren und endete ausschließlich
+an der bekannten UX02-Infrastrukturlücke: Das Manifest enthält 12 statt 18
+persönlich reviewter Bilder. Der QA-Stack und seine Volumes waren danach
+vollständig entfernt. Details:
+`qa-artifacts/consolidated-session-backlog/20260913-ux05-report.md`.
+
+### UX06: Aktionsfolgen und nächste Schritte erklären
+
+Status: **für Deploy-Queue/Abbruch/Retry und VM-Sammelaktionen lokal vollständig
+umgesetzt und automatisiert geprüft**. Einreihen und Terminieren nennen die
+konkrete Job-ID beziehungsweise den exakten Staffelscope und ausdrücklich nur
+den gespeicherten Queuezustand. Abbruch behauptet keinen Rollback bereits
+eingetretener Remoteeffekte; Retry nennt den neuen Auftrag. Strukturierte
+Folgelinks führen über die vorhandenen URL-Owner zum exakten Joblog oder zur
+gefilterten Liste.
+
+VM-Sammelergebnisse nennen bearbeitete und ausgewählte VMs. Jeder geschlossene
+Skipgrund macht die Meldung zur Warnung. Portal-Löschen, Hypervisorwirkung,
+vorbereiteter MECM-Reset, Altgerätelöschung und bestätigter Device-Sync bleiben
+verschiedene Aussagen; der Reset führt zum lesenden MECM-Status. Die längere
+Erklärung besitzt einen registrierten Hilfeanker. Ohne JavaScript bleiben
+Ergebnis und Folgelink vollständig.
+
+Fast bestand 6/6 Gates, der gezielte Chromiumlauf 18/18 Fälle. Die kanonische
+isolierte Browserabnahme ließ die funktionale Gesamtsuite bis zum Visual-Harness
+passieren und endete ausschließlich an der bekannten UX02-Infrastrukturlücke:
+12 statt 18 persönlich reviewter Bilder. QA-Stack und Volumes wurden danach
+vollständig entfernt. Details:
+`qa-artifacts/consolidated-session-backlog/20260913-ux06-report.md`.
+
+### F04: Sichtbare Werte kopieren
+
+Status: **lokal vollständig umgesetzt und automatisiert geprüft**. Der neue
+gemeinsame `lib/copy_control.php`-Renderer erweitert den vorhandenen
+Korrelations-ID-Mechanismus ohne zweiten Clipboardpfad. VM-Liste und VM-Editor
+besitzen Kopieraktionen für VM-Name und gewünschten Windows-Hostnamen. Ein
+abweichender aktiver Rolloutname bleibt eine getrennt beschriftete sichtbare
+Identität. Die Deploy-Detailansicht bezeichnet und kopiert die Auftrags-ID.
+
+IP und MAC werden im VM-Editor jeweils mit ihrer Netzwerkkartenposition
+benannt. Formularaktionen speichern keinen zweiten Wert im DOM, sondern lesen
+beim Klick den aktuellen Control-Wert. Leere Werte und durch DHCP deaktivierte
+konfigurierte IP-Adressen zeigen keine Aktion. Die Schaltflächen sind
+`type="button"`, bleiben fokussiert und melden Erfolg erst nach erfüllter
+Clipboard-Promise. Fehlende API, synchroner Fehler und Promise-Ablehnung zeigen
+den lokalisierten manuellen Fallback; der Wert bleibt auswählbar. Hilfeowner ist
+einmalig `help-copying-values` in der Übersicht.
+
+Die Unit-/Static-Suite bestand 1.787 Tests mit 41.543 Assertions ohne Skip. Der
+finale F04-Lauf bestand 7/7 Gates einschließlich PHP-Lint, PHPStan,
+Sprachparität, beiden Dokumentgates und JavaScript-Syntax. Der
+vollständige funktionale Chromiumlauf endete laut Playwright-Endstatus grün;
+das kombinierte Gate klassifizierte anschließend ausschließlich den bekannten
+UX02-Manifeststand mit 12 statt 18 Baselines als `infrastructure_error`. Der
+exakte QA-Stack und seine Volumes wurden danach entfernt. Details und
+Quellmanifest:
+`qa-artifacts/consolidated-session-backlog/20260913-f04-report.md`.
+
+### PC01 bis PC04: Powercycle pro VM
+
+Status 14.09.2026: **PC01 und PC02 lokal umgesetzt und offline nachgewiesen;
+PC03 und PC04 offen.** Der kanonische Powercycle-Ablauf bestand 14/14 Fälle,
+darunter 15 vollständige sequenzielle Zyklen und eine real gemessene
+5-Sekunden-Pause. UUID-/Zustandswachen, eigenes Cleanup, externe Einschaltung,
+Fehlerabbruch vor der nächsten VM sowie Upload-, Identitäts-, Hygiene- und
+Fortschrittsverträge sind lokal belegt.
+
+Die vollständige Fast-Bestandsaufnahme deckte alle 31 registrierten Gates ab:
+26 pass, 5 fail, keine Infrastrukturfehler und keine Skips. Direkter PC03-Befund
+ist der statische PHP-Vertragsspiegel, der `loop_control.loop_var` nicht als
+lokale Bereitstellung von `powercycle_vm` erkennt. Zusätzlich fehlt ein eigener
+Offline-Gegenfall mit vorhandenem, aber abweichendem `hw_name`; der bisherige
+Fall entfernt das Feld nur.
+
+Die übrigen roten Befunde werden nicht dem Powercycle-Ablauf zugeschlagen:
+Deploy-Fassadenspiegel, Deploy-Log-PHPStan, README-/E2E-/PHPStan-Lücken des
+Ansible-Volltestintervalls, sechs Dateigrößenbudgets, CSP-SQL-Blocker sowie die
+sechs weiterhin persönlich zu reviewenden UX02-Systemstatusbaselines behalten
+ihre jeweiligen Owner. Nächster Einstieg ist PC03, danach gezielte Gate-Nachläufe,
+Bereinigung dieser unabhängigen Blocker und vollständiges Fast auf neuem
+Quellenmanifest. Integration/Release bleiben Q02; die reale Ein/Pause/Aus-Folge
+mit Teilfehlern und den dokumentierten Grenzen bleibt L03.
+
+Belege: `docs/audits/2026-09-14-powercycle-sequential-plan.md`,
+`qa-artifacts/powercycle-sequential/sol-medium/report.md`, `result.json` und
+`source-manifest.json`. Zum QA-Abschluss stimmten 37/37 Hashes; die spätere
+Planfortschreibung ist eine dokumentierte Nachführung und keine rückwirkende
+Änderung dieses historischen Produktnachweises. Kein Commit, Push, Deployment
+oder Standortlauf ist daraus abgeleitet.
+
+Die reine Planintegration bestand anschließend 2/2 Dokumentgates über den
+kanonischen Runner; Beleg:
+`qa-artifacts/consolidated-session-backlog/20260914-powercycle-plan-integration-rerun.json`.
+Der erste Sandboxlauf ist wegen des bekannten `sh.exe`-/`ntdll.dll`-Hostabbruchs
+separat erhalten. Beim sauberen Halt liefen keine Subagenten und keine Container
+des Projekts `virtusphere-qa`.

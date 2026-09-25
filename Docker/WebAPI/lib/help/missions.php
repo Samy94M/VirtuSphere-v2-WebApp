@@ -14,6 +14,21 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.edit_conflict_p1')); ?></p>
         </section>
 
+        <section class="panel" id="help-work-context">
+            <h2><?php echo h(__t('help_missions.work_context_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.work_context_p1')); ?></p>
+            <p><?php echo h(__t('help_missions.work_context_p2')); ?></p>
+            <p><?php echo h(__t('help_missions.work_context_p3')); ?></p>
+            <p><?php echo h(__t('help_missions.unsaved_p1')); ?></p>
+        </section>
+
+        <section class="panel" id="help-effective-values">
+            <h2><?php echo h(__t('help_missions.effective_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.effective_p1')); ?></p>
+            <p><?php echo h(__t('help_missions.effective_p2')); ?></p>
+            <p><?php echo h(__t('help_missions.effective_p3')); ?></p>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_missions.naming_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.naming_p0')); ?></p>

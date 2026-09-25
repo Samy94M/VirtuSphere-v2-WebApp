@@ -73,6 +73,7 @@ SCHEMA_SQL="$CHECK_ROOT/Docker/mysql/mysql-init/struktur.sql"
 for required in \
   Docker/WebAPI/lib/migrate.php \
   Docker/WebAPI/lib/directory_restore_converge.php \
+  Docker/WebAPI/lib/package_report_restore_converge.php \
   Docker/WebAPI/tests/tools/restore-drill-probe.php
 do
   [ -f "$CHECK_ROOT/$required" ] \
@@ -81,7 +82,7 @@ done
 cd "$CHECK_ROOT"
 
 MYSQL_IMAGE="${VIRTUSPHERE_MYSQL_IMAGE:-mysql:8.4-virtusphere}"
-PHP_IMAGE="${VIRTUSPHERE_PHP_IMAGE:-virtusphere-v2-webapp-php}"
+PHP_IMAGE="${VIRTUSPHERE_PHP_IMAGE:-virtusphere-php:8.4-runtime}"
 SUFFIX="$(date +%s)-$$"
 RUN_LABEL="restore-drill-$SUFFIX"
 NET="vs-restore-net-$SUFFIX"
@@ -358,15 +359,15 @@ progress_run 6 migrations-and-schema
 # denselben Weg einmal mit dem gesicherten und einmal mit einem falschen
 # APP_KEY gehen kann. Verbunden wird als App-User aus der archivierten .env,
 # nie als root: genau so verbindet der Stack, und genau diese Faehigkeit hat
-# der Drill frueher nie bewiesen. MYSQL_ROOT_PASSWORD ist nur gesetzt, weil
-# EnvBoot seine Anwesenheit verlangt.
+# der Drill frueher nie bewiesen. Das Rootsecret bleibt beim MySQL-/Restoreowner
+# und wird der App-Runtime nicht mitgegeben.
 run_php() {
   _key="$1"; shift
   docker run --rm --network "$NET_ID" \
     --label com.docker.compose.project=virtusphere-qa --label "virtusphere.qa.probe=$RUN_LABEL" \
     -v "$REPO_MOUNT:/repo" \
     -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
-    -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
+    -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" \
     -e APP_KEY="$_key" "$PHP_IMAGE" php "$@"
 }
 
@@ -376,6 +377,14 @@ run_php "$APP_KEY" /repo/Docker/WebAPI/lib/migrate.php --check | grep -q 'pendin
   || fail "migrate --check meldet offene Migrationen nach dem Restore."
 run_php "$APP_KEY" /repo/Docker/WebAPI/lib/directory_restore_converge.php \
   || fail "AD-Restore-Konvergenz konnte die Verzeichnisanmeldung nicht sicher deaktivieren."
+generation_before=$(drill_sql "SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM \`$DB_NAME\`.deploy_package_report_state WHERE id = 1") \
+  || fail "Paketbericht-Annahmegeneration ist vor der Restore-Konvergenz nicht lesbar."
+run_php "$APP_KEY" /repo/Docker/WebAPI/lib/package_report_restore_converge.php \
+  || fail "Paketbericht-Restore-Konvergenz konnte die Annahmegeneration nicht rotieren."
+generation_after=$(drill_sql "SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM \`$DB_NAME\`.deploy_package_report_state WHERE id = 1") \
+  || fail "Paketbericht-Annahmegeneration ist nach der Restore-Konvergenz nicht lesbar."
+[ -n "$generation_before" ] && [ -n "$generation_after" ] && [ "$generation_before" != "$generation_after" ] \
+  || fail "Paketbericht-Annahmegeneration wurde beim Restore nicht nachweisbar rotiert."
 
 echo "Pruefe Schema-Konvergenz gegen struktur.sql ..."
 drill_sql "DROP DATABASE IF EXISTS vs_drill_fresh; CREATE DATABASE vs_drill_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null
@@ -440,7 +449,7 @@ SMOKE_ID=$(docker create --name "$SMOKE_NAME" --network "$NET_ID" \
   --label "virtusphere.qa.probe=$RUN_LABEL" \
   -v "$REPO_MOUNT:/repo" -w /repo/Docker/WebAPI \
   -e DB_HOST="$MYSQL_NAME" -e DB_PORT=3306 -e DB_NAME="$DB_NAME" \
-  -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" -e MYSQL_ROOT_PASSWORD="$PW" \
+  -e DB_USER="$APP_DB_USER" -e DB_PASS="$APP_DB_PASS" \
   -e APP_KEY="$APP_KEY" \
   "$PHP_IMAGE" php -S 0.0.0.0:$SMOKE_PORT -t /repo/Docker/WebAPI) \
   || fail "Smoke-Container konnte nicht erzeugt werden."

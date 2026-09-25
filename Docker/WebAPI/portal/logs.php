@@ -43,19 +43,25 @@ if ($usable && ($_GET['export'] ?? '') === 'csv') {
     logs_export_send_csv($connection, $filter, (int) $user['id']);
 }
 
-$page = max(1, request_int($_GET, 'page', 1));
+$cursor = log_cursor_from_query($_GET);
 $total = $usable ? repo_count_logs($connection, $filter) : 0;
 $exportBounds = log_filter_export_bounds($total);
-$totalPages = max(1, (int) ceil($total / LOGS_PER_PAGE));
-$page = min($page, $totalPages);
-$offset = ($page - 1) * LOGS_PER_PAGE;
-$rows = $usable ? repo_recent_logs($connection, $filter, LOGS_PER_PAGE, $offset) : [];
+$logPage = $usable && !$cursor['invalid']
+    ? repo_log_page($connection, $filter, LOGS_PER_PAGE, $cursor['before'], $cursor['after'])
+    : ['rows' => [], 'has_older' => false, 'has_newer' => false, 'stale' => $cursor['supplied']];
+$rows = $logPage['rows'];
+$cursorStale = $usable && ($cursor['invalid'] || $logPage['stale']);
+$newestUrl = log_filter_url($filter);
+$newerUrl = $rows !== [] && $logPage['has_newer']
+    ? log_filter_url($filter, ['after' => (int) $rows[0]['id']])
+    : null;
+$olderUrl = $rows !== [] && $logPage['has_older']
+    ? log_filter_url($filter, ['before' => (int) $rows[array_key_last($rows)]['id']])
+    : null;
 
-$pageUrl = static fn (int $targetPage): string => log_filter_url($filter, ['page' => $targetPage]);
-
-// Same filter set as $pageUrl, but no page: the export always starts at the
+// Same filter set as the table, but no cursor: the export always starts at the
 // newest matching row.
-$exportUrl = $rows !== [] ? log_filter_url($filter, ['export' => 'csv']) : null;
+$exportUrl = $usable && $total > 0 ? log_filter_url($filter, ['export' => 'csv']) : null;
 
 // Reset clears every filter and keeps only the tab. Switching tabs does the
 // same: a category, an event code or an object type belongs to the section it
@@ -118,20 +124,25 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                 // never obtained.
                 echo h(match (true) {
                     !$usable => __t('logs.empty_invalid'),
+                    $cursorStale => __t('logs.cursor_stale'),
                     log_filter_is_narrowed($filter) => __t('logs.empty_filtered'),
                     default => __t('logs.empty'),
                 });
             ?></td></tr><?php } ?>
             </tbody>
         </table></div>
-        <?php if ($totalPages > 1) { ?>
+        <?php if ($rows !== [] || $cursorStale) { ?>
         <nav class="pagination">
-            <?php if ($page > 1) { ?>
-                <a class="button button-secondary" href="<?php echo h($pageUrl($page - 1)); ?>">&laquo; <?php echo h(__t('logs.page_prev')); ?></a>
+            <?php if ($newerUrl !== null) { ?>
+                <a class="button button-secondary" href="<?php echo h($newerUrl); ?>">&laquo; <?php echo h(__t('logs.cursor_newer')); ?></a>
             <?php } ?>
-            <span class="pagination-info"><?php echo h(__t('logs.page_info', ['page' => $page, 'total' => $totalPages])); ?></span>
-            <?php if ($page < $totalPages) { ?>
-                <a class="button button-secondary" href="<?php echo h($pageUrl($page + 1)); ?>"><?php echo h(__t('logs.page_next')); ?> &raquo;</a>
+            <?php if ($cursorStale) { ?>
+                <a class="button button-secondary" href="<?php echo h($newestUrl); ?>"><?php echo h(__t('logs.cursor_newest')); ?></a>
+            <?php } elseif ($rows !== []) { ?>
+                <span class="pagination-info"><?php echo h(__t('logs.cursor_info')); ?></span>
+            <?php } ?>
+            <?php if ($olderUrl !== null) { ?>
+                <a class="button button-secondary" href="<?php echo h($olderUrl); ?>"><?php echo h(__t('logs.cursor_older')); ?> &raquo;</a>
             <?php } ?>
         </nav>
         <?php } ?>

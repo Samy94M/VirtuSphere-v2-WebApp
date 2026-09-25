@@ -72,6 +72,7 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         // appear in this job", the three above answer "what comes next".
         'repo_deploy_job_log_step_markers',
         'repo_deploy_job_log_search',
+        'repo_deploy_job_started_at',
         // Etappe 13R: the claim axis and the three reads the service snapshot
         // is composed from. They live in the deploy job repository because the
         // claim gate is a condition of the claim transaction itself, not a

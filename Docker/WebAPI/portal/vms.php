@@ -15,17 +15,31 @@ require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/vm_network_display.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
 require_once __DIR__ . '/../lib/mecm_rollout_display.php';
+require_once __DIR__ . '/../lib/copy_control.php';
+require_once __DIR__ . '/../lib/vms_page.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
+$workContext = portal_work_context($_GET);
 $missionId = request_int($_GET, 'mission_id');
 $mission = repo_get_mission($connection, $missionId);
 if ($mission === null) {
     flash_set('error', __t('portal.mission_not_found'));
-    redirect_to('missions.php?type=missions');
+    redirect_to(portal_work_context_mission_list_url($workContext));
 }
 $isTemplate = mission_name_is_template((string) $mission['mission_name']);
+if (!isset($workContext['work_list_type'])) {
+    $workContext = portal_work_context(array_merge($workContext, [
+        'work_list_type' => $isTemplate ? 'templates' : 'missions',
+    ]));
+}
+$requestedVmSort = request_string($_GET, 'sort', 'name');
+if (!in_array($requestedVmSort, ['name', 'hostname', 'os', 'cpu', 'ram', 'status'], true)) {
+    $requestedVmSort = 'name';
+}
+$requestedVmDir = request_string($_GET, 'dir', 'asc') === 'desc' ? 'desc' : 'asc';
+$workContext = portal_work_context_with_vm_list($workContext, $requestedVmSort, $requestedVmDir);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
@@ -35,10 +49,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         portal_forbid($connection, $user, 'vms.write');
     }
     $vmId = request_int($_POST, 'vm_id');
-    $redirectPath = 'vms.php?mission_id=' . $missionId;
+    $redirectPath = portal_work_context_vm_list_url($missionId, $workContext, $vmId > 0 ? $vmId : null);
     $returnTo = request_string($_POST, 'return_to');
-    if (preg_match('/^vm_edit\.php\?mission_id=' . preg_quote((string) $missionId, '/') . '&vm_id=' . preg_quote((string) $vmId, '/') . '$/', $returnTo) === 1) {
-        $redirectPath = $returnTo;
+    if ($returnTo === 'editor' && $vmId > 0) {
+        $redirectPath = vm_edit_url($missionId, $vmId, null, $workContext);
     }
 
     try {
@@ -122,7 +136,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'mission_id' => $missionId,
             ], (int) $user['id']);
             flash_set('success', __t('vms.flash_deleted'));
+            $redirectPath = portal_work_context_vm_list_url($missionId, $workContext);
         } elseif ($action === 'bulk_delete' || $action === 'bulk_reset_mecm_id') {
+            $redirectPath = portal_work_context_vm_list_url($missionId, $workContext);
             $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['vm_ids'] ?? [])), static fn (int $id): bool => $id > 0)));
             if ($ids === []) {
                 throw new ValidationException([], __t('vms.bulk_none_selected'));
@@ -158,15 +174,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($result['skipped'] as $skip) {
                 $skippedReasons[$skip['reason']] = ($skippedReasons[$skip['reason']] ?? 0) + 1;
             }
-            $message = __t('vms.bulk_done', ['done' => $done]);
+            $selected = count($ids);
+            $skipped = count($result['skipped']);
+            $message = __t(
+                $action === 'bulk_delete' ? 'vms.bulk_delete_done' : 'vms.bulk_reset_done',
+                ['done' => $done, 'selected' => $selected]
+            );
             if ($skippedReasons !== []) {
                 $parts = [];
                 foreach ($skippedReasons as $reason => $count) {
                     $parts[] = $count . ' ' . __t('vms.skip_' . $reason);
                 }
-                $message .= ' ' . __t('vms.bulk_skipped', ['count' => count($result['skipped'])]) . ' (' . implode(', ', $parts) . ')';
+                $message .= ' ' . __t('vms.bulk_skipped', ['count' => $skipped]) . ' (' . implode(', ', $parts) . ').';
             }
-            flash_set('success', $message);
+            $flashAction = $action === 'bulk_reset_mecm_id'
+                ? [
+                    'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM),
+                    'label' => __t('vms.bulk_open_mecm_status'),
+                ]
+                : null;
+            flash_set($skipped > 0 ? 'warning' : 'success', $message, '', $flashAction);
         }
     } catch (ValidationException $exception) {
         flash_set('error', portal_error_message($exception));
@@ -204,55 +231,11 @@ $canWrite = can('vms.write', $user);
     'ram' => portal_sort_number('vm_ram'),
     'status' => portal_sort_text('vm_status'),
 ], 'name');
+$workContext = portal_work_context_with_vm_list($workContext, $sort, $dir);
+$vmListUrl = portal_work_context_vm_list_url($missionId, $workContext);
 
-// The two per-VM location overrides, compact and only where one is set.
-$vmLocationOverride = static function (array $vm): string {
-    $parts = array_filter([
-        trim((string) ($vm['vm_datastore'] ?? '')),
-        trim((string) ($vm['vm_datacenter'] ?? '')),
-    ], static fn (string $value): bool => $value !== '');
-
-    return implode(' / ', $parts);
-};
-
-// CSV list export (A3): read-only GET download, streams and exits before layout.
-// The two override columns are always present here, unlike the table column
-// below: the export is where a collective answer to "which VM sits somewhere
-// else" belongs, and a column that appears only sometimes would make two
-// downloads of the same list disagree on their shape.
-if (($_GET['export'] ?? '') === 'csv') {
-    $header = [
-        __t('vms.th_vm_name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.csv_ram'),
-        __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
-        __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
-        __t('vms.csv_network_status'), __t('vms.csv_network_detail'),
-    ];
-    $csvRows = [];
-    foreach ($rows as $vm) {
-        $networkIssues = $networkIssuesByVm[(int) $vm['id']] ?? [];
-        $networkDetail = implode(';', array_map(static fn (array $issue): string => (string) $issue['code'] . ((string) $issue['vlan'] !== '' ? ':' . (string) $issue['vlan'] : ''), $networkIssues));
-        $csvRows[] = [
-            (string) ($vm['vm_name'] ?? ''),
-            (string) ($vm['vm_hostname'] ?? ''),
-            (string) ($vm['vm_os'] ?? ''),
-            (string) ($vm['vm_cpu'] ?? ''),
-            (string) ($vm['vm_ram'] ?? ''),
-            (string) ($vm['vm_status'] ?? ''),
-            (string) ($vm['vm_datastore'] ?? ''),
-            (string) ($vm['vm_datacenter'] ?? ''),
-            (string) ($vm['mecm_sync_state'] ?? ''),
-            (string) count($vm['interfaces'] ?? []),
-            (string) count($vm['disks'] ?? []),
-            (string) count($vm['packages'] ?? []),
-            $networkIssues === [] ? 'valid' : 'invalid',
-            $networkDetail,
-        ];
-    }
-    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-        'row_count' => count($csvRows),
-    ], (int) $user['id']);
-    portal_send_csv('vms-' . (string) $mission['mission_name'], $header, $csvRows);
-}
+$vmLocationOverride = static fn (array $vm): string => vms_page_location_override($vm);
+vms_export_csv_if_requested($connection, $user, $missionId, $mission, $rows, $networkIssuesByVm);
 
 // The table column exists only when a VM actually deviates. An override is the
 // exception, and a column of dashes states nothing while pushing the columns
@@ -275,17 +258,17 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
 <div class="stack">
     <section class="panel">
         <?php // The mission navigation, current entry here (lib/mission_nav.php). ?>
-        <?php echo mission_detail_nav($missionId, $isTemplate, 'vms'); ?>
+        <?php echo mission_detail_nav($missionId, $isTemplate, 'vms', $workContext); ?>
         <div class="actions">
             <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('vms.open_deploy')); ?></a><?php } ?>
-            <?php if (can('vms.write', $user)) { ?><a class="button" href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>"><?php echo h(__t('vms.add_vm')); ?></a><?php } ?>
-            <?php if ($rows !== []) { ?><a class="button button-secondary" href="vms.php?mission_id=<?php echo h((string) $missionId); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
+            <?php if (can('vms.write', $user)) { ?><a class="button" href="<?php echo h(portal_work_context_append_url('vm_edit.php?mission_id=' . $missionId, $workContext)); ?>"><?php echo h(__t('vms.add_vm')); ?></a><?php } ?>
+            <?php if ($rows !== []) { ?><a class="button button-secondary" href="<?php echo h($vmListUrl . '&export=csv'); ?>"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
         </div>
     </section>
 
     <?php if ($canWrite && $rows !== []) { ?>
         <section class="panel">
-            <form id="bulk-vms" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>" class="actions" data-bulk-form>
+            <form id="bulk-vms" method="post" action="<?php echo h($vmListUrl); ?>" class="actions" data-bulk-form>
                 <?php echo csrf_field(); ?>
                 <span class="muted"><span data-bulk-count>0</span> <?php echo h(__t('vms.bulk_selected')); ?></span>
                 <button class="button button-danger" type="submit" name="action" value="bulk_delete" data-confirm="<?php echo h(__t('vms.bulk_confirm_delete')); ?>" data-bulk-submit disabled><?php echo h(__t('vms.bulk_delete_btn')); ?></button>
@@ -304,7 +287,10 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                   // screen exactly while scrolling back loses which row it was. ?>
             <table class="table-sticky-actions">
                 <thead><tr><?php if ($canWrite) { ?><th><input type="checkbox" data-bulk-all aria-label="<?php echo h(__t('vms.bulk_select_all')); ?>"></th><?php } ?><?php
-                    $vmSortParams = ['mission_id' => (string) $missionId];
+                    $vmSortParams = array_merge(
+                        ['mission_id' => (string) $missionId],
+                        array_diff_key($workContext, array_flip(['work_vm_sort', 'work_vm_dir']))
+                    );
                     echo portal_sort_header('vms.php', 'name', __t('vms.th_vm_name'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'hostname', __t('vms.th_hostname'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'os', __t('vms.th_os'), $sort, $dir, $vmSortParams);
@@ -314,15 +300,15 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                 ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th class="table-action-cell"><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
-                    <tr>
+                    <tr id="vm-<?php echo h((string) $vm['id']); ?>">
                         <?php if ($canWrite) { ?><td><input type="checkbox" form="bulk-vms" name="vm_ids[]" value="<?php echo h((string) $vm['id']); ?>" data-bulk-item aria-label="<?php echo h((string) ($vm['vm_name'] ?? '')); ?>"></td><?php } ?>
-                        <td><?php echo h($vm['vm_name'] ?? ''); ?></td>
+                        <td><?php echo portal_copy_value((string) ($vm['vm_name'] ?? ''), __t('vms.th_vm_name')); ?></td>
                         <?php // Die Abweichungsmarkierung sitzt IN der Hostnamenzelle und
                               // bekommt keine eigene Spalte (14D.5.2): eine weitere Spalte
                               // haette die Tabelle auf schmalen Geraeten umgebrochen, fuer
                               // einen Zustand, den die meisten Zeilen nie haben. Der Titel
                               // traegt den Namen, unter dem der Rollout weiterlaeuft. ?>
-                        <td><?php echo h($vm['vm_hostname'] ?? '');
+                        <td><?php echo portal_copy_value((string) ($vm['vm_hostname'] ?? ''), __t('vms.th_hostname'));
                             if (!$isTemplate && mecm_rollout_shows_divergence($vm)) { ?>
                             <span title="<?php echo h(__t('vms.rollout_diverged_title', ['current' => (string) $vm['mecm_rollout_hostname']])); ?>"><?php echo portal_badge('warning', __t('vms.rollout_diverged')); ?></span>
                         <?php } ?></td>
@@ -339,9 +325,9 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                     $label = $attention['kind'] === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
                                         ? __t('vms.progress_badge_pending')
                                         : __t('vms.progress_badge_installing');
-                                    ?><a href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo portal_badge('warning', $label); ?></a><?php
+                                    ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('warning', $label); ?></a><?php
                                 } elseif ($watchMissing) {
-                                    ?><a href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo portal_badge('info', __t('vms.progress_badge_unwatched')); ?></a><?php
+                                    ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('info', __t('vms.progress_badge_unwatched')); ?></a><?php
                                 } else {
                                     echo '&mdash;';
                                 }
@@ -361,7 +347,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                     $networkTitle = vm_network_finding_message($networkIssues[0]);
                                     $networkBadge = portal_badge('warning', __t('vms.network_check'));
                                     if ($canWrite) {
-                                        ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], 'interfaces')); ?>" title="<?php echo h($networkTitle); ?>"><?php echo $networkBadge; ?></a><?php
+                                        ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], 'interfaces', $workContext)); ?>" title="<?php echo h($networkTitle); ?>"><?php echo $networkBadge; ?></a><?php
                                     } else {
                                         ?><span title="<?php echo h($networkTitle); ?>"><?php echo $networkBadge; ?></span><?php
                                     }
@@ -371,9 +357,9 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['packages'] ?? [])); ?></td>
                         <td class="actions table-action-cell">
-                            <a class="button button-secondary" href="vm_edit.php?mission_id=<?php echo h((string) $missionId); ?>&vm_id=<?php echo h((string) $vm['id']); ?>"><?php echo h(__t('common.edit')); ?></a>
+                            <a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo h(__t('common.edit')); ?></a>
                             <?php if (!$isTemplate && can('vms.write', $user)) { ?>
-                                <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                                <form class="inline-form" method="post" action="<?php echo h($vmListUrl); ?>">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="reset_mecm_id">
                                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vm['id']); ?>">
@@ -381,7 +367,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                 </form>
                             <?php } ?>
                             <?php if (can('vms.write', $user)) { ?>
-                                <form class="inline-form" method="post" action="vms.php?mission_id=<?php echo h((string) $missionId); ?>">
+                                <form class="inline-form" method="post" action="<?php echo h($vmListUrl); ?>">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vm['id']); ?>">

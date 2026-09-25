@@ -12,8 +12,11 @@ require_once __DIR__ . '/../lib/repo/client_events.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
 require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/vm_edit_form.php';
+require_once __DIR__ . '/../lib/portal_effective_values.php';
 require_once __DIR__ . '/../lib/mecm_rollout_display.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
+require_once __DIR__ . '/../lib/deploy_urls.php';
+require_once __DIR__ . '/../lib/vm_urls.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
 

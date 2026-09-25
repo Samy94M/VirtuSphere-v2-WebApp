@@ -57,8 +57,8 @@ jobs:
       - name: .env fuer das Compose-Gate stellen
         run: cp .env.example .env
 
-      - name: PHP-Projektimage bauen
-        run: docker build -t virtusphere-v2-webapp-php Docker/php
+      - name: PHP-Tooling-Image bauen
+        run: docker build --target tooling -t virtusphere-php:8.4-tooling Docker/php
 
       - name: QA-Ansible-Image bauen (Pins aus Docker/qa-ansible und Ansible/requirements.yml)
         run: docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .
@@ -67,7 +67,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo/Docker/WebAPI \
             -e COMPOSER_CACHE_DIR=/tmp/composer-cache -e COMPOSER_ALLOW_SUPERUSER=1 \
-            virtusphere-v2-webapp-php composer install --no-interaction --no-progress --prefer-dist
+            virtusphere-php:8.4-tooling composer install --no-interaction --no-progress --prefer-dist
 
       - name: PowerShell-Module (Versionen aus scripts/tool-lock.json)
         shell: pwsh
@@ -140,8 +140,8 @@ jobs:
       - name: .env fuer Compose stellen
         run: cp .env.example .env
 
-      - name: PHP-Projektimage bauen
-        run: docker build -t virtusphere-v2-webapp-php Docker/php
+      - name: PHP-Tooling-Image bauen
+        run: docker build --target tooling -t virtusphere-php:8.4-tooling Docker/php
 
       - name: QA-Ansible-Image bauen (Pins aus Docker/qa-ansible und Ansible/requirements.yml)
         run: docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .
@@ -150,7 +150,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo/Docker/WebAPI \
             -e COMPOSER_CACHE_DIR=/tmp/composer-cache -e COMPOSER_ALLOW_SUPERUSER=1 \
-            virtusphere-v2-webapp-php composer install --no-interaction --no-progress --prefer-dist
+            virtusphere-php:8.4-tooling composer install --no-interaction --no-progress --prefer-dist
 
       - name: PowerShell-Module (Versionen aus scripts/tool-lock.json)
         shell: pwsh

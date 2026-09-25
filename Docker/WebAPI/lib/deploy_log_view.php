@@ -21,7 +21,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
  * @param array<string,mixed> $job
  * @param array<string,mixed> $query typically $_GET
  * @return array{
- *     timeline: array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool}>,current:?string},
+ *     timeline: array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string},
  *     phase_names: list<string>,
  *     filter: array{q:string,source:string,phase:string,active:bool},
  *     page: array<string,mixed>,

@@ -36,7 +36,7 @@ $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 # der ACK traegt sie, damit ein Client eines VORIGEN Rollouts den Lebenszyklus
 # des neuen nicht abschliessen kann. Kein Skript der Kette trifft eine
 # Entscheidung anhand ihres Werts.
-$allowedFields = @('vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'mission_id', 'rollout_revision')
+$allowedFields = @('vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'mission_id', 'rollout_revision', 'device_generation', 'acceptance_generation')
 
 function Save-VsValue {
     param([string]$Path, [string]$Name, [string]$Value)
@@ -115,9 +115,12 @@ Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'started' -Detail "match
 # strings may be empty, but the fenced identity and every interface must be
 # structurally usable by the following phases.
 $revision = 0
+$uuidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 if ([string]::IsNullOrWhiteSpace([string]$data.vm_name) -or
     [string]::IsNullOrWhiteSpace([string]$data.vm_hostname) -or
     -not [int]::TryParse([string]$data.rollout_revision, [ref]$revision) -or $revision -le 0 -or
+    [string]$data.device_generation -cnotmatch $uuidPattern -or
+    [string]$data.acceptance_generation -cnotmatch $uuidPattern -or
     $null -eq $data.interfaces) {
     Write-VsClientLog -Level ERROR 'getDeviceInfos-Antwort ist unvollstaendig; kein Snapshot wird publiziert.'
     Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'failed' -Detail 'invalid response schema'
@@ -172,12 +175,14 @@ try {
     New-ItemProperty -Path $snapshotRoot -Name 'InterfaceCount' -Value $index -PropertyType DWORD -Force -ErrorAction Stop | Out-Null
 
     # Read back the material identity and the exact interface cardinality.
-    $stored = Get-ItemProperty -Path $snapshotRoot -Name 'SnapshotSchema', 'vm_name', 'vm_hostname', 'rollout_revision', 'InterfaceCount' -ErrorAction Stop
+    $stored = Get-ItemProperty -Path $snapshotRoot -Name 'SnapshotSchema', 'vm_name', 'vm_hostname', 'rollout_revision', 'device_generation', 'acceptance_generation', 'InterfaceCount' -ErrorAction Stop
     $storedInterfaces = @(Get-ChildItem -Path $ifPath -ErrorAction Stop)
     if ([int]$stored.SnapshotSchema -ne $script:VsClientSnapshotSchema -or
         [string]$stored.vm_name -ne [string]$data.vm_name -or
         [string]$stored.vm_hostname -ne [string]$data.vm_hostname -or
         [int]$stored.rollout_revision -ne $revision -or
+        [string]$stored.device_generation -cne [string]$data.device_generation -or
+        [string]$stored.acceptance_generation -cne [string]$data.acceptance_generation -or
         [int]$stored.InterfaceCount -ne $index -or $storedInterfaces.Count -ne $index) {
         throw 'Nachlesen des vorbereiteten Client-Snapshots ist fehlgeschlagen.'
     }

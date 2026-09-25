@@ -41,9 +41,11 @@ final class LogCorrelationContractTest extends TestCase
         }
 
         $helper = $this->source('lib/correlation_display.php');
-        self::assertStringContainsString('data-copy-value=', $helper, 'the id must be copyable');
-        self::assertStringContainsString('role="status"', $helper, 'the copy outcome must be announced, not only coloured');
-        self::assertStringContainsString('data-copy-failed=', $helper, 'a failed clipboard write is a real branch, not a silent catch');
+        self::assertStringContainsString('portal_copy_button(', $helper, 'the id must use the shared copy renderer');
+        $copy = $this->source('lib/copy_control.php');
+        self::assertStringContainsString('data-copy-value=', $copy, 'the id must be copyable');
+        self::assertStringContainsString('role="status"', $copy, 'the copy outcome must be announced, not only coloured');
+        self::assertStringContainsString('data-copy-failed=', $copy, 'a failed clipboard write is a real branch, not a silent catch');
         self::assertStringContainsString('<code>', $helper, 'the id stays selectable text; the button is an accelerator');
     }
 

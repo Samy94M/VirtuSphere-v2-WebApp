@@ -44,7 +44,7 @@ Auf dem Portal-Host müssen vorhanden sein:
 - Docker Compose Plugin (`docker compose ...`).
 - `git`, falls der Code direkt aus einem Repository geholt wird.
 - `openssl` für lokale Secret-Erzeugung.
-- Schreibrechte im Repository für `.env`, `Docker/WebAPI/logs`, `Docker/logs/nginx` und `Docker/mysql/mysql-data`.
+- Schreibrechte im Repository für `.env`, `Docker/WebAPI/logs` und `Docker/mysql/mysql-data`.
 
 Auf dem Ansible-Ausführungs-Host müssen `python3`, `ansible-playbook` aus `ansible-core`, die Python-Module `pyvmomi` und `requests` sowie die Collection `community.vmware` vorhanden sein. Die Collection muss genau die in `Ansible/requirements.yml` gepinnte Version haben, und `ansible-core` muss mindestens die Version haben, die diese Collection selbst fordert; der Verbindungstest des Ansible-Zugangs prüft beides und lehnt eine Abweichung ab, statt sie zu benutzen. Der dedizierte SSH-Benutzer benötigt Schreibrechte in seinem Home-Verzeichnis und unter `/tmp`; ausgehend müssen ESXi auf Port 443 und die konfigurierte Portal-API-Basis-URL erreichbar sein.
 
@@ -97,7 +97,7 @@ Docker/scripts/setup.sh
 Das Skript führt aus:
 
 - `.env` anlegen, wenn sie fehlt, und dabei frische lokale Secrets (`APP_KEY`, `DB_PASS`, `MYSQL_ROOT_PASSWORD`) mit `openssl` erzeugen.
-- Eine bereits vorhandene `.env` bleibt unverändert; bei zu schwachen Secrets bricht EnvBoot beim Start mit Klartextmeldung ab (nicht das Setup-Skript).
+- Eine bereits vorhandene `.env` bleibt unverändert. EnvBoot prüft `APP_KEY` und das App-Datenbankpasswort; der MySQL-Bootstrap prüft sein Root- und App-Passwort, bevor der Server startet.
 - Log- und Datenordner anlegen.
 - `docker compose config --quiet` ausführen.
 - Container bauen und starten.
@@ -105,7 +105,7 @@ Das Skript führt aus:
 - Migrationen anwenden.
 - optional ersten Admin seeden.
 
-Erwartung: Das Skript endet ohne Fehler. Wenn ein Secret zu schwach ist, bricht EnvBoot mit einer Klartextmeldung ab.
+Erwartung: Das Skript endet ohne Fehler. Ist ein App-Secret zu schwach, bricht EnvBoot ab; ist ein MySQL-Bootstrap-Passwort zu schwach, bricht der MySQL-Container vor dem Serverstart ab.
 
 ## Manuelle Prüfungen
 
@@ -160,8 +160,7 @@ Persistente Logs liegen hier:
 Docker/WebAPI/logs/error.log
 Docker/WebAPI/logs/php-error.log
 Docker/WebAPI/logs/fail.log
-Docker/logs/nginx/access.log
-Docker/logs/nginx/error.log
+nginx access/error: docker compose logs webserver
 MECM-Server: %ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<komponente>.log
 Windows-Client: C:\Program Files\VirtuSphere\Logs\yyyy-MM-dd_<phase>.log
 ```
@@ -184,7 +183,7 @@ grep '<referenz-id>' Docker/WebAPI/logs/error.log
 Wenn PHP gar nicht erreicht wird, zuerst nginx prüfen:
 
 ```bash
-tail -n 100 Docker/logs/nginx/error.log
+docker compose logs --tail 100 webserver
 ```
 
 ## Wartung

@@ -112,8 +112,11 @@ function deploy_queue_base_blockers(
     return $blockers;
 }
 
-/** @return list<array<string,mixed>> */
-function deploy_queue_blockers(mysqli $db, array $input): array
+/**
+ * @param-out array{state:string,status:string,context:string} $presentation
+ * @return list<array<string,mixed>>
+ */
+function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation = null): array
 {
     $state = deploy_queue_normalize_input($input);
     $missions = array_values(array_filter(getMissions($db), static fn (array $mission): bool =>
@@ -300,6 +303,15 @@ function deploy_queue_blockers(mysqli $db, array $input): array
         $blocker['target_id'] = 'deploy-blocker-' . ($index + 1);
     }
     unset($blocker);
+
+    $scopeCount = null;
+    if ($selectedMission !== null) {
+        $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
+        $scopeCount = $state['vm_selection_explicit']
+            ? count(array_intersect($state['vm_ids'], $missionVmIds))
+            : count($missionVmIds);
+    }
+    $presentation = deploy_blocker_presentation($state, $blockers, $scopeCount);
 
     return $blockers;
 }

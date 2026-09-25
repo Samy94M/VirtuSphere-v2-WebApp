@@ -1,3 +1,28 @@
+x-app-db-environment: &app-db-environment
+  APP_ENV: ${APP_ENV}
+  APP_KEY: ${APP_KEY}
+  DB_HOST: ${DB_HOST}
+  DB_NAME: ${DB_NAME}
+  DB_PASS: ${DB_PASS}
+  DB_PORT: ${DB_PORT}
+  DB_USER: ${DB_USER}
+  VIRTUSPHERE_DEBUG: ${VIRTUSPHERE_DEBUG:-0}
+
+# One bounded container-log policy for every long-lived runtime service. nginx
+# writes access/error output to stdout/stderr as well, so it is covered by the
+# same 50 MiB upper bound instead of growing an unrotated host bind mount.
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# One versioned runtime image for FPM and both workers. Compose builds this
+# target once and all three services resolve the same tag/Image-ID; QA and
+# release tooling deliberately use the separate `tooling` target.
+x-php-runtime: &php-runtime
+  image: virtusphere-php:8.4-runtime
+
 services:
   webserver:
     build:
@@ -12,7 +37,7 @@ services:
       - ./Docker/WebAPI:/var/www/html
       - ./Docker/nginx/ssl:/etc/nginx/ssl
       - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
-      - ./Docker/logs/nginx:/var/log/nginx
+    logging: *container-logging
     # Bewusst KEIN env_file und keine environment-Sektion. Der Container las mit
     # `env_file: .env` APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl das Image
     # keinen dieser Werte anfasst: init.sh liest keine Umgebung, default.conf ist
@@ -62,9 +87,13 @@ services:
     mem_limit: 256m
 
   php:
+    <<: *php-runtime
+    # Sole build owner. Workers reference the resulting versioned image only,
+    # so `compose build` evaluates this target once instead of once per service.
     build:
       context: ./Docker/php
       dockerfile: Dockerfile
+      target: runtime
     expose:
       - 9000
     volumes:
@@ -82,10 +111,15 @@ services:
       # tests that read the playbook source actually run here instead of
       # skipping, which is how a skipped test silently stops guarding anything.
       - ./Ansible:/var/www/ansible-src:ro
-    env_file:
-      - .env
     environment:
+      <<: *app-db-environment
       ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_USER: ${SEED_ADMIN_USER:-}
+      WEB_HTTPS_PORT: ${WEB_HTTPS_PORT}
+    logging: *container-logging
     depends_on:
       mysql:
         condition: service_healthy
@@ -117,18 +151,17 @@ services:
     mem_limit: 512m
 
   deploy-worker:
-    build:
-      context: ./Docker/php
-      dockerfile: Dockerfile
+    <<: *php-runtime
     command: ["php", "/var/www/html/lib/deploy_worker.php", "--loop", "--sleep=5"]
     volumes:
       - ./Docker/WebAPI:/var/www/html
       - ./Ansible:/var/www/ansible-src:ro
-    env_file:
-      - .env
     environment:
+      <<: *app-db-environment
       ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-}
       VIRTUSPHERE_DEPLOY_WORKDIR: /tmp/virtusphere-deploy
+    logging: *container-logging
     depends_on:
       mysql:
         condition: service_healthy
@@ -153,14 +186,13 @@ services:
     mem_limit: 256m
 
   maintenance-worker:
-    build:
-      context: ./Docker/php
-      dockerfile: Dockerfile
+    <<: *php-runtime
     command: ["php", "/var/www/html/lib/maintenance_worker.php", "--loop", "--sleep=15"]
     volumes:
       - ./Docker/WebAPI:/var/www/html
-    env_file:
-      - .env
+    environment:
+      <<: *app-db-environment
+    logging: *container-logging
     depends_on:
       mysql:
         condition: service_healthy
@@ -188,11 +220,16 @@ services:
     image: mysql:8.4-virtusphere
     build:
       context: ./Docker/mysql
+    # ADR-0017 defines scheduled logical backups, not replication or PITR.
+    # Keep binary logging disabled instead of retaining an unused second
+    # recovery stream. Existing binlog files are never deleted by this setting.
+    command: ["mysqld", "--skip-log-bin"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASS}
+    logging: *container-logging
     volumes:
       - ./Docker/mysql/mysql-data:/var/lib/mysql
       - ./Docker/mysql/mysql-init:/docker-entrypoint-initdb.d
@@ -247,6 +284,7 @@ services:
       # PMA_PORT protokolliert das Image je Anfrage "Undefined array key
       # PMA_PORT", bevor es auf 3306 zurueckfaellt.
       PMA_PORT: ${DB_PORT}
+    logging: *container-logging
     depends_on:
       mysql:
         condition: service_healthy

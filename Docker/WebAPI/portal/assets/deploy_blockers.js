@@ -11,7 +11,10 @@
     var list = root.querySelector('[data-deploy-blocker-list]');
     var summary = root.querySelector('[data-deploy-blocker-summary]');
     var warningList = root.querySelector('[data-deploy-warning-list]');
+    var warningHeading = root.querySelector('[data-deploy-warning-heading]');
     var jump = root.querySelector('[data-deploy-blocker-jump]');
+    var status = root.querySelector('[data-deploy-preparation-status]');
+    var context = root.querySelector('[data-deploy-preparation-context]');
     var initialLimit = parseInt(root.getAttribute('data-initial-limit') || '0', 10) || 0;
     var timer = null;
     var controller = null;
@@ -30,6 +33,38 @@
         input.name = name;
         input.value = String(value);
         target.appendChild(input);
+        return input;
+    }
+
+    function appendDraftFields(target) {
+        Array.prototype.forEach.call(target.querySelectorAll('input[name^="draft["]'), function (field) {
+            field.remove();
+        });
+        Array.prototype.forEach.call(form.elements, function (field) {
+            var name = field.name;
+            if (!name || name === '_csrf' || name === 'action') return;
+            if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) return;
+            var draftName = name === 'vm_ids[]' ? 'draft[vm_ids][]' : 'draft[' + name + ']';
+            appendHidden(target, draftName, field.value).setAttribute('data-deploy-draft-field', '');
+        });
+    }
+
+    function remedyForm(action, code) {
+        var remedy = document.createElement('form');
+        remedy.className = 'inline-form';
+        remedy.method = 'post';
+        remedy.action = 'deploy.php';
+        var csrf = form.querySelector('input[name="_csrf"]');
+        if (csrf) appendHidden(remedy, '_csrf', csrf.value);
+        appendHidden(remedy, 'action', 'open_remedy');
+        appendHidden(remedy, 'remedy_code', code);
+        appendDraftFields(remedy);
+        var button = document.createElement('button');
+        button.className = 'button-as-link';
+        button.type = 'submit';
+        button.textContent = action.label;
+        remedy.appendChild(button);
+        return remedy;
     }
 
     function queueParams() {
@@ -47,16 +82,13 @@
         return params;
     }
 
-    function blockerNode(blocker, index, prefix) {
+    function blockerNode(blocker, index) {
         var box = document.createElement('div');
         box.className = 'alert alert-error';
         box.id = blocker.target_id || ('deploy-blocker-' + String(index + 1));
         box.setAttribute('data-deploy-blocker', '');
-
-        var strong = document.createElement('strong');
-        strong.textContent = prefix;
-        box.appendChild(strong);
-        box.appendChild(document.createTextNode(' ' + String(blocker.message || '')));
+        box.tabIndex = -1;
+        box.appendChild(document.createTextNode(String(blocker.message || '')));
 
         // Same shape as the server render: follow-ups live in one .alert-actions
         // row, the middle dot appears only between two of them, and the row is
@@ -67,10 +99,7 @@
             var actions = document.createElement('div');
             actions.className = 'alert-actions';
             if (action && action.type === 'link') {
-                var link = document.createElement('a');
-                link.href = action.url;
-                link.textContent = action.label;
-                actions.appendChild(link);
+                actions.appendChild(remedyForm(action, String(blocker.code || '')));
             }
             if (action && action.type === 'link' && help) {
                 var dot = document.createElement('span');
@@ -102,6 +131,7 @@
             Object.keys(action.fields || {}).forEach(function (name) {
                 appendHidden(adoptForm, name, action.fields[name]);
             });
+            appendDraftFields(adoptForm);
             var adopt = document.createElement('button');
             adopt.className = 'button button-secondary';
             adopt.type = 'submit';
@@ -128,7 +158,7 @@
     function render(data) {
         list.replaceChildren();
         data.blockers.slice(0, initialLimit || data.blockers.length).forEach(function (blocker, index) {
-            list.appendChild(blockerNode(blocker, index, data.labels.prefix));
+            list.appendChild(blockerNode(blocker, index));
         });
         if (String(data.labels.omitted || '') !== '') {
             list.appendChild(omittedNode(data.labels.omitted, 'data-deploy-blocker-omitted'));
@@ -137,19 +167,26 @@
             warningList.replaceChildren();
             var warnings = data.warnings || [];
             warnings.slice(0, initialLimit || warnings.length).forEach(function (warning) {
-                var box = blockerNode(warning, 0, data.labels.warning_prefix || '');
+                var box = blockerNode(warning, 0);
                 box.className = 'alert alert-warning';
                 box.removeAttribute('id');
                 box.removeAttribute('data-deploy-blocker');
                 box.setAttribute('data-deploy-network-warning', '');
                 warningList.appendChild(box);
             });
+            if (warningHeading) warningHeading.hidden = warnings.length === 0;
         }
         button.disabled = !data.can_queue;
-        summary.hidden = data.count === 0;
+        var presentation = data.presentation || {
+            state: data.count === 0 ? 'ready' : 'blocked',
+            status: data.labels.count,
+            context: context ? context.textContent : ''
+        };
+        root.setAttribute('data-preparation-state', String(presentation.state || 'blocked'));
+        status.textContent = String(presentation.status || data.labels.count || '');
+        if (context) context.textContent = String(presentation.context || '');
+        jump.hidden = data.count === 0;
         if (data.count > 0) {
-            var count = summary.querySelector('strong');
-            count.textContent = data.labels.count;
             jump.textContent = data.labels.jump;
             jump.href = '#' + String((data.blockers[0] || {}).target_id || 'deploy-blocker-1');
         }
@@ -173,7 +210,9 @@
         }
         box.textContent = String(message || root.getAttribute('data-error-message') || '');
         list.appendChild(box);
-        summary.hidden = true;
+        root.setAttribute('data-preparation-state', 'unreliable');
+        status.textContent = root.getAttribute('data-unreliable-message') || '';
+        jump.hidden = true;
         button.disabled = hardMode;
     }
 
@@ -221,8 +260,28 @@
             return;
         }
         window.clearTimeout(timer);
+        root.setAttribute('data-preparation-state', 'checking');
+        status.textContent = root.getAttribute('data-checking-message') || '';
+        jump.hidden = true;
         timer = window.setTimeout(refresh, 250);
     }
+
+    jump.addEventListener('click', function () {
+        var id = jump.getAttribute('href') || '';
+        var target = id.charAt(0) === '#' ? document.getElementById(id.slice(1)) : null;
+        if (target) window.setTimeout(function () { target.focus(); }, 0);
+    });
+
+    // A live response may have rendered while the operator was still changing
+    // another field. Refresh the one-shot draft at the actual submit boundary,
+    // including server-rendered remedy and identity forms, so a fast click
+    // cannot restore an older live-request snapshot.
+    root.addEventListener('submit', function (event) {
+        var actionField = event.target.querySelector('input[name="action"]');
+        if (actionField && (actionField.value === 'open_remedy' || actionField.value === 'adopt_vm')) {
+            appendDraftFields(event.target);
+        }
+    }, true);
 
     form.addEventListener('input', scheduleRefresh);
     form.addEventListener('change', scheduleRefresh);

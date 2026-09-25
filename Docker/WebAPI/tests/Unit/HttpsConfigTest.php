@@ -164,6 +164,9 @@ final class HttpsConfigTest extends TestCase
         self::assertStringContainsString('ssl_certificate /etc/nginx/ssl/server.crt;', $conf);
         self::assertStringContainsString('ssl_certificate_key /etc/nginx/ssl/server.key;', $conf);
         self::assertStringContainsString('fastcgi_param HTTPS on;', $conf);
+        self::assertStringContainsString('access_log /dev/stdout virtusphere;', $conf);
+        self::assertStringContainsString('error_log stderr error;', $conf);
+        self::assertStringNotContainsString('/var/log/nginx/', $conf);
         self::assertStringNotContainsString('PRIVATE KEY', $conf);
         // The deny rules must mirror the HTTP block in Docker/nginx/default.conf.
         self::assertStringContainsString('location ~ ^/(lib|vendor|var|logs|tests)/ { deny all; }', $conf);
@@ -273,6 +276,28 @@ final class HttpsConfigTest extends TestCase
                 'the fallback headers must stay conditional on the upstream not having sent one'
             );
             self::assertStringContainsString($variable, $httpConf);
+        }
+    }
+
+    public function testHttpAndHttpsAssetDeliveryStayInSync(): void
+    {
+        $path = dirname(__DIR__, 3) . '/nginx/default.conf';
+        if (!is_file($path)) {
+            self::markTestSkipped('Docker/nginx/default.conf is not visible from this runtime');
+        }
+        $httpConf = (string) file_get_contents($path);
+        $generated = https_render_nginx_conf();
+
+        self::assertStringContainsString('gzip_types text/css application/javascript;', $httpConf);
+        self::assertStringContainsString('"~^/portal/assets/[^:]+:[0-9a-f]{64}$"', $httpConf);
+
+        foreach ([
+            'add_header Cache-Control $virtusphere_asset_cache_control always;',
+            'location ^~ /portal/assets/',
+            'try_files $uri =404;',
+        ] as $contract) {
+            self::assertStringContainsString($contract, $httpConf);
+            self::assertStringContainsString($contract, $generated);
         }
     }
 }

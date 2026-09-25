@@ -484,9 +484,10 @@ Describe 'E5 - Die Paketvorlage liest config.json ungeprueft' -Tag 'Haertung' {
         # Registry-Pfad wird zu "...\Packages\-", und alle Teilskripte laufen
         # trotzdem als SYSTEM.
         $ast = Get-PsAst -Path $script:Template
-        $loops = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.ForEachStatementAst])
-        $loops.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $firstLoop = ($loops | Sort-Object { $_.Extent.StartOffset })[0].Extent.StartOffset
+        $loops = Find-Ast -Ast $ast -Type ([System.Management.Automation.Language.ForEachStatementAst]) `
+            -Where { $_.Variable.Extent.Text -eq '$scriptFile' -and $_.Condition.Extent.Text -match '\$dir_script' }
+        $loops.Count | Should -Be 1 -Because 'die Pruefung muss die Teilskript-Schleife statt Hilfsfunktions-Schleifen finden'
+        $firstLoop = $loops[0].Extent.StartOffset
 
         $exitsBefore = Find-Ast -Ast $ast `
             -Type ([System.Management.Automation.Language.ExitStatementAst]) `
@@ -573,13 +574,25 @@ Describe 'E8 - Ein vorhandener ReportToken laesst sich nicht entfernen' -Tag 'Ha
     }
 
     It 'E8 - die interaktive Abfrage prueft PSBoundParameters' {
-        # -ReportToken '' faellt heute in die Abfrage, weil dort nur auf
-        # IsNullOrEmpty geprueft wird.
-        $ifs = Find-Ast -Ast $script:InstAst `
-            -Type ([System.Management.Automation.Language.IfStatementAst]) `
-            -Where { $_.Extent.Text -match 'Read-Host' -and $_.Extent.Text -match 'ReportToken' }
-        $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $ifs[0].Clauses[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+        # Ein aeusserer Upgrade-Zweig darf den eigentlichen Prompt-Guard
+        # umschliessen. Deshalb den direkten Guard anhand seiner Bedingung und
+        # seines Bodys waehlen, nicht den ersten If-AST mit passendem Extent.
+        $guards = @(
+            $ifs = Find-Ast -Ast $script:InstAst `
+                -Type ([System.Management.Automation.Language.IfStatementAst])
+            foreach ($if in $ifs) {
+                foreach ($clause in @($if.Clauses)) {
+                    if ($clause.Item1.Extent.Text -match 'PSBoundParameters' -and
+                        $clause.Item1.Extent.Text -match "ContainsKey\s*\(\s*'ReportToken'\s*\)" -and
+                        $clause.Item2.Extent.Text -match 'Read-Host\s+-AsSecureString') {
+                        $clause
+                    }
+                }
+            }
+        )
+        $guards.Count | Should -Be 1 -Because 'genau eine direkte If-/ElseIf-Clause die interaktive Tokenabfrage besitzen muss'
+        $guards[0].Item1.Extent.Text | Should -Match 'PSBoundParameters'
+        $guards[0].Item1.Extent.Text | Should -Match "ContainsKey\s*\(\s*'ReportToken'\s*\)"
     }
 
     It 'E8 - der Kommentar behauptet nichts, was der Code nicht haelt' {

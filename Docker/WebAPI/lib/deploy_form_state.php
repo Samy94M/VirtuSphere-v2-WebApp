@@ -59,6 +59,74 @@ const VIRTUSPHERE_DEPLOY_QUEUE_FIELDS = [
  * VIRTUSPHERE_DEPLOY_QUEUE_FIELDS and therefore never enters a job payload.
  */
 const VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD = 'vm_selection_mission_id';
+const VIRTUSPHERE_DEPLOY_DRAFT_MAX_AGE_SECONDS = 3600;
+
+/** @return array<string,mixed> */
+function deploy_form_draft_values(array $input): array
+{
+    $draft = [];
+    foreach (VIRTUSPHERE_DEPLOY_QUEUE_FIELDS as $field) {
+        if (array_key_exists($field, $input) && is_scalar($input[$field])) {
+            $draft[$field] = (string) $input[$field];
+        }
+    }
+    if (filter_var($input['verbose'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+        $draft['verbose'] = '1';
+    }
+    if (array_key_exists(VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD, $input)
+        && is_scalar($input[VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD])) {
+        $draft[VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD] = (string) $input[VIRTUSPHERE_DEPLOY_VM_SELECTION_MISSION_FIELD];
+    }
+    $draft['vm_ids'] = [];
+    foreach (is_array($input['vm_ids'] ?? null) ? $input['vm_ids'] : [] as $vmId) {
+        if (is_scalar($vmId) && (int) $vmId > 0) {
+            $draft['vm_ids'][(int) $vmId] = (string) (int) $vmId;
+        }
+    }
+    $draft['vm_ids'] = array_values($draft['vm_ids']);
+
+    return $draft;
+}
+
+function deploy_form_draft_store(array $input): void
+{
+    $_SESSION['_deploy_form_draft'] = [
+        'stored_at' => time(),
+        'values' => deploy_form_draft_values($input),
+    ];
+}
+
+/** @return null|array<string,mixed> */
+function deploy_form_draft_take(): ?array
+{
+    $stored = $_SESSION['_deploy_form_draft'] ?? null;
+    unset($_SESSION['_deploy_form_draft']);
+    if (!is_array($stored) || !is_array($stored['values'] ?? null)) {
+        return null;
+    }
+    $age = time() - (int) ($stored['stored_at'] ?? 0);
+    if ($age < 0 || $age > VIRTUSPHERE_DEPLOY_DRAFT_MAX_AGE_SECONDS) {
+        return null;
+    }
+
+    return deploy_form_draft_values($stored['values']);
+}
+
+function deploy_form_draft_hidden_fields(array $input): string
+{
+    $html = '';
+    foreach (deploy_form_draft_values($input) as $field => $value) {
+        if ($field === 'vm_ids') {
+            foreach ($value as $vmId) {
+                $html .= '<input type="hidden" name="draft[vm_ids][]" value="' . h((string) $vmId) . '">';
+            }
+            continue;
+        }
+        $html .= '<input type="hidden" name="draft[' . h((string) $field) . ']" value="' . h((string) $value) . '">';
+    }
+
+    return $html;
+}
 
 /**
  * Canonical queue input shared by the HTML handler, the read-only live blocker
@@ -115,6 +183,9 @@ function deploy_form_state(): array
     if ($state === null) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $state = ['kind' => 'post', 'values' => $_POST];
+        } elseif ((request_string($_GET, 'resume_draft') === '1' || request_int($_GET, 'mission_id') === 0)
+            && ($draft = deploy_form_draft_take()) !== null) {
+            $state = ['kind' => 'draft', 'values' => $draft];
         } elseif (form_has_state('schedule')) {
             $state = ['kind' => 'sticky', 'values' => form_old_all('schedule')];
         } else {

@@ -272,6 +272,13 @@ Describe 'Client-Kette traegt die Rolloutrevision' {
         $script:GetInfoText | Should -Match "\`$allowedFields = @\([^)]*'rollout_revision'"
     }
 
+    It 'validiert und publiziert beide Package-Report-Generationen' {
+        $script:GetInfoText | Should -Match "\`$allowedFields = @\([^)]*'device_generation'[^)]*'acceptance_generation'"
+        $script:GetInfoText | Should -Match '\$data\.device_generation -cnotmatch \$uuidPattern'
+        $script:GetInfoText | Should -Match '\$data\.acceptance_generation -cnotmatch \$uuidPattern'
+        $script:GetInfoText | Should -Match "Get-ItemProperty -Path \`$snapshotRoot -Name [^\r\n]*'device_generation', 'acceptance_generation'"
+    }
+
     It 'sendet sie im ACK zurueck' {
         $script:GetInfoText | Should -Match 'Confirm-VsClientReady .*-RolloutRevision \$data\.rollout_revision'
         $script:ClientCommonText | Should -Match '\$RolloutRevision'

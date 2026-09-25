@@ -200,3 +200,29 @@ function form_error_html(
         ? ''
         : '<span class="field-error" id="' . h(form_error_id($form, $field, $scope)) . '">' . h($error) . '</span>';
 }
+
+/**
+ * Opt one real editor into the shared client-side unsaved-change contract.
+ * Labels stay in PHP/i18n; JavaScript receives no language catalog and stores
+ * no draft. `$restored` means a POST was re-rendered and must stay dirty until
+ * the confirmed GET baseline has been read successfully.
+ */
+function form_unsaved_attrs(string $key, bool $restored = false): string
+{
+    $attrs = ' data-unsaved-form data-unsaved-key="' . h(form_id_segment($key)) . '"'
+        . ' data-unsaved-clean-label="' . h(__t('common.unsaved_clean')) . '"'
+        . ' data-unsaved-dirty-label="' . h(__t('common.unsaved_dirty')) . '"'
+        . ' data-unsaved-message="' . h(__t('common.unsaved_message')) . '"'
+        . ' data-unsaved-leave-label="' . h(__t('common.unsaved_leave')) . '"';
+    if ($restored) {
+        $attrs .= ' data-unsaved-restored';
+    }
+
+    return $attrs;
+}
+
+/** Hidden without JavaScript: the server never claims to detect live edits. */
+function form_unsaved_status_html(): string
+{
+    return '<p class="muted" data-unsaved-status role="status" aria-live="polite" hidden></p>';
+}

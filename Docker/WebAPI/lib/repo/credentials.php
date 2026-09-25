@@ -232,10 +232,10 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
     // secrets are encrypted verbatim (no trim), so surrounding spaces survive.
     if ($secretChanges) {
         $ciphertext = crypto_encrypt_secret($secret);
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, updated_at = NOW() WHERE id = ?');
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
         $stmt->bind_param('sssissssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     } else {
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, updated_at = NOW() WHERE id = ?');
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
         $stmt->bind_param('sssisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     }
 

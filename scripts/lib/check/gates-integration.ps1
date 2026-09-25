@@ -209,13 +209,14 @@ function Register-IntegrationCheckGates {
         $r = $null
         $restarted = $null
         try {
+            $qaAppEnvFile = Get-QaAppEnvFile
             $r = Invoke-Tool 'docker' @('run', '--rm',
                 '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
                 '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
                 '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
-                '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
+                '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
                 '--network', $qaNetwork,
-                '--env-file', $qaEnvFile,
+                '--env-file', $qaAppEnvFile,
                 '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
                 $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped',
                 '--log-junit', '/qa-evidence/phpunit-full.xml')

@@ -52,9 +52,19 @@ function repo_touch_integration_heartbeat(mysqli $db, string $source, string $ip
     // last_event is reset to 'heartbeat' so a sync task that once reported V2
     // results but was rolled back to an old heartbeat-only script is derived as
     // legacy again (the display follows last_event, never report_version).
+    // A legacy heartbeat has no completed-run provenance. Clear the fields that
+    // only make sense as one completed-result tuple instead of combining its
+    // fresh `ok`/detail with an older V2 result time, counters or duration.
     $stmt = $db->prepare('INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_status, last_detail, last_ip, interval_seconds, beat_count, last_event)
         VALUES (?, NOW(), NOW(), ?, ?, ?, ?, 1, ?)
-        ON DUPLICATE KEY UPDATE last_seen_at = NOW(), last_checked_at = NOW(), last_status = VALUES(last_status), last_detail = VALUES(last_detail), last_ip = VALUES(last_ip), interval_seconds = VALUES(interval_seconds), beat_count = beat_count + 1, last_event = VALUES(last_event)');
+        ON DUPLICATE KEY UPDATE
+            last_seen_at = NOW(), last_checked_at = NOW(),
+            last_status = VALUES(last_status), last_detail = VALUES(last_detail),
+            last_ip = VALUES(last_ip), interval_seconds = VALUES(interval_seconds),
+            beat_count = beat_count + 1, last_event = VALUES(last_event),
+            last_result_at = NULL, last_error_category = NULL,
+            last_duration_ms = NULL, last_summary = NULL,
+            last_run_id = NULL, failure_streak = 0');
     $status = VIRTUSPHERE_HEARTBEAT_STATUS_OK;
     $event = VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
     $stmt->bind_param('ssssis', $source, $status, $detail, $ip, $intervalSeconds, $event);
@@ -116,6 +126,7 @@ function repo_run_report_write_started(mysqli $db, array $report): void
     $event = VIRTUSPHERE_RUN_EVENT_STARTED;
     $scriptVersion = isset($report['script_version']) ? (string) $report['script_version'] : null;
 
+    $legacyEvent = VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT;
     $stmt = $db->prepare('INSERT INTO deploy_integration_heartbeats
         (source, last_seen_at, last_checked_at, last_attempt_at, last_ip, interval_seconds, beat_count, report_version, last_event, last_run_id, last_script_version)
         VALUES (?, NOW(), NOW(), NOW(), ?, ?, 1, 2, ?, ?, ?)
@@ -123,9 +134,29 @@ function repo_run_report_write_started(mysqli $db, array $report): void
             last_seen_at = NOW(), last_checked_at = NOW(), last_attempt_at = NOW(),
             last_ip = VALUES(last_ip), interval_seconds = VALUES(interval_seconds),
             beat_count = beat_count + 1, report_version = GREATEST(report_version, 2),
+            last_result_at = IF(last_event = ?, NULL, last_result_at),
+            last_detail = IF(last_event = ?, NULL, last_detail),
+            last_error_category = IF(last_event = ?, NULL, last_error_category),
+            last_duration_ms = IF(last_event = ?, NULL, last_duration_ms),
+            last_summary = IF(last_event = ?, NULL, last_summary),
+            failure_streak = IF(last_event = ?, 0, failure_streak),
             last_event = VALUES(last_event), last_run_id = VALUES(last_run_id),
             last_script_version = VALUES(last_script_version)');
-    $stmt->bind_param('ssisss', $source, $ip, $interval, $event, $runId, $scriptVersion);
+    $stmt->bind_param(
+        'ssisssssssss',
+        $source,
+        $ip,
+        $interval,
+        $event,
+        $runId,
+        $scriptVersion,
+        $legacyEvent,
+        $legacyEvent,
+        $legacyEvent,
+        $legacyEvent,
+        $legacyEvent,
+        $legacyEvent
+    );
     $stmt->execute();
 }
 

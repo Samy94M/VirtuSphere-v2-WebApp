@@ -38,9 +38,30 @@ function layout_asset_url(string $path): string
 {
     $relativePath = ltrim($path, '/');
     $fullPath = dirname(__DIR__) . '/portal/' . $relativePath;
-    $version = is_file($fullPath) ? (string) filemtime($fullPath) : '1';
+    $version = layout_asset_version($fullPath);
 
     return $relativePath . '?v=' . rawurlencode($version);
+}
+
+/**
+ * Content, rather than file metadata, owns the public asset identity.
+ *
+ * Offline archive extraction may deliberately preserve mtimes. A timestamp
+ * query would then let an already open browser keep stale CSS or JavaScript
+ * after an update. The full digest is also what nginx recognizes before it
+ * grants the immutable cache policy. A missing/unreadable file deliberately
+ * gets a non-digest marker, so nginx keeps the resulting visible 404
+ * revalidatable instead of caching it for a year.
+ */
+function layout_asset_version(string $fullPath): string
+{
+    if (!is_file($fullPath)) {
+        return 'missing';
+    }
+
+    $digest = hash_file('sha256', $fullPath);
+
+    return is_string($digest) ? $digest : 'unreadable';
 }
 
 /**
@@ -57,52 +78,123 @@ function layout_asset_url(string $path): string
  * last (StatusSpacingContractTest). Moving an entry is a design change, not a
  * cosmetic one, and it needs the computed-style comparison run again.
  *
- * Emitted from one place so the head of layout.php and the head of login.php
- * cannot drift apart. They linked these by hand and had already drifted:
- * login.php was missing status.css. Every entry is cache-busted through
- * layout_asset_url(); PortalStyleRegistryContractTest fails on a stylesheet
- * under assets/css that this list does not name, on a hand-written link beside
- * it, and on an @import, which would load a sheet past both the version query
- * and this registry.
+ * Emitted from one place so heads and page-specific selections cannot drift.
+ * Every page is classified, every entry keeps this one global cascade order,
+ * and every URL is cache-busted through layout_asset_url(). The registry tests
+ * reject an unclassified page, an unowned file, a missing file, a hand-written
+ * link and an @import that would bypass both versioning and the registry.
  */
-function layout_app_styles(): void
+const VIRTUSPHERE_LAYOUT_PAGES = [
+    'account.php',
+    'credentials.php',
+    'dashboard.php',
+    'deploy.php',
+    'deploy_log.php',
+    'help.php',
+    'login.php',
+    'logs.php',
+    'mission_details.php',
+    'missions.php',
+    'os.php',
+    'packages.php',
+    'settings.php',
+    'system_status.php',
+    'users.php',
+    'vlans.php',
+    'vm_edit.php',
+    'vms.php',
+];
+
+/** @return array<string, list<string>> ordered path => pages (`*` means every page) */
+function layout_style_registry(): array
 {
-    foreach ([
-        'assets/css/base.css',
-        'assets/css/layout.css',
-        'assets/css/panels.css',
-        'assets/css/tables.css',
-        'assets/css/controls.css',
-        'assets/css/feedback.css',
-        'assets/css/status.css',
+    $tablePages = [
+        'credentials.php', 'dashboard.php', 'deploy.php', 'deploy_log.php',
+        'help.php', 'logs.php', 'missions.php', 'os.php', 'packages.php',
+        'settings.php', 'system_status.php', 'users.php', 'vlans.php',
+        'vm_edit.php', 'vms.php',
+    ];
+
+    return [
+        'assets/css/base.css' => ['*'],
+        'assets/css/layout.css' => ['*'],
+        'assets/css/panels.css' => ['*'],
+        'assets/css/tables.css' => $tablePages,
+        'assets/css/controls.css' => ['*'],
+        'assets/css/feedback.css' => ['*'],
+        // deploy_log shares the fact grid and technical-detail treatment with
+        // System status. Keeping those selectors in their current sheet avoids
+        // a cascade-changing rule move; both real consumers are explicit.
+        'assets/css/status.css' => ['deploy_log.php', 'system_status.php'],
         // Last on purpose: its rules are specificity-equal with the component
         // defaults they hand back to the user agent, and they win only on
         // position. It is a policy rather than a domain, and it applies in a
         // mode where the portal must not have the last word about colour.
-        'assets/css/forced-colors.css',
-    ] as $sheet) {
+        'assets/css/forced-colors.css' => ['*'],
+    ];
+}
+
+/** @param array<string, list<string>> $registry @return list<string> */
+function layout_assets_for_page(array $registry, string $page): array
+{
+    if (!in_array($page, VIRTUSPHERE_LAYOUT_PAGES, true)) {
+        throw new LogicException('Unclassified portal asset page: ' . $page);
+    }
+
+    $assets = [];
+    foreach ($registry as $asset => $pages) {
+        if (in_array('*', $pages, true) || in_array($page, $pages, true)) {
+            $assets[] = $asset;
+        }
+    }
+
+    return $assets;
+}
+
+function layout_asset_page(?string $scriptName = null): string
+{
+    $source = $scriptName ?? (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+    $page = basename(str_replace('\\', '/', $source));
+    if (!in_array($page, VIRTUSPHERE_LAYOUT_PAGES, true)) {
+        throw new LogicException('Unclassified portal asset page: ' . $page);
+    }
+
+    return $page;
+}
+
+function layout_app_styles(?string $page = null): void
+{
+    foreach (layout_assets_for_page(layout_style_registry(), layout_asset_page($page)) as $sheet) {
         echo '    <link rel="stylesheet" href="' . h(layout_asset_url($sheet)) . '">' . "\n";
     }
 }
 
 /**
- * The portal's client scripts, in load order: core (theme, modals, tabs,
- * session), forms, the deploy-log reader, then the deploy form. Each is an independent IIFE; `defer`
- * preserves this order. Emitted from one place so the head of layout.php and
- * login.php cannot drift apart. Every tag carries the CSP nonce.
+ * The portal's client scripts, in their one global load order. Core owns the
+ * shared shell; each feature module names only the pages that render its hooks.
+ * Each is an independent IIFE; `defer` preserves the selected subsequence and
+ * every tag carries the CSP nonce.
  */
-function layout_app_scripts(string $nonce): void
+/** @return array<string, list<string>> ordered path => pages (`*` means every page) */
+function layout_script_registry(): array
 {
-    foreach ([
-        'assets/core.js',
-        'assets/forms.js',
-        'assets/deploy_log.js',
-        'assets/deploy_form.js',
-        'assets/deploy_warnings.js',
-        'assets/deploy_blockers.js',
-        'assets/deploy_storage.js',
-        'assets/vm-network.js',
-    ] as $script) {
+    return [
+        'assets/core.js' => ['*'],
+        'assets/unsaved_changes.js' => ['mission_details.php', 'vm_edit.php'],
+        'assets/effective_values.js' => ['vm_edit.php'],
+        'assets/forms.js' => ['credentials.php', 'vm_edit.php', 'vms.php'],
+        'assets/deploy_log.js' => ['deploy_log.php'],
+        'assets/deploy_form.js' => ['deploy.php'],
+        'assets/deploy_warnings.js' => ['deploy.php'],
+        'assets/deploy_blockers.js' => ['deploy.php'],
+        'assets/deploy_storage.js' => ['deploy.php'],
+        'assets/vm-network.js' => ['vm_edit.php'],
+    ];
+}
+
+function layout_app_scripts(string $nonce, ?string $page = null): void
+{
+    foreach (layout_assets_for_page(layout_script_registry(), layout_asset_page($page)) as $script) {
         echo '<script defer nonce="' . h($nonce) . '" src="' . h(layout_asset_url($script)) . '"></script>' . "\n";
     }
 }
@@ -110,6 +202,7 @@ function layout_app_scripts(string $nonce): void
 function layout_header(string $title, array $user, string $active = 'dashboard', ?string $helpAnchor = null): void
 {
     $nonce = h(virtusphere_csp_nonce());
+    $assetPage = layout_asset_page();
     $displayUser = trim((string) ($user['name'] ?? ''));
     $accountLabel = $displayUser !== '' ? $displayUser : __t('layout.account');
     $accountInitial = strtoupper(substr($accountLabel, 0, 1));
@@ -122,7 +215,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo h($title); ?> - VirtuSphere</title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?php echo h(layout_asset_url('assets/img/logo-64.png')); ?>">
-<?php layout_app_styles(); ?>
+<?php layout_app_styles($assetPage); ?>
     <script nonce="<?php echo $nonce; ?>">
         try {
             var theme = localStorage.getItem('virtusphere.theme');
@@ -131,7 +224,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
             }
         } catch (error) {}
     </script>
-    <?php layout_app_scripts($nonce); ?>
+    <?php layout_app_scripts($nonce, $assetPage); ?>
 </head>
 <body>
 <a class="skip-link" href="#main"><?php echo h(__t('layout.skip_to_content')); ?></a>

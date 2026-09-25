@@ -39,13 +39,14 @@ function Register-FastCheckGates {
 
     Add-Gate -Name 'phpunit-unit' -Lanes $allLanes -Kind 'container' -Body {
         if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+        $qaAppEnvFile = Get-QaAppEnvFile
         # docker run mit vollem Repo-Mount statt exec in den App-Container: die
         # Repo-Level-Contract-Tests (nginx/php-Config) sehen sonst ihre Dateien
         # nicht und wuerden skippen; die Fast-Lane laeuft ohne Skips.
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
             '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
             '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
-            '-v', ($qaEnvFile + ':/repo/.env:ro'), '-v', ($qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
+            '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
             $toolImages.php, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--fail-on-skipped',
             '--log-junit', '/qa-evidence/phpunit-unit.xml')
         Format-ToolResult $r 'Unit/Static-Suite gruen (ohne Skips)' 'PHPUnit Unit/Static rot oder geskippt'
@@ -275,7 +276,12 @@ function Register-FastCheckGates {
         }
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
             $toolImages.ansible, 'ansible-playbook', '/repo/Docker/qa-ansible/powercycle-selection-fixtures.yml')
-        Format-ToolResult $r 'Powercycle-Auswahl gegen Fixtures bewiesen (an/aus/suspendiert/kaputt/leer)' 'Powercycle-Auswahl weicht vom Vertrag ab'
+        if ($r.ExitCode -ne 0) {
+            return Format-ToolResult $r 'Powercycle-Auswahl bewiesen' 'Powercycle-Auswahl weicht vom Vertrag ab'
+        }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $toolImages.ansible, 'python', '/repo/Docker/qa-ansible/powercycle-sequence-contract.py') -Live
+        Format-ToolResult $r 'Powercycle-Auswahl und sequenzieller Produktionsablauf bewiesen' 'Powercycle-Ablauf weicht vom Vertrag ab'
     }
 
     Add-Gate -Name 'ansible-create-async' -Lanes $allLanes -Kind 'container' -Body {

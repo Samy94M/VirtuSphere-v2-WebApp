@@ -33,7 +33,23 @@
   ],
   "pages": [
     { "name": "missions", "url": "missions.php" },
-    { "name": "deploy", "url": "deploy.php?mission_id=:missionId" }
+    { "name": "deploy", "url": "deploy.php?mission_id=:missionId" },
+    {
+      "name": "system-status",
+      "url": "system_status.php",
+      "captureSelector": ".status-overview",
+      "fixture": {
+        "overviewBadges": [
+          { "href": "system_status.php#deploy-service", "className": "badge badge-danger", "text": "Manuelle Klärung nötig" },
+          { "href": "system_status.php#mecm", "className": "badge badge-success", "text": "Aktiv" },
+          { "href": "system_status.php#ansible", "className": "badge badge-neutral", "text": "Nicht geprüft" },
+          { "href": "system_status.php#esxi", "className": "badge badge-warning", "text": "Nicht geprüft" },
+          { "href": "system_status.php#deviations", "className": "badge badge-warning", "text": "12 Abweichungen" },
+          { "href": "system_status.php#internal-services", "className": "badge badge-success", "text": "Aktiv" },
+          { "href": "system_status.php#directory-status", "className": "badge badge-warning", "text": "Eingeschränkt", "optional": true }
+        ]
+      }
+    }
   ],
   "deviceScaleFactor": 1,
   "launchArgs": [

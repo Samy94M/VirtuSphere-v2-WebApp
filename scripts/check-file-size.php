@@ -136,8 +136,10 @@ const FILE_SIZE_ALLOWANCES = [
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     // U11 adds the require and ordered registry entry for migration 0053; its body stays separate.
+    // ADR-0044 adds the same two registry lines for migration 0056; all schema
+    // and backfill logic remains in lib/migrations/0056_package_report_foundation.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1269,
+        'lines' => 1271,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

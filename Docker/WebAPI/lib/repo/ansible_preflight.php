@@ -6,9 +6,8 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/helpers.php';
 
 /**
- * On-demand Ansible preflight result (migration 0023). A row is written only
- * when an operator tests an Ansible credential; there is no scheduler, so a
- * green row can age. The shared ampel applies its explicit freshness window;
+ * Manual and scheduled Ansible preflight results. The shared ampel applies
+ * its explicit freshness window independently of the configured schedule;
  * revision and test-generation evidence below additionally prevent an older
  * concurrent result from proving a newer credential configuration.
  */
@@ -44,7 +43,7 @@ function repo_ansible_preflight_begin(mysqli $db, int $credentialId, int $config
         $generation = (int) $credential['ansible_test_generation'] + 1;
         repo_execute(
             $db,
-            'UPDATE deploy_credentials SET ansible_test_generation = ? WHERE id = ? AND config_revision = ?',
+            'UPDATE deploy_credentials SET ansible_test_generation = ?, ansible_test_started_at = UTC_TIMESTAMP() WHERE id = ? AND config_revision = ?',
             'iii',
             [$generation, $credentialId, $configRevision]
         );

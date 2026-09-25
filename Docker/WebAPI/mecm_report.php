@@ -17,7 +17,9 @@ require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/client_events.php';
 require_once __DIR__ . '/lib/repo/heartbeats.php';
+require_once __DIR__ . '/lib/repo/package_runs.php';
 require_once __DIR__ . '/lib/run_report.php';
+require_once __DIR__ . '/lib/package_run_report.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -56,8 +58,10 @@ try {
         machine_api_json(['error' => 'Invalid token'], 401);
     }
 
-    $raw = (string) file_get_contents('php://input');
-    if (strlen($raw) > VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES) {
+    $bodyLimit = $action === 'reportPackageRun'
+        ? VIRTUSPHERE_PACKAGE_REPORT_MAX_BODY_BYTES : VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES;
+    $raw = (string) file_get_contents('php://input', false, null, 0, $bodyLimit + 1);
+    if (strlen($raw) > $bodyLimit) {
         machine_api_json(['error' => 'Payload too large'], 413);
     }
 
@@ -67,6 +71,35 @@ try {
     }
 
     $ipAllowed = machine_api_ip_allowed($connection, $clientIp);
+
+    if ($action === 'reportPackageRun') {
+        if (!$ipAllowed) {
+            machine_api_forbidden($clientIp, $connection);
+        }
+
+        $validated = package_run_report_validate($data);
+        if (isset($validated['error'])) {
+            machine_api_json(['error' => $validated['error']], $validated['status']);
+        }
+        $report = $validated['report'];
+        $resolved = repo_package_report_resolve_vm($connection, $report['mac_candidates']);
+        if (($resolved['status'] ?? 500) !== 200) {
+            machine_api_json(['error' => $resolved['error'] ?? 'device_lookup_failed'], (int) ($resolved['status'] ?? 500));
+        }
+        $result = repo_package_report_record($connection, (int) $resolved['vm_id'], $report);
+        if (($result['status'] ?? 500) !== 200) {
+            machine_api_json(['error' => $result['error'] ?? 'report_rejected'], (int) ($result['status'] ?? 500));
+        }
+
+        machine_api_json([
+            'schema_version' => VIRTUSPHERE_PACKAGE_REPORT_SCHEMA_VERSION,
+            'run_id' => $report['run_id'],
+            'event' => $report['event'],
+            'event_seq' => $report['event_seq'],
+            'accepted' => (bool) ($result['accepted'] ?? false),
+            'deduplicated' => (bool) ($result['deduplicated'] ?? false),
+        ]);
+    }
 
     if ($action === 'reportPhase') {
         $mac = (string) ($data['mac'] ?? '');

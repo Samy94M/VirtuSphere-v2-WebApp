@@ -119,8 +119,7 @@ function logs_export_rows(mysqli $connection, array $filter, int $max): array
         $chunk = repo_recent_logs(
             $connection,
             $filter,
-            min(VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS, $max - $offset),
-            0
+            min(VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS, $max - $offset)
         );
         if ($chunk !== []) {
             $filter['_before_id'] = (int) $chunk[array_key_last($chunk)]['id'];

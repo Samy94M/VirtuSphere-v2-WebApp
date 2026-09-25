@@ -17,7 +17,7 @@ final class DeployBlockerSessionReleaseContractTest extends TestCase
         $mustChange = $this->position($endpoint, '$mustChangePassword =');
         $permission = $this->position($endpoint, "can('deploy.run', \$user)");
         $close = $this->position($endpoint, 'session_write_close();');
-        $blockerRead = $this->position($endpoint, '$blockers = deploy_queue_blockers($connection, $state);');
+        $blockerRead = $this->position($endpoint, '$blockers = deploy_queue_blockers($connection, $state, $presentation);');
 
         self::assertTrue($currentUser < $mustChange);
         self::assertTrue($mustChange < $permission);

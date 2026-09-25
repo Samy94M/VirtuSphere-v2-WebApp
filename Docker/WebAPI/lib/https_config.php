@@ -206,8 +206,8 @@ server {
     index index.php index.html;
     charset utf-8;
 
-    access_log /var/log/nginx/access.log virtusphere;
-    error_log /var/log/nginx/error.log error;
+    access_log /dev/stdout virtusphere;
+    error_log stderr error;
     sendfile off;
     client_max_body_size 100m;
 
@@ -217,9 +217,15 @@ server {
     add_header Content-Security-Policy $virtusphere_csp always;
     add_header X-Content-Type-Options $virtusphere_nosniff always;
     add_header Referrer-Policy $virtusphere_referrer always;
+    add_header Cache-Control $virtusphere_asset_cache_control always;
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Keep missing static files visible instead of handing them to PHP.
+    location ^~ /portal/assets/ {
+        try_files $uri =404;
     }
 
     location = /favicon.ico { access_log off; log_not_found off; }

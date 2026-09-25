@@ -18,9 +18,8 @@ final class QaRuntimeIsolationContractTest extends TestCase
                     $errors[] = $service . ':' . $mount;
                 }
             }
-            if ($service !== 'webserver'
-                && (!str_contains($body, "env_file: !override\n      - Docker/qa/qa.env")
-                    || !str_contains($body, '- *qa-dotenv'))) {
+            if (str_contains($body, 'env_file:') || str_contains($body, 'qa-dotenv')
+                || str_contains($body, '/var/www/html/.env')) {
                 $errors[] = $service . ':environment';
             }
         }
@@ -40,13 +39,12 @@ final class QaRuntimeIsolationContractTest extends TestCase
                 $errors[] = 'volume:' . $volume;
             }
         }
-        if (!str_contains($compose, "x-qa-dotenv: &qa-dotenv\n  type: bind\n  source: ./Docker/qa/qa.env\n"
-            . "  target: /var/www/html/.env\n  read_only: true")) {
+        if (str_contains($compose, 'x-qa-dotenv') || str_contains($compose, '/var/www/html/.env')) {
             $errors[] = 'dotenv-source';
         }
         foreach (['unit' => $fast, 'full' => $integration, 'composer' => $runtime] as $gate => $source) {
             foreach (['/repo/Docker/WebAPI/var:mode=1777', '/repo/Docker/WebAPI/logs:mode=1777',
-                "\$qaEnvFile + ':/repo/.env:ro'", "\$qaEnvFile + ':/repo/Docker/WebAPI/.env:ro'"] as $mask) {
+                "\$qaAppEnvFile + ':/repo/.env:ro'", "\$qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'"] as $mask) {
                 if (!str_contains($source, $mask)) {
                     $errors[] = $gate . ':' . $mask;
                 }
@@ -72,12 +70,14 @@ final class QaRuntimeIsolationContractTest extends TestCase
             $sources[] = str_replace("\r\n", "\n", (string) file_get_contents($root . '/' . $path));
         }
         self::assertSame([], $this->violations(...$sources));
-        foreach (['- *qa-runtime', '- *qa-logs', 'nocopy: true', 'source: qa-backup-status',
-            'env_file: !override', '- *qa-dotenv', 'source: ./Docker/qa/qa.env'] as $boundary) {
+        foreach (['- *qa-runtime', '- *qa-logs', 'nocopy: true', 'source: qa-backup-status'] as $boundary) {
             $mutated = $sources;
             $mutated[0] = str_replace($boundary, '# removed isolation', $mutated[0]);
             self::assertNotEmpty($this->violations(...$mutated), $boundary);
         }
+        $mutated = $sources;
+        $mutated[0] = str_replace("  php:\n", "  php:\n    env_file:\n      - Docker/qa/qa.env\n", $mutated[0]);
+        self::assertNotEmpty($this->violations(...$mutated), 'runtime dotenv must stay absent');
         foreach ([1, 2, 3] as $index) {
             $mutated = $sources;
             $mutated[$index] = str_replace('/repo/Docker/WebAPI/logs:mode=1777', '/unprotected', $mutated[$index]);

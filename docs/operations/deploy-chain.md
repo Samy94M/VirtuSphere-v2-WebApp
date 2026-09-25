@@ -146,7 +146,7 @@ umgesetzte Etappe 14B führt Create und Full je VM im aktiven direkten
 
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
-Der Systemstatus hält den manuellen **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft nicht automatisch. Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.
+Der Systemstatus hält den **Volltest** und den letzten **vom Worker bearbeiteten Missionsauftrag** absichtlich getrennt. Als bearbeitet gilt dabei nur ein Auftrag, den ein Worker mindestens einmal übernommen hat (`attempts > 0`); ein aus der Warteschlange abgebrochener Auftrag war nie in Ausführung und erscheint dort nicht. Der Volltest prüft aus dem Portal heraus SSH, die vollständige Toolchain, einen echten SFTP-Transfer sowie – bei konfigurierter Rückadresse – Portal-Erreichbarkeit und IP-Allowlist. Er läuft manuell oder automatisch nach dem Intervall unter Einstellungen → Kataloge und Inventar. Ablauf und Randfälle stehen unter [Automatischer Ansible-Volltest](ansible-full-test.md). Nach `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS` Tagen heißt sein Zustand deshalb „Test veraltet“: kein bekannter Fehler, aber auch kein aktueller Gesamtnachweis. Ein bekannter Fehlschlag altert nicht ins Neutrale.
 
 Jeder Volltest gehört zu einer monotonen Konfigurationsrevision und
 Testgeneration. Zugang und verschlüsseltes Secret werden vor dem externen Lauf
@@ -432,3 +432,17 @@ Mehrere VM-Ergebnisse werden nicht zu einem falschen Gesamterfolg verdichtet. Da
 ## Diagnose
 
 Vom Symptom aus führt die [Störungsdiagnose](troubleshooting.md) zur richtigen Portal-Seite, Log-Kategorie und ersten Maßnahme. Die Supportgrenzen für Standalone ESXi und vCenter stehen in der [Deployment-Matrix](../DEPLOYMENT.md); die Begriffe der Kette stehen im [Glossar](../GLOSSARY.md).
+
+## Powercycle pro VM
+
+Der Powercycle beendet für jede geeignete VM Einschalten, Sekundenpause und
+hartes Ausschalten, bevor die nächste VM beginnt. Die Sekunden gelten je VM;
+Befehlslaufzeiten kommen hinzu. Das Log meldet Position und VM vor und nach dem
+Zyklus. Bei Ein-/Ausschaltfehlern endet die Folge; eine unklare Einschaltantwort
+berechtigt nicht zum blinden Ausschalten. Bereits laufende oder suspendierte
+VMs und VMs mit bekannter WDS-MAC bleiben ausgenommen.
+
+Die Gesamtzeit wächst mit der Zahl der Zyklen. Das bestehende SSH-Gesamtbudget
+bleibt wirksam; bei großen Auswahlen und langen Pausen kleinere Aufträge planen.
+Ein Prozessabbruch kann das Cleanup verhindern. Betroffene Instance-UUID am
+ESXi Host Client prüfen; ein Wiederholen ist kein Nachweis des alten Ausgangs.

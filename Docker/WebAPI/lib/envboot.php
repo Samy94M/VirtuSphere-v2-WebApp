@@ -38,7 +38,10 @@ function envboot_load_dotenv(): void
             [$name, $value] = explode('=', $line, 2);
             $name = trim($name);
             $value = trim($value);
-            if ($name === '' || getenv($name) !== false) {
+            // The application runtime must never import the database root
+            // credential from a readable dotenv file. Root access belongs to
+            // MySQL/bootstrap/backup tooling, not to PHP-FPM or either worker.
+            if ($name === '' || $name === 'MYSQL_ROOT_PASSWORD' || getenv($name) !== false) {
                 continue;
             }
 
@@ -92,15 +95,13 @@ function envboot_app_key_bytes(): string
 
 function envboot_assert_secure_runtime(): void
 {
-    foreach (['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS', 'MYSQL_ROOT_PASSWORD', 'APP_KEY'] as $name) {
+    foreach (['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS', 'APP_KEY'] as $name) {
         envboot_required($name);
     }
 
-    foreach (['DB_PASS', 'MYSQL_ROOT_PASSWORD'] as $name) {
-        $value = envboot_required($name);
-        if (strlen($value) < 16 || preg_match('/^(change-me|password|secret|root|admin)/i', $value) === 1) {
-            throw new RuntimeException($name . ' is missing or too weak for runtime boot.');
-        }
+    $dbPassword = envboot_required('DB_PASS');
+    if (strlen($dbPassword) < 16 || preg_match('/^(change-me|password|secret|root|admin)/i', $dbPassword) === 1) {
+        throw new RuntimeException('DB_PASS is missing or too weak for runtime boot.');
     }
 
     envboot_app_key_bytes();

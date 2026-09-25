@@ -552,12 +552,9 @@ const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
 // whose age has taken it out of evidence, not a new kind of problem.
 const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'stale', 'warning', 'danger', 'unknown'];
 
-// How long a passing Ansible preflight stays evidence. The test runs on click
-// only (there is no scheduler), so this is the window after which the portal
-// stops claiming the deploy chain works and says "unconfirmed" instead.
-// Deliberately its own constant rather than a multiple of the ESXi inventory
-// interval: that setting may be 0, and its 6h default would grey out a manual
-// test overnight, which trains operators to ignore the badge.
+// How long passing Ansible preflight evidence remains current. This window is
+// independent of both configurable schedules (full tests and ESXi inventory).
+// Disabling automation must not keep an old result green indefinitely.
 const VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS = 7;
 
 // mecm-category audits from the machine surface are throttled per tag so a

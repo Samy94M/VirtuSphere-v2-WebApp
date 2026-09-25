@@ -225,6 +225,14 @@ stoppt die vier Aufgaben, aktiviert den neuen Stand und rollt bei einem Fehler
 auf Registry, Dateien, Vorlage und Aufgaben zurück. Exit-Code 0 plus laufende
 Aufgaben und frische Tageslogs bilden den Abschlussnachweis.
 
+`VirtuSphere-Common.ps1` und der Autoimporter deklarieren denselben
+MECM-Serververtrag. Der Installer prüft ihn vor und nach der Aktivierung. Meldet
+der Portalstatus stattdessen eine unbekannte Funktion wie
+`Get-VsPackageRetainedNames`, ist ein alter Common-Stand mit einem neueren
+Autoimporter aktiv. Das ist kein Verteilungsfehler. Keine Einzeldatei ersetzen,
+sondern den vollständigen neuen Baum erneut mit `-Upgrade` installieren; ein
+inkompatibler Satz bricht danach schon beim Prozessstart eindeutig ab.
+
 Anschließend prüfen:
 
 ```powershell
@@ -709,9 +717,10 @@ Im Portal: Paketliste mit Status-Filter (Aktiv/Zurückgezogen/Alle); die
 VM-Bearbeitung blendet zurückgezogene Pakete aus (außer bereits verknüpfte,
 mit Kennzeichnung) und zeigt „Update verfügbar"-Hinweise.
 
-### Altversionen und sicherer Bereinigungsplan
+### Altversionen und automatische sichere Bereinigung
 
-Der Autoimporter löscht in seinem normalen Scan keine MECM-Objekte. Er liest
+`removeOldVersion=true` in einer `config.json` ist die maßgebliche Anforderung,
+ersetzte Altversionen automatisch aus MECM zu entfernen. Der Autoimporter liest
 zuerst alle `config.json`-Quellen und bestimmt je ordinalem Produktnamen einen
 Zielstand. Für eine automatische Ordnung sind nur kanonische, punktgetrennte
 Dezimalversionen zulässig; `1.10` ist neuer als `1.9`, `10` neuer als `2`.
@@ -719,14 +728,20 @@ Freie oder doppelte Versionen blockieren, und eine weiterhin in der Quelle
 liegende Version bleibt immer erhalten. Diese enge Löschsemantik ist bewusst
 nicht die breitere Anzeigeordnung des Portal-Katalogs.
 
-Ein freizugebender Plan muss stabile Application-/Collection-IDs, die exakten
-versionierten Ownership-Marker, keine Referenzen und einen vollständig bereiten
-Ersatz belegen. Bereit bedeutet: genau ein Deployment Type, bestätigtes
-Contentmanifest, vollständig bestätigter aktueller Contentstand und geprüftes
-Deployment. Unklare oder fremde Objekte bleiben erhalten. Der Plan wird direkt
-vor einer Ausführung neu erhoben; nur ein identischer SHA-256-Fingerabdruck ist
-gültig. Der normale Task ruft den Executor nicht auf. Eine echte Entfernung
-wird ausschließlich in einer freigegebenen MECM-Testmenge abgenommen.
+Der automatisch auszuführende Plan muss stabile Deployment-/Application-/Collection-IDs, die exakten
+versionierten Ownership-Marker, keine Referenzen und einen ausreichend bereiten
+Ersatz belegen. Bereit bedeutet: genau ein Deployment Type, ein bestätigter und
+an die exakte Content-ID gebundener Auftrag, eine bekannte sichere
+DP-Zielprojektion und ein geprüftes Deployment. `failed` oder `in_progress` auf
+einzelnen oder allen DPs sperrt den Plan nicht; 100 Prozent Verteilerfolg und
+mindestens ein erfolgreicher DP sind keine Voraussetzung. Ungebundene Intents,
+unbekannte Evidenz, Zielverlust, Löschzustände sowie unklare oder fremde Objekte
+bleiben gesperrt. Der Plan wird direkt vor einer Ausführung neu erhoben; nur ein
+identischer SHA-256-Fingerabdruck des aktuellen Schemas 3 ist gültig. Der
+Autoimporter liest den Plan unmittelbar zweimal und entfernt danach zuerst alte
+Application-Deployments, anschließend Applications und zuletzt Collections.
+Ein Einzelfehler stoppt die restlichen Einheiten und meldet
+`package_cleanup_failed`; der nächste Scan plant aus dem aktuellen Bestand neu.
 
 ### Transport, TLS, ACL und Site-Health seit 07.09.2026
 
@@ -828,7 +843,8 @@ Wichtige Härtungen gegenüber den Altskripten:
   WMI nichts, wird **nichts** gesendet (ein leerer Payload würde serverseitig
   den Katalog zurückziehen). Zusätzlich Change-Detection per Payload-Hash.
 - **Alt-Versionen im Autoimporter:** Der normale Importlauf erkennt bei
-  `removeOldVersion` nur exakte `^Name-<Version>$`-Kandidaten, behaelt sie aber.
+  `removeOldVersion` nur exakte `^Name-<Version>$`-Kandidaten und entfernt sie
+  nach belegtem, unmittelbar revalidiertem Ersatz automatisch.
   Name und Ordner sind kein Eigentums-, Referenz- oder Ersatznachweis. Eine
   spätere Löschung braucht einen separat geprüften Plan; bis dahin bleibt der
   Stamp offen und der Bereinigungsbedarf sichtbar. `config.json` ohne
@@ -1068,6 +1084,17 @@ widersprüchliche Zielzahlen und DP-Löschzustände bleiben gesperrt.
 Nach einem abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die
 Baseline des nächsten Auftrags aufgenommen; der Verlust eines bisherigen Ziels
 bleibt gesperrt.
+Ab `autoimporter/2.2` sind auch Deploymentfreigabe und vollständiger
+Verteilnachweis getrennt: Nach einem von MECM bestätigten Erst- oder
+Updateauftrag zieht der Autoimporter die
+Collection sowie Required- und Available-Deployments idempotent nach, selbst
+wenn aktuell kein DP eine erfolgreiche Kopie meldet. Die Zuweisung bleibt
+bestehen; ein Gerät kann das Paket anwenden, sobald sein zugeordneter DP den
+Inhalt anbietet. `package_content_failed` beziehungsweise
+`package_content_in_progress` bleiben trotzdem sichtbare offene Punkte und
+verhindern weiterhin den vollständigen Manifest- und Ersatznachweis. Eine
+fehlende DP-Gruppe, unbekannte Evidenz, Zielverlust, Löschzustände oder ein
+unbestätigter MECM-Aufruf geben den Deploymentabgleich nicht frei.
 Die Anforderungskriterien gehören zu `Test-VsDistributionCopyBaselineReady`,
 die gemeinsame Zielprüfung zu `Test-VsDistributionCopyEvidence`; der
 Controller in `mecm_autoimporter.ps1` entscheidet einmal pro Manifest.
@@ -1075,6 +1102,12 @@ Der Abschluss bleibt an vollständig erfolgreiche Aggregatzähler und neuere
 Kopien aller bisherigen Ziele gebunden. MECM verwaltet die ausstehenden
 Kopien; falls seine Wiederholungen erschöpft sind, ist der konkrete
 Verteilfehler nach Wiederkehr des DPs in der MECM-Konsole zu prüfen.
+Der grobe Wire-Code `package_content_failed` beweist dabei nicht zwingend einen
+DP-Fehler: Ohne konfigurierte DP-Gruppe bezeichnet er eine fehlende
+Voraussetzung. Eine unvollständige oder unbekannte Zielprojektion meldet dagegen
+`package_content_unknown` und bleibt vor Content- und Deploymentmutationen
+gesperrt. Die Anzeige bleibt bei der jeweils belegten Aussage und erfindet keine
+DP-Diagnose.
 
 **Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise beziehen sich auf den angezeigten letzten Abschluss, nicht auf den offenen Lauf. Der bestehende Bericht liefert keine vollständigen DP-Zahlen je Paket. Fehlende oder gekürzte Ursachen sind kein Erfolgsnachweis; offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben.
 
@@ -1087,6 +1120,9 @@ Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
 kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
 Ampellabels „Ausgefallen“ und „Verzögert“ bleiben aus Kompatibilitätsgründen
 erhalten; die Legende grenzt ihre Aussage auf Bericht und Laufergebnis ein.
+Ein nachfolgender Legacy-Heartbeat verwirft die Herkunftszuordnung eines
+früheren Scanabschlusses. Er darf dessen Ergebnis, Zeit, Zähler oder Details
+nicht zu einer neuen Beobachtung zusammensetzen.
 
 **Versionen und erhaltene Altobjekte.** Namen und Versionen sind
 JSON-Zeichenketten; Bindestriche gehören nur in `ProjectName`.
@@ -1096,9 +1132,21 @@ importierbar, die Bereinigungsplanung verlangt kanonische Zahlen mit Punkten.
 `1` und `1.0` sind numerisch gleich und kein eindeutiger Zielstand.
 Weiterhin gelieferte Quellversionen und höhere vorhandene Versionen werden
 nicht als Altobjekt zur Bereinigung gemeldet. Tatsächliche Altobjekte bleiben
-bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten;
-Offline-DPs können diesen Ersatznachweis offenhalten, ohne neue Inhalte zu
-blockieren. Der Importlauf entfernt keine Altobjekte.
+bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten. Ein
+bestätigter, an die exakte Content-ID gebundener Ersatzauftrag mit sicherer
+Zielprojektion und geprüftem Deployment genügt auch bei null erfolgreichen DPs;
+unbekannte Evidenz, Zielverlust und Löschzustände bleiben gesperrt. Fordert
+mindestens eine Quelle des Produkts `removeOldVersion=true`, entfernt der
+Importlauf ausschließlich die durch den unmittelbar revalidierten Plan belegten
+Altobjekte in der Reihenfolge Deployment, Application, Collection.
+
+**Teilwissen zu Altobjekten.** Die optionale Collection-/Application-Suche kann
+unvollständig sein. Ihr Fehler liefert keine Cleanupentscheidung und beendet
+nicht den ganzen Scan: Content und weitere Pakete werden weiter geprüft, soweit
+ihre eigene Identitäts- und Providerevidenz trägt. Bei gesperrter, mehrdeutiger
+oder nicht numerisch ordnungsfähiger Auswahl werden nur strikt belegbar ältere
+Bestände als erhaltene Altobjekte gemeldet; gleiche oder höhere Bestände erhalten
+keine Altklassifikation. Aus diesem Teilwissen folgt in keinem Fall eine Löschung.
 
 **Abnahme im MECM-Labor:** Bei sechs bestehenden Zielen zwei DPs offline
 lassen, eine Datei ändern und genau einen Updateaufruf nachweisen.
@@ -1126,11 +1174,11 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
 | files-Baum unverändert (SHA-256-Manifest) | kein Scan | still |
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
-| Alt-Version erkannt | bleibt unverändert; normaler Import darf ohne Eigentums-, Referenz- und Ersatznachweis nicht löschen (`package_cleanup_failed`) | WARN je Kandidat |
+| Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Bestätigter gebundener Ersatzauftrag, sichere Zielevidenz und neues Deployment genügen; vollständiger DP-Erfolg ist nicht nötig. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
 | Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
-| Content-Verteilung bleibt offen oder einzelne DPs melden Fehler | Neue Manifeste dürfen einmal angefordert werden; gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität, Zielverlust und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag, WARN mit Paket/Ursachencode beim offenen Nachweis |
+| Content-Verteilung bleibt offen oder einzelne/alle DPs melden Fehler | Nach einem bestätigten Contentauftrag werden Collection und Deployments auch bei null erfolgreichen DPs nachgezogen; Geräte können das Paket verwenden, sobald ihr DP den Inhalt anbietet. Neue Manifeste dürfen einmal angefordert werden, gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität/Projektion, Zielverlust, Löschzustände und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag und weiterlaufendem Deploymentabgleich, WARN mit Paket/Ursachencode beim offenen Nachweis |
 | Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
 | `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry, kein offener Punkt | WARN |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |

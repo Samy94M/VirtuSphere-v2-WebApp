@@ -70,3 +70,21 @@ Decision:
   user + grant from the archived `.env`) and only then re-checks the app user.
   The repair is the documented operator step for the disaster case, proven by
   the drill rather than promised.
+
+## Amendment 4 (2026-09-12): one bounded runtime-log stream and no unused binlog
+
+- The six long-lived Compose services use Docker's `json-file` driver with
+  `max-size=10m` and `max-file=5`. nginx sends both its HTTP and generated HTTPS
+  access/error logs to stdout/stderr. The old unrotated
+  `Docker/logs/nginx:/var/log/nginx` mount is removed; nginx diagnosis survives
+  container restarts through Docker's retained stream and uses
+  `docker compose logs webserver`.
+- Persistent PHP application/error files remain under `Docker/WebAPI/logs` and
+  outside the backup. Only that directory needs the documented host permission
+  repair after a restore.
+- There is no replication or point-in-time-recovery consumer. Compose therefore
+  starts MySQL with `--skip-log-bin`; the supported recovery granularity remains
+  the verified logical backup interval. The option does not delete historical
+  binlog files, and operators must never remove such files directly from the
+  data directory. A future PITR decision must add its own archive, retention and
+  restore proof before binary logging is enabled again.

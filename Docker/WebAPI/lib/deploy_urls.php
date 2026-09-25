@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/portal_work_context.php';
 
 /**
  * Canonical portal URL for one deploy-job log.
@@ -34,13 +35,13 @@ function deploy_mission_url(int $missionId): string
     return sprintf('deploy.php?mission_id=%d', $missionId);
 }
 
-function mission_details_url(int $missionId): string
+function mission_details_url(int $missionId, array $workContext = []): string
 {
     if ($missionId <= 0) {
         throw new InvalidArgumentException('Mission id must be positive.');
     }
 
-    return sprintf('mission_details.php?id=%d', $missionId);
+    return portal_work_context_append_url(sprintf('mission_details.php?id=%d', $missionId), $workContext);
 }
 
 const VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG = 'job_log';

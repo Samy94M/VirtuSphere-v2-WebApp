@@ -24,6 +24,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_credentials.credentials_tests_heading')); ?></h2>
             <p><?php echo h(__t('help_credentials.credentials_tests_p1', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+            <p><?php echo h(__t('ansible_test.help')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_p2')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_p3')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_cadence_heading')); ?></h3>

@@ -121,13 +121,15 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
 test('MECM sync cards: the same field sits in the same column in every card', async ({ page }) => {
   await page.goto('system_status.php#mecm');
 
-  // Three reporters, one fixed six-field list each. The fields used to render
-  // only when they had a value, so a card with a duration had one column more
-  // than its neighbours and the whole block started somewhere else; this is the
-  // geometry assertion ADR-0013 asks for on a repaired spacing boundary.
+  // Three reporters, one direct fixed six-field run list each. The autoimporter
+  // additionally owns a separate distribution axis below that list; descendants
+  // of that axis must not be counted as columns of the shared run facts.
+  // The run fields used to render only when they had a value, so a card with a
+  // duration had one column more than its neighbours and the whole block started
+  // somewhere else; this is the geometry assertion ADR-0013 asks for.
   const columns = await page.locator('#mecm .status-subgroup').first().evaluate((group) => {
     const rows = [...group.querySelectorAll('article.status-row')];
-    return rows.map((row) => [...row.querySelectorAll('.status-facts dt')]
+    return rows.map((row) => [...row.querySelector(':scope > .status-facts').querySelectorAll('dt')]
       .map((dt) => Math.round(dt.getBoundingClientRect().x)));
   });
 
@@ -341,6 +343,82 @@ test('Systemstatus overview: all visible cards share the responsive grid', async
 
   await page.setViewportSize({ width: 500, height: 900 });
   expect(await rowsAt(), 'on a narrow viewport every card gets its own row').toBe(count);
+});
+
+test('Systemstatus overview: long labels and statuses stay readable inside each card', async ({ page }) => {
+  await page.goto('system_status.php');
+
+  const deployCard = page.locator('.status-overview-card[href="system_status.php#deploy-service"]');
+  const ansibleCard = page.locator('.status-overview-card[href="system_status.php#ansible"]');
+  await deployCard.locator('.badge').evaluate((badge) => {
+    badge.textContent = 'Manual review required with UnbrokenRecoveryToken0123456789';
+  });
+  await ansibleCard.locator('.status-overview-label').evaluate((label) => {
+    label.textContent = 'Ansible integration test';
+  });
+
+  const assertContained = async (context) => {
+    const measurements = await page.locator('.status-overview').evaluate((overview) => {
+      const navigation = overview.getBoundingClientRect();
+      const cards = [...overview.querySelectorAll('.status-overview-card')].map((card) => {
+        const style = getComputedStyle(card);
+        const box = card.getBoundingClientRect();
+        const label = card.querySelector('.status-overview-label').getBoundingClientRect();
+        const badge = card.querySelector('.badge').getBoundingClientRect();
+        return {
+          href: card.getAttribute('href'),
+          contentLeft: box.left + parseFloat(style.paddingLeft),
+          contentRight: box.right - parseFloat(style.paddingRight),
+          contentTop: box.top + parseFloat(style.paddingTop),
+          contentBottom: box.bottom - parseFloat(style.paddingBottom),
+          label: { left: label.left, right: label.right, top: label.top, bottom: label.bottom },
+          badge: { left: badge.left, right: badge.right, top: badge.top, bottom: badge.bottom },
+          scrollWidth: card.scrollWidth,
+          clientWidth: card.clientWidth,
+        };
+      });
+      return {
+        navigation: { scrollWidth: overview.scrollWidth, clientWidth: overview.clientWidth, left: navigation.left, right: navigation.right },
+        cards,
+      };
+    });
+
+    expect(measurements.navigation.scrollWidth, `${context}: overview has no horizontal scroll`).toBeLessThanOrEqual(measurements.navigation.clientWidth + 1);
+    for (const card of measurements.cards) {
+      expect(card.scrollWidth, `${context}: ${card.href} has no horizontal overflow`).toBeLessThanOrEqual(card.clientWidth + 1);
+      for (const [name, child] of [['label', card.label], ['badge', card.badge]]) {
+        expect(child.left, `${context}: ${card.href} ${name} starts inside padding`).toBeGreaterThanOrEqual(card.contentLeft - 1);
+        expect(child.right, `${context}: ${card.href} ${name} ends inside padding`).toBeLessThanOrEqual(card.contentRight + 1);
+        expect(child.top, `${context}: ${card.href} ${name} starts inside padding`).toBeGreaterThanOrEqual(card.contentTop - 1);
+        expect(child.bottom, `${context}: ${card.href} ${name} ends inside padding`).toBeLessThanOrEqual(card.contentBottom + 1);
+      }
+      expect(card.badge.top, `${context}: ${card.href} status follows its label`).toBeGreaterThanOrEqual(card.label.bottom - 1);
+    }
+  };
+
+  for (const width of [1600, 1366, 1024, 768, 560, 360, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await assertContained(`${width}px at normal text size`);
+  }
+
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  for (const width of [1024, 360, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await assertContained(`${width}px at 200% text size`);
+  }
+
+  await deployCard.focus();
+  await expect(deployCard).toBeFocused();
+  const focus = await deployCard.evaluate((card) => {
+    const style = getComputedStyle(card);
+    return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+  });
+  expect(focus.style, 'keyboard focus uses a visible outline').not.toBe('none');
+  expect(focus.width, 'keyboard focus outline remains at least two pixels wide').toBeGreaterThanOrEqual(2);
+
+  await deployCard.click();
+  await expect(page).toHaveURL(/system_status\.php#deploy-service$/);
+  await expect(page.locator('#deploy-service')).toBeVisible();
 });
 
 // The count is one number with two readers. The strip must not be able to say

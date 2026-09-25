@@ -29,3 +29,13 @@ RUN microdnf update -y \
 # Same path, same mode, same owner as the binary it replaces (root:root 0755,
 # no setuid). The entrypoint calls it unchanged.
 COPY --from=gosu --chown=root:root --chmod=0755 /go/bin/gosu /usr/local/bin/gosu
+
+# Root- und App-DB-Passwort gehoeren zum Datenbank-Bootstrap. PHP/Worker sehen
+# das Rootsecret nicht; deshalb validiert der MySQL-Owner beide Werte selbst,
+# bevor der unveraenderte Upstream-Entrypoint irgendeinen Server startet.
+COPY --chown=root:root --chmod=0755 validate-secrets.sh /usr/local/bin/virtusphere-mysql-entrypoint.sh
+ENTRYPOINT ["virtusphere-mysql-entrypoint.sh"]
+# Re-state the server command explicitly. The currently pinned upstream image
+# publishes no inherited Config.Cmd, so an empty Compose command would otherwise
+# validate both secrets and then exit successfully without starting MySQL.
+CMD ["mysqld"]

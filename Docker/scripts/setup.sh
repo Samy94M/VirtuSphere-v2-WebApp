@@ -34,7 +34,7 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 2
 fi
 
-mkdir -p Docker/WebAPI/logs Docker/logs/nginx Docker/mysql/mysql-data
+mkdir -p Docker/WebAPI/logs Docker/mysql/mysql-data
 
 if [ ! -f .env ]; then
     cp .env.example .env

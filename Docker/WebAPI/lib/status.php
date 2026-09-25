@@ -195,10 +195,8 @@ function virtusphere_heartbeat_state_rank(string $state): int
  * 'warning', 'danger' (last test failed), 'stale' (last test passed but is too
  * old to still be evidence) or 'unknown' (never tested).
  *
- * The preflight has no scheduler, so without the staleness axis a green badge
- * stayed green forever next to a timestamp from months ago, in a column whose
- * badge-over-timestamp shape reads as "last poll" everywhere else in the portal.
- * Only a passing result ages: a failure stays red until someone re-tests it,
+ * The schedule may be disabled or delayed, so evidence expiry is independent.
+ * Only a passing result ages: a failure stays red until a current re-test,
  * because ageing a known break into grey would hide it.
  *
  * @param array<string, mixed>|null $state

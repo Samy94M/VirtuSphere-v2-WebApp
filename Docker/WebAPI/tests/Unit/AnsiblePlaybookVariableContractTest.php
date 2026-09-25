@@ -301,6 +301,17 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         preg_match_all('/^\s*register:\s*(\w+)/m', $source, $matches);
         $names = array_merge($names, $matches[1]);
 
+        // include_tasks loop variables are local bindings just like the
+        // implicit `item`. Keep the match inside loop_control: a free-standing
+        // `loop_var` key must not make an otherwise unbound Jinja name valid.
+        if (preg_match_all('/^(\s*)loop_control:\s*$((?:\R^\1\s+.*$)+)/m', $source, $blocks, PREG_SET_ORDER) > 0) {
+            foreach ($blocks as $match) {
+                if (preg_match('/^\s*loop_var:\s*(\w+)\s*$/m', $match[2], $loopVar) === 1) {
+                    $names[] = $loopVar[1];
+                }
+            }
+        }
+
         foreach (['set_fact', 'vars'] as $block) {
             if (preg_match_all('/^(\s*)(?:ansible\.builtin\.)?' . $block . ':\s*$((?:\R^\1\s+.*$)+)/m', $source, $blocks, PREG_SET_ORDER) > 0) {
                 foreach ($blocks as $match) {
@@ -311,6 +322,31 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         }
 
         return $names;
+    }
+
+    public function testOnlyLoopControlDeclaresACustomLoopVariable(): void
+    {
+        $names = $this->locallyDefinedNames(<<<'YAML'
+- name: Bound include
+  ansible.builtin.include_tasks: ./task.yml
+  loop: "{{ values }}"
+  loop_control:
+    loop_var: bound_value
+- name: Unrelated mapping
+  ansible.builtin.debug:
+    loop_var: unbound_value
+YAML);
+
+        self::assertContains('bound_value', $names);
+        self::assertNotContains('unbound_value', $names);
+        self::assertContains(
+            'genuinely_unbound',
+            array_values(array_diff(
+                $this->rootIdentifiers('{{ genuinely_unbound }}'),
+                array_merge(self::NON_DATA_TOKENS, $names)
+            )),
+            'A real Jinja input without a generator, local binding or extra-var must remain unbound.'
+        );
     }
 
     /**

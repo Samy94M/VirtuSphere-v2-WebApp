@@ -50,26 +50,43 @@ function vm_edit_identity_fields(array $vm, int $vmId, bool $isTemplate, bool $c
     // correction up.
     $showRolloutDivergence = $vmId > 0 && !$isTemplate && mecm_rollout_shows_divergence($vm);
     $mecmIdValue = (string) ($vm['mecm_id'] ?? '');
+    $vmNameValue = (string) ($vm['vm_name'] ?? '');
+    $vmNameId = form_element_id('vm_edit', 'vm_name');
+    $hostnameValue = (string) ($vm['vm_hostname'] ?? '');
+    $hostnameId = form_element_id('vm_edit', 'vm_hostname');
     ?>
     <?php if ($vmId > 0 && !$isTemplate) { ?>
         <label><?php echo h(__t('vm_edit.diagnostics_mecm_id')); ?><input value="<?php echo h($mecmIdValue !== '' ? $mecmIdValue : __t('vm_edit.mecm_id_none')); ?>" readonly></label>
     <?php } ?>
-    <label><?php echo h(__t('vm_edit.label_vm_name')); ?><input name="vm_name"<?php echo form_control_attrs('vm_edit', 'vm_name', null, false, (string) ($fieldErrors['vm_name'] ?? '')); ?> maxlength="16" value="<?php echo h($vm['vm_name'] ?? ''); ?>" required <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_name'); ?></label>
+    <div class="copy-field">
+        <label for="<?php echo h($vmNameId); ?>"><?php echo h(__t('vm_edit.label_vm_name')); ?></label>
+        <div class="copy-field-control">
+            <input name="vm_name"<?php echo form_control_attrs('vm_edit', 'vm_name', null, false, (string) ($fieldErrors['vm_name'] ?? '')); ?> maxlength="16" value="<?php echo h($vmNameValue); ?>" required <?php echo $canWrite ? '' : 'readonly'; ?>>
+            <?php echo portal_copy_input_button($vmNameId, $vmNameValue, __t('vm_edit.label_vm_name')); ?>
+        </div>
+        <?php echo vm_field_error($fieldErrors, 'vm_name'); ?>
+    </div>
     <?php // The group exists only in the divergence case. It is the established
           // way to put an explanation under ITS field (a full grid row would
           // start at the far left, columns away from the hostname), and
           // rendering it always would rebuild the grid in the normal case too. ?>
     <?php if ($showRolloutDivergence) { ?><div class="field-group"><?php } ?>
-    <label><?php echo h(__t('vm_edit.label_hostname')); ?><input name="vm_hostname"<?php echo form_control_attrs('vm_edit', 'vm_hostname', null, false, $hostnameEffectiveError); ?> maxlength="<?php echo h((string) VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH); ?>" value="<?php echo h($vm['vm_hostname'] ?? ''); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_hostname'); ?>
+    <div class="copy-field">
+        <label for="<?php echo h($hostnameId); ?>"><?php echo h(__t('vm_edit.label_hostname')); ?></label>
+        <div class="copy-field-control">
+            <input name="vm_hostname"<?php echo form_control_attrs('vm_edit', 'vm_hostname', null, false, $hostnameEffectiveError); ?> maxlength="<?php echo h((string) VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH); ?>" value="<?php echo h($hostnameValue); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>>
+            <?php echo portal_copy_input_button($hostnameId, $hostnameValue, __t('vm_edit.label_hostname')); ?>
+        </div>
+        <?php echo vm_field_error($fieldErrors, 'vm_hostname'); ?>
         <?php if ($hostnameLegacyInvalid && $hostnameFieldError === '') { ?>
             <span class="field-error" id="<?php echo h(form_error_id('vm_edit', 'vm_hostname')); ?>"><?php echo h($hostnameLegacyWarning); ?></span>
         <?php } ?>
-    </label>
+    </div>
     <?php // Read-only and without a form control: a hidden input would be a
           // second desired value, and the snapshot belongs to the reset alone. ?>
     <?php if ($showRolloutDivergence) { ?>
         <div class="alert alert-info">
-            <p><strong><?php echo h(__t('portal.vm_rollout_current_label')); ?>:</strong> <?php echo h((string) $vm['mecm_rollout_hostname']); ?>
+            <p><strong><?php echo h(__t('portal.vm_rollout_current_label')); ?>:</strong> <?php echo portal_copy_value((string) $vm['mecm_rollout_hostname'], __t('portal.vm_rollout_current_label')); ?>
                &middot; <strong><?php echo h(__t('portal.vm_rollout_next_label')); ?>:</strong> <?php echo h((string) ($vm['vm_hostname'] ?? '')); ?></p>
             <p><?php echo h(__t('portal.vm_rollout_frozen_hint', ['current' => (string) $vm['mecm_rollout_hostname']])); ?></p>
         </div>

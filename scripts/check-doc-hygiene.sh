@@ -4,11 +4,10 @@
 # Prueft die immer-geladenen Agenten-Dokus auf:
 #   1. Changelog-Marker (datierte Ueberschriften, "Nachtrag"/"Fortschritt") -> Fehler.
 #      Historie gehoert ausschliesslich nach docs/CHANGELOG.md.
-#   2. Zeilen-Budget -> Fehler. Verhindert, dass die Session-Start-Dokus
-#      unbemerkt zu Kontext-Fressern anwachsen.
+#   2. Zeilen- und UTF-8-Bytebudget -> Fehler. Lange Einzelzeilen duerfen
+#      das Kontextbudget nicht umgehen. Bytes sind kein exakter Tokenzaehler.
 #
-# Budgets (grosszuegig ueber dem Ist-Stand, bewusst unter den ueblichen
-# Best-Practice-Grenzen von ~200 Zeilen fuer always-on Agent-Dokus):
+# Zeilenbudgets fuer Einstieg und referenzierte Projektdokumente:
 #   AGENTS.md 120 | GROK.md 150 | CLAUDE.md 60 | README.md 100
 #
 # Aufrufer:
@@ -40,10 +39,24 @@ budget_for() {
   esac
 }
 
+byte_budget_for() {
+  case "$1" in
+    AGENTS.md) echo 8000 ;;
+    GROK.md)   echo 26000 ;;
+    CLAUDE.md) echo 2000 ;;
+    README.md) echo 16000 ;;
+  esac
+}
+
+file_index=0
 for file in AGENTS.md GROK.md CLAUDE.md README.md; do
+  file_index=$((file_index + 1))
+  before_errors=$errors
+  [ "$quiet" -eq 1 ] || echo "[$file_index/4] RUN doc-hygiene $file"
   if [ ! -f "$file" ]; then
     echo "FEHLER: [doc-hygiene.missing-file] $file nicht gefunden." >&2
     errors=$((errors + 1))
+    [ "$quiet" -eq 1 ] || echo "[$file_index/4] fail doc-hygiene $file"
     continue
   fi
 
@@ -59,6 +72,21 @@ for file in AGENTS.md GROK.md CLAUDE.md README.md; do
   if [ "$lines" -gt "$budget" ]; then
     echo "FEHLER: [doc-hygiene.line-budget] $file hat $lines Zeilen (Budget: $budget). Kuerzen oder nach docs/ auslagern." >&2
     errors=$((errors + 1))
+  fi
+
+  bytes=$(wc -c < "$file" | tr -d ' ')
+  byte_budget=$(byte_budget_for "$file")
+  if [ "$bytes" -eq 0 ]; then
+    echo "FEHLER: [doc-hygiene.empty-file] $file ist leer." >&2
+    errors=$((errors + 1))
+  elif [ "$bytes" -gt "$byte_budget" ]; then
+    echo "FEHLER: [doc-hygiene.byte-budget] $file hat $bytes Bytes (Budget: $byte_budget). Fachdetails gezielt auslagern." >&2
+    errors=$((errors + 1))
+  fi
+  if [ "$quiet" -eq 0 ]; then
+    result=pass
+    [ "$errors" -eq "$before_errors" ] || result=fail
+    echo "[$file_index/4] $result doc-hygiene $file"
   fi
 done
 

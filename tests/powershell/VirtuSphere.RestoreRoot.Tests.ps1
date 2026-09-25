@@ -9,7 +9,8 @@ BeforeAll {
     $script:CheckRuntime = Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'runtime.ps1'
     $script:ReleaseGates = Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'gates-release.ps1'
     $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures\restore-root'
-    $script:ShExe = (Get-Command sh -ErrorAction SilentlyContinue).Source
+    . $script:CheckRuntime
+    $script:ShExe = Find-Sh
     $script:TarExe = (Get-Command tar -ErrorAction SilentlyContinue).Source
     $script:EngineExe = (Get-Process -Id $PID).Path
 
@@ -28,6 +29,7 @@ BeforeAll {
             'Docker\mysql\mysql-init\struktur.sql',
             'Docker\WebAPI\lib\migrate.php',
             'Docker\WebAPI\lib\directory_restore_converge.php',
+            'Docker\WebAPI\lib\package_report_restore_converge.php',
             'Docker\WebAPI\tests\tools\restore-drill-probe.php'
         )) {
             $path = Join-Path $Root $relative
@@ -129,7 +131,8 @@ BeforeAll {
         $oldMysqlImage = $env:VIRTUSPHERE_MYSQL_IMAGE
         $oldRealSh = $env:VS_REAL_SH
         try {
-            $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $oldPath
+            $realShBin = Split-Path $script:ShExe -Parent
+            $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $realShBin + [IO.Path]::PathSeparator + $oldPath
             $env:VS_FAKE_DOCKER_LOG = $fakeLog
             $env:VS_REAL_SH = $script:ShExe
             $env:VIRTUSPHERE_PHP_IMAGE = 'fixture-php-image-never-present'
@@ -185,6 +188,8 @@ Describe 'Restore drill check-root contract' {
         $restore | Should -Match '< "\$SCHEMA_SQL"'
         ([regex]::Matches($restore, '-v "\$REPO_MOUNT:/repo"')).Count | Should -Be 3
         $restore | Should -Match 'run_php "\$APP_KEY" /repo/Docker/WebAPI/lib/migrate\.php'
+        $restore | Should -Match 'run_php "\$APP_KEY" /repo/Docker/WebAPI/lib/package_report_restore_converge\.php'
+        $restore | Should -Match '\$generation_before" != "\$generation_after"'
         $restore | Should -Match 'PROBE=/repo/Docker/WebAPI/tests/tools/restore-drill-probe\.php'
         $runtime | Should -Match '\$scriptPath = \(Join-Path \$scriptDir \$ScriptName\)'
         $runtime | Should -Match '''VIRTUSPHERE_CHECK_ROOT=/checkroot'''
@@ -262,9 +267,16 @@ Describe 'Restore drill check-root contract' {
         $sourceA = Join-Path $TestDrive 'empty-env-a'
         New-CanonicalSourceRoot -Root $sourceA -Stamp 'empty-env-a'
         $scriptPath = (Join-Path (Join-Path $sourceA 'scripts') 'restore_test.sh') -replace '\\', '/'
-        $output = @(& $script:ShExe -c 'VIRTUSPHERE_CHECK_ROOT= sh "$1" 2>&1' 'restore-empty-root' $scriptPath |
-            ForEach-Object { "$_" })
-        $LASTEXITCODE | Should -Be 2
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = (Split-Path $script:ShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
+            $output = @(& $script:ShExe -c 'VIRTUSPHERE_CHECK_ROOT= sh "$1" 2>&1' 'restore-empty-root' $scriptPath |
+                ForEach-Object { "$_" })
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $env:PATH = $oldPath
+        }
+        $exitCode | Should -Be 2
         ($output -join "`n") | Should -Match '\[restore\.root-empty\]'
     }
 }

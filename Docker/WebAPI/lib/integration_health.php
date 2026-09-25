@@ -13,6 +13,7 @@ require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/ansible_activity.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
+require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 // Refused machine accesses are what separates "rejected" from "never set up".
@@ -125,7 +126,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         // runs every minute against a closed IP gate, and the portal looks like a
         // server where MECM was never installed.
         'machine_api_denials' => repo_recent_machine_api_denial_summary($db, VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS),
-        'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst],
+        'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst, 'interval_hours' => ansible_test_interval_hours($db)],
         // ansible_selected is what esxi_inventory_automation_blocker() needs as
         // its third input, and it is resolved here rather than in the renderer:
         // this function already resolves the interval, and no other renderer on

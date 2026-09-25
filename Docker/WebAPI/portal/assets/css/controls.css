@@ -136,6 +136,18 @@ button.button:disabled:hover,
     margin: 0;
 }
 
+.button-as-link {
+    appearance: none;
+    border: 0;
+    padding: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
 .inline-form label {
     min-width: 180px;
 }
@@ -202,6 +214,10 @@ button.button:disabled:hover,
 
 .form-grid-span-2 {
     grid-column: span 2;
+}
+
+.form-grid-row-start {
+    grid-column-start: 1;
 }
 
 /* A captioned option group (field-label plus its radio/checkbox rows) rendered as
@@ -323,8 +339,35 @@ button.button:disabled:hover,
     gap: 6px;
 }
 
+/* Label, current form value and its copy accelerator remain one grid item.
+   The button is a sibling of the input rather than interactive content nested
+   in its label. */
+.copy-field > label {
+    display: block;
+}
+
+.copy-field-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.copy-field-control > input {
+    min-width: 0;
+}
+
+.copy-field-control > .copy-status {
+    grid-column: 1 / -1;
+}
+
 .ram-field {
     grid-template-columns: minmax(0, 1fr) 64px minmax(0, 116px);
+}
+
+.field-stack > .hint {
+    margin: 0;
 }
 
 @media (max-width: 600px) {
@@ -426,7 +469,8 @@ button.button:disabled:hover,
 label > input,
 label > select,
 label > textarea,
-label > .compound-field {
+label > .compound-field,
+.ram-control-group > .ram-field {
     margin-top: 6px;
 }
 

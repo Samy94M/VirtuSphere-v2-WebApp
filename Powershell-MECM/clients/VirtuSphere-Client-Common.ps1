@@ -25,6 +25,8 @@
 # Begruendung in mecm\VirtuSphere-Common.ps1.
 Set-StrictMode -Version 1.0
 
+$script:VsClientCommonContractVersion = 1
+
 # --- Eingebaute Notfalladressen (Laufzeitwerte kommen aus der Registry) ------
 $script:VsDefaultDnsApi = 'virtusphere.lan:8021'   # DNS-Alias im Deploy-Netz
 $script:VsFallbackIpApi = ''                        # z. B. '10.0.0.5:8021' (optional)
@@ -98,6 +100,41 @@ function Get-VsApiUrl {
         [Parameter(Mandatory)][string]$Path     # z.B. /mecm-api.php?action=...
     )
     return ('{0}://{1}{2}' -f (Get-VsApiScheme), $Api, $Path)
+}
+
+# Package reports use only the already configured address. A missing or broken
+# registry value is not an invitation to probe DNS/IP fallbacks or rewrite it.
+function Get-VsPackageReportApiConfiguration {
+    try {
+        $stored = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
+        $api = [string]$stored.WebAPI
+        if ($api -cnotmatch '\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(:([0-9]+))?\z') { return $null }
+        $port = [regex]::Match($api, ':([0-9]+)$')
+        if ($port.Success -and ([int64]$port.Groups[1].Value -lt 1 -or [int64]$port.Groups[1].Value -gt 65535)) { return $null }
+
+        $scheme = $script:VsDefaultScheme
+        if ($stored.PSObject.Properties['Scheme']) {
+            $scheme = [string]$stored.Scheme
+            if ($scheme -notin @('http', 'https')) { return $null }
+            $scheme = $scheme.ToLowerInvariant()
+        }
+
+        $thumbprint = ''
+        if ($stored.PSObject.Properties['CertThumbprint']) {
+            $thumbprint = ([string]$stored.CertThumbprint -replace '\s', '').ToUpperInvariant()
+            if ($thumbprint -and $thumbprint -cnotmatch '^[0-9A-F]{40}$') { return $null }
+        }
+
+        return [pscustomobject]@{
+            Api = $api
+            Scheme = $scheme
+            CertThumbprint = $thumbprint
+            ReportUrl = ('{0}://{1}/mecm_report.php?action=reportPackageRun' -f $scheme, $api)
+        }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
 }
 
 function Initialize-VsClientBootstrap {
@@ -608,6 +645,67 @@ function Get-VsActiveSnapshotRoot {
         $meta = Get-ItemProperty -Path $root -Name 'SnapshotSchema', 'SnapshotState', 'InterfaceCount' -ErrorAction Stop
         if ([int]$meta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or [string]$meta.SnapshotState -ne 'published' -or [int]$meta.InterfaceCount -lt 0) { return $null }
         return $root
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+# Reporter reads one complete published identity, never the active health/
+# fallback resolver and never one registry field from each of two rollouts.
+# A disappeared root or changed publication marker disables this run's report.
+function Get-VsPackageReportSnapshot {
+    $uuidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    try {
+        $base = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
+        $snapshotId = [string]$base.ActiveSnapshot
+        if ([string]$base.SetupState -ne 'complete' -or $snapshotId -cnotmatch '^[0-9a-f]{32}$') { return $null }
+
+        $root = Join-Path (Join-Path $script:VsRegistryBase 'Snapshots') $snapshotId
+        $metaNames = @('SnapshotSchema', 'SnapshotState', 'InterfaceCount', 'rollout_revision', 'device_generation', 'acceptance_generation')
+        $meta = Get-ItemProperty -Path $root -Name $metaNames -ErrorAction Stop
+        $revision = 0
+        $count = 0
+        if ([int]$meta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or
+            [string]$meta.SnapshotState -ne 'published' -or
+            -not [int]::TryParse([string]$meta.InterfaceCount, [ref]$count) -or $count -lt 1 -or $count -gt 16 -or
+            -not [int]::TryParse([string]$meta.rollout_revision, [ref]$revision) -or $revision -le 0 -or
+            [string]$meta.device_generation -cnotmatch $uuidPattern -or
+            [string]$meta.acceptance_generation -cnotmatch $uuidPattern) { return $null }
+
+        $interfacesRoot = Join-Path $root 'Interfaces'
+        $entries = @(Get-ChildItem -Path $interfacesRoot -ErrorAction Stop)
+        if ($entries.Count -ne $count) { return $null }
+        $macs = New-Object System.Collections.Generic.List[string]
+        $seen = @{}
+        for ($index = 0; $index -lt $count; $index++) {
+            $entryPath = Join-Path $interfacesRoot ('Interface{0}' -f $index)
+            $entry = Get-ItemProperty -Path $entryPath -Name 'mac' -ErrorAction Stop
+            $mac = ConvertTo-VsNormalizedMac ([string]$entry.mac)
+            if (-not $mac -or $seen.ContainsKey($mac)) { Write-Debug ('Reporter-Snapshot: ungueltige oder doppelte MAC bei Interface{0}.' -f $index); return $null }
+            $seen[$mac] = $true
+            $macs.Add($mac)
+        }
+
+        $afterBase = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
+        $afterMeta = Get-ItemProperty -Path $root -Name $metaNames -ErrorAction Stop
+        if ([string]$afterBase.SetupState -ne 'complete' -or
+            [string]$afterBase.ActiveSnapshot -cne $snapshotId -or
+            [int]$afterMeta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or
+            [string]$afterMeta.SnapshotState -ne 'published' -or
+            [string]$afterMeta.InterfaceCount -cne [string]$meta.InterfaceCount -or
+            [string]$afterMeta.rollout_revision -cne [string]$meta.rollout_revision -or
+            [string]$afterMeta.device_generation -cne [string]$meta.device_generation -or
+            [string]$afterMeta.acceptance_generation -cne [string]$meta.acceptance_generation) { return $null }
+
+        $macs.Sort([StringComparer]::Ordinal)
+        return [pscustomobject]@{
+            SnapshotId = $snapshotId
+            MacCandidates = $macs.ToArray()
+            RolloutRevision = $revision
+            DeviceGeneration = [string]$meta.device_generation
+            AcceptanceGeneration = [string]$meta.acceptance_generation
+        }
     } catch {
         Write-Debug $_
         return $null

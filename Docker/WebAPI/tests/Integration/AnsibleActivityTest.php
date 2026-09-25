@@ -189,7 +189,7 @@ final class AnsibleActivityTest extends TestCase
 
         ob_start();
         system_status_render_ansible(
-            ['ansible' => ['rows' => [$row]]],
+            ['ansible' => ['interval_hours' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'rows' => [$row]]],
             ['id' => 1, 'role' => 'admin']
         );
         $html = (string) ob_get_clean();

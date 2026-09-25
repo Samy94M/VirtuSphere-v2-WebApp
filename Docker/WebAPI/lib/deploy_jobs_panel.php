@@ -12,7 +12,7 @@ require_once __DIR__ . '/deploy_retry_confirmation.php';
 /** @var array<int,array<string,mixed>> $retryEvaluations */
 
 ?>
-<section class="panel">
+<section class="panel" id="deploy-jobs" tabindex="-1">
     <div class="actions">
         <h2><?php echo h(__t('deploy.jobs_heading')); ?></h2>
         <form class="inline-form" method="get" action="deploy.php" data-deploy-filter>

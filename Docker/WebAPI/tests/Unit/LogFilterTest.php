@@ -137,14 +137,49 @@ final class LogFilterTest extends TestCase
             'category' => VIRTUSPHERE_LOG_CATEGORY_AUTH,
         ]);
 
-        $page = log_filter_url($filter, ['page' => 3]);
+        $page = log_filter_url($filter, ['before' => 123]);
         $export = log_filter_url($filter, ['export' => 'csv']);
         foreach (['tab=' . VIRTUSPHERE_LOG_TAB_SECURITY, 'q=bob', 'ip=10.0.0.5', 'category=' . VIRTUSPHERE_LOG_CATEGORY_AUTH] as $part) {
             self::assertStringContainsString($part, $page);
             self::assertStringContainsString($part, $export);
         }
-        self::assertStringContainsString('page=3', $page);
+        self::assertStringContainsString('before=123', $page);
         self::assertStringContainsString('export=csv', $export);
+    }
+
+    public function testCursorAcceptsExactlyOnePositiveInteger(): void
+    {
+        self::assertSame(
+            ['before' => null, 'after' => null, 'supplied' => false, 'invalid' => false],
+            log_cursor_from_query([])
+        );
+        self::assertSame(
+            ['before' => 42, 'after' => null, 'supplied' => true, 'invalid' => false],
+            log_cursor_from_query(['before' => '0042'])
+        );
+        self::assertSame(
+            ['before' => null, 'after' => 9, 'supplied' => true, 'invalid' => false],
+            log_cursor_from_query(['after' => 9])
+        );
+    }
+
+    public function testInvalidCursorIsExplicitAndNeverClampedOrDropped(): void
+    {
+        foreach ([
+            ['before' => ''],
+            ['before' => '0'],
+            ['after' => '-1'],
+            ['after' => '1.5'],
+            ['before' => ['7']],
+            ['before' => '7', 'after' => '8'],
+            ['after' => (string) PHP_INT_MAX . '0'],
+        ] as $query) {
+            $cursor = log_cursor_from_query($query);
+            self::assertTrue($cursor['supplied']);
+            self::assertTrue($cursor['invalid']);
+            self::assertNull($cursor['before']);
+            self::assertNull($cursor['after']);
+        }
     }
 
     /**
