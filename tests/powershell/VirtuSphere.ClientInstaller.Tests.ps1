@@ -1,5 +1,5 @@
 # Isolierter Kontrollflusstest fuer den Clientinstaller. Die Fixture startet den
-# echten Installerrumpf in einem Kindprozess; nur die beiden dot-gesourcten
+# echten Installerrumpf in einem Kindprozess; die dot-gesourcten
 # Module werden durch Stubs ersetzt. Dadurch kann der Test jeden Manifestfall
 # bis zur ersten CM-Schreibgrenze ausfuehren, ohne MECM, Registry oder Share zu
 # veraendern. Der Administrator-#Requires wird nur in der Fixturekopie entfernt,
@@ -101,6 +101,14 @@ function Compare-VsClientContentManifest {
 }
 '@ | Set-Content -LiteralPath (Join-Path $mecmRoot 'VirtuSphere-ClientPackaging.ps1') -Encoding UTF8
 
+            @'
+function Get-VsClientPreflightReport {
+    param($Config, $Specs, $ClientSourceDir, $SiteCode)
+    Add-VsFixtureCall 'PREFLIGHT'
+    [pscustomobject]@{ CanApply = $true; Findings = @(); PlanId = 'fixture' }
+}
+'@ | Set-Content -LiteralPath (Join-Path $mecmRoot 'VirtuSphere-ClientPreflight.ps1') -Encoding UTF8
+
             $previousLog = $env:VS_CLIENT_INSTALLER_CALL_LOG
             $previousMode = $env:VS_CLIENT_INSTALLER_MANIFEST_MODE
             $previousFailureFolder = $env:VS_CLIENT_INSTALLER_FAILURE_FOLDER
@@ -154,7 +162,7 @@ function Compare-VsClientContentManifest {
 }
 
 Describe 'Clientinstaller: Manifestabnahme vor MECM' {
-    It 'beendet Manifestdrift in <folder> nach allen vier Vergleichen ohne CM-Aufruf' -ForEach @(
+    It 'beendet Manifestdrift in <folder> nach allen vier Vergleichen ohne CM-Write' -ForEach @(
         @{ folder = 'client_getInfos' }
         @{ folder = 'client_hostname' }
         @{ folder = 'client_staticip' }
@@ -164,11 +172,11 @@ Describe 'Clientinstaller: Manifestabnahme vor MECM' {
 
         $result.ExitCode | Should -Not -Be 0
         @($result.Calls | Where-Object { $_ -like 'MANIFEST *' }).Count | Should -Be 4 -Because ($result.Output -join "`n")
-        @($result.Calls | Where-Object { $_ -like 'CM_*' }).Count | Should -Be 0
+        @($result.Calls | Where-Object { $_ -like 'CM_WRITE *' }).Count | Should -Be 0
         ($result.Output -join "`n") | Should -Match 'ContentShare-Manifestpruefung fehlgeschlagen'
     }
 
-    It 'beendet eine nicht entscheidbare Pruefung in <folder> nach allen vier Vergleichen ohne CM-Aufruf' -ForEach @(
+    It 'beendet eine nicht entscheidbare Pruefung in <folder> nach allen vier Vergleichen ohne CM-Write' -ForEach @(
         @{ folder = 'client_getInfos' }
         @{ folder = 'client_hostname' }
         @{ folder = 'client_staticip' }
@@ -178,7 +186,7 @@ Describe 'Clientinstaller: Manifestabnahme vor MECM' {
 
         $result.ExitCode | Should -Not -Be 0
         @($result.Calls | Where-Object { $_ -like 'MANIFEST *' }).Count | Should -Be 4 -Because ($result.Output -join "`n")
-        @($result.Calls | Where-Object { $_ -like 'CM_*' }).Count | Should -Be 0
+        @($result.Calls | Where-Object { $_ -like 'CM_WRITE *' }).Count | Should -Be 0
         ($result.Output -join "`n") | Should -Match 'ContentShare-Manifestpruefung fehlgeschlagen'
     }
 

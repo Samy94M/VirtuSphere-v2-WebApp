@@ -20,6 +20,7 @@ BeforeAll {
     $script:CollectionLockContract = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'collection-lock-contract.py') -Raw
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
+    $script:ClientPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPreflight.ps1') -Raw
     $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
     $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
@@ -27,6 +28,24 @@ BeforeAll {
 
 
 Describe 'Visible progress reporting contract' {
+    It 'reports each client preflight phase and each content manifest read' {
+        $script:ClientPreflight | Should -Match '\[0/\$total\] RUN client-preflight'
+        foreach ($index in 1..6) {
+            $script:ClientPreflight | Should -Match ("\[$index/\`$total\] RUN ")
+            $script:ClientPreflight | Should -Match ("\[$index/\`$total\] DONE ")
+        }
+        $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] RUN content-manifest'
+        $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] DONE content-manifest'
+        $script:ClientPreflight | Should -Match '\[0/2\] RUN shared-references'
+        $script:ClientPreflight | Should -Match '\[1/2\] RUN application-groups'
+        $script:ClientPreflight | Should -Match '\[1/2\] DONE application-groups'
+        $script:ClientPreflight | Should -Match '\[2/2\] RUN task-sequence-references'
+        $script:ClientPreflight | Should -Match '\[2/2\] DONE task-sequence-references'
+        $script:ClientPreflight | Should -Match '\[0/\$\(\$points.Count\)\] RUN distribution-points'
+        $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] RUN distribution-point'
+        $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] DONE distribution-point'
+    }
+
     It 'reports each package step around the existing hash and child decision' {
         $script:PackageWrapper | Should -Match '\[0/\$knownStepTotal\]'
         $script:PackageWrapper | Should -Match '\[\$stepIndex/\$knownStepTotal\] RUN \$scriptName'

@@ -30,7 +30,7 @@
     .\install-VirtuSphere-Clients.ps1
 #>
 [CmdletBinding()]
-param()
+param([switch]$ValidateOnly)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 1.0
@@ -39,6 +39,7 @@ $SourceDir = Join-Path $PSScriptRoot 'clients'
 
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPackaging.ps1')
+. (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPreflight.ps1')
 
 # Zwei Klassen von Warnung, Einordnung an der Aufrufstelle (dieselbe Trennung
 # wie in install-VirtuSphere-MECM.ps1):
@@ -85,6 +86,21 @@ $CertThumbprint = [string]$site.CertThumbprint
 $bootstrap = @{ Schema = 1; WebAPI = $WebApi; Scheme = $Scheme; CertThumbprint = $CertThumbprint }
 $specs = Get-VsClientAppSpecs
 Assert-VsClientAppSpecGraph -Specs $specs
+
+# MC02 begins with a read-only inventory on every invocation. A blocked or
+# incomplete report exits before Copy-VsClientContent or any CM write. Keep the
+# old apply guard below until the remaining reference and site checks are built.
+$siteCode = Initialize-VsCmSite -Config $config
+if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar (MECM-Konsole/Site-Drive pruefen).' }
+$preflight = Get-VsClientPreflightReport -Config $site -Specs $specs -ClientSourceDir $SourceDir -SiteCode $siteCode
+$preflight | ConvertTo-Json -Depth 12 | Write-Output
+if ($ValidateOnly) {
+    if ($preflight.CanApply) { exit 0 }
+    exit 1
+}
+if (-not $preflight.CanApply) {
+    throw ('MC02-Preflight blockiert Apply: {0} Befund(e), Plan-ID {1}. Keine Content-/MECM-Aenderung.' -f @($preflight.Findings).Count, $preflight.PlanId)
+}
 # MC01 beschreibt bereits den neuen Zielgraphen. Der bisherige Re-Run kann
 # alte Dependencies nur ergaenzen, nicht geordnet entfernen. Ein Apply damit
 # koennte aus Alt- und Zielgraph einen Zyklus erzeugen. Bis der read-only
@@ -147,9 +163,7 @@ if ($writableByUsers) {
 }
 
 # --- MECM-Site initialisieren -----------------------------------------------
-Write-Step 'Initialisiere MECM-Site'
-$siteCode = Initialize-VsCmSite -Config $config
-if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar (MECM-Konsole/Site-Drive pruefen).' }
+Write-Step 'MECM-Site aus Preflight bestaetigt'
 Write-Ok "Site-Drive $siteCode aktiv"
 
 # Application-Ordner sicherstellen (Get-/New-CMFolder erwarten RELATIVE Pfade).
