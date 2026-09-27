@@ -1051,3 +1051,9 @@ Nutzerentscheidung vom 27.09.2026: Paketberichte sollen auch auf VMs funktionier
 
 Die Wahl zwischen A und B ist eine Produktentscheidung und noch offen; empfohlen ist B. V6 ändert sich bei B nur an einer Stelle: „Registry fehlt, Snapshot fehlt: Reporter deaktiviert“ wird zu „nachrangige, nur lesende Auflösung, sonst deaktiviert“. Die Regel „keine zweite Kopie der Standortdaten aus paketindividueller Konfiguration“ bleibt, weil der Bootstrap aus der Reportergeneration und nicht aus einer Paketkonfiguration stammt. Umsetzung erst zusammen mit MC01 (gemeinsame Auslieferung von Common und Reporter).
 
+
+## 28. Bestands-VMs nach MC01: keine Paketberichte (Entscheidung 27.09.2026)
+
+Seit MC01 liefert Client-Common Version 2 die Adresse nur aus einem hashgebundenen Registry-Satz mit Config-Commit. VMs, die mit der alten getinfo-Fassung (V22 oder V23) ausgerollt wurden, haben diesen Commit nicht; V22 hat zusätzlich keinen veröffentlichten Snapshot. Der Reporter mit Common V2 bleibt auf diesen VMs deshalb aus, und der Server erhält von ihnen keine Paketberichte. Paketinstallationen laufen unverändert.
+
+Der Nutzer hat entschieden, dafür keinen Nachzug-Job zu bauen: Paketberichte gibt es nur für VMs, die nach dem Core-/Reporter-Cutover mit der neuen Kette ausgerollt werden ([MECM-Plan](2026-09-15-mecm-client-delivery-simplification-plan.md), MC-R5). Ein Rückfall auf den alten, unbestätigten Registry-Satz ist ausdrücklich nicht vorgesehen, weil er die geschlossene Konfiguration aus MC01 wieder öffnen würde. Offen als Anzeigefrage: ob das Portal bei solchen VMs statt „Keine Rückmeldung“ erklärt, dass für vor dem Cutover ausgerollte VMs keine Paketberichte vorgesehen sind.

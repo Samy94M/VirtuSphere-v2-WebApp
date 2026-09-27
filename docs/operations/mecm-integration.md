@@ -963,6 +963,60 @@ fremde Partitionen oder ist nur eine unbekannte online-RAW-Platte sichtbar,
 bleibt der Lauf rot und erfordert eine menschliche Storageentscheidung. Journal-
 Unterschlüssel nicht löschen, um eine Formatierung zu erzwingen.
 
+### Altanwendungen `client_getinfo` und `client_getinfo_2.1` zurückbauen
+
+Behalten wird ausschließlich die verwaltete Anwendung `client_getInfos`. Die
+beiden manuell angelegten Altanwendungen werden nie übernommen und auch nicht
+als zweite Version parallel betrieben: Sie schreiben wie `client_getInfos` den
+Erkennungswert `SetupState=complete`, aber keinen Config-Commit. Läuft auf einer
+neuen VM eine Altanwendung, gilt `client_getInfos` dort als installiert, und die
+Folgephasen finden keine gültige Konfiguration.
+
+Rückgebaut wird bis Retire mit `retire-VirtuSphere-LegacyGetInfo.ps1` auf dem
+MECM-Server (als Administrator). Gelöscht wird nichts; Löschen bleibt ein
+eigener, später freizugebender Auftrag.
+
+1. **Bericht:** `.\retire-VirtuSphere-LegacyGetInfo.ps1` ohne Parameter ändert
+   nichts. Er zeigt je Altanwendung Retired-Status, Deployments (davon aktiv),
+   abhängige Deployment Types und Tasksequenzen, Supersedence,
+   Application-Group-Mitgliedschaft, Geräte mit installierter Anwendung,
+   verteilte Dateien, Skriptversion und ob die Detection `SetupState` liest.
+   Dazu kommen der Nachweis der neuen Kette und die Plan-ID.
+2. **Stufe `DisableDeployments`:** nur nötig, wenn eine Altanwendung ein aktives
+   Deployment hat. Bereit erst, wenn die neue Kette nachweislich läuft:
+   `client_getInfos` und `client_staticip` tragen den Projektmarker,
+   `client_staticip` hat ein aktives Required-Deployment, und dessen
+   Zusammenfassung zeigt mindestens einen erfolgreichen Client (vorher in der
+   Konsole die Zusammenfassung aktualisieren). Aufruf mit
+   `-Stage DisableDeployments -Apply -PlanId <Plan-ID>`. Danach auf der
+   Zielcollection **Clientbenachrichtigung → Computerrichtlinie herunterladen**
+   auslösen und auf repräsentativen Clients in `PolicyAgent.log` und
+   `AppDiscovery.log` prüfen, dass die alte Zuweisung weg ist. Eine Wartezeit
+   allein ist kein Nachweis.
+3. **Stufe `Retire`:** neuen Bericht erstellen (die Plan-ID ändert sich nach
+   jeder Änderung) und `-Stage Retire -Apply -PlanId <Plan-ID>` ausführen; hatte
+   die Anwendung Deployments, zusätzlich `-ConfirmPolicyConvergence`. Retire
+   bleibt blockiert, solange ein aktives Deployment, eine abhängige Anwendung
+   (zum Beispiel `client_hostname` im alten Graphen), eine Tasksequenz, eine
+   Supersedence oder eine Application Group auf die Altanwendung zeigt. Eine
+   ungenutzte Altanwendung ist sofort bereit, auch vor dem Cutover.
+
+Jede Änderung wird einzeln bestätigt (`-WhatIf` zeigt sie nur an,
+`-Confirm:$false` für unbeaufsichtigte Läufe), unmittelbar vorher neu gelesen,
+im Journal `%ProgramData%\VirtuSphere\MECM\LegacyRetirement\<Plan-ID>.jsonl`
+vor und nach dem Schreiben festgehalten und danach zurückgelesen. Weicht der
+Stand vom Bericht ab, bricht der Lauf ohne Änderung ab; dann einen neuen Bericht
+erstellen. Ein zweiter gleichzeitiger Lauf wird abgewiesen. Exit-Code 0
+bedeutet: Bericht erstellt beziehungsweise jeder Schritt der Stufe erledigt oder
+schon erledigt. Exit-Code 1 bedeutet: mindestens ein Schritt blockiert oder
+fehlgeschlagen, oder der Plan war veraltet.
+
+**Zurücknehmen:** `Resume-CMApplication -Id <CI_ID>` hebt Retire auf; ein
+deaktiviertes Deployment wird in der Konsole über **Aktivieren** wieder
+eingeschaltet. Retire deinstalliert nichts und ändert bereits ausgerollte VMs
+nicht. Laut Microsoft löscht MECM die Revisionen einer Anwendung, die 60 Tage
+retired ist; eine Rücknahme ist deshalb nur in diesem Zeitraum verlustfrei.
+
 ## Edge Cases der Server-Skripte (Referenz)
 
 Alle Fälle schreiben ins Tageslog (`%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`),

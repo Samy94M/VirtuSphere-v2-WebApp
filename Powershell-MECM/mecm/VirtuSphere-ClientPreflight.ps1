@@ -117,11 +117,13 @@ function Get-VsClientPreflightReport {
     Write-Host "[2/$total] DONE site-scope"
 
     Write-Host "[3/$total] RUN legacy-applications"
+    $legacyNames = @((Get-VsClientPackagingPolicy).LegacyApplicationNames)
+    $legacyTotal = $legacyNames.Count
     $legacyIndex = 0
-    Write-Host '[0/2] RUN legacy-applications'
-    foreach ($name in @('client_getinfo', 'client_getinfo_2.1')) {
+    Write-Host "[0/$legacyTotal] RUN legacy-applications"
+    foreach ($name in $legacyNames) {
         $legacyIndex++
-        Write-Host "[$legacyIndex/2] RUN legacy-application $name"
+        Write-Host "[$legacyIndex/$legacyTotal] RUN legacy-application $name"
         try {
             $appMatches = @(Get-CMApplication -Name $name -ShowHidden -DisableWildcardHandling -ErrorAction Stop | Where-Object { (Get-VsObjectPropertyText -Object $_ -Names @('LocalizedDisplayName', 'Name')) -ceq $name })
             foreach ($app in $appMatches) {
@@ -142,7 +144,7 @@ function Get-VsClientPreflightReport {
         } catch {
             $findings.Add([pscustomobject]@{ Code = 'legacy_inventory_unknown'; Target = $name; Detail = [string]$_.Exception.Message; Blocking = $true })
         } finally {
-            Write-Host "[$legacyIndex/2] DONE legacy-application $name"
+            Write-Host "[$legacyIndex/$legacyTotal] DONE legacy-application $name"
         }
     }
     Write-Host "[3/$total] DONE legacy-applications"
@@ -197,7 +199,7 @@ function Get-VsClientPreflightReport {
     Write-Host "[4/$total] DONE managed-applications"
 
     Write-Host "[5/$total] RUN deployment-references"
-    $deploymentNames = @(@($Specs | ForEach-Object { [string]$_.AppName }) + @('client_getinfo', 'client_getinfo_2.1'))
+    $deploymentNames = @(@($Specs | ForEach-Object { [string]$_.AppName }) + $legacyNames)
     $deploymentIndex = 0
     Write-Host "[0/$($deploymentNames.Count)] RUN application-deployments"
     foreach ($name in $deploymentNames) {
@@ -226,8 +228,14 @@ function Get-VsClientPreflightReport {
                     } elseif ($offerType -ne '0' -or $outsideInstall -ne 'True' -or $outsideRestart -ne 'True' -or $enabled -ne 'True') {
                         $findings.Add([pscustomobject]@{ Code = 'core_deployment_policy_drift'; Target = $name; Detail = 'Required, enabled, install and reboot outside maintenance windows expected'; Blocking = $true })
                     }
-                } elseif ($name -in @('client_getinfo', 'client_getinfo_2.1')) {
-                    $findings.Add([pscustomobject]@{ Code = 'legacy_deployment_present'; Target = $name; Detail = ('Assignment {0} targets collection {1}' -f $assignmentId, $collectionId); Blocking = $true })
+                } elseif ($name -cin $legacyNames) {
+                    # A deployment the retirement tool already disabled no longer
+                    # targets clients; an enabled or unreadable state still blocks.
+                    if ($enabled -ceq 'False') {
+                        $findings.Add([pscustomobject]@{ Code = 'legacy_deployment_disabled'; Target = $name; Detail = ('Assignment {0} on collection {1} is disabled' -f $assignmentId, $collectionId); Blocking = $false })
+                    } else {
+                        $findings.Add([pscustomobject]@{ Code = 'legacy_deployment_present'; Target = $name; Detail = ('Assignment {0} targets collection {1}' -f $assignmentId, $collectionId); Blocking = $true })
+                    }
                 } else {
                     $findings.Add([pscustomobject]@{ Code = 'internal_phase_deployment_present'; Target = $name; Detail = ('Assignment {0} targets collection {1}' -f $assignmentId, $collectionId); Blocking = $true })
                 }

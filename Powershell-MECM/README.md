@@ -25,6 +25,14 @@ Eine gesperrte, mehrdeutige oder nicht numerisch ordnungsfähige Quellauswahl
 klassifiziert nur strikt belegbar ältere Bestände; sie erzeugt weder eine
 Altklassifikation für höhere oder gleichwertige Bestände noch eine Löschung.
 
+`retire-VirtuSphere-LegacyGetInfo.ps1` baut die manuell angelegten
+Altanwendungen `client_getinfo` und `client_getinfo_2.1` bis Retire zurück:
+ohne `-Apply` nur ein lesender Bericht mit Plan-ID, danach getrennt die Stufen
+`DisableDeployments` und `Retire`, jede einzeln bestätigt, neu gelesen,
+journalisiert und zurückgelesen. Es löscht nichts. Ablauf und Voraussetzungen
+stehen in `docs/operations/mecm-integration.md` im Abschnitt zu den
+Altanwendungen unter „Client-Anwendungen“.
+
 JSON wird explizit als UTF-8-`byte[]` gesendet. Die beiden ausgelieferten
 Server-/Client-Helper geben das Array als ein einziges Funktionsobjekt zurück,
 damit PowerShell es nicht zu `object[]` entpackt und die HTTP-Bindung den

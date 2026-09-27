@@ -21,6 +21,7 @@ BeforeAll {
     $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
     $script:ClientPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPreflight.ps1') -Raw
+    $script:LegacyRetirement = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-LegacyRetirement.ps1') -Raw
     $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
     $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
@@ -44,6 +45,21 @@ Describe 'Visible progress reporting contract' {
         $script:ClientPreflight | Should -Match '\[0/\$\(\$points.Count\)\] RUN distribution-points'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] RUN distribution-point'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] DONE distribution-point'
+    }
+
+    It 'reports each legacy retirement read and each guarded write' {
+        $script:LegacyRetirement | Should -Match '\[0/\$total\] RUN legacy-retirement-inventory'
+        $script:LegacyRetirement | Should -Match '\[\$position/\$total\] RUN legacy-application'
+        $script:LegacyRetirement | Should -Match '\[\$position/\$total\] DONE legacy-application'
+        foreach ($unit in @('similar-names', 'application-groups', 'core-chain')) {
+            $script:LegacyRetirement | Should -Match ("\[\`$position/\`$total\] RUN $unit")
+            $script:LegacyRetirement | Should -Match ("\[\`$position/\`$total\] DONE $unit")
+        }
+        $script:LegacyRetirement | Should -Match '\[0/\$total\] RUN legacy-retirement \$Stage'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] RUN \$label'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] pass \$label'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] fail \$label'
+        $script:LegacyRetirement | Should -Match '\[\{0\}/\{1\}\] skip \{2\}'
     }
 
     It 'reports each package step around the existing hash and child decision' {

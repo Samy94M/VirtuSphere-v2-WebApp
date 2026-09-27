@@ -17,6 +17,9 @@ function Get-VsClientPackagingPolicy {
         MinimumSuccessfulBundles = 5
         MinimumAgeDays = 180
         UpgradeMode = 'future_provisioning_no_replay'
+        # Manuell angelegte Altobjekte der getinfo-Phase (Entscheidung 11):
+        # nie adoptieren, nur inventarisieren und hoechstens retire.
+        LegacyApplicationNames = @('client_getinfo', 'client_getinfo_2.1')
     }
 }
 

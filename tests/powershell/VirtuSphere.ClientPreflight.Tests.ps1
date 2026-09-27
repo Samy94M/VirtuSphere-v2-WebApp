@@ -105,6 +105,15 @@ Describe 'MC02 read-only client preflight inventory' {
         Should -Invoke Copy-VsClientContent -Times 0
     }
 
+    It 'keeps a legacy deployment disabled by the retirement tool as a note, not a blocker' {
+        Mock Get-CMApplicationDeployment {
+            if ($Name -eq 'client_getinfo') { [pscustomobject]@{ AssignmentID = 99; CollectionID = 'PS100013'; Enabled = $false } }
+        }
+        $report = Get-VsClientPreflightReport -Config $script:config -Specs @(Get-VsClientAppSpecs) -ClientSourceDir $TestDrive -SiteCode 'PS1'
+        @($report.Findings | Where-Object { $_.Code -eq 'legacy_deployment_disabled' -and $_.Target -eq 'client_getinfo' -and -not $_.Blocking }).Count | Should -Be 1
+        @($report.Findings | Where-Object Code -eq 'legacy_deployment_present').Count | Should -Be 0
+    }
+
     It 'marks a missing UNC marker as blocking and never infers path identity from matching content' {
         Remove-Item -LiteralPath (Join-Path $script:shareRoot '.virtusphere-source-identity')
         $report = Get-VsClientPreflightReport -Config $script:config -Specs @(Get-VsClientAppSpecs) -ClientSourceDir $TestDrive -SiteCode 'PS1'
