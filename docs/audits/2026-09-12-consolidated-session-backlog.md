@@ -10,7 +10,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S2 | [Codebase und Docker optimieren](codex://threads/01a04d27-a5b8-7fc0-82f6-8be82970feb0) | Alle vorgeschlagenen Code-/Docker-/Performanceoptimierungen; damalige Umsetzung wurde vor Beginn gestoppt |
 | S3 | [Admin-Portal gezielt erweitern](codex://threads/01a082e0-1ac5-7033-bc41-eb2b6829282e) | Genau die elf ausgewählten Funktionen F01 bis F11 einschließlich Planreview |
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
-| S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und [QA-Abschlussbericht](../../qa-artifacts/powercycle-sequential/sol-medium/report.md) | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
+| S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -199,7 +199,7 @@ generationenübergreifenden Abschlussfragen M03-Q01/Q02; kein Commit oder Push.
 ## Powercycle pro VM: PC01 bis PC04
 
 Detailowner ist der [Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md),
-Ergebnisowner das Auditregister. Der [QA-Bericht](../../qa-artifacts/powercycle-sequential/sol-medium/report.md)
+Ergebnisowner das Auditregister. Der lokale QA-Bericht `qa-artifacts/powercycle-sequential/sol-medium/report.md`
 deckt alle 31 Fast-Gates in zwei nicht überlappenden Läufen ab: 26 pass, 5 fail,
 keine Infrastrukturfehler und keine Skips.
 
@@ -597,3 +597,24 @@ Nutzerauftrag: Nach dem Vorfall 563 einen ausführlichen begründeten Umsetzungs
 Der [Detailplan zur VM-Identität und Ersatzbereitstellung](2026-09-14-vm-identity-replacement-plan.md) besitzt die Befunde IDR-F01 bis F08, Pakete IDR-P00 bis P08, Zustandsmatrix, Daten-/Konkurrenzmodell, 35 Randfälle, QoL-Anforderungen und Dokumentations-/Help-Matrix. Befunde und Paketstatus nur dort pflegen; dieses Register bleibt der Einstieg.
 
 Ergebnis: Plan erstellt und statisch gegen die betroffenen Quellen nachgeprüft. Bestätigt ist der zu späte UUID-Konflikt nach externer Löschung. Die Nachprüfung ergänzt Anforderungen an Rolloutrevision, Jobartefakte und geschlossene Fehlercodes. Keine Produktimplementierung, keine ausgeführten QA-Gates, keine Migration und keine Produktionsaktion. Installierter Commit und externe Laborabnahme bleiben offen. Nächster Schritt bei späterem Implementierungsauftrag: IDR-P00/P01, danach konservative Vorprüfung IDR-P02; keine erneute Erstellung oder automatische Übernahme aus diesem Plan ableiten.
+
+## Fortschreibung 27.09.2026: gemeinsamer Review und neue Reihenfolge
+
+Nutzerauftrag: die Pläne für Powercycle, VM-Identität und MECM-Clientbereitstellung auf Synergien, SSoT, Randfälle, QoL, Logik, Doku und Hilfe prüfen, bei Unsicherheit mehrere Onlinequellen heranziehen und danach mit den nächsten Schritten beginnen. Befunde und Paketstatus stehen in den Detailplänen; dieses Register hält nur Einstieg, Entscheidungen und Reihenfolge.
+
+| Strang | Stand | Detail |
+|---|---|---|
+| Powercycle PC01 bis PC04 | PC01 bis PC03 lokal geschlossen (`ae55493`). PC04 offen: Fast 30/31, rot nur `powershell-tests` wegen 12 statt 18 Visual-Referenzbildern. | [Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md), Fortschreibung 27.09. |
+| VM-Identität | IDR-P02 als erstes Paket beauftragt; Entscheidungen IDR-R1/R2, P06 konkretisiert, Randfälle IDR-E36 bis E40. | [Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16 |
+| MECM-Clientbereitstellung | Q1 entschieden: Core startet sofort, Installation und Neustart außerhalb von Wartungsfenstern erlaubt. Reporter-Synergien und Ist-Verhalten des Core-Installers aufgenommen. | [MECM-Plan](2026-09-15-mecm-client-delivery-simplification-plan.md), Abschnitt Q1 und Review 27.09. |
+| Paketreporter ohne Core | Zurückgestellt am 27.09.2026: Reporter bleibt vorerst nur für VMs mit Core. Entwurf A/B bleibt als Vorlage. | [Reporterplan](2026-09-13-package-wrapper-logging-plan.md), Abschnitt 27 |
+
+Reihenfolge nach Nutzerentscheidung: (1) IDR-P02 einschließlich der vorgezogenen Serverlisten-Korrektur IDR-R2, (2) gemeinsamer Save-und-Audit-Service in einer `repo_transaction()` für MECM-Plan und Identitätsplan, (3) MECM MC01 abgestimmt mit dem Reporter („Reporter ohne Core“ am 27.09. zurückgestellt: der Reporter bleibt vorerst Core-gebunden). Parallel und unabhängig: Visual-Baseline-Writer durch den Nutzer, danach Fast für PC04.
+
+Modellhinweis: Die Pläne sehen Sol High für Umsetzung und Sol Medium für QA vor; diese Fortschreibung und der Beginn von IDR-P02 laufen in einer Claude-Sitzung (Opus 5.5) auf ausdrücklichen Nutzerauftrag.
+
+### IDR-P02 lokal umgesetzt und geprüft (27.09.2026)
+
+Nutzerregel IDR-R3: Create legt eine extern gelöschte gebundene VM an und das Portal übernimmt sie; eine umbenannte gebundene VM wird mit `identity_bound_vm_renamed` gesperrt; Create löscht nie; MECM bleibt Handarbeit. IDR-R2 (Serverliste nach Create neu, `identity_unbound_allowed` entfernt) ist mit umgesetzt. Details: [Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16.6.
+
+Nachweise (lokal, nicht committet): Fast-Auswahl 19/19 grün (`qa-artifacts/p02-selected-2.log`; `phpunit-unit` nach Registernachtrag in `p02-phpunit-rerun.log` grün ohne Skips), darunter `ansible-create-async` mit zehn neuen Prepare-Fällen gegen das echte Playbook. Integration-Auswahl `qa-stack`, `migrate-check`, `phpunit-full` (2305 Tests), `schema-convergence` grün (`qa-artifacts/p02-integration-1.log`); `DeployCreateReplacementTest` gezielt 4/4 grün. QA-Stack danach abgebaut. Offen: vollständige Fast- und Integration-Lane vor Commit, `e2e-portal`/`visual-contract` für die neue Kartenliste, ESXi-Laborprobe. Nächster Schritt laut Reihenfolge: gemeinsamer Save-und-Audit-Service.

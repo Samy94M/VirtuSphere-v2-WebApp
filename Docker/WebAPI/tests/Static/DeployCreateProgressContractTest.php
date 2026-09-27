@@ -100,6 +100,10 @@ final class DeployCreateProgressContractTest extends TestCase
                 'data-create-since-text',
                 'data-create-findings',
                 'data-create-finding-list',
+                // IDR-P02: a replaced VM is a note with its own list, filled by
+                // the same view model as the card.
+                'data-create-replacements',
+                'data-create-replacement-list',
                 "help_url('deploy', 'help-create-progress')",
             ],
             'lib/help_page.php' => [
@@ -115,6 +119,8 @@ final class DeployCreateProgressContractTest extends TestCase
                 'data-create-since-text',
                 'data-create-findings',
                 'data-create-finding-list',
+                'data-create-replacements',
+                'data-create-replacement-list',
                 // The control is a real link now, so its default navigation
                 // must be suppressed here rather than relied upon.
                 'event.preventDefault();',

@@ -70,6 +70,7 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help_deploy.deploy_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_identity_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_identity_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_identity_p3')); ?></p>
         </section>
 
         <section class="panel">

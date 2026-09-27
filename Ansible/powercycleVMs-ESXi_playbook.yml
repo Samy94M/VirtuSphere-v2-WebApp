@@ -54,8 +54,6 @@
           - ((item['instance'] | default({}))['instance_uuid'] | default('')) | trim | length > 0
           - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
           - >-
-            (identity_unbound_allowed | default(false) | bool)
-            or
             (
               ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
               and

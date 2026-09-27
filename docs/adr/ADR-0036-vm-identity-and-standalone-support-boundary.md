@@ -77,6 +77,31 @@ therefore the state from before create, whatever the database now knows. Removin
 the flag would require regenerating the artifact between steps, which is a
 behavioural change with its own host proof and not a documentation edit.
 
+### Amendment: replacement of an externally deleted VM and no unbound bypass (2026-09-27)
+
+Decided by the operator on 2026-09-27 (IDR-P02 and IDR-R2 in
+`docs/audits/2026-09-14-vm-identity-replacement-plan.md`). It supersedes two
+statements of the amendment above.
+
+- A differing stored UUID no longer always writes nothing. When the create
+  preparation proves the stored UUID absent from a successfully read live
+  inventory (neither the name nor the UUID is present) it records that UUID as
+  `replaced_instance_uuid`; if the module then creates a new VM and exactly that
+  UUID is still bound at commit time, the new instance replaces the binding in
+  the same transaction. The report generation rotates and the imported MACs are
+  forgotten, because both describe the deleted VM. MECM stays with the
+  operator: delete the old device there, let the new MAC be imported, then run
+  the MECM-ID reset. Create never deletes a VM; the operator's Create click on a
+  VM whose instance they deleted is the authorization.
+- A stored UUID that lives on under another name is refused before any
+  mutation with `identity_bound_vm_renamed`, because a create would put a second
+  instance next to it.
+- `identity_unbound_allowed` is removed. A `full` job rewrites and re-uploads
+  `serverlist.yml` after its create section, so power-cycle, export, start and
+  autostart always require the bound UUID. This is the regeneration between
+  steps the previous amendment named as the precondition; its ESXi lab proof
+  remains an open acceptance item.
+
 ## Consequences
 
 - Existing portal VMs remain unbound until a successful full export or explicit

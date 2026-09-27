@@ -88,7 +88,7 @@ function ansible_prepare_job_artifacts(
     $trustFile = ansible_write_esxi_trust_artifact($workDir, $esxiCredential);
     ansible_write_file(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
-        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'], (string) $payload['mode'])
+        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'])
     );
     ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId, $jobId);
 
@@ -104,7 +104,66 @@ function ansible_prepare_job_artifacts(
         // that asked for it; the caller needs the mission row to know that, and
         // the mission is loaded here.
         'autostart_enabled' => (int) ($mission['autostart_enabled'] ?? 0) === 1,
+        // What ansible_refresh_serverlist_after_create() must reuse rather than
+        // derive again: the datacenter evidence may have aged past its bound
+        // during the create section, and the VM set is this job's scope, which
+        // a VM added to the mission since must never widen.
+        'serverlist_context' => [
+            'host_datacenter' => $hostDatacenter,
+            'esxi_host_name' => $esxiHostName,
+            'vm_ids' => array_values(array_map(static fn (array $vm): int => (int) ($vm['id'] ?? 0), $vms)),
+        ],
     ];
+}
+
+/**
+ * IDR-R2: rewrites serverlist.yml after a successful create section, before the
+ * remaining playbooks of a full pipeline run.
+ *
+ * The file was generated before the first create unit, so every UUID in it is
+ * the state from before create: empty for a new VM, the deleted instance for a
+ * replaced one. The rewrite reads the bindings the create section just
+ * committed, recomputes needs_mac (a replacement cleared the imported MACs) and
+ * keeps everything else of the original generation. Every VM of the scope must
+ * be bound now; one that is not, or that vanished, stops the job here instead
+ * of letting a later step look a VM up by its name alone.
+ *
+ * @param array<string, mixed> $artifacts the result of ansible_prepare_job_artifacts()
+ */
+function ansible_refresh_serverlist_after_create(mysqli $db, array $job, array $artifacts): void
+{
+    $missionId = (int) ($job['mission_id'] ?? 0);
+    $mission = repo_get_mission($db, $missionId);
+    if ($mission === null) {
+        throw new RuntimeException('Mission not found.');
+    }
+    $context = (array) ($artifacts['serverlist_context'] ?? []);
+    $scopeIds = array_values(array_filter(array_map('intval', (array) ($context['vm_ids'] ?? [])), static fn (int $id): bool => $id > 0));
+    if ($scopeIds === []) {
+        throw new RuntimeException('The create section left no VM scope to address.');
+    }
+    $vms = ansible_filter_vms(getVMs($db, $missionId), $scopeIds);
+    if (count($vms) !== count($scopeIds)) {
+        throw new RuntimeException('A VM of this job disappeared during the create section.');
+    }
+    foreach ($vms as $vm) {
+        if (trim((string) ($vm['vm_instance_uuid'] ?? '')) === '') {
+            throw new RuntimeException('VM ' . (string) ($vm['vm_name'] ?? '') . ' is not bound to an instance after the create section.');
+        }
+    }
+
+    $payload = ansible_job_payload($job);
+    ansible_write_file(
+        (string) $artifacts['local_dir'] . DIRECTORY_SEPARATOR . 'serverlist.yml',
+        ansible_serverlist_yml(
+            $mission,
+            $vms,
+            $payload['powercycle_wait'],
+            (string) ($context['host_datacenter'] ?? ''),
+            (string) ($context['esxi_host_name'] ?? ''),
+            $payload['start_wait']
+        )
+    );
 }
 
 /**

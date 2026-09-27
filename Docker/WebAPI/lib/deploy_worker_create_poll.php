@@ -196,6 +196,17 @@ function deploy_worker_create_finish_unit(
                     VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
                     deploy_worker_create_progress_line($unit, 'DONE', (string) $commit['outcome'])
                 );
+                if (isset($commit['replaced_instance_uuid'])) {
+                    // IDR-P02: the binding moved to a new instance. Both UUIDs
+                    // stay in the log; the result row keeps them durably.
+                    $channel->log(
+                        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+                        'Replaced the binding of ' . (string) $unit['vm_name'] . ': stored instance '
+                        . (string) $commit['replaced_instance_uuid'] . ' was absent on the host, new instance '
+                        . (string) $marker['instance_uuid'] . ' is now bound. Imported MACs were cleared.'
+                        . ' MECM: delete the old device there, then reset the MECM ID in the portal.'
+                    );
+                }
             }
             deploy_worker_create_cleanup_async($channel, $context, $unit);
 

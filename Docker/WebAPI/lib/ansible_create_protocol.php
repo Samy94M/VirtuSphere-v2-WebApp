@@ -37,7 +37,7 @@ const VIRTUSPHERE_CREATE_EVENT_REJECTED = 'rejected';
 
 /** Event => its exact field list, mirroring EVENTS in emit_create_result.py. */
 const VIRTUSPHERE_CREATE_EVENT_FIELDS = [
-    VIRTUSPHERE_CREATE_EVENT_PREPARED => ['portal_vm_id', 'vm_name', 'existed_before', 'precheck_moid', 'precheck_instance_uuid'],
+    VIRTUSPHERE_CREATE_EVENT_PREPARED => ['portal_vm_id', 'vm_name', 'existed_before', 'precheck_moid', 'precheck_instance_uuid', 'replaced_instance_uuid'],
     VIRTUSPHERE_CREATE_EVENT_LAUNCHED => ['portal_vm_id', 'vm_name', 'async_jid', 'async_dir', 'existed_before', 'precheck_moid', 'precheck_instance_uuid'],
     VIRTUSPHERE_CREATE_EVENT_RUNNING => ['portal_vm_id', 'async_jid'],
     VIRTUSPHERE_CREATE_EVENT_SUCCEEDED => ['portal_vm_id', 'vm_name', 'async_jid', 'changed', 'moid', 'instance_uuid', 'power_state'],
@@ -158,6 +158,10 @@ function ansible_create_marker_validate(array $payload): array
             throw new CreateMarkerProtocolException('existed_before contradicts the precheck identity.');
         }
     }
+    // IDR-P02: a stored UUID can only be proven absent for a VM that is gone.
+    if ($event === VIRTUSPHERE_CREATE_EVENT_PREPARED && $result['replaced_instance_uuid'] !== null && $result['existed_before']) {
+        throw new CreateMarkerProtocolException('replaced_instance_uuid contradicts an existing VM.');
+    }
 
     return $result;
 }
@@ -185,6 +189,7 @@ function ansible_create_marker_field(string $field, mixed $value): mixed
         'power_state' => ansible_create_marker_pattern($field, $value, '/^[A-Za-z]{1,32}$/'),
         'precheck_moid' => $value === null ? null : ansible_create_marker_pattern($field, $value, '/^[A-Za-z0-9._-]{1,64}$/'),
         'precheck_instance_uuid' => $value === null ? null : ansible_create_marker_pattern($field, $value, '/^[A-Za-z0-9 :._-]{1,64}$/'),
+        'replaced_instance_uuid' => $value === null ? null : ansible_create_marker_pattern($field, $value, '/^[A-Za-z0-9 :._-]{1,64}$/'),
         'async_dir' => is_string($value) && str_starts_with($value, '/') && !str_contains($value, '..') && strlen($value) <= 1024
             ? $value
             : throw new CreateMarkerProtocolException('async_dir must be an absolute path without traversal.'),

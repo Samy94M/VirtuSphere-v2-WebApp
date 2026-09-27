@@ -22,6 +22,7 @@ require_once __DIR__ . '/migrations/0053_edit_versions.php';
 require_once __DIR__ . '/migrations/0054_log_keyset_pagination.php';
 require_once __DIR__ . '/migrations/0055_ansible_test_schedule.php';
 require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
+require_once __DIR__ . '/migrations/0057_create_replaced_identity.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1223,6 +1224,7 @@ SQL;
     '0054_log_keyset_pagination' => migrate_0054_log_keyset_pagination(...),
     '0055_ansible_test_schedule' => migrate_0055_ansible_test_schedule(...),
     '0056_package_report_foundation' => migrate_0056_package_report_foundation(...),
+    '0057_create_replaced_identity' => migrate_0057_create_replaced_identity(...),
 ];
 try {
     $db = db();

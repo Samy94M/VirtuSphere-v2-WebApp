@@ -56,6 +56,7 @@ ERROR_CODES = (
     "launch_unconfirmed",
     "async_state_missing",
     "identity_result_invalid",
+    "identity_bound_vm_renamed",
     "transport_lost",
     "job_timeout",
     "protocol_error",
@@ -72,6 +73,7 @@ FIELD_RULES = {
     "existed_before": ("bool", None),
     "precheck_moid": ("moid_or_null", None),
     "precheck_instance_uuid": ("uuid_or_null", None),
+    "replaced_instance_uuid": ("uuid_or_null", None),
     "async_jid": ("jid", None),
     "async_dir": ("abs_path", None),
     "changed": ("bool", None),
@@ -83,7 +85,7 @@ FIELD_RULES = {
 }
 
 EVENTS = {
-    "prepared": ("portal_vm_id", "vm_name", "existed_before", "precheck_moid", "precheck_instance_uuid"),
+    "prepared": ("portal_vm_id", "vm_name", "existed_before", "precheck_moid", "precheck_instance_uuid", "replaced_instance_uuid"),
     "launched": ("portal_vm_id", "vm_name", "async_jid", "async_dir", "existed_before", "precheck_moid", "precheck_instance_uuid"),
     "running": ("portal_vm_id", "async_jid"),
     "succeeded": ("portal_vm_id", "vm_name", "async_jid", "changed", "moid", "instance_uuid", "power_state"),
@@ -166,6 +168,10 @@ def validate(payload):
         has_uuid = canonical["precheck_instance_uuid"] is not None
         if canonical["existed_before"] != (has_moid and has_uuid) or has_moid != has_uuid:
             raise ContractError("existed_before does not match the precheck identity")
+    # A replacement is only ever proven for a VM that is gone: a precheck that
+    # found the VM cannot at the same time name its stored UUID as absent.
+    if event == "prepared" and canonical["replaced_instance_uuid"] is not None and canonical["existed_before"]:
+        raise ContractError("replaced_instance_uuid contradicts an existing VM")
 
     return canonical
 

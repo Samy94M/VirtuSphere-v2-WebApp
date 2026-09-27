@@ -357,7 +357,7 @@ Das Async-Verzeichnis wird nicht zusätzlich gespeichert, sondern aus dem ohnehi
 
 Die feste Wartezeit nach dem Erstellen (früher `CreateSettleSeconds`, 60 Sekunden blind) ist ersatzlos entfallen. Jede Einheit wird bis zum Ende gepollt und ihre Live-Identität zurückgelesen; das ist der Beweis, den die Wartezeit nur zu ersetzen versuchte.
 
-Nach jedem Erfolg bindet **eine** Transaktion die Identität: Auftrag, Ergebniszeile und VM gesperrt, eine leere UUID wird gebunden, eine gleiche UUID frischt nur die MOID auf, eine abweichende UUID schreibt nichts. Eine vierte Beweiskombination, die keiner dieser drei entspricht, ist `identity_result_invalid` und damit ein Fehler, keine Auslegung.
+Nach jedem Erfolg bindet **eine** Transaktion die Identität: Auftrag, Ergebniszeile und VM gesperrt, eine leere UUID wird gebunden, eine gleiche UUID frischt nur die MOID auf. Eine abweichende UUID ist nur dann zulässig, wenn die Vorbereitung genau diese gespeicherte UUID live als fehlend nachgewiesen hat (`replaced_instance_uuid`) und das Modul eine neue VM angelegt hat (IDR-P02): Dann übernimmt das Portal die neue Instanz, rotiert die Berichtsgeneration und verwirft die importierten MACs; MECM bleibt ein Schritt für die Bedienperson (altes Gerät löschen, neue MAC importieren lassen, „MECM-ID zurücksetzen“). Jede andere abweichende UUID schreibt nichts. Existiert die gebundene VM unter anderem Namen weiter, lehnt die Vorbereitung mit `identity_bound_vm_renamed` ab. Create löscht nie eine VM. Eine Beweiskombination außerhalb dieser Regeln ist `identity_result_invalid` und damit ein Fehler, keine Auslegung.
 
 Im Auftragsprotokoll erscheint je Einheit eine technische, nicht übersetzte SYSTEM-Zeile:
 

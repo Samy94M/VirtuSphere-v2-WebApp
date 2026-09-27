@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_create_result.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/deploy_create_retry.php';
 
 /**
  * Storage and compare-and-swap for per-VM create results (Etappe 14B).
@@ -108,7 +109,7 @@ function repo_deploy_create_results(mysqli $db, int $jobId, bool $lock = false):
 {
     $stmt = $db->prepare(
         'SELECT id, job_id, vm_id, vm_name, position, total, action, status, outcome, changed, existed_before,'
-        . ' precheck_moid, precheck_instance_uuid, async_jid, remote_execution_id, async_deadline_at, vm_moid,'
+        . ' precheck_moid, precheck_instance_uuid, replaced_instance_uuid, async_jid, remote_execution_id, async_deadline_at, vm_moid,'
         . ' vm_instance_uuid, error_code, error_detail, resumed_from_result_id, started_at, finished_at, updated_at'
         . ' FROM deploy_create_vm_results WHERE job_id = ? ORDER BY position'
         . ($lock ? ' FOR UPDATE' : '')
@@ -190,7 +191,7 @@ function repo_deploy_create_transition(
     return (bool) repo_transaction($db, static function () use ($db, $jobId, $position, $from, $to, $fields, $fence): bool {
         $row = repo_fetch_one(
             $db,
-            'SELECT r.id, r.status, r.action FROM deploy_create_vm_results r'
+            'SELECT r.id, r.status, r.action, r.vm_id, r.resumed_from_result_id FROM deploy_create_vm_results r'
             . ' JOIN deploy_jobs j ON j.id = r.job_id'
             . ' WHERE r.job_id = ? AND r.position = ? AND r.status = ?'
             . ' AND j.status IN (?, ?) AND j.locked_by = ? AND j.lock_token = ? AND j.worker_epoch = ?'
@@ -217,8 +218,35 @@ function repo_deploy_create_transition(
             throw new DomainException('Only a verify_skip unit may end as skipped.');
         }
 
+        if (array_key_exists('action', $fields)) {
+            // IDR-E19: a retry may become a create only after its own live
+            // preparation proved that the previously successful instance is
+            // absent. Recheck the source and current binding under this CAS.
+            if ($from !== VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING
+                || $to !== VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED
+                || (string) $row['action'] !== VIRTUSPHERE_CREATE_ACTION_VERIFY_SKIP
+                || $fields['action'] !== VIRTUSPHERE_CREATE_ACTION_CREATE
+                || (int) ($fields['existed_before'] ?? -1) !== 0) {
+                throw new DomainException('A skip can become create only for its proven absent bound instance.');
+            }
+            $sourceId = $row['resumed_from_result_id'] === null ? 0 : (int) $row['resumed_from_result_id'];
+            $source = $sourceId > 0 ? repo_deploy_create_skip_source($db, $sourceId) : null;
+            $absentUuid = trim((string) ($fields['replaced_instance_uuid'] ?? ''));
+            $vm = $row['vm_id'] === null ? null : repo_fetch_one(
+                $db,
+                'SELECT vm_instance_uuid FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE',
+                'i',
+                [(int) $row['vm_id']]
+            );
+            if ($source === null || (int) $row['vm_id'] <= 0 || (int) $source['vm_id'] !== (int) $row['vm_id']
+                || $absentUuid === '' || strcasecmp((string) $source['vm_instance_uuid'], $absentUuid) !== 0
+                || $vm === null || strcasecmp((string) $vm['vm_instance_uuid'], $absentUuid) !== 0) {
+                return false;
+            }
+        }
+
         $values = ['status' => $to];
-        foreach (['outcome', 'changed', 'existed_before', 'precheck_moid', 'precheck_instance_uuid', 'async_jid',
+        foreach (['action', 'outcome', 'changed', 'existed_before', 'precheck_moid', 'precheck_instance_uuid', 'replaced_instance_uuid', 'async_jid',
                   'remote_execution_id', 'async_deadline_at', 'vm_moid', 'vm_instance_uuid', 'error_code',
                   'error_detail', 'resumed_from_result_id'] as $column) {
             if (array_key_exists($column, $fields)) {
@@ -290,47 +318,6 @@ function repo_deploy_create_touch_running(mysqli $db, int $jobId, int $position,
     $stmt->execute();
 
     return $stmt->affected_rows > 0;
-}
-
-/**
- * Materializes the retry of a create job: a confirmed success becomes a
- * verify_skip unit bound to the row that proved it, everything else becomes a
- * fresh create unit. Positions are renumbered over the whole original
- * selection, so the retry still creates the VMs in the same order.
- *
- * @param list<array<string, mixed>> $sourceRows
- */
-function repo_deploy_create_materialize_retry(mysqli $db, int $newJobId, array $sourceRows): int
-{
-    if ($sourceRows === []) {
-        throw new InvalidArgumentException('A create retry needs the source job rows.');
-    }
-    $plan = deploy_create_retry_plan($sourceRows);
-    if ($plan['blocked']) {
-        throw new DomainException('The source job still has unresolved create units.');
-    }
-    $total = count($sourceRows);
-    $position = 0;
-    foreach ($sourceRows as $row) {
-        $position++;
-        $successful = in_array((string) $row['status'], VIRTUSPHERE_CREATE_RESULT_SUCCESSFUL_STATUSES, true);
-        repo_insert_from_values($db, 'deploy_create_vm_results', [
-            'job_id' => $newJobId,
-            'vm_id' => $row['vm_id'] !== null ? (int) $row['vm_id'] : null,
-            'vm_name' => (string) $row['vm_name'],
-            'position' => $position,
-            'total' => $total,
-            // A proven success is not copied as a success. It is queued as the
-            // work of proving it again live, because "it existed an hour ago"
-            // is not evidence that it exists now, and the skip is only written
-            // once that check passed in THIS job.
-            'action' => $successful ? VIRTUSPHERE_CREATE_ACTION_VERIFY_SKIP : VIRTUSPHERE_CREATE_ACTION_CREATE,
-            'status' => VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING,
-            'resumed_from_result_id' => $successful ? (int) $row['id'] : null,
-        ]);
-    }
-
-    return $total;
 }
 
 /**

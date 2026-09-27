@@ -249,6 +249,20 @@
             });
             findingsContainer.hidden = findings.length === 0;
         }
+        // Replaced VMs (IDR-P02) arrive as finished sentences, like findings.
+        var replacementsContainer = progressCard.querySelector('[data-create-replacements]');
+        var replacementsList = progressCard.querySelector('[data-create-replacement-list]');
+        if (replacementsContainer && replacementsList) {
+            var replacements = Array.isArray(progress.replacements) ? progress.replacements : [];
+            replacementsList.replaceChildren();
+            replacements.forEach(function (text) {
+                if (typeof text !== 'string') { return; }
+                var item = document.createElement('li');
+                item.textContent = text;
+                replacementsList.appendChild(item);
+            });
+            replacementsContainer.hidden = replacements.length === 0;
+        }
     }
     function rowFor(entry) {
         var seqValue = String(entry.seq);

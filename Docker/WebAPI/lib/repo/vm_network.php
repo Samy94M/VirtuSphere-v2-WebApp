@@ -263,6 +263,32 @@ function repo_vm_network_update_vlan_ids(mysqli $db, array $interfaceIds, string
 }
 
 /**
+ * IDR-P02: forgets the MACs an externally deleted VM reported once its binding
+ * was replaced by a newly created instance. Create never configures a MAC, so
+ * every stored value describes the deleted VM; keeping one would make the
+ * power-cycle skip the new VM (`needs_mac`) and hand MECM a foreign address.
+ * The caller owns the transaction and holds the job and VM locks, so the lock
+ * order stays Job -> VM -> Interfaces. A changed row advances the edit version
+ * like the VLAN writer above, so an editor opened before the replacement
+ * cannot save the old addresses back.
+ */
+function repo_vm_network_forget_observed_macs(mysqli $db, int $vmId): int
+{
+    if ($vmId <= 0) {
+        throw new InvalidArgumentException('VM id is required.');
+    }
+    $stmt = $db->prepare("UPDATE deploy_interfaces SET mac = '' WHERE vm_id = ? AND mac IS NOT NULL AND mac <> ''");
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+    $forgotten = $stmt->affected_rows;
+    if ($forgotten > 0) {
+        repo_advance_vm_edit_version($db, $vmId);
+    }
+
+    return $forgotten;
+}
+
+/**
  * Central writer gate. The caller owns the transaction and has locked the
  * mission row before this function takes the active job, VM and interface
  * locks. An unchanged invalid legacy bundle is grandfathered; every changed

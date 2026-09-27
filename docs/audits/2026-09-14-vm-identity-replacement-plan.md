@@ -1,6 +1,6 @@
 # VM-Identität nach externer Löschung: Umsetzungs- und Prüfplan
 
-Stand: 14.09.2026. Status: Planung; keine Produktimplementierung und keine ausgeführten QA-Gates.
+Stand: 14.09.2026, fortgeschrieben am 27.09.2026 (Abschnitt 16). Status: Planung; P02 ist als erstes Paket beauftragt, weitere Produktpakete nicht begonnen.
 
 ## 1. Auftrag, Geltungsbereich und Einstieg
 
@@ -294,3 +294,61 @@ Nachprüfung gegen die zugeordneten Quellen:
 Die Nachprüfung ist eine statische Quellen-/Planprüfung, keine unabhängige Vertragsabnahme und kein QA-Pass. Nächster Schritt bei Implementierungsauftrag: P00 und P01, dann konservative P02-Korrektur. Bis dahin keine Produktänderung, automatische Übernahme, Ersatzfreigabe oder Wiederholung des Auftrags 563.
 
 Bei der Nachprüfung ergänzte Lücken: bestehende MECM-Rolloutrevision ist kein nachgewiesener Ersatz für Bindungsversion; Jobartefakte müssen neue Bindungen konsistent weitertragen; neue Fehlercodes müssen den geschlossenen Marker-/Schema-/Presentervertrag erfüllen. Diese Ergänzungen sind als P06-/P05-/QA-Abnahme aufgenommen, ohne einen ungeprüften Produktdefekt zu behaupten.
+
+## 16. Review 27.09.2026: Synergien, Entscheidungen und Ergänzungen
+
+Anlass: gemeinsamer Review dieses Plans mit dem [Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md), dem [MECM-Clientplan](2026-09-15-mecm-client-delivery-simplification-plan.md) und dem seit 22.09. umgesetzten [Paketreporter](2026-09-13-package-wrapper-logging-plan.md). Der Reporter hat Client-Snapshot, Common und eine VM-Generation eingeführt, die dieser Plan noch nicht kannte.
+
+### 16.1 Nutzerentscheidungen
+
+| ID | Entscheidung | Folge für diesen Plan |
+|---|---|---|
+| IDR-R1 | Reihenfolge: zuerst P02, danach ein gemeinsamer Save-und-Audit-Service in einer `repo_transaction()` (zusammen mit dem MECM-Plan), danach MECM MC01. | P02 wird vorgezogen. Für P02 genügt aus P00/P01 der hier festgelegte Teil: Quellenmanifest, synthetische Vorfallfixture und die Zustände IDR-S01, S04, S05, S08 und S09. IDR-D01 bis D06 betreffen erst P03 bis P07. |
+| IDR-R2 | Full-Modus sauber lösen: Serverliste nach dem Create-Schritt mit den bestätigten UUIDs neu schreiben und hochladen; danach entfällt `identity_unbound_allowed`. | Löst IDR-E35. Bis dahin prüfen Start, Autostart, Export und Powercycle im Full-Modus keine UUID, auch keine abweichende gebundene. Der MAC-Import verwirft eine fremde UUID weiterhin (`lib/mac_import.php`), der Stromzyklus selbst liegt aber davor. Eigenes Paket nach P02. |
+| IDR-R4 | Umfang nach IDR-R3 (27.09.2026): P03, P04, P05 und P07 entfallen; P06 bleibt reduziert. | P03 ist durch P02 abgedeckt (UUID-Suche im selben Inventarabruf, eingeschränkte Sicht bleibt unbekannt, Übernahme nur bei exakt nachgewiesener fehlender UUID). P04 entfällt, weil die ersetzte Instanz im Create-Ergebnis steht. P05 und P07 (Ersatzfreigabe, Vorschau, Bestätigung) widersprechen IDR-R3. P06 umfasst nur noch: Anzeige der neuen Instanz als noch nicht bereit trotz historischem 5/5 (IDR-E37), Prüfung, dass Powercycle, Heartbeats und späte Rückmeldungen der alten Instanz nichts bewirken, und die MECM-Zuordnung über Hardware-ID als Laborprobe (IDR-E36). |
+
+### 16.2 Gemeinsame Identitätsprüfung und P02-Weg
+
+Heute gibt es zwei Verfahren: `Ansible/create_identity_check_tasks.yml` liest das ganze Inventar per `vmware_vm_info` und filtert nach Namen; Start, Autostart, Export und Powercycle lesen per `vmware_guest_info` über den Namen und vergleichen danach die UUID. `vmware_guest_info` wählt bei Namensdubletten still den ersten Treffer (`name_match` Standard `first`), unterstützt aber `uuid` mit `use_instance_uuid: true`. Ziel ist eine Auflösung für alle Playbooks; bei bekannter UUID wird über sie gesucht.
+
+P02 braucht keinen zusätzlichen API-Aufruf: Die Create-Prüfung hat das vollständige Inventar bereits geladen. Ein zweiter Filter auf `instance_uuid` erkennt IDR-S04 (alte UUID unter anderem Namen) und IDR-S05 (alte Bindung, weder UUID noch Name vorhanden) vor jeder Mutation. Ein UUID-Fehltreffer ist nur dann Abwesenheit, wenn die Abfrage selbst erfolgreich war; eingeschränkte Sicht bleibt IDR-S09 und wird nie als Löschung gedeutet (IDR-E11).
+
+### 16.3 P06 konkretisiert
+
+- `deploy_vms.package_report_generation` (Migration 0056) wird nur beim Anlegen der Portalzeile vergeben und nie gewechselt; der Reporterplan definiert sie als bei jeder Neuanlage neu. Ein autorisierter Ersatz rotiert sie im selben Übergang wie die Bindung, sonst mischen sich Paketberichte alter und neuer Instanz.
+- Das historische 5/5 aus `mecm_client_ack` bleibt an der Portalzeile (MECM-Plan, Entscheidung 36). Nach einem Ersatz zeigt die Anzeige die neue Instanz als noch nicht bereit; die historische Evidenz bleibt erhalten.
+- Eine importierte MAC wird beim Ersatz ungültig (`needs_mac` wieder wahr, damit Powercycle läuft); eine bewusst konfigurierte statische MAC bleibt Sollwert. Standalone-ESXi leitet generierte MACs aus der BIOS-UUID ab, die aus Host-UUID und `.vmx`-Pfad entsteht. Eine am selben Pfad neu erstellte VM kann deshalb dieselbe MAC erhalten; das ist plausibel, aber nicht ausdrücklich dokumentiert und braucht eine Laborprobe. MAC-Gleichheit ist kein Instanzbeweis.
+- MECM: Der Device-Sync bindet über `mecm_id`/`previous_resource_id`, Rolloutname und MAC. Bei gleicher SMBIOS-GUID und MAC kann MECM den neuen Client über die Hardware-ID dem alten Datensatz zuordnen, samt alter Collection-Mitgliedschaften und Core-Deployment. Bei neuer MAC zeigt die gebundene ResourceID auf das alte Gerät und der Sync meldet „Identität nicht auflösbar“.
+
+### 16.4 Neue Randfälle
+
+| ID | Fall | Erwartetes Ergebnis |
+|---|---|---|
+| IDR-E36 | Ersatz-VM am selben Datastore-Pfad erhält dieselbe BIOS-UUID und MAC | Portal behandelt sie als neue Instanz; MECM-Zuordnung wird geprüft statt aus der MAC gefolgert. |
+| IDR-E37 | Ersatz-VM mit historischem 5/5 | Anzeige für die neue Instanz nicht bereit; historische Evidenz bleibt sichtbar. |
+| IDR-E38 | Ersatz ohne Rotation von `package_report_generation` | Verboten; alte Berichte werden nach Rotation mit `device_generation_mismatch` abgewiesen. |
+| IDR-E39 | Full-Modus, Namensdublette entsteht während der Startwartezeit | Bis IDR-R2 wählt `vmware_guest_info` den ersten Treffer ohne UUID-Vergleich; nach IDR-R2 UUID-gebunden. |
+| IDR-E40 | Gespeicherte UUID fehlt im Inventar, Sicht aber eingeschränkt oder Abfrage fehlgeschlagen | IDR-S09, kein Create und keine Löschungsannahme. |
+
+### 16.5 Hilfe
+
+`help_deploy.deploy_identity_p1` sagt ohne Ausnahme, dass vor Powercycle, Start und Autostart Name und UUID geprüft werden und keine neue Namensinhaberin einspringen kann. Bis IDR-R2 umgesetzt ist, gilt das im Full-Modus nicht; IDR-DOC04 umfasst diese Stelle. `deploy_identity_p2` (IDR-F08) ist unverändert falsch.
+
+Quellen: [Ansible vmware_guest_info](https://docs.ansible.com/projects/ansible/latest/collections/community/vmware/vmware_guest_info_module.html) (`name_match`, `uuid`, `use_instance_uuid`), [Broadcom: MAC Address Generation on ESXi Hosts](https://techdocs.broadcom.com/us/en/vmware-cis/vsphere/vsphere/7-0/vsphere-networking/mac-addresses/mac-address-generation-on-esxi-hosts.html), [Microsoft: Manage clients, Conflicting records](https://learn.microsoft.com/en-us/intune/configmgr/core/clients/manage/manage-clients).
+
+### 16.6 Nutzerregel IDR-R3 und Umsetzungsstand P02 (27.09.2026)
+
+Nutzerentscheidung: Wer auf eine VM, deren gebundene Instanz er auf ESXi gelöscht hat, Create anwendet, will sie wieder haben. Create legt die fehlende VM an und das Portal übernimmt die neue Instanz; eine Ersatzvorschau oder ein Sperren mit Umweg ist dafür nicht gewünscht. Create löscht nie eine VM. MECM bleibt ausdrücklich Handarbeit: altes Gerät in der MECM-Konsole löschen, neue MAC importieren lassen, „MECM-ID zurücksetzen“. Damit ersetzt IDR-R3 für den Fall IDR-S05 die Zeile „Normalen Create sperren; Ersatzvorschau anbieten“; IDR-S04 (umbenannt) bleibt gesperrt.
+
+Umgesetzt (lokal, noch nicht committet):
+
+- `create_identity_check_tasks.yml` sucht die gespeicherte UUID im selben Inventarabruf (ohne Groß-/Kleinschreibung, Name weiterhin exakt), lehnt eine umbenannte gebundene VM mit `identity_bound_vm_renamed` ab und meldet im `prepared`-Ereignis `replaced_instance_uuid`, wenn weder Name noch UUID vorhanden sind.
+- Protokoll beidseitig erweitert (Emitter und `ansible_create_protocol.php`), Migration 0057 mit Spalte und CHECK `replaced_instance_uuid IS NULL OR existed_before = 0`, Frischschema gespiegelt.
+- `repo_deploy_create_commit_success()` übernimmt die neue Instanz nur, wenn genau die nachgewiesen fehlende UUID noch gebunden ist und das Modul neu angelegt hat; rotiert `package_report_generation` und vergisst die MACs über `repo_vm_network_forget_observed_macs()` (erhöht `edit_version`).
+- IDR-R2 vorgezogen, weil P02 im Full-Modus sonst nicht durchläuft: Der Worker schreibt `serverlist.yml` nach dem Create-Abschnitt neu und lädt sie hoch; `identity_unbound_allowed` ist aus Generator und allen Playbooks entfernt.
+- Fortschrittskarte: Grund für „umbenannt“ und eigene Liste „Fehlende VMs angelegt“ mit MECM-Hinweis; Hilfe `deploy_identity_p3`, Korrektur von IDR-F08 in `deploy_identity_p2`; ADR-0036-Ergänzung, `deploy-chain.md`, `DEPLOYMENT.md`, WebAPI-Referenz.
+- Tests: zehn ausführbare Prepare-Fälle im Gate `ansible-create-async`, Emitter- und PHP-Protokolltests, Fortschrittstests, Integrationstest `DeployCreateReplacementTest` (Integration-Lane).
+
+IDR-E19 (lokal umgesetzt am 27.09.2026, vor dem Gesamtlauf): Ein Retry-Eintrag, der für einen früheren Erfolg steht (`verify_skip`), wird zum Create, wenn der Prepare-Nachweis zeigt, dass genau die gebundene UUID fehlt und kein Namensträger existiert (`deploy_worker_create_skip_proves_absence()`). Der Übergang läuft unter demselben Worker-Fence; `repo_deploy_create_transition()` prüft dafür die Quellzeile und `deploy_vms.vm_instance_uuid` erneut unter `FOR UPDATE`. Unbekanntes Inventar, eine umbenannte gebundene VM oder ein fremder Namensträger werden nie zum Create. Die Retry-Helfer liegen seitdem in `repo/deploy_create_retry.php`, weil `deploy_create_results.php` sonst das ADR-0006-Budget überschreitet. Tests: `DeployCreateVerifySkipDecisionTest`, `DeployCreateReplacementTest`.
+
+Offen: ESXi-Laborprobe (gelöschte, umbenannte und am selben Pfad neu erstellte VM) und P06 in der reduzierten Form aus IDR-R4.

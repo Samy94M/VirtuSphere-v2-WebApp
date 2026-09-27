@@ -138,8 +138,10 @@ const FILE_SIZE_ALLOWANCES = [
     // U11 adds the require and ordered registry entry for migration 0053; its body stays separate.
     // ADR-0044 adds the same two registry lines for migration 0056; all schema
     // and backfill logic remains in lib/migrations/0056_package_report_foundation.php.
+    // IDR-P02 adds the two registry lines for migration 0057; its column and
+    // check live in lib/migrations/0057_create_replaced_identity.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1271,
+        'lines' => 1273,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

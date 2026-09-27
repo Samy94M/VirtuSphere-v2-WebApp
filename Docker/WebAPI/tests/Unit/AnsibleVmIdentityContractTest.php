@@ -8,13 +8,13 @@ require_once dirname(__DIR__, 2) . '/lib/ansible.php';
 
 /**
  * Stage 9: a VM name is only an address after its vSphere instance UUID has
- * proved which object owns that name. The full pipeline may carry an unbound
- * VM past create because that same sequence just proved the name absent and
- * created it; every standalone follow-up mode requires the stored UUID.
+ * proved which object owns that name. Since IDR-R2 no mode carries an unbound
+ * VM past create any more: a full pipeline rewrites serverlist.yml after its
+ * create section, so every follow-up playbook requires the bound UUID.
  */
 final class AnsibleVmIdentityContractTest extends TestCase
 {
-    public function testServerlistCarriesStoredIdentityAndOnlyFullAllowsNewlyCreatedUnboundVms(): void
+    public function testServerlistCarriesStoredIdentityAndNoUnboundBypass(): void
     {
         $mission = [
             'id' => 7,
@@ -32,13 +32,43 @@ final class AnsibleVmIdentityContractTest extends TestCase
             'packages' => [],
         ];
 
-        $full = ansible_serverlist_yml($mission, [$vm], 5, 'ha-datacenter', 'esxi01', 300, VIRTUSPHERE_DEPLOY_MODE_FULL);
-        self::assertStringContainsString('vm_moid: "vm-42"', $full);
-        self::assertStringContainsString('vm_instance_uuid: "50112233-4455-6677-8899-aabbccddeeff"', $full);
-        self::assertStringContainsString('identity_unbound_allowed: true', $full);
+        $serverlist = ansible_serverlist_yml($mission, [$vm], 5, 'ha-datacenter', 'esxi01', 300);
+        self::assertStringContainsString('vm_moid: "vm-42"', $serverlist);
+        self::assertStringContainsString('vm_instance_uuid: "50112233-4455-6677-8899-aabbccddeeff"', $serverlist);
+        self::assertStringNotContainsString('identity_unbound_allowed', $serverlist);
+    }
 
-        $export = ansible_serverlist_yml($mission, [$vm], 5, 'ha-datacenter', 'esxi01', 300, 'export');
-        self::assertStringContainsString('identity_unbound_allowed: false', $export);
+    /**
+     * IDR-R2 guard, derived rather than listed: no playbook may read the removed
+     * full-mode bypass, because a new playbook would otherwise inherit it by
+     * copying a neighbour.
+     */
+    public function testNoPlaybookReadsTheRemovedUnboundBypass(): void
+    {
+        $files = glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*.yml') ?: [];
+        self::assertNotEmpty($files, 'no playbook found to check');
+        foreach ($files as $file) {
+            $content = file_get_contents($file);
+            self::assertIsString($content);
+            self::assertStringNotContainsString('identity_unbound_allowed', $content, basename($file));
+        }
+    }
+
+    /**
+     * IDR-P02: the shared check looks the stored UUID up in the same inventory,
+     * refuses a bound VM that lives on under another name, and states the
+     * stored UUID it proved absent so the commit may replace exactly that one.
+     */
+    public function testIdentityCheckFindsRenamedAndProvesAbsentBoundVms(): void
+    {
+        $identityTasks = $this->source('create_identity_check_tasks.yml');
+        self::assertStringContainsString("'identity_bound_vm_renamed'", $identityTasks);
+        self::assertStringContainsString('vs_identity_uuid_matches', $identityTasks);
+        self::assertStringContainsString('vs_replaced_instance_uuid', $identityTasks);
+        self::assertSame(1, substr_count($identityTasks, 'community.vmware.vmware_vm_info:'), 'the UUID lookup must reuse the one inventory read');
+
+        $prepare = $this->source('createVMPrepare-ESXi_playbook.yml');
+        self::assertStringContainsString("'replaced_instance_uuid': (vs_replaced_instance_uuid", $prepare);
     }
 
     /**

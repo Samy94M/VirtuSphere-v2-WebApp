@@ -668,6 +668,10 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
     existed_before TINYINT(1) NULL,
     precheck_moid VARCHAR(64) NULL,
     precheck_instance_uuid VARCHAR(64) NULL,
+    -- IDR-P02 (migration 0057): the stored instance UUID the preparation looked
+    -- for live and did not find. Only this fact lets the success commit replace
+    -- the binding of an externally deleted VM with the new instance.
+    replaced_instance_uuid VARCHAR(64) NULL,
     async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
     remote_execution_id BIGINT UNSIGNED NULL,
     async_deadline_at DATETIME NULL,
@@ -724,6 +728,9 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
         (outcome = _utf8mb4'created' AND existed_before = 0 AND changed = 1) OR
         (outcome = _utf8mb4'updated' AND existed_before = 1 AND changed = 1) OR
         (outcome = _utf8mb4'unchanged' AND existed_before = 1 AND changed = 0)
+    ),
+    CONSTRAINT deploy_create_result_replacement_check CHECK (
+        replaced_instance_uuid IS NULL OR existed_before = 0
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

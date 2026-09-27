@@ -15,7 +15,7 @@
 # Erwartet: vs_target (genau ein Eintrag aus vm_configurations).
 # Setzt: vs_existed_before, vs_precheck_moid, vs_precheck_instance_uuid,
 #        vs_identity_conflict, vs_identity_conflict_code,
-#        vs_identity_conflict_reason.
+#        vs_identity_conflict_reason, vs_replaced_instance_uuid.
 #
 # Diese Datei bricht den Lauf NICHT ab (Etappe 14B-E). Eine fremde
 # Namensgleichheit ist der häufigste echte Betriebsfall und ein fachliches
@@ -65,10 +65,31 @@
       {{ (vs_identity_matches | first).instance_uuid | default('')
          if (vs_identity_matches | length) == 1 else '' }}
 
+# IDR-P02: dieselbe Inventarantwort, zweiter Blick über die gespeicherte UUID.
+# Der Name allein beantwortet nicht, ob die gebundene VM noch existiert: eine
+# umbenannte VM hat ihn verloren, bleibt aber dieselbe Instanz. Die UUID wird
+# wie im Vergleich unten ohne Groß-/Kleinschreibung verglichen, der Name
+# weiterhin exakt. Ohne gespeicherte UUID gibt es nichts zu suchen.
+- name: VMs mit der gespeicherten Instance-UUID sammeln
+  ansible.builtin.set_fact:
+    vs_identity_stored_uuid: "{{ vs_target.vm_instance_uuid | default('') | trim }}"
+    vs_identity_uuid_matches: >-
+      {{
+        (
+          vs_identity_inventory.virtual_machines | default([])
+          | selectattr('instance_uuid', 'defined')
+          | selectattr('instance_uuid', 'string')
+          | selectattr('instance_uuid', 'match', '^' ~ (vs_target.vm_instance_uuid | default('') | trim | regex_escape) ~ '$', true)
+          | list
+        ) if (vs_target.vm_instance_uuid | default('') | trim | length) > 0 else []
+      }}
+
 # Die geschlossene Entscheidung. Reihenfolge ist Bedeutung: mehrere Treffer
 # schlagen alles andere, eine vorhandene VM ohne dauerhafte Identität ist ein
-# unbrauchbares Ergebnis und keine Kollision, und erst danach entscheidet die
-# gespeicherte Portal-UUID über eigen oder fremd.
+# unbrauchbares Ergebnis und keine Kollision. Danach die gebundene VM unter
+# anderem Namen: sie existiert noch, ein Create würde eine zweite Instanz neben
+# ihr anlegen. Erst dann entscheidet die gespeicherte Portal-UUID über eigen
+# oder fremd.
 - name: Identitaetsbefund einordnen
   ansible.builtin.set_fact:
     vs_identity_conflict_code: >-
@@ -80,29 +101,53 @@
             and ((vs_precheck_instance_uuid | length) == 0 or (vs_precheck_moid | length) == 0)
           )
           else (
-            'identity_conflict' if (
+            'identity_bound_vm_renamed' if (
               (vs_identity_require_stored_match | default(true) | bool)
-              and (vs_existed_before | bool)
-              and (
-                (vs_target.vm_instance_uuid | default('') | trim | length) == 0
-                or (vs_target.vm_instance_uuid | lower != vs_precheck_instance_uuid | lower)
-              )
+              and (vs_identity_uuid_matches | length) > 0
+              and (vs_identity_uuid_matches | selectattr('guest_name', 'equalto', vs_target.vm_name) | list | length) == 0
             )
-            else ''
+            else (
+              'identity_conflict' if (
+                (vs_identity_require_stored_match | default(true) | bool)
+                and (vs_existed_before | bool)
+                and (
+                  (vs_identity_stored_uuid | length) == 0
+                  or (vs_identity_stored_uuid | lower != vs_precheck_instance_uuid | lower)
+                )
+              )
+              else ''
+            )
           )
         )
       }}
 
+# Die gebundene VM ist nachweislich weg: weder ihr Name noch ihre UUID steht im
+# erfolgreich gelesenen Inventar. Dann darf die Einheit sie neu anlegen, und der
+# Erfolgscommit übernimmt die neue Instanz nur, wenn genau diese UUID dann noch
+# gebunden ist. Create löscht dabei nie etwas; es füllt nur diese Lücke.
 - name: Ursache des Identitaetsbefunds festhalten
   ansible.builtin.set_fact:
     vs_identity_conflict: "{{ (vs_identity_conflict_code | length) > 0 }}"
+    vs_replaced_instance_uuid: >-
+      {{
+        vs_identity_stored_uuid
+        if (
+          (vs_identity_require_stored_match | default(true) | bool)
+          and (vs_identity_stored_uuid | length) > 0
+          and (vs_identity_matches | length) == 0
+          and (vs_identity_uuid_matches | length) == 0
+        )
+        else ''
+      }}
     vs_identity_conflict_reason: >-
       {{
         ('the name exists more than once on this host'
          if (vs_identity_matches | length) > 1
          else ('the existing VM reports no durable instance uuid'
                if vs_identity_conflict_code == 'identity_result_invalid'
-               else ('an existing VM of this name does not carry the instance uuid stored by the portal'
-                     if (vs_identity_conflict_code | length) > 0
-                     else '')))
+               else ('the instance uuid stored by the portal belongs to a VM with a different name on this host'
+                     if vs_identity_conflict_code == 'identity_bound_vm_renamed'
+                     else ('an existing VM of this name does not carry the instance uuid stored by the portal'
+                           if (vs_identity_conflict_code | length) > 0
+                           else ''))))
       }}

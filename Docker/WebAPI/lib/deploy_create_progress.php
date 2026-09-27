@@ -79,7 +79,14 @@ function deploy_create_progress_from_rows(array $rows): ?array
     $summary = deploy_create_summary($rows);
     $unresolved = null;
     $findings = [];
+    // IDR-P02: successes that replaced an externally deleted VM. They are not
+    // failures, but each leaves the MECM step to the operator.
+    $replacements = [];
     foreach ($rows as $row) {
+        if ((string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED
+            && trim((string) ($row['replaced_instance_uuid'] ?? '')) !== '') {
+            $replacements[] = ['position' => (int) $row['position'], 'vm_name' => (string) $row['vm_name']];
+        }
         if ($unresolved === null && (string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN) {
             $unresolved = [
                 'position' => (int) $row['position'],
@@ -116,7 +123,21 @@ function deploy_create_progress_from_rows(array $rows): ?array
         'current' => $summary['current'],
         'unresolved' => $unresolved,
         'findings' => $findings,
+        'replacements' => $replacements,
     ];
+}
+
+/**
+ * The finished sentence for one replaced VM; card and poller share it.
+ *
+ * @param array{position:int,vm_name:string} $replacement
+ */
+function deploy_create_progress_replacement_text(array $replacement): string
+{
+    return __t('deploy.create_progress_replaced', [
+        'name' => (string) $replacement['vm_name'],
+        'position' => (string) (int) $replacement['position'],
+    ]);
 }
 
 /**
@@ -133,6 +154,7 @@ function deploy_create_progress_finding(array $row): array
     $reasonKey = match ($errorCode) {
         VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED => 'deploy.create_progress_reason_module_failed',
         VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT => 'deploy.create_progress_reason_identity_conflict',
+        VIRTUSPHERE_CREATE_ERROR_IDENTITY_BOUND_VM_RENAMED => 'deploy.create_progress_reason_renamed',
         VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
         VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID => 'deploy.create_progress_reason_invalid_evidence',
         VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED => 'deploy.create_progress_reason_operator_released',
@@ -211,6 +233,10 @@ function deploy_create_progress_payload_from_view(?array $view): ?array
                 ]),
             ],
             $view['findings']
+        ),
+        'replacements' => array_map(
+            static fn(array $replacement): string => deploy_create_progress_replacement_text($replacement),
+            $view['replacements']
         ),
     ];
 }
@@ -321,6 +347,14 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
                             <code><?php echo h((string) $finding['error_code']); ?></code>
                         <?php } ?>
                     </li>
+                <?php } ?>
+            </ul>
+        </div>
+        <div data-create-replacements<?php echo $view['replacements'] === [] ? ' hidden' : ''; ?>>
+            <p><strong><?php echo h(__t('deploy.create_progress_replacements_heading')); ?></strong></p>
+            <ul data-create-replacement-list>
+                <?php foreach ($view['replacements'] as $replacement) { ?>
+                    <li><?php echo h(deploy_create_progress_replacement_text($replacement)); ?></li>
                 <?php } ?>
             </ul>
         </div>

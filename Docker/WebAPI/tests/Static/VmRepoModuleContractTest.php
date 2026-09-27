@@ -50,6 +50,7 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_network_assert_scope_within_bounds',
         'repo_vm_network_assert_scope_idle',
         'repo_vm_network_update_vlan_ids',
+        'repo_vm_network_forget_observed_macs',
         'repo_vm_network_assert_bundle_write_allowed',
         'repo_mark_vm_for_mecm_resync',
         'repo_replace_interfaces',

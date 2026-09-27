@@ -92,6 +92,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         // its status matrix reads the create rows and nothing else does.
         'deploy_worker_conclude_create_section',
         'deploy_worker_create_drive_unit',
+        'deploy_worker_create_skip_proves_absence',
         'deploy_worker_create_prepare_unit',
         'deploy_worker_create_launch_unit',
         'deploy_worker_create_verify_skip',

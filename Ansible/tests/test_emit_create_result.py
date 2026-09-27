@@ -28,6 +28,7 @@ PREPARED = {
     'existed_before': False,
     'precheck_moid': None,
     'precheck_instance_uuid': None,
+    'replaced_instance_uuid': None,
 }
 
 SUCCEEDED = {
@@ -104,6 +105,25 @@ class EmitCreateResultTest(unittest.TestCase):
         payload['precheck_instance_uuid'] = '503c-1'
         with self.assertRaises(EMIT.ContractError):
             EMIT.validate(payload)
+
+    def test_a_proven_absent_binding_round_trips(self):
+        # IDR-P02: the preparation found neither name nor stored UUID and says
+        # which UUID it proved absent, so the commit may replace exactly that.
+        payload = dict(PREPARED)
+        payload['replaced_instance_uuid'] = '52677625-4986-ed5b-89b5-ee9597f0f4cb'
+        self.assertEqual(payload, decode(EMIT.build_marker(EMIT.validate(dict(payload)))))
+
+    def test_a_replacement_claim_next_to_an_existing_vm_is_refused(self):
+        # A precheck that found the VM cannot at the same time call its stored
+        # UUID absent; letting both through would authorize a second binding.
+        payload = dict(PREPARED)
+        payload['existed_before'] = True
+        payload['precheck_moid'] = 'vm-7'
+        payload['precheck_instance_uuid'] = '503c-1'
+        payload['replaced_instance_uuid'] = '503c-2'
+        with self.assertRaises(EMIT.ContractError) as caught:
+            EMIT.validate(payload)
+        self.assertIn('replaced_instance_uuid', str(caught.exception))
 
     def test_a_portal_vm_id_must_be_a_real_id(self):
         for value in (0, -1, '123', True, None):

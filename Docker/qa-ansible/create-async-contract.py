@@ -28,16 +28,20 @@ def decode_marker(line: str) -> dict[str, object]:
     return json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
 
 
-def write_stub_collection(root: Path) -> Path:
+DEFAULT_INVENTORY = [{"guest_name": "fixture-vm", "moid": "vm-42", "instance_uuid": "fixture-uuid"}]
+
+
+def write_stub_collection(root: Path, inventory: list[dict[str, str]] | None = None) -> Path:
     modules = root / "ansible_collections" / "community" / "vmware" / "plugins" / "modules"
     modules.mkdir(parents=True)
     common = """from ansible.module_utils.basic import AnsibleModule
 def module():
     return AnsibleModule(argument_spec=dict(hostname=dict(type='str'), port=dict(type='int'), username=dict(type='str'), password=dict(type='str', no_log=True), validate_certs=dict(type='bool'), datacenter=dict(type='str'), moid=dict(type='str')))
 """
+    listing = json.dumps(DEFAULT_INVENTORY if inventory is None else inventory)
     (modules / "vmware_vm_info.py").write_text(
         common
-        + "m=module()\nm.exit_json(changed=False, virtual_machines=[{'guest_name':'fixture-vm','moid':'vm-42','instance_uuid':'fixture-uuid'}])\n",
+        + "import json\nm=module()\nm.exit_json(changed=False, virtual_machines=json.loads(" + repr(listing) + "))\n",
         encoding="utf-8",
     )
     (modules / "vmware_guest_info.py").write_text(
@@ -71,13 +75,13 @@ class CallbackModule(CallbackBase):
     return callbacks
 
 
-def write_vars(work: Path) -> None:
+def write_vars(work: Path, stored_uuid: str = "") -> None:
     (work / "serverlist.yml").write_text(
         """---
 vm_configurations:
   - portal_vm_id: 1
     vm_name: fixture-vm
-    vm_instance_uuid: ''
+    vm_instance_uuid: '""" + stored_uuid + """'
     datacenter_name: ha-datacenter
 """,
         encoding="utf-8",
@@ -149,6 +153,63 @@ def run_status_case(repo: Path, label: str, source: str | None, expected: dict[s
                 )
 
 
+def run_prepare_case(repo: Path, label: str, stored_uuid: str, inventory: list[dict[str, str]], expected: dict[str, object]) -> None:
+    """IDR-P02: the production preparation against a synthetic live inventory.
+
+    The identity matrix is evaluated by ansible-core itself, so the Jinja the
+    shared check uses (UUID lookup, case folding, regex escaping, precedence)
+    is proven here rather than by reading its text.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-prepare-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", "create_identity_check_tasks.yml", "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work, stored_uuid)
+        collection_root = write_stub_collection(work / "collections", inventory)
+        result_file = work / "prepare.json"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(result_file)}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
+        emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+        if emitted.returncode != 0:
+            raise AssertionError(f"{label}: marker emission failed\n{emitted.stdout}\n{emitted.stderr}")
+        payload = decode_marker(emitted.stdout.strip())
+        for key, value in expected.items():
+            if payload.get(key, "<absent>") != value:
+                raise AssertionError(f"{label}: expected {key}={value!r}, got {payload!r}")
+
+
+def vm(name: str, moid: str, uuid: str) -> dict[str, str]:
+    return {"guest_name": name, "moid": moid, "instance_uuid": uuid}
+
+
+PREPARE_CASES = [
+    ("prepare-first-create", "", [], {"event": "prepared", "existed_before": False, "replaced_instance_uuid": None}),
+    ("prepare-bound-present", "uuid-a", [vm("fixture-vm", "vm-42", "uuid-a")],
+     {"event": "prepared", "existed_before": True, "precheck_instance_uuid": "uuid-a", "replaced_instance_uuid": None}),
+    ("prepare-bound-absent", "uuid-a", [vm("other-vm", "vm-7", "uuid-b")],
+     {"event": "prepared", "existed_before": False, "replaced_instance_uuid": "uuid-a"}),
+    ("prepare-bound-renamed", "uuid-a", [vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-renamed-uuid-case", "UUID-A", [vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-foreign-namesake", "uuid-a", [vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-renamed-beside-foreign-namesake", "uuid-a", [vm("fixture-vm", "vm-9", "uuid-z"), vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-duplicate-names", "uuid-a", [vm("fixture-vm", "vm-8", "uuid-a"), vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-unbound-foreign-namesake", "", [vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-uuid-regex-escaped", "uuid.a", [vm("other-vm", "vm-1", "uuidXa")],
+     {"event": "prepared", "existed_before": False, "replaced_instance_uuid": "uuid.a"}),
+]
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: create-async-contract.py <repo-root>", file=sys.stderr)
@@ -165,11 +226,15 @@ def main(argv: list[str]) -> int:
         ("corrupt", ("{not-json", {"event": "rejected", "error_code": "protocol_error"}, False)),
         ("removed-during-query", ('{"failed":false,"changed":true}', {"event": "rejected", "error_code": "async_state_missing"}, True)),
     ]
+    cases += [(label, ("prepare", stored, inventory, expected)) for label, stored, inventory, expected in PREPARE_CASES]
 
     for index, (label, case) in enumerate(cases, start=1):
         print(f"[{index}/{len(cases)}] RUN {label}", flush=True)
         try:
-            if case is None:
+            if case is not None and case[0] == "prepare":
+                _, stored, inventory, expected = case
+                run_prepare_case(repo, label, stored, inventory, expected)
+            elif case is None:
                 completed = subprocess.run(
                     ["ansible-playbook", str(repo / "Docker" / "qa-ansible" / "create-async-fixtures.yml")],
                     cwd=repo,

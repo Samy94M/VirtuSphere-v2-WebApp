@@ -51,14 +51,20 @@ function deploy_worker_create_drive_unit(
     $status = (string) $unit['status'];
     if ($status === VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING) {
         if ((string) $unit['action'] === VIRTUSPHERE_CREATE_ACTION_VERIFY_SKIP) {
-            return deploy_worker_create_verify_skip($channel, $fence, $unit, $context);
+            $verified = deploy_worker_create_verify_skip($channel, $fence, $unit, $context);
+            if (!isset($verified['unit'])) {
+                return $verified;
+            }
+            $unit = $verified['unit'];
+            $status = VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED;
+        } else {
+            $prepared = deploy_worker_create_prepare_unit($channel, $fence, $unit, $context);
+            if ($prepared['stop'] || !$prepared['continue']) {
+                return ['stop' => $prepared['stop'], 'reason' => $prepared['reason']];
+            }
+            $unit = $prepared['unit'];
+            $status = VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED;
         }
-        $prepared = deploy_worker_create_prepare_unit($channel, $fence, $unit, $context);
-        if ($prepared['stop'] || !$prepared['continue']) {
-            return ['stop' => $prepared['stop'], 'reason' => $prepared['reason']];
-        }
-        $unit = $prepared['unit'];
-        $status = VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED;
     }
     if ($status === VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED) {
         $launched = deploy_worker_create_launch_unit($channel, $fence, $unit, $context);
@@ -71,19 +77,31 @@ function deploy_worker_create_drive_unit(
     return deploy_worker_create_poll_unit($channel, $job, $fence, $unit, $context);
 }
 
+/** @param array<string,mixed> $unit @param array<string,mixed> $source @param array<string,mixed> $marker */
+function deploy_worker_create_skip_proves_absence(array $unit, array $source, array $marker): bool
+{
+    $expected = trim((string) ($source['vm_instance_uuid'] ?? ''));
+
+    return $marker['event'] === VIRTUSPHERE_CREATE_EVENT_PREPARED
+        && $marker['existed_before'] === false
+        && (int) ($unit['vm_id'] ?? 0) > 0
+        && (int) ($source['vm_id'] ?? 0) === (int) $unit['vm_id']
+        && $expected !== ''
+        && strcasecmp($expected, (string) ($marker['replaced_instance_uuid'] ?? '')) === 0;
+}
+
 /**
  * A retry unit that stands for an earlier confirmed success (plan 9.2 and
  * 10.2): the same read-only prepare call, and a skip only when the live UUID is
  * the one the source row proved.
  *
- * It never creates anything. A missing VM, an empty UUID or a different one is
- * a failure of this unit, because the alternative would be a second create for
- * a VM whose first one is on record as having succeeded.
+ * A proven missing prior instance becomes a create under the same worker fence.
+ * Unknown inventory, a renamed bound VM or a foreign namesake never does.
  *
  * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
  * @param array<string, mixed> $unit
  * @param array<string, mixed> $context
- * @return array{stop:bool,reason:?string}
+ * @return array{stop:bool,reason:?string,unit?:array<string,mixed>}
  */
 function deploy_worker_create_verify_skip(
     DeployWorkerDbChannel $channel,
@@ -131,6 +149,29 @@ function deploy_worker_create_verify_skip(
         );
 
         return ['stop' => $verdict['stop'], 'reason' => $verdict['reason']];
+    }
+    if (deploy_worker_create_skip_proves_absence($unit, $source, $marker)) {
+        $fields = [
+            'action' => VIRTUSPHERE_CREATE_ACTION_CREATE,
+            'existed_before' => 0,
+            'precheck_moid' => $marker['precheck_moid'],
+            'precheck_instance_uuid' => $marker['precheck_instance_uuid'],
+            'replaced_instance_uuid' => $expected,
+        ];
+        if (!repo_deploy_create_transition(
+            $channel->connection(),
+            (int) $unit['job_id'],
+            (int) $unit['position'],
+            VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED,
+            $fields,
+            $fence
+        )) {
+            return ['stop' => true, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST];
+        }
+        $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, deploy_worker_create_progress_line($unit, 'POLL', 'bound instance absent; creating replacement'));
+
+        return ['stop' => false, 'reason' => null, 'unit' => array_merge($unit, $fields, ['status' => VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED])];
     }
     $live = $marker['event'] === VIRTUSPHERE_CREATE_EVENT_PREPARED ? (string) ($marker['precheck_instance_uuid'] ?? '') : '';
     if ($expected === '' || $live === '' || strcasecmp($expected, $live) !== 0) {

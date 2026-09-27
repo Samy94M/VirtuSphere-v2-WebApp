@@ -1015,3 +1015,39 @@ Aktueller Quellenbefund: Die Funktion existiert in `Powershell-MECM/mecm/VirtuSp
 Lokale Diagnoseprobe: frischer Windows-PowerShell-Prozess 5.1.26100.9444, Common dot-gesourct, Funktion über Get-Command gefunden und aufgerufen. Mit Quelle Agent-2 und Bestand Agent-1/Agent-2/Agent-3 wurde ausschließlich Agent-1 zurückgegeben. Damit ist ein genereller Definitions-/Dot-Sourcingfehler des aktuellen Repositorysatzes für diesen Aufruf widerlegt; die Probe ist keine vollständige QA- oder MECM-Abnahme. Auf dem Arbeitsrechner fehlen der Standard-Serverinstallationsordner und die MECM-Registrykonfiguration; installierte Dateien und laufender Prozess des tatsächlichen MECM-Servers wurden nicht eingesehen.
 
 Wahrscheinliche Betriebsursache: gemischter/alter Server-Dateisatz oder ein noch mit altem Common gestarteter Prozess. Andere Importfehler müssen bei abweichender Live-Evidenz anhand des vollständigen Tageslogs geprüft werden. Nächster Schritt auf dem MECM-Server: aktuellen zusammengehörigen Powershell-MECM-Baum in ein frisches Verzeichnis bereitstellen und daraus `install-VirtuSphere-MECM.ps1 -Upgrade` als Administrator ausführen. Danach Task „VirtuSphere MECM Package Import“, frische Autoimporter-Logeinträge und einen neuen Portalabschluss kontrollieren. Keine Common-Datei in Clientpakete kopieren und kein bloßer Portalstatus-Reset. Die Serverbehebung bleibt bis zu diesem Standortnachweis offen. Quellen/Probe: `qa-artifacts/2026-09-13-package-wrapper-logging-plan/autoimporter-missing-function-diagnosis-20260922.json`. In dieser Diagnose nur dieses Register und das Artefakt geändert; keine Produktänderung oder erneute gesamte Prüfsuite.
+
+## 27. Reporter ohne Core (Entwurf 27.09.2026, zurückgestellt)
+
+**Stand 27.09.2026: zurückgestellt.** Der Nutzer hat entschieden, den Reporter vorerst nur für VMs mit Core zu betreiben; das Thema ruht. V6 gilt unverändert (ohne veröffentlichten Core-Snapshot bleibt der Reporter aus). Der folgende Entwurf bleibt als Vorlage für eine spätere Wiederaufnahme.
+
+Nutzerentscheidung vom 27.09.2026: Paketberichte sollen auch auf VMs funktionieren, für die Core nicht beauftragt ist. Heute ist das nicht möglich. Der Reporter braucht die native Registry-Konfiguration (WebAPI, Scheme, optionaler Fingerabdruck) und den veröffentlichten Snapshot (`SetupState=complete`, `ActiveSnapshot`, MACs, `rollout_revision`, `device_generation`, `acceptance_generation`). Beides schreibt ausschließlich `client_getinfo.ps1`, die erste Core-Phase. Der [MECM-Clientplan](2026-09-15-mecm-client-delivery-simplification-plan.md) legt in Entscheidung 22 fest, dass bei abgewähltem Core keine dieser Phasen läuft. Damit bleibt der Reporter dort nach V6 dauerhaft deaktiviert.
+
+### 27.1 Varianten
+
+| Variante | Kern | Bewertung |
+|---|---|---|
+| A: Registrierung aus Core lösen | `client_getInfos` wird eine eigenständige, nicht störende Registrierung für alle VMs mit Paketen; Core umfasst nur noch Hostname, Datenträger und IP. | Ein einziger Registrierungsweg, Reporter unverändert. Aber: Entscheidungen 22 und 36 kippen (ACK und 5/5 ohne Core), und es braucht entweder ein zweites Required Deployment oder eine Abhängigkeit jeder Paket-Application auf `client_getInfos`. Die Abhängigkeit würde eine fehlgeschlagene Registrierung zum Installationsfehler des Pakets machen und verletzt damit den Grundsatz, dass Reporting eine Installation nie beeinflusst. |
+| B: Reporter-eigene Minimalauflösung (empfohlen) | Fehlt der Core-Snapshot, löst der Reporter Konfiguration und Identität zu Laufbeginn selbst auf, nur lesend und nur für diesen Lauf. | Keine neue MECM-Struktur, Entscheidungen 22 und 36 bleiben, der Serververtrag von `reportPackageRun` bleibt unverändert. Kosten: ein zweiter Auflösungspfad im Client, der klar nachrangig bleiben muss. |
+
+### 27.2 Variante B im Detail
+
+- **Konfiguration.** Vorrang hat der vollständige native Registry-Satz aus Core. Fehlt er vollständig, liest der Reporter einen nur lesbaren Reporter-Bootstrap aus seiner Reportergeneration. Dessen Quelle ist dieselbe Client-Standortkonfiguration, aus der auch `bootstrap.json` entsteht (nach MC01 `ClientPackaging.psd1`), nicht die MECM-Serverkonfiguration: Clients erreichen das Portal unter Umständen über eine andere Adresse als der MECM-Server. Ein partieller oder abweichender Registry-Satz wird nicht mit dem Bootstrap gemischt; dann bleibt der Reporter aus und meldet die Kategorie „Konfiguration widersprüchlich“ lokal.
+- **Identität.** Vorrang hat der veröffentlichte Core-Snapshot. Fehlt er, fragt der Reporter zu Laufbeginn `mecm-api.php?action=getDeviceInfos` je lokaler Adapter-MAC ab. Diese Action ist ausdrücklich nur lesend (ADR-0019/E3; den 5/5-Übergang besitzt allein `mecm_client_ack.php`). Übernommen werden `rollout_revision`, `device_generation` und `acceptance_generation` nur, wenn alle Antworten dieselben Werte tragen; widersprüchliche oder leere Antworten schalten den Reporter für diesen Lauf ab. Die Werte werden im Speicher für den ganzen Lauf eingefroren, wie heute der Snapshot.
+- **Nie schreiben.** Der Fallback schreibt weder Registry noch Snapshot, insbesondere nicht `SetupState` oder `ActiveSnapshot`: `SetupState=complete` ist die Detection von `client_getInfos`, ein Schreiben würde die erste Core-Phase als installiert erscheinen lassen. Kein ACK, keine Lifecycleänderung.
+- **Server unverändert.** Die Zulassung von `reportPackageRun` (IP-Allowlist, genau eine VM über die MACs, passende Revision und Generationen) bleibt; der Fallback liefert nur dieselben Felder auf anderem Weg.
+- **Zeitbudget.** Die Abfrage gehört in das T4-Budget des Reporters; ein Timeout schaltet den Lauf ab, verzögert die Installation aber nicht darüber hinaus.
+
+### 27.3 Randfälle
+
+| Fall | Erwartung |
+|---|---|
+| Core läuft später doch | Ab dem veröffentlichten Snapshot gilt dieser; laufende Reporterläufe behalten ihre eingefrorenen Werte. |
+| Registry-WebAPI und Reporter-Bootstrap weichen ab | Registry gewinnt, Abweichung wird lokal als Drift protokolliert. |
+| MAC dem Portal unbekannt oder Client-IP nicht erlaubt | Reporter aus, Installation unverändert, Portal zeigt „Keine Rückmeldung“. |
+| Paketlauf während der Tasksequenz ohne Netz | Reporter aus innerhalb des Budgets. |
+| Ersatz-VM mit neuer Reportergeneration ([Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), 16.3) | Die Live-Abfrage liefert bereits die neue Generation; ein alter Snapshot auf einer wiederverwendeten Platte würde dagegen vom Server abgewiesen. |
+
+### 27.4 Offene Wahl und Einordnung
+
+Die Wahl zwischen A und B ist eine Produktentscheidung und noch offen; empfohlen ist B. V6 ändert sich bei B nur an einer Stelle: „Registry fehlt, Snapshot fehlt: Reporter deaktiviert“ wird zu „nachrangige, nur lesende Auflösung, sonst deaktiviert“. Die Regel „keine zweite Kopie der Standortdaten aus paketindividueller Konfiguration“ bleibt, weil der Bootstrap aus der Reportergeneration und nicht aus einer Paketkonfiguration stammt. Umsetzung erst zusammen mit MC01 (gemeinsame Auslieferung von Common und Reporter).
+

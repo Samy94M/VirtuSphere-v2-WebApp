@@ -207,4 +207,41 @@ final class DeployCreateProgressTest extends TestCase
             self::assertNotSame($finding['error_code'], $finding['reason_label']);
         }
     }
+
+    /**
+     * IDR-P02: a unit that replaced an externally deleted VM succeeded. It is a
+     * note about the follow-up MECM step, never a stored failure cause, and the
+     * sentence names the VM without exposing a raw UUID.
+     */
+    public function testAReplacedVmIsANoteAndNotAFinding(): void
+    {
+        $rows = $this->rows([
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_OUTCOME_CREATED],
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_OUTCOME_CREATED],
+        ]);
+        $rows[1]['replaced_instance_uuid'] = '52677625-4986-ed5b-89b5-ee9597f0f4cb';
+
+        $view = deploy_create_progress_from_rows($rows);
+        self::assertNotNull($view);
+        self::assertSame([], $view['findings']);
+        self::assertSame([['position' => 2, 'vm_name' => 'VM002']], $view['replacements']);
+
+        $payload = deploy_create_progress_payload_from_view($view);
+        self::assertNotNull($payload);
+        self::assertCount(1, $payload['replacements']);
+        self::assertStringContainsString('VM002', $payload['replacements'][0]);
+        self::assertStringNotContainsString('52677625', $payload['replacements'][0]);
+        self::assertStringNotContainsString('deploy.create_progress_replaced', $payload['replacements'][0]);
+    }
+
+    public function testARenamedBoundVmHasItsOwnReason(): void
+    {
+        $rows = $this->rows([[VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, '']]);
+        $rows[0]['error_code'] = VIRTUSPHERE_CREATE_ERROR_IDENTITY_BOUND_VM_RENAMED;
+
+        $view = deploy_create_progress_from_rows($rows);
+        self::assertNotNull($view);
+        self::assertSame(['deploy.create_progress_reason_renamed'], array_column($view['findings'], 'reason_key'));
+        self::assertSame([], $view['replacements']);
+    }
 }

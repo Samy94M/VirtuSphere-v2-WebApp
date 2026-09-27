@@ -68,11 +68,47 @@ Prüfergebnisse liegen unter `qa-artifacts/powercycle-sequential/`.
   `source-manifest.json`. Zum Laufabschluss stimmten 37/37 Hashes. Spätere
   reine Planfortschreibungen ändern diesen historischen Beleg nicht rückwirkend;
   sie benötigen nur ihre passenden Dokumentprüfungen.
-- Nächster direkter Schritt: `loop_control.loop_var` im Vertragsspiegel samt
-  echt ungebundener Negativprobe korrigieren, den abweichenden-`hw_name`-Fall
-  ergänzen und die unmittelbar betroffenen Gates wiederholen. Danach werden die
-  unabhängigen Fast-Blocker bei ihren eigenen Paketen geschlossen und Fast auf
-  einem neuen unveränderten Quellenmanifest vollständig wiederholt.
+- Nächster direkter Schritt (Stand 14.09., überholt, siehe Fortschreibung):
+  `loop_control.loop_var` im Vertragsspiegel samt echt ungebundener
+  Negativprobe korrigieren, den abweichenden-`hw_name`-Fall ergänzen und die
+  unmittelbar betroffenen Gates wiederholen.
+
+### Fortschreibung 27.09.2026
+
+- PC02 und PC03 sind mit Commit `ae55493` (20.09.) lokal geschlossen:
+  `mismatched-instance-identity` ist der 15. Offlinefall in
+  `Docker/qa-ansible/powercycle-sequence-contract.py`, und
+  `AnsiblePlaybookVariableContractTest` erkennt `loop_var` nur innerhalb von
+  `loop_control`, mit echt ungebundener Gegenprobe.
+- PC04 bleibt offen. Die Fast-Läufe vom 20.09. und 21.09.
+  (`qa-artifacts/merge-readiness/20260920-fast-full.json`,
+  `20260921-fast-post-rebase.json`) stehen bei 30/31; rot ist allein
+  `powershell-tests`, weil der Visual-Vertrag 18 Referenzbilder verlangt und
+  das Manifest 12 enthält. Das ist kein Powercycle-Befund. Die Bilder darf nur
+  der persönlich gestartete `scripts/update-visual-baselines.ps1` nach
+  Sichtprüfung schreiben; danach Fast auf neuem Quellenmanifest wiederholen.
+- Review-Befunde vom 27.09. (Folgearbeit, keine PC04-Voraussetzung):
+  - Die Zielauswahl liest den Ausgangszustand per `vmware_guest_info` über den
+    Namen. Das Modul wählt bei Namensdubletten still den ersten Treffer
+    (`name_match: first`). Außerhalb von Full fängt der UUID-Vergleich das ab;
+    im Full-Modus überspringt `identity_unbound_allowed` ihn. Die Auflösung
+    gehört zur gemeinsamen Identitätsprüfung im
+    [VM-Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16.
+  - Die geschlossene 8R-O-Registry in `lib/remote_step_policy.php` beschreibt
+    Powercycle als `stop_requested → stopped_verified → start_requested →
+    started_verified` mit Nachweis `uuid_or_moid`. Tatsächlich läuft
+    Einschalten, Warten, Ausschalten mit Namenssuche plus UUID-Assertion. Die
+    Registry ist inaktiv; vor ihrer Aktivierung an PC01 angleichen.
+  - Laufzeit wächst linear: Anzahl VMs mal (Wartezeit plus Befehlslaufzeit),
+    bei 300 s Obergrenze und 50 VMs über vier Stunden. QoL: erwartete
+    Mindestdauer neben dem Wartezeitfeld anzeigen.
+  - Hilfe und Texte: Der Modusname „Aus- und einschalten mit MAC-Export“ nennt
+    die Reihenfolge verkehrt herum (tatsächlich ein, warten, aus). Veraltete
+    Modusnamen stehen in `lang/de/mission_details.php` („Full Pipeline“,
+    „Power-Cycle + Export MACs“), `validate.php` und `deploy.php`
+    (`stagger_hint`); EN-Hilfe und EN-Modusname weichen voneinander ab.
+- Nächster direkter Schritt: Baseline-Writer durch den Nutzer, danach Fast
+  vollständig; Integration, Release und ESXi-Lab bleiben getrennte Abnahmen.
 
 
 ## Einordnung in das konsolidierte Ziel

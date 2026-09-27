@@ -117,6 +117,9 @@ function deploy_worker_create_prepare_unit(
         'existed_before' => $marker['existed_before'] ? 1 : 0,
         'precheck_moid' => $marker['precheck_moid'],
         'precheck_instance_uuid' => $marker['precheck_instance_uuid'],
+        // IDR-P02: the stored UUID the live inventory proved absent. The success
+        // commit replaces the binding only while exactly this UUID is bound.
+        'replaced_instance_uuid' => $marker['replaced_instance_uuid'],
     ];
     if (!repo_deploy_create_transition(
         $channel->connection(),

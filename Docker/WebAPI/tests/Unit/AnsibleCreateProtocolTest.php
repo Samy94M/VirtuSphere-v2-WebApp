@@ -36,6 +36,7 @@ final class AnsibleCreateProtocolTest extends TestCase
             'existed_before' => false,
             'precheck_moid' => null,
             'precheck_instance_uuid' => null,
+            'replaced_instance_uuid' => null,
         ], $overrides);
     }
 
@@ -121,6 +122,29 @@ final class AnsibleCreateProtocolTest extends TestCase
         ansible_create_marker_parse($this->marker($this->prepared([
             'existed_before' => true,
             'precheck_moid' => 'vm-7',
+        ])));
+    }
+
+    /** IDR-P02: the proven-absent binding travels with the prepared event. */
+    public function testAProvenAbsentBindingIsAccepted(): void
+    {
+        $marker = ansible_create_marker_parse($this->marker($this->prepared([
+            'replaced_instance_uuid' => '52677625-4986-ed5b-89b5-ee9597f0f4cb',
+        ])));
+
+        self::assertSame('52677625-4986-ed5b-89b5-ee9597f0f4cb', $marker['replaced_instance_uuid']);
+    }
+
+    /** A VM that was found cannot at the same time have its binding proven absent. */
+    public function testAReplacementClaimNextToAnExistingVmIsRefused(): void
+    {
+        $this->expectException(CreateMarkerProtocolException::class);
+        $this->expectExceptionMessage('replaced_instance_uuid contradicts');
+        ansible_create_marker_parse($this->marker($this->prepared([
+            'existed_before' => true,
+            'precheck_moid' => 'vm-7',
+            'precheck_instance_uuid' => '503c-1',
+            'replaced_instance_uuid' => '503c-2',
         ])));
     }
 

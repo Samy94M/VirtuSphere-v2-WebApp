@@ -130,7 +130,7 @@ function ansible_effective_datastore(array $mission, array $vm): string
     return $override !== '' ? $override : trim((string) ($mission['hypervisor_datastorage'] ?? ''));
 }
 
-function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = '', int $startWait = VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT, string $mode = VIRTUSPHERE_DEPLOY_MODE_FULL): string
+function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait = VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT, string $hostDatacenter = '', string $esxiHostName = '', int $startWait = VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT): string
 {
     // Mission-wide values: they feed the mission_configuration block below and
     // act as the fallback for every VM without an own override. The datacenter
@@ -198,11 +198,10 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
     $out .= "\nPowerCycleWaitSeconds: " . $powerCycleWait . "\n";
     $out .= 'StartWaitSeconds: ' . $startWait . "\n";
     // CreateSettleSeconds is gone with Etappe 14B-E: the per-VM flow reads each VM's live identity back, so its blind 60 s wait was replaced by evidence.
-    // Only a full pipeline may pass an unbound VM after create: the first
-    // playbook in that same && sequence proved the name absent and created it.
-    // A standalone power/export/start/autostart run has no such proof and must
-    // require an identity previously learned by export or explicit adoption.
-    $out .= 'identity_unbound_allowed: ' . ($mode === VIRTUSPHERE_DEPLOY_MODE_FULL ? 'true' : 'false') . "\n";
+    // identity_unbound_allowed is gone with IDR-R2: a full pipeline rewrites
+    // this file after its create section (ansible_refresh_serverlist_after_create),
+    // so every later step reads the instance UUID the create just bound and
+    // power, export, start and autostart always require a bound identity.
 
     $missionAutostart = ansible_mission_autostart($mission);
     $out .= "\nmission_configuration:\n";

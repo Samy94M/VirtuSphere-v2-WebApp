@@ -182,6 +182,23 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         }
 
         $steps = ansible_remote_steps($remoteDir, $payload, $autostartEnabled);
+
+        // IDR-R2: a full pipeline's serverlist.yml predates its create section.
+        // It is rewritten from the bindings the section just committed before
+        // any later playbook reads it, so power-cycle, export, start and
+        // autostart address every VM by its bound instance UUID, including a
+        // new instance that replaced an externally deleted one.
+        if (ansible_mode_creates_vms((string) $payload['mode']) && $steps !== []) {
+            ansible_refresh_serverlist_after_create($channel->connection(), $job, $artifacts);
+            ssh_sftp_upload_directory($ansibleCredential, $ansibleSecret, $localDir, $remoteDir, static function (string $line) use ($channel): void {
+                $channel->tick();
+                $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line);
+            });
+            deploy_worker_settle_db_channel($channel, $options, null);
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+            $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'serverlist.yml rewritten after the create section: every selected VM is now addressed by its bound instance UUID.');
+        }
+
         $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible playbook sequence: ' . deploy_job_payload_summary((string) $job['payload_json']));
         $channel->tick(0);
 
