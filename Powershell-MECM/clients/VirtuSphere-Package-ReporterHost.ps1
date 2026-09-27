@@ -343,10 +343,10 @@ function Start-VsPackageReportPipeWorker {
         $pipe.Connect(1500)
         . (Join-Path $PSScriptRoot 'VirtuSphere-Client-Common.ps1')
         . (Join-Path $PSScriptRoot 'VirtuSphere-Package-Reporter.ps1')
-        if ($script:VsClientCommonContractVersion -ne 1 -or
+        if ($script:VsClientCommonContractVersion -ne 2 -or
             (Get-VsClientLoggingContractVersion) -ne 1 -or
             (Get-VsPackageReporterContractVersion) -ne $script:VsPackageReporterHostExpectedAdapterContractVersion -or
-            -not (Test-VsPackageReporterDependencies -CommonContractVersion 1 -LoggingContractVersion 1)) { return }
+            -not (Test-VsPackageReporterDependencies -CommonContractVersion 2 -LoggingContractVersion 1)) { return }
         $encoding = New-Object Text.UTF8Encoding($false, $true)
         $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
         $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)

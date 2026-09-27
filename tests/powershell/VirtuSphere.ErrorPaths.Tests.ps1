@@ -419,27 +419,24 @@ Describe 'Initialize-VsTls (TLS-Kontrakt des Clients)' {
 
     It 'tut bei http nichts (kein Callback, keine Protokollaenderung noetig)' {
         Invoke-InFileScope -Path $script:ClientCommon -Body {
-            # Registry-Override ausschalten, Default-Schema http erzwingen.
-            $script:VsRegistryBase = 'HKCU:\Software\_vs_pester_missing_' + [guid]::NewGuid().ToString('N')
-            $script:VsDefaultScheme = 'http'
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'test.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
             Initialize-VsTls
         }
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
     }
 
-    It 'setzt bei https ohne Registry-Fingerabdruck keinen Callback' {
+    It 'setzt bei https ohne konfigurierten Fingerabdruck keinen Callback' {
         Invoke-InFileScope -Path $script:ClientCommon -Body {
-            $script:VsRegistryBase = 'HKCU:\Software\_vs_pester_missing_' + [guid]::NewGuid().ToString('N')
-            $script:VsDefaultScheme = 'https'
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'test.lan:8021'; Scheme = 'https'; CertThumbprint = '' }
             Initialize-VsTls
         }
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback | Should -BeNullOrEmpty
     }
 
-    It 'installiert niemals einen Accept-all-Callback und liest den engen Pin aus der Registry' {
+    It 'installiert niemals einen Accept-all-Callback und nutzt nur den validierten Pin' {
         $source = Get-Content -LiteralPath $script:ClientCommon -Raw
         $source | Should -Not -Match 'ServerCertificateValidationCallback\s*=\s*\{\s*\$true\s*\}'
-        $source | Should -Match "Get-ItemProperty.*CertThumbprint"
+        $source | Should -Match 'config\.CertThumbprint'
         $source | Should -Match 'GetCertHashString'
         $source | Should -Match 'SslPolicyErrors\]::None'
     }
@@ -1229,7 +1226,7 @@ if ($HasRegistry) {
         }
     }
 
-    Describe 'Client-Adresskette (Registry-Override und Schema)' {
+    Describe 'Client-Adresse (nur validierter Satz, kein Fallback)' {
 
         BeforeEach {
             $script:probeBase = 'HKCU:\Software\_vs_errorpaths_client_' + [guid]::NewGuid().ToString('N')
@@ -1239,47 +1236,43 @@ if ($HasRegistry) {
             Remove-Item -Path $script:probeBase -Recurse -Force -ErrorAction SilentlyContinue
         }
 
-        It 'probiert den Registry-Override zuerst, dann den DNS-Default' {
-            New-ItemProperty -Path $script:probeBase -Name 'WebAPI' -Value 'override.lan:9999' -PropertyType String -Force | Out-Null
+        It 'akzeptiert nur die vorbereitete Adresse des getInfos-Prozesses' {
             $candidates = Invoke-InFileScope -Path $script:ClientCommon -Arguments @($script:probeBase) -Body {
                 param($probe)
                 $script:VsRegistryBase = $probe
+                $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'override.lan:9999'; Scheme = 'https'; CertThumbprint = '' }
                 Get-VsApiCandidates
             }
-            @($candidates)[0] | Should -Be 'override.lan:9999'
-            @($candidates) | Should -Contain 'virtusphere.lan:8021'
+            @($candidates) | Should -Be @('override.lan:9999')
         }
 
-        It 'ueberspringt einen leeren Override (verlorener Registry-Wert)' {
+        It 'weist einen partiellen Registrysatz ohne DNS/IP-Fallback ab' {
             New-ItemProperty -Path $script:probeBase -Name 'WebAPI' -Value '   ' -PropertyType String -Force | Out-Null
             $candidates = Invoke-InFileScope -Path $script:ClientCommon -Arguments @($script:probeBase) -Body {
                 param($probe)
                 $script:VsRegistryBase = $probe
                 Get-VsApiCandidates
             }
-            @($candidates)[0] | Should -Be 'virtusphere.lan:8021'
+            @($candidates).Count | Should -Be 0
         }
 
-        It 'akzeptiert https aus der Registry, ignoriert Muell (<value>)' -ForEach @(
-            @{ value = 'https'; expected = 'https' }
-            @{ value = 'ftp';   expected = 'http' }
-            @{ value = 'HTTPS'; expected = 'https' }
-        ) {
-            # http/https werden case-insensitiv akzeptiert und kanonisch klein
-            # zurueckgegeben; alles andere faellt auf den sicheren Default
-            # zurueck, statt eine kaputte URL zu bauen.
-            New-ItemProperty -Path $script:probeBase -Name 'Scheme' -Value $value -PropertyType String -Force | Out-Null
+        It 'nutzt ausschliesslich das validierte Scheme und verwirft Fremdwerte' {
             Invoke-InFileScope -Path $script:ClientCommon -Arguments @($script:probeBase) -Body {
                 param($probe)
                 $script:VsRegistryBase = $probe
+                $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'test.lan:8021'; Scheme = 'https'; CertThumbprint = '' }
                 Get-VsApiScheme
-            } | Should -Be $expected
+            } | Should -Be 'https'
+            Invoke-InFileScope -Path $script:ClientCommon -Body {
+                ConvertTo-VsClientApiConfiguration -Api 'test.lan:8021' -Scheme 'ftp' -CertThumbprint ''
+            } | Should -BeNullOrEmpty
         }
 
         It 'baut die URL aus Schema, Adresse und Pfad zusammen' {
             Invoke-InFileScope -Path $script:ClientCommon -Arguments @($script:probeBase) -Body {
                 param($probe)
                 $script:VsRegistryBase = $probe
+                $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'test.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
                 Get-VsApiUrl -Api 'virtusphere.lan:8021' -Path '/mecm_report.php?action=reportPhase'
             } | Should -Be 'http://virtusphere.lan:8021/mecm_report.php?action=reportPhase'
         }
@@ -1313,7 +1306,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Stringliterale vorher entfernen: eine Fehlermeldung, die den Cmdlet-Namen
         # nennt ("... nach Set-Disk weiterhin offline"), ist kein Aufruf, und ein
         # Test, der darauf anspringt, prueft seinen eigenen Suchausdruck.
-        $text = (Get-ClientText -Name 'Set-VMDisksOnline.ps1') -replace '"[^"\r\n]*"', '""' -replace "'[^'\r\n]*'", "''"
+        $text = (Get-ClientText -Name 'client_VMDisksOnline.ps1') -replace '"[^"\r\n]*"', '""' -replace "'[^'\r\n]*'", "''"
         foreach ($cmdlet in @('Get-Disk', 'Set-Disk', 'Initialize-Disk', 'New-Partition', 'Format-Volume', 'Get-Volume')) {
             # (?![\w-]) sonst matcht "Set-Disk" die skripteigene Hilfsfunktion
             # Set-DiskStatus, und der Test prueft seinen eigenen Suchfehler.
@@ -1332,13 +1325,13 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Ein Aufruf kann ohne Fehler zurueckkommen und der Datentraeger trotzdem
         # offline bleiben (Richtlinie, Wechselmedium). Der Erfolgspfad braucht
         # deshalb eine Verifikation, keine Annahme.
-        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
         $text | Should -Match 'weiterhin offline'
         $text | Should -Match 'Formatierung unvollstaendig'
     }
 
     It 'Set-VMDisksOnline schreibt den Intent vor dem ersten irreversiblen RAW-Schritt' {
-        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
         $intent = $text.IndexOf('$operation = New-DiskOperation -Disk $disk -Identity $identity')
         $write = $text.IndexOf('Invoke-OwnedRawDiskOperation -Operation $operation -Disk $disk', $intent)
         $intent | Should -BeGreaterThan -1
@@ -1348,7 +1341,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 
     It 'Set-VMDisksOnline nimmt offene eigene Operationen unabhaengig vom Offlinefilter wieder auf' {
-        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
         $resume = $text.IndexOf('foreach ($operation in $openOperations)')
         $offline = $text.IndexOf('Where-Object { [string]$_.OperationalStatus -eq ''Offline'' }')
         $resume | Should -BeGreaterThan -1
@@ -1358,7 +1351,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 
     It 'Set-VMDisksOnline formatiert keine unbekannte online-RAW-Platte' {
-        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
         $text | Should -Match 'Online-RAW-Datentraeger.*keiner VirtuSphere-Operation zugeordnet.*nicht formatiert'
         $text | Should -Match "PartitionStyle -eq 'RAW'"
         $text | Should -Match 'New-DiskOperation -Disk \$disk -Identity \$identity'
@@ -1366,7 +1359,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 
     It 'Set-VMDisksOnline verifiziert Disk, Partition, Volume und erforderliche Marker' {
-        $text = Get-ClientText -Name 'Set-VMDisksOnline.ps1'
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
         $text | Should -Match 'Get-VsDiskStableIdentity'
         $text | Should -Match 'Get-OwnedDataPartition'
         $text | Should -Match 'FileSystemLabel -cne'
@@ -1477,7 +1470,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 
     It '<name> normalisiert jede MAC, bevor sie den Rechner verlaesst' -ForEach @(
-        @{ name = 'client_getinfo.ps1' }
+        @{ name = 'client_getInfos.ps1' }
         @{ name = 'client_staticip.ps1' }
     ) {
         # Das WMI-Format passt heute zufaellig zu dem, was das Portal speichert.
@@ -1556,12 +1549,12 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Der Stale-Fix muss VOR dem API-Aufruf laufen: sonst ueberlebt ein
         # SetupState=complete des Vorlaufs einen Abbruch, und die Folgeskripte
         # wuerden den alten Snapshot erneut als aktuell lesen.
-        $text = Get-ClientText -Name 'client_getinfo.ps1'
+        $text = Get-ClientText -Name 'client_getInfos.ps1'
         $text | Should -Match "(?s)Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*Resolve-VsApi"
     }
 
     It 'client_getinfo publiziert einen vollstaendigen Snapshot ueber einen finalen Zeiger' {
-        $getInfo = Get-ClientText -Name 'client_getinfo.ps1'
+        $getInfo = Get-ClientText -Name 'client_getInfos.ps1'
         $common = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
         $hostname = Get-ClientText -Name 'client_hostname.ps1'
         $staticIp = Get-ClientText -Name 'client_staticip.ps1'
@@ -1579,7 +1572,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # Das GET liefert nur Konfiguration. Nach vollstaendig geschriebenen
         # Nutzdaten bestaetigt der Client 5/5 per POST und setzt erst danach den
         # MECM-Marker; so hinterlaesst auch ein harter Abbruch im POST kein gruen.
-        $text = Get-ClientText -Name 'client_getinfo.ps1'
+        $text = Get-ClientText -Name 'client_getInfos.ps1'
         $text | Should -Match "(?s)Confirm-VsClientReady -Api \`$api -Mac \`$usedMac.*Save-VsValue -Path \`$registryBase -Name 'SetupState' -Value 'complete'.*Send-VsPhase -Mac \`$usedMac -Phase 'getinfo' -PhaseEvent 'finished'"
         $text | Should -Match "(?s)catch \{.*Remove-ItemProperty -Path \`$registryBase -Name 'SetupState'.*PhaseEvent 'failed'"
     }
@@ -1590,8 +1583,7 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match "(?s)Confirm-VsClientReady.*Get-VsApiUrl -Api \`$Api -Path '/mecm_client_ack.php'.*-Method Post"
 
         Invoke-InFileScope -Path $script:ClientCommon -Body {
-            $script:VsDefaultScheme = 'http'
-            Mock Get-ItemProperty { throw 'kein Override' }
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'virtusphere.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
             (Get-VsApiUrl -Api 'virtusphere.lan:8021' -Path '/mecm_client_ack.php') |
                 Should -Be 'http://virtusphere.lan:8021/mecm_client_ack.php'
         }
@@ -1599,11 +1591,12 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
 
     It 'Client-Bootstrap schreibt fehlende Registrywerte vor der ersten Adressaufloesung ohne Quelltextpatch' {
         $common = Get-ClientText -Name 'VirtuSphere-Client-Common.ps1'
-        $getInfo = Get-ClientText -Name 'client_getinfo.ps1'
+        $getInfo = Get-ClientText -Name 'client_getInfos.ps1'
         $installer = Get-Content -LiteralPath (Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1') -Raw
         $getInfo | Should -Match "(?s)Initialize-VsClientBootstrap.*Resolve-VsApi"
         $common | Should -Match 'function Initialize-VsClientBootstrap'
-        $common | Should -Match "if \(-not \`$raw\.PSObject\.Properties\['Scheme'\]\)"
+        $common | Should -Match 'function Get-VsPreparedClientApiConfiguration'
+        $common | Should -Match 'configuration_invalid'
         $installer | Should -Match "Copy-VsClientContent.*-Bootstrap \`$bootstrap"
         $installer | Should -Not -Match 'Set-Content.*VirtuSphere-Client-Common'
     }

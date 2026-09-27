@@ -62,11 +62,21 @@ function New-CMFolder {
             @'
 function Get-VsClientAppSpecs {
     @(
-        [pscustomobject]@{ AppName = 'client_getInfos'; Folder = 'client_getInfos'; Script = 'client_getinfo.ps1'; DependsOn = $null }
+        [pscustomobject]@{ AppName = 'client_getInfos'; Folder = 'client_getInfos'; Script = 'client_getInfos.ps1'; DependsOn = $null }
         [pscustomobject]@{ AppName = 'client_hostname'; Folder = 'client_hostname'; Script = 'client_hostname.ps1'; DependsOn = 'client_getInfos' }
-        [pscustomobject]@{ AppName = 'client_staticip'; Folder = 'client_staticip'; Script = 'client_staticip.ps1'; DependsOn = 'client_hostname' }
-        [pscustomobject]@{ AppName = 'client_VMDisksOnline'; Folder = 'client_VMDisksOnline'; Script = 'Set-VMDisksOnline.ps1'; DependsOn = 'client_staticip' }
+        [pscustomobject]@{ AppName = 'client_VMDisksOnline'; Folder = 'client_VMDisksOnline'; Script = 'client_VMDisksOnline.ps1'; DependsOn = 'client_hostname' }
+        [pscustomobject]@{ AppName = 'client_staticip'; Folder = 'client_staticip'; Script = 'client_staticip.ps1'; DependsOn = 'client_VMDisksOnline' }
     )
+}
+function Import-VsClientPackagingConfig {
+    [pscustomobject]@{
+        ContentShare = $env:VS_CLIENT_INSTALLER_CONTENT_ROOT
+        PackagesBase = $env:VS_CLIENT_INSTALLER_PACKAGES_ROOT
+        DpGroupName = ''
+        WebApi = 'fixture.test:8021'
+        Scheme = 'http'
+        CertThumbprint = ''
+    }
 }
 function Assert-VsClientAppSpecGraph { param($Specs) }
 function Get-VsClientLoggingPackageVersion { param($SourceDir) 1 }
@@ -94,9 +104,13 @@ function Compare-VsClientContentManifest {
             $previousLog = $env:VS_CLIENT_INSTALLER_CALL_LOG
             $previousMode = $env:VS_CLIENT_INSTALLER_MANIFEST_MODE
             $previousFailureFolder = $env:VS_CLIENT_INSTALLER_FAILURE_FOLDER
+            $previousContentRoot = $env:VS_CLIENT_INSTALLER_CONTENT_ROOT
+            $previousPackagesRoot = $env:VS_CLIENT_INSTALLER_PACKAGES_ROOT
             $env:VS_CLIENT_INSTALLER_CALL_LOG = $callLog
             $env:VS_CLIENT_INSTALLER_MANIFEST_MODE = $ManifestMode
             $env:VS_CLIENT_INSTALLER_FAILURE_FOLDER = $FailureFolder
+            $env:VS_CLIENT_INSTALLER_CONTENT_ROOT = $contentRoot
+            $env:VS_CLIENT_INSTALLER_PACKAGES_ROOT = $packagesRoot
             $previousErrorAction = $ErrorActionPreference
             try {
                 # Windows PowerShell 5.1 exposes native stderr as ErrorRecord.
@@ -104,9 +118,7 @@ function Compare-VsClientContentManifest {
                 $ErrorActionPreference = 'Continue'
                 $childArguments = @(
                     '-NoProfile', '-NonInteractive',
-                    '-File', (Join-Path $fixtureRoot 'install-VirtuSphere-Clients.ps1'),
-                    '-ContentShare', $contentRoot,
-                    '-PackagesBase', $packagesRoot
+                    '-File', (Join-Path $fixtureRoot 'install-VirtuSphere-Clients.ps1')
                 )
                 if ($PSBoundParameters.ContainsKey('SourceDirOverride')) {
                     $childArguments += @('-SourceDir', $SourceDirOverride)
@@ -118,6 +130,8 @@ function Compare-VsClientContentManifest {
                 $env:VS_CLIENT_INSTALLER_CALL_LOG = $previousLog
                 $env:VS_CLIENT_INSTALLER_MANIFEST_MODE = $previousMode
                 $env:VS_CLIENT_INSTALLER_FAILURE_FOLDER = $previousFailureFolder
+                $env:VS_CLIENT_INSTALLER_CONTENT_ROOT = $previousContentRoot
+                $env:VS_CLIENT_INSTALLER_PACKAGES_ROOT = $previousPackagesRoot
             }
 
             $calls = if (Test-Path -LiteralPath $callLog) { @(Get-Content -LiteralPath $callLog) } else { @() }
@@ -178,12 +192,12 @@ Describe 'Clientinstaller: Manifestabnahme vor MECM' {
         ($result.Output -join "`n") | Should -Match 'fixture-stop-after-first-cm-write'
     }
 
-    It 'bewahrt einen expliziten SourceDir bis zur ersten CM-Mutation' {
+    It 'weist einen SourceDir-Einzeloverride vor jedem Content-Write ab' {
         $explicitSourceDir = Join-Path ([IO.Path]::GetTempPath()) 'vs-explicit-client-source'
         $result = Invoke-VsClientInstallerFixture -ManifestMode match -SourceDirOverride $explicitSourceDir
 
-        @($result.Calls | Where-Object { $_ -like 'MANIFEST *' }).Count | Should -Be 4 -Because ($result.Output -join "`n")
-        @($result.Calls | Where-Object { $_ -eq ('SOURCE ' + $explicitSourceDir) }).Count | Should -Be 4
-        $result.Calls | Should -Contain 'CM_WRITE New-CMFolder'
+        $result.ExitCode | Should -Not -Be 0
+        @($result.Calls).Count | Should -Be 0
+        ($result.Output -join "`n") | Should -Match 'SourceDir'
     }
 }

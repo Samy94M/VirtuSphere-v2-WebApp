@@ -2,11 +2,14 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Legt die vier VirtuSphere-Client-Applikationen in MECM an (falls fehlend) und
-    haelt ihren Content aktuell.
+    Client-Packaging (MC01-Uebergang: mutierender Apply gesperrt).
 
 .DESCRIPTION
-    Fuer jede der vier Client-Phasen (getinfo -> hostname -> staticip -> disks):
+    MC01-Uebergang: der Zielgraph ist getInfos -> hostname -> VMDisksOnline
+    -> staticip. Apply bleibt bis zum read-only Preflight und geordneten
+    Dependency-Cutover blockiert; dieser Stand aendert keinen MECM-Bestand.
+
+    Fuer jede der vier Client-Phasen:
       1. stellt den Content bereit: Client-Skript, Common-Fassade UND lokales
          Loggingmodul in <PackagesBase>\<Ordner> (ersetzt bestehende Dateien),
       2. legt die MECM-Application an und ergaenzt einen fehlenden eigenen
@@ -14,56 +17,25 @@
       3. prueft und repariert die Abhaengigkeitskette bei jedem Re-Run,
       4. verteilt den Content an die DP-Gruppe.
 
-    Es wird KEIN Deployment an eine Collection angelegt - das entscheidet der
-    MECM-Admin. Der WebAPI-Name wird NICHT in die Common-ps1 gestempelt (Common
-    bleibt unveraendert); die Adress-Aufloesung laeuft ueber DNS.
+    Es wird KEIN Deployment an eine Collection angelegt. Die folgenden alten
+    Apply-Schritte sind derzeit unerreichbar und werden erst mit MC02/MC03
+    durch einen geprueften Ablauf ersetzt.
 
     Muss auf dem MECM-Server mit installierter MECM-Konsole laufen.
-    Idempotent: erneutes Ausfuehren aktualisiert Content und heilt fehlende Apps.
-
-.PARAMETER ContentShare
-    UNC-Freigabe von PackagesBase, z. B. \\MECM-SERVER\VirtuSphere\Base\Packages.
-    Wird als ContentLocation der Deployment-Types gesetzt.
-
-.PARAMETER PackagesBase
-    Lokale Wurzel der Client-Paketordner. Standard: D:\VirtuSphere\Base\Packages.
-
-.PARAMETER DpGroupName
-    Distribution-Point-GRUPPE fuer die Content-Verteilung. Leer = nicht verteilen
-    (der Admin verteilt dann manuell). Standard wie beim Server-Installer.
-
-.PARAMETER SourceDir
-    Quelle der Client-Skripte. Standard: der clients-Ordner neben diesem Skript.
-
-.PARAMETER AppFolder
-    Application-Ordner in der Konsole. Standard: VirtuSphere_Core.
+    Der spaetere Build liest Standortwerte aus der ACL-geprueften
+    C:\ProgramData\VirtuSphere\MECM\ClientPackaging.psd1. Einzelparameter
+    fuer WebAPI, Paketpfade und DP-Gruppe sind keine Freigabe.
 
 .EXAMPLE
-    .\install-VirtuSphere-Clients.ps1 -ContentShare \\MECM-01\VirtuSphere\Base\Packages
+    .\install-VirtuSphere-Clients.ps1
 #>
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$ContentShare,
-    [string]$PackagesBase = 'D:\VirtuSphere\Base\Packages',
-    [string]$DpGroupName = 'DP Group - VirtuSphere-Applications',
-    [string]$SourceDir = '',
-    [string]$AppFolder = 'VirtuSphere_Core',
-    [string]$WebApi = 'virtusphere.lan:8021',
-    [ValidateSet('http', 'https')][string]$Scheme = 'http',
-    [string]$CertThumbprint = ''
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 1.0
 
-# Windows PowerShell 5.1 setzt $PSScriptRoot beim Auswerten eines
-# Parameter-Defaultausdrucks noch nicht. Den Standard deshalb erst nach der
-# Parameterbindung ableiten; ein ausdruecklich uebergebener Wert bleibt exakt
-# die Entscheidung des Aufrufers und wird von den vorhandenen Pfadchecks
-# beurteilt.
-if (-not $PSBoundParameters.ContainsKey('SourceDir')) {
-    $SourceDir = Join-Path $PSScriptRoot 'clients'
-}
+$SourceDir = Join-Path $PSScriptRoot 'clients'
 
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPackaging.ps1')
@@ -100,13 +72,27 @@ $config = Get-VsConfig
 $logRoot = if ($config) { $config.LogRoot } else { $null }
 Initialize-VsLog -Component 'client-packaging' -LogRoot $logRoot
 
-$ContentShare = $ContentShare.TrimEnd('\')
-$WebApi = Convert-VsWebApi $WebApi
-$CertThumbprint = ($CertThumbprint -replace '\s', '').ToUpperInvariant()
-if ($CertThumbprint -and $CertThumbprint -notmatch '^[0-9A-F]{40}$') { throw 'CertThumbprint muss genau 40 Hexzeichen (SHA-1-Anzeigeform von Windows) enthalten.' }
+# Import prueft jedes Feld; WebApi/Scheme/Pin mit derselben Funktion, die der
+# Client auf bootstrap.json anwendet. Die Werte werden unveraendert verwendet.
+$site = Import-VsClientPackagingConfig -ClientSourceDir $SourceDir
+$ContentShare = [string]$site.ContentShare
+$PackagesBase = [string]$site.PackagesBase
+$DpGroupName = [string]$site.DpGroupName
+$AppFolder = 'VirtuSphere_Core'
+$WebApi = [string]$site.WebApi
+$Scheme = [string]$site.Scheme
+$CertThumbprint = [string]$site.CertThumbprint
 $bootstrap = @{ Schema = 1; WebAPI = $WebApi; Scheme = $Scheme; CertThumbprint = $CertThumbprint }
 $specs = Get-VsClientAppSpecs
 Assert-VsClientAppSpecGraph -Specs $specs
+# MC01 beschreibt bereits den neuen Zielgraphen. Der bisherige Re-Run kann
+# alte Dependencies nur ergaenzen, nicht geordnet entfernen. Ein Apply damit
+# koennte aus Alt- und Zielgraph einen Zyklus erzeugen. Bis der read-only
+# Preflight und der freigegebene Cutover (MC02/MC03/MC07) existieren, darf
+# dieser Installer weder Content noch MECM-Objekte veraendern.
+if (@($specs | Where-Object { $_.PSObject.Properties['Role'] -and $_.Role -eq 'deployable_entry' }).Count -gt 0) {
+    throw 'MC01-Zielgraph ist noch nicht fuer Apply freigegeben: MC02-Preflight und geordneter Dependency-Cutover fehlen. Keine Content-/MECM-Aenderung ausgefuehrt.'
+}
 $serverLoggingVersion = Get-VsLoggingContractVersion
 $clientLoggingVersion = Get-VsClientLoggingPackageVersion -SourceDir $SourceDir
 if ($clientLoggingVersion -ne $serverLoggingVersion) {

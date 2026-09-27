@@ -228,6 +228,7 @@ Describe 'E1 tatsächliche HTTP-Parameterbindung ohne verdeckenden Stubcast' {
 
     It 'Confirm-VsClientReady reicht seinen Objektbody als untypisiertes byte[] weiter' {
         $captured = Invoke-InFileScope -Path $script:ClientCommon -Body {
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'host:1'; Scheme = 'http'; CertThumbprint = '' }
             function Invoke-RestMethod {
                 param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType)
                 $script:capturedBody = [pscustomobject]@{
@@ -250,6 +251,7 @@ Describe 'E1 tatsächliche HTTP-Parameterbindung ohne verdeckenden Stubcast' {
 
     It 'Send-VsPhase reicht Unicode im Objektbody als untypisiertes byte[] weiter' {
         $captured = Invoke-InFileScope -Path $script:ClientCommon -Body {
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'host:1'; Scheme = 'http'; CertThumbprint = '' }
             function Resolve-VsApi { return 'host:1' }
             function Write-VsClientLog { param($Message, $Level, $Context) }
             function Invoke-RestMethod {
@@ -300,6 +302,7 @@ Describe 'E1 vorbereitete Loopback-Abnahme der wirklich übertragenen Bytes' {
             $capture = Start-VsRawLoopbackCapture
             Invoke-InFileScope -Path $script:ClientCommon -Arguments @($capture.Port) -Body {
                 param($port)
+                $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = "127.0.0.1:$port"; Scheme = 'http'; CertThumbprint = '' }
                 Confirm-VsClientReady -Api "127.0.0.1:$port" -Mac '00:11:22:33:44:55' -RolloutRevision 7
             }
             $actual = Complete-VsRawLoopbackCapture -Capture $capture
@@ -314,6 +317,7 @@ Describe 'E1 vorbereitete Loopback-Abnahme der wirklich übertragenen Bytes' {
             $capture = Start-VsRawLoopbackCapture
             Invoke-InFileScope -Path $script:ClientCommon -Arguments @($capture.Port) -Body {
                 param($port)
+                $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = "127.0.0.1:$port"; Scheme = 'http'; CertThumbprint = '' }
                 function Resolve-VsApi { return "127.0.0.1:$port" }
                 function Write-VsClientLog { param($Message, $Level, $Context) }
                 $detail = 'M' + [char]0x00FC + 'nchen ' + [char]0x6771 + [char]0x4EAC

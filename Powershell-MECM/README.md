@@ -1,5 +1,13 @@
 # VirtuSphere MECM-Integration – PowerShell
 
+> MC01-Übergang: Der Clientinstaller ist vor jedem Content-/MECM-Write
+> gesperrt. Alte `-WebApi`-/`-ContentShare`-Clientaufrufe weiter unten sind
+> historisch und derzeit nicht ausführbar. Common besitzt keinen DNS-/IP-
+> Fallback mehr; bestehende Client-/MECM-Stände brauchen einen getrennten,
+> freigegebenen Cutover. Auch der Serverinstaller ist vor allen Writes
+> gesperrt: Er würde sonst Reporter/Common V2 allein in Paketvorlagen
+> veröffentlichen, während Core V1 noch auf Clients liegt.
+
 Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
 laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
 MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
@@ -31,7 +39,8 @@ Alle umgebungsspezifischen Werte der **Server-Skripte** (Adresse der WebApp,
 Pfade, Site-Code) kommen aus der Registry
 `HKLM:\SOFTWARE\VirtuSphere\MECM` und stehen **nicht** im Server-Code. Diese
 Registry schreibt der Server-Installer. Die separat verteilten Client-Skripte
-verwenden ihre dokumentierte Registry-/DNS-/IP-Fallback-Kette.
+verwenden nur den vollständigen Bootstrap beziehungsweise den veröffentlichten,
+hashgebundenen nativen Registry-/Snapshot-Satz.
 
 ## Erstinstallation auf dem MECM-Server (3 Schritte)
 
@@ -66,10 +75,10 @@ beide Installer und die Abnahmecheckliste.
 
 Ist noch kein DNS-Eintrag verfügbar, darf der Server-Installer vorläufig eine
 feste IP als `-WebApi '<WEBAPP-IP>:8021'` erhalten. Vor dem Client-Installer muss
-diese Adresse mit dessen `-WebApi`-Parameter in das ausgelieferte
-`bootstrap.json` geschrieben werden. `client_getinfo` übernimmt sie vor der
-ersten Auflösung einmalig in die Registry; Quelltext wird nicht angepasst. Die vollständige
-Übergangs- und spätere DNS-Wechselprozedur steht im Admin-Runbook.
+diese Adresse künftig über die geschützte Standortkonfiguration in das
+`bootstrap.json` gelangen. Der aktuelle Clientinstaller ist für Apply gesperrt;
+ein erneuter Aufruf mit `-WebApi` ist kein Migrationspfad. Die spätere
+Umstellung gehört in den gesonderten Cutover des Admin-Runbooks.
 
 Der Installer ist idempotent: erneutes Ausführen aktualisiert Konfiguration und
 Skripte. Die vier Intervalle und `MECM_ProviderMachine` behalten dabei ihren

@@ -100,7 +100,7 @@ Describe 'PowerShell-Loggingvertrag: Paritaet und Dot-Source-Exports' {
             $text = Get-Content -Raw -Path (Join-Path $script:MecmDir $name)
             $text | Should -Match '(?s)VirtuSphere-Common\.ps1.*Initialize-VsLog'
         }
-        foreach ($name in @('client_getinfo.ps1', 'client_hostname.ps1', 'client_staticip.ps1', 'Set-VMDisksOnline.ps1')) {
+        foreach ($name in @('client_getInfos.ps1', 'client_hostname.ps1', 'client_staticip.ps1', 'client_VMDisksOnline.ps1')) {
             $text = Get-Content -Raw -Path (Join-Path $script:ClientDir $name)
             $text | Should -Match '(?s)VirtuSphere-Client-Common\.ps1.*Initialize-VsClientLog'
         }
@@ -242,6 +242,7 @@ Describe 'Clientlogger haelt strukturierte Rueckgaben auf Stream 1 rein' {
     It 'Resolve-VsApi liefert bei beantwortetem HTTP-Fehler genau einen String' {
         $result = Invoke-InLoggingScope -Path $script:ClientCommon -Body {
             $script:VsResolvedApi = $null
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'virtusphere.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
             function Get-VsApiCandidates { return @('virtusphere.lan:8021') }
             function Invoke-RestMethod { throw [System.Net.WebException]::new('HTTP 503') }
             function Test-VsApiAnswered { return $true }
@@ -490,7 +491,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 $spec = Get-VsClientAppSpecs | Select-Object -First 1
                 Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
-            foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
+            foreach ($name in @('client_getInfos.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
                 Test-Path (Join-Path $dest $name) | Should -BeTrue
                 (Get-FileHash -Algorithm SHA256 -Path (Join-Path $dest $name)).Hash |
                     Should -Be (Get-FileHash -Algorithm SHA256 -Path (Join-Path $script:ClientDir $name)).Hash
@@ -509,7 +510,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 $spec = Get-VsClientAppSpecs | Select-Object -First 1
                 Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
-            foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
+            foreach ($name in @('client_getInfos.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
                 Set-Content -Path (Join-Path $dest $name) -Value 'stale upgrade content'
             }
             $upgradeDest = Invoke-InLoggingScope -Path $script:Packaging -Arguments @($script:ClientDir, $root) -Body {
@@ -518,7 +519,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 Copy-VsClientContent -Spec $spec -SourceDir $source -PackagesBase $target -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
             $upgradeDest | Should -Be $dest
-            foreach ($name in @('client_getinfo.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
+            foreach ($name in @('client_getInfos.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1')) {
                 (Get-FileHash -Algorithm SHA256 -Path (Join-Path $dest $name)).Hash |
                     Should -Be (Get-FileHash -Algorithm SHA256 -Path (Join-Path $script:ClientDir $name)).Hash
             }
@@ -536,7 +537,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 $dest = Join-Path $target $spec.Folder
                 New-Item -ItemType Directory -Path $dest -Force | Out-Null
                 $old = @{
-                    'client_getinfo.ps1' = 'old phase'
+                    'client_getInfos.ps1' = 'old phase'
                     'VirtuSphere-Client-Common.ps1' = 'old common'
                     'VirtuSphere-Client-Logging.ps1' = 'old logging'
                 }
@@ -561,7 +562,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
                 }
                 [pscustomobject]@{
                     Error = $errorText
-                    Phase = (Get-Content -Raw -Path (Join-Path $dest 'client_getinfo.ps1')).Trim()
+                    Phase = (Get-Content -Raw -Path (Join-Path $dest 'client_getInfos.ps1')).Trim()
                     Common = (Get-Content -Raw -Path (Join-Path $dest 'VirtuSphere-Client-Common.ps1')).Trim()
                     Logging = (Get-Content -Raw -Path (Join-Path $dest 'VirtuSphere-Client-Logging.ps1')).Trim()
                     SwapDirectories = @(Get-ChildItem -Path $target -Directory | Where-Object { $_.Name -like '.virtusphere-*' }).Count
@@ -670,6 +671,7 @@ Describe 'PowerShell-Loggingvertrag: Packaging, fehlende Datei und Version' {
 Describe 'Client-Reportkorrelation bleibt additiv zum unveraenderten JSON' {
     It 'ReportPhase sendet dieselbe JSON-Struktur plus stabile Korrelations-ID im Header' {
         $captured = Invoke-InLoggingScope -Path $script:ClientCommon -Body {
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'virtusphere.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
             function Resolve-VsApi { return 'virtusphere.lan:8021' }
             $script:capture = $null
             function Invoke-RestMethod {
@@ -690,6 +692,7 @@ Describe 'Client-Reportkorrelation bleibt additiv zum unveraenderten JSON' {
 
     It 'Client-Ready-ACK behaelt ausschliesslich mac im JSON und nutzt dieselbe Headerfunktion' {
         $captured = Invoke-InLoggingScope -Path $script:ClientCommon -Body {
+            $script:VsBootstrapApiConfiguration = [pscustomobject]@{ Api = 'virtusphere.lan:8021'; Scheme = 'http'; CertThumbprint = '' }
             $script:capture = $null
             function Invoke-RestMethod {
                 param($Uri, $Method, $ContentType, $Body, $Headers, $TimeoutSec)

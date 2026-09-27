@@ -877,15 +877,44 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
 
     It 'liefert genau die vier Phasen in Ausfuehrungsreihenfolge' {
         $names = (Get-Specs).AppName
-        $names | Should -Be @('client_getInfos', 'client_hostname', 'client_staticip', 'client_VMDisksOnline')
+        $names | Should -Be @('client_getInfos', 'client_hostname', 'client_VMDisksOnline', 'client_staticip')
     }
 
-    It 'verdrahtet die Kette getinfo -> hostname -> staticip -> disks' {
+    It 'verdrahtet die Kette getinfo -> hostname -> disks -> staticip' {
         $specs = Get-Specs
         ($specs | Where-Object AppName -eq 'client_getInfos').DependsOn      | Should -BeNullOrEmpty
         ($specs | Where-Object AppName -eq 'client_hostname').DependsOn      | Should -Be 'client_getInfos'
-        ($specs | Where-Object AppName -eq 'client_staticip').DependsOn      | Should -Be 'client_hostname'
-        ($specs | Where-Object AppName -eq 'client_VMDisksOnline').DependsOn | Should -Be 'client_staticip'
+        ($specs | Where-Object AppName -eq 'client_VMDisksOnline').DependsOn | Should -Be 'client_hostname'
+        ($specs | Where-Object AppName -eq 'client_staticip').DependsOn      | Should -Be 'client_VMDisksOnline'
+    }
+
+    It 'deklariert genau einen deploybaren Einstieg und den vollstaendigen 64-Bit-Contentvertrag' {
+        $specs = Get-Specs
+        @($specs | Where-Object Role -eq 'deployable_entry').AppName | Should -Be @('client_staticip')
+        foreach ($spec in $specs) {
+            $spec.DisplayName | Should -Be $spec.AppName
+            $spec.CmIdentityFields | Should -Be @('CI_ID', 'ModelName')
+            $spec.RunAs32Bit | Should -BeFalse
+            $spec.DetectionIs32Bit | Should -BeFalse
+            $spec.RequiredFiles | Should -Be @($spec.Script, 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+        }
+    }
+
+    It 'fixiert Schema, ACL-Writer und Archiv-Mindestaufbewahrung ohne Standort-Override' {
+        $policy = Invoke-InFileScope -Path $script:Packaging -Body { Get-VsClientPackagingPolicy }
+        $policy.SchemaVersion | Should -Be 1
+        $policy.ConfigPath | Should -Be 'C:\ProgramData\VirtuSphere\MECM\ClientPackaging.psd1'
+        $policy.AllowedWriterSids | Should -Be @('S-1-5-18', 'S-1-5-32-544')
+        $policy.RequiredConfigKeys | Should -Contain 'CoreLimitingCollectionId'
+        $policy.RequiredConfigKeys | Should -Contain 'SourceIdentity'
+        $policy.MinimumSuccessfulBundles | Should -Be 5
+        $policy.MinimumAgeDays | Should -Be 180
+        $policy.UpgradeMode | Should -Be 'future_provisioning_no_replay'
+    }
+
+    It 'blockiert den alten mutierenden Installer vor dem ungeordneten Zielgraph-Cutover' {
+        $installer = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-Clients.ps1') -Raw
+        $installer | Should -Match '(?s)Assert-VsClientAppSpecGraph.*MC01-Zielgraph ist noch nicht fuer Apply freigegeben.*Copy-VsClientContent'
     }
 
     It 'validiert den deklarierten Graphen und blockiert unbekannte Kanten oder Zyklen' {
@@ -911,13 +940,12 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
         }
     }
 
-    It 'jedes Spec-Skript existiert im clients-Ordner: <Script>' -ForEach @(
-        @{ Script = 'client_getinfo.ps1' }
-        @{ Script = 'client_hostname.ps1' }
-        @{ Script = 'client_staticip.ps1' }
-        @{ Script = 'Set-VMDisksOnline.ps1' }
-    ) {
-        Test-Path (Join-Path $script:ClientsDir $Script) | Should -BeTrue
+    It 'jedes Spec-Skript existiert im clients-Ordner und alte Einstiegsskripte nicht' {
+        foreach ($spec in (Get-Specs)) {
+            Test-Path (Join-Path $script:ClientsDir $spec.Script) | Should -BeTrue
+        }
+        Test-Path (Join-Path $script:ClientsDir 'client_getinfo.ps1') | Should -BeFalse
+        Test-Path (Join-Path $script:ClientsDir 'Set-VMDisksOnline.ps1') | Should -BeFalse
     }
 
     Context 'Detection-Contract: die Erkennungswerte stimmen mit dem, was das Skript schreibt' {
@@ -950,7 +978,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
                 $spec = (Get-VsClientAppSpecs | Where-Object AppName -eq 'client_getInfos')
                 Copy-VsClientContent -Spec $spec -SourceDir $srcDir -PackagesBase $base -Bootstrap @{ Schema = 1; WebAPI = 'virtusphere.test:8021'; Scheme = 'http'; CertThumbprint = '' }
             }
-            Test-Path (Join-Path $result 'client_getinfo.ps1')               | Should -BeTrue
+            Test-Path (Join-Path $result 'client_getInfos.ps1')               | Should -BeTrue
             Test-Path (Join-Path $result 'VirtuSphere-Client-Common.ps1')    | Should -BeTrue
             Test-Path (Join-Path $result 'VirtuSphere-Client-Logging.ps1')   | Should -BeTrue
             Test-Path (Join-Path $result 'bootstrap.json')                    | Should -BeTrue
@@ -990,7 +1018,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
     }
 
     Context 'bestehende MECM-Definitionen' {
-        It 'erkennt Eigentum nur am Marker oder am exakten Legacy-Ordner' {
+        It 'erkennt Eigentum nur am Marker und nie allein am Ordner' {
             $spec = (Get-Specs)[0]
             $marked = [pscustomobject]@{ LocalizedDescription = $spec.ManagedMarker; ObjectPath = '' }
             $legacy = [pscustomobject]@{ LocalizedDescription = ''; ObjectPath = 'Application\VirtuSphere_Core' }
@@ -1000,7 +1028,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             } | Should -BeTrue
             Invoke-InFileScope -Path $script:Packaging -Arguments @($legacy, $spec) -Body {
                 param($app, $s) Test-VsClientApplicationOwnership -Application $app -Spec $s -AppFolder 'VirtuSphere_Core'
-            } | Should -BeTrue
+            } | Should -BeFalse
             Invoke-InFileScope -Path $script:Packaging -Arguments @($foreign, $spec) -Body {
                 param($app, $s) Test-VsClientApplicationOwnership -Application $app -Spec $s -AppFolder 'VirtuSphere_Core'
             } | Should -BeFalse
@@ -1008,7 +1036,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
 
         It 'prueft DT, Detection, Content, Kontext und Returncodes ohne Drift zu reparieren' {
             $spec = (Get-Specs)[0]
-            $command = 'powershell.exe -NoProfile -File client_getinfo.ps1'
+            $command = 'powershell.exe -NoProfile -File client_getInfos.ps1'
             $content = '\\server\share\client_getInfos'
             $xml = '<DeploymentType><Name>client_getInfos Deployment</Name><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0]
             $dt = [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos Deployment'; SDMPackageXML = $xml }

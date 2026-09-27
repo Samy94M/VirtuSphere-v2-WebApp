@@ -112,6 +112,13 @@ $ErrorActionPreference = 'Stop'
 # Version 1.0, nicht Latest: siehe die Begruendung in mecm\VirtuSphere-Common.ps1
 # (die Sync-Skripte lesen JSON mit legitim fehlenden Feldern).
 Set-StrictMode -Version 1.0
+# MC01 verschiebt den Client-Common-Vertrag auf V2. Dieses Skript veroeffentlicht
+# denselben Common ueber reporting/current.json in neue und aktualisierte
+# Paketquellen. Der Core-Apply ist bis MC02/MC03/MC07 gesperrt; ein alleiniger
+# Server-Re-Run wuerde Reporter V2 auf Clients mit Core V1 bringen. Deshalb
+# auch hier vor Registry-, Aufgaben-, Paketvorlagen- oder MECM-Writes stoppen.
+# Die Sperre erst zusammen mit dem nachgewiesenen gemeinsamen Cutover entfernen.
+throw 'MC01: MECM-Serverinstaller ist bis zum gemeinsamen Core-/Reporter-Cutover gesperrt; keine Server-/Paketvorlagen-Aenderung ausgefuehrt.'
 $registryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 $installDir = Join-Path $env:ProgramFiles 'VirtuSphere\mecm'
 $logRoot = Join-Path $env:ProgramFiles 'VirtuSphere\Logs'

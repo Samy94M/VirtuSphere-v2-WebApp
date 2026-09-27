@@ -1,5 +1,16 @@
 # MECM-Integration: Betriebshandbuch
 
+> **Client-Cutover gesperrt (MC01-Zwischenstand, 27.09.2026).** Die folgenden
+> historischen Schritte zum Anlegen/Aktualisieren der vier Client-Anwendungen
+> dürfen nicht ausgeführt werden: Der Clientinstaller blockiert vor jedem
+> Content-/MECM-Write und akzeptiert keine `-WebApi`-/`-ContentShare`-Overrides
+> mehr. Common verwendet keinen DNS-/IP-Fallback. Erst MC02/MC03 liefern
+> Preflight und geordneten Cutover; bestehende MECM-Objekte bleiben unberührt.
+> Auch `install-VirtuSphere-MECM.ps1` ist vor allen Writes gesperrt, weil sein
+> Reporter-Bundle sonst Common V2 ohne den passenden Core veröffentlichen würde.
+> Die Server-Installationsbefehle weiter unten sind bis zur gemeinsamen
+> Freigabe ebenfalls historisch und nicht ausführbar.
+
 Dieses Dokument beschreibt die Integration zwischen der VirtuSphere-WebApp, dem
 MECM-Server und den per PXE ausgerollten Windows-Clients. Zielgruppe sind
 Administratoren ohne tiefes MECM- oder Docker-Vorwissen.
@@ -18,16 +29,17 @@ Portal: Mission/VM  --->   mecm_new-device-sync.ps1       <---  mecm-api.php?act
 anlegen, Pakete            (importiert Devices unter dem
 verknüpfen                  Rolloutnamen, weist
                             Collections zu)               --->  mecm_updateid.php (ResourceID)
-                                                                                        getinfo (Registry füllen)
+                                                                                        getInfos (Registry füllen)
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
-                                                                getDeviceInfos        staticip (Netz konfigurieren)
-                                                                                        disks (Platten online)
+                                                                getDeviceInfos        VMDisksOnline (Platten online)
+                                                                                        staticip (Netz konfigurieren)
                                                           <---  mecm_client_ack.php (Client bereit, 5/5)
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
 ```
 
-- Reihenfolge der Client-Phasen ist über MECM-Anwendungsabhängigkeiten fixiert:
-  `getinfo → hostname → staticip → disks` (disks optional).
+- Zielreihenfolge der Client-Phasen ist über MECM-Anwendungsabhängigkeiten
+  festgelegt: `getInfos → hostname → VMDisksOnline → staticip`. Der neue
+  Dependency-Graph ist noch nicht freigegeben.
 - Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
 - **Was MECM als Gerätenamen bekommt, ist der Windows-Hostname, nicht der
   ESXi-Name** (Etappe 14D, ADR-0043). Genauer: der für diesen Rollout
@@ -37,11 +49,11 @@ verknüpfen                  Rolloutnamen, weist
 
 ## Admin-Runbook: MECM erstmals anbinden
 
-Dieser Abschnitt ist die chronologische Arbeitsanleitung für neues oder
-wechselndes Adminpersonal. Die späteren Abschnitte erklären Architektur,
-Fehlerbilder und Sonderfälle im Detail. Zuerst werden die vier Server-Aufgaben
-installiert, danach die vier Client-Anwendungen. Der Client-Installer legt
-bewusst noch kein Deployment auf eine Collection an.
+Dieser Abschnitt beschreibt den früheren Installationsablauf und ist im
+MC01-Zwischenstand nicht ausführbar. Die späteren Abschnitte erklären
+Architektur, Fehlerbilder und Sonderfälle. Vor einem neuen Server- oder
+Client-Apply sind der gemeinsame Core-/Reporter-Cutover und seine Prüfungen
+abzuschließen.
 
 ### 1. Werte vor Beginn festhalten
 
@@ -70,17 +82,11 @@ Benutzer dürfen dort nicht schreiben, weil der Inhalt später als SYSTEM läuft
 sowohl vom MECM-Server als auch von einem PXE-Client über den per DHCP gelieferten
 DNS-Server auflösbar sein.
 
-**Ohne aktuellen DNS-Zugriff:** Die Inbetriebnahme kann mit einer festen
-Ubuntu-IP fortgesetzt werden. Für den Server-Installer später
-`-WebApi '<UBUNTU-IP>:8021'` verwenden. Dem Client-Installer dieselbe Adresse
-als Bootstrapwert übergeben:
-
-```powershell
-.\install-VirtuSphere-Clients.ps1 -ContentShare '\\MECM-01\VirtuSphere\Base\Packages' -WebApi '<UBUNTU-IP>:8021' -Scheme http
-```
-
-Der DNS-Kandidat darf stehen bleiben. Solange er nicht auflösbar ist, probieren
-die Clients danach die IP. Die IP muss fest oder reserviert und aus allen
+**Ohne aktuellen DNS-Zugriff:** Für den Server-Installer kann eine feste
+Ubuntu-IP als `-WebApi '<UBUNTU-IP>:8021'` vorgesehen werden. Der Client-Cutover
+ist derzeit gesperrt; die spätere geschützte Standortkonfiguration muss
+dieselbe ausdrücklich gewählte Adresse in den Bootstrap tragen. Es gibt keinen
+zweiten DNS-/IP-Kandidaten. Die IP muss fest oder reserviert und aus allen
 Deploy-VLANs erreichbar sein. Bei HTTPS funktioniert die IP nur, wenn das
 Zertifikat diese IP als Subject Alternative Name enthält; andernfalls zuerst
 einen passenden DNS-Namen und ein entsprechendes Zertifikat bereitstellen.
@@ -275,70 +281,32 @@ derselben Sperre sitzt.
 
 ### 5. Vier Client-Anwendungen erstellen
 
-Adresse und Schema werden beim Client-Installer als Bootstrapmanifest erzeugt.
-Der Quelltext bleibt umgebungsneutral. Dann den Client-Installer ausführen:
+Dieser historische Schritt ist bis MC02/MC03 ausgesetzt. Der Clientinstaller
+nimmt keine Einzelparameter mehr an und beendet den Lauf vor Content-/MECM-
+Writes. Keine vier Applications oder Dependencies manuell aus dem Zielgraphen
+anlegen; zuerst den read-only Preflight und den geordneten Cutover abwarten.
 
-```powershell
-.\install-VirtuSphere-Clients.ps1 `
-    -PackagesBase 'D:\VirtuSphere\Base\Packages' `
-    -ContentShare '\\MECM-01\VirtuSphere\Base\Packages' `
-    -DpGroupName 'DP Group - VirtuSphere-Applications' `
-    -WebApi 'virtusphere.lan:8021' -Scheme http
-```
-
-Seit V23 ist das ein koordinierter Wire-Wechsel: `client_getinfo` bestätigt das
-vollständige lokale Schreiben mit einem POST an `mecm_client_ack.php`; der
-vorherige GET ist read-only. Deshalb den Client-Installer beim WebApp-Update
-erneut ausführen und danach die aktualisierte Content-Verteilung abwarten. Ein
-V22-Client kann seine Konfiguration weiterhin lesen, bleibt ohne den neuen ACK
-im Portal aber auf 4/5. Der Installer ersetzt beide Dateien und stößt bei einer
-bestehenden Anwendung `Update-CMDistributionPoint` an.
-
-Vor jeder MECM-Änderung vergleicht er für alle Clientordner das vollständige
-lokale Pfad-/Längen-/SHA-256-Manifest mit dem tatsächlichen `ContentShare`.
-Alle Manifestvergleiche werden abgeschlossen. Sobald ein veröffentlichter Ordner
-fehlt, nicht vollständig lesbar ist oder abweicht, endet der Installer danach mit
-`!!` und Exit 1, noch vor Site-Initialisierung und vor dem ersten
-Configuration-Manager-Cmdlet. Der fehlerhafte Lauf ändert daher keine
-Applications, Deployment Types, Dependencies oder Contentverteilungen. Den
-gemeldeten Freigabepfad, dessen Leserechte und den Inhalt korrigieren und erst
-dann den Installer erneut ausführen.
-Anschließend verlangt er pro Application einen VirtuSphere-Eigentumsmarker oder
-den engen Legacy-Nachweis im Ordner `VirtuSphere_Core`, genau einen erwarteten
-Deployment Type, den Detection-/System-/Reboot-/Returncodevertrag und die
-wirkliche Dependency auf den erwarteten Vorgänger-DT. Fehlende eigene Teile
-werden ergänzt; fremde oder manuell abweichende Definitionen werden nicht
-überschrieben und enden als `!!`/Exit 1.
-
-In der MECM-Konsole danach prüfen:
-
-1. Unter *Softwarebibliothek → Anwendungsverwaltung → Anwendungen →
-   VirtuSphere_Core* existieren vier Anwendungen.
-2. Die Kette lautet `client_getinfo → client_hostname → client_staticip →
-   Set-VMDisksOnline`.
-3. `client_hostname` erkennt `Erfolgreich` **oder** `Uebersprungen`, und
-   Rückgabecode 1641 gilt als Erfolg mit Neustart.
-4. Der Contentstatus der vier Anwendungen ist auf der vorgesehenen DP-Gruppe
-   erfolgreich.
-5. Erst jetzt legt der MECM-Admin bewusst ein Required Deployment auf einer
-   Test-Collection an. Der Installer selbst deployt nichts.
-
-Auf einem Testclient müssen die Phasen in dieser Reihenfolge erfolgreich sein.
-Lokale Client-Logs liegen unter `C:\Program Files\VirtuSphere\Logs`; die Phasen erscheinen
-zusätzlich an der VM im Portal.
+Die früheren V22/V23-Re-Run- und Legacy-Übernahmeschritte sind keine Anleitung
+für den neuen Graphen. Der ausstehende Preflight muss bestehende Applications,
+Deployment Types, Dependencies, Content und aktive Policies read-only
+inventarisieren. Erst ein freigegebener Cutover darf die vier Ziel-Applications
+`client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
+gemeinsam mit dem dazu passenden Reporter verteilen. Der bisherige Installer
+prüft diese Reihenfolge noch nicht und führt deshalb keine Content-/MECM-Writes
+aus. Ein manuelles Required Deployment oder eine manuelle Reparatur des
+Dependency-Graphen ist in diesem Zwischenstand nicht freigegeben.
 
 ### 6. Später von der festen IP auf DNS wechseln
 
-1. DNS-Record anlegen und Auflösung aus MECM- und Deploy-VLAN prüfen.
-2. `install-VirtuSphere-Clients.ps1` erneut mit `-WebApi '<DNS-NAME>:8021'`
-   ausführen. Er ersetzt Content und Bootstrapmanifest
-   und stößt für bestehende Anwendungen die DP-Aktualisierung an.
-3. `install-VirtuSphere-MECM.ps1` erneut mit dem DNS-Namen ausführen. Der Lauf
-   aktualisiert die Registry und behält einen bestehenden Report-Token.
-4. Bereits installierte Clients können die funktionierende IP in
-   `HKLM:\SOFTWARE\VirtuSphere\WebAPI` gespeichert haben. Diesen Registry-Override
-   im Rahmen eines kontrollierten Client-Deployments auf den DNS-Namen ändern;
-   neue Clients verwenden den aktualisierten Content automatisch.
+Dieser Ablauf ist für den MC01-Zwischenstand gesperrt. Die neue Clientkonfiguration
+wird als geprüfter, unveränderlicher Satz veröffentlicht; ein einzelner
+Registry-Override oder ein Re-Run mit `-WebApi` ist kein zulässiger Wechsel.
+Zuerst DNS-Auflösung aus MECM- und Deploy-VLAN prüfen. Danach den neuen
+Standortwert in der geschützten Packaging-Konfiguration vorbereiten und den
+noch ausstehenden MC02-/MC03-Preflight samt geordnetem Core-/Reporter-Cutover
+durchführen. Bereits veröffentlichte Clients brauchen einen ausdrücklich
+geplanten Migrations-/Repairpfad; sie übernehmen den neuen Wert nicht
+automatisch aus aktualisiertem Content.
 
 ### 7. Übergabe- und Abnahmecheckliste
 
@@ -921,17 +889,27 @@ als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
 
 ## Client-Anwendungen (Etappe 5)
 
+> MC01-Zwischenstand (27.09.2026): Im lokalen Quellstand ist der Zielgraph
+> `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
+> als Vertrag definiert; die Einstiegsskripte wurden entsprechend umbenannt.
+> Der mutierende Clientinstaller stoppt vor Content- und MECM-Änderungen, bis
+> Read-only-Preflight und geordneter Cutover umgesetzt sind. Die nachfolgende
+> Beschreibung dokumentiert den bisherigen Betrieb, nicht eine Freigabe zur
+> Anwendung des neuen Graphen. `client_getinfo`/`client_getinfo_2.1` werden
+> niemals stillschweigend übernommen.
+
 Die überarbeiteten Client-Skripte liegen unter `Powershell-MECM/clients/` und
 teilen sich `VirtuSphere-Client-Common.ps1`. Reihenfolge über
-MECM-Anwendungsabhängigkeiten: `client_getinfo` → `client_hostname` →
-`client_staticip` → `Set-VMDisksOnline`. Vollständige App-Definitionen,
+MECM-Anwendungsabhängigkeiten im Zielgraphen: `client_getInfos` →
+`client_hostname` → `client_VMDisksOnline` → `client_staticip`. Vollständige App-Definitionen,
 Erkennungsregeln und Exit-Codes stehen in `Powershell-MECM/clients/README.md`.
 
 Kernpunkte:
 
-- **Adress-Fallback-Kette:** Registry-Override → DNS-Name (`virtusphere.lan:8021`,
-  DNS-Eintrag im Deploy-Netz nötig) → hartkodierte IP. `client_getinfo`
-  schreibt die funktionierende Adresse in die Registry für die Folge-Skripte.
+- **Geschlossene Adresse:** `client_getInfos` prüft den vollständigen Bootstrap
+  und übernimmt ihn nur bei leerem nativem Satz. Folgephasen und Reporter
+  lesen ausschließlich die gemeinsam veröffentlichte, hashgebundene
+  Registry-/Snapshot-Konfiguration. DNS-/IP-Fallback und Feldmischung entfallen.
 - **Rückkanal:** Phasenevents sind einzelne best-effort-Sendeversuche und keine
   garantierte `started`-zu-Terminal-Sequenz. `staticip` versucht `started` vor
   der Änderung der Windows-IP-/Subnetzkonfiguration; das Skript ändert keine
@@ -1029,7 +1007,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Journal enthält nur `intent`, passt nicht mehr zu Revision/ResourceID oder erhält beim Replay 404/409 | Ownership ist ungeklärt: kein erneuter MECM-Write, keine Adoption und keine ResourceID-Meldung. `membership-journal.json` samt lokalem Log sichern und Bestand/Operation manuell belegen; niemals nur wegen des Alters löschen. | ERROR |
 | Journal ist voll, nicht schreibbar oder beschädigt | Mutierender Device-Sync blockiert vor dem nächsten MECM-Write. Beschädigte Evidenz bleibt als `membership-journal.json.quarantine.*.json` erhalten und sperrt auch spätere Starts sowie ein ersetztes Hauptjournal. Speicher/ACL reparieren, Evidenz und Logs sichern; Operationen gegen aktuelle Rolloutrevision, ResourceID und exakte CollectionID in MECM und Portal klären. Quarantäne erst nach dokumentierter Ownership-Entscheidung entfernen, niemals lediglich als Neustartmaßnahme. | ERROR |
 | Client-Snapshot nicht veröffentlicht oder ACK ausstehend | `client_getinfo` entfernt zuerst `SetupState`, schreibt einen neuen versionierten Snapshot, liest Identität und Interfaceanzahl nach und veröffentlicht ihn über `ActiveSnapshot`. Folgephasen lesen nur diesen vollständigen Stand. Erst ein bestätigter Client-Ready-ACK setzt `SetupState=complete`; ein Retry erzeugt einen neuen Snapshot und der ACK bleibt idempotent. | ERROR/Phase `failed` |
-| Client-Application vorhanden, Deployment Type oder Abhängigkeit fehlt | `install-VirtuSphere-Clients.ps1` prüft die verwalteten Pflichtteile bei jedem Re-Run, ergänzt einen fehlenden eigenen Deployment Type und eine fehlende eindeutige Dependency-Gruppe. Mehrdeutige oder nicht sicher auflösbare Fremddefinitionen werden nicht überschrieben und lassen den Installer mit Blocker enden. | Installer `!!`, Exit 1 |
+| Client-Application vorhanden, Deployment Type oder Abhängigkeit fehlt | Im MC01-Zwischenstand keine automatische Reparatur: Client- und Serverinstaller sind vor Writes gesperrt. Den Bestand im MC02-Preflight read-only erfassen; jede Änderung wartet auf den geordneten Cutover. | Blocker vor Mutation |
 | Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
 | Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
 | ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |

@@ -17,7 +17,7 @@ BeforeAll {
     $script:MecmCommon = Join-Path (Join-Path $script:PsRoot 'mecm') 'VirtuSphere-Common.ps1'
     $script:ClientCommon = Join-Path (Join-Path $script:PsRoot 'clients') 'VirtuSphere-Client-Common.ps1'
     $script:DeviceSyncPath = Join-Path (Join-Path $script:PsRoot 'mecm') 'mecm_new-device-sync.ps1'
-    $script:ClientGetInfoPath = Join-Path (Join-Path $script:PsRoot 'clients') 'client_getinfo.ps1'
+    $script:ClientGetInfoPath = Join-Path (Join-Path $script:PsRoot 'clients') 'client_getInfos.ps1'
 
     # Dot-Source in EINEM Scope: VirtuSphere-Common.ps1 laedt beim Laden nichts
     # Externes nach, und die vier gepruften Funktionen sind rein.

@@ -1,12 +1,12 @@
 #Requires -Version 5.1
 # ============================================================================
-# client_getinfo.ps1 (V23) - holt die Geraeteinformationen der VM von der
+# client_getInfos.ps1 (V23) - holt die Geraeteinformationen der VM von der
 # VirtuSphere-WebAPI (per MAC) und legt sie in der Registry
 # HKLM:\SOFTWARE\VirtuSphere ab. Erste Phase der Client-Kette.
 #
 # Verbesserungen gegenueber V21:
-#  - Adress-Fallback-Kette (Registry-Override / DNS / IP), Ergebnis wird fuer
-#    die Folge-Skripte in die Registry geschrieben
+#  - geschlossene Bootstrap-/Registry-Konfiguration statt Adress-Fallback;
+#    Folge-Skripte lesen nur den veroeffentlichten hashgebundenen Satz
 #  - Invoke-RestMethod mit Timeout statt WebClient
 #  - Stale-Fix: der Interfaces-Zweig wird VOR dem Schreiben geloescht (sonst
 #    ueberleben Interface-Eintraege frueherer Ausrollungen -> client_staticip
@@ -46,12 +46,10 @@ function Save-VsValue {
 
 # --- Erfolgs-Marker eines Vorlaufs SOFORT entfernen -------------------------
 #
-# Vor jeder Abbruchmoeglichkeit, nicht erst im Schreib-try weiter unten: das lag
-# hinter dem API-Aufruf, also blieb bei einem Abbruch davor (WebAPI nicht
-# erreichbar, keine passende MAC) ein `SetupState=complete` samt Interfaces-
-# Unterbaum des VORIGEN Laufs stehen. client_staticip.ps1 liest genau diesen
-# Unterbaum und haette die Adressen der vorigen VM auf diese gesetzt, unter einer
-# gruenen Phase. Ein Marker darf nur eine Aussage ueber DIESEN Lauf sein.
+# Vor API-Aufruf und Snapshot-Schreiben: Bei Transportfehlern oder fehlender
+# MAC darf ein altes `SetupState=complete` nicht als Erfolg dieses Laufs gelten.
+# Ein ungueltiger Bootstrap blockiert bereits davor und erfordert den eigenen
+# Repair-/Migrationspfad; er veraendert den alten Registrysatz nicht.
 if (Test-Path $registryBase) {
     Remove-ItemProperty -Path $registryBase -Name 'SetupState' -ErrorAction SilentlyContinue
 }
@@ -113,7 +111,8 @@ Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'started' -Detail "match
 
 # Validate the complete response before the first snapshot write. Optional
 # strings may be empty, but the fenced identity and every interface must be
-# structurally usable by the following phases.
+# structurally usable by the following phases. The interface bounds match
+# Get-VsActiveSnapshotRoot so a mismatch fails before the ACK, not after it.
 $revision = 0
 $uuidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 if ([string]::IsNullOrWhiteSpace([string]$data.vm_name) -or
@@ -121,7 +120,8 @@ if ([string]::IsNullOrWhiteSpace([string]$data.vm_name) -or
     -not [int]::TryParse([string]$data.rollout_revision, [ref]$revision) -or $revision -le 0 -or
     [string]$data.device_generation -cnotmatch $uuidPattern -or
     [string]$data.acceptance_generation -cnotmatch $uuidPattern -or
-    $null -eq $data.interfaces) {
+    $null -eq $data.interfaces -or
+    @($data.interfaces).Count -lt 1 -or @($data.interfaces).Count -gt 16) {
     Write-VsClientLog -Level ERROR 'getDeviceInfos-Antwort ist unvollstaendig; kein Snapshot wird publiziert.'
     Send-VsPhase -Mac $usedMac -Phase 'getinfo' -PhaseEvent 'failed' -Detail 'invalid response schema'
     exit 1
@@ -188,6 +188,9 @@ try {
     }
     Save-VsValue -Path $snapshotRoot -Name 'SnapshotState' -Value 'published'
     Save-VsValue -Path $registryBase -Name 'ActiveSnapshot' -Value $snapshotId
+    if (-not (Get-VsPreparedClientApiConfiguration)) {
+        throw 'Client-Konfigurationshash vor Client-Ready-ACK nicht bestaetigt.'
+    }
     Write-VsClientLog "Snapshot $snapshotId publiziert ($index Interface(s))."
     # Verbindlich nach allen Nutzdaten: ein GET beweist nur, dass Daten gelesen
     # wurden. Erst dieser POST darf die VM im Portal auf 5/5 setzen.
@@ -201,6 +204,9 @@ try {
     # einen gruenen Detection-State ohne bestaetigten Serverzustand hinterlaesst.
     # ACK erfolgreich + Marker-Schreibfehler ist sicher: der Retry dedupliziert.
     Save-VsValue -Path $registryBase -Name 'SetupState' -Value 'complete'
+    if (-not (Get-VsCommittedClientApiConfiguration)) {
+        throw 'Client-Konfiguration und Snapshot nach SetupState nicht gemeinsam lesbar.'
+    }
 
     # Only the selected snapshot belongs to this rollout. Remove older
     # snapshots after success; bootstrap, logging and foreign registry values

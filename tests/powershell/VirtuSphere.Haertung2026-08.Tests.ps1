@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # Befund-Register der PowerShell/MECM-Haertung 2026-08
 # ----------------------------------------------------------------------------
 # EIN It je Befund aus der Einzelpruefung der 14 ausgelieferten Skripte,
@@ -35,10 +35,10 @@ BeforeAll {
     $script:Autoimporter  = Join-Path $script:MecmDir 'mecm_autoimporter.ps1'
     $script:ClientCommon  = Join-Path $script:ClientsDir 'VirtuSphere-Client-Common.ps1'
     $script:ClientLogging = Join-Path $script:ClientsDir 'VirtuSphere-Client-Logging.ps1'
-    $script:GetInfo       = Join-Path $script:ClientsDir 'client_getinfo.ps1'
+    $script:GetInfo       = Join-Path $script:ClientsDir 'client_getInfos.ps1'
     $script:Hostname      = Join-Path $script:ClientsDir 'client_hostname.ps1'
     $script:StaticIp      = Join-Path $script:ClientsDir 'client_staticip.ps1'
-    $script:Disks         = Join-Path $script:ClientsDir 'Set-VMDisksOnline.ps1'
+    $script:Disks         = Join-Path $script:ClientsDir 'client_VMDisksOnline.ps1'
     $script:InstMecm      = Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1'
     $script:InstClients   = Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1'
     $script:Template      = Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1'

@@ -6,6 +6,136 @@
 # dot-sourct und das ConfigurationManager-Modul braucht.
 Set-StrictMode -Version 1.0
 
+# Statischer, standortunabhaengiger Packaging-Vertrag. Die Standortdatei darf
+# weder die Aufbewahrung lockern noch den MECM-Graphen umdefinieren.
+function Get-VsClientPackagingPolicy {
+    [pscustomobject]@{
+        SchemaVersion = 1
+        ConfigPath = 'C:\ProgramData\VirtuSphere\MECM\ClientPackaging.psd1'
+        RequiredConfigKeys = @('SchemaVersion', 'PackagesBase', 'ContentShare', 'WebApi', 'Scheme', 'CertThumbprint', 'DpGroupName', 'CoreLimitingCollectionId', 'BundleArchivePath', 'SourceIdentity')
+        AllowedWriterSids = @('S-1-5-18', 'S-1-5-32-544') # SYSTEM, lokale Administratoren
+        MinimumSuccessfulBundles = 5
+        MinimumAgeDays = 180
+        UpgradeMode = 'future_provisioning_no_replay'
+    }
+}
+
+# Nur konstante PSD1-Daten laden. ACL- und Feldvalidierung sind Pflicht vor
+# Apply; ein unbekannter Writer ist kein akzeptierter Packaging-Auftrag.
+function Import-VsClientPackagingConfig {
+    param(
+        [Parameter(Mandatory)][string]$ClientSourceDir,
+        [string]$LiteralPath = (Get-VsClientPackagingPolicy).ConfigPath
+    )
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw ("Client-Packaging-Konfiguration fehlt: {0}" -f $LiteralPath)
+    }
+    $policy = Get-VsClientPackagingPolicy
+    $acl = Get-Acl -LiteralPath $LiteralPath -ErrorAction Stop
+    foreach ($entry in @($acl.Access)) {
+        if ($entry.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+        $rights = [int64]$entry.FileSystemRights
+        $writeRights = [int64]([Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)
+        if (($rights -band $writeRights) -eq 0) { continue }
+        try { $sid = $entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+        catch { throw ("Client-Packaging-ACL enthaelt nicht aufloesbaren Writer: {0}" -f $entry.IdentityReference) }
+        if ($policy.AllowedWriterSids -cnotcontains $sid) {
+            throw ("Client-Packaging-ACL enthaelt unbekannten Writer: {0}" -f $sid)
+        }
+    }
+    $value = Import-PowerShellDataFile -LiteralPath $LiteralPath -ErrorAction Stop
+    if ($value -isnot [hashtable]) { throw 'Client-Packaging-Konfiguration muss eine Hashtable sein.' }
+    if (@($value.Keys | Where-Object { $_ -cnotin $policy.RequiredConfigKeys }).Count -gt 0 -or
+        @($policy.RequiredConfigKeys | Where-Object { -not $value.ContainsKey($_) }).Count -gt 0) {
+        throw 'Client-Packaging-Konfiguration hat fehlende oder unbekannte Schluessel.'
+    }
+    if ($value.SchemaVersion -isnot [int] -or $value.SchemaVersion -ne $policy.SchemaVersion) {
+        throw 'Client-Packaging-Konfiguration hat eine unbekannte Schemaversion.'
+    }
+    Assert-VsClientPackagingConfigValues -Config $value -ClientSourceDir $ClientSourceDir
+    return $value
+}
+
+# Die WebAPI-/Scheme-/Pin-Regel besitzt allein der ausgelieferte Client-Common.
+# Der Server wendet exakt diese Funktion auf den kuenftigen Bootstrap an, statt
+# eine zweite Regel zu pflegen, die still auseinanderlaufen koennte. Nur die
+# reine Funktion wird aus dem AST gelesen; der zustandsbehaftete Common wird
+# nicht ausgefuehrt.
+function Get-VsClientApiConfigurationRule {
+    param([Parameter(Mandatory)][string]$ClientSourceDir)
+    $commonSource = Join-Path $ClientSourceDir 'VirtuSphere-Client-Common.ps1'
+    if (-not (Test-Path -LiteralPath $commonSource -PathType Leaf)) { throw "Client-Common fehlt: $commonSource" }
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $commonSource).Path, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0) { throw "Client-Common ist syntaktisch ungueltig: $commonSource" }
+    $rule = @($ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -ceq 'ConvertTo-VsClientApiConfiguration'
+    }, $true))
+    if ($rule.Count -ne 1) { throw 'Client-Common muss ConvertTo-VsClientApiConfiguration genau einmal definieren.' }
+    return $rule[0].Body.GetScriptBlock()
+}
+
+# Lokaler absoluter Pfad ohne Relativsegmente, Platzhalter oder Schlussstrich.
+# Windows entfernt Punkt und Leerzeichen am Ende JEDES Segments; `a.\b` waere
+# derselbe Ordner wie `a\b` und unterliefe den Enthaltenseinvergleich unten.
+function Test-VsClientPackagingLocalPath {
+    param([string]$Path)
+    return ($Path -cmatch '\A[A-Za-z]:(\\[^\\/:*?"<>|\x00-\x1F]+)+\z' -and
+        $Path -notmatch '[ .](\\|\z)')
+}
+
+# Typ- und Wertpruefung jedes Standortfelds. Werte muessen bereits kanonisch
+# sein: Der Lauf nennt und verwendet genau die Werte der Datei, er normalisiert
+# nichts still. Alle Befunde werden gesammelt und gemeinsam gemeldet.
+function Assert-VsClientPackagingConfigValues {
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$ClientSourceDir
+    )
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($key in @($Config.Keys | Where-Object { $_ -cne 'SchemaVersion' })) {
+        if ($Config[$key] -isnot [string]) { $issues.Add(('{0}: muss eine Zeichenkette sein' -f $key)) }
+    }
+    if ($issues.Count -gt 0) { throw ('Client-Packaging-Konfiguration ungueltig: {0}.' -f ($issues -join '; ')) }
+
+    $apiRule = Get-VsClientApiConfigurationRule -ClientSourceDir $ClientSourceDir
+    $api = & $apiRule -Api $Config.WebApi -Scheme $Config.Scheme -CertThumbprint $Config.CertThumbprint
+    if (-not $api) {
+        $issues.Add('WebApi/Scheme/CertThumbprint: kein gueltiger Client-Bootstrap (host[:port], http|https klein, Pin genau 40 Hexzeichen gross und nur mit https)')
+    }
+
+    $packagesBase = [string]$Config.PackagesBase
+    $archive = [string]$Config.BundleArchivePath
+    if (-not (Test-VsClientPackagingLocalPath $packagesBase)) { $issues.Add('PackagesBase: lokaler absoluter Pfad erwartet (z. B. D:\VirtuSphere\Base\Packages)') }
+    if (-not (Test-VsClientPackagingLocalPath $archive)) {
+        $issues.Add('BundleArchivePath: lokaler absoluter Pfad erwartet (z. B. D:\VirtuSphere\Base\ClientBundles)')
+    } elseif (($archive + '\').StartsWith($packagesBase + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        ($packagesBase + '\').StartsWith($archive + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $issues.Add('BundleArchivePath: muss ausserhalb von PackagesBase liegen und darf es nicht enthalten')
+    }
+    $share = [string]$Config.ContentShare
+    if ($share -cnotmatch '\A\\\\[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(\\[^\\/:*?"<>|\x00-\x1F]+)+\z' -or
+        $share -match '[ .](\\|\z)') {
+        $issues.Add('ContentShare: UNC-Pfad \\server\freigabe[\ordner] ohne Schlussstrich erwartet')
+    }
+    $dpGroup = [string]$Config.DpGroupName
+    if ($dpGroup -and ($dpGroup -cne $dpGroup.Trim() -or $dpGroup.Length -gt 256 -or $dpGroup -match '[\x00-\x1F]')) {
+        $issues.Add('DpGroupName: leer oder ein Name ohne Randleerzeichen und Steuerzeichen, hoechstens 256 Zeichen')
+    }
+    # MECM-CollectionID: dreistelliger Sitecode plus fuenf Hexziffern. Nie ein
+    # lokalisierter Anzeigename.
+    if ([string]$Config.CoreLimitingCollectionId -cnotmatch '\A[A-Z0-9]{3}[0-9A-F]{5}\z') {
+        $issues.Add('CoreLimitingCollectionId: MECM-CollectionID erwartet (Sitecode plus fuenf Hexziffern, z. B. PS100012)')
+    }
+    if ([string]$Config.SourceIdentity -cnotmatch '\A[0-9a-f]{32}\z') {
+        $issues.Add('SourceIdentity: 32 Kleinbuchstaben-Hexzeichen erwartet (zufaelliger Source-Identitaetsmarker)')
+    }
+    if ($issues.Count -gt 0) { throw ('Client-Packaging-Konfiguration ungueltig: {0}.' -f ($issues -join '; ')) }
+}
+
 function Get-VsDangerousFileSystemAclEntries {
     param([Parameter(Mandatory)]$Acl)
     $broadSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
@@ -37,8 +167,14 @@ function Get-VsClientAppSpecs {
     @(
         [pscustomobject]@{
             AppName         = 'client_getInfos'
+            DisplayName     = 'client_getInfos'
+            CmIdentityFields = @('CI_ID', 'ModelName')
             Folder          = 'client_getInfos'
-            Script          = 'client_getinfo.ps1'
+            Script          = 'client_getInfos.ps1'
+            RequiredFiles   = @('client_getInfos.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            Role            = 'internal_dependency'
+            RunAs32Bit      = $false
+            DetectionIs32Bit = $false
             DetectionKey    = 'SOFTWARE\VirtuSphere'
             DetectionName   = 'SetupState'
             DetectionValues = @('complete')
@@ -53,8 +189,14 @@ function Get-VsClientAppSpecs {
         }
         [pscustomobject]@{
             AppName         = 'client_hostname'
+            DisplayName     = 'client_hostname'
+            CmIdentityFields = @('CI_ID', 'ModelName')
             Folder          = 'client_hostname'
             Script          = 'client_hostname.ps1'
+            RequiredFiles   = @('client_hostname.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            Role            = 'internal_dependency'
+            RunAs32Bit      = $false
+            DetectionIs32Bit = $false
             DetectionKey    = 'SOFTWARE\VirtuSphere\HostnameUpdate'
             DetectionName   = 'Status'
             # Zwei Erfolgswerte: 'Erfolgreich' (umbenannt/bereits korrekt) und
@@ -71,17 +213,19 @@ function Get-VsClientAppSpecs {
             )
         }
         [pscustomobject]@{
-            AppName         = 'client_staticip'
-            Folder          = 'client_staticip'
-            Script          = 'client_staticip.ps1'
-            DetectionKey    = 'SOFTWARE\VirtuSphere\staticip'
-            DetectionName   = 'installed'
-            # Als DWORD 1 geschrieben ([int]$Success). PropertyType MUSS 'Int64'
-            # sein - New-CMDetectionClauseRegistryKeyValue kennt kein 'Integer'
-            # (gueltig: String/Boolean/DateTime/Double/Int64/Version), sonst wirft
-            # die Detection-Erstellung am Server.
-            DetectionValues = @('1')
-            DetectionType   = 'Int64'
+            AppName         = 'client_VMDisksOnline'
+            DisplayName     = 'client_VMDisksOnline'
+            CmIdentityFields = @('CI_ID', 'ModelName')
+            Folder          = 'client_VMDisksOnline'
+            Script          = 'client_VMDisksOnline.ps1'
+            RequiredFiles   = @('client_VMDisksOnline.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            Role            = 'internal_dependency'
+            RunAs32Bit      = $false
+            DetectionIs32Bit = $false
+            DetectionKey    = 'SOFTWARE\VirtuSphere\VMDiskManagement'
+            DetectionName   = 'VMDisksOnlineStatus'
+            DetectionValues = @('Success')
+            DetectionType   = 'String'
             DependsOn       = 'client_hostname'
             ManagedMarker   = 'VirtuSphere managed client application contract v1'
             ReturnCodes     = @(
@@ -91,14 +235,20 @@ function Get-VsClientAppSpecs {
             )
         }
         [pscustomobject]@{
-            AppName         = 'client_VMDisksOnline'
-            Folder          = 'client_VMDisksOnline'
-            Script          = 'Set-VMDisksOnline.ps1'
-            DetectionKey    = 'SOFTWARE\VirtuSphere\VMDiskManagement'
-            DetectionName   = 'VMDisksOnlineStatus'
-            DetectionValues = @('Success')
-            DetectionType   = 'String'
-            DependsOn       = 'client_staticip'
+            AppName         = 'client_staticip'
+            DisplayName     = 'client_staticip'
+            CmIdentityFields = @('CI_ID', 'ModelName')
+            Folder          = 'client_staticip'
+            Script          = 'client_staticip.ps1'
+            RequiredFiles   = @('client_staticip.ps1', 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            Role            = 'deployable_entry'
+            RunAs32Bit      = $false
+            DetectionIs32Bit = $false
+            DetectionKey    = 'SOFTWARE\VirtuSphere\staticip'
+            DetectionName   = 'installed'
+            DetectionValues = @('1')
+            DetectionType   = 'Int64'
+            DependsOn       = 'client_VMDisksOnline'
             ManagedMarker   = 'VirtuSphere managed client application contract v1'
             ReturnCodes     = @(
                 [pscustomobject]@{ Value = 0; Type = 'Success' }
@@ -112,13 +262,26 @@ function Get-VsClientAppSpecs {
 function Assert-VsClientAppSpecGraph {
     param([Parameter(Mandatory)][object[]]$Specs)
     $byName = @{}
+    $entryCount = 0
     foreach ($spec in $Specs) {
         $name = [string]$spec.AppName
         if ([string]::IsNullOrWhiteSpace($name) -or $byName.ContainsKey($name)) {
             throw ("Client-App-Graph enthaelt einen leeren oder doppelten Namen: '{0}'." -f $name)
         }
         $byName[$name] = $spec
+        if ($spec.PSObject.Properties['Role']) {
+            if ($spec.Role -eq 'deployable_entry') { $entryCount++ }
+            elseif ($spec.Role -ne 'internal_dependency') { throw ("Client-App '{0}' hat eine unbekannte Rolle." -f $name) }
+            if ($spec.RunAs32Bit -ne $false -or $spec.DetectionIs32Bit -ne $false) {
+                throw ("Client-App '{0}' verletzt den 64-Bit-Vertrag." -f $name)
+            }
+            $expectedFiles = @($spec.Script, 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            if (@(Compare-Object -ReferenceObject $expectedFiles -DifferenceObject @($spec.RequiredFiles)).Count -gt 0) {
+                throw ("Client-App '{0}' hat einen abweichenden RequiredFiles-Vertrag." -f $name)
+            }
+        }
     }
+    if ($entryCount -gt 0 -and $entryCount -ne 1) { throw 'Client-App-Graph muss genau einen deploybaren Einstieg enthalten.' }
     foreach ($spec in $Specs) {
         if ($spec.DependsOn -and -not $byName.ContainsKey([string]$spec.DependsOn)) {
             throw ("Client-App-Graph verweist von '{0}' auf den unbekannten Vorgaenger '{1}'." -f $spec.AppName, $spec.DependsOn)
@@ -189,13 +352,8 @@ function Test-VsClientApplicationOwnership {
         [Parameter(Mandatory)][string]$AppFolder
     )
     $description = if ($Application.PSObject.Properties['LocalizedDescription']) { [string]$Application.LocalizedDescription } elseif ($Application.PSObject.Properties['Description']) { [string]$Application.Description } else { '' }
-    if ($description -eq [string]$Spec.ManagedMarker) { return $true }
-    # Legacy adoption is deliberately narrow: older installers moved their app
-    # into the dedicated folder before creating the DT. Name alone is never
-    # ownership evidence; a half-created app outside that folder stays foreign.
-    $objectPath = if ($Application.PSObject.Properties['ObjectPath']) { [string]$Application.ObjectPath } else { '' }
-    if ([string]::IsNullOrWhiteSpace($objectPath)) { return $false }
-    return (($objectPath.TrimEnd('\') -split '\\')[-1] -eq $AppFolder)
+    $null = $AppFolder # Ordner allein ist ausdruecklich kein Eigentumsbeleg.
+    return ($description -ceq [string]$Spec.ManagedMarker)
 }
 
 function Get-VsObjectPropertyText {
@@ -318,10 +476,12 @@ function Copy-VsClientContent {
         [Parameter(Mandatory)][string]$PackagesBase,
         [Parameter(Mandatory)][hashtable]$Bootstrap
     )
-    $scriptSource = Join-Path $SourceDir $Spec.Script
-    $commonSource = Join-Path $SourceDir 'VirtuSphere-Client-Common.ps1'
-    $loggingSource = Join-Path $SourceDir 'VirtuSphere-Client-Logging.ps1'
-    foreach ($src in @($scriptSource, $commonSource, $loggingSource)) {
+    $sourceFiles = @($Spec.RequiredFiles | Where-Object { $_ -ne 'bootstrap.json' })
+    if ($sourceFiles.Count -ne 3 -or @($sourceFiles | Where-Object { $_ -notmatch '^[A-Za-z0-9_-]+\.ps1$' }).Count -gt 0) {
+        throw 'Client-RequiredFiles-Vertrag enthaelt ungueltige Quelldateien.'
+    }
+    $sources = @($sourceFiles | ForEach-Object { Join-Path $SourceDir $_ })
+    foreach ($src in $sources) {
         if (-not (Test-Path $src)) { throw "Quelldatei fehlt: $src (SourceDir stimmt?)" }
     }
     [void](Get-VsClientLoggingPackageVersion -SourceDir $SourceDir)
@@ -341,7 +501,7 @@ function Copy-VsClientContent {
     $activated = $false
     New-Item -ItemType Directory -Path $stage -Force -ErrorAction Stop | Out-Null
     try {
-        foreach ($src in @($scriptSource, $commonSource, $loggingSource)) {
+        foreach ($src in $sources) {
             Copy-Item -Path $src -Destination $stage -Force -ErrorAction Stop
             $staged = Join-Path $stage (Split-Path $src -Leaf)
             if ((Get-FileHash -Algorithm SHA256 -Path $src).Hash -ne (Get-FileHash -Algorithm SHA256 -Path $staged).Hash) {

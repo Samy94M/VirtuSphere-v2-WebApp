@@ -6,14 +6,9 @@
 #
 # Dot-Source:  . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
 #
-# Adressfindung (Fallback-Kette):
-#   1) Registry-SSoT      HKLM:\SOFTWARE\VirtuSphere\WebAPI
-#   2) Paket-Notfall-DNS  $script:VsDefaultDnsApi
-#   3) Paket-Notfall-IP   $script:VsFallbackIpApi
-# Standortwerte werden durch bootstrap.json/Installer in die Registry gelegt;
-# ausgelieferter Quelltext wird nicht angepasst.
-# client_getinfo schreibt die funktionierende Adresse in die Registry, sodass
-# die Folge-Skripte die Kette nicht erneut durchprobieren muessen.
+# Nur ein vollstaendig validierter Bootstrap (erste getInfos-Phase) oder ein
+# veroeffentlichter nativer Registry-Satz liefert die WebAPI-Adresse. Es gibt
+# weder eine eingebaute DNS-/IP-Adresse noch eine Teilmerge-Semantik.
 # ============================================================================
 
 # Set-StrictMode: ein vertippter Variablenname ist sonst ein stilles $null, und
@@ -25,26 +20,13 @@
 # Begruendung in mecm\VirtuSphere-Common.ps1.
 Set-StrictMode -Version 1.0
 
-$script:VsClientCommonContractVersion = 1
-
-# --- Eingebaute Notfalladressen (Laufzeitwerte kommen aus der Registry) ------
-$script:VsDefaultDnsApi = 'virtusphere.lan:8021'   # DNS-Alias im Deploy-Netz
-$script:VsFallbackIpApi = ''                        # z. B. '10.0.0.5:8021' (optional)
-
-# Schema der WebAPI. 'http' ist der LAN-Default (Projektziel); auf 'https'
-# stellen, sobald das Portal auf TLS laeuft. Ueberschreibbar per Registry
-# (HKLM:\SOFTWARE\VirtuSphere\Scheme), damit ein Umstieg keine Skriptaenderung
-# im Paket braucht.
-#
-# Warum das ueberhaupt ein Schalter ist: die Maschinen-API ist vom
-# HTTP->HTTPS-Redirect ausgenommen, ein reines Einschalten von HTTPS bricht die
-# Clients also nicht. Wer aber HTTP *abschaltet*, schaltet die ganze Client-Kette
-# mit ab - und das faellt erst beim naechsten PXE-Deploy auf.
-$script:VsDefaultScheme = 'http'
+$script:VsClientCommonContractVersion = 2
+$script:VsClientConfigSchema = 1
 
 $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $script:VsClientSnapshotSchema = 1
 $script:VsResolvedApi = $null
+$script:VsBootstrapApiConfiguration = $null
 
 # Die Client-Loggingdomaene wird gemeinsam mit jeder Phase paketiert. Common
 # bleibt der oeffentliche Dot-Source-Pfad, verweigert aber einen unvollstaendigen
@@ -60,38 +42,72 @@ if ($clientLoggingVersion -ne $script:VsExpectedClientLoggingContractVersion) {
     throw ('VirtuSphere-Client-Logging-Modul hat Version {0}, erwartet wird {1}. Clientpaket vollstaendig aktualisieren.' -f $clientLoggingVersion, $script:VsExpectedClientLoggingContractVersion)
 }
 
-# --- WebAPI-Adresse aufloesen (Fallback-Kette) ------------------------------
-function Get-VsApiCandidates {
-    $candidates = New-Object System.Collections.Generic.List[string]
-    try {
-        $override = (Get-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -ErrorAction Stop).WebAPI
-        if (-not [string]::IsNullOrWhiteSpace($override)) { $candidates.Add([string]$override) }
-    } catch { Write-Debug $_ }
-    if (-not [string]::IsNullOrWhiteSpace($script:VsDefaultDnsApi)) { $candidates.Add($script:VsDefaultDnsApi) }
-    if (-not [string]::IsNullOrWhiteSpace($script:VsFallbackIpApi)) { $candidates.Add($script:VsFallbackIpApi) }
-    return $candidates
+# Ein kanonischer, laengenpraefigierter Hash bindet genau Schema und alle drei
+# Standortwerte. Er ist ein Integritaetsbeleg, keine Autorisierung.
+function Get-VsClientConfigHash {
+    param([Parameter(Mandatory)]$Configuration)
+    $parts = @([string]$script:VsClientConfigSchema, [string]$Configuration.Api,
+        [string]$Configuration.Scheme, [string]$Configuration.CertThumbprint)
+    $canonical = (@($parts | ForEach-Object {
+        '{0}:{1}' -f [Text.Encoding]::UTF8.GetByteCount($_), $_
+    }) -join '|')
+    return (Get-VsSha256Hex -Value $canonical)
 }
 
-# Speichert die funktionierende Adresse fuer nachfolgende Phasen.
+function ConvertTo-VsClientApiConfiguration {
+    param([string]$Api, [string]$Scheme, [string]$CertThumbprint)
+    if ($Api -cnotmatch '\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(:([0-9]+))?\z') { return $null }
+    $port = [regex]::Match($Api, ':([0-9]+)$')
+    if ($port.Success -and ($port.Groups[1].Value.Length -gt 5 -or
+        [int]$port.Groups[1].Value -lt 1 -or [int]$port.Groups[1].Value -gt 65535)) { return $null }
+    if ($Scheme -cnotin @('http', 'https')) { return $null }
+    if ($CertThumbprint -and ($CertThumbprint -cnotmatch '^[0-9A-F]{40}$' -or $Scheme -cne 'https')) { return $null }
+    return [pscustomobject]@{ Api = $Api; Scheme = $Scheme; CertThumbprint = $CertThumbprint }
+}
+
+function Get-VsPreparedClientApiConfiguration {
+    try {
+        $raw = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
+        if ($raw.ConfigSchemaVersion -isnot [int] -or [int]$raw.ConfigSchemaVersion -ne $script:VsClientConfigSchema -or
+            $raw.WebAPI -isnot [string] -or $raw.Scheme -isnot [string] -or
+            $raw.CertThumbprint -isnot [string] -or $raw.ConfigHash -isnot [string] -or
+            $raw.ConfigCommittedAtUtc -isnot [string] -or
+            [string]$raw.ConfigHash -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$raw.ConfigCommittedAtUtc -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$') { return $null }
+        $config = ConvertTo-VsClientApiConfiguration -Api ([string]$raw.WebAPI) -Scheme ([string]$raw.Scheme) -CertThumbprint ([string]$raw.CertThumbprint)
+        if (-not $config -or [string]$raw.ConfigHash -cne (Get-VsClientConfigHash -Configuration $config)) { return $null }
+        return $config
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+function Get-VsCommittedClientApiConfiguration {
+    $config = Get-VsPreparedClientApiConfiguration
+    if (-not $config -or -not (Get-VsActiveSnapshotRoot)) { return $null }
+    $after = Get-VsPreparedClientApiConfiguration
+    if (-not $after -or (Get-VsClientConfigHash -Configuration $after) -cne (Get-VsClientConfigHash -Configuration $config)) { return $null }
+    return $config
+}
+
+# Eine Adresse, niemals ein alternativer Host. Die Bootstrap-Ausnahme ist nur
+# im aktuellen getInfos-Prozess vorhanden; Folgeprozesse brauchen den Commit.
+function Get-VsApiCandidates {
+    $config = if ($script:VsBootstrapApiConfiguration) { $script:VsBootstrapApiConfiguration } else { Get-VsCommittedClientApiConfiguration }
+    if ($config) { return @([string]$config.Api) }
+    return @()
+}
+
 function Set-VsResolvedApi {
     param([Parameter(Mandatory)][string]$Api)
     $script:VsResolvedApi = $Api
-    try {
-        if (-not (Test-Path $script:VsRegistryBase)) { New-Item -Path $script:VsRegistryBase -Force | Out-Null }
-        New-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -Value $Api -PropertyType String -Force | Out-Null
-    } catch { Write-Debug $_ }
 }
 
-# Schema der WebAPI: Registry schlaegt Default. EINZIGE Schema-Stelle der
-# Client-Skripte - alle URLs werden ueber Get-VsApiUrl gebaut.
 function Get-VsApiScheme {
-    try {
-        $override = (Get-ItemProperty -Path $script:VsRegistryBase -Name 'Scheme' -ErrorAction Stop).Scheme
-        # -in vergleicht case-insensitiv; kanonisch klein zurueckgeben, damit
-        # URL-Bau und Schema-Vergleiche eine Schreibweise sehen.
-        if ($override -in @('http', 'https')) { return ([string]$override).ToLowerInvariant() }
-    } catch { Write-Debug $_ }
-    return $script:VsDefaultScheme
+    $config = if ($script:VsBootstrapApiConfiguration) { $script:VsBootstrapApiConfiguration } else { Get-VsCommittedClientApiConfiguration }
+    if (-not $config) { throw 'Client-Konfiguration ist nicht vollstaendig veroeffentlicht.' }
+    return [string]$config.Scheme
 }
 
 function Get-VsApiUrl {
@@ -102,67 +118,75 @@ function Get-VsApiUrl {
     return ('{0}://{1}{2}' -f (Get-VsApiScheme), $Api, $Path)
 }
 
-# Package reports use only the already configured address. A missing or broken
-# registry value is not an invitation to probe DNS/IP fallbacks or rewrite it.
+# Reporter akzeptiert nur denselben veroeffentlichten Satz wie Folgephasen.
 function Get-VsPackageReportApiConfiguration {
-    try {
-        $stored = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
-        $api = [string]$stored.WebAPI
-        if ($api -cnotmatch '\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(:([0-9]+))?\z') { return $null }
-        $port = [regex]::Match($api, ':([0-9]+)$')
-        if ($port.Success -and ([int64]$port.Groups[1].Value -lt 1 -or [int64]$port.Groups[1].Value -gt 65535)) { return $null }
-
-        $scheme = $script:VsDefaultScheme
-        if ($stored.PSObject.Properties['Scheme']) {
-            $scheme = [string]$stored.Scheme
-            if ($scheme -notin @('http', 'https')) { return $null }
-            $scheme = $scheme.ToLowerInvariant()
-        }
-
-        $thumbprint = ''
-        if ($stored.PSObject.Properties['CertThumbprint']) {
-            $thumbprint = ([string]$stored.CertThumbprint -replace '\s', '').ToUpperInvariant()
-            if ($thumbprint -and $thumbprint -cnotmatch '^[0-9A-F]{40}$') { return $null }
-        }
-
-        return [pscustomobject]@{
-            Api = $api
-            Scheme = $scheme
-            CertThumbprint = $thumbprint
-            ReportUrl = ('{0}://{1}/mecm_report.php?action=reportPackageRun' -f $scheme, $api)
-        }
-    } catch {
-        Write-Debug $_
-        return $null
+    $config = Get-VsCommittedClientApiConfiguration
+    if (-not $config) { return $null }
+    return [pscustomobject]@{
+        Api = $config.Api
+        Scheme = $config.Scheme
+        CertThumbprint = $config.CertThumbprint
+        ReportUrl = ('{0}://{1}/mecm_report.php?action=reportPackageRun' -f $config.Scheme, $config.Api)
     }
 }
 
 function Initialize-VsClientBootstrap {
     param([Parameter(Mandatory)][string]$ManifestPath)
-    try {
-        $current = Get-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -ErrorAction Stop
-        if (-not [string]::IsNullOrWhiteSpace([string]$current.WebAPI)) { return }
-    } catch { Write-Debug $_ }
-
-    if (-not (Test-Path -LiteralPath $ManifestPath)) { return }
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { throw 'Client-Bootstrapmanifest fehlt.' }
     try {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $webApi = Convert-VsWebApi ([string]$manifest.WebAPI)
-        $scheme = ([string]$manifest.Scheme).ToLowerInvariant()
-        $thumbprint = ([string]$manifest.CertThumbprint -replace '\s', '').ToUpperInvariant()
-        if ($scheme -notin @('http', 'https')) { throw 'ungueltiges Scheme' }
-        if ($thumbprint -and $thumbprint -notmatch '^[0-9A-F]{40}$') { throw 'ungueltiger Zertifikatfingerabdruck' }
-        if (-not (Test-Path $script:VsRegistryBase)) { New-Item -Path $script:VsRegistryBase -Force -ErrorAction Stop | Out-Null }
-        New-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -Value $webApi -PropertyType String -Force -ErrorAction Stop | Out-Null
-        $raw = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
-        if (-not $raw.PSObject.Properties['Scheme']) {
-            New-ItemProperty -Path $script:VsRegistryBase -Name 'Scheme' -Value $scheme -PropertyType String -ErrorAction Stop | Out-Null
-        }
-        if ($thumbprint -and -not $raw.PSObject.Properties['CertThumbprint']) {
-            New-ItemProperty -Path $script:VsRegistryBase -Name 'CertThumbprint' -Value $thumbprint -PropertyType String -ErrorAction Stop | Out-Null
+        $keys = @($manifest.PSObject.Properties.Name)
+        if ($keys.Count -ne 4 -or @('Schema', 'WebAPI', 'Scheme', 'CertThumbprint' | Where-Object { $_ -cnotin $keys }).Count -gt 0 -or
+            $manifest.Schema -isnot [int] -or [int]$manifest.Schema -ne 1 -or
+            $manifest.WebAPI -isnot [string] -or $manifest.Scheme -isnot [string] -or
+            $manifest.CertThumbprint -isnot [string]) { throw 'unbekanntes Bootstrap-Schema oder ungueltige Feldtypen' }
+        $desired = ConvertTo-VsClientApiConfiguration -Api ([string]$manifest.WebAPI) -Scheme ([string]$manifest.Scheme) -CertThumbprint ([string]$manifest.CertThumbprint)
+        if (-not $desired) { throw 'ungueltige oder unvollstaendige API-Konfiguration' }
+        $desiredHash = Get-VsClientConfigHash -Configuration $desired
+        $mutex = New-Object Threading.Mutex($false, 'Global\VirtuSphereClientConfig')
+        $locked = $false
+        try {
+            try { $locked = $mutex.WaitOne(30000) }
+            catch [Threading.AbandonedMutexException] { $locked = $true }
+            if (-not $locked) { throw 'Client-Konfigurationssperre nicht verfuegbar' }
+            $raw = $null
+            try { $raw = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop } catch { Write-Debug $_ }
+            $names = @('WebAPI', 'Scheme', 'CertThumbprint', 'ConfigSchemaVersion', 'ConfigHash', 'ConfigCommittedAtUtc', 'SetupState', 'ActiveSnapshot')
+            $present = @($names | Where-Object { $raw -and $raw.PSObject.Properties[$_] })
+            # Der vorbereitete Satz genuegt: Ein frueherer Lauf kann nach dem
+            # Config-Commit an WebAPI, MAC-Treffer oder ACK gescheitert sein und
+            # hat dann weder SetupState noch ActiveSnapshot. MECM wiederholt genau
+            # diesen Lauf; er muss denselben Satz weiterverwenden duerfen.
+            if ($present.Count -gt 0) {
+                $current = Get-VsPreparedClientApiConfiguration
+                if (-not $current) { throw 'configuration_invalid: nativer Registrysatz ist partiell oder ungueltig' }
+                if ((Get-VsClientConfigHash -Configuration $current) -cne $desiredHash) {
+                    throw 'configuration_drift: Bootstrap und nativer Registrysatz unterscheiden sich'
+                }
+                $script:VsBootstrapApiConfiguration = $current
+                return
+            }
+            if (-not (Test-Path -Path $script:VsRegistryBase)) { New-Item -Path $script:VsRegistryBase -Force -ErrorAction Stop | Out-Null }
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'WebAPI' -Value $desired.Api -PropertyType String -Force -ErrorAction Stop | Out-Null
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'Scheme' -Value $desired.Scheme -PropertyType String -Force -ErrorAction Stop | Out-Null
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'CertThumbprint' -Value $desired.CertThumbprint -PropertyType String -Force -ErrorAction Stop | Out-Null
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'ConfigSchemaVersion' -Value $script:VsClientConfigSchema -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+            $readBack = Get-ItemProperty -Path $script:VsRegistryBase -ErrorAction Stop
+            if ([string]$readBack.WebAPI -cne $desired.Api -or [string]$readBack.Scheme -cne $desired.Scheme -or
+                [string]$readBack.CertThumbprint -cne $desired.CertThumbprint -or [int]$readBack.ConfigSchemaVersion -ne $script:VsClientConfigSchema) {
+                throw 'Client-Konfiguration konnte nicht identisch zurueckgelesen werden.'
+            }
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'ConfigHash' -Value $desiredHash -PropertyType String -Force -ErrorAction Stop | Out-Null
+            $utc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+            New-ItemProperty -Path $script:VsRegistryBase -Name 'ConfigCommittedAtUtc' -Value $utc -PropertyType String -Force -ErrorAction Stop | Out-Null
+            if (-not (Get-VsPreparedClientApiConfiguration)) { throw 'Client-Konfigurationshash konnte nicht bestaetigt werden.' }
+            $script:VsBootstrapApiConfiguration = $desired
+        } finally {
+            if ($locked) { $mutex.ReleaseMutex() }
+            $mutex.Dispose()
         }
     } catch {
-        throw ("Client-Bootstrapmanifest ist ungueltig oder nicht schreibbar: {0}" -f $_.Exception.Message)
+        throw ("Client-Bootstrap blockiert: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -186,14 +210,14 @@ function ConvertTo-VsUtf8JsonBytes {
 # Ausnahme fuer genau dieses Zertifikat; ein bereits PKI-gueltiges Zertifikat
 # bleibt gueltig und wird nicht zusaetzlich gepinnt.
 function Initialize-VsTls {
-    if ((Get-VsApiScheme) -ne 'https') { return }
+    $config = if ($script:VsBootstrapApiConfiguration) { $script:VsBootstrapApiConfiguration } else { Get-VsCommittedClientApiConfiguration }
+    if (-not $config -or $config.Scheme -ne 'https') { return }
 
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     } catch { Write-Debug $_ }
 
-    $pinned = ''
-    try { $pinned = ([string](Get-ItemProperty -Path $script:VsRegistryBase -Name 'CertThumbprint' -ErrorAction Stop).CertThumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant() } catch { Write-Debug $_ }
+    $pinned = [string]$config.CertThumbprint
     if ([string]::IsNullOrWhiteSpace($pinned)) { return }
     try {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
@@ -640,10 +664,17 @@ function Get-VsSha256Hex {
 function Get-VsActiveSnapshotRoot {
     try {
         $base = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
-        if ([string]$base.SetupState -ne 'complete' -or [string]::IsNullOrWhiteSpace([string]$base.ActiveSnapshot)) { return $null }
-        $root = Join-Path (Join-Path $script:VsRegistryBase 'Snapshots') ([string]$base.ActiveSnapshot)
+        $snapshotId = [string]$base.ActiveSnapshot
+        if ([string]$base.SetupState -ne 'complete' -or $snapshotId -cnotmatch '^[0-9a-f]{32}$') { return $null }
+        $root = Join-Path (Join-Path $script:VsRegistryBase 'Snapshots') $snapshotId
         $meta = Get-ItemProperty -Path $root -Name 'SnapshotSchema', 'SnapshotState', 'InterfaceCount' -ErrorAction Stop
-        if ([int]$meta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or [string]$meta.SnapshotState -ne 'published' -or [int]$meta.InterfaceCount -lt 0) { return $null }
+        if (-not $meta.PSObject.Properties['SnapshotSchema'] -or -not $meta.PSObject.Properties['SnapshotState'] -or
+            -not $meta.PSObject.Properties['InterfaceCount'] -or
+            [int]$meta.SnapshotSchema -ne $script:VsClientSnapshotSchema -or
+            [string]$meta.SnapshotState -ne 'published' -or
+            [int]$meta.InterfaceCount -lt 1 -or [int]$meta.InterfaceCount -gt 16) { return $null }
+        $after = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
+        if ([string]$after.SetupState -ne 'complete' -or [string]$after.ActiveSnapshot -cne $snapshotId) { return $null }
         return $root
     } catch {
         Write-Debug $_

@@ -1,5 +1,14 @@
 # VirtuSphere Client-Skripte
 
+> MC01-Übergang im Arbeitsbaum (27.09.2026): Die Einstiegsskripte heißen jetzt
+> `client_getInfos.ps1` und `client_VMDisksOnline.ps1`. Der statische Zielgraph
+> lautet `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`;
+> allein `client_staticip` ist der künftige deploybare Einstieg. Der bisherige
+> mutierende Clientinstaller ist vor Content-/MECM-Writes gesperrt. Common
+> akzeptiert jetzt nur einen vollständigen Bootstrap oder den veröffentlichten,
+> hashgebundenen Registry-/Snapshot-Satz. Bestehende MECM-Objekte bleiben
+> unberührt; alte Clients brauchen einen gesonderten Migrations-/Repairauftrag.
+
 Diese Skripte laufen auf den per PXE frisch installierten Windows-Clients und
 werden über das MECM-Software-Center als Anwendungen verteilt. Sie teilen sich
 `VirtuSphere-Client-Common.ps1` (Adressfindung und Rückkanal) sowie das lokal
@@ -8,46 +17,38 @@ mitgelieferte, versionierte `VirtuSphere-Client-Logging.ps1`.
 ## Reihenfolge (über MECM-Anwendungsabhängigkeiten)
 
 ```
-client_getinfo  →  client_hostname  →  client_staticip  →  Set-VMDisksOnline
+client_getInfos  →  client_hostname  →  client_VMDisksOnline  →  client_staticip
 ```
 
-- **client_getinfo** installiert die Basisdaten in die Registry
-  (`HKLM:\SOFTWARE\VirtuSphere`). Die drei folgenden sind Anwendungen vom
-  Beziehungstyp *„hängt ab von"*, die für die Deploy-Collections bereitgestellt
-  werden (z. B. „Deploy Windows Server 2019/2022").
+- **client_getInfos** installiert die Basisdaten in die Registry
+  (`HKLM:\SOFTWARE\VirtuSphere`). `client_staticip` ist der einzige geplante
+  deploybare Einstieg; die drei vorherigen Phasen sind interne Abhängigkeiten.
+  Das ist der lokale Zielvertrag, noch kein freigegebener MECM-Cutover.
 
-## Adressfindung (Fallback-Kette)
+## Adressfindung und Commit
 
-Jedes Skript ermittelt die WebAPI-Adresse in dieser Reihenfolge:
+`client_getInfos` verlangt ein vollständiges, gültiges `bootstrap.json` mit
+`Schema`, `WebAPI`, `Scheme` und `CertThumbprint`. Ist der native Satz vollständig
+leer, schreibt Common die Werte unter einer maschinenweiten Sperre, liest sie
+zurück und bindet sie mit `ConfigSchemaVersion`, `ConfigHash` und
+`ConfigCommittedAtUtc`. Der aktuelle `getInfos`-Prozess darf genau diesen
+validierten Satz für seine API-Aufrufe verwenden. Scheitert der Lauf danach an
+WebAPI, MAC-Treffer oder ACK, verwendet der MECM-Wiederholungslauf denselben
+vorbereiteten Satz weiter. Erst nach veröffentlichtem
+Snapshot, bestätigtem Client-Ready-ACK und `SetupState=complete` dürfen
+Folgephasen und Paketreporter die Registry-Adresse verwenden.
 
-1. **Registry-Override** `HKLM:\SOFTWARE\VirtuSphere\WebAPI` (falls gesetzt)
-2. **mitgelieferter Notfall-DNS-Name** aus `VirtuSphere-Client-Common.ps1`
-3. **mitgelieferte Notfall-IP** als letzte Rückfallebene
+Ein gültiger bestehender Satz mit gleichem Hash bleibt unverändert. Ein
+abweichender, partieller oder ungültiger Satz blockiert; es gibt weder
+Feldmischung noch eingebauten DNS-/IP-Fallback. Ein Standortwechsel braucht
+einen getrennt freigegebenen Migrations-/Repairauftrag, nicht einen
+Installerparameter. Der mutierende Installer ist bis zum geordneten Cutover
+gesperrt.
 
-Vor der ersten Auflösung übernimmt `client_getinfo` die mit dem Client-Installer
-erzeugte `bootstrap.json` einmalig in die Registry, sofern dort noch kein
-`WebAPI`-Wert existiert. Danach ist ausschließlich die Registry wirksam;
-vorhandene Werte werden bei einem Paketupgrade nicht überschrieben.
-
-Der Bootstrap ist der reguläre Konfigurationsweg. Für einen Standortwechsel
-wird der Clientinstaller mit `-WebApi`, `-Scheme` und optional
-`-CertThumbprint` erneut ausgeführt; ausgelieferter Quelltext wird nicht
-bearbeitet. Die Adressprobe akzeptiert nur das VirtuSphere-Health-Schema, nicht
-irgendeine HTTP-Antwort. JSON-POSTs sind explizite UTF-8-Bytes. Ein leerer
-Fingerabdruck nutzt normale PKI, ein gesetzter ist nur die enge Ausnahme für
-genau dieses Zertifikat; es gibt keinen Accept-all-Schalter.
-
-Wenn der DNS-Administrator beim ersten Rollout noch nicht verfügbar ist, wird
-die feste, aus allen Deploy-VLANs erreichbare WebApp-IP beim Packaging gesetzt:
-
-```powershell
-.\install-VirtuSphere-Clients.ps1 -ContentShare '\\MECM-01\VirtuSphere\Base\Packages' -WebApi '192.0.2.10:8021' -Scheme http
-```
-
-Der DNS-Kandidat bleibt für die spätere Umstellung erhalten. Bei HTTPS ist eine
-IP nur geeignet, wenn das Zertifikat diese IP als Subject Alternative Name
-enthält. Das vollständige Vorgehen einschließlich Server-Installer und späterem
-DNS-Wechsel steht im **Admin-Runbook** in
+Die Adressprobe akzeptiert nur das VirtuSphere-Health-Schema. JSON-POSTs sind
+explizite UTF-8-Bytes. Ein leerer HTTPS-Fingerabdruck nutzt normale PKI; ein
+gesetzter ist nur die enge Ausnahme für genau dieses Zertifikat. Bei HTTP
+darf kein Fingerabdruck gesetzt sein. Das Admin-Runbook steht unter
 [`docs/operations/mecm-integration.md`](../../docs/operations/mecm-integration.md).
 
 ## Rückkanal
@@ -93,27 +94,26 @@ Sequence ihn bereits angewandt, endet die Phase ohne Rename-Reboot.
 Die Client-Phasen authentifizieren sich über ihre bereits bekannte MAC; sie senden
 keinen Rückkanal-Token (der Token gilt nur für die Server-Heartbeats).
 
-Alle URLs — einschließlich des ACK — laufen durch `Get-VsApiUrl`. Standard ist
-`http`; dafür werden weder CA noch Zertifikat noch Thumbprint benötigt. `https`
-bleibt eine optionale Registry-/Paketkonfiguration und ändert keine Endpunkte.
+Alle URLs — einschließlich des ACK — laufen durch `Get-VsApiUrl`. `Scheme`
+ist Pflichtwert (`http` oder `https`), kein im Client eingebauter Default.
 
 ## MECM-Anwendungsdefinitionen
 
 | Skript | Erkennungsregel (Registry) | Wert | Exit-Codes |
 |---|---|---|---|
-| client_getinfo | `HKLM:\SOFTWARE\VirtuSphere\SetupState` | `complete` | 0 = ok, 1 = Fehler |
+| client_getInfos | `HKLM:\SOFTWARE\VirtuSphere\SetupState` | `complete` | 0 = ok, 1 = Fehler |
 | client_hostname | `HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate\Status` | `Erfolgreich`/`Uebersprungen` | 0, 1641 (Neustart), 1 |
+| client_VMDisksOnline | `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement\VMDisksOnlineStatus` | `Success` | 0 = ok, 1 = Fehler |
 | client_staticip | `HKLM:\SOFTWARE\VirtuSphere\staticip\installed` | `1` | 0 = ok, 1 = Fehler |
-| Set-VMDisksOnline | `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement\VMDisksOnlineStatus` | `Success` | 0 = ok, 1 = Fehler |
 
 Programm-Befehlszeile jeweils:
 `powershell.exe -ExecutionPolicy Bypass -File "<skript>.ps1"`,
 als System ausführen, Administratorrechte erforderlich. Für `client_hostname`
 den Rückgabecode **1641** als „Erfolg mit Neustart" konfigurieren.
 
-### Anlegen per Skript
+### Anlegen per Skript (derzeit gesperrt)
 
-`install-VirtuSphere-Clients.ps1` (im `Powershell-MECM`-Wurzelordner) legt diese
+Der frühere `install-VirtuSphere-Clients.ps1` (im `Powershell-MECM`-Wurzelordner) legte diese
 vier Applikationen im Konsolen-Ordner `VirtuSphere_Core` an, **falls sie fehlen**
 (Self-Healing), stellt je Ordner das
 Client-Skript **plus** `VirtuSphere-Client-Common.ps1` **plus**
@@ -128,7 +128,7 @@ jedem Configuration-Manager-Cmdlet ab. In diesem Lauf werden keine Applications,
 Deployment Types, Dependencies oder Contentverteilungen geändert. Freigabepfad,
 Leserechte beziehungsweise Inhalt korrigieren und den Installer danach erneut
 starten.
-Bei jedem Re-Run werden Eigentumsmarker bzw. der enge Legacy-Ordnernachweis,
+Bei jedem Re-Run wurden Eigentumsmarker und zuvor auch der unsichere Legacy-Ordnernachweis,
 genau ein verwalteter Deployment Type, Detection, Systemkontext, Rebootverhalten,
 die Standard-Returncodes und jede Dependency bis zum wirklichen Ziel-DT geprüft.
 Fehlende eigene Teile werden ergänzt. Gleichnamige fremde, zusätzliche,
@@ -137,9 +137,9 @@ Blocker; der Name allein gilt nie als Eigentumsnachweis. Danach verteilt der
 Installer den Content an die angegebene DP-Gruppe.
 Es legt **kein** Deployment an eine Collection an — das entscheidet der Admin.
 
-```powershell
-.\install-VirtuSphere-Clients.ps1 -ContentShare \\MECM-SERVER\VirtuSphere\Base\Packages -WebApi 'virtusphere.lan:8021' -Scheme http
-```
+Der Aufruf mit Einzelparametern ist entfernt. Der gegenwärtige Installer liest
+die geschützte Standortdatei und blockiert Apply vor Content-/MECM-Writes, bis
+MC02/MC03 den sicheren Preflight und Cutover liefern.
 
 Die Erkennungswerte oben sind die SSoT: sie stehen als Datentabelle in
 `mecm\VirtuSphere-ClientPackaging.ps1` und werden von einem Pester-Contract-Test

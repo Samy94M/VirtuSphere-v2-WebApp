@@ -45,6 +45,8 @@ BeforeAll {
 Describe 'T3 package reporter distribution contract' {
     It 'binds the generated bundle to the four canonical client sources and switches the descriptor last' {
         $installer = Get-Content -LiteralPath $script:Installer -Raw
+        $installer.IndexOf("throw 'MC01: MECM-Serverinstaller") | Should -BeGreaterThan -1
+        $installer.IndexOf("throw 'MC01: MECM-Serverinstaller") | Should -BeLessThan $installer.IndexOf("Write-Step 'Pruefe Voraussetzungen'")
         foreach ($name in @(
             'VirtuSphere-Client-Common.ps1',
             'VirtuSphere-Client-Logging.ps1',

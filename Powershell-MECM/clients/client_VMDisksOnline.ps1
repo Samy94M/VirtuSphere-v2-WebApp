@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # ============================================================================
-# Set-VMDisksOnline.ps1 - bringt vorhandene Datenplatten online und richtet
+# client_VMDisksOnline.ps1 - bringt vorhandene Datenplatten online und richtet
 # neue, eindeutig VirtuSphere-eigene RAW-Datentraeger wiederaufnehmbar ein.
 # Vierte/optionale Phase der Client-Kette.
 #

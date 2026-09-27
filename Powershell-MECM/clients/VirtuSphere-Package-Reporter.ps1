@@ -6,7 +6,7 @@ Set-StrictMode -Version 1.0
 
 $script:VsPackageReporterContractVersion = 1
 $script:VsPackageReportSchemaVersion = 1
-$script:VsPackageReporterExpectedCommonContractVersion = 1
+$script:VsPackageReporterExpectedCommonContractVersion = 2
 $script:VsPackageReporterExpectedLoggingContractVersion = 1
 
 function Get-VsPackageReporterContractVersion {
