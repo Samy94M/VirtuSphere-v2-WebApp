@@ -56,7 +56,7 @@ final class AuditProducerContractTest extends TestCase
                 continue;
             }
             preg_match_all(
-                '/(?<!function )\b(audit_event|audit|machine_api_audit_warning)\s*\(\s*([^,()]{1,80}),\s*([A-Za-z_$][A-Za-z0-9_$]{0,80})/s',
+                '/(?<!function )\b(audit_event|audit_event_required|audit|machine_api_audit_warning)\s*\(\s*([^,()]{1,80}),\s*([A-Za-z_$][A-Za-z0-9_$]{0,80})/s',
                 $this->withoutComments($source),
                 $calls,
                 PREG_SET_ORDER

@@ -75,84 +75,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'autostart_start_delay' => request_string($_POST, 'autostart_start_delay'),
             'autostart_stop_delay' => request_string($_POST, 'autostart_stop_delay'),
         ];
-        $savedVmId = repo_save_vm(
+        // One transaction for the save and its audit rows (vm_save_with_audit).
+        // $vm is the pre-save bundle on update and the diff base of vm.changed.
+        $saved = vm_save_with_audit(
             $connection,
             $missionId,
-            $vmId > 0 ? $vmId : null,
+            $vmId,
+            $vmId > 0 ? (array) $vm : [],
+            $isTemplate,
             $vmData,
             vm_parse_interfaces(is_array($_POST['interfaces'] ?? null) ? $_POST['interfaces'] : [], $mission),
             vm_parse_disks(is_array($_POST['disks'] ?? null) ? $_POST['disks'] : []),
             vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []),
             request_string($_POST, 'edit_version'),
-            (int) $user['id'],
-            requireVersion: true
+            (int) $user['id']
         );
-        // On update, $vm is the pre-save bundle: diff the scalar columns so the
-        // entry names the change (a datastore override, a renamed hostname). The
-        // diff compares stored row against stored row, NOT the raw POST values:
-        // repo_save_vm normalizes on the way in (an emptied hostname falls back
-        // to the VM name, an empty guest id to the default), and the audit trail
-        // must never claim a change that was not persisted. The legacy vm_disk
-        // summary and the free-text notes are withheld; interfaces, disks and
-        // packages are child rows and out of this scalar diff.
-        $auditContext = ['action' => $vmId > 0 ? 'updated' : 'created', 'mission_id' => $missionId];
-        if ($vmId > 0) {
-            $savedVm = repo_get_vm_bundle($connection, $savedVmId) ?? [];
-            $auditColumns = array_diff_key($vmData, array_flip(['vm_disk', 'vm_notes']));
-            $changes = audit_change_summary((array) $vm, array_intersect_key($savedVm, $auditColumns));
-            // An edit that changed nothing still gets a row (with optimistic
-            // locking a no-op save is a real event), it just carries no diff:
-            // an empty `changes` string is not a value the registry accepts.
-            if ($changes !== '') {
-                $auditContext['changes'] = $changes;
-            }
-        }
-        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
-
-        // Etappe 14D: the desired Windows name moved. Its own event rather than
-        // one more entry in `changes`, because the question somebody reads this
-        // row to answer is not "what changed" but "did this rollout take it":
-        // `current_pending` says the waiting hand-off picked the new name up,
-        // `next_rollout` says the snapshot is frozen and only a reset activates
-        // it. Those two are one operator action apart.
-        //
-        // Compared by normalised key, so a pure change of spelling is correctly
-        // NOT an identity change; it stays visible in the vm.changed diff.
-        // `$frozenSnapshot` carries the one thing the flash below needs and is
-        // initialised HERE, not inside the branch: a variable that only exists
-        // on one path is a variable the next reader has to prove reachable.
-        $frozenSnapshot = '';
-        if ($vmId > 0 && !$isTemplate) {
-            // $savedVm was read for the diff above, under the same `$vmId > 0`.
-            $oldHostname = (string) ($vm['vm_hostname'] ?? '');
-            $newHostname = (string) ($savedVm['vm_hostname'] ?? '');
-            if (mecm_hostname_key($oldHostname) !== mecm_hostname_key($newHostname)) {
-                $snapshot = (string) ($savedVm['mecm_rollout_hostname'] ?? '');
-                $effect = mecm_hostname_same($snapshot, $newHostname) ? 'current_pending' : 'next_rollout';
-                if ($effect === 'next_rollout') {
-                    $frozenSnapshot = $snapshot;
-                }
-                // Optional fields are OMITTED when empty, never sent blank: the
-                // registry refuses an empty context value, and this audit shares
-                // a request with the save. `old_value` is empty for a VM that
-                // never had a hostname, `rollout_hostname` for one that has no
-                // snapshot yet; both are normal, and neither is worth a blank.
-                $rolloutContext = [
-                    'action' => 'updated',
-                    'mission_id' => $missionId,
-                    'effect' => $effect,
-                    'new_value' => $newHostname,
-                    'rollout_revision' => (int) ($savedVm['mecm_rollout_revision'] ?? 0),
-                ];
-                if ($oldHostname !== '') {
-                    $rolloutContext['old_value'] = $oldHostname;
-                }
-                if ($snapshot !== '') {
-                    $rolloutContext['rollout_hostname'] = $snapshot;
-                }
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $rolloutContext, (int) $user['id']);
-            }
-        }
+        $savedVmId = $saved['vm_id'];
+        $frozenSnapshot = $saved['frozen_snapshot'];
 
         flash_set('success', __t('vm_edit.flash_saved'));
         // A frozen snapshot means the correction was stored and changes nothing

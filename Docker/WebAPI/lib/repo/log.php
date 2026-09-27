@@ -63,6 +63,24 @@ function audit_event(
     return $stmt->execute();
 }
 
+/**
+ * The audit row of a domain write that must not outlive a missing trace (MECM
+ * plan decision 32). It runs inside the repo_transaction() of that write: a
+ * false from audit_event() becomes an exception, so the write rolls back
+ * instead of committing a change nobody can attribute.
+ *
+ * @param array<string,mixed> $context
+ */
+function audit_event_required(mysqli $connection, string $eventCode, string $objectType, string|int|null $objectId, string $result, array $context = [], ?int $userId = null): void
+{
+    if (repo_transaction_depth($connection) === 0) {
+        throw new LogicException('audit_event_required() must run inside the transaction of the write it records.');
+    }
+    if (!audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId)) {
+        throw new RuntimeException('Audit event ' . $eventCode . ' could not be stored; the change was rolled back.');
+    }
+}
+
 /** @param array<string,mixed> $context */
 function audit(
     mysqli $connection,

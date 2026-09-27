@@ -98,35 +98,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'autostart_stop_action' => request_string($_POST, 'autostart_stop_action'),
                 'autostart_wait_for_heartbeat' => request_string($_POST, 'autostart_wait_for_heartbeat', '0'),
             ];
-            repo_update_mission_checked($connection, $missionId, $missionChanges, request_string($_POST, 'edit_version'), !$isTemplate, requireVersion: true);
             // $mission holds the pre-update row (loaded before the POST branch), so
             // the diff names which columns changed and from what: this is the entry
             // that answers "who moved the mission to the wrong datastore". Notes are
-            // opaque (value withheld, "changed" only).
+            // opaque (value withheld, "changed" only). Update and audit row commit
+            // together (MECM plan decision 32).
             $missionDiff = audit_change_summary($mission, $missionChanges, ['mission_notes']);
             $auditContext = ['action' => 'updated'];
             if ($missionDiff !== '') {
                 $auditContext['changes'] = $missionDiff;
             }
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $missionId, $missionChanges, $isTemplate, $auditContext, $user): void {
+                repo_update_mission_checked($connection, $missionId, $missionChanges, request_string($_POST, 'edit_version'), !$isTemplate, requireVersion: true);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, (int) $user['id']);
+            });
             flash_set('success', __t('mission_details.flash_saved'));
             redirect_to($detailsUrl);
         }
         if ($action === 'clone_template') {
-            $result = repo_clone_template_to_new_mission($connection, $missionId, request_string($_POST, 'target_mission_name'), (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'cloned_template',
-                'target_mission_id' => (int) $result['target_mission_id'],
-            ], (int) $user['id']);
+            $result = repo_transaction($connection, static function () use ($connection, $missionId, $user): array {
+                $result = repo_clone_template_to_new_mission($connection, $missionId, request_string($_POST, 'target_mission_name'), (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'cloned_template',
+                    'target_mission_id' => (int) $result['target_mission_id'],
+                ], (int) $user['id']);
+
+                return $result;
+            });
             flash_set('success', __t('mission_details.flash_cloned', ['count' => (int) $result['created']]));
             redirect_to(mission_details_url((int) $result['target_mission_id'], ['work_list_type' => 'missions']));
         }
         if ($action === 'save_as_template') {
-            $result = repo_save_mission_as_template($connection, $missionId, request_string($_POST, 'target_template_name'), (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'saved_as_template',
-                'target_mission_id' => (int) $result['target_mission_id'],
-            ], (int) $user['id']);
+            $result = repo_transaction($connection, static function () use ($connection, $missionId, $user): array {
+                $result = repo_save_mission_as_template($connection, $missionId, request_string($_POST, 'target_template_name'), (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'saved_as_template',
+                    'target_mission_id' => (int) $result['target_mission_id'],
+                ], (int) $user['id']);
+
+                return $result;
+            });
             flash_set('success', __t('mission_details.flash_saved_as_template', ['count' => (int) $result['created']]));
             redirect_to(mission_details_url((int) $result['target_mission_id'], ['work_list_type' => 'templates']));
         }

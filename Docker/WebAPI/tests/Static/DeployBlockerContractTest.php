@@ -37,8 +37,8 @@ final class DeployBlockerContractTest extends TestCase
         self::assertStringContainsString("\$blocker['target_id']", $model);
         self::assertStringContainsString("\$blocker['action']", $model);
         self::assertStringContainsString('Unknown deploy blocker kind', $model);
-        self::assertMatchesRegularExpression('/deploy_assert_queue_unblocked\([^;]+\);\s*\$result = repo_enqueue_deploy_group/s', $actions);
-        self::assertMatchesRegularExpression('/deploy_assert_queue_unblocked\([^;]+\);\s*\$jobId = repo_create_deploy_job/s', $actions);
+        self::assertMatchesRegularExpression('/deploy_assert_queue_unblocked\([^;]+\);\s*(?:(?:\/\/[^\r\n]*)\s*)*\$result = repo_transaction\([^;]+\$result = repo_enqueue_deploy_group\([^;]+\);\s*audit_event_required\(/s', $actions);
+        self::assertMatchesRegularExpression('/deploy_assert_queue_unblocked\([^;]+\);\s*\$jobId = repo_transaction\([^;]+\$jobId = repo_create_deploy_job\([^;]+\);\s*audit_event_required\(/s', $actions);
         self::assertStringContainsString('deploy_queue_normalize_input($_POST)', $actions);
     }
 

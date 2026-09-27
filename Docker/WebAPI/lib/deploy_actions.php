@@ -97,12 +97,18 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
                 // Same normalized blocker list as the page and live endpoint,
                 // immediately before the repository performs its locking gate.
                 deploy_assert_queue_unblocked($connection, $queueInput);
-                $result = repo_enqueue_deploy_group($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc'], $schedule['stagger']);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_group', (string) $result['group_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'mission_id' => $missionIdPost,
-                    'job_count' => (int) $result['count'],
-                    'scheduled' => $schedule['base_utc'] !== null,
-                ], (int) $user['id']);
+                // One transaction for the group and its audit row (MECM plan
+                // decision 32): a failed audit rolls the queued jobs back.
+                $result = repo_transaction($connection, static function () use ($connection, $missionIdPost, $user, $esxiId, $ansibleId, $payloadData, $schedule): array {
+                    $result = repo_enqueue_deploy_group($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc'], $schedule['stagger']);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_group', (string) $result['group_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'mission_id' => $missionIdPost,
+                        'job_count' => (int) $result['count'],
+                        'scheduled' => $schedule['base_utc'] !== null,
+                    ], (int) $user['id']);
+
+                    return $result;
+                });
                 flash_set('success', __t('deploy.flash_group_queued', ['count' => $result['count']]), '', [
                     'url' => deploy_mission_url($missionIdPost) . '#deploy-jobs',
                     'label' => __t('deploy.flash_open_jobs'),
@@ -111,11 +117,15 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             }
 
             deploy_assert_queue_unblocked($connection, $queueInput);
-            $jobId = repo_create_deploy_job($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'mission_id' => $missionIdPost,
-                'scheduled' => $schedule['base_utc'] !== null,
-            ], (int) $user['id']);
+            $jobId = repo_transaction($connection, static function () use ($connection, $missionIdPost, $user, $esxiId, $ansibleId, $payloadData, $schedule): int {
+                $jobId = repo_create_deploy_job($connection, $missionIdPost, (int) $user['id'], $esxiId, $ansibleId, $payloadData, $schedule['base_utc']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'mission_id' => $missionIdPost,
+                    'scheduled' => $schedule['base_utc'] !== null,
+                ], (int) $user['id']);
+
+                return $jobId;
+            });
             if ($schedule['base_utc'] !== null) {
                 flash_set('success', __t('deploy.flash_scheduled', ['id' => $jobId]), '', [
                     'url' => deploy_job_log_url($jobId),
@@ -137,13 +147,19 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             $missionIdPost = request_int($_POST, 'mission_id');
             $esxiId = request_int($_POST, 'credential_esxi_id');
             $vmId = request_int($_POST, 'vm_id');
-            $adopted = repo_adopt_vm_identity($connection, $missionIdPost, $vmId, $esxiId);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'credential_id' => $esxiId,
-                'mission_id' => $missionIdPost,
-                'moid' => (string) $adopted['vm_moid'],
-                'instance_uuid' => (string) $adopted['vm_instance_uuid'],
-            ], (int) $user['id']);
+            // The binding and its audit row commit together (identity plan 6.4):
+            // an adoption must never be stored without its trace.
+            $adopted = repo_transaction($connection, static function () use ($connection, $missionIdPost, $vmId, $esxiId, $user): array {
+                $adopted = repo_adopt_vm_identity($connection, $missionIdPost, $vmId, $esxiId);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'credential_id' => $esxiId,
+                    'mission_id' => $missionIdPost,
+                    'moid' => (string) $adopted['vm_moid'],
+                    'instance_uuid' => (string) $adopted['vm_instance_uuid'],
+                ], (int) $user['id']);
+
+                return $adopted;
+            });
             if (is_array($_POST['draft'] ?? null)) {
                 deploy_form_draft_store($_POST['draft']);
             }
@@ -157,17 +173,24 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             if ($job !== null) {
                 $redirectBase = deploy_job_cancel_redirect_url($job, request_string($_POST, 'origin'));
             }
-            $cancelOutcome = repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
+            $cancelOutcome = repo_transaction($connection, static function () use ($connection, $jobId, $user): string {
+                $cancelOutcome = repo_cancel_deploy_job($connection, $jobId, (int) $user['id']);
+                if ($cancelOutcome === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
+                } else {
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'cancelled',
+                    ], (int) $user['id']);
+                }
+
+                return $cancelOutcome;
+            });
             if ($cancelOutcome === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
                 flash_set('success', __t('deploy.flash_cancel_requested'), '', [
                     'url' => deploy_job_log_url($jobId),
                     'label' => __t('deploy.flash_open_job_log'),
                 ]);
             } else {
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_job', $jobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'cancelled',
-                ], (int) $user['id']);
                 flash_set('success', __t('deploy.flash_cancelled'), '', [
                     'url' => deploy_job_log_url($jobId),
                     'label' => __t('deploy.flash_open_job_log'),
@@ -178,11 +201,15 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
         if ($action === 'cancel_group') {
             $groupId = request_string($_POST, 'group_id');
-            $count = repo_cancel_deploy_group($connection, $groupId, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_group', $groupId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'cancelled',
-                'job_count' => $count,
-            ], (int) $user['id']);
+            $count = repo_transaction($connection, static function () use ($connection, $groupId, $user): int {
+                $count = repo_cancel_deploy_group($connection, $groupId, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED, 'deploy_group', $groupId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'cancelled',
+                    'job_count' => $count,
+                ], (int) $user['id']);
+
+                return $count;
+            });
             flash_set('success', __t('deploy.flash_group_cancelled', ['count' => $count]));
             redirect_to($redirectBase);
         }
@@ -192,10 +219,14 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             if (request_string($_POST, 'origin') === VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG) {
                 $redirectBase = deploy_job_log_url($jobId);
             }
-            $newJobId = repo_retry_deploy_job($connection, $jobId, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED, 'deploy_job', $newJobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'retry_of_job_id' => $jobId,
-            ], (int) $user['id']);
+            $newJobId = repo_transaction($connection, static function () use ($connection, $jobId, $user): int {
+                $newJobId = repo_retry_deploy_job($connection, $jobId, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED, 'deploy_job', $newJobId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'retry_of_job_id' => $jobId,
+                ], (int) $user['id']);
+
+                return $newJobId;
+            });
             flash_set('success', __t('deploy.flash_retried', ['id' => $newJobId]), '', [
                 'url' => deploy_job_log_url($newJobId),
                 'label' => __t('deploy.flash_open_job_log'),

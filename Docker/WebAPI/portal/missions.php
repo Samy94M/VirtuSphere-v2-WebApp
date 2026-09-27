@@ -56,11 +56,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($type === 'missions' && mission_name_is_template($name)) {
                 throw new ValidationException(['mission_name' => __t('missions.err_prefix_reserved')]);
             }
-            $newMissionId = repo_create_mission($connection, ['mission_name' => $name], false, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $newMissionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'created',
-                'name' => $name,
-            ], (int) $user['id']);
+            // Creation and audit row commit together (MECM plan decision 32).
+            $newMissionId = repo_transaction($connection, static function () use ($connection, $name, $user): int {
+                $newMissionId = repo_create_mission($connection, ['mission_name' => $name], false, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $newMissionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'created',
+                    'name' => $name,
+                ], (int) $user['id']);
+
+                return $newMissionId;
+            });
             flash_set('success', $isTemplateView ? __t('missions.flash_created_template') : __t('missions.flash_created_mission'));
             redirect_to(mission_details_url($newMissionId, $workContext));
         } elseif ($action === 'delete') {
@@ -68,10 +73,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($missionId <= 0) {
                 throw new RuntimeException(__t('missions.err_mission_id_required'));
             }
-            deleteMission($missionId, $connection);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'deleted',
-            ], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $missionId, $user): void {
+                deleteMission($missionId, $connection);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'deleted',
+                ], (int) $user['id']);
+            });
             flash_set('success', $isTemplateView ? __t('missions.flash_deleted_template') : __t('missions.flash_deleted_mission'));
         } elseif ($action === 'import_preview') {
             // Every expected outcome below answers with flash + redirect (both
@@ -130,7 +137,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // The cast narrows a type, it decides no shape: the status above
                 // already established that the stored payload is an array, and
                 // everything inside it is canonicalized by the analysis.
-                $report = mission_import($connection, (array) $state['payload'], $name, false, (int) $user['id']);
+                // Import and its audit row commit together (MECM plan decision 32);
+                // the refusals below keep their meaning because a rolled-back
+                // import throws the same exception out of the transaction.
+                $report = repo_transaction($connection, static function () use ($connection, $state, $name, $user): array {
+                    $report = mission_import($connection, (array) $state['payload'], $name, false, (int) $user['id']);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', (int) $report['mission_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'imported',
+                        'name' => $name,
+                        'vm_count' => (int) $report['counts']['vms'],
+                    ], (int) $user['id']);
+
+                    return $report;
+                });
             } catch (MissionTransferDocumentException $documentError) {
                 // The stored document cannot be read at all any more; there is
                 // nothing left to retry against.
@@ -154,11 +173,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
             }
             unset($_SESSION['mission_import']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', (int) $report['mission_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'imported',
-                'name' => $name,
-                'vm_count' => (int) $report['counts']['vms'],
-            ], (int) $user['id']);
             flash_set('success', __t('missions.import_flash_done', ['count' => (int) $report['counts']['vms']]));
             redirect_to('mission_details.php?id=' . (int) $report['mission_id']);
         }

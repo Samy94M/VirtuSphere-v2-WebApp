@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/log.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
+require_once __DIR__ . '/../lib/vm_save_service.php';
 require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
@@ -88,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ((string) ($result['previous_id'] ?? '') !== '') {
                     $context['previous_resource_id'] = (string) $result['previous_id'];
                 }
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $context, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $context, (int) $user['id']);
 
                 return $result;
             });
@@ -102,39 +103,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
             }
-            // Revision gate (ADR-0034): the preview the operator confirmed must
-            // still describe the stored assignments. hash_equals against the
-            // freshly computed revision; a page rendered before an assignment
-            // change (or before the preview existed) is rejected, never applied.
-            $transferState = mecm_transfer_state($connection, $missionId, $vmId);
-            if (!hash_equals($transferState['revision'], request_string($_POST, 'assignment_revision'))) {
-                throw new RuntimeException(__t('portal.vm_mecm_transfer_stale'));
-            }
-            repo_mark_vm_for_mecm_resync($connection, $missionId, $vmId, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'queued_mecm_transfer',
-                'mission_id' => $missionId,
-            ], (int) $user['id']);
+            vm_queue_mecm_transfer_with_audit(
+                $connection,
+                $missionId,
+                $vmId,
+                request_string($_POST, 'assignment_revision'),
+                (int) $user['id']
+            );
             flash_set('success', __t('portal.vm_mecm_transfer_success'));
         } elseif ($action === 'restart_progress_watch') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('vms.progress_template_blocked'));
             }
-            $kind = repo_restart_vm_progress_watch($connection, $missionId, $vmId, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'restarted_progress_watch',
-                'mission_id' => $missionId,
-                'progress_kind' => $kind,
-            ], (int) $user['id']);
+            $kind = repo_transaction($connection, static function () use ($connection, $missionId, $vmId, $user): string {
+                $kind = repo_restart_vm_progress_watch($connection, $missionId, $vmId, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'restarted_progress_watch',
+                    'mission_id' => $missionId,
+                    'progress_kind' => $kind,
+                ], (int) $user['id']);
+
+                return $kind;
+            });
             flash_set('success', __t($kind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
                 ? 'vms.progress_flash_pending'
                 : 'vms.progress_flash_installing'));
         } elseif ($action === 'delete') {
-            repo_delete_vm_by_id($connection, $missionId, $vmId);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'deleted',
-                'mission_id' => $missionId,
-            ], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $missionId, $vmId, $user): void {
+                repo_delete_vm_by_id($connection, $missionId, $vmId);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'deleted',
+                    'mission_id' => $missionId,
+                ], (int) $user['id']);
+            });
             flash_set('success', __t('vms.flash_deleted'));
             $redirectPath = portal_work_context_vm_list_url($missionId, $workContext);
         } elseif ($action === 'bulk_delete' || $action === 'bulk_reset_mecm_id') {

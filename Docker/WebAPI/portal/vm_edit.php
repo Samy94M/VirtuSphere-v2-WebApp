@@ -8,6 +8,7 @@ require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/vm_save_service.php';
 require_once __DIR__ . '/../lib/repo/client_events.php';
 require_once __DIR__ . '/../lib/repo/package_run_reads.php';
 require_once __DIR__ . '/../lib/package_report_page.php';
