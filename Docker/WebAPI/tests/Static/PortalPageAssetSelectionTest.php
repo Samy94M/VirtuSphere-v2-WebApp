@@ -38,7 +38,7 @@ final class PortalPageAssetSelectionTest extends TestCase
         $commonAfter = ['assets/css/controls.css', 'assets/css/feedback.css'];
         $tablePages = [
             'credentials.php', 'dashboard.php', 'deploy.php', 'deploy_log.php',
-            'help.php', 'logs.php', 'missions.php', 'os.php', 'packages.php',
+            'help.php', 'logs.php', 'missions.php', 'os.php', 'package_run.php', 'package_reports.php', 'packages.php',
             'settings.php', 'system_status.php', 'users.php', 'vlans.php',
             'vm_edit.php', 'vms.php',
         ];
@@ -49,7 +49,7 @@ final class PortalPageAssetSelectionTest extends TestCase
                 $expected[] = 'assets/css/tables.css';
             }
             array_push($expected, ...$commonAfter);
-            if (in_array($page, ['deploy_log.php', 'system_status.php'], true)) {
+            if (in_array($page, ['deploy_log.php', 'package_run.php', 'system_status.php'], true)) {
                 $expected[] = 'assets/css/status.css';
             }
             $expected[] = 'assets/css/forced-colors.css';

@@ -96,6 +96,8 @@ const VIRTUSPHERE_LAYOUT_PAGES = [
     'mission_details.php',
     'missions.php',
     'os.php',
+    'package_run.php',
+    'package_reports.php',
     'packages.php',
     'settings.php',
     'system_status.php',
@@ -110,7 +112,7 @@ function layout_style_registry(): array
 {
     $tablePages = [
         'credentials.php', 'dashboard.php', 'deploy.php', 'deploy_log.php',
-        'help.php', 'logs.php', 'missions.php', 'os.php', 'packages.php',
+        'help.php', 'logs.php', 'missions.php', 'os.php', 'package_run.php', 'package_reports.php', 'packages.php',
         'settings.php', 'system_status.php', 'users.php', 'vlans.php',
         'vm_edit.php', 'vms.php',
     ];
@@ -125,7 +127,7 @@ function layout_style_registry(): array
         // deploy_log shares the fact grid and technical-detail treatment with
         // System status. Keeping those selectors in their current sheet avoids
         // a cascade-changing rule move; both real consumers are explicit.
-        'assets/css/status.css' => ['deploy_log.php', 'system_status.php'],
+        'assets/css/status.css' => ['deploy_log.php', 'package_run.php', 'system_status.php'],
         // Last on purpose: its rules are specificity-equal with the component
         // defaults they hand back to the user agent, and they win only on
         // position. It is a policy rather than a domain, and it applies in a

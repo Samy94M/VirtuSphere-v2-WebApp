@@ -18,4 +18,5 @@ return [
     'filter_retired' => 'Zurückgezogen',
     'filter_all' => 'Alle',
     'filter_apply' => 'Filtern',
+    'diagnostics' => 'Paketberichte',
 ];

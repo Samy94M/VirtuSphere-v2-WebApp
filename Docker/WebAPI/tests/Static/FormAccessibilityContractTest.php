@@ -33,6 +33,7 @@ final class FormAccessibilityContractTest extends TestCase
                 'portal/account.php',
                 'portal/mission_details.php',
                 'portal/missions.php',
+                'portal/package_reports.php',
             ]
         );
     }

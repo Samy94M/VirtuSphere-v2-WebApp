@@ -35,9 +35,11 @@ $vmEditorUrl = $vmId > 0
 
 $clientPhaseSummary = [];
 $clientEvents = [];
+$packageRuns = [];
 if ($vmId > 0 && !$isTemplate) {
     $clientPhaseSummary = repo_client_phase_summary($connection, $vmId);
     $clientEvents = repo_client_events_for_vm($connection, $vmId, 20);
+    $packageRuns = repo_package_runs_for_vm($connection, $vmId);
 }
 
 $error = '';

@@ -8,6 +8,9 @@ require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/package_run_report.php';
 require_once dirname(__DIR__, 2) . '/lib/package_report_restore_converge.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/package_runs.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/package_run_reads.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/package_run_search.php';
+require_once dirname(__DIR__, 2) . '/lib/package_report_filter.php';
 
 final class PackageRunRepositoryTest extends TestCase
 {
@@ -81,6 +84,92 @@ final class PackageRunRepositoryTest extends TestCase
         self::assertSame(1, (int) repo_scalar($this->db,
             'SELECT COUNT(*) FROM deploy_package_run_events e JOIN deploy_package_runs r ON r.id = e.package_run_id WHERE r.run_id = UUID_TO_BIN(?)',
             's', [self::RUNS[0]]));
+    }
+
+    public function testReadModelIsVmScopedAndHidesExpiredDiagnosticsWithoutDeletingMarkers(): void
+    {
+        $base = $this->base(self::RUNS[5]);
+        self::assertSame(200, repo_package_report_record($this->db, $this->vmId, $this->validated($base))['status']);
+        self::assertSame(200, repo_package_report_record($this->db, $this->vmId,
+            $this->validated($this->step($base, 1, 'ok', false)))['status']);
+
+        $list = repo_package_runs_for_vm($this->db, $this->vmId);
+        self::assertCount(1, $list);
+        self::assertSame(self::RUNS[5], $list[0]['run_id']);
+        self::assertSame(1, (int) $list[0]['stored_steps']);
+        self::assertSame('1 · 001.ps1', $list[0]['last_reported_step']);
+        self::assertSame('ok', $list[0]['last_reported_result']);
+        self::assertSame([], repo_package_runs_for_vm($this->db, $this->vmId + 1));
+        self::assertNull(repo_package_run_for_vm($this->db, $this->vmId + 1, self::RUNS[5]));
+        self::assertNull(repo_package_run_for_vm($this->db, $this->vmId, '../invalid'));
+        $run = repo_package_run_for_vm($this->db, $this->vmId, self::RUNS[5]);
+        self::assertNotNull($run);
+        self::assertNull($run['completed_received_at']);
+        self::assertSame(1, (int) $run['stored_starts']);
+        self::assertCount(1, repo_package_steps_for_vm_run($this->db, $this->vmId, (int) $run['id']));
+        self::assertSame([], repo_package_steps_for_vm_run($this->db, $this->vmId + 1, (int) $run['id']));
+        self::assertSame(['mission_id' => $this->missionId, 'vm_id' => $this->vmId],
+            repo_package_run_location($this->db, self::RUNS[5]));
+        $filter = package_report_filter(['name' => 'PHPUNIT', 'state' => 'no_completion']);
+        self::assertSame([], $filter['errors']);
+        $search = repo_package_run_search($this->db, $filter);
+        self::assertSame(1, $search['run_count']);
+        self::assertSame(1, $search['vm_count']);
+        self::assertCount(1, $search['rows']);
+        self::assertSame(0, repo_package_run_search($this->db, package_report_filter(['name' => '%']))['run_count']);
+        self::assertSame(0, repo_package_run_search($this->db, package_report_filter(['name' => '_']))['run_count']);
+
+        repo_execute($this->db, 'UPDATE deploy_package_run_markers SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE run_id = UUID_TO_BIN(?)',
+            's', [self::RUNS[5]]);
+        self::assertSame([], repo_package_runs_for_vm($this->db, $this->vmId));
+        self::assertNull(repo_package_run_for_vm($this->db, $this->vmId, self::RUNS[5]));
+        self::assertNull(repo_package_run_location($this->db, self::RUNS[5]));
+        self::assertSame([], repo_package_steps_for_vm_run($this->db, $this->vmId, (int) $run['id']));
+        self::assertSame(1, (int) repo_scalar($this->db,
+            'SELECT COUNT(*) FROM deploy_package_run_markers WHERE run_id = UUID_TO_BIN(?)', 's', [self::RUNS[5]]));
+    }
+
+    public function testSimilarErrorSearchExcludesTheSourceVmAndCountsOtherRunsAndDevices(): void
+    {
+        $otherMac = '02:00:00:00:56:03';
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_rollout_revision) VALUES (?, ?, ?, 3)',
+            'iss', [$this->missionId, self::PROJECT . '-OTHER', self::PROJECT . '-OTHER']);
+        $otherId = (int) $this->db->insert_id;
+        repo_execute($this->db,
+            'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'issssss', [$otherId, '10.0.0.12', '255.255.255.0', '10.0.0.1', $otherMac, 'dhcp', 'vmxnet3']);
+        $otherGeneration = (string) repo_scalar($this->db,
+            'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?', 'i', [$otherId]);
+
+        foreach ([[self::RUNS[0], $this->vmId, self::MAC, $this->deviceGeneration],
+            [self::RUNS[1], $otherId, $otherMac, $otherGeneration]] as [$runId, $vmId, $mac, $generation]) {
+            $base = $this->base($runId);
+            $base['mac_candidates'] = [$mac];
+            $base['device_generation'] = $generation;
+            $failure = $this->step($base, 300, 'fail', true);
+            $failure['error_category'] = 'child_exit';
+            $failure['child_exit_code'] = 1;
+            self::assertSame(200, repo_package_report_record($this->db, $vmId, $this->validated($base))['status']);
+            self::assertSame(200, repo_package_report_record($this->db, $vmId, $this->validated($failure))['status']);
+            self::assertSame(200, repo_package_report_record($this->db, $vmId,
+                $this->validated($this->completed($base, $failure)))['status']);
+        }
+
+        $filter = package_report_filter([
+            'scope' => 'package', 'project' => self::PROJECT, 'version' => '1.0',
+            'error_category' => 'child_exit', 'child_exit' => '1', 'wrapper_exit' => '1',
+            'exclude_vm' => (string) $this->vmId,
+        ]);
+        self::assertSame([], $filter['errors']);
+        $result = repo_package_run_search($this->db, $filter);
+        self::assertSame(1, $result['run_count']);
+        self::assertSame(1, $result['vm_count']);
+        self::assertSame($otherId, (int) $result['rows'][0]['vm_id']);
+        self::assertSame(0, repo_package_run_search($this->db, package_report_filter([
+            'scope' => 'package', 'project' => self::PROJECT, 'version' => '1.0',
+            'error_category' => 'child_exit', 'child_exit' => '2', 'wrapper_exit' => '1',
+            'exclude_vm' => (string) $this->vmId,
+        ]))['run_count']);
     }
 
     public function testConflictingReplayRollsBackAProvisionalTotalChange(): void

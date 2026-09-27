@@ -52,3 +52,15 @@ removed by routine retention.
 The repository admits indices 1..256 as normal details, one distinct
 first-failure projection and one completion core, with closed event fingerprints
 and no replay-based timestamp extension.
+
+## R8 Package-report reads keep expiry, identity and counts together
+
+`lib/repo/package_run_reads.php` scopes detail and step reads by exact VM/run
+identity and the still-live marker. `lib/repo/package_run_search.php` applies
+one normalized predicate to the list and the run/distinct-VM counts inside a
+single transaction, then pages by `(first_received_at,id)` with a 50-row
+window. First receipt is the date filter's UTC axis; last stored evidence is
+separate. Search `%`, `_` and `!` are literal, exact package/version remains
+binary, and a similar-error predicate binds category and known child code to
+the same first-failure row. Neither a GET nor a count extends retention or
+reconstructs a run from its permanent replay marker.

@@ -79,3 +79,18 @@ function portal_copy_input_button(
         $dynamicLabel === '' ? '' : __t('common.copy_value', ['label' => $dynamicLabel])
     );
 }
+
+/** Browser resolves the local href against its actual origin; no Host header becomes copied data. */
+function portal_copy_local_link(string $href, string $label): string
+{
+    if (preg_match('/\A[a-z_]+\.php\?[a-z0-9_=%&.-]+\z/D', $href) !== 1) {
+        throw new InvalidArgumentException('Copy link must be a local portal URL.');
+    }
+
+    return '<span class="copy-control"><a class="copy-value" href="' . h($href) . '">' . h($label) . '</a>'
+        . '<button type="button" class="button button-ghost copy-button" data-copy-link="' . h($href) . '"'
+        . ' aria-label="' . h(__t('common.copy_value', ['label' => $label])) . '"'
+        . ' data-copy-done="' . h(__t('common.copy_done')) . '"'
+        . ' data-copy-failed="' . h(__t('common.copy_failed')) . '">' . h(__t('common.copy')) . '</button>'
+        . '<span class="copy-status" role="status" data-copy-status hidden></span></span>';
+}

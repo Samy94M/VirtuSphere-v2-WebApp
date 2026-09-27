@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/portal_work_context.php';
 
-const VIRTUSPHERE_VM_EDIT_ANCHORS = ['interfaces'];
+const VIRTUSPHERE_VM_EDIT_ANCHORS = ['interfaces', 'package-reports'];
 
 function vm_edit_url(int $missionId, int $vmId, ?string $anchor = null, array $workContext = []): string
 {

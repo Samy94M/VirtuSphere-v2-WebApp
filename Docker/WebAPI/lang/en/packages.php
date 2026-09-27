@@ -18,4 +18,5 @@ return [
     'filter_retired' => 'Retired',
     'filter_all' => 'All',
     'filter_apply' => 'Apply',
+    'diagnostics' => 'Package reports',
 ];

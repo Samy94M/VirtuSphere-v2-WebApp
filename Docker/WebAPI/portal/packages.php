@@ -57,7 +57,7 @@ layout_header(__t('packages.title'), $user, 'packages', 'packages');
                 echo portal_sort_header('packages.php', 'status', __t('common.status'), $sort, $dir, $pkgSortParams);
                 echo portal_sort_header('packages.php', 'retired', __t('packages.th_retired_at'), $sort, $dir, $pkgSortParams);
                 echo portal_sort_header('packages.php', 'updated', __t('common.updated'), $sort, $dir, $pkgSortParams);
-            ?></tr></thead>
+            ?><th><?php echo h(__t('packages.diagnostics')); ?></th></tr></thead>
             <tbody>
             <?php foreach ($rows as $row) { ?>
                 <tr>
@@ -67,9 +67,14 @@ layout_header(__t('packages.title'), $user, 'packages', 'packages');
                     <td><?php echo catalog_status_badge((string) ($row['package_status'] ?? '')); ?></td>
                     <td><?php echo h(portal_format_timestamp((string) ($row['retired_at'] ?? ''))); ?></td>
                     <td><?php echo h(portal_format_timestamp((string) ($row['updated_at'] ?? ''))); ?></td>
+                    <td><a href="<?php echo h('package_reports.php?' . http_build_query([
+                        'scope' => 'package',
+                        'project' => (string) ($row['package_basename'] ?? ''),
+                        'version' => (string) ($row['package_version'] ?? ''),
+                    ], '', '&', PHP_QUERY_RFC3986)); ?>"><?php echo h(__t('packages.diagnostics')); ?></a></td>
                 </tr>
             <?php } ?>
-            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="6"><?php echo portal_catalog_empty_state('packages.php', $statusFilter, $catalogHasRows, [
+            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="7"><?php echo portal_catalog_empty_state('packages.php', $statusFilter, $catalogHasRows, [
                 'empty' => __t('packages.empty'),
                 'empty_filtered' => __t('packages.empty_filtered'),
                 'show_all' => __t('packages.show_all'),

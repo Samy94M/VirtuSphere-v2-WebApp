@@ -16,6 +16,7 @@ declare(strict_types=1);
 /** @var array<string, string> $fieldErrors */
 /** @var array<string, array<string, mixed>|null> $clientPhaseSummary */
 /** @var array<int, array<string, mixed>> $clientEvents */
+/** @var array<int, array<string, mixed>> $packageRuns */
 /** @var array<int, array<string, mixed>> $oses */
 /** @var array<int, array<string, mixed>> $vlans */
 /** @var array<int, array<string, mixed>> $packages */
@@ -141,6 +142,7 @@ declare(strict_types=1);
     <?php } ?>
 
     <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $clientPhaseSummary, $clientEvents); } ?>
+    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_package_reports($packageRuns, $missionId, $vmId, $workContext); } ?>
 
     <?php if ($error !== '') { ?>
         <?php

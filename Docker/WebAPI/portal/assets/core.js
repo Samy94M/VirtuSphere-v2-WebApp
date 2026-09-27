@@ -675,6 +675,14 @@
         }
 
         function currentValue(button) {
+            if (button.hasAttribute('data-copy-link')) {
+                try {
+                    var target = new URL(button.getAttribute('data-copy-link') || '', document.baseURI);
+                    return target.origin === window.location.origin ? target.href : '';
+                } catch (error) {
+                    return '';
+                }
+            }
             if (!button.hasAttribute('data-copy-source')) {
                 return button.getAttribute('data-copy-value') || '';
             }
@@ -723,7 +731,7 @@
         }
 
         document.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-copy-value], [data-copy-source]');
+            var button = event.target.closest('[data-copy-value], [data-copy-source], [data-copy-link]');
             if (!button) {
                 return;
             }
