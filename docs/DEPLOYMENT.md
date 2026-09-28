@@ -51,6 +51,8 @@ The playbooks under `Ansible/` are not self-contained: they read variables that 
 
 ### Deploy modes and the MAC-generation power-cycle
 
+Each mode and each playbook is drawn step by step in [Bereitstellung: Abläufe](operations/deploy-flows.md); the checks behind the system status cards are in [Systemstatus: Prüfungen](operations/system-status-checks.md).
+
 Modes map to playbooks in `ansible_playbooks_for_mode()`: `create`, `export`, `start`, `powercycle` (runs `powercycleVMs-ESXi_playbook.yml` then the export playbook), `autostart` (writes the ESXi autostart policy, ADR-0025) and `full` (`create → powercycle → export → start`, plus `autostart` when the mission enabled it). The power-cycle exists because ESXi may only assign a NIC its MAC once the VM has been powered on, and the MAC export otherwise reads nothing. `powercycleVMs-ESXi_playbook.yml` briefly powers a VM on, waits `PowerCycleWaitSeconds` (portal field, default 5s, clamped 1–300s), then hard powers it off (`state: powered-off`, `force: yes`; freshly created VMs have no guest OS/tools, so a graceful shutdown would hang).
 
 Before any remote upload, the shared network contract validates the selected VM

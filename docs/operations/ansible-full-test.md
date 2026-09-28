@@ -6,6 +6,8 @@ Ansible-Zugänge, auch einen als „Ansible auf Ubuntu“ benannten Zugang.
 Vorgabe und Grenzen gehören `lib/ansible_test_config.php`: standardmäßig
 24 Stunden, ganze Stunden bis 168; 0 schaltet die Automatik aus.
 Das ESXi-Inventarintervall bleibt eine unabhängige Einstellung.
+Welche Prüfungen der Systemstatus für Ansible zeigt, steht als Ablaufdiagramm
+in [Systemstatus: Prüfungen](system-status-checks.md#ansible).
 
 Der Bereitstellungsdienst prüft die Fälligkeit in freien Durchläufen.
 Deploy-Aufträge haben Vorrang. Pausierte oder gestoppte Dienste starten keine
