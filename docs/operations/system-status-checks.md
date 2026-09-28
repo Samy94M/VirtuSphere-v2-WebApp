@@ -52,37 +52,43 @@ Die drei Sync-Aufgaben (Devices Sync, Packages Sync, Package Import) und der Sit
 
 ```mermaid
 flowchart TD
-  A{"Hat die Aufgabe je gemeldet?"} -->|nein| A1{"Meldet eine andere Aufgabe derselben Gruppe?"}
+  A{"Hat die Sync-Aufgabe je gemeldet?"} -->|nein| A1{"Meldet eine andere Sync-Aufgabe?"}
   A1 -->|ja| MI["Fehlt (gelb)"]
   A1 -->|nein| UK["Unbekannt (grau)"]
-  A -->|ja| K{"Art der Quelle?"}
-  K -->|Sync-Aufgabe| L{"Letztes Ereignis?"}
+  A -->|ja| L{"Letztes Ereignis?"}
   L -->|completed| CP{"Ergebnis fail?"}
   CP -->|ja| RD["Ausgefallen (rot)"]
-  CP -->|nein| CA{"Letztes Ergebnis älter als Intervall mal Warnfaktor, mindestens die Untergrenze?"}
-  CA -->|älter als Intervall mal Gefahrfaktor| RD
-  CA -->|älter als Warnschwelle| YL["Verzögert (gelb)"]
+  CP -->|nein| CA{"Alter des letzten Ergebnisses?"}
+  CA -->|über Gefahrschwelle| RD
+  CA -->|über Warnschwelle| YL["Verzögert (gelb)"]
   CA -->|frisch| CO{"Ergebnis?"}
   CO -->|ok| GR["OK (grün)"]
   CO -->|warning| YL
   CO -->|sonst| UK
-  L -->|started| ST{"Lauf offen länger als die Warnschwelle, mindestens die Laufschonfrist?"}
-  ST -->|länger als die Gefahrschwelle| RD
-  ST -->|ja| YL
-  ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses"]
+  L -->|started| ST{"Wie lange ist der Lauf offen?"}
+  ST -->|über Gefahrschwelle| RD
+  ST -->|über Warnschwelle, mindestens Laufschonfrist| YL
+  ST -->|kürzer| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses"]
   L -->|nur alter Heartbeat| LG{"Heartbeat frisch?"}
   LG -->|ja| LE["Alte Skriptversion (gelb)"]
   LG -->|nein| YL
-  K -->|Site-Health| S{"Letztes Ergebnis älter als Intervall mal Warnfaktor?"}
-  S -->|ja| SS["veraltet: grau, Beschriftung „Unbekannt“, Hinweis „Befund ist historisch“"]
-  S -->|nein| SC{"MECM-Site-Status?"}
-  SC -->|kritisch| RD
-  SC -->|Warnung| YL
-  SC -->|ok| GR
-  SC -->|Provider nicht lesbar| UK
 ```
 
-Schwellen: Warnung nach `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` (aktuell 3) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; rot nach `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` (aktuell 10) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; ein offener Lauf zusätzlich mindestens `VIRTUSPHERE_RUN_GRACE_SECONDS`. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Der Site-Health-Reporter wird eigens bewertet: Sein Alter färbt die Zeile nie gelb oder rot, weil ein fehlender Nachweis kein kritischer MECM-Zustand ist.
+
+```mermaid
+flowchart TD
+  A{"Hat der Site-Health-Reporter je gemeldet?"} -->|nein| UK["Unbekannt (grau)"]
+  A -->|ja| S{"Letztes Ergebnis älter als die Warnschwelle?"}
+  S -->|ja| SS["Veraltet: grau, Beschriftung „Unbekannt“, Hinweis „Befund ist historisch“"]
+  S -->|nein| SC{"MECM-Site-Status?"}
+  SC -->|kritisch| RD["Ausgefallen (rot)"]
+  SC -->|Warnung| YL["Verzögert (gelb)"]
+  SC -->|ok| GR["OK (grün)"]
+  SC -->|Provider nicht lesbar oder Abfrage gescheitert| UK
+```
+
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` (aktuell 3) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` (aktuell 10) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; ein offener Lauf gilt frühestens nach `VIRTUSPHERE_RUN_GRACE_SECONDS` als verzögert. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
 ## Ansible
 
