@@ -53,6 +53,12 @@ BeforeAll {
     }
 }
 
+# Discovery-time capability flag, like $HasRegistry in VirtuSphere.ErrorPaths.Tests.ps1:
+# the reporter child runs as a suspended powershell.exe inside a Win32 job object.
+# pwsh on Linux has neither, so those cases are defined only on Windows, where
+# the PS-5.1 CI job proves them. On Linux they would return $null for the wrong reason.
+$HasWindowsJobObjects = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+
 Describe 'T4 wrapper reads only a complete bound reporter generation' {
     BeforeEach {
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -65,47 +71,50 @@ Describe 'T4 wrapper reads only a complete bound reporter generation' {
         @($verified.Files).Count | Should -Be 4
     }
 
-    It 'verifies the bundle in a supervised child before exposing its host path' {
-        $clock = [Diagnostics.Stopwatch]::StartNew()
-        $verified = Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 5000
-        $clock.Stop()
-        $verified.BundleId | Should -Match '^[0-9a-f]{64}$'
-        @($verified.Files).Count | Should -Be 4
-        $clock.ElapsedMilliseconds | Should -BeLessThan 5500
-    }
-
-    It 'refuses a damaged generation through the supervised verifier' {
-        Add-Content -LiteralPath (Join-Path $script:fixture.BundleRoot 'VirtuSphere-Package-ReporterHost.ps1') -Value '# damaged'
-        Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 5000 |
-            Should -BeNullOrEmpty
-    }
-
-    It 'returns on its deadline when the separate verifier is stuck before hashing' {
-        $original = ${function:Get-VsPackageVerifiedReporterBundle}
-        try {
-            Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value {
-                param([string]$PackageRoot)
-                [IO.File]::WriteAllText((Join-Path $PackageRoot 'verifier-pid.txt'), [string]$PID)
-                Start-Sleep -Seconds 30
-            }
-            # The deadline must be long enough for the child to reach the stuck
-            # stub even on a loaded host; a shorter one tests the start timeout
-            # instead and leaves no PID to prove the kill (release lane 28.09.).
+    # Windows only: these cases start the real job-bound child process.
+    if ($HasWindowsJobObjects) {
+        It 'verifies the bundle in a supervised child before exposing its host path' {
             $clock = [Diagnostics.Stopwatch]::StartNew()
-            Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 6000 |
-                Should -BeNullOrEmpty
+            $verified = Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 5000
             $clock.Stop()
-            $clock.ElapsedMilliseconds | Should -BeLessThan 7000
-            $pidFile = Join-Path $script:fixture.Root 'verifier-pid.txt'
-            Test-Path -LiteralPath $pidFile | Should -BeTrue -Because 'the child must have reached the stuck verifier before its deadline'
-            $childId = [int](Get-Content -LiteralPath $pidFile -Raw)
-            $endClock = [Diagnostics.Stopwatch]::StartNew()
-            while ((Get-Process -Id $childId -ErrorAction SilentlyContinue) -and $endClock.ElapsedMilliseconds -lt 1000) {
-                Start-Sleep -Milliseconds 25
+            $verified.BundleId | Should -Match '^[0-9a-f]{64}$'
+            @($verified.Files).Count | Should -Be 4
+            $clock.ElapsedMilliseconds | Should -BeLessThan 5500
+        }
+
+        It 'refuses a damaged generation through the supervised verifier' {
+            Add-Content -LiteralPath (Join-Path $script:fixture.BundleRoot 'VirtuSphere-Package-ReporterHost.ps1') -Value '# damaged'
+            Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 5000 |
+                Should -BeNullOrEmpty
+        }
+
+        It 'returns on its deadline when the separate verifier is stuck before hashing' {
+            $original = ${function:Get-VsPackageVerifiedReporterBundle}
+            try {
+                Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value {
+                    param([string]$PackageRoot)
+                    [IO.File]::WriteAllText((Join-Path $PackageRoot 'verifier-pid.txt'), [string]$PID)
+                    Start-Sleep -Seconds 30
+                }
+                # The deadline must be long enough for the child to reach the stuck
+                # stub even on a loaded host; a shorter one tests the start timeout
+                # instead and leaves no PID to prove the kill (release lane 28.09.).
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 6000 |
+                    Should -BeNullOrEmpty
+                $clock.Stop()
+                $clock.ElapsedMilliseconds | Should -BeLessThan 7000
+                $pidFile = Join-Path $script:fixture.Root 'verifier-pid.txt'
+                Test-Path -LiteralPath $pidFile | Should -BeTrue -Because 'the child must have reached the stuck verifier before its deadline'
+                $childId = [int](Get-Content -LiteralPath $pidFile -Raw)
+                $endClock = [Diagnostics.Stopwatch]::StartNew()
+                while ((Get-Process -Id $childId -ErrorAction SilentlyContinue) -and $endClock.ElapsedMilliseconds -lt 1000) {
+                    Start-Sleep -Milliseconds 25
+                }
+                Get-Process -Id $childId -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+            } finally {
+                Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value $original
             }
-            Get-Process -Id $childId -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
-        } finally {
-            Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value $original
         }
     }
 

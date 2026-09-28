@@ -16,6 +16,11 @@ BeforeAll {
     function Get-CMDistributionPoint { param($DistributionPointGroup, $ErrorAction) }
     function New-CMApplication { throw 'write was called' }
     function Copy-VsClientContent { throw 'write was called' }
+    # Pester can only mock a command that exists. Windows has the real cmdlet;
+    # pwsh on Linux (Fast lane) has none, so the provider query gets a stub there.
+    if (-not (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+        function Get-CimInstance { param($Namespace, $ClassName, $Filter, $ErrorAction) }
+    }
 }
 
 Describe 'MC02 read-only client preflight inventory' {
@@ -71,16 +76,17 @@ Describe 'MC02 read-only client preflight inventory' {
 
     It 'reads markers and content from a FileSystem location while a non-FileSystem drive is active' {
         # Initialize-VsCmSite leaves the session on the CM site drive; UNC paths
-        # only resolve from a FileSystem location. HKCU stands in for that drive.
+        # only resolve from a FileSystem location. Env: stands in for that drive
+        # because it exists on every engine (HKCU: has no Linux counterpart).
         foreach ($spec in @(Get-VsClientAppSpecs)) {
             New-Item -ItemType Directory -Path (Join-Path $script:sourceRoot $spec.Folder), (Join-Path $script:shareRoot $spec.Folder) -Force | Out-Null
         }
         $script:manifestProviders = @()
         Mock Compare-VsClientContentManifest { $script:manifestProviders += (Get-Location).Provider.Name; @() }
-        Push-Location -LiteralPath 'HKCU:\'
+        Push-Location -LiteralPath 'Env:\'
         try {
             $report = Get-VsClientPreflightReport -Config $script:config -Specs @(Get-VsClientAppSpecs) -ClientSourceDir $TestDrive -SiteCode 'PS1'
-            (Get-Location).Provider.Name | Should -Be 'Registry'
+            (Get-Location).Provider.Name | Should -Be 'Environment'
         } finally {
             Pop-Location
         }
@@ -115,7 +121,8 @@ Describe 'MC02 read-only client preflight inventory' {
     }
 
     It 'marks a missing UNC marker as blocking and never infers path identity from matching content' {
-        Remove-Item -LiteralPath (Join-Path $script:shareRoot '.virtusphere-source-identity')
+        # -Force: pwsh on Linux treats a dot file as hidden and would leave it.
+        Remove-Item -LiteralPath (Join-Path $script:shareRoot '.virtusphere-source-identity') -Force
         $report = Get-VsClientPreflightReport -Config $script:config -Specs @(Get-VsClientAppSpecs) -ClientSourceDir $TestDrive -SiteCode 'PS1'
         @($report.Findings | Where-Object { $_.Code -eq 'source_identity_unknown' -and $_.Target -eq 'unc' }).Count | Should -Be 1
         @($report.Findings | Where-Object Code -eq 'source_mapping_unverified').Count | Should -Be 1

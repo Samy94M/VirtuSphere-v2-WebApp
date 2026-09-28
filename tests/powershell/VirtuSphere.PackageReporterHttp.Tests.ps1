@@ -1,8 +1,9 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1')
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-ReporterHost.ps1')
-    $script:base = (Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json).base
+    $script:base = (Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson).base
     $snapshot = [pscustomobject]@{
         MacCandidates = @($script:base.mac_candidates)
         RolloutRevision = [int]$script:base.rollout_revision

@@ -41,6 +41,8 @@ function Write-VsLog { param($Level, $Context, $Message, $Color) Write-Host $Mes
 function Convert-VsWebApi { param($WebApi) $WebApi }
 function Get-VsLoggingContractVersion { 1 }
 function Get-VsDangerousFileSystemAclEntries { param($Acl) @() }
+# pwsh on Linux has no Get-Acl; the ACL verdict above is stubbed either way.
+if (-not (Get-Command Get-Acl -ErrorAction SilentlyContinue)) { function Get-Acl { param($Path, $LiteralPath, $ErrorAction) } }
 function Get-VsErrorDetail { param($ErrorRecord) [string]$ErrorRecord.Exception.Message }
 function Initialize-VsCmSite {
     param($Config)

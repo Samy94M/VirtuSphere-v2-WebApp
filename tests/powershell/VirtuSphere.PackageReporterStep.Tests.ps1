@@ -1,7 +1,8 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1')
-    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json
+    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson
     $script:base = $fixture.base
     $script:lateFailure = @($fixture.validation_cases | Where-Object { $_.name -eq 'first failure beyond normal detail limit' })[0].patch
     $script:snapshot = [pscustomobject]@{
@@ -39,7 +40,7 @@ Describe 'T4 bounded V1 step_result request' {
         $request.BodyBytes.Length | Should -BeLessOrEqual 65536
         $request.ReportEvent | Should -Be 'step_result'
         $request.EventSeq | Should -Be 301
-        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-VsTestJson
         $expected = @($script:base.PSObject.Properties.Name + @($script:lateFailure.PSObject.Properties.Name | Where-Object { $_ -notin @('event', 'event_seq') }) | Sort-Object)
         @($body.PSObject.Properties.Name | Sort-Object) | Should -Be $expected
         foreach ($property in $script:lateFailure.PSObject.Properties) {
@@ -50,7 +51,7 @@ Describe 'T4 bounded V1 step_result request' {
     It 'keeps absent optional details explicit null and zero child code distinct' {
         $request = New-TestStep -EventSeq 2 -StepIndex 1 -Result 'skip' -IsFirstFailure $false `
             -ErrorCategory $null -ChildExitCode 0 -DurationMs 0 -DetailPath $null
-        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-VsTestJson
         $body.error_category | Should -BeNullOrEmpty
         $body.detail_path | Should -BeNullOrEmpty
         $body.child_exit_code | Should -Be 0

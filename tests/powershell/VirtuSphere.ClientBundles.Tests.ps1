@@ -200,14 +200,16 @@ Describe 'MC03 four-content client bundle' {
     It 'uses FileSystem context and restores a non-FileSystem caller location' {
         $stage = New-TestStage -Root $script:CaseRoot
         $before = (Get-Location).Path
-        Push-Location HKCU:\
+        # Env: stands in for the CM site drive: a non-FileSystem drive that
+        # exists on every engine (HKCU: has no Linux counterpart).
+        Push-Location Env:\
         try {
-            $registryLocation = (Get-Location).Path
+            $callerLocation = (Get-Location).Path
             $result = Get-VsClientBundleValidation -Root $stage.StageRoot -Specs $stage.Specs -BundleId $stage.BundleId -BootstrapConfiguration @{
                 WebAPI = 'virtusphere.test:8021'; Scheme = 'https'; CertThumbprint = ('A' * 40)
             }
             $result.Status | Should -Be 'ready'
-            (Get-Location).Path | Should -BeExactly $registryLocation
+            (Get-Location).Path | Should -BeExactly $callerLocation
         } finally { Pop-Location }
         (Get-Location).Path | Should -BeExactly $before
     }

@@ -788,6 +788,10 @@ Describe 'Mitgliedschaften entfernt nur der Device-Sync, und nur mit Provenienz-
 # Ein Portal auf TLS 1.2+ haette die vier Aufgaben also mit einem Handshake-Fehler
 # stillgelegt, obwohl Scheme=https laengst konfigurierbar war und der Installer
 # gruen meldete: sein Probelauf bewies etwas, das seine Aufgaben nicht konnten.
+# Discovery-Zeit-Flag fuer die Registry-Faelle weiter unten: pwsh auf Linux hat
+# kein HKCU:, dort werden diese Faelle gar nicht erst definiert.
+$HasRegistry = Test-Path 'HKCU:\'
+
 Describe 'TLS-Vorbereitung der MECM-Aufgaben' {
     BeforeAll {
         # Ein echtes, kurzlebiges selbstsigniertes Zertifikat im Speicher. Kein
@@ -884,22 +888,26 @@ Describe 'TLS-Vorbereitung der MECM-Aufgaben' {
         $callback.Invoke($null, $null, $null, [System.Net.Security.SslPolicyErrors]::None) | Should -BeTrue
     }
 
-    It 'liest den Fingerabdruck aus der Registry-Konfiguration' {
-        # Get-VsConfig normalisiert Trennzeichen weg, damit ein aus certlm.msc
-        # kopierter Abdruck mit Leerzeichen genauso funktioniert.
-        $probe = 'HKCU:\Software\_vs_tls_' + [guid]::NewGuid().ToString('N')
-        New-Item -Path $probe -Force | Out-Null
-        try {
-            New-ItemProperty -Path $probe -Name 'VirtuSphere_WebAPI' -Value 'portal.lan:8443' -PropertyType String -Force | Out-Null
-            New-ItemProperty -Path $probe -Name 'CertThumbprint' -Value 'a1 b2:c3-d4 e5f6 0718293a4b5c6d7e8f9012345678' -PropertyType String -Force | Out-Null
-            $thumb = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($probe) -Body {
-                param($path)
-                $script:VsRegistryPath = $path
-                (Get-VsConfig).CertThumbprint
+    # Registry-Fall: nur auf Windows definiert (Registry-Provider), wie in
+    # VirtuSphere.ErrorPaths.Tests.ps1; der PS-5.1-CI-Job beweist ihn.
+    if ($HasRegistry) {
+        It 'liest den Fingerabdruck aus der Registry-Konfiguration' {
+            # Get-VsConfig normalisiert Trennzeichen weg, damit ein aus certlm.msc
+            # kopierter Abdruck mit Leerzeichen genauso funktioniert.
+            $probe = 'HKCU:\Software\_vs_tls_' + [guid]::NewGuid().ToString('N')
+            New-Item -Path $probe -Force | Out-Null
+            try {
+                New-ItemProperty -Path $probe -Name 'VirtuSphere_WebAPI' -Value 'portal.lan:8443' -PropertyType String -Force | Out-Null
+                New-ItemProperty -Path $probe -Name 'CertThumbprint' -Value 'a1 b2:c3-d4 e5f6 0718293a4b5c6d7e8f9012345678' -PropertyType String -Force | Out-Null
+                $thumb = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($probe) -Body {
+                    param($path)
+                    $script:VsRegistryPath = $path
+                    (Get-VsConfig).CertThumbprint
+                }
+                $thumb | Should -Be 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+            } finally {
+                Remove-Item -Path $probe -Recurse -Force -ErrorAction SilentlyContinue
             }
-            $thumb | Should -Be 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
-        } finally {
-            Remove-Item -Path $probe -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -1136,31 +1144,39 @@ Describe 'Intervall-Aufloesung (Resolve-VsInterval und ihre Spiegel)' {
         $range.Max | Should -Be $bounds.Ceiling
     }
 
-    It 'die Standardwerte von Installer und Get-VsConfig sind dieselben: <setting>' -ForEach @(
+    # Die Doku-Tabelle (docs/operations/mecm-integration.md) nennt dieselben
+    # Zahlen; der Installer ist die SSoT, Get-VsConfig nur der Notnagel.
+    $intervalDefaults = @(
         @{ setting = 'DeviceSyncIntervalSeconds';   property = 'DeviceSyncInterval';   expected = 10 }
         @{ setting = 'PackagesSyncIntervalSeconds'; property = 'PackagesSyncInterval'; expected = 60 }
         @{ setting = 'ImporterIntervalSeconds';     property = 'ImporterInterval';     expected = 60 }
         @{ setting = 'SiteHealthIntervalSeconds';   property = 'SiteHealthInterval';   expected = 300 }
-    ) {
-        # Die Doku-Tabelle (docs/operations/mecm-integration.md) nennt dieselben
-        # Zahlen; der Installer ist die SSoT, Get-VsConfig nur der Notnagel.
+    )
+
+    It 'der Installer-Standardwert ist der dokumentierte: <setting>' -ForEach $intervalDefaults {
         $default = (Get-InstallerParameter -Name $setting).DefaultValue.Extent.Text
         [int]$default | Should -Be $expected
+    }
 
-        $fallback = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($property) -Body {
-            param($prop)
-            $script:VsRegistryPath = 'HKCU:\Software\_vs_interval_absent_' + [guid]::NewGuid().ToString('N')
-            # Ohne VirtuSphere_WebAPI liefert Get-VsConfig $null; der Fallback
-            # wird deshalb ueber einen Schluessel MIT Adresse und OHNE Intervall
-            # gelesen.
-            New-Item -Path $script:VsRegistryPath -Force | Out-Null
-            New-ItemProperty -Path $script:VsRegistryPath -Name 'VirtuSphere_WebAPI' `
-                -Value 'virtusphere.lan:8021' -PropertyType String -Force | Out-Null
-            $value = (Get-VsConfig).$prop
-            Remove-Item -Path $script:VsRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
-            $value
+    # Der Get-VsConfig-Notnagel liest die Registry: nur auf Windows definiert,
+    # der PS-5.1-CI-Job beweist ihn.
+    if ($HasRegistry) {
+        It 'Get-VsConfig faellt auf denselben Standardwert zurueck: <setting>' -ForEach $intervalDefaults {
+            $fallback = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($property) -Body {
+                param($prop)
+                $script:VsRegistryPath = 'HKCU:\Software\_vs_interval_absent_' + [guid]::NewGuid().ToString('N')
+                # Ohne VirtuSphere_WebAPI liefert Get-VsConfig $null; der Fallback
+                # wird deshalb ueber einen Schluessel MIT Adresse und OHNE Intervall
+                # gelesen.
+                New-Item -Path $script:VsRegistryPath -Force | Out-Null
+                New-ItemProperty -Path $script:VsRegistryPath -Name 'VirtuSphere_WebAPI' `
+                    -Value 'virtusphere.lan:8021' -PropertyType String -Force | Out-Null
+                $value = (Get-VsConfig).$prop
+                Remove-Item -Path $script:VsRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+                $value
+            }
+            $fallback | Should -Be $expected
         }
-        $fallback | Should -Be $expected
     }
 
     It 'jeder Setting-Name der Tabelle ist ein echter Installer-Parameter' {

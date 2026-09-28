@@ -10,7 +10,7 @@ Für einen neuen Betreiber ist die Lesereihenfolge bewusst betrieblich, nicht na
 
 1. [Go-live](docs/operations/go-live.md): erste produktive Inbetriebnahme und Reihenfolge der Entscheidungen.
 2. [Störungsdiagnose](docs/operations/troubleshooting.md): vom Symptom zur Portal-Seite, Log-Kategorie und ersten Maßnahme.
-3. [Bereitstellungskette](docs/operations/deploy-chain.md): Übergaben und Rückkanäle von Portal über Ansible/ESXi und MECM bis zum Client.
+3. [Bereitstellungskette](docs/operations/deploy-chain.md): Übergaben und Rückkanäle von Portal über Ansible/ESXi und MECM bis zum Client. Als Ablaufdiagramme: [Bereitstellungsmodi und Playbooks](docs/operations/deploy-flows.md) und [Systemstatus-Prüfungen](docs/operations/system-status-checks.md).
 4. [Glossar](docs/GLOSSARY.md): Statusstufen, Auftragszustände, MECM-Provenienz, VM-Identität und Korrelations-ID.
 
 Danach führen die spezialisierten Betriebshandbücher weiter:

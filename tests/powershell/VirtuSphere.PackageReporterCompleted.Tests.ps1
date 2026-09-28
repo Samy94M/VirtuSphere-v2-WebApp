@@ -1,7 +1,8 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1')
-    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json
+    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson
     $script:base = $fixture.base
     $script:complete = @($fixture.validation_cases | Where-Object { $_.name -eq 'completed carries reserved failure and wrapper core' })[0].patch
     $script:snapshot = [pscustomobject]@{
@@ -45,7 +46,7 @@ Describe 'T4 bounded V1 completed request' {
         $request.BodyBytes.Length | Should -BeLessOrEqual 65536
         $request.ReportEvent | Should -Be 'completed'
         $request.EventSeq | Should -Be 302
-        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-VsTestJson
         $expected = @($script:base.PSObject.Properties.Name + @($script:complete.PSObject.Properties.Name | Where-Object { $_ -notin @('event', 'event_seq') }) | Sort-Object)
         @($body.PSObject.Properties.Name | Sort-Object) | Should -Be $expected
         foreach ($property in $script:complete.PSObject.Properties) {
@@ -60,7 +61,7 @@ Describe 'T4 bounded V1 completed request' {
         $request = New-TestCompletion -WrapperResult 'failed' -WrapperExitCode 1 -DetectionResult 'failed' `
             -ProcessedCount 1 -OkCount 1 -SkipCount 0 -FailCount 0 -LastProcessedIndex 1 `
             -FirstFailure $null -PayloadOmittedCount 0 -WrapperLogPath $null -ReportingLogPath $null
-        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-Json
+        $body = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-VsTestJson
         $body.first_failure | Should -BeNullOrEmpty
         $body.wrapper_log_path | Should -BeNullOrEmpty
         $body.reporting_log_path | Should -BeNullOrEmpty

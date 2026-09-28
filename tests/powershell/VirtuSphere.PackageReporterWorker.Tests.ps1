@@ -1,8 +1,9 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1')
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-ReporterHost.ps1')
-    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json
+    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson
     $script:base = $fixture.base
     $script:step = @($fixture.validation_cases | Where-Object name -eq 'first failure beyond normal detail limit')[0].patch
     $script:completion = @($fixture.validation_cases | Where-Object name -eq 'completed carries reserved failure and wrapper core')[0].patch
@@ -66,7 +67,7 @@ Describe 'T4 isolated worker builds only the frozen V1 run sequence' {
         $endAnswer.confirmed | Should -BeTrue
         @($script:requests | ForEach-Object ReportEvent) | Should -Be @('started', 'step_result', 'completed')
         @($script:requests | ForEach-Object EventSeq) | Should -Be @(1, 301, 302)
-        $lastBody = [Text.Encoding]::UTF8.GetString($script:requests[2].BodyBytes) | ConvertFrom-Json
+        $lastBody = [Text.Encoding]::UTF8.GetString($script:requests[2].BodyBytes) | ConvertFrom-VsTestJson
         $lastBody.first_failure.step_index | Should -Be 300
         $lastBody.payload_omitted_count | Should -Be 43
         Should -Invoke Get-VsPackageReportSnapshot -Exactly 1
@@ -81,16 +82,18 @@ Describe 'T4 isolated worker builds only the frozen V1 run sequence' {
     }
 
     It 'accepts a JSON-roundtripped wrapper hash-skip event' {
+        # The host parses each pipe line on Windows PowerShell 5.1, where ISO
+        # timestamps stay strings; ConvertFrom-VsTestJson reproduces that here.
         $state = New-WorkerState
         $start = [pscustomobject]@{ event = 'started'; event_seq = 1; run_id = $script:base.run_id;
             project_name = $script:base.project_name; package_version = $script:base.package_version;
             client_started_at = $script:base.client_started_at; event_at = $script:base.event_at;
             context = 'system'; total = 2 }
-        $null = Invoke-VsPackageReportWorkerMessage -State $state -Message ($start | ConvertTo-Json -Compress | ConvertFrom-Json)
+        $null = Invoke-VsPackageReportWorkerMessage -State $state -Message ($start | ConvertTo-Json -Compress | ConvertFrom-VsTestJson)
         $skip = [pscustomobject]@{ event = 'step_result'; event_seq = 2; event_at = $script:base.event_at;
             step_index = 1; script_name = '01.ps1'; result = 'skip'; is_first_failure = $false;
             error_category = 'hash_match'; child_exit_code = $null; duration_ms = 5; detail_path = $null }
-        $answer = Invoke-VsPackageReportWorkerMessage -State $state -Message ($skip | ConvertTo-Json -Compress | ConvertFrom-Json)
+        $answer = Invoke-VsPackageReportWorkerMessage -State $state -Message ($skip | ConvertTo-Json -Compress | ConvertFrom-VsTestJson)
         $answer.reason | Should -Be 'accepted'
         $answer.attempted | Should -BeTrue
     }

@@ -52,6 +52,10 @@ Describe 'T4 package reporter reads one frozen published client identity' {
             $global:VsReporterSnapshotFixture.ChildReads++
             @($global:VsReporterSnapshotFixture.Macs | ForEach-Object { [pscustomobject]@{ Name = $_ } })
         }
+        # Join-Path needs the HKLM: drive to exist, and pwsh on Linux has none, so
+        # the reader would stop at its first path and every null case would pass
+        # for the wrong reason. The registry provider joins with one backslash.
+        Mock Join-Path { '{0}\{1}' -f ([string]$Path).TrimEnd('\'), [string]$ChildPath } -ParameterFilter { [string]$Path -like 'HKLM:\*' }
         Mock Invoke-RestMethod { throw 'report snapshot must not probe health' }
         Mock New-ItemProperty { throw 'report snapshot must not write the registry' }
         Mock Write-Debug { $global:VsReporterSnapshotFixture.ErrorText = [string]$Message }

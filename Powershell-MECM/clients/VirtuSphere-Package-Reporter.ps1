@@ -147,6 +147,10 @@ function New-VsPackageReportStepRequest {
             -EventAt $EventAt -Context $Context -Total $Total
         if ($null -eq $started) { return $null }
         $body = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($started.BodyBytes)) -ErrorAction Stop
+        # pwsh 7 reads the ISO strings back as DateTime; the validated originals
+        # keep the wire format identical on every engine.
+        $body.client_started_at = $ClientStartedAt
+        $body.event_at = $EventAt
         $body.event = 'step_result'
         $body.event_seq = $EventSeq
         $stepFields = [ordered]@{
@@ -262,6 +266,10 @@ function New-VsPackageReportCompletedRequest {
             -EventAt $EventAt -Context $Context -Total $Total
         if ($null -eq $started) { return $null }
         $body = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($started.BodyBytes)) -ErrorAction Stop
+        # pwsh 7 reads the ISO strings back as DateTime; the validated originals
+        # keep the wire format identical on every engine.
+        $body.client_started_at = $ClientStartedAt
+        $body.event_at = $EventAt
         $body.event = 'completed'
         $body.event_seq = $EventSeq
         $completionFields = [ordered]@{
@@ -335,7 +343,7 @@ function Resolve-VsPackageReportAcknowledgement {
         foreach ($property in $properties) {
             if ($keys -cnotcontains $property.Name) { return $unconfirmed }
         }
-        if ($body.schema_version -isnot [int] -or $body.schema_version -ne $script:VsPackageReportSchemaVersion) { return $unconfirmed }
+        if (($body.schema_version -isnot [int] -and $body.schema_version -isnot [long]) -or $body.schema_version -ne $script:VsPackageReportSchemaVersion) { return $unconfirmed }
         if ($body.run_id -isnot [string] -or $body.run_id -cne $RunId) { return $unconfirmed }
         if ($body.event -isnot [string] -or $body.event -cne $ReportEvent) { return $unconfirmed }
         if (($body.event_seq -isnot [long] -and $body.event_seq -isnot [int]) -or [long]$body.event_seq -ne $EventSeq) { return $unconfirmed }

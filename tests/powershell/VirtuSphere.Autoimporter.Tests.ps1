@@ -190,9 +190,9 @@ BeforeAll {
         function Get-ChildItem {
             param($Path, [switch]$Directory)
             return @(
-                [pscustomobject]@{ Name = 'broken'; FullName = 'C:\fixture\files\broken' },
-                [pscustomobject]@{ Name = 'agent'; FullName = 'C:\fixture\files\agent' },
-                [pscustomobject]@{ Name = 'beta'; FullName = 'C:\fixture\files\beta' }
+                [pscustomobject]@{ Name = 'broken'; FullName = (Join-Path $basePath 'broken') },
+                [pscustomobject]@{ Name = 'agent'; FullName = (Join-Path $basePath 'agent') },
+                [pscustomobject]@{ Name = 'beta'; FullName = (Join-Path $basePath 'beta') }
             )
         }
         function Read-VsPackageConfig {
@@ -281,9 +281,12 @@ BeforeAll {
         function Write-Host { param($Object, $ForegroundColor) }
         function Start-Sleep { param($Seconds) }
 
-        $config = [pscustomobject]@{ PackagesRoot = 'C:\fixture'; PackagesShare = '\\fixture\packages' }
-        $basePath = 'C:\fixture\files'
-        $templatePath = 'C:\fixture\Package_Vorlage'
+        # A root Join-Path accepts on every engine: pwsh on Linux has no C: drive.
+        # Nothing below touches it; Test-Path and Get-ChildItem are stubbed.
+        $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) 'fixture'
+        $config = [pscustomobject]@{ PackagesRoot = $fixtureRoot; PackagesShare = '\\fixture\packages' }
+        $basePath = Join-Path $fixtureRoot 'files'
+        $templatePath = Join-Path $fixtureRoot 'Package_Vorlage'
         $networkPath = $config.PackagesShare
         $appFolderName = $script:VsApplicationsFolderName
         $dpGroupName = 'DP-Fixture'
