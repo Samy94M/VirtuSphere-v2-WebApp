@@ -1976,6 +1976,12 @@ Quellmanifest:
 
 ### PC01 bis PC04: Powercycle pro VM
 
+Fortschreibung 28.09.2026: PC02 und PC03 sind seit `ae55493` geschlossen und auf
+`main` veröffentlicht. PC04 bleibt offen, rot ist allein die fehlende
+UX02-Visual-Baseline; Details im
+[Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md), Fortschreibung
+27.09.2026. Der folgende Abschnitt ist der historische Stand vom 14.09.
+
 Status 14.09.2026: **PC01 und PC02 lokal umgesetzt und offline nachgewiesen;
 PC03 und PC04 offen.** Der kanonische Powercycle-Ablauf bestand 14/14 Fälle,
 darunter 15 vollständige sequenzielle Zyklen und eine real gemessene

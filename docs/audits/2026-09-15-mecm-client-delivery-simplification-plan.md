@@ -771,6 +771,8 @@ Portal-Help bleibt kurz und auf Fehlersuche ausgerichtet. Tiefe CM-Schritte lebe
 
 ## Arbeitspakete
 
+Stand 28.09.2026: MC00 ist erledigt. MC01, der lesende Teil von MC02 (`CanApply` bleibt bewusst `false`) und MC04 sind als `a15938d`, `5d8b6ff` und `9139971` auf `main` veröffentlicht; ihre Site-Abnahme steht aus. Als Nächstes folgt MC03. Paketimport und Paketwechsel je VM besitzt der [Autoimporter-Plan](2026-09-28-autoimporter-version-model-plan.md).
+
 ### MC00 – Offenen Betriebsentscheid schließen (erledigt 27.09.2026)
 
 - Q1 zwischen „nach explizitem Transfer so bald wie MECM zulässt“ und „Wartungsfenster ist Pflicht“ bestätigen. **Erledigt:** Variante A.

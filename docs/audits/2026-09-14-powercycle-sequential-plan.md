@@ -94,6 +94,11 @@ Prüfergebnisse liegen unter `qa-artifacts/powercycle-sequential/`.
     im Full-Modus überspringt `identity_unbound_allowed` ihn. Die Auflösung
     gehört zur gemeinsamen Identitätsprüfung im
     [VM-Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16.
+    **Erledigt am 28.09.2026 mit IDR-P02 (`9a33073`):** Die Serverliste wird
+    nach dem Create-Abschnitt neu geschrieben, `identity_unbound_allowed` ist
+    entfernt; eine Namensdublette scheitert jetzt am UUID-Vergleich. Offen
+    bleibt nur die einheitliche UUID-Suche in allen Playbooks (Identitätsplan
+    16.2), damit statt des Abbruchs die richtige VM gefunden wird.
   - Die geschlossene 8R-O-Registry in `lib/remote_step_policy.php` beschreibt
     Powercycle als `stop_requested → stopped_verified → start_requested →
     started_verified` mit Nachweis `uuid_or_moid`. Tatsächlich läuft
