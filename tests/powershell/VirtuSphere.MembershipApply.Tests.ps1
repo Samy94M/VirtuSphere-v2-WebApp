@@ -231,4 +231,13 @@ Describe 'Device sync membership apply contract (D-01)' {
         $membershipRevision | Should -BeGreaterThan $staleRemoval
         $resourceRevision | Should -BeGreaterThan $membershipRevision
     }
+
+    It 'reports the transfer generation it read, including zero, back with the ResourceID (AV-P0)' {
+        $script:DeviceSyncSource | Should -Match '\$transferGeneration = \$device\.transfer_generation'
+        $send = $script:DeviceSyncSource.IndexOf("`$updateBody['transfer_generation'] = [long]`$transferGeneration")
+        $send | Should -BeGreaterThan $script:DeviceSyncSource.IndexOf("`$updateBody['rollout_revision']")
+        # Generation 0 is a real value: a truthiness test would drop it and turn
+        # the callback into a legacy one that clears any queued transfer.
+        $script:DeviceSyncSource | Should -Not -Match 'if \(\$transferGeneration\)'
+    }
 }

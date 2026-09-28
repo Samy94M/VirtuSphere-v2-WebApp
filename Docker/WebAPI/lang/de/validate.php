@@ -109,7 +109,7 @@ return [
     'deploy_schedule_horizon' => 'Der letzte Startzeitpunkt liegt jenseits des :days-Tage-Planungshorizonts.',
     'deploy_scope_vm_limit' => 'Ein Auftrag darf höchstens :max VMs umfassen, ausgewählt sind :count. Teilen Sie die Auswahl in mehrere Aufträge auf.',
     'deploy_scope_interface_limit' => 'Die VM :name besitzt :count Netzwerkkarten, unterstützt werden höchstens :max.',
-    'deploy_stagger_mode' => 'Staffelung ist nur in den Modi Full, Power-Cycle und Start möglich.',
+    'deploy_stagger_mode' => 'Staffelung ist nur in den Modi :modes möglich.',
     'deploy_stagger_range' => 'Der Staffelabstand muss zwischen :min und :max Minuten liegen.',
     'esxi_certificate_invalid' => 'Das ESXi-Zertifikat ist kein gültiges PEM-Zertifikat bzw. CA-Bundle.',
     'esxi_strict_https' => 'Die strikte ESXi-Zertifikatsprüfung erfordert eine HTTPS-Host-URL.',

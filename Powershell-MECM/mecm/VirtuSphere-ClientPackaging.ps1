@@ -178,6 +178,7 @@ function Get-VsClientAppSpecs {
             Role            = 'internal_dependency'
             RunAs32Bit      = $false
             DetectionIs32Bit = $false
+            MaximumRuntimeMins = 15
             DetectionKey    = 'SOFTWARE\VirtuSphere'
             DetectionName   = 'SetupState'
             DetectionValues = @('complete')
@@ -200,6 +201,7 @@ function Get-VsClientAppSpecs {
             Role            = 'internal_dependency'
             RunAs32Bit      = $false
             DetectionIs32Bit = $false
+            MaximumRuntimeMins = 15
             DetectionKey    = 'SOFTWARE\VirtuSphere\HostnameUpdate'
             DetectionName   = 'Status'
             # Zwei Erfolgswerte: 'Erfolgreich' (umbenannt/bereits korrekt) und
@@ -225,6 +227,7 @@ function Get-VsClientAppSpecs {
             Role            = 'internal_dependency'
             RunAs32Bit      = $false
             DetectionIs32Bit = $false
+            MaximumRuntimeMins = 15
             DetectionKey    = 'SOFTWARE\VirtuSphere\VMDiskManagement'
             DetectionName   = 'VMDisksOnlineStatus'
             DetectionValues = @('Success')
@@ -247,6 +250,7 @@ function Get-VsClientAppSpecs {
             Role            = 'deployable_entry'
             RunAs32Bit      = $false
             DetectionIs32Bit = $false
+            MaximumRuntimeMins = 15
             DetectionKey    = 'SOFTWARE\VirtuSphere\staticip'
             DetectionName   = 'installed'
             DetectionValues = @('1')
@@ -277,6 +281,10 @@ function Assert-VsClientAppSpecGraph {
             elseif ($spec.Role -ne 'internal_dependency') { throw ("Client-App '{0}' hat eine unbekannte Rolle." -f $name) }
             if ($spec.RunAs32Bit -ne $false -or $spec.DetectionIs32Bit -ne $false) {
                 throw ("Client-App '{0}' verletzt den 64-Bit-Vertrag." -f $name)
+            }
+            # MECM akzeptiert fuer Applications keine Maximum Runtime unter 15 Minuten.
+            if (-not $spec.PSObject.Properties['MaximumRuntimeMins'] -or $spec.MaximumRuntimeMins -isnot [int] -or $spec.MaximumRuntimeMins -lt 15) {
+                throw ("Client-App '{0}' braucht eine ganzzahlige Maximum Runtime von mindestens 15 Minuten." -f $name)
             }
             $expectedFiles = @($spec.Script, 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
             if (@(Compare-Object -ReferenceObject $expectedFiles -DifferenceObject @($spec.RequiredFiles)).Count -gt 0) {
@@ -396,6 +404,15 @@ function Get-VsClientDeploymentTypeContractIssues {
         if (-not $matched) { $issues += ('definition:{0}' -f $expected) }
     }
     if (@($values | Where-Object { $_ -in @('InstallForSystem', 'System') }).Count -eq 0) { $issues += 'installation-context-system' }
+    # Installer-Argumente tragen die SDK-Eigenschaftsnamen des ScriptInstallers
+    # (MaxExecuteTime, RunAs32Bit). Fehlt die Laufzeit oder ist sie mehrdeutig,
+    # ist sie unbekannt und blockiert; eine fehlende 32-Bit-Angabe ist der
+    # native Standard, jeder andere Wert als "false" blockiert.
+    $runtimeArgs = @($xml.SelectNodes("//*[local-name()='Arg'][@Name='MaxExecuteTime']"))
+    if ($runtimeArgs.Count -ne 1 -or ([string]$runtimeArgs[0].InnerText).Trim() -cne [string]$Spec.MaximumRuntimeMins) { $issues += 'maximum-runtime' }
+    foreach ($bitnessArg in @($xml.SelectNodes("//*[local-name()='Arg'][@Name='RunAs32Bit']"))) {
+        if (([string]$bitnessArg.InnerText).Trim() -ne 'false') { $issues += 'run-as-32bit'; break }
+    }
     if (@($Spec.DetectionValues).Count -gt 1 -and $rawXml -notmatch '(?i)\bOR\b') { $issues += 'detection-connector-or' }
 
     foreach ($expectedCode in @($Spec.ReturnCodes)) {

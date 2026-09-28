@@ -20,6 +20,42 @@ Describe 'T4 reporter process starts suspended inside its private kill-on-close 
         Start-VsPackageReporterJobProcess -ScriptPath $scriptPath -PipeName 'bad' | Should -BeNullOrEmpty
     }
 
+    It 'does not probe a verified package host path synchronously in the wrapper' {
+        $scriptPath = Join-Path $TestDrive 'missing-package-host.ps1'
+        $pipeName = 'virtusphere-report-' + ([guid]::NewGuid()).ToString('N')
+        Mock Test-Path {
+            if ($LiteralPath -like '*missing-package-host.ps1') {
+                throw 'A package filesystem probe ran on the wrapper thread.'
+            }
+            return $true
+        }
+        $job = $null
+        try {
+            # A missing host is allowed to fail in its private job, where the
+            # bounded ready handshake can disable reporting without blocking
+            # the installation on an unbounded package filesystem operation.
+            $job = Start-VsPackageReporterJobProcess -ScriptPath $scriptPath -PipeName $pipeName
+            $job | Should -Not -BeNullOrEmpty
+            Should -Invoke Test-Path -Times 0 -Exactly -ParameterFilter {
+                $LiteralPath -eq $scriptPath
+            }
+        } finally {
+            if ($null -ne $job) { $job.Dispose() }
+        }
+    }
+
+    It 'disables a missing verified host within the bounded ready handshake' {
+        $scriptPath = Join-Path $TestDrive 'missing-bundle-host/VirtuSphere-Package-ReporterHost.ps1'
+        $bundle = [pscustomobject]@{
+            Root = Split-Path $scriptPath -Parent
+            Files = @($scriptPath)
+        }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        Start-VsPackageReporterPipeSession -VerifiedBundle $bundle -TimeoutMs 1000 | Should -BeNullOrEmpty
+        $clock.Stop()
+        $clock.ElapsedMilliseconds | Should -BeLessThan 2000
+    }
+
     It 'terminates only its worker when the wrapper closes the job handle' {
         $scriptPath = Join-Path $TestDrive 'worker.ps1'
         $markerPath = Join-Path $TestDrive 'worker-started.txt'

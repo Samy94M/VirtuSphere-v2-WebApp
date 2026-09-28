@@ -94,6 +94,11 @@ Prüfergebnisse liegen unter `qa-artifacts/powercycle-sequential/`.
     im Full-Modus überspringt `identity_unbound_allowed` ihn. Die Auflösung
     gehört zur gemeinsamen Identitätsprüfung im
     [VM-Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16.
+    **Erledigt am 28.09.2026 mit IDR-P02 (`9a33073`):** Die Serverliste wird
+    nach dem Create-Abschnitt neu geschrieben, `identity_unbound_allowed` ist
+    entfernt; eine Namensdublette scheitert jetzt am UUID-Vergleich. Offen
+    bleibt nur die einheitliche UUID-Suche in allen Playbooks (Identitätsplan
+    16.2), damit statt des Abbruchs die richtige VM gefunden wird.
   - Die geschlossene 8R-O-Registry in `lib/remote_step_policy.php` beschreibt
     Powercycle als `stop_requested → stopped_verified → start_requested →
     started_verified` mit Nachweis `uuid_or_moid`. Tatsächlich läuft
@@ -107,6 +112,19 @@ Prüfergebnisse liegen unter `qa-artifacts/powercycle-sequential/`.
     Modusnamen stehen in `lang/de/mission_details.php` („Full Pipeline“,
     „Power-Cycle + Export MACs“), `validate.php` und `deploy.php`
     (`stagger_hint`); EN-Hilfe und EN-Modusname weichen voneinander ab.
+    **Erledigt am 28.09.2026:** Ursache der Abweichung war die Modusauswahl im
+    Deploy-Formular, die die unlokalisierten technischen Texte aus
+    `virtusphere_deploy_mode_labels()` zeigte („Power-Cycle + Export MACs“
+    auch im deutschen Portal). Sie zeigt jetzt dieselben Namen wie Jobliste und
+    Status (`deploy_mode_label()`). Der DE-Name lautet „Ein- und ausschalten mit
+    MAC-Export“. Moduslisten in Hinweis-, Validierungs- und Hilfetexten
+    (Staffelung, WDS-Portgruppe, beide Wartezeiten, Netzwerkvertrag) sind
+    `:modes`-Platzhalter aus denselben Prädikaten, die das Verhalten
+    entscheiden. `DeployModeTextTest` leitet alle Listen daraus ab, verbietet
+    von Hand genannte Modusnamen außerhalb dieser Listen und jeden technischen
+    Namen, der vom lokalisierten abweicht; er fand zusätzlich den englischen
+    Autostart-Namen in der deutschen Missionshilfe. 8R-O-Registry und
+    Mindestdauer-Hinweis bleiben unbeauftragt offen.
 - Nächster direkter Schritt: Baseline-Writer durch den Nutzer, danach Fast
   vollständig; Integration, Release und ESXi-Lab bleiben getrennte Abnahmen.
 

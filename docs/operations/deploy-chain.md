@@ -15,6 +15,8 @@ Dieses Runbook beschreibt jeden Sprung eines vollständigen Deploys: Wer löst i
 | MECM → PXE-VM | Collection/Task Sequence ist bereit und VM startet | MECM-Status plus Portalstufe 4/5 | Windows-Client meldet Phasen an `mecm_report.php` | Verteilung noch nicht erfolgreich, falsche Task Sequence, PXE-/Netzproblem |
 | Windows-Client → Portal | Clientphasen versuchen `started`, `finished` oder `failed` anhand der MAC best effort zu melden | **VM bearbeiten → Client-Phasen** mit dem letzten eingetroffenen Event; fehlende Events sind kein Fachnachweis | Report-Endpoint speichert ausschließlich Telemetrie; keine Lifecycle-Schreibabkürzung und keine Outbox | API nicht erreichbar, Zertifikatswechsel/Pin, kein passender Adapter oder Datenträger |
 
+Was Device-Sync, Paket-Sync und Autoimporter auf dem MECM-Server Schritt für Schritt tun, zeigen die Diagramme in [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md).
+
 ## Aktiver Transport und vorbereiteter Durable Runner
 
 Der aktive Produktpfad ist weiterhin die in der Tabelle beschriebene direkte

@@ -13,7 +13,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_blockers_p2')); ?></p>
             <h3 id="help-network-contract" tabindex="-1"><?php echo h(__t('help_deploy.network_contract_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.network_contract_p1')); ?></p>
-            <p><?php echo h(__t('help_deploy.network_contract_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.network_contract_p2', deploy_network_contract_mode_lists())); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p4', ['vms' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS, 'nics' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_p1')); ?></p>
@@ -46,7 +46,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_terminal_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_terminal_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_powercycle_wait_heading')); ?></h3>
-            <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1', ['modes' => deploy_mode_label_list(ansible_modes_using_powercycle())])); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_start_wait_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_start_wait_p1', [
                 'default' => VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT,
@@ -58,6 +58,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_start_wait_p2', [
                 'max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX,
                 'idle' => VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS,
+                'modes' => deploy_mode_label_list(ansible_modes_using_start()),
             ])); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_transport_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_transport_p1', [
@@ -76,7 +77,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.deploy_schedule_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_schedule_p1')); ?></p>
-            <p><?php echo h(__t('help_deploy.deploy_schedule_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_schedule_p2', ['modes' => deploy_mode_label_list(VIRTUSPHERE_DEPLOY_STAGGER_MODES)])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_schedule_p3')); ?></p>
         </section>
 

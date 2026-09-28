@@ -22,6 +22,7 @@ BeforeAll {
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
     $script:ClientPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPreflight.ps1') -Raw
     $script:LegacyRetirement = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-LegacyRetirement.ps1') -Raw
+    $script:ClientBundles = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientBundles.ps1') -Raw
     $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
     $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
@@ -45,6 +46,14 @@ Describe 'Visible progress reporting contract' {
         $script:ClientPreflight | Should -Match '\[0/\$\(\$points.Count\)\] RUN distribution-points'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] RUN distribution-point'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] DONE distribution-point'
+    }
+
+    It 'reports each client bundle folder build with a total derived from the specs' {
+        $script:ClientBundles | Should -Match "'\[0/\{0\}\] RUN client-bundle-content' -f \`$specs.Count"
+        foreach ($result in @('RUN', 'DONE', 'FAIL')) {
+            $script:ClientBundles | Should -Match ("'\[\{0\}/\{1\}\] $result client-bundle \{2\}' -f \`$ordinal, \`$specs.Count")
+        }
+        $script:ClientBundles | Should -Not -Match '\[\{0\}/4\]|\[0/4\]'
     }
 
     It 'reports each legacy retirement read and each guarded write' {

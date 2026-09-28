@@ -243,6 +243,10 @@ while ($true) {
                 $deviceName = [string]$device.vm_name
                 $rolloutName = [string]$device.vm_hostname
                 $rolloutRevision = $device.rollout_revision
+                # AV-P0: Uebertragungszaehler dieses Lesevorgangs. updateDevice
+                # meldet ihn zurueck, damit das Portal nur genau diese
+                # Uebertragung aus der Warteschlange nimmt.
+                $transferGeneration = $device.transfer_generation
                 $boundResourceId = if ($device.mecm_id) { "$($device.mecm_id)" } else { '' }
                 $previousResourceId = if ($device.previous_resource_id) { "$($device.previous_resource_id)" } else { '' }
                 $deviceOS = [string]$device.vm_os
@@ -743,6 +747,9 @@ while ($true) {
                         deviceid         = $device.id
                     }
                     if ($rolloutRevision) { $updateBody['rollout_revision'] = [int]$rolloutRevision }
+                    # 0 ist ein gueltiger Zaehlerstand; nur ein fehlendes Feld
+                    # (Portal vor AV-P0) bleibt weg.
+                    if ($null -ne $transferGeneration -and "$transferGeneration" -ne '') { $updateBody['transfer_generation'] = [long]$transferGeneration }
                     Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body $updateBody | Out-Null
                 } catch {
                     $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)

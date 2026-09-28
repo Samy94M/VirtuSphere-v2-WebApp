@@ -34,6 +34,7 @@ $script:VsPackageRunStartedUtc = [DateTime]::UtcNow
 $script:VsPackageRunStamp = $script:VsPackageRunStartedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
 $script:VsPackageReporterSession = $null
 $script:VsPackageReporterActiveClock = New-Object Diagnostics.Stopwatch
+$script:VsPackageReporterPhaseMs = @{ verifier = 0; host_start = 0; ipc = 0; teardown = 0 }
 $script:VsPackageReporterDisableReason = 'not_initialized'
 $script:VsPackageReporterNextSeq = 2
 $script:VsPackageReporterOmittedCount = 0
@@ -134,12 +135,18 @@ function Get-VsPackageVerifiedReporterBundle {
 # suspended child. The wrapper alone retains the non-inherited job handle.
 function Start-VsPackageReporterJobProcess {
     param(
-        [Parameter(Mandatory)][string]$ScriptPath,
-        [Parameter(Mandatory)][string]$PipeName
+        [string]$ScriptPath,
+        [Parameter(Mandatory)][string]$PipeName,
+        [string]$VerifierCode
     )
 
-    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z' -or
-        -not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { return $null }
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z') { return $null }
+    # The bundle verifier already authenticated this package path. Do not
+    # reopen its filesystem on the installation thread: a missing/unreadable
+    # host must fail inside its private job and bounded ready handshake.
+    if (-not $VerifierCode -and
+        ([string]::IsNullOrWhiteSpace($ScriptPath) -or
+         $ScriptPath.IndexOfAny([char[]]@(0, 10, 13, 34)) -ge 0)) { return $null }
     $powerShellPath = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { return $null }
     try {
@@ -224,6 +231,15 @@ namespace VirtuSphere {
             return process != IntPtr.Zero && GetNamedPipeClientProcessId(pipe, out pid) && pid == ProcessId;
         }
         public static PackageReporterJobProcess Start(string exe, string script, string pipeName) {
+            string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -File \"" +
+                script + "\" -VsReporterPipeName " + pipeName;
+            return StartInternal(exe, args);
+        }
+        public static PackageReporterJobProcess StartEncoded(string exe, string code) {
+            string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -EncodedCommand " + code;
+            return StartInternal(exe, args);
+        }
+        private static PackageReporterJobProcess StartInternal(string exe, string args) {
             IntPtr jobHandle = IntPtr.Zero;
             PROCESS_INFORMATION child = new PROCESS_INFORMATION();
             bool created = false;
@@ -237,8 +253,6 @@ namespace VirtuSphere {
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 STARTUPINFO startup = new STARTUPINFO();
                 startup.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
-                string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -File \"" +
-                    script + "\" -VsReporterPipeName " + pipeName;
                 if (!CreateProcessW(exe, new StringBuilder(args), IntPtr.Zero, IntPtr.Zero,
                     false, 0x08000004, IntPtr.Zero, null, ref startup, out child))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -271,12 +285,103 @@ namespace VirtuSphere {
         ~PackageReporterJobProcess() { Dispose(); }
     }
 }
+
 '@
+        }
+        if ($VerifierCode) {
+            return [VirtuSphere.PackageReporterJobProcess]::StartEncoded($powerShellPath, $VerifierCode)
         }
         return [VirtuSphere.PackageReporterJobProcess]::Start($powerShellPath, $ScriptPath, $PipeName)
     } catch {
-        Write-Debug $_
+        Write-Debug ("reporter process start failure: " + $_.Exception.ToString() + ' | ' + $_.ScriptStackTrace)
         return $null
+    }
+}
+
+# Only the already executing wrapper is allowed to verify the publication.
+# The verifier is a separate, kill-on-close process: a stalled filesystem read
+# can no longer pin the installation's PowerShell thread indefinitely.
+function Get-VsPackageSupervisedReporterBundle {
+    param([Parameter(Mandatory)][string]$PackageRoot,
+          [Parameter(Mandatory)][ValidateRange(1, 7000)][int]$TimeoutMs)
+
+    $pipe = $null
+    $reader = $null
+    $job = $null
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $pipeName = 'virtusphere-report-' + ([guid]::NewGuid()).ToString('N')
+        $security = New-Object IO.Pipes.PipeSecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security.AddAccessRule((New-Object IO.Pipes.PipeAccessRule($sid,
+            [IO.Pipes.PipeAccessRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow)))
+        $pipe = [IO.Pipes.NamedPipeServerStream]::new($pipeName,
+            [IO.Pipes.PipeDirection]::In, 1, [IO.Pipes.PipeTransmissionMode]::Byte,
+            [IO.Pipes.PipeOptions]::Asynchronous, 1024, 1024, $security)
+        # Encode the definitions already loaded by this wrapper. Reopening
+        # install.ps1 as child executable code would create a pre-hash race.
+        $rootB64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($PackageRoot))
+        $source = 'function Get-VsPackageVerifiedReporterBundle {' +
+            ${function:Get-VsPackageVerifiedReporterBundle}.ToString() + "}`n" +
+            'function Invoke-VsPackageBundleVerifyChild {' +
+            ${function:Invoke-VsPackageBundleVerifyChild}.ToString() + "}`n" +
+            'Invoke-VsPackageBundleVerifyChild -PipeName ' + $pipeName +
+            ' -PackageRoot ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String("' + $rootB64 + '")))'
+        $code = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
+        if ($code.Length -gt 30000) { return $null }
+        $job = Start-VsPackageReporterJobProcess -PipeName $pipeName -VerifierCode $code
+        if ($null -eq $job) { return $null }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $connection = $pipe.WaitForConnectionAsync()
+        if (-not $connection.Wait($remaining) -or
+            -not $job.IsExpectedPipeClient($pipe.SafePipeHandle.DangerousGetHandle())) { return $null }
+        $reader = New-Object IO.StreamReader($pipe, (New-Object Text.UTF8Encoding($false, $true)), $false, 1024, $true)
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $read = $reader.ReadLineAsync()
+        if (-not $read.Wait($remaining)) { return $null }
+        $line = $read.Result
+        if ($null -eq $line -or $line.Length -gt 256) { return $null }
+        $answer = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+        if ((@($answer.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'bundle_id|schema_version' -or
+            $answer.schema_version -ne 1 -or $answer.bundle_id -isnot [string] -or
+            $answer.bundle_id -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+        $bundleRoot = Join-Path (Join-Path $PackageRoot 'reporting') $answer.bundle_id
+        $files = @('VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1', 'VirtuSphere-Package-ReporterHost.ps1') |
+            Sort-Object | ForEach-Object { Join-Path $bundleRoot $_ }
+        return [pscustomobject]@{ BundleId = $answer.bundle_id; Root = $bundleRoot; Files = $files }
+    } catch {
+        Write-Debug ("supervised bundle failure: " + $_.Exception.Message)
+        return $null
+    } finally {
+        if ($null -ne $job) { try { $job.Dispose() } catch { Write-Debug $_.Exception.Message } }
+        if ($reader) { $reader.Dispose() }
+        if ($pipe) { $pipe.Dispose() }
+    }
+}
+
+function Invoke-VsPackageBundleVerifyChild {
+    param([Parameter(Mandatory)][string]$PipeName,
+          [Parameter(Mandatory)][string]$PackageRoot)
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z') { return }
+    $pipe = $null
+    $writer = $null
+    try {
+        $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $PipeName, [IO.Pipes.PipeDirection]::Out,
+            [IO.Pipes.PipeOptions]::Asynchronous)
+        $pipe.Connect(2000)
+        $bundle = Get-VsPackageVerifiedReporterBundle -PackageRoot $PackageRoot
+        $bundleId = if ($null -eq $bundle) { '' } else { $bundle.BundleId }
+        $writer = New-Object IO.StreamWriter($pipe, (New-Object Text.UTF8Encoding($false)))
+        $writer.WriteLine((ConvertTo-Json -InputObject ([ordered]@{ schema_version = 1; bundle_id = $bundleId }) -Compress))
+        $writer.Flush()
+    } catch { Write-Debug $_ } finally {
+        if ($writer) { $writer.Dispose() }
+        if ($pipe) { $pipe.Dispose() }
     }
 }
 
@@ -294,6 +399,7 @@ function Start-VsPackageReporterPipeSession {
     $writer = $null
     $job = $null
     $ready = $false
+    $clock = [Diagnostics.Stopwatch]::StartNew()
     try {
         $workerPath = Join-Path $VerifiedBundle.Root 'VirtuSphere-Package-ReporterHost.ps1'
         if (@($VerifiedBundle.Files) -cnotcontains $workerPath) { return $null }
@@ -309,15 +415,19 @@ function Start-VsPackageReporterPipeSession {
             [IO.Pipes.PipeOptions]::Asynchronous, 16384, 16384, $security)
         $job = Start-VsPackageReporterJobProcess -ScriptPath $workerPath -PipeName $pipeName
         if ($null -eq $job) { return $null }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
         $connection = $pipe.WaitForConnectionAsync()
-        if (-not $connection.Wait($TimeoutMs) -or
+        if (-not $connection.Wait($remaining) -or
             -not $job.IsExpectedPipeClient($pipe.SafePipeHandle.DangerousGetHandle())) { return $null }
         $encoding = New-Object Text.UTF8Encoding($false, $true)
         $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
         $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)
         $writer.AutoFlush = $true
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
         $hello = $reader.ReadLineAsync()
-        if (-not $hello.Wait($TimeoutMs) -or
+        if (-not $hello.Wait($remaining) -or
             $hello.Result -cne '{"schema_version":1,"state":"ready"}') { return $null }
         $ready = $true
         return [pscustomobject]@{ Pipe = $pipe; Reader = $reader; Writer = $writer; Job = $job; Disabled = $false }
@@ -337,12 +447,18 @@ function Start-VsPackageReporterPipeSession {
 function Close-VsPackageReporterPipeSession {
     param([AllowNull()][object]$Session)
     if ($null -eq $Session) { return }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
     # The job handle is first: even a blocked worker loses its life before
     # stream disposal can wait for an outstanding I/O completion.
     try { $Session.Job.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Pipe.Dispose() } catch { Write-Debug $_ }
     try { $Session.Writer.Dispose() } catch { Write-Debug $_ }
     try { $Session.Reader.Dispose() } catch { Write-Debug $_ }
-    try { $Session.Pipe.Dispose() } catch { Write-Debug $_ }
+    $clock.Stop()
+    $phaseMs = Get-Variable -Name VsPackageReporterPhaseMs -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($phaseMs -is [hashtable]) {
+        $phaseMs.teardown += $clock.ElapsedMilliseconds
+    }
 }
 
 function Invoke-VsPackageReporterPipeExchange {
@@ -653,6 +769,7 @@ function Invoke-VsPackageReporterEvent {
     }
     $timeoutMs = [int][Math]::Min(2000, $available)
     $script:VsPackageReporterActiveClock.Start()
+    $phaseClock = [Diagnostics.Stopwatch]::StartNew()
     try {
         $answer = Invoke-VsPackageReporterPipeExchange -Session $script:VsPackageReporterSession `
             -Message $Message -TimeoutMs $timeoutMs
@@ -684,6 +801,8 @@ function Invoke-VsPackageReporterEvent {
         $script:VsPackageReporterSession = $null
         return $null
     } finally {
+        $phaseClock.Stop()
+        $script:VsPackageReporterPhaseMs.ipc += $phaseClock.ElapsedMilliseconds
         $script:VsPackageReporterActiveClock.Stop()
     }
 }
@@ -693,7 +812,19 @@ function Start-VsPackageReporterForRun {
 
     $script:VsPackageReporterActiveClock.Start()
     try {
-        $bundle = Get-VsPackageVerifiedReporterBundle -PackageRoot $PSScriptRoot
+        $remaining = 7500 - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        if ($remaining -lt 100) {
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
+            return
+        }
+        $phaseClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $bundle = Get-VsPackageSupervisedReporterBundle -PackageRoot $PSScriptRoot `
+                -TimeoutMs ([int][Math]::Min(5000, $remaining))
+        } finally {
+            $phaseClock.Stop()
+            $script:VsPackageReporterPhaseMs.verifier += $phaseClock.ElapsedMilliseconds
+        }
         if ($null -eq $bundle) {
             $script:VsPackageReporterDisableReason = 'bundle_unavailable'
             return
@@ -703,10 +834,22 @@ function Start-VsPackageReporterForRun {
             $script:VsPackageReporterDisableReason = 'budget_exhausted'
             return
         }
-        $script:VsPackageReporterSession = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle `
-            -TimeoutMs ([int][Math]::Min(2000, $remaining))
+        $phaseClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $script:VsPackageReporterSession = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle `
+                -TimeoutMs ([int][Math]::Min(2000, $remaining))
+        } finally {
+            $phaseClock.Stop()
+            $script:VsPackageReporterPhaseMs.host_start += $phaseClock.ElapsedMilliseconds
+        }
         if ($null -eq $script:VsPackageReporterSession) {
             $script:VsPackageReporterDisableReason = 'supervisor_unavailable'
+            return
+        }
+        if ($script:VsPackageReporterActiveClock.ElapsedMilliseconds -ge 7500) {
+            Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+            $script:VsPackageReporterSession = $null
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
             return
         }
         $script:VsPackageReporterDisableReason = ''
@@ -870,6 +1013,10 @@ function Complete-VsPackageRun {
         active_ms = $script:VsPackageReporterActiveClock.ElapsedMilliseconds
         target_ms = 10000
         exceeded = ($script:VsPackageReporterActiveClock.ElapsedMilliseconds -gt 10000)
+        verifier_ms = $script:VsPackageReporterPhaseMs.verifier
+        host_start_ms = $script:VsPackageReporterPhaseMs.host_start
+        ipc_ms = $script:VsPackageReporterPhaseMs.ipc
+        teardown_ms = $script:VsPackageReporterPhaseMs.teardown
     }
     Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
     if ($wrapperPath) { Write-Host "Wrapper-Log: $wrapperPath" -ForegroundColor Cyan }

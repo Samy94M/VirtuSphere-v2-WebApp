@@ -9,6 +9,9 @@ require_once __DIR__ . '/../lib/layout.php';
 // fatals mid-render, truncating every panel after it. The same panel renders the
 // cause table from connection_error_message(), the SSoT for that wording.
 require_once __DIR__ . '/../lib/deploy_constants.php';
+require_once __DIR__ . '/../lib/deploy_display.php';
+require_once __DIR__ . '/../lib/vm_network_contract.php';
+require_once __DIR__ . '/../lib/ansible_command_modes.php';
 require_once __DIR__ . '/../lib/connection_errors.php';
 // The same panel renders the three Ampel legends through the SSoT renderer the
 // System status page itself uses, so neither side can list a state the other

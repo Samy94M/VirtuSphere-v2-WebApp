@@ -8,7 +8,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A55 getDeviceList uses the pinned VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS projection, never SELECT *;
 
-- `getDeviceList` uses the pinned `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` projection, never `SELECT *`; on the wire `vm_name` is the ESXi identity and `vm_hostname` is the frozen rollout snapshot. Every mutating MECM/client callback carries `rollout_revision` and is fenced inside one transaction with its write (ADR-0043).
+- `getDeviceList` uses the pinned `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` projection, never `SELECT *`; on the wire `vm_name` is the ESXi identity and `vm_hostname` is the frozen rollout snapshot. Every mutating MECM/client callback carries `rollout_revision` and is fenced inside one transaction with its write (ADR-0043). `transfer_generation` (additive, AV-P0) is the queueing counter of the row; `updateDevice` may report it back, and the portal clears `updated` only when the reported value equals the stored one, in the binding write and in the `noop` duplicate alike. A callback without it clears whatever is queued (the behaviour before the counter); a present value that is not a non-negative integer is 400.
 
 ## A62 mecm-api.php: read surface with getDeviceList and the minimal, side-effect-free getDeviceInfos&
 

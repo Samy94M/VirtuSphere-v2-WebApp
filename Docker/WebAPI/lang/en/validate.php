@@ -109,7 +109,7 @@ return [
     'deploy_schedule_horizon' => 'The last staggered start is beyond the :days-day scheduling horizon.',
     'deploy_scope_vm_limit' => 'A deploy job may cover at most :max VMs; :count are selected. Split the selection into several jobs.',
     'deploy_scope_interface_limit' => 'VM :name has :count network interfaces; at most :max are supported.',
-    'deploy_stagger_mode' => 'Staggering is only available for the full, power-cycle and start modes.',
+    'deploy_stagger_mode' => 'Staggering is only available in the modes :modes.',
     'deploy_stagger_range' => 'The stagger interval must be between :min and :max minutes.',
     'esxi_certificate_invalid' => 'The ESXi certificate is not a valid PEM certificate or CA bundle.',
     'esxi_strict_https' => 'Strict ESXi certificate verification requires an HTTPS host URL.',

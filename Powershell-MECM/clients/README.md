@@ -28,7 +28,11 @@ client_getInfos  →  client_hostname  →  client_VMDisksOnline  →  client_st
 ## Adressfindung und Commit
 
 `client_getInfos` verlangt ein vollständiges, gültiges `bootstrap.json` mit
-`Schema`, `WebAPI`, `Scheme` und `CertThumbprint`. Ist der native Satz vollständig
+`Schema`, `WebAPI`, `Scheme` und `CertThumbprint`. Schema 2 trägt zusätzlich die
+`BundleId` des ausgelieferten Contentsatzes (64 Kleinbuchstaben-Hexzeichen);
+sie ist reine Herkunftsangabe und geht nicht in den `ConfigHash` ein. Ein
+Schema 1 mit `BundleId`, ein Schema 2 ohne gültige `BundleId` und jedes
+weitere Feld blockieren vor dem ersten Registryschreiben. Ist der native Satz vollständig
 leer, schreibt Common die Werte unter einer maschinenweiten Sperre, liest sie
 zurück und bindet sie mit `ConfigSchemaVersion`, `ConfigHash` und
 `ConfigCommittedAtUtc`. Der aktuelle `getInfos`-Prozess darf genau diesen
@@ -110,6 +114,11 @@ Programm-Befehlszeile jeweils:
 `powershell.exe -ExecutionPolicy Bypass -File "<skript>.ps1"`,
 als System ausführen, Administratorrechte erforderlich. Für `client_hostname`
 den Rückgabecode **1641** als „Erfolg mit Neustart" konfigurieren.
+Maximale Laufzeit (Maximum Runtime) jeder Phase: **15 Minuten**. Das Programm
+läuft als 64-Bit-Prozess; die Option „Als 32-Bit-Prozess auf 64-Bit-Clients
+ausführen" bleibt aus. Beide Werte stammen aus `Get-VsClientAppSpecs`; eine
+abweichende oder nicht lesbare Laufzeit und eine 32-Bit-Ausführung meldet der
+Preflight als Deployment-Type-Drift.
 
 ### Anlegen per Skript (derzeit gesperrt)
 
@@ -130,7 +139,7 @@ Leserechte beziehungsweise Inhalt korrigieren und den Installer danach erneut
 starten.
 Bei jedem Re-Run wurden Eigentumsmarker und zuvor auch der unsichere Legacy-Ordnernachweis,
 genau ein verwalteter Deployment Type, Detection, Systemkontext, Rebootverhalten,
-die Standard-Returncodes und jede Dependency bis zum wirklichen Ziel-DT geprüft.
+Maximum Runtime, 64-Bit-Ausführung, die Standard-Returncodes und jede Dependency bis zum wirklichen Ziel-DT geprüft.
 Fehlende eigene Teile werden ergänzt. Gleichnamige fremde, zusätzliche,
 mehrdeutige oder manuell abweichende Definitionen bleiben unverändert und sind
 Blocker; der Name allein gilt nie als Eigentumsnachweis. Danach verteilt der

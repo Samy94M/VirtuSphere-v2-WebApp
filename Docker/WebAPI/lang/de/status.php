@@ -44,7 +44,7 @@ return [
     // aber niemand einreihen, weil nur der Scheduler ihn erzeugt.
     'mode_full' => 'Vollständige Kette',
     'mode_create' => 'VMs anlegen',
-    'mode_powercycle' => 'Aus- und einschalten mit MAC-Export',
+    'mode_powercycle' => 'Ein- und ausschalten mit MAC-Export',
     'mode_export' => 'MAC-Adressen exportieren',
     'mode_start' => 'VMs starten',
     'mode_autostart' => 'ESXi-Autostart anwenden',

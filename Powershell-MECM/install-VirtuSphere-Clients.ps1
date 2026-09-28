@@ -197,6 +197,7 @@ function New-VsManagedClientDeploymentType {
         AddDetectionClause = $clauses
         RebootBehavior = 'BasedOnExitCode'
         InstallationBehaviorType = 'InstallForSystem'
+        MaximumRuntimeMins = $Spec.MaximumRuntimeMins
     }
     if ($clauses.Count -gt 1) {
         $dtParams['DetectionClauseConnector'] = @(

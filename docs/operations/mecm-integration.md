@@ -762,6 +762,8 @@ zwei Triggern (`AtStartup` **und** stündliche Wiederholung),
 | VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
 | VirtuSphere MECM Site Health | `mecm_site-health.ps1` | nur `completed`: Site-Code, Provider, Rohstatus 0/1/2 |
 
+Die Abläufe der vier Aufgaben zeigen die Diagramme in [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md).
+
 Wichtige Härtungen gegenüber den Altskripten:
 
 - **Konfiguration nur aus der Registry** `HKLM:\SOFTWARE\VirtuSphere\MECM` –
@@ -1019,6 +1021,8 @@ retired ist; eine Rücknahme ist deshalb nur in diesem Zeitraum verlustfrei.
 
 ## Edge Cases der Server-Skripte (Referenz)
 
+Den regulären Ablauf jeder Aufgabe zeigt [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md); die Tabellen hier listen die Sonderfälle.
+
 Alle Fälle schreiben ins Tageslog (`%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`),
 sofern nicht anders vermerkt. „Still" heißt: bewusst ohne Log-Eintrag, um Spam
 im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Portal).
@@ -1212,7 +1216,7 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
 | Content-Verteilung bleibt offen oder einzelne/alle DPs melden Fehler | Nach einem bestätigten Contentauftrag werden Collection und Deployments auch bei null erfolgreichen DPs nachgezogen; Geräte können das Paket verwenden, sobald ihr DP den Inhalt anbietet. Neue Manifeste dürfen einmal angefordert werden, gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität/Projektion, Zielverlust, Löschzustände und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag und weiterlaufendem Deploymentabgleich, WARN mit Paket/Ursachencode beim offenen Nachweis |
 | Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
-| `DeployTo`-Ziel-Collection fehlt | Konfigurationsfehler; kein Dauer-Retry, kein offener Punkt | WARN |
+| `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name; der Dateistand wird nicht gemerkt, der nächste Lauf versucht das Available-Deployment erneut, bis die Collection existiert | WARN `package_deploy_failed` |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
 
 ## Troubleshooting
@@ -1231,7 +1235,9 @@ Zustand „Erwartet, nie gemeldet" (gelb) unterscheidet sich von „Noch keine
 Daten" (grau): gelb heißt, andere MECM-Quellen melden sich bereits, diese eine
 also nie eingerichtet oder nie gestartet; grau heißt, die Integration ist
 insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
-(Quellen, ESXi, Ansible) aus denselben Konstanten wie die Hilfe. Häufige Fälle:
+(Quellen, ESXi, Ansible) aus denselben Konstanten wie die Hilfe. An welchem
+Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
+[MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md). Häufige Fälle:
 
 **VM taucht nicht in MECM auf**
 1. *Systemstatus* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung

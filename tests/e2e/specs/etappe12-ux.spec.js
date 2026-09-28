@@ -232,7 +232,7 @@ test('every live queue control refreshes blockers and disabled filled values sur
   expect(params.get('start_wait')).toBe('99');
   params = await changeAndReadBlockerRequest(page, () => form.locator('select[name="mode"]').selectOption('powercycle'));
   expect(params.get('mode')).toBe('powercycle');
-  await expect(page.locator('[data-deploy-preparation-context]')).toContainText('Aus- und einschalten mit MAC-Export');
+  await expect(page.locator('[data-deploy-preparation-context]')).toContainText('Ein- und ausschalten mit MAC-Export');
   await expect(form.locator('input[name="start_wait"]')).toBeDisabled();
   expect(params.get('start_wait'), 'disabled-but-filled control remains in the live request').toBe('99');
   params = await changeAndReadBlockerRequest(page, () => form.locator('input[name="verbose"]').check());

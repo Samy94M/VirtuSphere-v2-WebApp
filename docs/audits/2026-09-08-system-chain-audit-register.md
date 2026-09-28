@@ -1687,8 +1687,8 @@ zusammen.
 
 ### O04: Gemeinsames PHP-Runtimeimage und getrennte Werkzeuge
 
-Status: **O04a/O04b lokal abgeschlossen; O04c implementiert, finaler
-Release-Archivnachweis offen**. `php`, `deploy-worker` und
+Status: **O04a/O04b lokal abgeschlossen; O04c implementiert, Release-Archiv
+am 28.09.2026 durch behebbare High/Critical-CVEs blockiert**. `php`, `deploy-worker` und
 `maintenance-worker` verwenden dasselbe schlanke, mehrstufig gebaute
 Runtimeimage; nur der PHP-Dienst besitzt den Compose-Buildblock. Composer,
 Git, Compiler, ZIP-Werkzeuge und PHP-Header liegen ausschließlich im
@@ -1698,9 +1698,19 @@ vorherigen PHP-Image um 58.111.755 Byte beziehungsweise rund 10,2 % kleiner.
 Der Offline-Builder trennt Kernimages und optionale Werkzeugimages in eigene
 Manifeste, Prüfsummen und Installationspfade. phpMyAdmin wird dadurch weder
 mit dem Kern installiert noch gestartet und kann später gezielt ergänzt
-werden. Der reale `--release`-Archivlauf bleibt bis zu einem autorisierten,
-sauberen Commitstand offen, weil der Release-Guard einen schmutzigen oder
-uncommitteten Baum vertragsgemäß abweist.
+werden. Der reale `--release`-Archivlauf wurde am sauberen LF-Commit
+`5ed805e48413176a9c042072210f06ea5eabc163` ausgeführt. Im ersten Lauf fehlte
+das arbeitsbaumspezifische Webserverimage; nach dessen Build bestanden SBOM
+und npm-Audit. Der CVE-Gate fand behebbare High/Critical-Befunde in allen vier
+Runtimeimages, und der Archivbau verweigerte deshalb ein Release-Artefakt.
+O04c ist damit nicht abgenommen; keine Ausnahme oder Toleranz wurde gelockert.
+Original und gezielter Wiederholungslauf stehen unter
+`qa-artifacts/consolidated-session-backlog/20260928-release/` in
+`release.json` und `delivery-rerun.json`; die gesicherten CVE-Berichte liegen
+in `delivery-gate-artifacts/`. Nächster Schritt außerhalb dieser Sitzung:
+Runtimeimages an den CVE-Ursachen aktualisieren und CVE-/Archivnachweis erneut
+führen. Der Restore-Drill des ersten Laufs blieb wegen fehlenden Backups im
+beauftragten Arbeitsbaum `infrastructure_error`.
 
 Die fokussierten, Integrations-, Restore- und Einzelbuild-Nachweise sowie
 Messwerte und Grenzen stehen in
@@ -1975,6 +1985,12 @@ Quellmanifest:
 `qa-artifacts/consolidated-session-backlog/20260913-f04-report.md`.
 
 ### PC01 bis PC04: Powercycle pro VM
+
+Fortschreibung 28.09.2026: PC02 und PC03 sind seit `ae55493` geschlossen und auf
+`main` veröffentlicht. PC04 bleibt offen, rot ist allein die fehlende
+UX02-Visual-Baseline; Details im
+[Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md), Fortschreibung
+27.09.2026. Der folgende Abschnitt ist der historische Stand vom 14.09.
 
 Status 14.09.2026: **PC01 und PC02 lokal umgesetzt und offline nachgewiesen;
 PC03 und PC04 offen.** Der kanonische Powercycle-Ablauf bestand 14/14 Fälle,

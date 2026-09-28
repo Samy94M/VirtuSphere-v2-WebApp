@@ -340,7 +340,7 @@ Quellen: [Ansible vmware_guest_info](https://docs.ansible.com/projects/ansible/l
 
 Nutzerentscheidung: Wer auf eine VM, deren gebundene Instanz er auf ESXi gelöscht hat, Create anwendet, will sie wieder haben. Create legt die fehlende VM an und das Portal übernimmt die neue Instanz; eine Ersatzvorschau oder ein Sperren mit Umweg ist dafür nicht gewünscht. Create löscht nie eine VM. MECM bleibt ausdrücklich Handarbeit: altes Gerät in der MECM-Konsole löschen, neue MAC importieren lassen, „MECM-ID zurücksetzen“. Damit ersetzt IDR-R3 für den Fall IDR-S05 die Zeile „Normalen Create sperren; Ersatzvorschau anbieten“; IDR-S04 (umbenannt) bleibt gesperrt.
 
-Umgesetzt (lokal, noch nicht committet):
+Umgesetzt und am 28.09.2026 als `9a33073` auf `main` veröffentlicht (zusammen mit IDR-E19 unten):
 
 - `create_identity_check_tasks.yml` sucht die gespeicherte UUID im selben Inventarabruf (ohne Groß-/Kleinschreibung, Name weiterhin exakt), lehnt eine umbenannte gebundene VM mit `identity_bound_vm_renamed` ab und meldet im `prepared`-Ereignis `replaced_instance_uuid`, wenn weder Name noch UUID vorhanden sind.
 - Protokoll beidseitig erweitert (Emitter und `ansible_create_protocol.php`), Migration 0057 mit Spalte und CHECK `replaced_instance_uuid IS NULL OR existed_before = 0`, Frischschema gespiegelt.

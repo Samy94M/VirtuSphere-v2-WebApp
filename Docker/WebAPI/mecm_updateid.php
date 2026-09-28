@@ -138,6 +138,7 @@ try {
 
     try {
         $reportedRevision = mecm_rollout_fence_reported_revision($data['rollout_revision'] ?? null);
+        $reportedTransfer = mecm_transfer_generation_reported($data['transfer_generation'] ?? null);
     } catch (InvalidArgumentException) {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
@@ -153,8 +154,8 @@ try {
     // ResourceID is really bound. Clearing it at reset time would drop the one
     // thing that keeps the next hand-off fail-closed while the old device is
     // still sitting in MECM.
-    $outcome = repo_transaction($connection, static function () use ($connection, $vmId, $mecmId, $reportedRevision): array {
-        $vm = repo_fetch_one($connection, 'SELECT id, mecm_id, mecm_rollout_revision, mecm_previous_id FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+    $outcome = repo_transaction($connection, static function () use ($connection, $vmId, $mecmId, $reportedRevision, $reportedTransfer): array {
+        $vm = repo_fetch_one($connection, 'SELECT id, mecm_id, mecm_rollout_revision, mecm_previous_id, updated, mecm_transfer_generation FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
         if ($vm === null) {
             return ['status' => 'unknown_vm', 'vm' => []];
         }
@@ -169,11 +170,27 @@ try {
         if ($verdict === VIRTUSPHERE_MECM_FENCE_STALE) {
             return ['status' => 'stale', 'vm' => $vm];
         }
+        // Whether this callback answers the transfer that is queued now. A caller
+        // without a generation (the sync before AV-P0) answers whatever is
+        // queued, as before; one with a generation only the transfer it read.
+        $storedTransfer = (int) $vm['mecm_transfer_generation'];
+        $transferApplied = mecm_transfer_generation_applied($reportedTransfer, $storedTransfer);
+
         if ($verdict === VIRTUSPHERE_MECM_FENCE_NOOP) {
             // The same current rollout re-reporting the ResourceID it already
-            // bound. A duplicate, not a conflict: 200 with no second write and
-            // no second status event, so a sync retrying after a network hiccup
-            // does not fill the VM history with identical rows.
+            // bound. A duplicate, not a conflict: 200 with no second binding
+            // write and no second status event, so a sync retrying after a
+            // network hiccup does not fill the VM history with identical rows.
+            //
+            // It is also exactly how an operator transfer of a registered VM
+            // comes back (AV-F01): the sync re-applied the assignments and
+            // reports the ResourceID it already had. Without clearing the queue
+            // flag here the VM stayed in getDeviceList forever. The generation
+            // is part of the WHERE, so the clear cannot take a newer transfer.
+            if ($transferApplied && (int) $vm['updated'] === 1) {
+                repo_execute($connection, 'UPDATE deploy_vms SET updated = 0, updated_at = updated_at WHERE id = ? AND mecm_transfer_generation = ?', 'ii', [$vmId, $storedTransfer]);
+            }
+
             return ['status' => 'noop', 'vm' => $vm];
         }
 
@@ -187,7 +204,7 @@ try {
         // 200 "Data updated successfully" for it, and the device-sync reads that
         // as "done": the device left the queue and was never reported again, for
         // a row that was deleted in the portal. 404 lets the sync keep it.
-        if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', $mecmId)) {
+        if (!repo_set_vm_state_forward($connection, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, $transferApplied ? 0 : 1, 'mecm update id', $mecmId)) {
             return ['status' => 'unknown_vm', 'vm' => $vm];
         }
 

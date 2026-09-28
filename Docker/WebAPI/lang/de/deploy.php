@@ -258,7 +258,7 @@ return [
     'schedule_tz_hint' => 'Zeiten gelten in der Portal-Zeitzone (:tz).',
     'stagger_label' => 'Staffelung (Minuten)',
     'stagger_placeholder' => 'aus',
-    'stagger_hint' => 'Optional: VMs im Abstand von N Minuten nacheinander starten (nur Modi Full, Power-Cycle, Start). Leer = alle zusammen.',
+    'stagger_hint' => 'Optional: VMs im Abstand von N Minuten nacheinander starten (nur in den Modi :modes). Leer = alle zusammen.',
     'stagger_lock_hint' => 'Nicht staffelbare Modi sind gesperrt, solange eine Staffelung gesetzt ist. Staffelung leeren, um wieder alle Modi zu wählen.',
     'preview_heading' => 'Zeitplan-Vorschau',
     'preview_hint' => 'Berechnete Startzeiten in der Portal-Zeitzone (:tz). Zum Einreihen bestätigen.',

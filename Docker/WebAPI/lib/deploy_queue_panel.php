@@ -115,8 +115,8 @@ if ($deployPreview !== null) { ?>
                     data-stagger-modes="<?php echo h(implode(',', VIRTUSPHERE_DEPLOY_STAGGER_MODES)); ?>"
                     data-powercycle-modes="<?php echo h(implode(',', ansible_modes_using_powercycle())); ?>"
                     data-start-wait-modes="<?php echo h(implode(',', ansible_modes_using_start())); ?>">
-                <?php foreach (virtusphere_deploy_mode_labels() as $modeValue => $modeLabel) { ?>
-                    <option value="<?php echo h($modeValue); ?>" <?php echo $selectedMode === (string) $modeValue ? 'selected' : ''; ?>><?php echo h($modeLabel); ?></option>
+                <?php foreach (virtusphere_user_deploy_modes() as $modeValue) { ?>
+                    <option value="<?php echo h($modeValue); ?>" <?php echo $selectedMode === (string) $modeValue ? 'selected' : ''; ?>><?php echo h(deploy_mode_label((string) $modeValue)); ?></option>
                 <?php } ?>
             </select>
             <small class="hint" id="<?php echo h($staggerLockHintId); ?>" data-stagger-lock<?php echo $staggerLockActive ? '' : ' hidden'; ?>><?php echo h(__t('deploy.stagger_lock_hint')); ?></small>
@@ -206,7 +206,7 @@ if ($deployPreview !== null) { ?>
             </div>
             <label><?php echo h(__t('deploy.stagger_label')); ?>
                 <input type="number" name="stagger_minutes"<?php echo form_control_attrs('schedule', 'stagger_minutes', null, true); ?> min="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_DEPLOY_STAGGER_MAX); ?>" value="<?php echo h(deploy_form_value('stagger_minutes')); ?>" data-stagger-input placeholder="<?php echo h(__t('deploy.stagger_placeholder')); ?>">
-                <small class="hint" id="<?php echo h(form_hint_id('schedule', 'stagger_minutes')); ?>"><?php echo h(__t('deploy.stagger_hint')); ?></small>
+                <small class="hint" id="<?php echo h(form_hint_id('schedule', 'stagger_minutes')); ?>"><?php echo h(__t('deploy.stagger_hint', ['modes' => deploy_mode_label_list(VIRTUSPHERE_DEPLOY_STAGGER_MODES)])); ?></small>
                 <?php echo form_error_html('schedule', 'stagger_minutes'); ?>
             </label>
             <p class="hint" id="<?php echo h($scheduleHintId); ?>"><?php echo h(__t('deploy.schedule_tz_hint', ['tz' => portal_timezone()])); ?></p>

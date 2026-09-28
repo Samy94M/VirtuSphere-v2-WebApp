@@ -4,9 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/vm_location.php';
-// The rollout-hostname identity rules travel with migration 0050 (CLI require
-// closure: a worker/CLI entrypoint has no bootstrap to lean on).
-require_once __DIR__ . '/mecm_hostname.php';
+require_once __DIR__ . '/mecm_hostname.php'; // Migration 0050 hostname identity; CLI has no bootstrap.
 require_once __DIR__ . '/migrations/0042_remote_execution_foundation.php';
 require_once __DIR__ . '/migrations/0043_deploy_terminal_metadata.php';
 require_once __DIR__ . '/migrations/0044_structured_audit_events.php';
@@ -23,6 +21,7 @@ require_once __DIR__ . '/migrations/0054_log_keyset_pagination.php';
 require_once __DIR__ . '/migrations/0055_ansible_test_schedule.php';
 require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
 require_once __DIR__ . '/migrations/0057_create_replaced_identity.php';
+require_once __DIR__ . '/migrations/0058_mecm_transfer_generation.php';
 function migrator_out(string $message): void
 {
     if (PHP_SAPI === 'cli') {
@@ -1225,6 +1224,7 @@ SQL;
     '0055_ansible_test_schedule' => migrate_0055_ansible_test_schedule(...),
     '0056_package_report_foundation' => migrate_0056_package_report_foundation(...),
     '0057_create_replaced_identity' => migrate_0057_create_replaced_identity(...),
+    '0058_mecm_transfer_generation' => migrate_0058_mecm_transfer_generation(...),
 ];
 try {
     $db = db();

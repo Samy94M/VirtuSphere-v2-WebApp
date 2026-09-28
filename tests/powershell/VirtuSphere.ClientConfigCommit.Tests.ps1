@@ -113,6 +113,37 @@ Describe 'MC01 closed client configuration commit' {
         Test-Path -LiteralPath $script:ConfigProbe | Should -BeFalse
     }
 
+    It 'accepts bootstrap schema 2 with its BundleId as provenance without changing the config hash' {
+        Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile
+        $schemaOneHash = (Get-ItemProperty -Path $script:ConfigProbe).ConfigHash
+        $script:VsBootstrapBundleId | Should -BeNullOrEmpty
+        $script:VsBootstrapApiConfiguration = $null
+        $bundleId = 'a' * 64
+        [IO.File]::WriteAllText($script:ManifestFile, ('{{"Schema":2,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":"","BundleId":"{0}"}}' -f $bundleId), (New-Object Text.UTF8Encoding($false)))
+
+        { Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile } | Should -Not -Throw
+        $script:VsBootstrapBundleId | Should -Be $bundleId
+        (Get-ItemProperty -Path $script:ConfigProbe).ConfigHash | Should -Be $schemaOneHash
+        (Get-ItemProperty -Path $script:ConfigProbe).ConfigSchemaVersion | Should -Be 1
+    }
+
+    It 'rejects a schema 1 BundleId, a schema 2 without one and a malformed BundleId before any write' {
+        foreach ($document in @(
+            ('{{"Schema":1,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":"","BundleId":"{0}"}}' -f ('a' * 64)),
+            '{"Schema":2,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":""}',
+            ('{{"Schema":2,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":"","BundleId":"{0}"}}' -f ('A' * 64)),
+            ('{{"Schema":2,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":"","BundleId":"{0}"}}' -f ('a' * 63)),
+            ('{{"Schema":2,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":"","BundleId":"{0}","Extra":""}}' -f ('a' * 64)),
+            '{"Schema":3,"WebAPI":"portal.test:8021","Scheme":"https","CertThumbprint":""}'
+        )) {
+            $script:VsBootstrapBundleId = $null
+            [IO.File]::WriteAllText($script:ManifestFile, $document, (New-Object Text.UTF8Encoding($false)))
+            { Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile } | Should -Throw '*Bootstrap-Schema*' -Because $document
+            Test-Path -LiteralPath $script:ConfigProbe | Should -BeFalse
+            $script:VsBootstrapBundleId | Should -BeNullOrEmpty
+        }
+    }
+
     It 'rejects a non-string registry host even with a recomputed matching hash' {
         Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile
         New-ItemProperty -Path $script:ConfigProbe -Name WebAPI -Value 123 -PropertyType DWord -Force | Out-Null

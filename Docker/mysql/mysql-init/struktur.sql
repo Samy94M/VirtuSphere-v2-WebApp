@@ -103,6 +103,10 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     mecm_rollout_revision BIGINT UNSIGNED NULL,
     mecm_previous_id VARCHAR(255) NULL,
     updated TINYINT(1) NOT NULL DEFAULT 0,
+    -- AV-P0 (migration 0058): counts every queueing for the device-sync. The
+    -- sync reports the value it read back, and `updated` is cleared only for
+    -- that transfer, so one queued meanwhile is not lost.
+    mecm_transfer_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     edit_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
