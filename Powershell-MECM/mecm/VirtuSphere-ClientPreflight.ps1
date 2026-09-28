@@ -46,7 +46,14 @@ function Get-VsClientPreflightReport {
     # non-FileSystem location Test-Path and Get-ChildItem cannot resolve UNC
     # paths, so every share check would report a false unknown. Run the file
     # checks from a FileSystem location and restore the site drive afterwards.
-    Push-Location -LiteralPath ([IO.Path]::GetPathRoot([Environment]::SystemDirectory))
+    # The system drive on Windows. pwsh on Linux has no system directory, and a
+    # bare "/" would resolve inside the current non-FileSystem provider, so the
+    # fallback names the FileSystem provider explicitly (Linux Pester lane).
+    $fileSystemRoot = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
+    if ([string]::IsNullOrEmpty($fileSystemRoot)) {
+        $fileSystemRoot = 'Microsoft.PowerShell.Core\FileSystem::' + [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
+    }
+    Push-Location -LiteralPath $fileSystemRoot
     try {
         $markerName = '.virtusphere-source-identity'
         $localMarker = Join-Path ([string]$Config.PackagesBase) $markerName

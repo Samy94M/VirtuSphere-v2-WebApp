@@ -1,8 +1,11 @@
 # Dot-sourced check module. Importing defines functions only.
 
 function Get-RuntimeImages {
+    # `--profile=*` als ein Argument, nicht '--profile','*': pwsh auf Unix
+    # expandiert ein einzelnes `*` zu den Dateien im Arbeitsverzeichnis
+    # (derselbe Grund wie in check-compose-hardening.ps1).
     $r = Invoke-Tool 'docker' @('compose', '--project-directory', $repoRoot,
-        '--profile', '*', 'config', '--format', 'json')
+        '--profile=*', 'config', '--format', 'json')
     if ($r.ExitCode -ne 0) { return $null }
     $config = $null
     try { $config = (@($r.Output) -join "`n") | ConvertFrom-Json } catch { return $null }

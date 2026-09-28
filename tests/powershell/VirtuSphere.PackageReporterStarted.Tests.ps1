@@ -1,7 +1,8 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1')
-    $script:base = (Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json).base
+    $script:base = (Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson).base
     function New-TestStarted {
         param([object]$Snapshot, [string]$RunId = $script:base.run_id,
             [string]$ProjectName = $script:base.project_name,
@@ -33,7 +34,7 @@ Describe 'T4 bounded V1 started request' {
         $request.ReportEvent | Should -Be 'started'
         $request.EventSeq | Should -Be 1
         $json = [Text.Encoding]::UTF8.GetString($request.BodyBytes)
-        $actual = $json | ConvertFrom-Json
+        $actual = $json | ConvertFrom-VsTestJson
         @($actual.PSObject.Properties.Name | Sort-Object) | Should -Be @($script:base.PSObject.Properties.Name | Sort-Object)
         foreach ($property in $script:base.PSObject.Properties) {
             if ($property.Name -eq 'mac_candidates') {
@@ -52,7 +53,7 @@ Describe 'T4 bounded V1 started request' {
             AcceptanceGeneration = $script:base.acceptance_generation
         }
         $request = New-TestStarted -Snapshot $snapshot -Total $null
-        $actual = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-Json
+        $actual = [Text.Encoding]::UTF8.GetString($request.BodyBytes) | ConvertFrom-VsTestJson
         @($actual.mac_candidates) | Should -Be @('00:50:56:AA:BB:CC', '00:50:56:FF:EE:DD')
         $actual.PSObject.Properties.Name | Should -Contain 'total'
         $actual.total | Should -BeNullOrEmpty

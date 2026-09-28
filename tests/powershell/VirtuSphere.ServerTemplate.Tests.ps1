@@ -1,5 +1,12 @@
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    # Pester can only mock a command that exists; pwsh on Linux has no
+    # ScheduledTasks module, so the task cmdlets the installer calls get stubs.
+    foreach ($taskCommand in @('Get-ScheduledTask', 'Export-ScheduledTask', 'Register-ScheduledTask', 'Start-ScheduledTask')) {
+        if (-not (Get-Command $taskCommand -ErrorAction SilentlyContinue)) {
+            Set-Item -Path "function:script:$taskCommand" -Value { param($TaskName, $TaskPath, $Xml, $ErrorAction) }
+        }
+    }
     $script:ServerInstaller = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-MECM.ps1'
     $script:reporterSource = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'clients'
     $script:requiredReporterFiles = @(

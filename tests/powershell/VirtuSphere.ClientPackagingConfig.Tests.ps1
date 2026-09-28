@@ -2,6 +2,10 @@ BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $script:ClientSource = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'clients'
     . (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPackaging.ps1')
+    # Pester can only mock a command that exists; pwsh on Linux has no Get-Acl.
+    if (-not (Get-Command Get-Acl -ErrorAction SilentlyContinue)) {
+        function Get-Acl { param($LiteralPath, $Path, $ErrorAction) }
+    }
 
     function New-TestSiteConfig {
         @{

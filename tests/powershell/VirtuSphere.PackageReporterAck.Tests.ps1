@@ -1,8 +1,9 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot 'VirtuSphere.TestJson.ps1')
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $adapter = Join-Path $repoRoot 'Powershell-MECM/clients/VirtuSphere-Package-Reporter.ps1'
     . $adapter
-    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-Json
+    $fixture = Get-Content -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI/tests/fixtures/package-report-v1.json') -Raw | ConvertFrom-VsTestJson
     $script:ReportRunId = [string]$fixture.base.run_id
     function Resolve-TestAck {
         param([string]$Json, [int]$Status = 200, [string]$Type = 'application/json; charset=utf-8', [string]$Run = $script:ReportRunId)

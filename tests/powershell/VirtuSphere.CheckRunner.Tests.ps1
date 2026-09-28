@@ -5,10 +5,13 @@ BeforeAll {
     $script:RunnerPath = Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1'
     $script:ModuleDir = Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check'
     $script:Golden = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures/check-runner-golden.json') -Raw | ConvertFrom-Json
+    # The runner under test starts on the same engine as this suite: Windows
+    # PowerShell 5.1 in its CI job, pwsh on the Linux Fast lane (no 'powershell').
+    $script:EngineExe = (Get-Process -Id $PID).Path
 
     function Invoke-CheckRunnerCase {
         param([string[]]$Arguments)
-        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $script:RunnerPath @Arguments 2>&1 | ForEach-Object { "$_" })
+        $output = @(& $script:EngineExe -NoProfile -ExecutionPolicy Bypass -File $script:RunnerPath @Arguments 2>&1 | ForEach-Object { "$_" })
         return @{ ExitCode = $LASTEXITCODE; Output = $output }
     }
 
@@ -28,7 +31,7 @@ Describe 'check.ps1 golden surface' {
         $errors | Should -BeNullOrEmpty
         @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath) | Should -Be @($script:Golden.parameters)
 
-        $help = @(& powershell -NoProfile -Command "Get-Help '$script:RunnerPath' -Full | Out-String -Width 240" 2>&1) -join "`n"
+        $help = @(& $script:EngineExe -NoProfile -Command "Get-Help '$script:RunnerPath' -Full | Out-String -Width 240" 2>&1) -join "`n"
         $help | Should -Match 'check\.ps1'
         foreach ($parameter in $script:Golden.parameters) { $help | Should -Match ([regex]::Escape('-' + $parameter)) }
     }

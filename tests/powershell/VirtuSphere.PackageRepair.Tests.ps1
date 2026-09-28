@@ -7,6 +7,10 @@ BeforeAll {
         param([switch]$NoProfile, [string]$ExecutionPolicy, [switch]$NonInteractive, [string]$File)
         throw 'A child process must be mocked.'
     }
+    # Pester can only mock a command that exists; pwsh on Linux has no Get-Acl.
+    if (-not (Get-Command Get-Acl -ErrorAction SilentlyContinue)) {
+        function Get-Acl { param($LiteralPath, $Path, $ErrorAction) }
+    }
     function Invoke-RepairWrapper {
         $previousLocation = Get-Location
         $wrapperLog = Join-Path $script:PackageRoot 'wrapper.log'
@@ -185,6 +189,13 @@ function Get-VsPackageReportApiConfiguration {
     }
 }
 
+# Discovery-time capability flag, like $HasRegistry in VirtuSphere.ErrorPaths.Tests.ps1.
+# The wrapper enables its managed logs only after a Windows ACL check and runs
+# the reporter as a powershell.exe child inside a Win32 job object. pwsh on
+# Linux has neither, so those cases are defined only on Windows, where the
+# PS-5.1 CI job proves them.
+$IsWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+
 Describe 'Package repair invalidates only an actual hash-miss before child execution' {
     BeforeEach {
         $script:PackageRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -265,156 +276,159 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
     }
 
-    It 'writes a paired UTF-8 BOM run record with skips and one completed summary' {
-        Invoke-RepairWrapper
-        $script:WrapperExit | Should -Be 0
-
-        $runLogs = @(Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') -File -Recurse)
-        @($runLogs | Where-Object Name -like 'wrapper_*.log').Count | Should -Be 1
-        @($runLogs | Where-Object Name -like 'reporting_*.log').Count | Should -Be 1
-        foreach ($file in $runLogs) {
-            $bytes = [IO.File]::ReadAllBytes($file.FullName)
-            @($bytes[0..2]) | Should -Be @(0xef, 0xbb, 0xbf)
-        }
-
-        $wrapper = $runLogs | Where-Object Name -like 'wrapper_*.log' | Select-Object -First 1
-        $reporting = $runLogs | Where-Object Name -like 'reporting_*.log' | Select-Object -First 1
-        $wrapperRecords = @(Get-Content -LiteralPath $wrapper.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-        $reportingRecords = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-        @($wrapperRecords.event) | Should -Be @('header', 'inventory', 'step_run', 'step_result', 'step_run', 'step_result', 'completed')
-        @($wrapperRecords | Where-Object event -eq 'step_result').outcome | Should -Be @('SKIP', 'SKIP')
-        $completed = $wrapperRecords | Where-Object event -eq 'completed'
-        $completed.exit_code | Should -Be 0
-        $completed.detection_status | Should -Be 'written'
-        $completed.total | Should -Be 2
-        $completed.processed | Should -Be 2
-        $completed.skip | Should -Be 2
-        @($reportingRecords.event) | Should -Be @('header', 'reporting_disabled', 'reporting_budget')
-        $reportingRecords[1].reason | Should -Be 'bundle_unavailable'
-        $reportingRecords[2].active_ms | Should -BeGreaterOrEqual 0
-        $wrapperRecords[0].run_id | Should -Be $reportingRecords[0].run_id
-        $wrapperRecords[0].partner_file | Should -Be $reporting.Name
-        $reportingRecords[0].partner_file | Should -Be $wrapper.Name
-    }
-
-    It 'preserves detection and exit when a verified worker lacks a published identity' {
-        Add-RepairReporterBundle
-        Invoke-RepairWrapper
-        $script:WrapperExit | Should -Be 0
-        $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
-            -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
-        $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-        @($records.event) | Should -Be @('header', 'report_attempt', 'reporting_disabled', 'reporting_budget')
-        $records[1].report_event | Should -Be 'started'
-        $records[1].attempted | Should -BeFalse
-        $records[1].reason | Should -Be 'identity_unavailable'
-        $records[2].reason | Should -Be 'identity_unavailable'
-        $records[3].active_ms | Should -BeLessThan 10000
-    }
-
-    It 'sends started, both skips and completion once to a synthetic loopback receiver' {
-        $server = Start-RepairReportServer
-        try {
-            Add-RepairReporterBundle -LoopbackPort $server.Port
+    # Windows only: managed logs (ACL check) or the job-bound reporter child.
+    if ($IsWindowsHost) {
+        It 'writes a paired UTF-8 BOM run record with skips and one completed summary' {
             Invoke-RepairWrapper
             $script:WrapperExit | Should -Be 0
-            $done = Wait-Job -Job $server.Job -Timeout 10
-            if ($null -eq $done) {
-                $diagnosticLog = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
-                    -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
-                $diagnosticRecords = @(Get-Content -LiteralPath $diagnosticLog.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-                Write-Host ('Synthetic receiver incomplete: state={0}, attempts={1}, reasons={2}' -f
-                    $server.Job.State, @($diagnosticRecords | Where-Object event -eq 'report_attempt').Count,
-                    (@($diagnosticRecords | Where-Object event -eq 'report_attempt' | ForEach-Object reason) -join ','))
+
+            $runLogs = @(Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') -File -Recurse)
+            @($runLogs | Where-Object Name -like 'wrapper_*.log').Count | Should -Be 1
+            @($runLogs | Where-Object Name -like 'reporting_*.log').Count | Should -Be 1
+            foreach ($file in $runLogs) {
+                $bytes = [IO.File]::ReadAllBytes($file.FullName)
+                @($bytes[0..2]) | Should -Be @(0xef, 0xbb, 0xbf)
             }
-            $done | Should -Not -BeNullOrEmpty
-            $events = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-            @($events.event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
-            @($events.seq) | Should -Be @(1, 2, 3, 4)
-            $events[1].body.result | Should -Be 'skip'
-            $events[2].body.result | Should -Be 'skip'
-            $events[3].body.wrapper_result | Should -Be 'ok'
-            $events[3].body.processed_count | Should -Be 2
-            $events[3].body.skip_count | Should -Be 2
-            $events[3].body.first_failure | Should -BeNullOrEmpty
+
+            $wrapper = $runLogs | Where-Object Name -like 'wrapper_*.log' | Select-Object -First 1
+            $reporting = $runLogs | Where-Object Name -like 'reporting_*.log' | Select-Object -First 1
+            $wrapperRecords = @(Get-Content -LiteralPath $wrapper.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+            $reportingRecords = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+            @($wrapperRecords.event) | Should -Be @('header', 'inventory', 'step_run', 'step_result', 'step_run', 'step_result', 'completed')
+            @($wrapperRecords | Where-Object event -eq 'step_result').outcome | Should -Be @('SKIP', 'SKIP')
+            $completed = $wrapperRecords | Where-Object event -eq 'completed'
+            $completed.exit_code | Should -Be 0
+            $completed.detection_status | Should -Be 'written'
+            $completed.total | Should -Be 2
+            $completed.processed | Should -Be 2
+            $completed.skip | Should -Be 2
+            @($reportingRecords.event) | Should -Be @('header', 'reporting_disabled', 'reporting_budget')
+            $reportingRecords[1].reason | Should -Be 'bundle_unavailable'
+            $reportingRecords[2].active_ms | Should -BeGreaterOrEqual 0
+            $wrapperRecords[0].run_id | Should -Be $reportingRecords[0].run_id
+            $wrapperRecords[0].partner_file | Should -Be $reporting.Name
+            $reportingRecords[0].partner_file | Should -Be $wrapper.Name
+        }
+
+        It 'preserves detection and exit when a verified worker lacks a published identity' {
+            Add-RepairReporterBundle
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
             $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
                 -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
             $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-            @($records | Where-Object event -eq 'report_attempt').Count | Should -Be 4
-            @($records | Where-Object event -eq 'report_attempt' | ForEach-Object confirmed) | Should -Be @($true, $true, $true, $true)
-            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
-        } finally {
-            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+            @($records.event) | Should -Be @('header', 'report_attempt', 'reporting_disabled', 'reporting_budget')
+            $records[1].report_event | Should -Be 'started'
+            $records[1].attempted | Should -BeFalse
+            $records[1].reason | Should -Be 'identity_unavailable'
+            $records[2].reason | Should -Be 'identity_unavailable'
+            $records[3].active_ms | Should -BeLessThan 10000
         }
-    }
 
-    It 'does not bypass server Retry-After for steps or completion' {
-        $server = Start-RepairReportServer -Mode backpressure
-        try {
-            Add-RepairReporterBundle -LoopbackPort $server.Port
+        It 'sends started, both skips and completion once to a synthetic loopback receiver' {
+            $server = Start-RepairReportServer
+            try {
+                Add-RepairReporterBundle -LoopbackPort $server.Port
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                $done = Wait-Job -Job $server.Job -Timeout 10
+                if ($null -eq $done) {
+                    $diagnosticLog = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                        -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+                    $diagnosticRecords = @(Get-Content -LiteralPath $diagnosticLog.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+                    Write-Host ('Synthetic receiver incomplete: state={0}, attempts={1}, reasons={2}' -f
+                        $server.Job.State, @($diagnosticRecords | Where-Object event -eq 'report_attempt').Count,
+                        (@($diagnosticRecords | Where-Object event -eq 'report_attempt' | ForEach-Object reason) -join ','))
+                }
+                $done | Should -Not -BeNullOrEmpty
+                $events = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+                @($events.event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
+                @($events.seq) | Should -Be @(1, 2, 3, 4)
+                $events[1].body.result | Should -Be 'skip'
+                $events[2].body.result | Should -Be 'skip'
+                $events[3].body.wrapper_result | Should -Be 'ok'
+                $events[3].body.processed_count | Should -Be 2
+                $events[3].body.skip_count | Should -Be 2
+                $events[3].body.first_failure | Should -BeNullOrEmpty
+                $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                    -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+                $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+                @($records | Where-Object event -eq 'report_attempt').Count | Should -Be 4
+                @($records | Where-Object event -eq 'report_attempt' | ForEach-Object confirmed) | Should -Be @($true, $true, $true, $true)
+                ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+            } finally {
+                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'does not bypass server Retry-After for steps or completion' {
+            $server = Start-RepairReportServer -Mode backpressure
+            try {
+                Add-RepairReporterBundle -LoopbackPort $server.Port
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                (Wait-Job -Job $server.Job -Timeout 5) | Should -Not -BeNullOrEmpty
+                $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+                @($received.event) | Should -Be @('started')
+                $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                    -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+                $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+                $attempts = @($records | Where-Object event -eq 'report_attempt')
+                @($attempts.report_event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
+                @($attempts.reason) | Should -Be @('http_status', 'backpressure', 'backpressure', 'backpressure')
+                @($attempts.attempted) | Should -Be @($true, $false, $false, $false)
+                ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+            } finally {
+                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'keeps package success when a report response stalls beyond the IPC deadline' {
+            $server = Start-RepairReportServer -Mode stall
+            try {
+                Add-RepairReporterBundle -LoopbackPort $server.Port
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                Invoke-RepairWrapper
+                $watch.Stop()
+                $script:WrapperExit | Should -Be 0
+                $watch.ElapsedMilliseconds | Should -BeLessThan 10000
+                (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty
+                $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+                @($received.event) | Should -Be @('started')
+                $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
+                    -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
+                $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
+                ($records | Where-Object event -eq 'reporting_disabled').reason | Should -Be 'ipc_unconfirmed'
+                ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
+            } finally {
+                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
+                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'retains five paired run groups and leaves a locked older group intact' {
+            1..5 | ForEach-Object { Invoke-RepairWrapper; $script:WrapperExit | Should -Be 0 }
+            $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
+            $groupsBefore = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+            $groupsBefore.Count | Should -Be 5
+            $oldestWrapper = Get-ChildItem -LiteralPath $logRoot -Filter 'wrapper_*.log' -File -Recurse | Sort-Object Name | Select-Object -First 1
+            $lock = New-Object IO.FileStream($oldestWrapper.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                $groupsLocked = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+                $groupsLocked.Count | Should -Be 6
+            } finally {
+                $lock.Dispose()
+            }
             Invoke-RepairWrapper
             $script:WrapperExit | Should -Be 0
-            (Wait-Job -Job $server.Job -Timeout 5) | Should -Not -BeNullOrEmpty
-            $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-            @($received.event) | Should -Be @('started')
-            $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
-                -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
-            $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-            $attempts = @($records | Where-Object event -eq 'report_attempt')
-            @($attempts.report_event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
-            @($attempts.reason) | Should -Be @('http_status', 'backpressure', 'backpressure', 'backpressure')
-            @($attempts.attempted) | Should -Be @($true, $false, $false, $false)
-            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
-        } finally {
-            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+            $groupsAfter = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
+            $groupsAfter.Count | Should -Be 5
+            @($groupsAfter | Where-Object Count -ne 2).Count | Should -Be 0
         }
-    }
-
-    It 'keeps package success when a report response stalls beyond the IPC deadline' {
-        $server = Start-RepairReportServer -Mode stall
-        try {
-            Add-RepairReporterBundle -LoopbackPort $server.Port
-            $watch = [Diagnostics.Stopwatch]::StartNew()
-            Invoke-RepairWrapper
-            $watch.Stop()
-            $script:WrapperExit | Should -Be 0
-            $watch.ElapsedMilliseconds | Should -BeLessThan 10000
-            (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty
-            $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-            @($received.event) | Should -Be @('started')
-            $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
-                -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
-            $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-            ($records | Where-Object event -eq 'reporting_disabled').reason | Should -Be 'ipc_unconfirmed'
-            ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
-        } finally {
-            Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-            Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    It 'retains five paired run groups and leaves a locked older group intact' {
-        1..5 | ForEach-Object { Invoke-RepairWrapper; $script:WrapperExit | Should -Be 0 }
-        $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
-        $groupsBefore = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
-        $groupsBefore.Count | Should -Be 5
-        $oldestWrapper = Get-ChildItem -LiteralPath $logRoot -Filter 'wrapper_*.log' -File -Recurse | Sort-Object Name | Select-Object -First 1
-        $lock = New-Object IO.FileStream($oldestWrapper.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-        try {
-            Invoke-RepairWrapper
-            $script:WrapperExit | Should -Be 0
-            $groupsLocked = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
-            $groupsLocked.Count | Should -Be 6
-        } finally {
-            $lock.Dispose()
-        }
-        Invoke-RepairWrapper
-        $script:WrapperExit | Should -Be 0
-        $groupsAfter = @(Get-ChildItem -LiteralPath $logRoot -File -Recurse | Group-Object { $_.BaseName -replace '^(wrapper|reporting)_', '' })
-        $groupsAfter.Count | Should -Be 5
-        @($groupsAfter | Where-Object Count -ne 2).Count | Should -Be 0
     }
 
     It 'continues the package decision when the managed log ACL cannot be checked' {
@@ -426,44 +440,47 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
     }
 
-    It 'accepts read-only Users access without disabling package logs' {
-        $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
-        $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
-        $readRule = [Security.AccessControl.FileSystemAccessRule]::new(
-            $usersSid,
-            [Security.AccessControl.FileSystemRights]::ReadAndExecute,
-            [Security.AccessControl.InheritanceFlags]::ContainerInherit,
-            [Security.AccessControl.PropagationFlags]::None,
-            [Security.AccessControl.AccessControlType]::Allow
-        )
-        $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($readRule)
-        $global:VirtuSpherePackageRepairFixture.LogAcl.Access.Count | Should -Be 1
-        Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
+    # Windows only: managed logs (ACL check) or the job-bound reporter child.
+    if ($IsWindowsHost) {
+        It 'accepts read-only Users access without disabling package logs' {
+            $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
+            $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            $readRule = [Security.AccessControl.FileSystemAccessRule]::new(
+                $usersSid,
+                [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+            $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($readRule)
+            $global:VirtuSpherePackageRepairFixture.LogAcl.Access.Count | Should -Be 1
+            Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
 
-        Invoke-RepairWrapper
-        $script:WrapperExit | Should -Be 0
-        $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
-        Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Not -Match 'deaktiviert'
-        @(Get-ChildItem -LiteralPath $logRoot -File -Recurse).Count | Should -Be 2
-    }
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
+            $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
+            Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Not -Match 'deaktiviert'
+            @(Get-ChildItem -LiteralPath $logRoot -File -Recurse).Count | Should -Be 2
+        }
 
-    It 'disables package logs for writable Users access without changing detection' {
-        $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
-        $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
-        $writeRule = [Security.AccessControl.FileSystemAccessRule]::new(
-            $usersSid,
-            [Security.AccessControl.FileSystemRights]::Write,
-            [Security.AccessControl.InheritanceFlags]::ContainerInherit,
-            [Security.AccessControl.PropagationFlags]::None,
-            [Security.AccessControl.AccessControlType]::Allow
-        )
-        $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($writeRule)
-        Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
+        It 'disables package logs for writable Users access without changing detection' {
+            $global:VirtuSpherePackageRepairFixture.LogAcl = [Security.AccessControl.DirectorySecurity]::new()
+            $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            $writeRule = [Security.AccessControl.FileSystemAccessRule]::new(
+                $usersSid,
+                [Security.AccessControl.FileSystemRights]::Write,
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+            $global:VirtuSpherePackageRepairFixture.LogAcl.AddAccessRule($writeRule)
+            Mock Get-Acl { $global:VirtuSpherePackageRepairFixture.LogAcl }
 
-        Invoke-RepairWrapper
-        $script:WrapperExit | Should -Be 0
-        $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
-        Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
+            Invoke-RepairWrapper
+            $script:WrapperExit | Should -Be 0
+            $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
+            Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
+        }
     }
 
     It 'removes old detection before changed content, including failure and reboot <Code>' -TestCases @(

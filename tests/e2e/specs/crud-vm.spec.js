@@ -59,6 +59,17 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc() ?: null) . 'JSON';
 `);
 }
 
+// Every confirmed VM action here posts to the VM list (vms.php) and redirects,
+// often back to the very URL the page is already on. waitForURL resolves at
+// once in that case, and a database read right after it races the POST. Waiting
+// for the POST response itself means the write is committed before any check.
+async function confirmAndAwaitPost(page, dialog) {
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('vms.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+}
+
 function cleanup() {
   runPhp(`
 $db = db();
@@ -158,10 +169,8 @@ test('row MECM reset: Cancel keeps the ID, Confirm clears it and re-queues the s
 
   await reset.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vms\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
   const after = vmRow(vmId);
   expect(after.mecm_id, 'Confirm cleared the MECM ID').toBeNull();
   expect(after.mecm_sync_state, 'the sync is re-queued').toBe('pending');
@@ -185,11 +194,9 @@ test('vm_edit MECM reset: Cancel keeps the ID, Confirm clears it and returns to 
 
   await reset.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    // return_to points back at the editor, so the operator keeps their context.
-    page.waitForURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`)),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  // return_to points back at the editor, so the operator keeps their context.
+  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
   expect(vmRow(vmId).mecm_id, 'Confirm cleared the MECM ID').toBeNull();
 });
 
@@ -228,10 +235,8 @@ echo 'SEEDED';
 
   await transfer.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`)),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
   expect(vmRow(vmId).updated, 'Confirm queued the VM for the device-sync').toBe(1);
 });
 
@@ -263,10 +268,8 @@ echo 'SEEDED';
 
   await observe.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`)),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
   const after = vmRow(vmId);
   expect(after.os_install_watch_started_at, 'Confirm started the dedicated observation').not.toBeNull();
   expect(after.lifecycle_state, 'the lifecycle is display-only').toBe('os_installing');
@@ -293,10 +296,8 @@ test('row delete: Cancel keeps the VM, Confirm removes it with its interfaces', 
 
   await del.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vms\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
   expect(vmRow(vmId), 'Confirm deleted the VM').toBeNull();
   const interfaces = phpJson(`
 $db = db();
@@ -331,10 +332,8 @@ test('bulk MECM reset: Cancel changes nothing, Confirm re-queues the selection',
 
   await bulkReset.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vms\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
   for (const vmId of seed.vmIds) {
     const after = vmRow(vmId);
     expect(after.mecm_id, 'the MECM ID is cleared').toBeNull();
@@ -364,10 +363,8 @@ echo 'READY';
   await page.locator('button[name="action"][value="bulk_reset_mecm_id"]').click();
   const dialog = page.locator('[data-confirm-dialog]');
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vms\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
 
   const outcome = page.locator('.alert-warning').first();
   await expect(outcome, 'a skipped VM prevents an all-success signal').toBeVisible();
@@ -399,10 +396,8 @@ test('bulk delete: Cancel changes nothing, Confirm removes the selection', async
 
   await bulkDelete.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vms\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
   expect(vmRow(seed.vmIds[0]), 'Confirm deleted the selection').toBeNull();
   expect(vmRow(seed.vmIds[1]), 'Confirm deleted the selection').toBeNull();
   const outcome = page.locator('.alert-success').first();

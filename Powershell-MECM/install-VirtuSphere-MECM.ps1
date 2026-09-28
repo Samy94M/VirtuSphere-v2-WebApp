@@ -839,7 +839,10 @@ try {
     $templateDirectories = @(Get-ChildItem -LiteralPath $templateSource -Recurse -Directory -Force -ErrorAction Stop | Sort-Object FullName)
     $templateDirectoryManifest = New-Object System.Collections.Generic.List[string]
     foreach ($directory in $templateDirectories) {
-        $relative = $directory.FullName.Substring($templateRoot.FullName.TrimEnd('\').Length).TrimStart('\')
+        # The manifest spells relative paths with '\' (see the reporting entries
+        # below); FullName uses '/' under pwsh on Linux (Fast lane), so both
+        # sides of the directory-set check normalize to that one spelling.
+        $relative = $directory.FullName.Substring($templateRoot.FullName.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
         New-Item -ItemType Directory -Path (Join-Path $templateStage $relative) -Force -ErrorAction Stop | Out-Null
         [void]$templateDirectoryManifest.Add($relative)
     }
@@ -1024,7 +1027,7 @@ try {
         }
     }
     $liveTemplateDirectories = @(Get-ChildItem -LiteralPath $templateDest -Recurse -Directory -Force -ErrorAction Stop | ForEach-Object {
-        $_.FullName.Substring($templateDest.TrimEnd('\').Length).TrimStart('\')
+        $_.FullName.Substring($templateDest.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
     } | Sort-Object)
     if (($liveTemplateDirectories -join "`n") -cne (@($templateDirectoryManifest | Sort-Object) -join "`n")) {
         throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Verzeichnissatz.'

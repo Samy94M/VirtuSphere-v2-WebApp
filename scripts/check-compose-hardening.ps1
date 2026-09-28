@@ -69,8 +69,11 @@ if (-not (Test-Path (Join-Path $root '.env'))) {
 # --profile "*": alle Profile aufloesen. Mit einem konkreten Profilnamen
 # verschwaende ein in ein fremdes Profil verschobener Service einfach aus der
 # Sicht, und der Contract koennte ihn nie als falsch platziert melden.
+# Als EIN Argument `--profile=*`: pwsh auf Linux/macOS expandiert ein einzelnes
+# `*` aus dem Argument-Array wie eine Shell zu den Dateien im Arbeitsverzeichnis,
+# compose bekam dann Dateinamen statt eines Profils und gab nur seine Hilfe aus.
 $r = Invoke-Tool 'docker' @('compose', '--project-directory', $root, '-f', $composeFile,
-    '--profile', '*', 'config', '--format', 'json')
+    '--profile=*', 'config', '--format', 'json')
 if ($r.ExitCode -ne 0) {
     Write-Output 'check-compose-hardening: docker compose config fehlgeschlagen:'
     $r.Output | Select-Object -First 5 | ForEach-Object { Write-Output ('  ' + $_) }
