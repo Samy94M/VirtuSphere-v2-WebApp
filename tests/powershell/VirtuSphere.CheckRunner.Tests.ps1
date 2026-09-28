@@ -137,9 +137,14 @@ Describe 'JavaScript visual contracts' {
         $config | Should -Not -Match 'chromium-\d+|C:\\Users\\'
     }
 
-    It 'pass their positive and negative resolver, metadata, pixel and seed cases' {
-        $testFile = Join-Path (Join-Path $script:RepoRoot 'tests/e2e/tests') 'visual-contract.test.js'
-        $result = @(& node --test $testFile 2>&1 | ForEach-Object { "$_" })
-        $LASTEXITCODE | Should -Be 0 -Because ($result -join "`n")
+    It 'run their resolver, metadata, pixel and seed cases in the Integration gate visual-contract' {
+        # The suite needs playwright-core and the lockfile Chromium, and the Fast
+        # lane stays browser-free (docs/QA.md). It runs only as the Integration and
+        # Release gate visual-contract; this case pins that it really covers the file.
+        Test-Path -LiteralPath (Join-Path $script:RepoRoot 'tests/e2e/tests/visual-contract.test.js') -PathType Leaf | Should -BeTrue
+        $integration = Get-Content -LiteralPath (Join-Path $script:ModuleDir 'gates-integration.ps1') -Raw
+        $integration | Should -Match "Add-Gate -Name 'visual-contract'[^\n]*\n(?:.*\n){0,15}?.*@\('--test', 'tests/\*\.test\.js'\)"
+        @($script:Golden.lanes.Integration) | Should -Contain 'visual-contract'
+        @($script:Golden.lanes.Fast) | Should -Not -Contain 'visual-contract'
     }
 }
