@@ -161,6 +161,10 @@ Alle vier laufen als `NT AUTHORITY\SYSTEM`, höchste Rechte, ohne Profil
 (`-NoProfile`), Doppelstart-Schutz `MultipleInstances IgnoreNew`, **ohne
 Laufzeitlimit** (`PT0S`, Endlosschleifen) und mit Auto-Neustart bei Absturz.
 
+Den Ablauf jeder Aufgabe als Diagramm zeigt
+[MECM-Serveraufgaben: Abläufe](../docs/operations/mecm-scheduled-tasks.md);
+die Abschnitte unten erklären die Gründe hinter den einzelnen Schritten.
+
 Jede Aufgabe hat **zwei** Trigger: `AtStartup` und eine stündliche
 Wiederholung. Mit dem Systemstart allein war eine Aufgabe nach ihren drei
 Neustartversuchen bis zum nächsten Reboot tot, und ein MECM-Server bootet
@@ -482,14 +486,12 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     DP-Ziele. Das ist kein eigener Nachweis der aktuellen Mitgliedschaft einer
     konfigurierten DP-Gruppe. Unbekannte Evidenz bleibt ein offener Punkt und
     autorisiert keine blinde erneute Verteilung.
-  - Optionales Available-Deployment an die Collection aus `DeployTo`
-    (fehlende Ziel-Collection ist ein Konfigurationsfehler; Warnung ohne
-    Dauer-Retry).
-- Traten **gezählte** Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der
-  nächste Durchlauf wiederholt die offenen Punkte. Die `DeployTo`-Warnung zählt
-  bewusst nicht: sie ist ein Konfigurationsfehler ohne Dauer-Retry, der Stamp
-  wird trotz ihr gemerkt und erst eine geänderte `config.json` löst den
-  nächsten Versuch aus.
+  - Optionales Available-Deployment an die Collection aus `DeployTo`. Fehlt die
+    Ziel-Collection oder scheitert das Deployment, ist das ein offener Punkt
+    (`package_deploy_failed` mit Collection-Name); der nächste Durchlauf
+    versucht es erneut, bis die Collection existiert.
+- Traten Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der nächste
+  Durchlauf wiederholt die offenen Punkte.
 
 ### Site Health (`mecm_site-health.ps1`, alle 300 s)
 
@@ -497,10 +499,11 @@ Meldet den offiziellen, zusammengefassten MECM-Site-Zustand an die WebApp, ohne
 dass das Portal MECM selbst ansprechen muss (der frühere TCP-445-Check im Portal
 ist entfernt, ADR-0018 Amendment 2026-07-23):
 
-- Fragt über den SMS Provider `SMS_SummarizerSiteStatus` für den konfigurierten
-  Site-Code ab (Site-Code über `Get-VsSiteCode`). Die Abfrage läuft per CIM ohne
-  ConfigurationManager-Modul; das Modul wird nur für den PSDrive-Fallback der
-  Provider-Ermittlung geladen.
+- Fragt über den SMS Provider `SMS_SummarizerSiteStatus` für den Site-Code aus
+  dem Registry-Wert `MECM_SiteCode` ab; fehlt er, lautet das Ergebnis `unknown`.
+  Die Abfrage läuft per CIM, ein ConfigurationManager-Modul wird nicht geladen.
+  Die Provider-Ermittlung liest höchstens ein bereits vorhandenes
+  CMSite-Laufwerk.
 - Reine Statusabbildung: `0` = OK (grün), `1` = Warnung (gelb), `2` = kritisch
   (rot), jeder andere Rohwert = unbekannt (grau). Sendet ausschließlich
   `completed`-Berichte, kein `started`.
