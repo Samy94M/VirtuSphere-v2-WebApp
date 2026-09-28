@@ -4,7 +4,7 @@
 
 Der Nutzer wollte Ablaufdiagramme für alle Ansible-YAML-Dateien, die Bereitstellungsmodi und die Prüfungen des Systemstatus. Danach sollte er sie auf SSoT, Drifts, Logik, Probleme, Bedienkomfort, Doku und Hilfe prüfen. Ergebnis sind die beiden Betriebsdokumente [Bereitstellung: Abläufe](../operations/deploy-flows.md) und [Systemstatus: Prüfungen](../operations/system-status-checks.md). Diese Datei hält Befunde, Entscheidungen und Pakete fest.
 
-Quelle ist Codelesung am Stand `9139971` (MC04). Kein Befund ist durch einen Testlauf bestätigt. Jeder Fix beginnt mit einem Test, der den Befund zeigt.
+Quelle ist Codelesung am Stand `9139971` (MC04), nachgeprüft gegen `a364047`: Die dazwischen gelieferten Commits (T4, MC03, Modusbezeichnungen, AV-P0 Teil 1, MECM-Diagramme) erledigen keinen der Befunde unten und verschieben keine genannte Funktion. Kein Befund ist durch einen Testlauf bestätigt. Jeder Fix beginnt mit einem Test, der den Befund zeigt.
 
 Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Diagramme; eine Ansichtsseite wird daraus erzeugt, nie umgekehrt. Die Betriebsdokumente zeigen nur ausgelieferten Stand. Die Änderungen unten ziehen ihr Diagramm im Commit ihrer Umsetzung nach.
 
@@ -50,11 +50,11 @@ Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Dia
 | DF-S1 | `lib/ansible_paths.php` (`ansible_required_files`) | `powercycle_vm_tasks.yml` steht als Literal, die Create-Dateien dagegen als Konstanten. | Konstante neben `VIRTUSPHERE_CREATE_IDENTITY_TASKS`. |
 | DF-S2 | `Ansible/powercycleVMs-ESXi_playbook.yml`, `Ansible/startVMs-ESXi_playbook.yml` | `default(5)` und `default(300)` doppeln `VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT` und `VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT`. Der Worker schreibt beide Werte immer; ein Default würde nur einen Emitterfehler verdecken. | Default entfernen und einen fehlenden Wert laut scheitern lassen, oder vom Pausenbudget-Vertragstest mitprüfen lassen. |
 | DF-S3 | `Ansible/test-linux_playbook.yml` | Gehört zu keinem Modus, wird nie hochgeladen und legt beim Ausführen Ordner und Dateien im Home-Verzeichnis des Ansible-Benutzers an. | Entfernt. Der Nutzer hat am 28.09.2026 bestätigt, dass er die Datei nicht benutzt. |
-| DF-S4 | `docs/operations/deploy-flows.md`, `docs/operations/system-status-checks.md` | Nur die Regel im Dokumentkopf hält Diagramm und Code zusammen. Ein neues Playbook oder ein neuer Modus kann ohne Diagramm ausgeliefert werden. | Wächtertest: Jede Datei `Ansible/*_playbook.yml` hat einen Abschnitt in `deploy-flows.md`, jeder Modus aus `virtusphere_deploy_modes()` eine Zeile in der Modustabelle, jeder Bereich der Systemstatus-Übersicht einen Abschnitt in `system-status-checks.md`. |
+| DF-S4 | `docs/operations/deploy-flows.md`, `docs/operations/system-status-checks.md` | Nur die Regel im Dokumentkopf hält Diagramm und Code zusammen. Ein neues Playbook oder ein neuer Modus kann ohne Diagramm ausgeliefert werden. | Wächtertest nach dem Muster von `MecmScheduledTasksDocContractTest` (Liste aus dem Code ableiten, nie im Test aufzählen): Jede Datei `Ansible/*_playbook.yml` hat einen Abschnitt in `deploy-flows.md`, jeder Modus aus `virtusphere_deploy_modes()` eine Zeile in der Modustabelle, jeder Bereich der Systemstatus-Übersicht einen Abschnitt in `system-status-checks.md`. |
 
 ### Bereits geplant, hier nur verknüpft
 
-- Modusnamen DE/EN und doppelter MAC-Export im Hilfetext von `full`: [Powercycle-Plan](2026-09-14-powercycle-sequential-plan.md), Review-Befund „Hilfe und Texte“.
+- Modusnamen DE/EN und doppelter MAC-Export im Hilfetext von `full`: geliefert in `0dc5172`; `DeployModeTextTest` leitet seither jede Modusliste der Hilfe ab. DF-D2 und DF-D3 betrifft das nicht, sie beschreiben das Verhalten falsch, nicht den Namen.
 - Suche per Name in Powercycle, Export, Start und Autostart, bei Namensdubletten sicherer Abbruch statt richtiger VM: [Identitätsplan](2026-09-14-vm-identity-replacement-plan.md), Abschnitt 16.2.
 - Alle VMs starten nach einer gemeinsamen Pause gleichzeitig: [Staffelungsaudit](2026-09-11-full-pipeline-start-stagger-audit.md), P1 bis P7.
 
@@ -74,7 +74,7 @@ Jedes Paket zieht das betroffene Diagramm in [Bereitstellung: Abläufe](../opera
 
 Vom Nutzer am 28.09.2026 bestätigt, bezogen auf die Reihenfolge der Register-Entscheidungen vom selben Tag:
 
-- DF-P0 läuft mit den Powercycle-Modusnamen DE/EN, weil beide dieselben Hilfetexte der Modi ändern.
+- DF-P0 läuft als nächstes Doku-Paket nach dem Reporter- und MC03-Strang. Die ursprünglich geplante Kopplung an die Modusnamen entfällt, weil diese in `0dc5172` schon geliefert sind.
 - DF-P1, DF-P2 und DF-P3 folgen auf das Autoimporter-Versionsmodell (AV). Sie sind reine Portal-Arbeit und von der MECM-Installersperre nicht betroffen. DF-P2 kommt vor DF-P3.
 - DF-P4 läuft mit IDR-P06 und der UUID-Suche in allen Playbooks, weil alle drei das Create- und Identitätsverhalten ändern.
 
@@ -86,11 +86,10 @@ Verweise auf die beiden neuen Betriebsdokumente fehlen noch an diesen Stellen:
 - `docs/operations/esxi-inventory.md`
 - `docs/operations/ansible-full-test.md`
 - `docs/operations/troubleshooting.md`
-- `docs/operations/system-status-checks.md` auf die lokal entstandenen MECM-Serveraufgaben (`mecm-scheduled-tasks.md`), sobald beide Stände zusammengeführt sind
 - Portalhilfe `help_deploy` und `help_system_status` DE/EN, im bestehenden Muster „liegt im Projektordner auf dem Server“
 
 Diese Dateien bearbeitet parallel die lokale Session. Die Verweise setzt deshalb sie, nachdem dieser Branch zusammengeführt ist. Dieselbe Session trägt auch den Verweis auf diesen Plan in das [Register](2026-09-12-consolidated-session-backlog.md) ein.
 
 ## Nächster Schritt
 
-Branch `claude/practical-galileo-d8yx5g` mit `main` zusammenführen, dann Verweise und Registereintrag setzen. Danach DF-P0 bis DF-P4 wie unter „Einordnung in die Reihenfolge“ abarbeiten.
+Pull Request des Branches `claude/practical-galileo-d8yx5g` zusammenführen, dann Verweise und Registereintrag setzen. Danach DF-P0 bis DF-P4 wie unter „Einordnung in die Reihenfolge“ abarbeiten.

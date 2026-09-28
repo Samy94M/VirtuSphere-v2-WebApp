@@ -10,13 +10,13 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 |---|---|---|---|---|---|
 | `full` (Vollständige Kette) | Create je VM, dann `powercycleVMs`, `exportVMs`, `startVMs`; `autostartVMs` nur bei Mission mit Autostart | ja | Power-Cycle- und Start-Wartezeit | ja | ja |
 | `create` (VMs anlegen) | Create je VM | nein | nichts | nein | ja |
-| `powercycle` | `powercycleVMs`, dann `exportVMs` | ja | Power-Cycle-Wartezeit | ja | ja |
+| `powercycle` (Ein- und ausschalten mit MAC-Export) | `powercycleVMs`, dann `exportVMs` | ja | Power-Cycle-Wartezeit | ja | ja |
 | `export` (MAC-Adressen exportieren) | `exportVMs` | nein | nichts | ja | ja |
 | `start` (VMs starten) | `startVMs` | ja | Start-Wartezeit | nein | ja |
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Systemmodus, ohne Mission) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
