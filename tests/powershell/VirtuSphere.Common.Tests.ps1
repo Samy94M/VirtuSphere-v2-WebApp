@@ -897,6 +897,20 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             $spec.RunAs32Bit | Should -BeFalse
             $spec.DetectionIs32Bit | Should -BeFalse
             $spec.RequiredFiles | Should -Be @($spec.Script, 'VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1', 'bootstrap.json')
+            # Nutzerentscheidung 28.09.2026: 15 Minuten fuer alle vier Phasen.
+            $spec.MaximumRuntimeMins | Should -BeOfType [int]
+            $spec.MaximumRuntimeMins | Should -Be 15
+        }
+    }
+
+    It 'lehnt eine Phase ohne ganzzahlige Maximum Runtime ab MECM-Minimum ab' {
+        foreach ($runtime in @($null, 14, '15')) {
+            { Invoke-InFileScope -Path $script:Packaging -Arguments @(, $runtime) -Body {
+                param($value)
+                $specs = @(Get-VsClientAppSpecs)
+                $specs[0].MaximumRuntimeMins = $value
+                Assert-VsClientAppSpecGraph -Specs $specs
+            } } | Should -Throw '*Maximum Runtime*'
         }
     }
 
@@ -1038,7 +1052,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             $spec = (Get-Specs)[0]
             $command = 'powershell.exe -NoProfile -File client_getInfos.ps1'
             $content = '\\server\share\client_getInfos'
-            $xml = '<DeploymentType><Name>client_getInfos Deployment</Name><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0]
+            $xml = '<DeploymentType><Name>client_getInfos Deployment</Name><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Args><Arg Name="MaxExecuteTime" Type="Int32">15</Arg></Args><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0]
             $dt = [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos Deployment'; SDMPackageXML = $xml }
             $codes = @(
                 [pscustomobject]@{ Value = 0; CodeType = 'Success' }
@@ -1055,6 +1069,38 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
                 param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
             })
             $issues | Should -Contain 'return-code-type:1641'
+        }
+
+        It 'blockiert abweichende oder fehlende Maximum Runtime und 32-Bit-Ausfuehrung' {
+            $spec = (Get-Specs)[0]
+            $command = 'powershell.exe -NoProfile -File client_getInfos.ps1'
+            $content = '\\server\share\client_getInfos'
+            $codes = @(
+                [pscustomobject]@{ Value = 0; CodeType = 'Success' }
+                [pscustomobject]@{ Value = 1641; CodeType = 'HardReboot' }
+                [pscustomobject]@{ Value = 3010; CodeType = 'SoftReboot' }
+            )
+            $cases = @(
+                @{ Args = '<Arg Name="MaxExecuteTime" Type="Int32">120</Arg>'; Expected = 'maximum-runtime' }
+                @{ Args = ''; Expected = 'maximum-runtime' }
+                @{ Args = '<Arg Name="MaxExecuteTime" Type="Int32">15</Arg><Arg Name="MaxExecuteTime" Type="Int32">15</Arg>'; Expected = 'maximum-runtime' }
+                @{ Args = '<Arg Name="MaxExecuteTime" Type="Int32">15</Arg><Arg Name="RunAs32Bit" Type="Boolean">true</Arg>'; Expected = 'run-as-32bit' }
+                @{ Args = '<Arg Name="MaxExecuteTime" Type="Int32">15</Arg><Arg Name="RunAs32Bit" Type="Boolean"></Arg>'; Expected = 'run-as-32bit' }
+            )
+            foreach ($case in $cases) {
+                $xml = '<DeploymentType><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Args>{6}</Args><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0], $case.Args
+                $dt = [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos Deployment'; SDMPackageXML = $xml }
+                $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $codes) -Body {
+                    param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+                })
+                $issues | Should -Contain $case.Expected -Because $case.Args
+            }
+
+            $explicit64 = '<DeploymentType><ContentLocation>{0}</ContentLocation><InstallCommand>{1}</InstallCommand><Context>System</Context><Reboot>BasedOnExitCode</Reboot><Args><Arg Name="MaxExecuteTime" Type="Int32">15</Arg><Arg Name="RunAs32Bit" Type="Boolean">false</Arg></Args><Detection><Key>{2}</Key><Name>{3}</Name><Type>{4}</Type><Value>{5}</Value></Detection></DeploymentType>' -f $content, $command, $spec.DetectionKey, $spec.DetectionName, $spec.DetectionType, $spec.DetectionValues[0]
+            $dt = [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos Deployment'; SDMPackageXML = $explicit64 }
+            @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $codes) -Body {
+                param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+            }).Count | Should -Be 0
         }
     }
 }

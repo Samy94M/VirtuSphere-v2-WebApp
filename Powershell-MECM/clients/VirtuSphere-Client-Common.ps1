@@ -27,6 +27,9 @@ $script:VsRegistryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 $script:VsClientSnapshotSchema = 1
 $script:VsResolvedApi = $null
 $script:VsBootstrapApiConfiguration = $null
+# Herkunft des ausgelieferten Contentsatzes (Bootstrap-Schema 2). Reine
+# Provenienz: sie geht nicht in den ConfigHash ein.
+$script:VsBootstrapBundleId = $null
 
 # Die Client-Loggingdomaene wird gemeinsam mit jeder Phase paketiert. Common
 # bleibt der oeffentliche Dot-Source-Pfad, verweigert aber einen unvollstaendigen
@@ -136,8 +139,19 @@ function Initialize-VsClientBootstrap {
     try {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $keys = @($manifest.PSObject.Properties.Name)
-        if ($keys.Count -ne 4 -or @('Schema', 'WebAPI', 'Scheme', 'CertThumbprint' | Where-Object { $_ -cnotin $keys }).Count -gt 0 -or
-            $manifest.Schema -isnot [int] -or [int]$manifest.Schema -ne 1 -or
+        # Schema 1: genau die vier API-Felder. Schema 2 (MC03-Bundle): dieselben
+        # Felder plus BundleId als 64 Kleinbuchstaben-Hexzeichen.
+        $schemaKeys = @('Schema', 'WebAPI', 'Scheme', 'CertThumbprint')
+        $bundleId = $null
+        if ($manifest.Schema -is [int] -and [int]$manifest.Schema -eq 2) {
+            $schemaKeys += 'BundleId'
+            if ($manifest.PSObject.Properties['BundleId'] -and $manifest.BundleId -is [string] -and [string]$manifest.BundleId -cmatch '\A[0-9a-f]{64}\z') {
+                $bundleId = [string]$manifest.BundleId
+            }
+        }
+        if ($keys.Count -ne $schemaKeys.Count -or @($schemaKeys | Where-Object { $_ -cnotin $keys }).Count -gt 0 -or
+            $manifest.Schema -isnot [int] -or [int]$manifest.Schema -notin @(1, 2) -or
+            ([int]$manifest.Schema -eq 2 -and -not $bundleId) -or
             $manifest.WebAPI -isnot [string] -or $manifest.Scheme -isnot [string] -or
             $manifest.CertThumbprint -isnot [string]) { throw 'unbekanntes Bootstrap-Schema oder ungueltige Feldtypen' }
         $desired = ConvertTo-VsClientApiConfiguration -Api ([string]$manifest.WebAPI) -Scheme ([string]$manifest.Scheme) -CertThumbprint ([string]$manifest.CertThumbprint)
@@ -164,6 +178,7 @@ function Initialize-VsClientBootstrap {
                     throw 'configuration_drift: Bootstrap und nativer Registrysatz unterscheiden sich'
                 }
                 $script:VsBootstrapApiConfiguration = $current
+                $script:VsBootstrapBundleId = $bundleId
                 return
             }
             if (-not (Test-Path -Path $script:VsRegistryBase)) { New-Item -Path $script:VsRegistryBase -Force -ErrorAction Stop | Out-Null }
@@ -181,6 +196,7 @@ function Initialize-VsClientBootstrap {
             New-ItemProperty -Path $script:VsRegistryBase -Name 'ConfigCommittedAtUtc' -Value $utc -PropertyType String -Force -ErrorAction Stop | Out-Null
             if (-not (Get-VsPreparedClientApiConfiguration)) { throw 'Client-Konfigurationshash konnte nicht bestaetigt werden.' }
             $script:VsBootstrapApiConfiguration = $desired
+            $script:VsBootstrapBundleId = $bundleId
         } finally {
             if ($locked) { $mutex.ReleaseMutex() }
             $mutex.Dispose()
