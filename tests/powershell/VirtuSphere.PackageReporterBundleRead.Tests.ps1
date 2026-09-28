@@ -88,12 +88,17 @@ Describe 'T4 wrapper reads only a complete bound reporter generation' {
                 [IO.File]::WriteAllText((Join-Path $PackageRoot 'verifier-pid.txt'), [string]$PID)
                 Start-Sleep -Seconds 30
             }
+            # The deadline must be long enough for the child to reach the stuck
+            # stub even on a loaded host; a shorter one tests the start timeout
+            # instead and leaves no PID to prove the kill (release lane 28.09.).
             $clock = [Diagnostics.Stopwatch]::StartNew()
-            Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 1500 |
+            Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 6000 |
                 Should -BeNullOrEmpty
             $clock.Stop()
-            $clock.ElapsedMilliseconds | Should -BeLessThan 2500
-            $childId = [int](Get-Content -LiteralPath (Join-Path $script:fixture.Root 'verifier-pid.txt') -Raw)
+            $clock.ElapsedMilliseconds | Should -BeLessThan 7000
+            $pidFile = Join-Path $script:fixture.Root 'verifier-pid.txt'
+            Test-Path -LiteralPath $pidFile | Should -BeTrue -Because 'the child must have reached the stuck verifier before its deadline'
+            $childId = [int](Get-Content -LiteralPath $pidFile -Raw)
             $endClock = [Diagnostics.Stopwatch]::StartNew()
             while ((Get-Process -Id $childId -ErrorAction SilentlyContinue) -and $endClock.ElapsedMilliseconds -lt 1000) {
                 Start-Sleep -Milliseconds 25
