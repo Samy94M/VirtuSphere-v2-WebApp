@@ -47,7 +47,7 @@ Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Dia
 |---|---|---|---|
 | DF-S1 | `lib/ansible_paths.php` (`ansible_required_files`) | `powercycle_vm_tasks.yml` steht als Literal, die Create-Dateien dagegen als Konstanten. | Konstante neben `VIRTUSPHERE_CREATE_IDENTITY_TASKS`. |
 | DF-S2 | `Ansible/powercycleVMs-ESXi_playbook.yml`, `Ansible/startVMs-ESXi_playbook.yml` | `default(5)` und `default(300)` doppeln `VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT` und `VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT`. Der Worker schreibt beide Werte immer; ein Default würde nur einen Emitterfehler verdecken. | Default entfernen und einen fehlenden Wert laut scheitern lassen, oder vom Pausenbudget-Vertragstest mitprüfen lassen. |
-| DF-S3 | `Ansible/test-linux_playbook.yml` | Gehört zu keinem Modus, wird nie hochgeladen und legt beim Ausführen Ordner und Dateien im Home-Verzeichnis des Ansible-Benutzers an. | Vorschlag: entfernen. Vor der Umsetzung vom Nutzer bestätigen lassen. |
+| DF-S3 | `Ansible/test-linux_playbook.yml` | Gehört zu keinem Modus, wird nie hochgeladen und legt beim Ausführen Ordner und Dateien im Home-Verzeichnis des Ansible-Benutzers an. | Entfernt. Der Nutzer hat am 28.09.2026 bestätigt, dass er die Datei nicht benutzt. |
 
 ### Bereits geplant, hier nur verknüpft
 
@@ -59,7 +59,7 @@ Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Dia
 
 | Paket | Inhalt | Voraussetzung |
 |---|---|---|
-| DF-P0 | Drift und Aufräumen: DF-D1 bis DF-D7, DF-S1, DF-S2; DF-S3 nach Bestätigung | keine |
+| DF-P0 | Drift und Aufräumen: DF-D1 bis DF-D7, DF-S1, DF-S2 (DF-S3 ist bereits erledigt) | keine |
 | DF-P1 | Systemstatus: DF-L4 mit DF-E4 und DF-E5 | keine |
 | DF-P2 | ESXi-Nachweisalter: DF-L3 mit DF-E3 | vor DF-P3, weil DF-P3 auf aktuelle Befunde angewiesen ist |
 | DF-P3 | Freie Lizenz sperrt schreibende Modi: DF-L2 mit DF-E2 | DF-P2 |

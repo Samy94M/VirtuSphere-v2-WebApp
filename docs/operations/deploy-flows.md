@@ -16,7 +16,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Systemmodus, ohne Mission) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf. `test-linux_playbook.yml` gehört zu keinem Modus und wird nie auf den Ansible-Host hochgeladen.
+Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
