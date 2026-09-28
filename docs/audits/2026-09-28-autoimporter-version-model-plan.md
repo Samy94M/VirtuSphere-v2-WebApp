@@ -82,6 +82,20 @@ Codelesung am Stand `9139971`; keiner der Befunde ist per Laufzeitprobe bestäti
 | AV-F21 | Jede Collection im Ordner `VirtuSphere_Applications` gilt als Paket, auch eine von Hand angelegte oder eine, deren Application gelöscht wurde. VMs bekommen dann eine Mitgliedschaft, installiert wird nichts. | `mecm_Packages-TaskSeq-sync.ps1` | AV-R15. |
 | AV-F22 | Jede Task Sequence der Site wird ein Betriebssystem im Portal, auch fremde; die Liste ist nicht kuratiert. | `mecm_Packages-TaskSeq-sync.ps1` | AV-R16. |
 
+Aus der [PowerShell-Prüfung vom 28.09.2026](2026-09-28-powershell-audit.md) (Befund-ID dort in Klammern; Beleg und Reproduktion stehen dort):
+
+| ID | Befund | Ort | Folge |
+|---|---|---|---|
+| AV-F23 | Zwei Paketordner mit gleichem `ProjectName`/`version`, aber verschiedenem Inhalt fordern abwechselnd neuen Content an; verteilt wird immer der Ordner der ersten Anlage (PS-08). | `mecm_autoimporter.ps1` (Schleife ohne Duplikatprüfung) | Doppelte Name-Version vor jedem MECM-Write als offener Punkt sperren und nennen. AV-R01 beendet nur die Updateschleife, nicht die Mehrdeutigkeit der Quelle. |
+| AV-F24 | Ein Produkt mit Bindestrich-Erweiterung (`Firefox-ESR` neben `Firefox`) sperrt `removeOldVersion` des anderen dauerhaft, weil der Bereinigungsplan `Firefox-*` liest und `Firefox-ESR-115` als Kandidat mit ungültiger Version wertet; jeder Lauf hat damit einen offenen Punkt und scannt voll (PS-07). Das ist keine fremde Altversion im Sinne von AV-R05, sondern ein anderes Produkt. | `mecm_autoimporter.ps1` (`$readRetirementPlan`), `VirtuSphere-Common.ps1` (`Get-VsPackageRetirementPlan`) | Kandidaten nach der Katalogregel filtern (Basisname vor dem letzten Bindestrich exakt gleich), Regressionstest mit Nachbarprodukt. |
+| AV-F25 | Der Server prüft `ErrorAction` nicht, der Paketwrapper bricht ohne `Stop`/`Continue` mit Exit 1 ab: das Paket wird importiert und scheitert auf jedem Client. Der Pflichtfeld-Zwillingstest führt eine feste Liste und sieht das nicht; Hilfe und README nennen nur `ProjectName`/`version` (PS-10, D-01). | `VirtuSphere-Common.ps1` (`Read-VsPackageConfig`), `Package_Vorlage/install.ps1`, `VirtuSphere.Autoimporter.Tests.ps1` | Serverseitig dieselbe Regel, fehlend als offener Punkt; Zwillingstest aus beiden ASTs ableiten; `help_packages` und README nachziehen. |
+| AV-F26 | Der Datei-Stamp liest `files` ohne `-Force`: eine Änderung nur an einer versteckten Datei löst nichts aus, obwohl MECM sie verteilt (PS-06). | `VirtuSphere-Common.ps1` (`Get-VsFilesManifestStamp`) | Versteckte Dateien mitzählen oder bewusst ausschließen und dokumentieren. |
+| AV-F27 | Eine leere DP-Gruppe (keine Mitglieder) lässt den Erstauftrag dauerhaft `package_content_in_progress` stehen und erzwingt Vollscans; die Ursache wird nicht benannt (Nachbar von M03-F03). | `mecm_autoimporter.ps1` (Intent-Bindung `initial`) | Eigene Ursache „DP-Gruppe ohne Ziele“. |
+| AV-F28 | Das Verschieben einer neuen Application in den Ordner läuft ohne Zähler (PS-09). | `mecm_autoimporter.ps1` (`Move-CMObject`) | Wiederholen und zählen oder als kosmetisch dokumentieren. |
+| AV-F29 | Ein vorübergehender Fehler bei Add/Remove einer Direktregel macht den Journaleintrag `uncertain` und blockiert die VM dauerhaft. Für einen offenen Add wäre sicher gelesene Abwesenheit eindeutig; der Remove-Replay prüft schon so (PS-14). | `mecm_new-device-sync.ps1` (Add-/Remove-`catch`, Replay) | Offene Add-Intents bei belegter Abwesenheit automatisch auflösen; nur Anwesenheit oder unbekannter Stand bleibt für AV-E. |
+| AV-F30 | Ist das Journal beim Start gesperrt, unlesbar oder quarantiniert, endet der Device-Sync ohne Run-Report; mitten im Lauf meldet er `mecm_unavailable` und baut die MECM-Verbindung neu auf, obwohl die Ursache lokal ist (PS-04). | `mecm_new-device-sync.ps1`, Kategorien in `lib/constants.php` | Eigene Kategorie im Wire-Vertrag (Portal zuerst), Startfehler melden und gebremst weiterlaufen. |
+| AV-F31 | Der Freigabezweig `Approve-CMDevice` ist unerreichbar; Hilfe (`help_stack.stack_a6_p2`), README, Fehlertabelle und Flowchart beschreiben ihn als regulären Schritt (PS-05, D-02). | `mecm_new-device-sync.ps1` | Entscheiden, ob Freigabe nötig ist; dann erreichbar machen, sonst Code, Doku, Hilfe und Diagramm bereinigen. |
+
 ## 5. Randfälle
 
 | ID | Fall | Erwartetes Ergebnis |
@@ -128,6 +142,7 @@ Reihenfolge laut Register: nach MC03 zuerst AV-P0 und AV-A, danach AV-B und AV-C
 - AV-F03: Gelöschte eigene Collections ohne Providerabfrage als nicht vorhanden behandeln.
 - AV-F20: MAC-Auswahl nach der Regel des Portals (Karte auf der WDS-Portgruppe der Mission).
 - AV-F16: Rückstufung blockierter VMs, damit eine hängende VM nicht jeden Lauf alle MECM-Abfragen auslöst.
+- AV-F31: Freigabezweig entscheiden und Code, Doku, Hilfe und Diagramm angleichen. Mit AV-F20 wird die Hilfe `help_missions.status_stuck_2` richtig, die heute schon das Zielbild beschreibt (D-06).
 - Tests: Integration (Transfer einer registrierten VM endet; Speichern während eines Durchlaufs geht nicht verloren), Maschinen-Wire-Test, Pester für den Device-Sync (MAC-Auswahl mit mehreren DHCP-Karten, keine passende Karte, Rückstufung und Rückkehr).
 
 ### AV-A: Portal (WebApp, ohne MECM-Installer auslieferbar)
@@ -136,7 +151,7 @@ Reihenfolge laut Register: nach MC03 zuerst AV-P0 und AV-A, danach AV-B und AV-C
 - AV-R14: Schutzschwelle zählt Versionswechsel nicht.
 - AV-R09 und AV-R10: Update-Hinweis für jede höhere Version, Warnung bei zwei Versionen desselben Pakets.
 - AV-R12: automatische Übertragung im Save-Service, nur für `mecm_sync_state = registered`, Betriebssystem gegen `deploy_vm_mecm_rules`; Speichermeldung nennt Zu- und Abgänge („keine Deinstallation“), OS-Hinweis mit Neuinstallationsrisiko, Warnung bei Haken auf gelöschter Version.
-- AV-R13 und AV-F10: Doku und Hilfe.
+- AV-R13 und AV-F10: Doku und Hilfe. Dabei die Aufräumregel genau beschreiben: gelöscht wird eine zurückgezogene Zeile ohne aktuelle Zuordnung, die nie umgehängt wurde, nicht nur eine „nie zugeordnete“ (D-07: `help_packages.packages_p2b`, `help_system_status.logs_p3`, Einleitung Packages Sync in `mecm-scheduled-tasks.md`).
 - Tests: Save-Service, Package-Sync-Endpoint, VM-Editor (Unit/Integration), E2E für die Editor-Meldungen, DE/EN-Parität.
 
 ### AV-B: Autoimporter (MECM-Server, erst mit MC03 und Cutover auslieferbar, MC-R4)
@@ -144,6 +159,7 @@ Reihenfolge laut Register: nach MC03 zuerst AV-P0 und AV-A, danach AV-B und AV-C
 - AV-R01 bis AV-R04 und AV-R07, AV-F05, AV-F06, AV-E02, AV-E08, AV-E09.
 - Kein Contentupdate derselben Version; Vorlage nur bei Neuanlage; gemerkte Zustandsbefunde und Hinweiszeile; neue Laufursachen und Summary-Key.
 - AV-F12 bis AV-F15: gescheiterter Deployment Type ist ein offener Punkt statt Laufabbruch; Hash nur nach Vorprüfung und einmal je Lauf; Datei in Bearbeitung als eigene Ursache ohne Verbindungsabbau; offene Punkte ohne Vollscan jede Minute.
+- AV-F23 bis AV-F28: doppelte Name-Version sperren; Bereinigungskandidaten nach der Katalogregel filtern; `ErrorAction` serverseitig prüfen und den Pflichtfeld-Zwilling ableiten; versteckte Dateien im Stamp; leere DP-Gruppe als eigene Ursache; Application-Ordner zählen.
 - Pester: Versionsregeln (Format, höher, gleich, niedriger, `1.0`/`1.0.0`), gleiche Version mit geänderten Dateien, ältere Vorlage, doppelter Quellordner, `removeOldVersion` ohne Ziel, Baseline ohne Tracking, ruhige Läufe melden Hinweise weiter, Deployment Type scheitert mitten im Scan, Datei ändert sich beim Hashen; bei neuem Fortschritt `VirtuSphere.ProgressReporting.Tests.ps1`.
 
 ### AV-C: Übernahme-Werkzeug für Altbestand (MECM-Server)
@@ -157,19 +173,23 @@ Reihenfolge laut Register: nach MC03 zuerst AV-P0 und AV-A, danach AV-B und AV-C
 - AV-R15: Package-Sync meldet nur markierte Paket-Collections. Voraussetzung ist AV-C, sonst verschwindet unmarkierter Altbestand aus dem Portal; die Schutzschwelle (AV-R14) muss diesen Übergang tragen.
 - AV-R16: kuratierte Task-Sequence-Liste für Betriebssystemkatalog und OS-Collections. Vorher entscheiden: Ordner oder Marker; bestehende Portalzuweisungen auf dann nicht mehr gemeldete Task Sequences bleiben als „zurückgezogen“ sichtbar.
 - AV-R17: Marker auf OS- und Missions-Collections (auch nachträglich für vorhandene), Ordnernamen zentral in `VirtuSphere-Common.ps1`, lesender Bericht über leere oder nicht mehr gebrauchte Collections, kein Löschen.
+- Beim Umbau des Package-Sync zugleich PS-03 aus der [PowerShell-Prüfung](2026-09-28-powershell-audit.md) schließen: die Ordnerabfrage läuft heute mit `SilentlyContinue`, ein nicht beendender Providerfehler würde als „Ordner fehlt“ (`source_missing`) gemeldet und die Site-Drive-Neuinitialisierung verhindern; außerdem einen Verhaltenstest für den Sende-Schutz bei leerem Katalog ergänzen (T-05).
 - Tests: Pester für Katalogfilter und Bericht, Package-Sync-Endpoint mit schrumpfendem Katalog, DE/EN-Hilfe zu Paket- und Betriebssystemkatalog.
 
 ### AV-E: Werkzeug für unklare Journal-Einträge (MECM-Server)
 
 - AV-R18: lesender Bericht über unklare Einträge mit Plan-ID; `-Apply` löst nur auf, was der Provider eindeutig belegt, `ShouldProcess` mit ConfirmImpact High, Sperre gegen den laufenden Device-Sync, Rückleseprobe. Muster: `Powershell-MECM/retire-VirtuSphere-LegacyGetInfo.ps1`.
 - Doku: `mecm-integration.md` ersetzt „manuell belegen“ durch die Werkzeugschritte.
-- Tests: Pester für Bericht, Auflösung und Sperrkonflikt.
+- AV-F29: Vor dem Werkzeug im Device-Sync selbst auflösen, was eindeutig ist (offener Add mit sicher gelesener Abwesenheit); das Werkzeug behandelt nur den Rest.
+- AV-F30: Journalfehler als eigene Laufkategorie melden; die Kategorie kommt zuerst ins Portal (`lib/constants.php`, Hilfe), das Skript folgt mit dem Cutover.
+- Tests: Pester für Bericht, Auflösung und Sperrkonflikt; Device-Sync mit Journal-Startfehler und mit Add-Timeout bei abwesender und bei anwesender Regel.
 
 ## 8. Doku- und Hilfematrix
 
 | Ort | Änderung |
 |---|---|
-| `docs/operations/mecm-integration.md` | Katalog-Lebenszyklus ohne automatisches Umhängen (heute steht dort „automatisch umgehängt“), Versionsregeln, Übernahme-Werkzeug, MECM-Übertragung. |
+| `docs/operations/mecm-integration.md` | Katalog-Lebenszyklus ohne automatisches Umhängen (heute steht dort „automatisch umgehängt“), Versionsregeln, Übernahme-Werkzeug, MECM-Übertragung. Fehlertabelle: Backoff des Autoimporters (immer 60 s, sofort neu) getrennt von Device-/Packages-Sync; „Ordner scheitert“ meldet den Lauf als `warning` (D-09). |
+| DE/EN-Hilfe `help_system_status` (`system_status_source_1`, `_source_3`), `help_packages` (`packages_p1`) | Device-Sync setzt OS-, Paket- und Missions-Collection und entfernt eigene Regeln; eine Paket-Collection entsteht nur mit `generateOwnDeviceColletion` (D-03); Pflichtfelder samt `ErrorAction` (AV-F25). |
 | `Powershell-MECM/README.md` | `config.json`-Regeln (Version, `removeOldVersion` wirkt mit der Anhebung), Marker und Übernahme; heute steht dort, Altobjekte ohne Marker „bleiben erhalten“, tatsächlich sperren sie das Produkt. |
 | `docs/operations/mecm-scheduled-tasks.md` | Diagramme von Devices Sync (AV-P0, AV-D), Packages Sync (Portal-Schritte aus AV-A, Katalogfilter aus AV-D) und Package Import (AV-B) im selben Commit wie die Codeänderung nachziehen; der Wächter `MecmScheduledTasksDocContractTest` prüft nur, dass jede Aufgabe ein Diagramm hat, nicht dessen Inhalt. |
 | `Docker/WebAPI/lib/repo/vms_operations.php` | Kommentar „device-sync never Remove“ korrigieren; der Device-Sync entfernt eigene, nicht mehr gewünschte Regeln. |
@@ -185,3 +205,4 @@ Reihenfolge laut Register: nach MC03 zuerst AV-P0 und AV-A, danach AV-B und AV-C
 - AV-C: Revisionswirkung der Markierung (Microsoft-Doku, Labor).
 - AV-D: Ordner oder Marker für kuratierte Task Sequences; Revisionswirkung eines Kommentars an bestehenden Collections (Labor).
 - Site-Abnahme von AV-B und AV-C nach dem Cutover.
+- PS-03: ob `Get-CMFolder` unter MECM 2509 einen Providerfehler beendend oder nicht beendend meldet (Labor).

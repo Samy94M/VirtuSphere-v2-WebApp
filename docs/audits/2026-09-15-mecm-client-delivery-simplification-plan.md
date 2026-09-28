@@ -880,6 +880,12 @@ Quellen: [Management tasks for applications](https://learn.microsoft.com/en-us/i
 - Das vorhandene `VirtuSphere-Logging.ps1` für Packaging-Läufe wiederverwenden: sechs Felder, Levelvertrag, CorrelationId, Redigierung und 30-Tage-Retention bleiben zentral. Plan-/Receipt-/Cleanup-Dateien sind getrennte Geschäftsbelege und folgen nicht dem Tageslog-Rollover.
 - Auditfelder und Ereignisse ausschließlich in `audit_event_definitions.php` registrieren. Core-Desired-State, MECM-Transfer und Clientphase bleiben drei verschiedene Ereignis-/Evidenzarten; ein Vorgang erzeugt keine doppelte Auditzeile.
 - Die konkrete Dateimatrix aus „Dokumentationsspiegel“ umsetzen: Runbook als einzige Admin-Schrittfolge, Client-README als technischer Phasenvertrag, Haupt-README nur als Einstieg sowie `help_packages.php`, `help_missions.php`, VM-Editor und Systemstatus jeweils gleichzeitig in DE/EN.
+- Aus der [PowerShell-Prüfung vom 28.09.2026](2026-09-28-powershell-audit.md):
+  - PS-11: Ein blockierter Bootstrap in `client_getInfos.ps1` endet als unbehandelte Ausnahme; das Client-Log nennt die Ursache nicht. Aufruf fangen, Ursache als ERROR ins Phasenlog schreiben, dann mit 1 enden.
+  - PS-13 zuerst: Die Paketwrapper-Logs unter `%ProgramData%` entstehen auf einem Standard-Client gar nicht (geerbte `Users`-Schreibrechte, siehe [Reporterplan](2026-09-13-package-wrapper-logging-plan.md), Abschnitt 30). Erst danach die Diagnosepfade in Hilfe und Runbook beschreiben.
+  - D-05: Hilfe (DE/EN, `clientphases_p1`, `stack_a7_p3`) nennt die Phasen „immer in dieser Reihenfolge“ getinfo → hostname → staticip → disks; die SSoT ist `getInfos` → `hostname` → `VMDisksOnline` → `staticip`. Die Portalanzeige (`VIRTUSPHERE_CLIENT_PHASES`) als Anzeigereihenfolge kennzeichnen.
+  - D-08: Client-README nennt die Befehlszeile ohne `-NoProfile -NonInteractive` und im Fließtext noch `client_getinfo`/`Set-VMDisksOnline`.
+  - D-04: Hilfe (`system_status_status_package_p5`, `system_status_fix_1`) rät zum Installerlauf, obwohl beide Installer bis zum Cutover sperren; bis dahin auf die Sperre verweisen.
 
 **Abnahme:** Ein neuer Admin kann ohne Sitzungswissen den Validate-Lauf starten, die richtige Endanwendung identifizieren, die vier erwarteten Cachedateien erklären und je nach Evidenz die richtigen Logs wählen, ohne einen Marker oder Cache manuell zu verändern.
 
@@ -917,6 +923,12 @@ Quellen: [Management tasks for applications](https://learn.microsoft.com/en-us/i
 - Portalpfad zusätzlich mit Bestands-VM, Tasksequenzdrift, Limiting-Collection-Ausschluss, offener Collection-Evaluation und dem Q1-Verhalten (Warnung, Bestätigung je VM, kein Terminversprechen, Start nach Policyempfang auch außerhalb eines vorhandenen Wartungsfensters) abnehmen.
 - Cutover von `Deploy Windows 2022` auf die stabile Core-Collection anhand beider Assignment-IDs und tatsächlicher Client-Policy nachweisen; implizites Uninstall bleibt aus.
 - Mindestens folgende Diagnosepfade provozieren: Detection überspringt Enforcement, Helferdatei fehlt vor Loggerstart, Content auf DP aber Boundary falsch, vorhandenes `WebAPI` bei fehlendem HTTPS-Scheme und Policywechsel von Alt- zu Neuanwendung.
+- Proben aus der [PowerShell-Prüfung vom 28.09.2026](2026-09-28-powershell-audit.md), vor der ersten Pilot-VM:
+  - PS-01 (Server, als SYSTEM): `Import-Module` des ConfigurationManager-Moduls und `Get-PSDrive -PSProvider CMSite`. Fehlt das Laufwerk, scheitern Device-Sync, Packages-Sync und Autoimporter bei jedem Lauf; das blockiert den Cutover.
+  - PS-02 (nur bei SMS-Provider auf einem anderen Rechner): Site-Code-Ermittlung, CMSite-Laufwerk und Katalogabfrage gegen den entfernten Provider.
+  - PS-12 (je OS-Vorlage): `[Net.ServicePointManager]::SecurityProtocol` in Windows PowerShell 5.1; bei `Ssl3, Tls` scheitert jeder Paketbericht an ein HTTPS-Portal.
+  - PS-15 (je OS-Vorlage): `Get-StorageSetting | Select NewDiskPolicy` und nach Hinzufügen einer VMDK `Get-Disk | Select Number, OperationalStatus, IsReadOnly, PartitionStyle`. Online-RAW- oder schreibgeschützte neue Platten lassen `client_VMDisksOnline` heute scheitern.
+  - `client_staticip`: vor und nach dem Wechsel DHCP → statisch `Get-NetIPAddress -InterfaceIndex <n> -AddressFamily IPv4`; bleibt eine DHCP- oder APIPA-Adresse stehen, ist der Adapter mehrfach adressiert.
 
 **Abnahme:** Neue VM, bewusst nachgereichte Bestands-VM, bewusst Core-freie VM und Upgrade-VM erreichen jeweils ihren erwarteten Zustand; Simulation, Collection-, Policy-, Script- und Registry-Evidenz stimmen überein. Produktion bleibt bis zur ausdrücklichen Freigabe offen.
 

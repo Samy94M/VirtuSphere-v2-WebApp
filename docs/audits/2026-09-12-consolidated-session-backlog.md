@@ -11,6 +11,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S3 | [Admin-Portal gezielt erweitern](codex://threads/01a082e0-1ac5-7033-bc41-eb2b6829282e) | Genau die elf ausgewählten Funktionen F01 bis F11 einschließlich Planreview |
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
+| S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -768,3 +769,28 @@ Die vollständige Fast-Lane am damaligen D-Stand: 28 pass, 3 fail. Neben dem bek
 **Secret- und Registerabschluss:** Der kanonische `secret-scan` am finalen Produkt-/Teststand `185bf57` besteht im tatsächlichen Clone ohne Tags: 306 gescannte Commits, 27,86 MB, keine Funde (`secret-history.json`, `secret-history-gate-artifacts/secret-scan.log`). Die ursprüngliche Null-Commit-Ausgabe bleibt ungültig. Der abschließende Registercommit ändert ausschließlich die zwei genannten Register; `final-checks.json` und `final-checks-gate-artifacts/` enthalten seine Dokument-/Größenprüfung und den zusätzlichen Scan des gesamten Veröffentlichungsstands. Der Final-Manifestabgleich umfasst 54 eigene Dateien; fremde Änderungen bleiben außerhalb des Commits und werden vor/nach der Veröffentlichung abgeglichen. Git-Baum-Linkprüfung: `markdown-links-final.json`. Nachweise und Quellstände bleiben unter `qa-artifacts/consolidated-session-backlog/20260928-candidates/` erhalten. Der Pushauftrag umfasst nur `main`; nächste Arbeit bleibt die oben beschriebene Folgearbeit nach den parallelen Nutzercommits beziehungsweise externen Voraussetzungen.
 
 **Ablaufdiagramme und Durchsicht 28.09.2026:** Die vier geplanten MECM-Serveraufgaben haben Mermaid-Diagramme in [MECM-Serveraufgaben: Abläufe](../operations/mecm-scheduled-tasks.md), verlinkt aus README, MECM-README, Betriebshandbüchern und DE/EN-Hilfe; `MecmScheduledTasksDocContractTest` leitet die Aufgaben aus dem Installer ab und verlangt je Aufgabe Tabellenzeile, Abschnitt und Diagramm. Die Durchsicht ergab AV-F12 bis AV-F22 und die Nutzerentscheidungen AV-R15 bis AV-R18 im [Autoimporter-Plan](2026-09-28-autoimporter-version-model-plan.md): Device-Sync-Punkte F16 und F20 gehören zu AV-P0 Teil 2, Autoimporter-Punkte F12 bis F15 zu AV-B, neu sind AV-D (Paketkatalog nur mit Marker, kuratierte Task Sequences, Marker und Bericht für OS- und Missions-Collections ohne Löschen) und AV-E (Werkzeug für unklare Journal-Einträge). Reihenfolge nach Nutzerentscheidung: AV-D und AV-E folgen direkt auf AV-C, vor MC04A.
+## PowerShell-Prüfung 28.09.2026: Aufnahme und Zuordnung
+
+Quelle S6, [PowerShell-Prüfung](2026-09-28-powershell-audit.md): alle PowerShell-Skripte am Stand `a364047`, die vier Ablaufdiagramme, Doku und Hilfe mit Skriptbezug, Mutationsstichprobe (7 von 8 Eingriffen von Tests erkannt). Die Ausgangsmessung bestätigt nur das bekannte UX02-Rot (Pester 906 pass, 1 fail). Die Befunde stehen mit Beleg im Prüfbericht; umgesetzt wird in den Fachplänen, dieses Register hält Zuordnung und Reihenfolge.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| PS-06, PS-07, PS-08, PS-09, PS-10 (mit D-01), leere DP-Gruppe | [Autoimporter-Plan](2026-09-28-autoimporter-version-model-plan.md), AV-F23 bis AV-F28 | AV-B (MECM-Server, mit Cutover) |
+| PS-14, PS-04 | Autoimporter-Plan, AV-F29, AV-F30 | AV-E; die neue Laufkategorie für AV-F30 vorab im Portal |
+| PS-05 (mit D-02), D-06 | Autoimporter-Plan, AV-F31, AV-F20 | AV-P0 Teil 2 |
+| PS-03, T-05 | Autoimporter-Plan, AV-D | AV-D |
+| D-03, D-07, D-09 | Autoimporter-Plan, Doku-Matrix und AV-A | AV-A (Hilfe) bzw. mit AV-B (Fehlertabelle) |
+| PS-12, PS-13 samt P3-Punkten des Wrappers | [Reporterplan](2026-09-13-package-wrapper-logging-plan.md), Abschnitt 30 | neues Reporter-Paket; PS-13 auch vor MC05 |
+| PS-11, D-04, D-05, D-08 | [MECM-Plan](2026-09-15-mecm-client-delivery-simplification-plan.md), MC05 | MC05 |
+| Proben PS-01, PS-02, PS-12, PS-15, DHCP-Restadresse | MECM-Plan, MC07 | Labor vor der ersten Pilot-VM |
+| PS-01, PS-02 (Code) | dieser Abschnitt | **PSA** (neu, unten) |
+| PS-15 (Code) | MECM-Plan, MC07-Probe, danach Entscheidung | nach der Probe |
+| T-01, T-02 | dieser Abschnitt | zusammen mit R01 |
+
+**PSA: Laufzeitvoraussetzungen der MECM-Serverskripte (neu).** PS-01: `Initialize-VsCmSite` legt kein CMSite-Laufwerk an; ob es für SYSTEM ohne `New-PSDrive` entsteht, klärt die MC07-Probe, und fehlt es, scheitern alle drei Sync-Aufgaben. PS-02: `MECM_ProviderMachine` wirkt nur in Site Health und Verteilkopie-Abfrage; Site-Code-Ermittlung, CMSite-Laufwerk, Katalogabfrage, `retire-VirtuSphere-LegacyGetInfo.ps1` und ClientPreflight arbeiten lokal, und ohne lokalen Provider schreibt der Installer keinen Site-Code. Entweder überall denselben Provider verwenden oder die Doku auf „Provider auf dem Site-Server“ zurücknehmen. Auslieferung wie alle Serverskripte erst mit dem Cutover (MC-R4); das Ergebnis der PS-01-Probe kann den Cutover blockieren und gehört deshalb vor MC07.
+
+**Zu R01:** T-02, PSScriptAnalyzer prüft nur `Powershell-MECM/`, nicht `scripts/` und `tests/powershell/`. T-01, sechs Testdateien mit Nicht-ASCII-Testdaten ohne BOM testen unter Windows PowerShell 5.1 Mojibake statt der gemeinten Zeichen. Beide gehören zur Runner- und Testqualität neben dem offenen R01-Befund zur Pass-Klassifikation.
+
+**Parallel beim Nutzer, ohne Codearbeit:** die fünf Proben aus MC07 (PS-01 auf dem MECM-Server als SYSTEM, PS-02 nur bei entferntem Provider, PS-12 und PS-15 je OS-Vorlage, DHCP-Restadresse auf einer Test-VM) sowie die PS-03-Frage im Labor, ob `Get-CMFolder` Providerfehler beendend meldet.
+
+**Reihenfolge:** Vorschlag, Nutzerentscheid offen. Die bisherige Reihenfolge bleibt. Innerhalb der bestehenden Pakete werden die neuen Punkte mitgenommen. Sofort ohne Cutover lieferbar sind die Portal-Teile (AV-F30-Kategorie, Hilfe D-03, D-04, D-05, D-07); D-06 wird erst mit AV-F20 richtig. PS-13 ist ein Fix im Paketwrapper; die Paketvorlage kommt aber nur über den gesperrten Serverinstaller auf den MECM-Server, geht also erst mit dem Cutover raus und erreicht Pakete nach AV-R04 erst mit ihrer nächsten Version. Zeitlich passt er vor MC05. Die MC07-Proben so früh wie möglich, weil PS-01 den Cutover blockieren kann.
