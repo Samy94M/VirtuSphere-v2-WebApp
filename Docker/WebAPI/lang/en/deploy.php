@@ -258,7 +258,7 @@ return [
     'schedule_tz_hint' => 'Times are in the portal timezone (:tz).',
     'stagger_label' => 'Stagger (minutes)',
     'stagger_placeholder' => 'off',
-    'stagger_hint' => 'Optional: start VMs one after another every N minutes (full, power-cycle and start modes only). Empty = all together.',
+    'stagger_hint' => 'Optional: start VMs one after another every N minutes (only in the modes :modes). Empty = all together.',
     'stagger_lock_hint' => 'Modes that cannot be staggered are locked while a stagger interval is set. Clear the stagger field to choose all modes again.',
     'preview_heading' => 'Schedule preview',
     'preview_hint' => 'Computed start times in the portal timezone (:tz). Confirm to queue.',

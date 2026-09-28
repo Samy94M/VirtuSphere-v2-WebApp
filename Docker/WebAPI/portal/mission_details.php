@@ -13,6 +13,8 @@ require_once __DIR__ . '/../lib/inventory_field.php';
 require_once __DIR__ . '/../lib/mission_transfer.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
+require_once __DIR__ . '/../lib/deploy_display.php';
+require_once __DIR__ . '/../lib/vm_network_contract.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/mission_details_page.php';
@@ -227,7 +229,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                     'none' => __t('mission_details.vlan_none'),
                     'unknown_suffix' => __t('mission_details.vlan_not_in_inventory'),
                 ], !can('missions.write', $user), form_control_attrs('update', 'wds_vlan', null, [$wdsHintId], '')); ?>
-                    <small class="hint" id="<?php echo h($wdsHintId); ?>"><?php echo h(__t('mission_details.wds_vlan_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_existing_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_impact', [
+                    <small class="hint" id="<?php echo h($wdsHintId); ?>"><?php echo h(__t('mission_details.wds_vlan_hint', ['modes' => deploy_mode_label_list(array_values(array_filter(virtusphere_user_deploy_modes(), 'deploy_mode_requires_wds_ready')))])); ?> <?php echo h(__t('mission_details.wds_vlan_existing_hint')); ?> <?php echo h(__t('mission_details.wds_vlan_impact', [
                         'total' => $wdsImpactTotal,
                         'ready' => $wdsImpactCounts[VIRTUSPHERE_WDS_READY],
                         'missing' => $wdsImpactCounts[VIRTUSPHERE_WDS_MISSION_MISSING] + $wdsImpactCounts[VIRTUSPHERE_WDS_PORTAL_MISSING],

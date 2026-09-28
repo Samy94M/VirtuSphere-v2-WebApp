@@ -15,6 +15,7 @@ declare(strict_types=1);
 // names the same modes for a reader, plus `inventory`, which the portal can
 // SHOW but nobody can post, because the scheduler is its only producer.
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_mode_labels.php';
 
 /**
  * The human name of a deploy-job status.
@@ -45,31 +46,6 @@ function deploy_job_status_label(string $status): string
 function deploy_job_status_badge(string $status): string
 {
     return portal_badge(deploy_job_status_badge_class($status), deploy_job_status_label($status));
-}
-
-/**
- * The human name of a deploy mode.
- *
- * The six postable modes are exactly the keys of
- * virtusphere_deploy_mode_labels(); `inventory` is the seventh value a reader
- * can meet, because the ESXi scheduler queues it and it therefore appears in
- * the job list, on the System status Ansible card and in a job's own header.
- * It stays out of the technical set on purpose: that set decides what a POST
- * may contain, and a mode nobody can post must not become postable by being
- * given a name.
- */
-function deploy_mode_label(string $mode): string
-{
-    return match ($mode) {
-        VIRTUSPHERE_DEPLOY_MODE_FULL => __t('status.mode_full'),
-        'create' => __t('status.mode_create'),
-        'powercycle' => __t('status.mode_powercycle'),
-        'export' => __t('status.mode_export'),
-        'start' => __t('status.mode_start'),
-        VIRTUSPHERE_DEPLOY_MODE_AUTOSTART => __t('status.mode_autostart'),
-        VIRTUSPHERE_DEPLOY_MODE_INVENTORY => __t('status.mode_inventory'),
-        default => __t('status.mode_unknown'),
-    };
 }
 
 /**

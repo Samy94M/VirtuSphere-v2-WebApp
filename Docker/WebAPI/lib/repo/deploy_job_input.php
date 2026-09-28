@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../deploy_mode_labels.php';
 require_once __DIR__ . '/../validate.php';
 
 /**
@@ -235,7 +236,12 @@ function deploy_parse_schedule(array $post, ?string $timezone = null): array
     $staggerRaw = trim((string) ($post['stagger_minutes'] ?? ''));
     if ($staggerRaw !== '' && (int) $staggerRaw > 0) {
         if (!in_array($mode, VIRTUSPHERE_DEPLOY_STAGGER_MODES, true)) {
-            throw deploy_schedule_error('stagger_minutes', 'validate.deploy_stagger_mode', 'Staggering is only available for the full, power-cycle and start modes.');
+            // Display names where the portal display layer is loaded (the web
+            // request); a CLI caller without it reads the technical keys.
+            $modes = function_exists('deploy_mode_label_list')
+                ? deploy_mode_label_list(VIRTUSPHERE_DEPLOY_STAGGER_MODES)
+                : implode(', ', VIRTUSPHERE_DEPLOY_STAGGER_MODES);
+            throw deploy_schedule_error('stagger_minutes', 'validate.deploy_stagger_mode', 'Staggering is only available in the modes :modes.', ['modes' => $modes]);
         }
         $stagger = (int) $staggerRaw;
         if ($stagger < VIRTUSPHERE_DEPLOY_STAGGER_MIN || $stagger > VIRTUSPHERE_DEPLOY_STAGGER_MAX) {

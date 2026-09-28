@@ -112,6 +112,19 @@ Prüfergebnisse liegen unter `qa-artifacts/powercycle-sequential/`.
     Modusnamen stehen in `lang/de/mission_details.php` („Full Pipeline“,
     „Power-Cycle + Export MACs“), `validate.php` und `deploy.php`
     (`stagger_hint`); EN-Hilfe und EN-Modusname weichen voneinander ab.
+    **Erledigt am 28.09.2026:** Ursache der Abweichung war die Modusauswahl im
+    Deploy-Formular, die die unlokalisierten technischen Texte aus
+    `virtusphere_deploy_mode_labels()` zeigte („Power-Cycle + Export MACs“
+    auch im deutschen Portal). Sie zeigt jetzt dieselben Namen wie Jobliste und
+    Status (`deploy_mode_label()`). Der DE-Name lautet „Ein- und ausschalten mit
+    MAC-Export“. Moduslisten in Hinweis-, Validierungs- und Hilfetexten
+    (Staffelung, WDS-Portgruppe, beide Wartezeiten, Netzwerkvertrag) sind
+    `:modes`-Platzhalter aus denselben Prädikaten, die das Verhalten
+    entscheiden. `DeployModeTextTest` leitet alle Listen daraus ab, verbietet
+    von Hand genannte Modusnamen außerhalb dieser Listen und jeden technischen
+    Namen, der vom lokalisierten abweicht; er fand zusätzlich den englischen
+    Autostart-Namen in der deutschen Missionshilfe. 8R-O-Registry und
+    Mindestdauer-Hinweis bleiben unbeauftragt offen.
 - Nächster direkter Schritt: Baseline-Writer durch den Nutzer, danach Fast
   vollständig; Integration, Release und ESXi-Lab bleiben getrennte Abnahmen.
 
