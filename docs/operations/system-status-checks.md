@@ -71,7 +71,8 @@ flowchart TD
   ST -->|kürzer| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses"]
   L -->|nur alter Heartbeat| LG{"Heartbeat frisch?"}
   LG -->|ja| LE["Alte Skriptversion (gelb)"]
-  LG -->|nein| YL
+  LG -->|über Warnschwelle| YL
+  LG -->|über Gefahrschwelle oder Status fail| RD
 ```
 
 Der Site-Health-Reporter wird eigens bewertet: Sein Alter färbt die Zeile nie gelb oder rot, weil ein fehlender Nachweis kein kritischer MECM-Zustand ist.

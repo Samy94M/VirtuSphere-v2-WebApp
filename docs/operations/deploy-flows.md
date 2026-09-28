@@ -120,7 +120,10 @@ flowchart TD
   V -->|andere UUID oder keine Antwort| VF["failed"]
   AC -->|create| PR["createVMPrepare: Identität lesend prüfen"]
   PR -->|rejected| PF["failed (Identitätsbefund)"]
-  PR -->|prepared| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
+  PR -->|prepared| BG{"Budget der Create-Phase noch übrig?"}
+  BG -->|nein| BGX["failed (job_timeout), keine VM gestartet"]
+  BGX --> HOLD
+  BG -->|ja| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
   LA -->|rejected| LF["failed"]
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
   JD -->|nein| LU["uncertain"]
@@ -133,8 +136,10 @@ flowchart TD
   PC --> PO
   PO -->|failed| MF["failed (module_failed)"]
   PO -->|rejected oder unlesbar| SU["uncertain"]
-  PO -->|succeeded| CM["Identität binden: UUID und MOID in einer Transaktion; ersetzte Instanz übernehmen"]
-  CM --> CL["createVMCleanup: Statusdatei genau dieser Job-ID löschen"]
+  PO -->|succeeded| CM{"Identität binden: UUID und MOID in einer Transaktion; ersetzte Instanz übernehmen"}
+  CM -->|gebunden| CL["createVMCleanup: Statusdatei genau dieser Job-ID löschen"]
+  CM -->|abgelehnt, etwa andere UUID schon gebunden| CMF["failed mit Code der Ablehnung"]
+  CMF --> CL
   MF --> CL
   CL --> N
   SK --> N
@@ -146,7 +151,7 @@ flowchart TD
   SU --> HOLD
 ```
 
-Ein Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost` und `job_timeout` stoppen dagegen die ganze Create-Phase, weil ihr Ausgang auf ESXi nicht feststeht. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis.
+Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost` und `job_timeout` stoppen dagegen die ganze Create-Phase, weil ihr Ausgang auf ESXi nicht feststeht. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis.
 
 ## Playbooks
 
