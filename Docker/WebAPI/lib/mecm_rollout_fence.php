@@ -106,3 +106,35 @@ function mecm_rollout_fence_reported_revision(mixed $raw): ?int
 
     return $value;
 }
+
+/**
+ * Reads the transfer generation an updateDevice callback reported (AV-P0).
+ * Absent and empty mean a caller from before the counter; a present value
+ * must be a non-negative integer, because the counter starts at 0.
+ *
+ * @throws InvalidArgumentException on a present but unusable value.
+ */
+function mecm_transfer_generation_reported(mixed $raw): ?int
+{
+    if ($raw === null || $raw === '') {
+        return null;
+    }
+    if (is_int($raw) && $raw >= 0) {
+        return $raw;
+    }
+    if (is_string($raw) && preg_match('/^[0-9]{1,18}$/', $raw) === 1) {
+        return (int) $raw;
+    }
+    throw new InvalidArgumentException('transfer_generation must be a non-negative integer.');
+}
+
+/**
+ * Whether a callback answers the transfer queued now. Without a reported
+ * generation it answers whatever is queued (the behaviour before AV-P0);
+ * with one, only the exact generation it read from getDeviceList. A transfer
+ * queued after that read therefore stays queued.
+ */
+function mecm_transfer_generation_applied(?int $reported, int $stored): bool
+{
+    return $reported === null || $reported === $stored;
+}

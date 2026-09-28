@@ -66,11 +66,12 @@ final class MachineApiWireTest extends TestCase
      * Walked in BOTH directions against the live payload: a column added to the
      * constant but not delivered is a wire promise nothing keeps, and a key
      * delivered without being in the constant is exactly the silent leak the
-     * projection replaced. The three aliases are named here rather than derived,
+     * projection replaced. The aliases are named here rather than derived,
      * because each is a deliberate decision: `vm_hostname` carries the frozen
      * snapshot (never the current desired value), `previous_resource_id` is the
      * tombstone under a wire name so the internal column name never leaves the
-     * database, and `rollout_revision` is the fence.
+     * database, `rollout_revision` is the fence, and `transfer_generation`
+     * (AV-P0) is the queueing counter updateDevice reports back.
      */
     public function testDeviceListProjectsExactlyThePinnedColumns(): void
     {
@@ -97,7 +98,7 @@ final class MachineApiWireTest extends TestCase
             // provenance) and are listed here so this test measures the
             // projection and nothing else.
             $composed = ['interfaces', 'mission', 'packages', 'owned_collections'];
-            $aliases = ['vm_hostname', 'rollout_revision', 'previous_resource_id'];
+            $aliases = ['vm_hostname', 'rollout_revision', 'previous_resource_id', 'transfer_generation'];
 
             $delivered = array_values(array_diff($this->sortedKeys($row), $composed, $aliases));
             $expected = VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS;
@@ -114,7 +115,7 @@ final class MachineApiWireTest extends TestCase
             self::assertNotSame($fixture['vm_hostname'], $row['vm_hostname'], 'the current desired value must not be exported');
 
             // No internal column name may leak, whatever the projection says.
-            foreach (['mecm_rollout_hostname', 'mecm_rollout_revision', 'mecm_previous_id'] as $internal) {
+            foreach (['mecm_rollout_hostname', 'mecm_rollout_revision', 'mecm_previous_id', 'mecm_transfer_generation'] as $internal) {
                 self::assertArrayNotHasKey($internal, $row, $internal . ' leaked its database column name onto the wire');
             }
         } finally {

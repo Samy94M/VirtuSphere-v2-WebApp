@@ -196,6 +196,7 @@ function repo_reset_vm_mecm_id(mysqli $db, int $missionId, int $vmId, ?int $user
         $stmt = $db->prepare(
             'UPDATE deploy_vms
                 SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, updated = 1,
+                    mecm_transfer_generation = mecm_transfer_generation + 1,
                     mecm_id = NULL, mecm_previous_id = ?,
                     mecm_rollout_hostname = ?, mecm_rollout_revision = ?,
                     mecm_pending_since = NOW(), os_install_watch_started_at = NULL, updated_at = NOW()

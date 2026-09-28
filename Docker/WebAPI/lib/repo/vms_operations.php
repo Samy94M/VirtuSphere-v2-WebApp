@@ -201,7 +201,9 @@ function repo_mark_vm_for_mecm_resync(mysqli $db, int $missionId, int $vmId, ?in
             throw new RuntimeException('VM is not registered with MECM yet; its assignments travel with the next sync anyway.');
         }
 
-        repo_execute($db, 'UPDATE deploy_vms SET updated = 1, updated_at = NOW() WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
+        // The generation lets the sync's callback clear exactly the transfer it
+        // applied; a second transfer queued during that run stays (AV-F02).
+        repo_execute($db, 'UPDATE deploy_vms SET updated = 1, mecm_transfer_generation = mecm_transfer_generation + 1, updated_at = NOW() WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
         repo_record_vm_status_event(
             $db,
             $vmId,

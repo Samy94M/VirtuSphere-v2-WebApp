@@ -145,13 +145,17 @@ try {
         //    value is deliberately NOT exported.
         //  - `previous_resource_id` is the delete tombstone under a wire name;
         //    the internal column name never leaves the database.
+        //  - `transfer_generation` (AV-P0) is the queueing counter the sync
+        //    reports back through updateDevice, so only the transfer it applied
+        //    leaves the queue.
         // `vm_name` keeps meaning the ESXi identity, exactly as before.
         $result = machine_api_prepared_result(
             $connection,
             'SELECT ' . implode(', ', VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS) . ',
                     mecm_rollout_hostname AS vm_hostname,
                     mecm_rollout_revision AS rollout_revision,
-                    mecm_previous_id AS previous_resource_id
+                    mecm_previous_id AS previous_resource_id,
+                    mecm_transfer_generation AS transfer_generation
                FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ? ORDER BY id',
             's',
             [VIRTUSPHERE_MECM_SYNC_PENDING]
