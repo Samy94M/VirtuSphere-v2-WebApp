@@ -299,6 +299,30 @@ FM-03 braucht zuerst die Laborprobe; FM-05 bis FM-09 sind ohne Entscheid umsetzb
 
 **Ergebnis:** Die Budgets des Workers passen zueinander; Herzschlag, Ernten, Wiederverbinden und Leerlauf greifen sauber ineinander. Schwach sind die Ränder, an denen Größen von außen kommen: Schreibrate des Datastores (ZB-01), Laufzeit in MECM (ZB-02, FC2-E6), Wiederholung durch MECM (ZB-04) und Zeitpunkt des letzten Inventars (ZB-06).
 
+## Schritt 5: Meldungen ohne Link (R11)
+
+**Regel:** R11 in `docs/ai/reference/portal.md`: „A message that names a prerequisite, an instruction or another page carries the link to it“, Einstellungen über `settings_url()`, Hilfe über `help_url()`.
+
+**Vorgehen:** Aus den deutschen Sprachmodulen ohne die Hilfeseiten alle Meldungen gezogen, die eine Portalseite, eine Voraussetzung oder eine Handlung nennen (Suchwörter wie Systemstatus, Einstellungen, Protokoll, Inventar, prüfen, zuerst, abrufen): 412 Kandidaten. Ein Skript hat an jeder Aufrufstelle im Umkreis von sechs Zeilen nach einem Link gesucht. Übrig blieben 177 Meldungen ohne Link in der Nähe, acht mit Link nur an einem Teil der Stellen und 41 mit zusammengesetztem Schlüssel. Diese einzeln gelesen. Nicht als Verstoß gezählt: Anweisungen für fremde Systeme (ESXi Host Client, MECM-Konsole, Ansible-Host, Clientlogs), Verweise auf dieselbe Seite, Beschriftungen und Überschriften, Flash-Meldungen, die ihren Link als Aktion tragen (etwa die Zugangstests in `lib/credentials_actions.php`), und Hinweise, neben denen der Link in derselben Karte steht. Die englischen Schlüssel gibt es parallel (Sprachprüfung); ihre Texte wurden nicht eigens gelesen. Stand `3b37025`.
+
+| ID | Schlüssel und Stelle | Nennt | Befund |
+|---|---|---|---|
+| R11-01 | `credentials.err_in_use` über `lib/layout_response.php` | „Den Auftrag zuerst abwarten oder abbrechen“ | Fehlermeldung ohne Auftragsnummer und Link |
+| R11-02 | `layout.err_mission_active_job` über `lib/layout_response.php` | „Brich ihn zuerst in der Bereitstellungsliste ab“ | ohne Link auf Auftrag oder Liste; Geschwister von FC2-06 |
+| R11-03 | `layout.err_datacenter_unresolved` über `lib/layout_response.php` (Wiederholen in der Auftragsliste) | Datacenter in der Mission setzen oder Inventar abrufen | ohne Link; die Sperre beim Einreihen hat ihn |
+| R11-04 | `deploy.blocker_create_credential_target` aus `repo_deploy_create_fence_credential_change()` | aktiver Auftrag oder ungeklärte VM-Erstellung | Fehler beim Speichern oder Löschen eines Zugangs ohne Link auf Auftrag oder Einheit |
+| R11-05 | `deploy.verbose_hint` in `lib/deploy_queue_panel.php` | „Details in der Hilfe“ | ohne `help_url()` |
+| R11-06 | `settings.esxi_hint` in `lib/settings/catalog_panel.php` | „Anzeige im Systemstatus“ | ohne Link |
+| R11-07 | `missions.deviation_title` in `portal/missions.php` | „Details im Systemstatus“ | nur als Tooltip auf einem Badge, das kein Link ist; per Tastatur nicht erreichbar, für Bildschirmleser nicht verlässlich |
+| R11-08 | `deploy.create_progress_replaced` in `lib/deploy_create_progress.php` | Handlung „MECM-ID zurücksetzen“ an der VM | Listeneintrag ohne Link auf die VM, an der die Handlung liegt |
+| R11-09 | `packages.empty` in `portal/packages.php` | Voraussetzung: Paket-Sync von MECM | ohne Link auf die MECM-Karte im Systemstatus |
+
+**Schon bekannt:** FC2-03 (Freigabe einer ungeklärten Einheit verlangt einen Inventarabruf ohne Link; dazu die Sperrtexte `deploy.create_release_blocker_release_inventory_*`), FC2-06 (`deploy.err_active_job`) und FM-05 (`vm_edit.progress_pending_overdue`).
+
+**Muster:** Die meisten Verstöße kommen über einen Weg: `portal_error_message()` in `lib/layout_response.php` übersetzt eine Ausnahme in einen Satz, und `flash_set()` bekommt dann keine Aktion. Sätze aus diesem Weg können heute keinen Link tragen (R11-01 bis R11-04, FC2-06).
+
+**Maßnahmen:** Den Übersetzungsweg um eine Aktion je Schlüssel erweitern (Auftrag, Mission, Systemstatus), die Hinweise R11-05 bis R11-09 mit den vorhandenen Helfern verlinken. Als Wächter: ein statischer Test, der Meldungen mit Seitennamen aus einer festen Liste nur zusammen mit einer Aktion, einem Link oder einer begründeten Ausnahme zulässt, nach dem Muster von PI-01. Alles P3; R11 ist ein Vertrag, deshalb zählen die Fälle als Abweichung, nicht nur als Komfort.
+
 ## Nächster Schritt
 
-Als Nächstes die Meldungsprüfung nach R11, danach der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3. Laborproben: WM-01 (Abfrage oben, nur lesend), VT-04 (Passwort auf dem Ubuntu-Host suchen), FM-03 (Fernlauf nach Verbindungsende, auf einer Testmission), ZB-01 und ZB-02 (Abfragen oben, nur lesend), ZB-04 zusammen mit der Probe zu VT-E1 B.
+Als Nächstes der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3. Laborproben: WM-01 (Abfrage oben, nur lesend), VT-04 (Passwort auf dem Ubuntu-Host suchen), FM-03 (Fernlauf nach Verbindungsende, auf einer Testmission), ZB-01 und ZB-02 (Abfragen oben, nur lesend), ZB-04 zusammen mit der Probe zu VT-E1 B.
