@@ -12,7 +12,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
-| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6 |
+| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -830,3 +830,15 @@ Quelle S7, Abschnitt „FC2: Abgleich der Diagramme mit dem Code“ im [Ablaufpr
 **Reihenfolge:** Die Entscheidung vom 28.09.2026 gilt weiter (FC1, FC2, FC3, PS1 bis PS3, Mutationsrunde). FC2 ist nicht abgeschlossen: Der im Plan genannte, nicht Knoten für Knoten geprüfte Rest folgt vor FC3. Ob FC2-01 vorgezogen wird, entscheidet FC2-E1.
 
 **Nächster Schritt:** Entscheide FC2-E1 bis FC2-E6 beim Nutzer einholen; danach FC2-Rest und Umsetzung, jeweils mit Rot-vor-Fix-Test.
+
+## Abdeckung der Abläufe und Prüfinstrumente aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „Abdeckung der Abläufe und Prüfinstrumente“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): Inventar aus dem Code am Stand `3b37025` (Portal-Aktionen, Endpunkte der Maschinen-API, Wartungsjobs, Playbooks, PowerShell-Skripte) gegen die drei Ablaufdokumente und FC4. Nur Codelesung; Nutzerentscheid 03.10.2026: keine Codeänderung, nur Aufnahme. Im selben Abschnitt: FC2-03 und FC2-06 verletzen die Portalregel R11 (Meldung ohne Link).
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| AB-01 (P1-Kandidat): SSH und SFTP zum Ubuntu-Host ohne Abgleich des Host-Schlüssels, darüber Ansible-Passwort und ESXi-Zugangsdaten | Ablaufprüfplan | nach AB-E1, Vorschlag: als Sicherheitsbefund vorziehen |
+| AB-02 bis AB-09: Gesamtkette, ESXi-Inventar auf Worker-Seite, Zugänge und Vertrauensmodus, Portal-Aktionen mit MECM- oder ESXi-Wirkung, Löschen und Außerbetriebnahme, Wiederholen und Freigeben, Upgrade und Migration, Fehlersuche | Ablaufprüfplan | Erweiterung von FC4 nach AB-E2 |
+| PI-01 bis PI-10: Abdeckungsinventar, Zustands- und Schreibermatrix, Verbindungs-, Vertrauens- und Geheimnismatrix, Zeitbudgets, Fehlermodus-Tabelle mit Kanten-IDs, Mutationslauf, ESXi-Stellvertreter, Ist-Pfad-Rekonstruktion, Laborproben, Konfigurationsmatrix | Ablaufprüfplan | Vorschlag; Reihenfolge nach AB-E3 |
+
+**Nächster Schritt:** Entscheide AB-E1 bis AB-E3 zusammen mit FC2-E1 bis FC2-E6 beim Nutzer einholen.
