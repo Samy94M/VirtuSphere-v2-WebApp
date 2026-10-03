@@ -345,6 +345,41 @@ FM-03 braucht zuerst die Laborprobe; FM-05 bis FM-09 sind ohne Entscheid umsetzb
 
 **Reihenfolge:** LP-01 bis LP-05 kosten nichts und gehen sofort. LP-06 bis LP-11 brauchen eine Testmission. LP-12 und LP-13 gehören zum Labor vor dem Cutover, zusammen mit MC07.
 
+## Schritt 8: Konfigurationsmatrix (PI-10)
+
+**Vorgehen:** Jede Einstellung aus Portal (`deploy_settings` und eigene Tabellen), `.env`, Registry des MECM-Servers und `bootstrap.json` der Clients mit ihren Verbrauchern im Code, dem Zeitpunkt, ab dem sie wirkt, ihrer Prüfung und dem Hinweis dazu. Gesucht sind Querwirkungen: Eine Einstellung wirkt an Stellen, die ihr Hinweis nicht nennt, oder zu einem anderen Zeitpunkt als erwartet. Stand `3b37025`, nur Codelesung.
+
+| Einstellung | Ort | Verbraucher | Wirkt ab | Auffällig |
+|---|---|---|---|---|
+| API-Basis-URL (`api_base_url`, sonst `APP_PUBLIC_BASE_URL`) | Einstellungen → Bereitstellung, `.env` | Artefakte des Auftrags (MAC-Rückruf, Zertifikats-Pin), Host-Preflight (Portal-Erreichbarkeit, IP-Freigabe), Einreihsperre, Zugangstest | Portalwert: nächster Auftrag; `.env`: Portal sofort, Worker erst nach Neustart | **KM-01**, **KM-02** |
+| Rückkanal-Token | Einstellungen → Maschinen-API | `heartbeat`, `reportRun` (VT-07) | sofort | Bestätigung warnt richtig, dass der MECM-Server bis zum neuen Registry-Wert nichts meldet |
+| IP-Freigabe der Maschinen-API | Einstellungen → Maschinen-API | alle Maschinen-Endpunkte (VT-01), Urteil im Zugangstest | sofort | VT-01 |
+| HTTPS, Umleitung, HSTS, Zertifikat | Einstellungen → HTTPS | Webserver über den Watcher, LDAPS-Anmeldung (verlangt HTTPS), Pin des MAC-Rückrufs, gepinnte MECM-Server und Clients | Watcher-Durchlauf; Pin ab dem nächsten Auftrag | FM-07 |
+| ESXi-Inventarintervall | Einstellungen → Kataloge und Inventar | Planer, Frische der Host-Befunde, Abweichungsbericht, Ampel; Datacenter-Ableitung fest 48 h | nächste Prüfung (300 s) | ZB-06; Datacenter-Grenze in der Hilfe benannt |
+| Ansible-Zugang für Inventarabrufe | Einstellungen → Kataloge und Inventar | Planer, manueller ESXi-Test | nächster Abruf | Meldungen mit Link |
+| Intervall des Ansible-Volltests | Einstellungen → Kataloge und Inventar | Planer des Volltests | nächste Prüfung (60 s) | **KM-03** |
+| Schwelle für zurückgezogene Pakete (5 bis 90 %) | Einstellungen → Kataloge und Inventar | `mecm_packages.php` | nächster Packages Sync | Hinweis vorhanden |
+| Passwortlänge, Sitzungsdauer, Zeitzone | Einstellungen | Anmeldung, Sitzung, Anzeige und Eingabe geplanter Zeiten | nächste Anmeldung oder Anfrage | keine |
+| AD-Verzeichnis: Suchkonto, Suchbasis, CA, Controller | Benutzer → Verzeichnis | Anmeldung, Sitzungsprüfung | sofort; jede Änderung erhöht die Revision | **KM-04** |
+| Prozessvertrag des Bereitstellungsdienstes | `deploy_supervisor_switch.php`, Compose-Datei | Start des Containers | nach Neustart | in `deploy-chain.md` beschrieben |
+| Auftragsannahme pausieren | Systemstatus | Beanspruchen neuer Aufträge | nach dem laufenden Auftrag | keine |
+| `.env`: `APP_KEY`, `DB_*`, `VIRTUSPHERE_DEPLOY_WORKDIR`, `ANSIBLE_SOURCE_DIR`, `WEB_HTTPS_PORT`, `VIRTUSPHERE_DEBUG` | App-Host | Portal je Anfrage, Worker beim Start | Worker erst nach Neustart | **KM-02**; VT-06 |
+| MECM-Registry: Intervalle, `WebApi`, `Scheme`, `CertThumbprint`, `ReportToken`, `LogRoot`, Paketshare | MECM-Server | vier Serveraufgaben | erst nach Neustart der Aufgabe | in `mecm-integration.md` beschrieben |
+| `bootstrap.json`: `WebAPI`, `Scheme`, `CertThumbprint` | Client-Bundle | Clientskripte und Reporter | beim ersten Lauf, danach fest; Wechsel nur über einen Reparaturauftrag | **KM-01** |
+| Missionswerte: Autostart, Datastore, Datacenter, WDS-Portgruppe | Mission | nächster Auftrag; Netzänderung während `running` und `cancelling` gesperrt | nächster Auftrag | keine |
+| ESXi-Zugang: Vertrauensmodus und Zertifikat | Zugangsdaten | Aufträge und Inventarabrufe | nächster Auftrag; `strict` erst nach erfolgreichem Test | Zielwechsel: FM-01 |
+
+### Befunde
+
+| ID | Klasse / Prio | Befund | Maßnahme |
+|---|---|---|---|
+| KM-01 | B / P3 | **Portal-Adresse an drei Stellen.** Ansible erreicht das Portal über `api_base_url` oder `APP_PUBLIC_BASE_URL`, der MECM-Server über `WebApi`, `Scheme` und `CertThumbprint` in seiner Registry, die Clients über `bootstrap.json`. Das Portal zeigt nur die erste Adresse; ihr Hinweis spricht nur von Ansible. Ein Wechsel von Adresse oder Schema braucht drei getrennte Schritte, für die Clients einen Reparaturauftrag. | Hinweis an der API-Basis-URL nennt alle drei Stellen mit Link auf die Anleitung; hängt an FC2-E5 (Doku im Portal). |
+| KM-02 | B / P3 | **`.env` wirkt in den Workern erst nach Neustart.** `envboot_load_dotenv()` liest die Datei einmal je Prozess und überschreibt keine gesetzte Variable. PHP-FPM liest sie damit je Anfrage neu, Deploy-, Wartungs- und Aufsichtsprozess nur beim Start. Wer `APP_PUBLIC_BASE_URL` später ändert und den Portalwert leer lässt, sieht im Portal sofort die neue Adresse (Einreihsperre, Zugangstest), der Worker schreibt bis zum Neustart die alte in die Artefakte: Der MAC-Rückruf geht an die alte Adresse. Keine Anleitung nennt den Neustart. | In `go-live.md` und `upgrade-recovery.md`: nach jeder `.env`-Änderung die Worker neu starten. Besser: den Portalwert als einzigen Pflegeort empfehlen. |
+| KM-03 | B / P3 | **Volltest am Intervallrand grau.** Das Intervall reicht bis 168 h, „Test veraltet“ gilt fest nach sieben Tagen, also ebenfalls nach 168 h. Am oberen Rand wird jeder Test grau, bevor der nächste läuft, bei jeder Verzögerung des Workers sichtbar. Das ESXi-Inventar koppelt seine Veraltung dagegen an das Intervall (2 × Intervall). | Veraltung an das Intervall koppeln, etwa max(7 Tage, 2 × Intervall), oder das Intervall unter sieben Tagen begrenzen. |
+| KM-04 | B / P3 | **AD-Änderung leert den Controller-Pool still.** Jede gespeicherte Änderung der AD-Konfiguration erhöht die Revision (`repo_directory_save_config()`); zugelassen bleibt nur der Controller, der beim Speichern getestet wurde. Alle anderen fallen bis zu einem eigenen Test aus dem Pool. Die Gesamtampel bleibt grün, weil `directory_health_snapshot()` nur zugelassene Controller zählt. Die Meldung „Testen Sie geänderte Controller erneut“ nennt den falschen Umfang. Folge: Die Ausfallsicherheit geht verloren, ohne dass es jemand sieht. | Meldung nennt die Zahl der Controller, die bis zum Test fehlen; Gesamtampel gelb, solange aktivierte Controller für die aktuelle Revision ungetestet sind. |
+
+**Ergebnis:** Die Einstellungen im Portal wirken meist ab dem nächsten Auftrag oder sofort und sind geprüft. Querwirkungen entstehen dort, wo derselbe Wert an mehreren Orten lebt (Portal-Adresse, Zertifikat) oder wo ein Prozess Werte nur beim Start liest (`.env` in den Workern; auf dem MECM-Server ist das beschrieben).
+
 ## Nächster Schritt
 
-Der Rest von FC2 steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „FC2-Rest“ (FC2-14 bis FC2-19). Der Laborprobenkatalog steht oben (Schritt 7). Als Nächstes die Konfigurationsmatrix (PI-10). Offen sind VT-E2 und FM-E1 bis FM-E3, aus dem Ablaufprüfplan FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.
+Alle geplanten Schritte der Lückensuche sind aufgenommen: PI-02, PI-03, PI-05, PI-04, die Meldungsprüfung nach R11, der FC2-Rest (im Ablaufprüfplan), der Laborprobenkatalog (PI-09) und die Konfigurationsmatrix (PI-10). Offen bleiben die Entscheide VT-E2 und FM-E1 bis FM-E3, aus dem Ablaufprüfplan FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3, dazu die Laborproben LP-01 bis LP-13. PI-01 (Abdeckungswächter), PI-06 (Mutationslauf), PI-07 (ESXi-Simulator) und PI-08 (Ist-Pfad-Rekonstruktion) brauchen Code oder Werkzeuge und warten auf die Freigabe von Codeänderungen.

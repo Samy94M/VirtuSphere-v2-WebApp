@@ -13,7 +13,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 | S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6, FC2-Rest vom selben Tag mit FC2-14 bis FC2-19; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
-| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06; Schritt 5 Meldungen ohne Link nach R11 mit Befunden R11-01 bis R11-09; Schritt 7 Laborprobenkatalog (PI-09) mit LP-01 bis LP-13 |
+| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06; Schritt 5 Meldungen ohne Link nach R11 mit Befunden R11-01 bis R11-09; Schritt 7 Laborprobenkatalog (PI-09) mit LP-01 bis LP-13; Schritt 8 Konfigurationsmatrix (PI-10) mit Befunden KM-01 bis KM-04 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -960,3 +960,13 @@ Quelle S8, Abschnitt „Schritt 7: Laborprobenkatalog (PI-09)“ in der [Lücken
 | LP-12 und LP-13: ESXi-Identität am selben Pfad (IDR-E36) und Client-Apps in MECM (VT-E1 B, ZB-04) | Nutzer | Labor vor dem Cutover, zusammen mit MC07 |
 
 **Nächster Schritt:** Konfigurationsmatrix (PI-10).
+
+## Lückensuche, Schritt 8 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 8: Konfigurationsmatrix (PI-10)“ in der [Lückensuche](2026-10-03-gap-matrices.md): jede Einstellung aus Portal, `.env`, MECM-Registry und `bootstrap.json` mit Verbrauchern, Wirkungszeitpunkt und Auffälligkeiten; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| KM-01 bis KM-04 (P3): Portal-Adresse an drei Stellen, `.env` wirkt in den Workern erst nach Neustart, Volltest am Intervallrand grau, AD-Änderung leert den Controller-Pool bei grüner Ampel | Lückensuche | KM-02 als Doku sofort möglich; übrige mit dem nächsten Paket am Ort |
+
+**Stand der Lückensuche:** Alle geplanten Schritte sind aufgenommen. Offen sind die Entscheide VT-E2, FM-E1 bis FM-E3, FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3 sowie die Laborproben LP-01 bis LP-13. PI-01, PI-06, PI-07 und PI-08 brauchen Code oder Werkzeuge und warten auf die Freigabe von Codeänderungen.
