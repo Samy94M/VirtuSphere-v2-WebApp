@@ -160,7 +160,7 @@ Die DF-Befunde oben und die FC3-Lücken des Registers bestehen am selben Stand f
 | FC2-E1 | Welchen Zustand behält eine VM nach einem gescheiterten oder abgebrochenen Auftrag, der sie nicht angefasst hat (FC2-01)? Werden bereits gefärbte VMs repariert? Kommt der Fix vor FC1 bis FC3 oder mit Staffelplan P5? | Wie unter FC2-01; Reparatur nur als eigener, belegter Auftrag. Reihenfolge offen. |
 | FC2-E2 | Ausgabe der Statusabfragen reduzieren oder vollständig als Nachweis behalten (FC2-04)? | Reduzieren; volle Ausgabe bei ausführlicher Ausgabe und am Endergebnis. |
 | FC2-E3 | „Lauf offen“ (FC2-11): nur das Diagramm korrigieren oder eine Laufschonfrist je Aufgabe einführen, etwa kürzer für Devices Sync als für den Autoimporter? | offen |
-| FC2-E4 | Die vorgeschlagenen Flowchart-Regeln des Registers übernehmen (`accTitle`, Ergebnisklassen per `classDef`, Fehlerpfade immer zeichnen, große Diagramme teilen), dazu den Vokabular-Abgleich aus FC2-13? | Übernehmen. |
+| FC2-E4 | Die vorgeschlagenen Flowchart-Regeln des Registers übernehmen (`accTitle`, Ergebnisklassen per `classDef`, Fehlerpfade immer zeichnen, große Diagramme teilen), dazu den Vokabular-Abgleich aus FC2-13? | Entschieden 03.10.2026 mit DS-E1: übernommen. |
 | FC2-E5 | Diagramme in der Portalhilfe zeigen, mit lokal ausgeliefertem Mermaid oder vorgerenderten SVGs, oder nur im Repo führen? | offen |
 | FC2-E6 | `full`: statt fester `StartWaitSeconds` warten, bis Devices Sync alle VMs des Auftrags als `registered` gemeldet hat, mit der Wartezeit als Obergrenze? `registered` belegt gesetzte Mitgliedschaften; die Collection-Auswertung in MECM kann danach noch dauern. Der Staffelplan schließt nur ein „MECM bereit“ aus einem abgelaufenen Timer aus. | offen |
 
@@ -217,7 +217,7 @@ Flowcharts zeigen den Steuerfluss einer Komponente. Die Befunde dieses Plans lag
 | ID | Frage | Vorschlag |
 |---|---|---|
 | AB-E1 | Wie wird AB-01 behandelt, und kommt es vor FC1 bis FC4? | Host-Schlüssel anheften wie oben; als Sicherheitsbefund vorziehen. |
-| AB-E2 | Welche von AB-02 bis AB-09 kommen zu FC4? | Alle; AB-02 zuerst als Einstieg. |
+| AB-E2 | Welche von AB-02 bis AB-09 kommen zu FC4? | Mit der Dokumentkarte (DS-E1, 03.10.2026) beantwortet: Alle haben dort einen Ort; AB-02 kommt als Einstieg zuerst. |
 | AB-E3 | Welche Instrumente in welcher Reihenfolge? | PI-01, PI-02, PI-03 und PI-09 vor dem Zeichnen von FC4; PI-04 mit FC3; PI-05, PI-06 und PI-08 danach; PI-07 erst nach Aufwandsschätzung für ein Air-Gap-taugliches Image; PI-10 bei Bedarf. |
 
 ## Darstellungsarten und Doku-Struktur (03.10.2026)
@@ -252,7 +252,7 @@ Online-Recherche auf Wunsch des Nutzers: Wie sinnvoll sind Flowcharts, welche we
 | Wer, Mensch oder System, macht welchen Schritt? | Swimlane |
 | Welche Verbindung trägt welches Geheimnis, mit welchem Vertrauensanker? | Datenfluss mit Vertrauensgrenzen |
 
-### Strukturvorschlag gegen einen Doku-Dschungel (Nutzerentscheid DS-E1 offen)
+### Struktur gegen einen Doku-Dschungel (übernommen mit DS-E1, 03.10.2026)
 
 | ID | Regel |
 |---|---|
@@ -272,7 +272,7 @@ Online-Recherche auf Wunsch des Nutzers: Wie sinnvoll sind Flowcharts, welche we
 |---|---|---|
 | `flows.md` (neu) | Einstieg: Kontextbild (DA-E3), Gesamtkette (AB-02), Landkarte, Legende, Begriffe | Flowchart mit Gruppen, Sequenz |
 | `deploy-flows.md` | Einreihen, Worker, Create, Playbooks; dazu Auftrags- und Einheitenzustände, Wiederholen und Freigeben (AB-07), ESXi-Inventar auf Worker-Seite (AB-03), später der Durable Runner | Flowchart, Zustand, Sequenz |
-| `system-status-checks.md` | Ampelregeln des Systemstatus | Entscheidungstabelle oder Flowchart (DA-E5) |
+| `system-status-checks.md` | Ampelregeln des Systemstatus | Entscheidungstabellen (DA-E5); Flowchart nur, wo die Prüfreihenfolge die Aussage ist |
 | `mecm-scheduled-tasks.md` | MECM-Serveraufgaben, nach dem Cutover die Installer | Flowchart |
 | `client-flows.md` (FC4) | Clientphasen, Paketwrapper, Reporter | Flowchart, Sequenz |
 | `machine-api-flows.md` (FC4) | Endpunkte, Rollout-Sperre, MAC-Rückruf (P2) | Flowchart, Sequenz, Entscheidungstabelle |
@@ -281,12 +281,12 @@ Online-Recherche auf Wunsch des Nutzers: Wie sinnvoll sind Flowcharts, welche we
 | `trust-flows.md` (neu) | Verbindungen, Vertrauensanker und Geheimnisse (AB-01, PI-03), Zugänge und Vertrauensmodus (AB-04), Anmeldung und Rechte (P2) | Datenfluss mit Vertrauensgrenzen, Zustand, Matrix |
 | vorhandene Runbooks | Diagramm am Ort statt neuer Dateien: `upgrade-recovery.md` (AB-08), `backup.md` und `https.md` (P3), `troubleshooting.md` mit Entscheidungsbaum (AB-09, Admin-Phase) | Flowchart, Swimlane |
 
-### Offene Entscheidungen (Nutzer)
+### Entscheidungen zur Struktur (Nutzer, 03.10.2026)
 
-| ID | Frage | Vorschlag |
+| ID | Frage | Entscheidung |
 |---|---|---|
-| DS-E1 | Strukturvorschlag DS-01 bis DS-09 mit Dokumentkarte übernehmen, und damit die Einzelregeln aus FC2-E4? | Übernehmen. |
-| DA-E5 | Ampelregeln im Systemstatus als Entscheidungstabelle statt als Flowchart, oder beides? Eine Tabelle zeigt auf einen Blick, wenn ein Ergebnis nie eintreten kann; so wäre FC2-11 aufgefallen. | Tabelle als einzige Quelle; ein kurzes Flowchart nur dort, wo die Reihenfolge der Prüfungen selbst die Aussage ist. |
+| DS-E1 | Strukturvorschlag DS-01 bis DS-09 mit Dokumentkarte übernehmen, und damit die Einzelregeln aus FC2-E4? | Übernommen. Damit sind auch FC2-E4 entschieden und AB-E2 über die Dokumentkarte beantwortet. |
+| DA-E5 | Ampelregeln im Systemstatus als Entscheidungstabelle statt als Flowchart, oder beides? Eine Tabelle zeigt auf einen Blick, wenn ein Ergebnis nie eintreten kann; so wäre FC2-11 aufgefallen. | Entscheidungstabelle als einzige Quelle; ein kurzes Flowchart nur dort, wo die Reihenfolge der Prüfungen selbst die Aussage ist. |
 
 ### Einordnung
 
@@ -294,4 +294,4 @@ Nach DA-E1 kommen zuerst PI-01 bis PI-03, die Einstiegsseite sowie Zustands- und
 
 ## Nächster Schritt
 
-PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Für FC2 zuerst die Entscheide FC2-E1 bis FC2-E6 einholen und den offenen Rest prüfen, für die Abdeckung die Entscheide AB-E1 bis AB-E3, für Darstellung und Struktur DS-E1 und DA-E5; jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.
+PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Darstellung und Struktur sind entschieden (DA-E1 bis DA-E5, DS-E1, damit auch FC2-E4 und AB-E2). Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1 und AB-E3, als Erstes AB-E1; danach der offene Rest von FC2. Jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.

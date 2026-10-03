@@ -849,8 +849,8 @@ Quelle S7, Abschnitt „Darstellungsarten und Doku-Struktur“ im [Ablaufprüfpl
 
 **Entscheidungen des Nutzers:** DA-E1 zuerst Entwickler, danach die Admins im Betrieb; DA-E2 vorläufig ja zu Zustandsdiagrammen, Sequenzdiagrammen und Entscheidungstabellen unter denselben Regeln wie Flowcharts (Wächter, Ansichtsseite, `accTitle`); DA-E3 Kontextbild als normales Mermaid-Flowchart statt C4-Syntax; DA-E4 Aufnahme nur als Doku.
 
-**Vorschlag, Nutzerentscheid DS-E1 offen:** Regeln DS-01 bis DS-09 gegen einen Doku-Dschungel: ein Einstieg (`docs/operations/flows.md`), ein Dokument je Thema nach Dokumentkarte, ein Ort je Ablauf, ein festes Gerüst je Abschnitt, kleine Diagramme, eine Legende, Ist und Plan getrennt, Prüfung durch den erweiterten FC1-Wächter, bewusst weggelassene Bereiche. Mit DS-E1 fallen auch die Einzelregeln aus FC2-E4. Offen ist außerdem DA-E5: Ampelregeln als Entscheidungstabelle statt Flowchart.
+**Struktur, übernommen mit DS-E1 (Nutzer, 03.10.2026):** Regeln DS-01 bis DS-09 gegen einen Doku-Dschungel: ein Einstieg (`docs/operations/flows.md`), ein Dokument je Thema nach Dokumentkarte, ein Ort je Ablauf, ein festes Gerüst je Abschnitt, kleine Diagramme, eine Legende, Ist und Plan getrennt, Prüfung durch den erweiterten FC1-Wächter, bewusst weggelassene Bereiche. Damit sind auch die Einzelregeln aus FC2-E4 übernommen und AB-E2 über die Dokumentkarte beantwortet. **DA-E5 (Nutzer, 03.10.2026):** Ampelregeln werden Entscheidungstabellen als einzige Quelle; ein kurzes Flowchart bleibt nur, wo die Reihenfolge der Prüfungen selbst die Aussage ist.
 
 **Reihenfolge:** Nach DA-E1 kommen PI-01 bis PI-03, Einstiegsseite sowie Zustands- und Sequenzdiagramme vor Entscheidungsbaum, Swimlanes und Playbooks der Admin-Phase. FC1, FC2, FC3 und PS1 bis PS3 bleiben in ihrer Reihenfolge.
 
-**Nächster Schritt:** DS-E1 und DA-E5 zusammen mit den übrigen offenen Entscheiden beim Nutzer einholen.
+**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1 und AB-E3; als Erstes AB-E1 (SSH-Host-Schlüssel) beim Nutzer einholen.
