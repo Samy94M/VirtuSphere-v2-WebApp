@@ -13,7 +13,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 | S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
-| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3 |
+| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -908,3 +908,16 @@ Quelle S8, Abschnitt „Schritt 3: Fehlerfälle entlang der Gesamtkette (PI-05)�
 Bestätigt ohne neue ID: FC2-01, FC2-02, FC2-03, FC2-05, FC2-06, AB-01, VT-04, WM-01, die Nachholwelle aus dem Staffelaudit und FC2-E6. Gut abgesichert sind Einreihen, Abbruch, Besitz, Datenbankausfall, MAC-Rückruf und das Mitgliedschafts-Journal.
 
 **Nächster Schritt:** Schritt 4 der Lückensuche, die Zeitbudgets (PI-04). Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04 und FM-03.
+
+## Lückensuche, Schritt 4 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 4: Zeitbudgets und Schwellen (PI-04)“ in der [Lückensuche](2026-10-03-gap-matrices.md): alle Takte, Budgets, Fristen, Schwellen und Aufbewahrungszeiten aus Portal, Worker, Playbooks, MECM-Serveraufgaben und Clientskripten, daraus 15 Ungleichungen mit Standard- und Grenzwerten; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| ZB-01 (P2, V): Create-Budget von vier Stunden für bis zu 40 VMs mit vorab beschriebenen 50-GB-Platten kann auf langsamem Datastore ablaufen; Einheit wird `uncertain` | Lückensuche | Laborprobe per Abfrage in S8, dann Paket |
+| ZB-02 bis ZB-06 (P3): lange gesunde Sync-Läufe werden rot, MAC-Rückruf ohne Wiederholung bei abgewiesener Verbindung, Client gegen Portal-Ausfall, Protokoll-Löschung trotz offener Create-Einheit, alte Host-Befunde sperren bei Inventarintervall 0 | Lückensuche | ZB-02 mit FC2-E3; ZB-04 mit der Probe zu VT-E1 B; übrige mit dem nächsten Paket am Ort |
+
+Halten: Leerlauf gegen Pausen, Ernten gegen Wiederverbinden, blockierende Schritte gegen Erntefrist; Power-Cycle nur knapp an der Obergrenze. Bekannt: FC2-11 (Gelb unerreichbar), FC2-E6 (Start-Wartezeit gegen MECM), Datacenter-Ableitung gegen langes Inventarintervall (in der Hilfe benannt), Nachholwelle und S07 aus dem Staffelaudit.
+
+**Nächster Schritt:** Meldungsprüfung nach R11, danach der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04, FM-03, ZB-01, ZB-02 und ZB-04.

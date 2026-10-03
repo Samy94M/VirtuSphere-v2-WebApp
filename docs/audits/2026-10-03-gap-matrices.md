@@ -240,6 +240,65 @@ Anlegen als `pending` (`repo_deploy_create_materialize()`, bei Wiederholung `rep
 
 FM-03 braucht zuerst die Laborprobe; FM-05 bis FM-09 sind ohne Entscheid umsetzbar.
 
+## Schritt 4: Zeitbudgets und Schwellen (PI-04)
+
+**Vorgehen:** Alle Takte, Budgets, Fristen, Schwellen und Aufbewahrungszeiten aus Portal, Worker, Playbooks, MECM-Serveraufgaben und Clientskripten gesammelt. Daraus prüfbare Ungleichungen abgeleitet und mit Standardwerten und Grenzwerten der Einstellungen ausgewertet. Stand `3b37025`, nur Codelesung.
+
+### Zeitwerte, die eine Ungleichung tragen
+
+| Bereich | Wert | Quelle |
+|---|---|---|
+| Job-Herzschlag des Workers | alle 30 s, auch während stiller Fernschritte (Stille-Takt 15 s) | `VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS`, `VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS` |
+| Ernten eines Auftrags | nach 600 s ohne Herzschlag, Takt 120 s, Schonfrist des Beobachters 120 s | `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS`, `VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS`, `VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS` |
+| DB-Kanal des Workers | Wiederverbindung alle 2 bis 30 s | `VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_*` |
+| SSH je Playbook-Schritt | 1800 s Leerlauf, 14400 s gesamt; Host-Preflight 45 s Leerlauf | `VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS`, `VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS`, `lib/deploy_worker_mission.php` |
+| SFTP | 120 s je Operation, 300 s gesamt | `VIRTUSPHERE_SFTP_*` |
+| Create-Phase | zusammen 14400 s ab `create_started_at`; Abfrage alle 30 s; Steueraufruf 120 s Leerlauf und 300 s gesamt; Suche nach der Job-ID 90 s | `lib/deploy_create_constants.php` |
+| Umfang und Platten | bis 40 VMs je Auftrag; neue Platte 50 GB `eagerzeroedthick` | `VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS`, `VIRTUSPHERE_VM_DEFAULTS` |
+| Wartezeiten im Playbook | Start 300 s (1 bis 1500), Power-Cycle 5 s je VM (1 bis 300) | `VIRTUSPHERE_START_WAIT_SECONDS_*`, `VIRTUSPHERE_POWERCYCLE_WAIT_*` |
+| Staffelung | 1 bis 120 min, je VM ein eigener Auftrag | `VIRTUSPHERE_DEPLOY_STAGGER_*` |
+| MAC-Upload | zwei Versuche zu je 30 s ohne Pause, Wiederholung nur bei 5xx und Zeitüberschreitung | `Ansible/upload_mac_list.py` |
+| Herzschlag-Ampel | gelb ab max(3 × Takt, 60 s), rot ab max(10 × Takt, 300 s) | `virtusphere_heartbeat_staleness()` |
+| Offener Lauf | Schonfrist max(3 × Takt, 60 s, 600 s) | `virtusphere_run_running_state()` |
+| Überwachung der VM | „wartet auf MECM“ nach 2 h, Installation nach 6 h, Clientphase unbestätigt nach 900 s | `VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS`, `VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS`, `VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS` |
+| ESXi-Inventar | alle 6 h (0 bis 168, 0 = aus), veraltet ab 2 × Intervall; Datacenter-Ableitung gilt 48 h | `deploy_constants.php`, `VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS` |
+| MECM-Serveraufgaben | Devices Sync 10 s, Packages Sync und Autoimporter 60 s, Site Health 300 s; `getDeviceList` 20 s, Berichte 5 s; je neu importiertem Gerät feste Pausen von 2 s und 5 s | `mecm/VirtuSphere-Common.ps1`, `mecm/mecm_new-device-sync.ps1` |
+| Client | Portal suchen 3 × (5 s + 10 s Pause), MAC-Abfrage 3 × (10 s + 10 s) je Netzwerkkarte, ACK ein Versuch mit 10 s, Phasenmeldung ein Versuch mit 5 s; danach Exitcode 1 und Wiederholung durch MECM | `clients/client_getInfos.ps1`, `clients/VirtuSphere-Client-Common.ps1` |
+| Aufbewahrung | Auftragsprotokolle 30 Tage nach Ende, Clientereignisse 30 Tage, Statusereignisse und Paketberichte 90 Tage | `lib/constants.php`, `lib/repo/deploy_job_maintenance.php` |
+
+### Ungleichungen
+
+| ID | Ungleichung | Auswertung | Ergebnis |
+|---|---|---|---|
+| ZB-I1 | Längste stille Pause eines Playbooks < SSH-Leerlauf | Start bis 1500 s, Power-Cycle bis 300 s, gegen 1800 s | hält, 300 s Reserve |
+| ZB-I2 | Ernten erst, wenn der Worker nach einem DB-Ausfall wieder schreiben konnte | Schonfrist 120 s > Wiederverbindung 30 s + Herzschlag 30 s | hält |
+| ZB-I3 | Blockierende Schritte ohne Herzschlag < Erntefrist | SFTP 300 s, Steueraufruf 300 s, Job-ID-Suche 90 s gegen 600 s | hält |
+| ZB-I4 | Summe aller Anlagen eines Auftrags < Create-Budget | bis 40 × 50 GB vorab beschriebene Platten gegen 14400 s, abhängig von der Schreibrate des Datastores | Verdacht (**ZB-01**) |
+| ZB-I5 | Power-Cycle-Schritt < SSH-Gesamtbudget | 40 × (300 s + Schaltzeit) gegen 14400 s | hält knapp, nur an der Obergrenze |
+| ZB-I6 | Längster gesunder Lauf einer MECM-Aufgabe < Laufschonfrist | Devices Sync nach einem Auftrag mit 40 neuen Geräten gegen 600 s | Verdacht (**ZB-02**) |
+| ZB-I7 | Jeder Ampelzustand ist mit Standardwerten erreichbar | Gelb für „Lauf offen“ nie | verletzt (FC2-11) |
+| ZB-I8 | Start-Wartezeit ≥ Sync-Takt + Sync-Lauf + Collection-Auswertung in MECM | 300 s gegen 10 s + Lauf + inkrementelle Auswertung (in MECM standardmäßig 5 min) | knapp (FC2-E6) |
+| ZB-I9 | MAC-Rückruf übersteht einen kurzen Neustart des Portals | zwei Versuche ohne Pause, Verbindungsabweisung ohne Wiederholung | verletzt (**ZB-03**) |
+| ZB-I10 | Client übersteht einen Portal-Ausfall bis zur nächsten MECM-Wiederholung | 45 bis 60 s, danach unbekannter Abstand | Verdacht (**ZB-04**) |
+| ZB-I11 | Belege leben mindestens so lange wie ungeklärte Einheiten | Protokoll 30 Tage gegen unbefristet `uncertain` | verletzt (**ZB-05**) |
+| ZB-I12 | Befunde, die einen Auftrag sperren, sind frisch | mit Inventarintervall 0 gilt jeder Befund als frisch | verletzt (**ZB-06**) |
+| ZB-I13 | Datacenter-Ableitung erneuert sich mit dem Inventar | Intervall ab 48 h erneuert nicht rechtzeitig | verletzt, aber in der Hilfe benannt |
+| ZB-I14 | Staffelabstand ≥ Dauer eines Einzelauftrags | sonst laufen die Aufträge ohne Abstand nacheinander | offen, gehört zu FM-04 und Staffelaudit P4; S07 betrifft erst das geplante Staffeln innerhalb eines Auftrags |
+| ZB-I15 | Clientphase meldet ihr Ende vor Ablauf von 900 s | die IP-Umstellung meldet das Ende über die neue Adresse; ohne Weg zum Portal bleibt die Phase „unbestätigt“ | gewollt (best effort), Hinweis zu FM-08 |
+
+### Befunde
+
+| ID | Klasse / Prio | Befund | Maßnahme |
+|---|---|---|---|
+| ZB-01 | V / P2 | **Create-Budget gegen Standard-Platten.** Die Create-Phase hat für alle VMs zusammen vier Stunden ab der ersten Einheit. Neue Platten sind standardmäßig 50 GB `eagerzeroedthick`; ESXi beschreibt sie beim Anlegen vollständig, außer das Speichersystem übernimmt das per VAAI (Kommentar in `lib/defaults.php`). Ein Auftrag darf 40 VMs umfassen. Auf einem lokalen Datastore ohne VAAI mit etwa 200 MB/s brauchen 40 × 50 GB rund 2,8 Stunden reine Schreibzeit, dazu je VM etwa eine Minute Steueraufrufe; mit größeren oder mehreren Platten reicht das Budget nicht. Läuft es ab, wird die laufende Einheit `uncertain` (`job_timeout`) und hält den Auftrag an; die Freigabe braucht einen neuen Inventarabruf (FC2-03). | Laborprobe nur lesend: `SELECT job_id, position, TIMESTAMPDIFF(SECOND, started_at, finished_at) AS seconds FROM deploy_create_vm_results WHERE status = 'succeeded' ORDER BY finished_at DESC LIMIT 40;` Je nach Ergebnis: Vorschau schätzt die Dauer aus Plattengröße und gemessener Rate und warnt vor dem Einreihen, oder Budget je Einheit statt je Auftrag. |
+| ZB-02 | V / P3 | **Lange gesunde Sync-Läufe werden rot.** Die Laufschonfrist von 600 s gilt für alle Aufgaben (FC2-11). Der Devices Sync wartet je neu importiertem Gerät fest 2 s und nach `Approve-CMDevice` 5 s und ruft je Gerät mehrere MECM-Cmdlets auf. Nach einem großen Auftrag kann ein gesunder Lauf länger als zehn Minuten dauern; die MECM-Karte wird dann rot, obwohl nichts hängt. | Probe nur lesend: `SELECT source, last_duration_ms, last_result_at FROM deploy_integration_heartbeats;` nach einem großen Auftrag. Das Ergebnis geht in FC2-E3 (Laufschonfrist je Aufgabe). |
+| ZB-03 | B / P3 | **MAC-Rückruf ohne Wiederholung bei kurzer Störung.** `upload_mac_list.py` versucht es zweimal ohne Pause und wiederholt nur bei 5xx und Zeitüberschreitung. Eine abgewiesene Verbindung, etwa während eines Portal-Neustarts, beendet den Export sofort; der Auftrag scheitert, und mit FC2-01 werden die VMs `failed`. Der Rückruf ist für denselben Lauf idempotent, eine Wiederholung wäre sicher. | Wiederholen mit wachsender Pause (etwa 5, 15 und 45 s), auch bei abgewiesener Verbindung, innerhalb des Leerlaufbudgets. |
+| ZB-04 | V / P3 | **Client gegen Portal-Ausfall.** `client_getInfos.ps1` wartet höchstens etwa 45 bis 60 Sekunden auf das Portal und sendet den ACK genau einmal; danach endet es mit Exitcode 1, und MECM entscheidet, wann es wieder läuft. Das hängt an der Bereitstellungsart der Client-Apps, die erst mit dem Cutover feststeht. Ein Portal-Update während laufender Installationen kann VMs bis zur nächsten Wiederholung bei 4/5 lassen; die Warnung kommt nach sechs Stunden. | In die Laborprobe zu VT-E1 B aufnehmen: Bereitstellungsart und Wiederholabstand der Client-Apps feststellen. Je nach Ergebnis den ACK im Skript länger wiederholen. |
+| ZB-05 | B / P3 | **Aufbewahrung ignoriert offene Create-Einheiten.** `repo_purge_deploy_job_logs()` löscht die Ausgabe jedes beendeten Auftrags 30 Tage nach seiner letzten Änderung. Eine `uncertain`-Einheit bleibt unbefristet offen; ihre Fernausgabe steht nur im Protokoll, bei FC2-02 auch MOID und UUID der angelegten VM. `deploy-chain.md` rät, Protokoll und Belege zuerst zu sichern, aber nichts hält sie fest. | Aufträge mit ungeklärten Einheiten von der Löschung ausnehmen, bis die Einheit freigegeben ist; FC2-02 behebt den MOID-Teil zusätzlich. |
+| ZB-06 | B / P3 | **Alte Host-Befunde sperren bei abgeschaltetem Inventar.** Mit Inventarintervall 0 gilt jeder gespeicherte Befund als frisch (`esxi_capabilities_fresh()`). Eine einmal gesehene freie Lizenz sperrt dann jeden Autostart-Auftrag und jede Vollständige Kette mit Autostart, auch Monate nach einem Lizenzwechsel. Die Meldung nennt nur Lizenz oder Autostart, nicht den neuen Inventarabruf. Der Kommentar derselben Funktion nennt eine Sperre auf alter Grundlage „eine Vermutung mit Folgen“. Mit FC2-01 werden dabei alle VMs `failed`. | Bei Intervall 0 einen Befund ab festem Alter (etwa sieben Tage) als unbekannt behandeln oder die Meldung um „Inventar jetzt abrufen“ mit Link ergänzen. |
+
+**Ergebnis:** Die Budgets des Workers passen zueinander; Herzschlag, Ernten, Wiederverbinden und Leerlauf greifen sauber ineinander. Schwach sind die Ränder, an denen Größen von außen kommen: Schreibrate des Datastores (ZB-01), Laufzeit in MECM (ZB-02, FC2-E6), Wiederholung durch MECM (ZB-04) und Zeitpunkt des letzten Inventars (ZB-06).
+
 ## Nächster Schritt
 
-Schritt 4 sind die Zeitbudgets (PI-04), danach die Meldungsprüfung nach R11 und der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3. Laborproben: WM-01 (Abfrage oben, nur lesend), VT-04 (Passwort auf dem Ubuntu-Host suchen) und FM-03 (Fernlauf nach Verbindungsende, auf einer Testmission).
+Als Nächstes die Meldungsprüfung nach R11, danach der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3. Laborproben: WM-01 (Abfrage oben, nur lesend), VT-04 (Passwort auf dem Ubuntu-Host suchen), FM-03 (Fernlauf nach Verbindungsende, auf einer Testmission), ZB-01 und ZB-02 (Abfragen oben, nur lesend), ZB-04 zusammen mit der Probe zu VT-E1 B.
