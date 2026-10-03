@@ -14,9 +14,9 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `export` (MAC-Adressen exportieren) | `exportVMs` | nein | nichts | ja | ja |
 | `start` (VMs starten) | `startVMs` | ja | Start-Wartezeit | nein | ja |
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
-| `inventory` (Systemmodus, ohne Mission) | `inventoryESXi` | nein | nichts | nein | nein |
+| `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Die Namen in Klammern sind die deutschen Portalbezeichnungen. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, erzeugt vom Zeitplan, von **Alle aktualisieren** und nach jedem `create`- oder `full`-Auftrag, nie über das Formular. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
@@ -59,13 +59,13 @@ Der Deploy-Worker bearbeitet immer genau einen Auftrag. Ein Abbruch greift an je
 flowchart TD
   L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist"]
   L --> I{"Systemmodus inventory?"}
-  I -->|ja| INV["Inventarpfad (Abschnitt ESXi-Inventar)"]
+  I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
   I -->|nein| K["Collection-Sperre (requirements.yml) lokal lesen"]
   K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH"]
   K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
   P -->|ja| D["VMs des Auftrags auf deploying setzen, Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
-  D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware, Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe"]
+  D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit. Die IP-Freigabe wird dort nur abgefragt und protokolliert, sie sperrt den Auftrag nicht"]
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente"]
   H --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
@@ -115,20 +115,28 @@ flowchart TD
   UN -->|ja| HOLD["HOLD: gesamte Create-Phase stoppt"]
   UN -->|nein| AC{"Aktion der Einheit?"}
   AC -->|verify_skip, nach Wiederholung| V["Prepare-Playbook als Prüfung der früher bestätigten VM"]
-  V -->|gebundene UUID live nicht mehr vorhanden| LA
+  V -->|gebundene UUID live nicht mehr vorhanden: Ersatz anlegen| BG
   V -->|dieselbe UUID live| SK["skipped (unverändert)"]
-  V -->|andere UUID oder keine Antwort| VF["failed"]
-  AC -->|create| PR["createVMPrepare: Identität lesend prüfen"]
+  V -->|andere UUID, oder kein früherer Erfolg auffindbar| VF["failed (identity_conflict)"]
+  V -->|Transport abgerissen| VT["failed (transport_lost)"]
+  V -->|keine lesbare Antwort| PP["failed (protocol_error)"]
+  AC -->|create| B0{"Budget der Create-Phase noch übrig?"}
+  B0 -->|nein| BGX["failed (job_timeout), keine VM gestartet"]
+  B0 -->|ja| PR["createVMPrepare: Identität lesend prüfen"]
   PR -->|rejected| PF["failed (Identitätsbefund)"]
+  PR -->|Transport abgerissen| VT
+  PR -->|keine lesbare Antwort oder unerwartetes Ereignis| PP
   PR -->|prepared| BG{"Budget der Create-Phase noch übrig?"}
-  BG -->|nein| BGX["failed (job_timeout), keine VM gestartet"]
+  BG -->|nein| BGX
   BGX --> HOLD
+  PP --> HOLD
   BG -->|ja| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
   LA -->|rejected| LF["failed"]
+  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
   JD -->|nein| LU["uncertain"]
   JD -->|ja| PO
-  LA -->|launched| PO["createVMStatus alle 30 Sekunden"]
+  LA -->|launched| PO["createVMStatus im Takt VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS"]
   PO -->|running| PO
   PO -->|Transport abgerissen| PO
   PO -->|Budget der Create-Phase erschöpft| TU["uncertain (job_timeout)"]
@@ -144,6 +152,7 @@ flowchart TD
   CL --> N
   SK --> N
   VF --> N
+  VT --> N
   PF --> N
   LF --> N
   LU --> HOLD
@@ -173,7 +182,7 @@ flowchart TD
 
 ### create_identity_check_tasks
 
-Die eine Identitätsmatrix für Prepare, Launch und Status. Sie bricht nie ab, sondern setzt einen geschlossenen Code.
+Die eine Identitätsmatrix für Prepare, Launch und Status. Ein Befund bricht nie ab, sondern setzt einen geschlossenen Code. Scheitert dagegen das Lesen des Live-Inventars selbst (Anmeldung, Transport, Modul), endet der Lauf ohne Ergebniszeile; der Worker wertet das als unlesbare Antwort.
 
 ```mermaid
 flowchart TD
@@ -191,7 +200,7 @@ flowchart TD
   G -->|nein| G2["Kein Befund"]
 ```
 
-Nach einem erfolgreichen Async-Job ruft das Status-Playbook die Matrix ohne Abgleich gegen die gespeicherte UUID auf, weil die VM gerade erst entstanden ist.
+Nach einem erfolgreichen Async-Job ruft das Status-Playbook die Matrix ohne Abgleich gegen die gespeicherte UUID auf (`vs_identity_require_stored_match` aus), weil die VM gerade erst entstanden ist. Dann entfallen die Fragen E und F.
 
 ### createVMLaunch
 
@@ -221,17 +230,23 @@ flowchart TD
   A["Ziel-VM auflösen"] --> B["Statusdatei der Job-ID gebunden lesen (inspect_create_async_state.py)"]
   B -->|Leser scheitert| BX["rejected: protocol_error"]
   B -->|fehlt, unlesbar, ungültig| BM["rejected: async_state_missing oder protocol_error"]
-  B --> C["async_status einmal abfragen, Statusdatei erneut prüfen"]
-  C --> D{"Schnappschuss und Abfrage widerspruchsfrei, Datei noch da?"}
-  D -->|nein| DX["rejected"]
-  D -->|ja| E{"Zustand des Async-Jobs?"}
+  B --> C["async_status einmal abfragen (Fehler toleriert), Statusdatei erneut prüfen"]
+  C --> D{"Datei noch da?"}
+  D -->|nein| DM["rejected: async_state_missing"]
+  D -->|ja| D2{"Schnappschuss und Abfrage widerspruchsfrei?"}
+  D2 -->|nein| DX["rejected: protocol_error"]
+  D2 -->|ja| E{"Zustand laut Statusdatei?"}
   E -->|läuft| E1["running"]
   E -->|fehlgeschlagen| E2["failed mit einzeiliger Ursache"]
   E -->|erfolgreich| F["Identität live prüfen, ohne Abgleich mit der gespeicherten UUID"]
   F --> G{"Genau eine VM mit MOID und UUID?"}
   G -->|nein| GX["rejected: identity_result_invalid"]
-  G -->|ja| H["Energiezustand lesen, Ergebnis succeeded mit MOID, UUID, changed"]
+  G -->|ja| H{"Energiezustand per MOID lesbar?"}
+  H -->|ja| H1["Ergebnis succeeded mit MOID, UUID, changed, Energiezustand"]
+  H -->|nein| HX["Lauf endet ohne Ergebniszeile; der Worker setzt die Einheit uncertain"]
 ```
+
+Den Zustand bestimmt die Statusdatei, die `inspect_create_async_state.py` gebunden liest; `async_status` muss ihr nur widerspruchsfrei zustimmen.
 
 ### createVMCleanup
 
@@ -260,14 +275,15 @@ flowchart TD
     G -->|ja| H["PowerCycleWaitSeconds warten"]
     H --> I["Immer: bestätigte eigene Einschaltung hart ausschalten"]
     G -->|nein| I
-    I --> K{"Einschaltung fehlgeschlagen oder unklar?"}
+    I -->|Ausschalten scheitert, VM kann eingeschaltet bleiben| KX
+    I -->|ausgeschaltet oder nichts auszuschalten| K{"Einschaltung fehlgeschlagen oder unklar?"}
     K -->|ja| KX["Abbruch vor der nächsten VM: Zustand der UUID im ESXi Host Client prüfen"]
     K -->|nein| KP["VM fertig, nächste VM"]
   end
   E --> F
 ```
 
-Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
+Je VM meldet das Playbook `[n/total] RUN`, `pass` oder `fail Powercycle <VM>`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
 
 ### exportVMs-Informations
 
@@ -308,7 +324,7 @@ flowchart TD
   B -->|ja| C{"Autostart der Mission aktiv?"}
   C -->|ja| D["Host-Standardwerte setzen: Autostart ein, Verzögerungen, Stoppaktion, Heartbeat"]
   C -->|nein| E
-  D --> E["Je VM per UUID schreiben: powerOn oder none, Reihenfolge -1, Verzögerungen je VM"]
+  D --> E["Je VM per UUID schreiben: powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault)"]
 ```
 
 Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.

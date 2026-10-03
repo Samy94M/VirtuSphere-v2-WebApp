@@ -52,6 +52,27 @@ Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Dia
 | DF-S3 | `Ansible/test-linux_playbook.yml` | Gehört zu keinem Modus, wird nie hochgeladen und legt beim Ausführen Ordner und Dateien im Home-Verzeichnis des Ansible-Benutzers an. | Entfernt. Der Nutzer hat am 28.09.2026 bestätigt, dass er die Datei nicht benutzt. |
 | DF-S4 | `docs/operations/deploy-flows.md`, `docs/operations/system-status-checks.md` | Nur die Regel im Dokumentkopf hält Diagramm und Code zusammen. Ein neues Playbook oder ein neuer Modus kann ohne Diagramm ausgeliefert werden. | Wächtertest nach dem Muster von `MecmScheduledTasksDocContractTest` (Liste aus dem Code ableiten, nie im Test aufzählen): Jede Datei `Ansible/*_playbook.yml` hat einen Abschnitt in `deploy-flows.md`, jeder Modus aus `virtusphere_deploy_modes()` eine Zeile in der Modustabelle, jeder Bereich der Systemstatus-Übersicht einen Abschnitt in `system-status-checks.md`. |
 
+### Grundprüfung gegen den Code (FC2, 03.10.2026)
+
+Alle Diagramme beider Dokumente erneut Knoten für Knoten gegen den ausgelieferten Code gelesen: Systemstatus gegen `lib/status*.php`, `lib/deploy_service_health.php`, `lib/esxi_inventory_display.php`, `lib/directory_status.php` und die Panel-Dateien; Worker und Create gegen `lib/deploy_worker_mission.php`, `deploy_worker_create*.php`, `deploy_worker_finish.php`, `lib/ssh.php` und `lib/ansible_command_preflight.php`; die Playbook-Abschnitte gegen `Ansible/*.yml` (Prüfung durch einen Sonnet-5.5-Agenten, jede Zeilenangabe hier nachgelesen). Keine Diagrammaussage war falsch im Sinne einer umgekehrten Regel. Ungenau oder lückenhaft war Folgendes, und das ist in denselben Dokumenten bereits korrigiert:
+
+- Systemstatus: Bereichsnamen jetzt gleich den Kachelbeschriftungen der Seite (Bereitstellungsdienst, Ansible-Test, ESXi-Inventar, Interne Dienste, Active Directory); die beiden Anker-Verweise aus `esxi-inventory.md` und `ansible-full-test.md` mitgezogen. Fehlende Zweige „Zeitstempel fehlt, unlesbar oder mehr als `VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS` in der Zukunft ergibt Unbekannt“ für MECM-Sync, Site-Health und Ansible-Test ergänzt. Abkühlphase nur unter Supervisor. ESXi und Active Directory mit den echten Badge-Beschriftungen. Active Directory: sichtbar nur mit gespeicherter Konfiguration und Recht `users.manage`; „Letzter Test“ war falsch benannt, es zählt jede Beobachtung (Anmeldung, Sitzungsprüfung, Test); „alle veraltet“ ergibt gesamt Eingeschränkt; der unzugelassene Controller heißt „Nicht getestet“, nicht „Deaktiviert“.
+- Bereitstellung: Modustabelle `inventory` mit der Portalbezeichnung „Inventar abrufen“ und allen drei Erzeugern. Toter Verweis „Abschnitt ESXi-Inventar“ im Worker-Diagramm ersetzt. Der Worker-Preflight prüft das Modul `vmware_guest` (der Volltest `vmware_host_auto_start`), und die IP-Freigabe sperrt dort nicht (DF-L8). Create je VM: Budgetprüfung schon vor Prepare, `verify_skip` mit allen vier Ausgängen, Prepare mit Transportabriss (weiter) und unlesbarer Antwort (Create-Phase stoppt), Launch mit unlesbarer Antwort oder ungültiger Job-ID (uncertain), Abfragetakt als Konstantenname statt „30 Sekunden“. Playbooks: Identitätsmatrix bricht bei Lesefehler ohne Ergebniszeile ab; createVMStatus nennt `async_state_missing` und `protocol_error` getrennt, der Zustand kommt aus der Statusdatei; Energiezustand nicht lesbar (DF-L9); powercycle: gescheitertes hartes Ausschalten bricht ab und kann eine VM eingeschaltet lassen; autostart: Stoppaktion und Heartbeat bleiben `systemDefault`.
+
+Neue Befunde im Code:
+
+| ID | Stelle | Befund | Maßnahme |
+|---|---|---|---|
+| DF-L6 | `lib/deploy_worker_finish.php` (`deploy_worker_conclude_sequence`), `lib/deploy_worker_create.php` (`deploy_worker_conclude_create_section`) | Der Inventarabruf nach einem Deploy hängt am Endstatus `succeeded` oder `partial`. Ein `full`-Auftrag, dessen Create-Phase VMs angelegt hat und der danach an Power-Cycle, Export oder Start scheitert oder abgebrochen wird, reiht keinen ein; ebenso eine Create-Phase ohne einzigen Erfolg (`deploy_worker_create_job_status()` ergibt dann `failed`), deren `uncertain`-Einheit ihre VM auf ESXi trotzdem angelegt haben kann. Bis zum nächsten Intervall (bei Intervall 0 nie) fehlen die neuen VMs im Cache: Identitätssperre, Abweichungen und Kapazitätsvorschau rechnen mit dem alten Stand. | Abruf in jedem Endzustand von `create` und `full` einreihen, sobald eine Create-Einheit den Launch erreicht hat (Job-ID gesetzt), unabhängig vom Endstatus. Fail-soft wie heute. Paket DF-P2. |
+| DF-L7 | `lib/esxi_inventory_display.php` (`esxi_inventory_ampel`) | Liest `last_success_at` per `strtotime()` ohne die Zukunftsgrenze, die alle anderen Nachweise über `virtusphere_evidence_timestamp()` haben. Ein künftiger Zeitstempel (Uhrabweichung zwischen Datenbank und PHP) altert nie, die Kachel bleibt grün. | `virtusphere_evidence_timestamp()` nutzen; künftiger oder unlesbarer Zeitstempel ergibt keinen Erfolgsnachweis. Zusammen mit DF-L3 in derselben Funktion, Paket DF-P2. |
+| DF-L8 | `lib/deploy_worker_mission.php` (Preflight, Kommentar „The portal/allowlist probes gate exactly the modes …“) | Für Modi mit MAC-Export läuft die Freigabeprobe mit, ihr Urteil wird aber nie gelesen; die Probe endet immer mit 0. Bei abgewiesener IP legt ein `full`-Auftrag alle VMs an, schaltet sie ein und aus und scheitert erst am Ende mit „no usable MAC import result“. Der Volltest meldet denselben Befund als „bestanden mit Einschränkung“. Der Kommentar behauptet eine Sperre, die es nicht gibt. | Entscheidung offen: (a) im Worker das Urteil auswerten und MAC-Modi vor dem Upload als `configuration_blocked` mit Verweis auf die Freigabeliste beenden, oder (b) nur eine Warnzeile und die Ursache in der Endmeldung. Empfehlung (a), weil der Ausgang vorher feststeht und nichts auf ESXi geändert werden muss, um ihn zu erfahren. Kommentar in jedem Fall korrigieren. |
+| DF-L9 | `Ansible/createVMStatus-ESXi_playbook.yml` (Energiezustand per `vmware_guest_info`, ohne `ignore_errors`) | Nach nachgewiesen erfolgreichem Async-Job und bestandener Identitätsprüfung macht ein vorübergehender Lesefehler des Energiezustands die Einheit `uncertain` und stoppt die ganze Create-Phase. Der Energiezustand ist nur Information; das Feld hat bereits den Ersatzwert `unknown`. | Lesefehler tolerieren und `unknown` melden; Vertragstest der Create-Marker mitziehen. Paket DF-P4 (Create-Vertrag). |
+| DF-D9 | Kommentar in `lang/de/status.php` und `lang/en/status.php` über `mode_inventory` | „nur der Scheduler erzeugt ihn“: Auch **Alle aktualisieren** und jeder `create`- oder `full`-Auftrag reihen ihn ein. | Kommentar korrigieren. Paket DF-P0. |
+
+DF-D1 ist bestätigt: Der Kommentar in `Ansible/exportVMs-Informations-ESXi_playbook.yml` (Zeilen 31 bis 34) erlaubt eine leere gespeicherte UUID, der Code darunter verlangt eine.
+
+DF-S4 ist mit diesem Stand geliefert: `DeployFlowsDocContractTest` leitet Modi, deutsche Portalbezeichnungen, Playbook-Reihenfolge je Modus (mit und ohne Autostart) und die Playbook-Dateien ab; `SystemStatusChecksDocContractTest` leitet die Bereiche aus den gerenderten Abschnitten, die Übersichtskacheln und deren deutsche Beschriftungen ab. Beide prüfen beide Richtungen, lassen keinen Nulltreffer durch und beweisen jede Regel mit einem Negativfall.
+
 ### Bereits geplant, hier nur verknüpft
 
 - Modusnamen DE/EN und doppelter MAC-Export im Hilfetext von `full`: geliefert in `0dc5172`; `DeployModeTextTest` leitet seither jede Modusliste der Hilfe ab. DF-D2 und DF-D3 betrifft das nicht, sie beschreiben das Verhalten falsch, nicht den Namen.
@@ -62,11 +83,12 @@ Die Mermaid-Blöcke der beiden Betriebsdokumente sind die einzige Quelle der Dia
 
 | Paket | Inhalt | Voraussetzung |
 |---|---|---|
-| DF-P0 | Drift und Aufräumen: DF-D1 bis DF-D7, DF-S1, DF-S2, DF-S4 (DF-S3 ist bereits erledigt) | keine |
+| DF-P0 | Drift und Aufräumen: DF-D1 bis DF-D7, DF-D9, DF-S1, DF-S2 (DF-S3 und DF-S4 sind erledigt) | keine |
 | DF-P1 | Systemstatus: DF-L4 mit DF-E4 und DF-E5 | keine |
-| DF-P2 | ESXi-Nachweisalter: DF-L3 mit DF-E3, dazu DF-L5 und DF-D8 | vor DF-P3, weil DF-P3 auf aktuelle Befunde angewiesen ist |
+| DF-P2 | ESXi-Nachweisalter: DF-L3 mit DF-E3, dazu DF-L5, DF-L6, DF-L7 und DF-D8 | vor DF-P3, weil DF-P3 auf aktuelle Befunde angewiesen ist |
 | DF-P3 | Freie Lizenz sperrt schreibende Modi: DF-L2 mit DF-E2 | DF-P2 |
-| DF-P4 | Create auf laufender eigener VM nur prüfen: DF-L1 mit DF-E1, DF-D3 | Create-Vertrag (Maschinenprotokoll der Create-Marker) unverändert lassen oder gemeinsam mit seinen Vertragstests ändern |
+| DF-P4 | Create auf laufender eigener VM nur prüfen: DF-L1 mit DF-E1, DF-D3; dazu DF-L9 | Create-Vertrag (Maschinenprotokoll der Create-Marker) unverändert lassen oder gemeinsam mit seinen Vertragstests ändern |
+| DF-P5 | IP-Freigabe vor dem Upload auswerten: DF-L8 | Entscheidung des Nutzers zwischen (a) und (b); reine Portal-Arbeit, keine Installersperre |
 
 Jedes Paket zieht das betroffene Diagramm in [Bereitstellung: Abläufe](../operations/deploy-flows.md) oder [Systemstatus: Prüfungen](../operations/system-status-checks.md) nach.
 
@@ -112,4 +134,4 @@ Nebenbefunde, nicht in diesem Paket behoben:
 
 ## Nächster Schritt
 
-Pull Request des Branches `claude/practical-galileo-d8yx5g` zusammenführen, dann Verweise und Registereintrag setzen. Danach DF-P0 bis DF-P4 wie unter „Einordnung in die Reihenfolge“ abarbeiten.
+PR #2 ist zusammengeführt, Verweise und Registereintrag sind gesetzt (`1c87571`), FC1 und FC2 sind geliefert (Abschnitt „Grundprüfung gegen den Code“). Offen: Entscheidung zu DF-L8 (DF-P5), dann DF-P0 bis DF-P5 wie unter „Einordnung in die Reihenfolge“; FC3 (übrige Diagrammkorrekturen aus dem PowerShell-Audit) und FC4 (neue Ablaufdokumente) laut Register.

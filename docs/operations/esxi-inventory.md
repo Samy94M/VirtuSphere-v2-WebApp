@@ -2,7 +2,7 @@
 
 Das Portal liest in regelmäßigen Abständen read-only aus den registrierten ESXi-Zugangsdaten: Datacenter, Datastores (mit Kapazität/frei), Portgruppen (Standard und Distributed) sowie Host-Kapazität (RAM, CPU-Kerne, Modell). Die Werte sind Snapshots vom letzten Abruf, kein Live-Monitoring (ADR-0023). ESXi ist die Quelle, der Cache im Portal nur ein Spiegel: er speist Anzeige und Warnungen, blockiert aber nie einen Deploy.
 
-Den Ablauf des Abrufplaybooks zeigt [Bereitstellung: Abläufe](deploy-flows.md#inventoryesxi), die Ampel und die übrigen Inventarprüfungen des Systemstatus [Systemstatus: Prüfungen](system-status-checks.md#esxi).
+Den Ablauf des Abrufplaybooks zeigt [Bereitstellung: Abläufe](deploy-flows.md#inventoryesxi), die Ampel und die übrigen Inventarprüfungen des Systemstatus [Systemstatus: Prüfungen](system-status-checks.md#esxi-inventar).
 
 ## Wie es läuft
 

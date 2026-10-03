@@ -6,26 +6,30 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 
 | Bereich | Quelle | Ampel je Zeile | Kachel in der Übersicht |
 |---|---|---|---|
-| Deploy-Dienst | Laufzeitidentität, Supervisor, Worker-Status, Warteschlange, Prüffälle | Verfügbarkeit plus Aufmerksamkeit | Summe der Karte |
+| Bereitstellungsdienst | Laufzeitidentität, Supervisor, Worker-Status, Warteschlange, Prüffälle | Verfügbarkeit plus Aufmerksamkeit | Summe der Karte |
 | MECM | Laufberichte der drei Sync-Aufgaben und des Site-Health-Reporters | je Aufgabe | schlechteste Zeile |
-| Ansible | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
-| ESXi | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
+| Ansible-Test | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
+| ESXi-Inventar | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
 | Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl |
-| Intern | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Zeile |
-| Verzeichnis | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
+| Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Zeile |
+| Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
+
+Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite; `SystemStatusChecksDocContractTest` leitet die Namen aus den Kachelbeschriftungen ab.
 
 Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`): rot vor „fehlt“ vor gelb vor „alte Skriptversion“ vor grau vor grün.
 
-## Deploy-Dienst
+## Bereitstellungsdienst
 
 ```mermaid
 flowchart TD
   A{"Supervisor-Vertrag bekannt und Prozessform passend?"} -->|nein| DG["Eingeschränkt"]
   A -->|ja| B{"Dienstprozess lebt? (Supervisor-Heartbeat frisch, sonst Worker-Status ok)"}
   B -->|nein| OF["Offline"]
-  B -->|ja| C{"Supervisor in der Neustart-Abkühlphase?"}
+  B -->|ja| SV{"Läuft der Dienst unter Supervisor?"}
+  SV -->|nein, Einzelprozess| E
+  SV -->|ja| C{"Supervisor in der Neustart-Abkühlphase?"}
   C -->|ja| CO["Abkühlphase"]
-  C -->|nein| D{"Unter Supervisor: Worker-Kindprozess lebt?"}
+  C -->|nein| D{"Worker-Kindprozess lebt?"}
   D -->|nein| DG
   D -->|ja| E{"Aktiver Auftrag widersprüchlich?"}
   E -->|ja| DG
@@ -56,7 +60,9 @@ flowchart TD
   A1 -->|ja| MI["Fehlt (gelb)"]
   A1 -->|nein| UK["Unbekannt (grau)"]
   A -->|ja| L{"Letztes Ereignis?"}
-  L -->|completed| CP{"Ergebnis fail?"}
+  L -->|completed| CT{"Ergebniszeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
+  CT -->|nein| UK
+  CT -->|ja| CP{"Ergebnis fail?"}
   CP -->|ja| RD["Ausgefallen (rot)"]
   CP -->|nein| CA{"Alter des letzten Ergebnisses?"}
   CA -->|über Gefahrschwelle| RD
@@ -79,7 +85,7 @@ Der Site-Health-Reporter wird eigens bewertet: Sein Alter färbt die Zeile nie g
 
 ```mermaid
 flowchart TD
-  A{"Hat der Site-Health-Reporter je gemeldet?"} -->|nein| UK["Unbekannt (grau)"]
+  A{"Hat der Site-Health-Reporter je gemeldet, mit lesbarer und nicht künftiger Ergebniszeit?"} -->|nein| UK["Unbekannt (grau)"]
   A -->|ja| S{"Letztes Ergebnis älter als die Warnschwelle?"}
   S -->|ja| SS["Veraltet: grau, Beschriftung „Unbekannt“, Hinweis „Befund ist historisch“"]
   S -->|nein| SC{"MECM-Site-Status?"}
@@ -89,9 +95,9 @@ flowchart TD
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UK
 ```
 
-Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` (aktuell 3) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` (aktuell 10) Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; ein offener Lauf gilt frühestens nach `VIRTUSPHERE_RUN_GRACE_SECONDS` als verzögert. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; ein offener Lauf gilt frühestens nach `VIRTUSPHERE_RUN_GRACE_SECONDS` als verzögert. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
-## Ansible
+## Ansible-Test
 
 Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Jetzt vollständig testen**, über **Zugangsdaten, Testen** oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 
@@ -118,27 +124,29 @@ flowchart TD
   A -->|nein, Zugang seither geändert oder nie getestet| U["Nicht getestet (grau)"]
   A -->|ja| B{"Ergebnis?"}
   B -->|fehlgeschlagen| D["Fehlgeschlagen (rot), altert nie"]
-  B -->|bestanden oder eingeschränkt| C{"Älter als VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS?"}
+  B -->|bestanden oder eingeschränkt| C0{"Prüfzeit vorhanden, lesbar und nicht künftig?"}
+  C0 -->|nein| U
+  C0 -->|ja| C{"Älter als VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS?"}
   C -->|ja| S["Test veraltet (grau)"]
-  C -->|nein| O["bestanden: grün; eingeschränkt: gelb"]
+  C -->|nein| O["bestanden: OK (grün); eingeschränkt: Eingeschränkt (gelb)"]
 ```
 
-## ESXi
+## ESXi-Inventar
 
 Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** und nach jedem `create`- oder `full`-Auftrag.
 
 ```mermaid
 flowchart TD
-  A{"Je ein Abruf versucht?"} -->|nein| U["Unbekannt (grau)"]
+  A{"Je ein Abruf versucht?"} -->|nein| U["Noch kein Abruf (grau)"]
   A -->|ja| B{"Anmeldung pausiert oder Fehlerserie ab VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER?"}
-  B -->|ja| D["Rot"]
+  B -->|ja| D["Fehler (rot)"]
   B -->|nein| C{"Je erfolgreich?"}
-  C -->|nein| W["Gelb"]
+  C -->|nein| W["Prüfen (gelb)"]
   C -->|ja| E{"Intervall größer 0 und letzter Erfolg älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle?"}
   E -->|ja| W
   E -->|nein| F{"Letzter Abruf fehlgeschlagen?"}
   F -->|ja| W
-  F -->|nein| O["Grün"]
+  F -->|nein| O["OK (grün)"]
 ```
 
 Host-Eigenschaften aus einem erfolgreichen Abruf färben die Ampel nicht, sondern erscheinen als eigene Badges: freie Lizenz, HA-Cluster, Wartungsmodus. Über den Karten nennt eine Zeile, warum kein automatischer Abruf läuft: Intervall 0, kein Ansible-Zugang für den Abruf, Deploy-Worker nicht aktiv oder Anmeldung pausiert.
@@ -159,7 +167,7 @@ flowchart TD
 
 Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Die Deploy-Seite zeigt dieselben Befunde je Zugang zusätzlich als Warnung.
 
-## Intern
+## Interne Dienste
 
 Wartungsdienst und Deploy-Worker schreiben ihren Status direkt in dieselbe Tabelle wie die MECM-Aufgaben, im Takt `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` beziehungsweise `VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS`.
 
@@ -176,29 +184,35 @@ flowchart TD
   C -->|frisch| GR["OK (grün)"]
 ```
 
-## Verzeichnis
+## Active Directory
 
-Erscheint nur, wenn die LDAPS-Anmeldung eingerichtet ist.
+Erscheint nur, wenn eine LDAPS-Konfiguration gespeichert ist, und nur für Benutzer mit dem Recht **Benutzerkonten verwalten** (`users.manage`): Die Controller-Namen sind interne Infrastruktur.
+
+Nutzbar ist ein Controller, der aktiv ist und für den aktuellen Konfigurationsstand getestet wurde. Jede echte Anmeldung, jede Sitzungsprüfung und jeder Test schreibt eine Beobachtung; automatische Fehlschläge nehmen die Zulassung nicht zurück, nur ein fehlgeschlagener manueller Test tut das.
 
 ```mermaid
 flowchart TD
   subgraph JE["Je Domänencontroller"]
-    A{"Aktiv und für den aktuellen Konfigurationsstand getestet?"} -->|nein| U["Deaktiviert (grau)"]
-    A -->|ja| B{"Letzter Test ok?"}
-    B -->|nein| D["Rot"]
+    A{"Aktiv und für den aktuellen Konfigurationsstand getestet?"} -->|nein| U["Nicht getestet (grau)"]
+    A -->|ja| B{"Letzte Beobachtung ok?"}
+    B -->|nein| D["Gestört (rot)"]
     B -->|ja| C{"Zertifikat abgelaufen?"}
     C -->|ja| D
     C -->|nein| E{"Zertifikat läuft innerhalb von VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS ab?"}
-    E -->|ja| W["Gelb"]
+    E -->|ja| W["Zertifikat läuft bald ab (gelb)"]
     E -->|nein| F{"Letzter Erfolg fehlt oder älter als VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS?"}
     F -->|ja| S["Veraltet (grau)"]
-    F -->|nein| O["Grün"]
+    F -->|nein| O["Aktiv (grün)"]
   end
-  G{"LDAPS eingeschaltet?"} -->|nein| G0["Gesamt: Deaktiviert"]
-  G -->|ja| H{"Automatische Anmeldung für diesen Stand gesperrt?"}
-  H -->|ja| G1["Gesamt: Rot"]
+  G{"LDAPS eingeschaltet?"} -->|nein| G0["Gesamt: Deaktiviert (grau)"]
+  G -->|ja| H{"Automatische Anmeldung für diesen Stand gesperrt, weil das Suchkonto abgewiesen wurde?"}
+  H -->|ja| G1["Gesamt: Gestört (rot)"]
   H -->|nein| I{"Nutzbare Controller?"}
-  I -->|keiner, oder alle rot| G1
-  I -->|alle grün| G2["Gesamt: Grün"]
-  I -->|gemischt| G3["Gesamt: Gelb"]
+  I -->|keiner| G1
+  I -->|ja| J{"Zustand der nutzbaren Controller?"}
+  J -->|alle Gestört| G1
+  J -->|alle Aktiv| G2["Gesamt: Aktiv (grün)"]
+  J -->|sonst, auch alle veraltet| G3["Gesamt: Eingeschränkt (gelb)"]
 ```
+
+Das Zertifikat kennt die Seite nur aus dem letzten manuellen Test. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen.
