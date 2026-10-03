@@ -886,8 +886,10 @@ Quelle S8, Abschnitt „Schritt 2: Verbindungen, Vertrauensanker und Geheimnisse
 | Befunde | Owner | Paket |
 |---|---|---|
 | VT-01 (P2): IP-Freigabe gilt für alle Maschinen-Endpunkte gleich; mit AB-01 kann ein abgegriffenes Ansible-Passwort MECM-Bindungen und Katalog erreichen | Lückensuche | mit AB-01 betrachten; Freigabe je Rolle |
-| VT-02 (P2): Client-ACK schreibt Stufe 5/5 und `registered` mit der bekannten MAC als einziger Berechtigung | Lückensuche | nach VT-E1 |
+| VT-02 (P2): Client-ACK schreibt Stufe 5/5 und `registered` mit der bekannten MAC als einziger Berechtigung | Lückensuche | nach VT-E1: C als Portalpaket, B mit dem Cutover MC-R4 nach Laborprobe |
 | VT-04 (P2): ESXi-Passwort bleibt bei ungeklärten Einheiten oder unerreichbarem Host unbefristet in `accounts.yml` auf dem Ubuntu-Host | Lückensuche | Probe auf dem Ubuntu-Host, dann Paket |
 | VT-03, VT-05 bis VT-07 (P3): Klartext ohne HTTPS, Backup mit Schlüssel und Chiffrat, kein APP_KEY-Wechsel, ADR-0018-Drift zum Token | Lückensuche | VT-05 nach VT-E2; übrige mit dem nächsten Paket am Ort |
 
-**Nächster Schritt:** Schritt 3 der Lückensuche, die Fehlerfälle entlang der Gesamtkette (PI-05). Offen sind VT-E1 (Berechtigung des Client-ACK) und VT-E2 (Backup-Verschlüsselung).
+**VT-E1 (Nutzer, 03.10.2026):** Der Client-ACK setzt künftig nur noch die Stufe 5/5 (`os_installed`) und nicht mehr MECM `registered` (C: reine Portaländerung ohne Cutover; Paketskizze in S8, mit Überwachung von `os_installed` / `pending`). Ein Einmalwert je Rollout als echte Berechtigung des ACK folgt mit dem Cutover MC-R4, nach einer Laborprobe zu MECM-Gerätevariablen (B). Anzeige-Meldungen bleiben bei der MAC-Berechtigung.
+
+**Nächster Schritt:** Schritt 3 der Lückensuche, die Fehlerfälle entlang der Gesamtkette (PI-05). Offen ist VT-E2 (Backup-Verschlüsselung).
