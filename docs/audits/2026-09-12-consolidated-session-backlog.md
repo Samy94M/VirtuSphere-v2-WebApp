@@ -13,6 +13,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 | S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
+| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-06 und Entscheiden WM-E1, WM-E2 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -856,3 +857,18 @@ Quelle S7, Abschnitt „Darstellungsarten und Doku-Struktur“ im [Ablaufprüfpl
 **AB-E1 (Nutzer, 03.10.2026):** Host-Schlüssel des Ubuntu-Hosts je Ansible-Zugang anheften; AB-01 wird das erste Umsetzungspaket vor FC1 bis FC4. Auf Wunsch des Nutzers bleibt es in dieser Sitzung bei Doku: Paketskizze im Ablaufprüfplan. **AB-E1a (Nutzer, 03.10.2026):** Bestehende Zugänge heften den Schlüssel bei der ersten Verbindung nach dem Update vorläufig an (wie `accept-new` bei OpenSSH), blockieren danach jede Abweichung und zeigen „bitte bestätigen“, bis der Admin den Fingerprint bestätigt; kein Betriebsstopp beim Update.
 
 **Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3. Umsetzung erst, wenn der Nutzer Codeänderungen wieder freigibt; dann beginnt AB-01 mit einem Rot-vor-Fix-Test.
+
+## Lückensuche mit Matrizen, Schritt 1 aufgenommen (03.10.2026)
+
+Quelle S8, [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md): Zustands- und Schreibermatrix (PI-02) für VM-Lebenszyklus, MECM-Zustand, Auftragsstatus, Create-Einheiten und Identität am Stand `3b37025`, nur Codelesung; Nutzerentscheid 03.10.2026: keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| WM-01 (P1-Kandidat): Ein erneuter Export setzt registrierte VMs auf `deployed` / `pending`; der Devices Sync antwortet mit derselben ResourceID, die VM bleibt dauerhaft ausstehend und wird in jedem Lauf neu verarbeitet | Lückensuche | nach WM-E1; Laborprobe lesend per Abfrage in S8 |
+| WM-02: Vorzustand nur im Speicher des Workers (Ursache von FC2-01) | Lückensuche | mit FC2-E1 |
+| WM-03: „Identität übernehmen“ ersetzt eine bestehende Bindung ohne die Folgen des Create-Ersatzes | Lückensuche | nach WM-E2 |
+| WM-04 bis WM-06: Schreiberzusage im Test, Transfer-Generation beim MAC-Rückruf, MAC-Eindeutigkeit | Lückensuche | P3, mit dem nächsten Paket am jeweiligen Ort |
+
+Auftragsstatus und Create-Einheiten sind durch Sperren und Vergleiche geschützt; dort keine neue Lücke.
+
+**Nächster Schritt:** Schritt 2 der Lückensuche, die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03). Offen sind zusätzlich WM-E1 und WM-E2.
