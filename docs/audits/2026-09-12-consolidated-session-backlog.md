@@ -12,7 +12,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
-| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`) |
+| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -813,3 +813,20 @@ S7 ist als Merge-Commit `6489f6b` auf `main` (PR #2 auf GitHub als gemergt gefü
 **Flowchart-Regeln als Vorschlag, Nutzerentscheid offen** (Recherche 28.09.2026): je Diagramm `accTitle` und `accDescr` für Screenreader; Start und Ende als abgerundete Terminale; jede Entscheidung als Frage mit beschrifteten Ausgängen, mehr als zwei Ausgänge nur für aufgezählte Zustände; Hauptpfad von oben nach unten; Fehler-, Abbruch-, Timeout-, Teil- und Unbekannt-Pfade immer zeichnen; einheitliche Ergebnisklassen per `classDef` statt Inline-Styles, mit Legende; zu große Diagramme (Worker, Create je VM) in verlinkte Teilabläufe teilen; kurze Knotentexte, Erklärung in den Fließtext. Maschinell prüfbar für den FC1-Wächter: `accTitle` vorhanden, jede Entscheidungskante beschriftet, Start und Ende vorhanden, Knotenzahl je Diagramm begrenzt.
 
 **Edge-Case-Checkliste je Diagramm (für FC2/FC3):** fehlende Konfiguration, leere Eingabe, Abbruch durch den Operator, Prozessabsturz und Neustart, Timeout, Teilerfolg, unbekannter Ausgang, parallele zweite Instanz, veraltete Daten, Wiederholung nach Fehler; jeder Pfad endet in einem benannten Ergebnis, das das Portal oder Log so meldet.
+
+## FC2: Code-Abgleich der Ablaufdiagramme aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „FC2: Abgleich der Diagramme mit dem Code“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): `deploy-flows.md` und `system-status-checks.md` am Stand `3b37025` gegen den Code, entlang der Edge-Case-Checkliste. Befunde FC2-01 bis FC2-13, offene Entscheide FC2-E1 bis FC2-E6. Nur Codelesung, kein Testlauf und kein QA-Gate; Prüftiefe und offener Rest stehen im Plan.
+
+**Nutzerentscheid 03.10.2026:** In dieser Sitzung keine Änderung an Code, Diagrammen oder Hilfe; nur Aufnahme der Befunde.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| FC2-01 (P1): Ein gescheiterter oder abgebrochener Auftrag färbt VMs `failed/failed`, die er nicht angefasst hat, auch bei `start`, `autostart` und Fehlern vor dem ersten Playbook | Ablaufprüfplan; erweitert [Staffelplan](2026-09-11-full-pipeline-start-stagger-audit.md) P5 über `start` hinaus | nach FC2-E1 |
+| FC2-02, FC2-03, FC2-08 (Create-Belege, Inventarabruf nach Fehlschlag, Schwärzung) | Ablaufprüfplan | FC2-02 mit DF-P4 und IDR-P06; FC2-03 und FC2-08 als kleine Worker-Fixes |
+| FC2-04 bis FC2-07 (Lograuschen der Statusabfragen, Fehlerzusammenfassung, Sperrtexte, Volltest auf der Deploy-Seite) | Ablaufprüfplan | Bedienpaket nach FC2-E2 |
+| FC2-09 bis FC2-13 (Diagrammdrift, abgeleitete Modus-Listen, Vokabular-Abgleich) | Ablaufprüfplan | FC1 und FC3 |
+
+**Reihenfolge:** Die Entscheidung vom 28.09.2026 gilt weiter (FC1, FC2, FC3, PS1 bis PS3, Mutationsrunde). FC2 ist nicht abgeschlossen: Der im Plan genannte, nicht Knoten für Knoten geprüfte Rest folgt vor FC3. Ob FC2-01 vorgezogen wird, entscheidet FC2-E1.
+
+**Nächster Schritt:** Entscheide FC2-E1 bis FC2-E6 beim Nutzer einholen; danach FC2-Rest und Umsetzung, jeweils mit Rot-vor-Fix-Test.
