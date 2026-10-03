@@ -57,18 +57,29 @@ Anlegen als `pending` (`repo_deploy_create_materialize()`, bei Wiederholung `rep
 | WM-04 | B / P3 | `StatusWriterContractTest` erklärt „One writer per stage“ und nennt `db_importMAC.php` als einzigen Schreiber der Stufe 3/5 (`deployed`). „MECM-ID zurücksetzen“ schreibt dieselbe Stufe; der Test prüft nur, dass der genannte Endpunkt schreibt, nicht, dass kein anderer es tut. | Reset als zweiten Schreiber der Stufe aufnehmen und die Aussage im Test angleichen; die Hilfe zu 3/5 um den Fall „nach Reset“ ergänzen. |
 | WM-05 | B / P3 | Der MAC-Rückruf setzt `updated = 1`, ohne `mecm_transfer_generation` zu erhöhen; Reset und „An MECM übertragen“ erhöhen sie. Ein Devices-Sync-Lauf, der die Generation vorher gelesen hat, kann den Merker des Rückrufs löschen. Folgenarm, solange `pending` die VM ohnehin in `getDeviceList` hält, aber eine zweite Regel für denselben Merker. | Generation auch im MAC-Rückruf erhöhen oder begründen, warum nicht. |
 | WM-06 | V / P3 | Die Eindeutigkeit einer MAC über alle VMs prüft nur der MAC-Import (`mac_import_validate_duplicate_macs()`); der Index auf `deploy_interfaces.mac` ist nicht eindeutig. `mecm_client_ack.php` und `getDeviceInfos` wählen bei Doppel die erste Zeile per `LIMIT 1` ohne Ordnung. Ob manuell im Editor eingetragene MACs gegen andere VMs geprüft werden, ist offen. | Prüfen, ob der Editor Doppel zulässt; wenn ja, Eindeutigkeit an einer Stelle erzwingen. |
+| WM-07 | B / P3 | VirtuSphere schreibt beim Anlegen keine Herkunftsmarke an die ESXi-VM (`createVMLaunch-ESXi_playbook.yml` setzt keine Notiz und kein Attribut). Das Portal kann eine früher von VirtuSphere angelegte VM deshalb nicht von einer von Hand angelegten unterscheiden; der Grundsatz GR-01 (unten) hängt bei „Identität übernehmen“ allein am Urteil des Operators. | Mit WM-E2a: Marke in der Notiz der VM beim Anlegen (etwa „VirtuSphere, Portal-VM <id>“), Inventar liest sie, Übernahme nur für markierte VMs. Bestehende VMs haben keine Marke. |
+| WM-08 | B, Häufigkeit V / P3 | Der Devices Sync übernimmt im ersten Rollout ein schon vorhandenes MECM-Gerät, wenn Rolloutname und MAC eindeutig auf denselben Datensatz zeigen (`Resolve-VsDeviceIdentity()` in `Powershell-MECM/mecm/VirtuSphere-Common.ps1`, Regel 3). Gedacht ist das für einen verlorenen Rückruf nach dem eigenen Import; die Regel kann ein eigenes Importgerät aber nicht von einem von Hand angelegten unterscheiden. Nach GR-01 dürfte ein von Hand angelegtes Gerät nicht gebunden werden. | Entscheid WM-E3. |
 
 **Bestätigt, ohne neue ID:** FC2-01 gilt auch für Reaper und Sweep; WM-01 und WM-02 erweitern es. FC2-02 bleibt. Dass `initializing` keinen Schreiber hat, ist bekannt und von `StatusWriterContractTest` festgehalten.
 
 **Ansatzpunkt für den Wächter:** `StatusWriterContractTest` hält heute drei Stufen-Schreiber fest. Erweitert auf alle Schreiber von `lifecycle_state` und `mecm_sync_state` (mit derselben Suche über Endpunkte und `lib`) wird diese Matrix zum Wächter aus PI-02. Nur Vorschlag.
 
+### Entscheidungen (Nutzer, 03.10.2026)
+
+**Grundsatz GR-01:** Was in ESXi oder MECM von Hand angelegt wurde, landet nicht im Portal. Das Portal verwaltet nur, was es selbst angelegt hat.
+
+| ID | Frage | Entscheidung |
+|---|---|---|
+| WM-E1 | Was soll ein Export mit einer VM tun, die MECM schon kennt (gespeicherte ResourceID)? | Den Zustand nicht anfassen, nur die MAC vergleichen. Gleiche MAC: nichts ändern, die VM zählt im Auftrag als unverändert. Andere MAC: die VM als fehlgeschlagen melden mit dem Hinweis „MAC geändert, MECM kennt noch die alte; bitte MECM-ID zurücksetzen“. VMs ohne ResourceID: wie heute. |
+| WM-E2 | Darf „Identität übernehmen“ eine bestehende Bindung ersetzen? | Nein, folgt aus GR-01: Eine von Hand neu gebaute ESXi-VM ersetzt nie die Bindung einer Portal-VM. Variante B (Ersetzen mit denselben Folgen wie beim Create) entfällt. |
+
 ### Offene Entscheidungen (Nutzer)
 
 | ID | Frage | Vorschlag |
 |---|---|---|
-| WM-E1 | Was soll ein Export mit einer schon registrierten VM tun? | Lifecycle, MECM-Zustand und `updated` unverändert lassen und nur Identität und MACs prüfen. Weicht eine MAC ab, die VM als fehlgeschlagen melden mit der Ursache „MAC geändert, MECM-ID zurücksetzen“, statt sie still zurückzusetzen. |
-| WM-E2 | Darf „Identität übernehmen“ eine bestehende Bindung ersetzen? | Nein: Übernahme nur für ungebundene VMs; eine gebundene VM mit anderer Instanz läuft über den Create-Ersatz mit seinen Folgen (MACs leeren, Generation drehen, MECM-Hinweis). |
+| WM-E2a | Bleibt „Identität übernehmen“ für ungebundene VMs? Laut `docs/DEPLOYMENT.md` ist der Knopf für VMs gedacht, die VirtuSphere selbst angelegt hat, bevor es die Bindung gab (ältere Versionen, frühere Desktop-App); das Portal kann solche VMs aber nicht von von Hand angelegten unterscheiden (WM-07). | Gibt es keine solchen Alt-VMs mehr: Knopf entfernen; eine namensgleiche VM auf ESXi blockiert dann immer. Gibt es sie noch: Knopf nur für ungebundene VMs mit klarem Hinweis im Dialog behalten und später entfernen; optional die Herkunftsmarke aus WM-07. |
+| WM-E3 | Darf der Devices Sync im ersten Rollout ein vorhandenes MECM-Gerät mit gleichem Namen und gleicher MAC übernehmen (WM-08)? | Nach GR-01 nur Geräte, die der Sync selbst importiert hat; das braucht eine eigene Importliste oder Marke auf der MECM-Seite. Alternativ als dokumentierte Ausnahme für den Fall „Rückruf nach eigenem Import verloren“ behalten. |
 
 ## Nächster Schritt
 
-Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen sind WM-E1 und WM-E2; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
+Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen sind WM-E2a und WM-E3; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
