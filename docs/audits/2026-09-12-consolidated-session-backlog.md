@@ -853,6 +853,6 @@ Quelle S7, Abschnitt „Darstellungsarten und Doku-Struktur“ im [Ablaufprüfpl
 
 **Reihenfolge:** Nach DA-E1 kommen PI-01 bis PI-03, Einstiegsseite sowie Zustands- und Sequenzdiagramme vor Entscheidungsbaum, Swimlanes und Playbooks der Admin-Phase. FC1, FC2, FC3 und PS1 bis PS3 bleiben in ihrer Reihenfolge.
 
-**AB-E1 (Nutzer, 03.10.2026):** Host-Schlüssel des Ubuntu-Hosts je Ansible-Zugang anheften; AB-01 wird das erste Umsetzungspaket vor FC1 bis FC4. Auf Wunsch des Nutzers bleibt es in dieser Sitzung bei Doku: Paketskizze im Ablaufprüfplan, Unterentscheid AB-E1a (Umgang mit bestehenden Zugängen) offen.
+**AB-E1 (Nutzer, 03.10.2026):** Host-Schlüssel des Ubuntu-Hosts je Ansible-Zugang anheften; AB-01 wird das erste Umsetzungspaket vor FC1 bis FC4. Auf Wunsch des Nutzers bleibt es in dieser Sitzung bei Doku: Paketskizze im Ablaufprüfplan. **AB-E1a (Nutzer, 03.10.2026):** Bestehende Zugänge heften den Schlüssel bei der ersten Verbindung nach dem Update vorläufig an (wie `accept-new` bei OpenSSH), blockieren danach jede Abweichung und zeigen „bitte bestätigen“, bis der Admin den Fingerprint bestätigt; kein Betriebsstopp beim Update.
 
-**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1a und AB-E3. Umsetzung erst, wenn der Nutzer Codeänderungen wieder freigibt; dann beginnt AB-01 mit einem Rot-vor-Fix-Test.
+**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3. Umsetzung erst, wenn der Nutzer Codeänderungen wieder freigibt; dann beginnt AB-01 mit einem Rot-vor-Fix-Test.
