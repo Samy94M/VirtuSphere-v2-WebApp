@@ -13,7 +13,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 | S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
-| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3 |
+| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -878,3 +878,16 @@ Auftragsstatus und Create-Einheiten sind durch Sperren und Vergleiche geschützt
 **WM-E3 (Nutzer, 03.10.2026):** Der Devices Sync übernimmt im ersten Rollout nur Geräte, die er nachweislich selbst importiert hat (eigene Importliste auf dem MECM-Server); ein fremdes Gerät blockiert mit Meldung. Umsetzung mit den Serverskripten erst zum Cutover (MC-R4).
 
 **Nächster Schritt:** Schritt 2 der Lückensuche, die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03).
+
+## Lückensuche, Schritt 2 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 2: Verbindungen, Vertrauensanker und Geheimnisse (PI-03)“ in der [Lückensuche](2026-10-03-gap-matrices.md): alle Verbindungen zwischen Browser, Portal, Datenbank, Worker, Ubuntu-Host, ESXi, MECM-Server, Clients, Domänencontrollern und Backup-Ziel sowie alle Geheimnisse mit Speicherung, Transport, Schwärzung, Backup und Wechsel; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| VT-01 (P2): IP-Freigabe gilt für alle Maschinen-Endpunkte gleich; mit AB-01 kann ein abgegriffenes Ansible-Passwort MECM-Bindungen und Katalog erreichen | Lückensuche | mit AB-01 betrachten; Freigabe je Rolle |
+| VT-02 (P2): Client-ACK schreibt Stufe 5/5 und `registered` mit der bekannten MAC als einziger Berechtigung | Lückensuche | nach VT-E1 |
+| VT-04 (P2): ESXi-Passwort bleibt bei ungeklärten Einheiten oder unerreichbarem Host unbefristet in `accounts.yml` auf dem Ubuntu-Host | Lückensuche | Probe auf dem Ubuntu-Host, dann Paket |
+| VT-03, VT-05 bis VT-07 (P3): Klartext ohne HTTPS, Backup mit Schlüssel und Chiffrat, kein APP_KEY-Wechsel, ADR-0018-Drift zum Token | Lückensuche | VT-05 nach VT-E2; übrige mit dem nächsten Paket am Ort |
+
+**Nächster Schritt:** Schritt 3 der Lückensuche, die Fehlerfälle entlang der Gesamtkette (PI-05). Offen sind VT-E1 (Berechtigung des Client-ACK) und VT-E2 (Backup-Verschlüsselung).

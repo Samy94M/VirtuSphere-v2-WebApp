@@ -78,6 +78,56 @@ Anlegen als `pending` (`repo_deploy_create_materialize()`, bei Wiederholung `rep
 
 | WM-E3 | Darf der Devices Sync im ersten Rollout ein vorhandenes MECM-Gerät mit gleichem Namen und gleicher MAC übernehmen (WM-08)? | Nur Geräte, die der Sync nachweislich selbst importiert hat: Der MECM-Server führt dafür eine eigene Importliste, ähnlich dem Mitgliedschafts-Journal. Ein fremdes Gerät blockiert mit der Meldung „Gerät existiert schon in MECM, nicht von VirtuSphere importiert“. Bereits gebundene VMs sind nicht betroffen. Umsetzung mit den Serverskripten erst zum Cutover (MC-R4). |
 
+## Schritt 2: Verbindungen, Vertrauensanker und Geheimnisse (PI-03)
+
+**Vorgehen:** Jede Verbindung zwischen Browser, Portal, Datenbank, Worker, Ubuntu-Host, ESXi, MECM-Server, Clients, Domänencontrollern und Backup-Ziel aus dem Code abgeleitet (Verbindungsaufbau, Zugriffsprüfungen der Endpunkte, Trust-Einstellungen), dazu jedes Geheimnis mit Speicherung, Transport, Dateien auf Hosts, Schwärzung, Backup und Wechsel. Fragen: Weist sich der Server aus? Weist sich der Client aus? Welches Geheimnis geht darüber? Woran hängt das Vertrauen? Stand `3b37025`, nur Codelesung.
+
+### Verbindungen
+
+| Verbindung | Protokoll | Server weist sich aus | Client weist sich aus | Geheimnisse darauf | Anker |
+|---|---|---|---|---|---|
+| Browser → Portal | HTTP oder HTTPS (wahlweise, mit Weiterleitung und HSTS) | Zertifikat, wenn HTTPS an | Anmeldung lokal oder per LDAPS, Sitzung, CSRF | Benutzerpasswort, Sitzungscookie | Zertifikat; ohne HTTPS keiner. LDAPS-Anmeldung ist ohne HTTPS gesperrt (`lib/directory_config.php`) |
+| PHP und Worker → MySQL | MySQL im Docker-Netz | internes Netz | Benutzer und Passwort aus `.env` | DB-Passwort | Docker-Netz |
+| Worker → Ubuntu-Host | SSH und SFTP (`lib/ssh.php`, `lib/ssh_sftp.php`) | **nicht geprüft** (AB-01, entschieden mit AB-E1) | Passwort | Ansible-Passwort; per SFTP `accounts.yml` mit ESXi-Zugangsdaten | keiner |
+| Ubuntu-Host → ESXi | HTTPS über pyVmomi | `strict`: CA aus `esxi-trust.pem`; `legacy_insecure`: keine Prüfung | ESXi-Benutzer und -Passwort | ESXi-Passwort | Vertrauensmodus je Zugang, neu standardmäßig `strict` |
+| Ubuntu-Host → Portal, MAC-Rückruf | HTTP oder HTTPS (`upload_mac_list.py`) | Zertifikats-Pin bei HTTPS | IP-Freigabe, Auftrag und Mission | keine | Pin |
+| MECM-Server → Portal | HTTP oder HTTPS mit TLS 1.2 und Zertifikats-Pin | Pin | IP-Freigabe; Token, wenn eingerichtet, nur für `heartbeat` und `reportRun` | Token-Header | Pin |
+| Clients → Portal (`getDeviceInfos`, Client-ACK, `reportPhase`, Paketberichte) | HTTP oder HTTPS | Systemvertrauen des Clients (ADR-0019) | IP-Freigabe **oder bekannte MAC** | keine | — |
+| Portal → Domänencontroller | LDAPS | gespeichertes CA-Zertifikat | Dienstkonto | Bind-Passwort; Benutzerpasswort bei Anmeldung | CA |
+| App-Host → Backup-Ziel | Dateien, Abholung vom Backup-Host | — | — | `.env` (APP_KEY, DB-Passwörter), HTTPS-Schlüssel, Dump mit verschlüsselten Zugangsdaten | Zugriffsschutz des Ziels (ADR-0017) |
+
+### Geheimnisse
+
+| Geheimnis | Ruhend | Unterwegs und auf Hosts | Schwärzung | Backup | Wechsel |
+|---|---|---|---|---|---|
+| ESXi-Passwort | libsodium mit APP_KEY (`lib/repo/credentials.php`) | SFTP in `accounts.yml` (0600) je Auftrag; bleibt in Sonderfällen liegen (VT-04) | Auftragsprotokoll gegen beide Zugangsgeheimnisse; `error_detail` nur allgemein (FC2-08) | Dump verschlüsselt, Schlüssel im Config-Archiv (VT-05) | Zugang neu speichern |
+| Ansible-Passwort | libsodium | SSH-Anmeldung ohne Server-Prüfung (AB-01) | wie oben | wie oben | Zugang neu speichern |
+| LDAP-Bind-Passwort | libsodium (`lib/directory_config.php`) | LDAPS | — | wie oben | Konfiguration neu speichern |
+| APP_KEY | `.env` auf dem App-Host | — | — | Config-Archiv | **kein Verfahren** (VT-06) |
+| DB-Passwörter | `.env` | Docker-Netz | — | Config-Archiv | im Restore-Runbook beschrieben |
+| Rückkanal-Token | SHA-256-Hash in den Einstellungen; auf dem MECM-Server in der Registry, nur für Administratoren lesbar | Header bei `heartbeat` und `reportRun` | — | Hash im Dump | in den Einstellungen neu erzeugen oder löschen |
+| HTTPS-Schlüssel | Datei unter `/etc/nginx/ssl` | — | — | Config-Archiv | neues Zertifikat hochladen |
+| Benutzerpasswörter | Hash mit Neuberechnung bei Anmeldung | Anmeldung, ohne HTTPS im Klartext | — | Hash im Dump | ändern oder zurücksetzen |
+
+### Befunde
+
+| ID | Klasse / Prio | Befund | Maßnahme |
+|---|---|---|---|
+| VT-01 | B / P2 | Die IP-Freigabe der Maschinen-API gilt für alle Endpunkte gleich (`machine_api_ip_allowed()` kennt keinen Endpunkt, die Freigabeliste hat nur IP und Beschreibung). Der Ubuntu-Host steht für den MAC-Rückruf darin und darf damit auch `updateDevice`, `reportMembership` und den Paketkatalog aufrufen; der MECM-Server umgekehrt den MAC-Rückruf. Der Token schützt, wenn eingerichtet, nur `heartbeat` und `reportRun`, nicht `updateDevice`, `reportMembership`, den Paketkatalog oder den MAC-Rückruf. Zusammen mit AB-01 ergibt das eine Kette: Wer das Ansible-Passwort abgreift, kontrolliert einen freigegebenen Host und kann MECM-Bindungen und Katalog verändern. | Freigabe je Rolle: MECM-Server, Ansible-Host und Clients nur für ihre Endpunkte. |
+| VT-02 | B / P2 | Der Client-Kanal hat die bekannte MAC als einzige Berechtigung, auch wo er schreibt: Der Client-ACK ist der einzige Schreiber von Stufe 5/5 und setzt zugleich MECM `registered`. Die nötige Rollout-Revision liefert `getDeviceInfos` an jeden, der die MAC kennt, zusammen mit Hostname, Domäne, Betriebssystem, Mission, Generationen der Paketberichte und Netzkonfiguration. ADR-0018 nimmt die MAC-Berechtigung für Anzeige-Verkehr in Kauf, ADR-0044 sagt ausdrücklich, dass die Generationen keine Authentisierung sind. Der Nachtrag vom 09.08.2026 in ADR-0018 trennt den ACK gerade deshalb vom anzeigenden Kanal, weil er den Lifecycle schreibt, lässt ihm aber dieselbe Berechtigung. Ein Gerät im LAN, das eine MAC kennt, kann eine VM als installiert und registriert markieren. | Entscheid VT-E1. |
+| VT-03 | B / P3 | Ohne HTTPS gehen lokale Anmeldungen und Sitzungscookies im Klartext; HTTPS ist wahlweise. Die LDAPS-Anmeldung ist ohne HTTPS richtig gesperrt. | Prüfen, ob das Portal ohne HTTPS sichtbar warnt; sonst Hinweis im Systemstatus. |
+| VT-04 | B, Teil V / P2 | Das ESXi-Passwort bleibt in `accounts.yml` auf dem Ubuntu-Host liegen, solange eine Create-Einheit ungeklärt ist oder der Host beim Aufräumen nicht erreichbar war (`deploy_worker_cleanup_remote_dir()`: „left in place“, „reported, not resolved“). Eine zeitliche Grenze gibt es nicht. Verdacht V: Ansible legt bei Async-Aufrufen die Modulargumente samt Passwort in eigenen Arbeitsdateien auf dem Host ab. | Zugangsdaten vom Beleg trennen: `accounts.yml` immer am Auftragsende löschen, nur den Async-Status als Beleg behalten und für eine spätere Abfrage neu hochladen. Probe auf dem Ubuntu-Host nach einem Create: nach dem Passwort in `~/.ansible` und im Arbeitsverzeichnis suchen. |
+| VT-05 | B / P3 | Backups enthalten Schlüssel und Chiffrat zusammen und unverschlüsselt: Das Config-Archiv trägt die `.env` mit APP_KEY, der Dump die verschlüsselten Zugangsdaten. Wer das Backup-Verzeichnis liest, kann alle ESXi-, Ansible- und LDAP-Passwörter entschlüsseln. ADR-0017 nimmt das mit Zugriffsschutz und Abholung durch einen zweiten Host bewusst in Kauf. | Entscheid VT-E2. |
+| VT-06 | B / P3 | Für den APP_KEY gibt es weder ein Wechselverfahren noch ein Werkzeug zum Neuverschlüsseln; nichts in Code oder Doku. Nach einem Verlust von `.env` oder Backup bleibt nur, alle Passwörter an der Quelle zu ändern und neu einzutragen. | Runbook „APP_KEY wechseln“; optional ein Werkzeug, das die gespeicherten Geheimnisse mit neuem Schlüssel neu verschlüsselt. |
+| VT-07 | B / P3 | Drift: Der Nachtrag vom 08.07.2026 in ADR-0018 sagt, der Token werde nur noch für `heartbeat` verlangt; `mecm_report.php` verlangt ihn für `heartbeat` und `reportRun`. | Nachtrag im ADR an den Code angleichen. |
+
+### Offene Entscheidungen (Nutzer)
+
+| ID | Frage | Vorschlag |
+|---|---|---|
+| VT-E1 | Reicht die bekannte MAC als Berechtigung für den Client-ACK, der eine VM auf „installiert“ und „registriert“ setzt? | Für Anzeige-Meldungen (`reportPhase`, Paketberichte) wie bisher; für den ACK eine echte Berechtigung, zum Beispiel ein Einmalwert je Rollout, den der Client über MECM erhält und das Portal nach Gebrauch verwirft. |
+| VT-E2 | Sollen Backups verschlüsselt oder der APP_KEY getrennt von den Dumps gesichert werden? | Archive mit einem Schlüssel verschlüsseln, der nicht auf dem App-Host liegt; mindestens das Config-Archiv getrennt vom Dump ablegen. |
+
 ## Nächster Schritt
 
-Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Alle Entscheidungen zu Schritt 1 sind gefallen; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
+Schritt 3 sind die Fehlerfälle entlang der Gesamtkette (PI-05), danach die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen sind VT-E1 und VT-E2. Alle Entscheidungen zu Schritt 1 sind gefallen; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
