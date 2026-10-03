@@ -325,4 +325,4 @@ FM-03 braucht zuerst die Laborprobe; FM-05 bis FM-09 sind ohne Entscheid umsetzb
 
 ## Nächster Schritt
 
-Als Nächstes der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3. Laborproben: WM-01 (Abfrage oben, nur lesend), VT-04 (Passwort auf dem Ubuntu-Host suchen), FM-03 (Fernlauf nach Verbindungsende, auf einer Testmission), ZB-01 und ZB-02 (Abfragen oben, nur lesend), ZB-04 zusammen mit der Probe zu VT-E1 B.
+Der Rest von FC2 steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „FC2-Rest“ (FC2-14 bis FC2-19). Als Nächstes der Laborprobenkatalog (PI-09), der alle Proben dieser Datei und des Ablaufprüfplans an einer Stelle sammelt, danach die Konfigurationsmatrix (PI-10). Offen sind VT-E2 und FM-E1 bis FM-E3, aus dem Ablaufprüfplan FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.

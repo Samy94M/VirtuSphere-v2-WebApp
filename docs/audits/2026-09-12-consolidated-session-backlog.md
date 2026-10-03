@@ -12,7 +12,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
-| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
+| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6, FC2-Rest vom selben Tag mit FC2-14 bis FC2-19; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
 | S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06; Schritt 5 Meldungen ohne Link nach R11 mit Befunden R11-01 bis R11-09 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
@@ -934,3 +934,17 @@ Quelle S8, Abschnitt „Schritt 5: Meldungen ohne Link (R11)“ in der [Lückens
 Bestätigt ohne neue ID: FC2-03, FC2-06, FM-05. Vorschlag für einen Wächter nach dem Muster von PI-01: Meldungen mit Seitennamen nur mit Aktion, Link oder begründeter Ausnahme.
 
 **Nächster Schritt:** Rest von FC2 (nicht Knoten für Knoten geprüfte Diagramme und Systemstatus-Bereiche). Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04, FM-03, ZB-01, ZB-02 und ZB-04.
+
+## FC2-Rest aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „FC2-Rest“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): die bisher nicht Knoten für Knoten geprüften Diagramme (vier Create-Playbooks, Identitätsmatrix, Autostart, Inventar, Vorschau beim Einreihen) und die Systemstatus-Bereiche Ansible, Abweichungen und Verzeichnis gegen den Code; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| FC2-14, FC2-16, FC2-17, FC2-19 (P3): fehlende Abbruchkanten ohne Marker, Autostart-Teilerfolg, Verwerfen-Zweig und zwei Preflight-Budgets im Volltest, zu enger Knoten im Verzeichnis | FC2 | mit FC3 |
+| FC2-15 (P3, Wirkung V): Launch gleicht vorhandene VMs an, Kommentare sagen „nie umkonfiguriert“ | FC2 | Laborprobe, dann Kommentare, Hilfe und Diagramm |
+| FC2-18 (P3): Systemstatus und Deploy-Seite urteilen nach verschiedenen Regeln, ob ein Wert im Inventar fehlt | FC2 | nächstes Paket an den Inventarwarnungen |
+
+Ohne Abweichung: `createVMCleanup`, `inventoryESXi`, Vorschau beim Einreihen, Identitätsmatrix, Gesamtampel des Verzeichnisses.
+
+**Nächster Schritt:** Laborprobenkatalog (PI-09), danach Konfigurationsmatrix (PI-10). Offen sind VT-E2, FM-E1 bis FM-E3, FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.
