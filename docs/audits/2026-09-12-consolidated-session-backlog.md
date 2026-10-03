@@ -12,7 +12,8 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S4 | [Orchestrate VirtuSphere audit](codex://threads/01a082bc-4ba5-7471-8ccb-73f2f99e411e) | Restabnahmen nach U01 bis U17 und der späteren gemeinsamen QA; maßgeblich ist die letzte Fortschreibung, nicht ein früheres Zwischenfazit |
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
-| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`) |
+| S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6, FC2-Rest vom selben Tag mit FC2-14 bis FC2-19; FC1-Wächter und Grundprüfung mit DF-L6 bis DF-L9, DF-D9 und Paket DF-P5 (`af84415`), beide FC2-Durchgänge abgeglichen; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
+| S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06; Schritt 5 Meldungen ohne Link nach R11 mit Befunden R11-01 bis R11-09; Schritt 7 Laborprobenkatalog (PI-09) mit LP-01 bis LP-13; Schritt 8 Konfigurationsmatrix (PI-10) mit Befunden KM-01 bis KM-04 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
 
@@ -814,6 +815,162 @@ S7 ist als Merge-Commit `6489f6b` auf `main` (PR #2 auf GitHub als gemergt gefü
 
 **Edge-Case-Checkliste je Diagramm (für FC2/FC3):** fehlende Konfiguration, leere Eingabe, Abbruch durch den Operator, Prozessabsturz und Neustart, Timeout, Teilerfolg, unbekannter Ausgang, parallele zweite Instanz, veraltete Daten, Wiederholung nach Fehler; jeder Pfad endet in einem benannten Ergebnis, das das Portal oder Log so meldet.
 
+## FC2: Code-Abgleich der Ablaufdiagramme aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „FC2: Abgleich der Diagramme mit dem Code“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): `deploy-flows.md` und `system-status-checks.md` am Stand `3b37025` gegen den Code, entlang der Edge-Case-Checkliste. Befunde FC2-01 bis FC2-13, offene Entscheide FC2-E1 bis FC2-E6. Nur Codelesung, kein Testlauf und kein QA-Gate; Prüftiefe und offener Rest stehen im Plan.
+
+**Nutzerentscheid 03.10.2026:** In dieser Sitzung keine Änderung an Code, Diagrammen oder Hilfe; nur Aufnahme der Befunde.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| FC2-01 (P1): Ein gescheiterter oder abgebrochener Auftrag färbt VMs `failed/failed`, die er nicht angefasst hat, auch bei `start`, `autostart` und Fehlern vor dem ersten Playbook | Ablaufprüfplan; erweitert [Staffelplan](2026-09-11-full-pipeline-start-stagger-audit.md) P5 über `start` hinaus | nach FC2-E1 |
+| FC2-02, FC2-03, FC2-08 (Create-Belege, Inventarabruf nach Fehlschlag, Schwärzung) | Ablaufprüfplan | FC2-02 mit DF-P4 und IDR-P06; FC2-03 und FC2-08 als kleine Worker-Fixes |
+| FC2-04 bis FC2-07 (Lograuschen der Statusabfragen, Fehlerzusammenfassung, Sperrtexte, Volltest auf der Deploy-Seite) | Ablaufprüfplan | Bedienpaket nach FC2-E2 |
+| FC2-09 bis FC2-13 (Diagrammdrift, abgeleitete Modus-Listen, Vokabular-Abgleich) | Ablaufprüfplan | FC1 und FC3 |
+
+**Reihenfolge:** Die Entscheidung vom 28.09.2026 gilt weiter (FC1, FC2, FC3, PS1 bis PS3, Mutationsrunde). FC2 ist nicht abgeschlossen: Der im Plan genannte, nicht Knoten für Knoten geprüfte Rest folgt vor FC3. Ob FC2-01 vorgezogen wird, entscheidet FC2-E1.
+
+**Nächster Schritt:** Entscheide FC2-E1 bis FC2-E6 beim Nutzer einholen; danach FC2-Rest und Umsetzung, jeweils mit Rot-vor-Fix-Test.
+
+## Abdeckung der Abläufe und Prüfinstrumente aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „Abdeckung der Abläufe und Prüfinstrumente“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): Inventar aus dem Code am Stand `3b37025` (Portal-Aktionen, Endpunkte der Maschinen-API, Wartungsjobs, Playbooks, PowerShell-Skripte) gegen die drei Ablaufdokumente und FC4. Nur Codelesung; Nutzerentscheid 03.10.2026: keine Codeänderung, nur Aufnahme. Im selben Abschnitt: FC2-03 und FC2-06 verletzen die Portalregel R11 (Meldung ohne Link).
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| AB-01 (P1-Kandidat): SSH und SFTP zum Ubuntu-Host ohne Abgleich des Host-Schlüssels, darüber Ansible-Passwort und ESXi-Zugangsdaten | Ablaufprüfplan | Entschieden (AB-E1, Nutzer, 03.10.2026): Host-Schlüssel je Ansible-Zugang anheften, als erstes Umsetzungspaket vor FC1 bis FC4; Paketskizze im Plan; Umsetzung erst mit Codefreigabe |
+| AB-02 bis AB-09: Gesamtkette, ESXi-Inventar auf Worker-Seite, Zugänge und Vertrauensmodus, Portal-Aktionen mit MECM- oder ESXi-Wirkung, Löschen und Außerbetriebnahme, Wiederholen und Freigeben, Upgrade und Migration, Fehlersuche | Ablaufprüfplan | Erweiterung von FC4 nach AB-E2 |
+| PI-01 bis PI-10: Abdeckungsinventar, Zustands- und Schreibermatrix, Verbindungs-, Vertrauens- und Geheimnismatrix, Zeitbudgets, Fehlermodus-Tabelle mit Kanten-IDs, Mutationslauf, ESXi-Stellvertreter, Ist-Pfad-Rekonstruktion, Laborproben, Konfigurationsmatrix | Ablaufprüfplan | Vorschlag; Reihenfolge nach AB-E3 |
+
+**Nächster Schritt:** Entscheide AB-E1 bis AB-E3 zusammen mit FC2-E1 bis FC2-E6 beim Nutzer einholen.
+
+## Darstellungsarten und Doku-Struktur aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „Darstellungsarten und Doku-Struktur“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), mit Online-Recherche und Quellen. Keine Codeänderung.
+
+**Entscheidungen des Nutzers:** DA-E1 zuerst Entwickler, danach die Admins im Betrieb; DA-E2 vorläufig ja zu Zustandsdiagrammen, Sequenzdiagrammen und Entscheidungstabellen unter denselben Regeln wie Flowcharts (Wächter, Ansichtsseite, `accTitle`); DA-E3 Kontextbild als normales Mermaid-Flowchart statt C4-Syntax; DA-E4 Aufnahme nur als Doku.
+
+**Struktur, übernommen mit DS-E1 (Nutzer, 03.10.2026):** Regeln DS-01 bis DS-09 gegen einen Doku-Dschungel: ein Einstieg (`docs/operations/flows.md`), ein Dokument je Thema nach Dokumentkarte, ein Ort je Ablauf, ein festes Gerüst je Abschnitt, kleine Diagramme, eine Legende, Ist und Plan getrennt, Prüfung durch den erweiterten FC1-Wächter, bewusst weggelassene Bereiche. Damit sind auch die Einzelregeln aus FC2-E4 übernommen und AB-E2 über die Dokumentkarte beantwortet. **DA-E5 (Nutzer, 03.10.2026):** Ampelregeln werden Entscheidungstabellen als einzige Quelle; ein kurzes Flowchart bleibt nur, wo die Reihenfolge der Prüfungen selbst die Aussage ist.
+
+**Reihenfolge:** Nach DA-E1 kommen PI-01 bis PI-03, Einstiegsseite sowie Zustands- und Sequenzdiagramme vor Entscheidungsbaum, Swimlanes und Playbooks der Admin-Phase. FC1, FC2, FC3 und PS1 bis PS3 bleiben in ihrer Reihenfolge.
+
+**AB-E1 (Nutzer, 03.10.2026):** Host-Schlüssel des Ubuntu-Hosts je Ansible-Zugang anheften; AB-01 wird das erste Umsetzungspaket vor FC1 bis FC4. Auf Wunsch des Nutzers bleibt es in dieser Sitzung bei Doku: Paketskizze im Ablaufprüfplan. **AB-E1a (Nutzer, 03.10.2026):** Bestehende Zugänge heften den Schlüssel bei der ersten Verbindung nach dem Update vorläufig an (wie `accept-new` bei OpenSSH), blockieren danach jede Abweichung und zeigen „bitte bestätigen“, bis der Admin den Fingerprint bestätigt; kein Betriebsstopp beim Update.
+
+**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3. Umsetzung erst, wenn der Nutzer Codeänderungen wieder freigibt; dann beginnt AB-01 mit einem Rot-vor-Fix-Test.
+
+## Lückensuche mit Matrizen, Schritt 1 aufgenommen (03.10.2026)
+
+Quelle S8, [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md): Zustands- und Schreibermatrix (PI-02) für VM-Lebenszyklus, MECM-Zustand, Auftragsstatus, Create-Einheiten und Identität am Stand `3b37025`, nur Codelesung; Nutzerentscheid 03.10.2026: keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| WM-01 (P1-Kandidat): Ein erneuter Export setzt registrierte VMs auf `deployed` / `pending`; der Devices Sync antwortet mit derselben ResourceID, die VM bleibt dauerhaft ausstehend und wird in jedem Lauf neu verarbeitet | Lückensuche | nach WM-E1; Laborprobe lesend per Abfrage in S8 |
+| WM-02: Vorzustand nur im Speicher des Workers (Ursache von FC2-01) | Lückensuche | mit FC2-E1 |
+| WM-03: „Identität übernehmen“ ersetzt eine bestehende Bindung ohne die Folgen des Create-Ersatzes | Lückensuche | nach WM-E2 |
+| WM-04 bis WM-06: Schreiberzusage im Test, Transfer-Generation beim MAC-Rückruf, MAC-Eindeutigkeit | Lückensuche | P3, mit dem nächsten Paket am jeweiligen Ort |
+
+Auftragsstatus und Create-Einheiten sind durch Sperren und Vergleiche geschützt; dort keine neue Lücke.
+
+**Entscheidungen des Nutzers (03.10.2026):** Grundsatz GR-01: Was in ESXi oder MECM von Hand angelegt wurde, landet nicht im Portal. WM-E1: Ein Export ändert den Zustand einer VM mit gespeicherter ResourceID nicht; bei geänderter MAC meldet er die VM als fehlgeschlagen mit dem Hinweis „MECM-ID zurücksetzen“. WM-E2: „Identität übernehmen“ ersetzt keine bestehende Bindung. Neu aufgenommen: WM-07 (keine Herkunftsmarke an ESXi-VMs) und WM-08 (Devices Sync übernimmt im ersten Rollout ein vorhandenes Gerät mit gleichem Namen und gleicher MAC).
+
+**WM-E2a (Nutzer, 03.10.2026):** „Identität übernehmen“ wird zurückgebaut. Alt-VMs ohne Bindung aus der früheren Desktop-App oder älteren Portalversionen werden nicht übernommen; die Altlast wird ignoriert. Damit erledigen sich WM-03 und der Übernahme-Teil von WM-07; Rückbau-Skizze in S8.
+
+**WM-E3 (Nutzer, 03.10.2026):** Der Devices Sync übernimmt im ersten Rollout nur Geräte, die er nachweislich selbst importiert hat (eigene Importliste auf dem MECM-Server); ein fremdes Gerät blockiert mit Meldung. Umsetzung mit den Serverskripten erst zum Cutover (MC-R4).
+
+**Nächster Schritt:** Schritt 2 der Lückensuche, die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03).
+
+## Lückensuche, Schritt 2 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 2: Verbindungen, Vertrauensanker und Geheimnisse (PI-03)“ in der [Lückensuche](2026-10-03-gap-matrices.md): alle Verbindungen zwischen Browser, Portal, Datenbank, Worker, Ubuntu-Host, ESXi, MECM-Server, Clients, Domänencontrollern und Backup-Ziel sowie alle Geheimnisse mit Speicherung, Transport, Schwärzung, Backup und Wechsel; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| VT-01 (P2): IP-Freigabe gilt für alle Maschinen-Endpunkte gleich; mit AB-01 kann ein abgegriffenes Ansible-Passwort MECM-Bindungen und Katalog erreichen | Lückensuche | mit AB-01 betrachten; Freigabe je Rolle |
+| VT-02 (P2): Client-ACK schreibt Stufe 5/5 und `registered` mit der bekannten MAC als einziger Berechtigung | Lückensuche | nach VT-E1: C als Portalpaket, B mit dem Cutover MC-R4 nach Laborprobe |
+| VT-04 (P2): ESXi-Passwort bleibt bei ungeklärten Einheiten oder unerreichbarem Host unbefristet in `accounts.yml` auf dem Ubuntu-Host | Lückensuche | Probe auf dem Ubuntu-Host, dann Paket |
+| VT-03, VT-05 bis VT-07 (P3): Klartext ohne HTTPS, Backup mit Schlüssel und Chiffrat, kein APP_KEY-Wechsel, ADR-0018-Drift zum Token | Lückensuche | VT-05 nach VT-E2; übrige mit dem nächsten Paket am Ort |
+
+**VT-E1 (Nutzer, 03.10.2026):** Der Client-ACK setzt künftig nur noch die Stufe 5/5 (`os_installed`) und nicht mehr MECM `registered` (C: reine Portaländerung ohne Cutover; Paketskizze in S8, mit Überwachung von `os_installed` / `pending`). Ein Einmalwert je Rollout als echte Berechtigung des ACK folgt mit dem Cutover MC-R4, nach einer Laborprobe zu MECM-Gerätevariablen (B). Anzeige-Meldungen bleiben bei der MAC-Berechtigung.
+
+**Nächster Schritt:** Schritt 3 der Lückensuche, die Fehlerfälle entlang der Gesamtkette (PI-05). Offen ist VT-E2 (Backup-Verschlüsselung).
+
+## Lückensuche, Schritt 3 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 3: Fehlerfälle entlang der Gesamtkette (PI-05)“ in der [Lückensuche](2026-10-03-gap-matrices.md): je Übergang von Portal, Worker, Ubuntu-Host, ESXi, MECM-Sync, Installation und Client die zehn Fehlerarten der Edge-Case-Checkliste mit Erkennung, Zustand danach, Signal für den Operator und Test; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| FM-01 (P2): Create mit anderem ESXi-Zugang oder geändertem Zugangsziel hält gebundene VMs für gelöscht, legt sie auf dem anderen Host neu an und verwirft die MACs | Lückensuche | nach FM-E1 |
+| FM-02 (P2): Nie angelegte VM im Umfang von Start, Export, Power-Cycle oder Autostart wird erst vom Playbook abgelehnt; mit FC2-01 werden alle VMs `failed` | Lückensuche | nach FM-E2 |
+| FM-03 (P2, Wirkung V): Nach Verbindungsende läuft der Fernlauf ohne Terminal womöglich weiter, schaltet VMs und lässt `accounts.yml` liegen; keine Sperre auf dem Ubuntu-Host | Lückensuche | Laborprobe, dann Entscheid |
+| FM-04 bis FM-09 (P3): geplanter Auftrag ohne Verfallszeit, Warten auf MECM ohne Ursache, kein Rückabgleich mit ESXi und MECM, Zertifikatswechsel ohne Hinweis auf Pins, Clientphasen nur an der VM, Testlücken am Client-ACK | Lückensuche | FM-04 nach FM-E3; FM-05 mit dem Cutover MC-R4, der Link vorher; FM-06 nach FM-01; FM-09 mit VT-E1 C; übrige mit dem nächsten Paket am Ort |
+
+Bestätigt ohne neue ID: FC2-01, FC2-02, FC2-03, FC2-05, FC2-06, AB-01, VT-04, WM-01, die Nachholwelle aus dem Staffelaudit und FC2-E6. Gut abgesichert sind Einreihen, Abbruch, Besitz, Datenbankausfall, MAC-Rückruf und das Mitgliedschafts-Journal.
+
+**Nächster Schritt:** Schritt 4 der Lückensuche, die Zeitbudgets (PI-04). Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04 und FM-03.
+
+## Lückensuche, Schritt 4 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 4: Zeitbudgets und Schwellen (PI-04)“ in der [Lückensuche](2026-10-03-gap-matrices.md): alle Takte, Budgets, Fristen, Schwellen und Aufbewahrungszeiten aus Portal, Worker, Playbooks, MECM-Serveraufgaben und Clientskripten, daraus 15 Ungleichungen mit Standard- und Grenzwerten; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| ZB-01 (P2, V): Create-Budget von vier Stunden für bis zu 40 VMs mit vorab beschriebenen 50-GB-Platten kann auf langsamem Datastore ablaufen; Einheit wird `uncertain` | Lückensuche | Laborprobe per Abfrage in S8, dann Paket |
+| ZB-02 bis ZB-06 (P3): lange gesunde Sync-Läufe werden rot, MAC-Rückruf ohne Wiederholung bei abgewiesener Verbindung, Client gegen Portal-Ausfall, Protokoll-Löschung trotz offener Create-Einheit, alte Host-Befunde sperren bei Inventarintervall 0 | Lückensuche | ZB-02 mit FC2-E3; ZB-04 mit der Probe zu VT-E1 B; übrige mit dem nächsten Paket am Ort |
+
+Halten: Leerlauf gegen Pausen, Ernten gegen Wiederverbinden, blockierende Schritte gegen Erntefrist; Power-Cycle nur knapp an der Obergrenze. Bekannt: FC2-11 (Gelb unerreichbar), FC2-E6 (Start-Wartezeit gegen MECM), Datacenter-Ableitung gegen langes Inventarintervall (in der Hilfe benannt), Nachholwelle und S07 aus dem Staffelaudit.
+
+**Nächster Schritt:** Meldungsprüfung nach R11, danach der Rest von FC2. Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04, FM-03, ZB-01, ZB-02 und ZB-04.
+
+## Lückensuche, Schritt 5 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 5: Meldungen ohne Link (R11)“ in der [Lückensuche](2026-10-03-gap-matrices.md): 412 deutsche Laufzeitmeldungen, die eine Seite, Voraussetzung oder Handlung nennen, per Skript an ihren Aufrufstellen auf Links geprüft, die Treffer ohne Link einzeln gelesen; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| R11-01 bis R11-04 (P3): Fehlermeldungen über `portal_error_message()` nennen Auftrag, Bereitstellungsliste, Mission oder ungeklärte Einheit ohne Link, weil dieser Weg keine Aktion kennt | Lückensuche | ein Paket mit FC2-06: Übersetzungsweg um eine Aktion je Schlüssel erweitern |
+| R11-05 bis R11-09 (P3): Hinweise nennen Hilfe, Systemstatus, MECM-Karte oder „MECM-ID zurücksetzen“ ohne Link; ein Tooltip auf einem Badge statt Link | Lückensuche | mit dem nächsten Paket am Ort |
+
+Bestätigt ohne neue ID: FC2-03, FC2-06, FM-05. Vorschlag für einen Wächter nach dem Muster von PI-01: Meldungen mit Seitennamen nur mit Aktion, Link oder begründeter Ausnahme.
+
+**Nächster Schritt:** Rest von FC2 (nicht Knoten für Knoten geprüfte Diagramme und Systemstatus-Bereiche). Offen sind VT-E2 und FM-E1 bis FM-E3; Laborproben WM-01, VT-04, FM-03, ZB-01, ZB-02 und ZB-04.
+
+## FC2-Rest aufgenommen (03.10.2026)
+
+Quelle S7, Abschnitt „FC2-Rest“ im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md): die bisher nicht Knoten für Knoten geprüften Diagramme (vier Create-Playbooks, Identitätsmatrix, Autostart, Inventar, Vorschau beim Einreihen) und die Systemstatus-Bereiche Ansible, Abweichungen und Verzeichnis gegen den Code; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| FC2-14, FC2-16, FC2-17, FC2-19 (P3): fehlende Abbruchkanten ohne Marker, Autostart-Teilerfolg, Verwerfen-Zweig und zwei Preflight-Budgets im Volltest, zu enger Knoten im Verzeichnis | FC2 | mit FC3 |
+| FC2-15 (P3, Wirkung V): Launch gleicht vorhandene VMs an, Kommentare sagen „nie umkonfiguriert“ | FC2 | Laborprobe, dann Kommentare, Hilfe und Diagramm |
+| FC2-18 (P3): Systemstatus und Deploy-Seite urteilen nach verschiedenen Regeln, ob ein Wert im Inventar fehlt | FC2 | nächstes Paket an den Inventarwarnungen |
+
+Ohne Abweichung: `createVMCleanup`, `inventoryESXi`, Vorschau beim Einreihen, Identitätsmatrix, Gesamtampel des Verzeichnisses.
+
+**Nächster Schritt:** Laborprobenkatalog (PI-09), danach Konfigurationsmatrix (PI-10). Offen sind VT-E2, FM-E1 bis FM-E3, FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.
+
+## Laborprobenkatalog aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 7: Laborprobenkatalog (PI-09)“ in der [Lückensuche](2026-10-03-gap-matrices.md): alle offenen Proben aus S7 und S8 als LP-01 bis LP-13, je mit System, Risiko, Befehl oder Schritten und dem, was das Ergebnis entscheidet. Die MECM-Pilotproben bleiben in MC07.
+
+| Proben | Owner | Wann |
+|---|---|---|
+| LP-01 bis LP-05: nur lesende Abfragen in der Portal-Datenbank zu WM-01, ZB-01, ZB-02, FC2-04 und FC2-E6 | Nutzer | sofort, ohne Risiko |
+| LP-06 bis LP-11: Ubuntu-Host und Testmission zu VT-04, FC2-01, FM-03, AB-01, AB-06 und FC2-15 | Nutzer | mit einer Testmission |
+| LP-12 und LP-13: ESXi-Identität am selben Pfad (IDR-E36) und Client-Apps in MECM (VT-E1 B, ZB-04) | Nutzer | Labor vor dem Cutover, zusammen mit MC07 |
+
+**Nächster Schritt:** Konfigurationsmatrix (PI-10).
+
+## Lückensuche, Schritt 8 aufgenommen (03.10.2026)
+
+Quelle S8, Abschnitt „Schritt 8: Konfigurationsmatrix (PI-10)“ in der [Lückensuche](2026-10-03-gap-matrices.md): jede Einstellung aus Portal, `.env`, MECM-Registry und `bootstrap.json` mit Verbrauchern, Wirkungszeitpunkt und Auffälligkeiten; Stand `3b37025`, nur Codelesung, keine Codeänderung.
+
+| Befunde | Owner | Paket |
+|---|---|---|
+| KM-01 bis KM-04 (P3): Portal-Adresse an drei Stellen, `.env` wirkt in den Workern erst nach Neustart, Volltest am Intervallrand grau, AD-Änderung leert den Controller-Pool bei grüner Ampel | Lückensuche | KM-02 als Doku sofort möglich; übrige mit dem nächsten Paket am Ort |
+
+**Stand der Lückensuche:** Alle geplanten Schritte sind aufgenommen. Offen sind die Entscheide VT-E2, FM-E1 bis FM-E3, FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3 sowie die Laborproben LP-01 bis LP-13. PI-01, PI-06, PI-07 und PI-08 brauchen Code oder Werkzeuge und warten auf die Freigabe von Codeänderungen.
+
 ## FC1 und FC2 geliefert (03.10.2026)
 
 **FC1:** `DeployFlowsDocContractTest` und `SystemStatusChecksDocContractTest` unter `Docker/WebAPI/tests/Static/`, entworfen von Sonnet 5.5, nachgeschärft und geprüft von Opus 5.5. Beide leiten ihre Listen ab, statt sie zu führen: Modi aus `virtusphere_deploy_modes()`, Playbook-Reihenfolge je Modus mit und ohne Autostart aus `ansible_playbooks_for_mode()` und `VIRTUSPHERE_SYSTEM_PLAYBOOKS`, Modusbezeichnung aus `lang/de/status.php`, Playbook-Abschnitte aus `Ansible/*.yml`; Systemstatus-Bereiche aus den gerenderten `status-section`-Abschnitten, abgeglichen mit den Übersichtskacheln, Namen aus deren deutschen Beschriftungen. Beide Richtungen, kein Nulltreffer, jede Regel mit Negativfall. `MecmScheduledTasksDocContractTest` deckte das dritte Dokument schon ab. Damit ist DF-S4 erledigt.
@@ -825,3 +982,27 @@ S7 ist als Merge-Commit `6489f6b` auf `main` (PR #2 auf GitHub als gemergt gefü
 **Nachweis:** Endstand mit `scripts/check.ps1 -Gate phpstan,phpunit-unit,doc-hygiene,doc-semantics`: 4 pass, phpunit-unit ohne Skips, die beiden neuen Wächter liefen also gegen die echten Dokumente. php-lint und file-size liefen grün auf dem Stand vor der letzten Einzeilenänderung im Test (`?? ''` entfernt, phpstan und PHPUnit haben die Datei danach geparst).
 
 **Beobachtung zum Runner, Ursache nicht gemessen:** Ein roter phpstan-Lauf zeigte zweimal (Log und `-Json`) keine einzige Befundzeile unter der Fail-Zeile, obwohl phpstan direkt aufgerufen genau einen Befund meldete. Bei grünem Lauf mit `-KeepArtifacts` steht die Ausgabe in `phpstan.log`. Vor einer Änderung an `scripts/check.ps1` erst mit einem absichtlich roten Fall messen, ob `output` beim Fail leer ankommt. Außerdem trat nach dem Neustart des Rechners das bekannte sporadische „No such image: virtusphere-php:8.4-tooling“ wieder auf (vier `infrastructure_error`); `docker tag` per Image-ID behob es.
+
+## Abgleich der FC2-Durchgänge und offene Entscheidungen (03.10.2026)
+
+Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Doku) ist mit `af84415` (FC1-Wächter, Grundprüfung) auf `main` zusammengeführt. Die beiden FC2-Durchgänge haben sich teils gedeckt; die Zuordnung steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „Abgleich der FC2-Durchgänge“. Kurz: FC2-09, FC2-19 und der Diagrammteil von FC2-14 sind erledigt. FC2-03 ist DF-L6, FC2-14 im Code DF-L9, FC2-15 im Kern DF-L1 und ZB-06 ist DF-L3; führend ist jeweils die DF-ID mit ihrem Paket. FC2-10, FC2-11 und FC2-13 sind nur teilweise erledigt.
+
+**Offene Entscheidungen des Nutzers.** Diese Liste ersetzt die Aufzählungen in den „Nächster Schritt“-Zeilen der Abschnitte darüber; diese bleiben als Stand ihres Tages stehen.
+
+| ID | Frage | Quelle |
+|---|---|---|
+| DF-L8 | IP-Freigabe vor dem Upload: sperren (a, empfohlen) oder nur warnen (b)? Abhängig von MR-02: (a) sperrt erst, nachdem alle VMs auf `deploying` stehen, und färbt sie mit FC2-01 alle `failed`. | S7, Paket DF-P5 |
+| FC2-E1 | VM-Zustand nach einem gescheiterten Auftrag, der die VM nicht berührt hat | S7 |
+| FC2-E2 | Ausgabe der Create-Statusabfragen kürzen oder voll behalten? | S7 |
+| FC2-E3 | „Lauf offen“: Diagramm korrigieren oder Laufschonfrist je Aufgabe? | S7 |
+| FC2-E5 | Diagramme in der Portalhilfe zeigen oder nur im Repo führen? | S7 |
+| FC2-E6 | `full`: auf `registered` warten statt fester Start-Wartezeit? | S7 |
+| AB-E3 | Reihenfolge der Prüfinstrumente | S7 |
+| VT-E2 | Backups verschlüsseln oder APP_KEY getrennt sichern? | S8 |
+| FM-E1 | Create auf anderem ESXi-Host als beim Anlegen | S8 |
+| FM-E2 | Nie angelegte VMs in Start, Export, Power-Cycle, Autostart: sperren oder ausnehmen? | S8 |
+| FM-E3 | Geplante Aufträge: Verfallszeit oder Hinweis auf die Verspätung? | S8 |
+
+**Prüfung nach dem Zusammenführen:** MR-01 bis MR-04 im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „Prüfung nach dem Zusammenführen“. MR-02 (P2) koppelt DF-L8 an FC2-01. MR-01 korrigiert die Maßnahme zu DF-D9, MR-03 gehört zu FM-05, MR-04 ist eine Frage an den Nutzer (Ablaufseite neu veröffentlichen).
+
+**Nächster Schritt:** Entscheidungen oben; nur lesende Laborproben LP-01 bis LP-05; danach FC3 und die Pakete in der Reihenfolge des Registers, beginnend mit AB-01, sobald Codeänderungen freigegeben sind.
