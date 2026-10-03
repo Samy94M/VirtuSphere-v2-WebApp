@@ -216,9 +216,22 @@ Flowcharts zeigen den Steuerfluss einer Komponente. Die Befunde dieses Plans lag
 
 | ID | Frage | Vorschlag |
 |---|---|---|
-| AB-E1 | Wie wird AB-01 behandelt, und kommt es vor FC1 bis FC4? | Host-Schlüssel anheften wie oben; als Sicherheitsbefund vorziehen. |
+| AB-E1 | Wie wird AB-01 behandelt, und kommt es vor FC1 bis FC4? | Entschieden 03.10.2026: Host-Schlüssel je Ansible-Zugang anheften (Paketskizze unten), als Sicherheitsbefund vor FC1 bis FC4. In dieser Sitzung nur Doku, keine Umsetzung. |
 | AB-E2 | Welche von AB-02 bis AB-09 kommen zu FC4? | Mit der Dokumentkarte (DS-E1, 03.10.2026) beantwortet: Alle haben dort einen Ort; AB-02 kommt als Einstieg zuerst. |
 | AB-E3 | Welche Instrumente in welcher Reihenfolge? | PI-01, PI-02, PI-03 und PI-09 vor dem Zeichnen von FC4; PI-04 mit FC3; PI-05, PI-06 und PI-08 danach; PI-07 erst nach Aufwandsschätzung für ein Air-Gap-taugliches Image; PI-10 bei Bedarf. |
+
+### Paketskizze AB-01: Host-Schlüssel des Ubuntu-Hosts anheften (Entscheid AB-E1)
+
+Skizze für die spätere Umsetzung, kein Umsetzungsauftrag. Ziel: Weder Passwort noch Datei verlässt den Worker, bevor der Host-Schlüssel des Ubuntu-Hosts dem bestätigten Wert entspricht.
+
+- **Ein Verbindungshelfer:** SSH und SFTP (`lib/ssh.php`, `lib/ssh_sftp.php`) prüfen den Server-Schlüssel mit `getServerPublicHostKey()` vor `login()`, an genau einer Stelle. Alle Wege nutzen sie: Zugangstest, Host-Preflight, Playbook-Schritte, Create-Steueraufrufe, Job-ID-Suche, Aufräumen, SFTP-Upload, Inventarabruf und Volltest.
+- **Speicherung:** SHA-256-Fingerprint und Schlüsseltyp je Ansible-Zugang, mit Zeitpunkt und bestätigendem Benutzer. Eine Änderung braucht eine neue Bestätigung und wird auditiert.
+- **Bestätigung:** Der Zugangstest zeigt Fingerprint und Typ; der Admin vergleicht mit dem Wert auf dem Host (`ssh-keygen -lf` auf den öffentlichen Host-Schlüssel) und bestätigt.
+- **Abweichung:** Abbruch vor der Anmeldung mit eigener, geschlossener Ursache, sichtbar am Zugang, in der Ansible-Karte des Systemstatus und im Auftragsprotokoll. Kein automatisches Überschreiben.
+- **Bestehende Zugänge (Entscheid AB-E1a offen):** Vorschlag wie beim ESXi-Vertrauensmodus: Bestehende Zugänge laufen sichtbar als „nicht bestätigt“ weiter, bis der Admin den Fingerprint bestätigt; neue Zugänge nur mit bestätigtem Fingerprint; kein stilles Anheften beim ersten Kontakt.
+- **Doku:** neues ADR zum Vertrauen in den Ubuntu-Host, Abschnitt in `trust-flows.md` nach der Dokumentkarte, Ubuntu-Abschnitt in `docs/DEPLOYMENT.md`, Hilfe DE/EN.
+- **Prüfung:** Rot-vor-Fix am Verbindungshelfer: Ein fremder Schlüssel führt zu keinem `login()`-Aufruf. Der QA-Stack hat keinen SSH-Server; Ende-zu-Ende daher über einen eigenen Testserver oder die Laborprobe aus PI-09.
+- **Betroffene Verträge laut Routing in `AGENTS.md`:** `docs/ai/contracts/core.md`, `docs/ai/reference/webapi.md`, `docs/ai/reference/database.md` (Migration), `docs/ai/reference/i18n.md` (Hilfe und Meldungen).
 
 ## Darstellungsarten und Doku-Struktur (03.10.2026)
 
@@ -294,4 +307,4 @@ Nach DA-E1 kommen zuerst PI-01 bis PI-03, die Einstiegsseite sowie Zustands- und
 
 ## Nächster Schritt
 
-PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Darstellung und Struktur sind entschieden (DA-E1 bis DA-E5, DS-E1, damit auch FC2-E4 und AB-E2). Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1 und AB-E3, als Erstes AB-E1; danach der offene Rest von FC2. Jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.
+PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Darstellung und Struktur sind entschieden (DA-E1 bis DA-E5, DS-E1, damit auch FC2-E4 und AB-E2). AB-E1 ist entschieden: AB-01 wird als erstes Umsetzungspaket vor FC1 bis FC4 bearbeitet, sobald Code wieder freigegeben ist (Paketskizze oben). Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1a und AB-E3; danach der offene Rest von FC2. Jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.

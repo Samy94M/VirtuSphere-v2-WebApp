@@ -837,7 +837,7 @@ Quelle S7, Abschnitt „Abdeckung der Abläufe und Prüfinstrumente“ im [Ablau
 
 | Befunde | Owner | Paket |
 |---|---|---|
-| AB-01 (P1-Kandidat): SSH und SFTP zum Ubuntu-Host ohne Abgleich des Host-Schlüssels, darüber Ansible-Passwort und ESXi-Zugangsdaten | Ablaufprüfplan | nach AB-E1, Vorschlag: als Sicherheitsbefund vorziehen |
+| AB-01 (P1-Kandidat): SSH und SFTP zum Ubuntu-Host ohne Abgleich des Host-Schlüssels, darüber Ansible-Passwort und ESXi-Zugangsdaten | Ablaufprüfplan | Entschieden (AB-E1, Nutzer, 03.10.2026): Host-Schlüssel je Ansible-Zugang anheften, als erstes Umsetzungspaket vor FC1 bis FC4; Paketskizze im Plan; Umsetzung erst mit Codefreigabe |
 | AB-02 bis AB-09: Gesamtkette, ESXi-Inventar auf Worker-Seite, Zugänge und Vertrauensmodus, Portal-Aktionen mit MECM- oder ESXi-Wirkung, Löschen und Außerbetriebnahme, Wiederholen und Freigeben, Upgrade und Migration, Fehlersuche | Ablaufprüfplan | Erweiterung von FC4 nach AB-E2 |
 | PI-01 bis PI-10: Abdeckungsinventar, Zustands- und Schreibermatrix, Verbindungs-, Vertrauens- und Geheimnismatrix, Zeitbudgets, Fehlermodus-Tabelle mit Kanten-IDs, Mutationslauf, ESXi-Stellvertreter, Ist-Pfad-Rekonstruktion, Laborproben, Konfigurationsmatrix | Ablaufprüfplan | Vorschlag; Reihenfolge nach AB-E3 |
 
@@ -853,4 +853,6 @@ Quelle S7, Abschnitt „Darstellungsarten und Doku-Struktur“ im [Ablaufprüfpl
 
 **Reihenfolge:** Nach DA-E1 kommen PI-01 bis PI-03, Einstiegsseite sowie Zustands- und Sequenzdiagramme vor Entscheidungsbaum, Swimlanes und Playbooks der Admin-Phase. FC1, FC2, FC3 und PS1 bis PS3 bleiben in ihrer Reihenfolge.
 
-**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1 und AB-E3; als Erstes AB-E1 (SSH-Host-Schlüssel) beim Nutzer einholen.
+**AB-E1 (Nutzer, 03.10.2026):** Host-Schlüssel des Ubuntu-Hosts je Ansible-Zugang anheften; AB-01 wird das erste Umsetzungspaket vor FC1 bis FC4. Auf Wunsch des Nutzers bleibt es in dieser Sitzung bei Doku: Paketskizze im Ablaufprüfplan, Unterentscheid AB-E1a (Umgang mit bestehenden Zugängen) offen.
+
+**Nächster Schritt:** Offen sind noch FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6, AB-E1a und AB-E3. Umsetzung erst, wenn der Nutzer Codeänderungen wieder freigibt; dann beginnt AB-01 mit einem Rot-vor-Fix-Test.
