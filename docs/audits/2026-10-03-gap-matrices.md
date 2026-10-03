@@ -72,14 +72,16 @@ Anlegen als `pending` (`repo_deploy_create_materialize()`, bei Wiederholung `rep
 |---|---|---|
 | WM-E1 | Was soll ein Export mit einer VM tun, die MECM schon kennt (gespeicherte ResourceID)? | Den Zustand nicht anfassen, nur die MAC vergleichen. Gleiche MAC: nichts ändern, die VM zählt im Auftrag als unverändert. Andere MAC: die VM als fehlgeschlagen melden mit dem Hinweis „MAC geändert, MECM kennt noch die alte; bitte MECM-ID zurücksetzen“. VMs ohne ResourceID: wie heute. |
 | WM-E2 | Darf „Identität übernehmen“ eine bestehende Bindung ersetzen? | Nein, folgt aus GR-01: Eine von Hand neu gebaute ESXi-VM ersetzt nie die Bindung einer Portal-VM. Variante B (Ersetzen mit denselben Folgen wie beim Create) entfällt. |
+| WM-E2a | Bleibt „Identität übernehmen“ für ungebundene VMs? | Nein: Die Funktion wird zurückgebaut. Alt-VMs ohne Bindung aus der früheren Desktop-App oder älteren Portalversionen gibt es noch; sie werden nicht übernommen, die Altlast wird ignoriert. Eine namensgleiche VM auf ESXi blockiert dann immer. Damit erledigen sich WM-03 und der Übernahme-Teil von WM-07. |
+
+**Rückbau-Skizze zu WM-E2a, für die spätere Umsetzung:** Aktion `adopt_vm` in `lib/deploy_actions.php`, `repo_adopt_vm_identity()` und `repo_vm_identity_adopt_locked()` entfallen. Die Identitätssperre in `lib/deploy_blockers.php` bietet statt der Übernahme einen Hinweis an: VM auf ESXi umbenennen oder löschen, oder die Portal-VM löschen. Nachzuziehen sind die Hilfe DE/EN, der Abschnitt „VM identity, collision block and adoption“ in `docs/DEPLOYMENT.md` und die Übernahme-Tests in `VmIdentityCollisionTest`. Das Audit-Ereignis der Übernahme bleibt für alte Einträge lesbar.
 
 ### Offene Entscheidungen (Nutzer)
 
 | ID | Frage | Vorschlag |
 |---|---|---|
-| WM-E2a | Bleibt „Identität übernehmen“ für ungebundene VMs? Laut `docs/DEPLOYMENT.md` ist der Knopf für VMs gedacht, die VirtuSphere selbst angelegt hat, bevor es die Bindung gab (ältere Versionen, frühere Desktop-App); das Portal kann solche VMs aber nicht von von Hand angelegten unterscheiden (WM-07). | Gibt es keine solchen Alt-VMs mehr: Knopf entfernen; eine namensgleiche VM auf ESXi blockiert dann immer. Gibt es sie noch: Knopf nur für ungebundene VMs mit klarem Hinweis im Dialog behalten und später entfernen; optional die Herkunftsmarke aus WM-07. |
 | WM-E3 | Darf der Devices Sync im ersten Rollout ein vorhandenes MECM-Gerät mit gleichem Namen und gleicher MAC übernehmen (WM-08)? | Nach GR-01 nur Geräte, die der Sync selbst importiert hat; das braucht eine eigene Importliste oder Marke auf der MECM-Seite. Alternativ als dokumentierte Ausnahme für den Fall „Rückruf nach eigenem Import verloren“ behalten. |
 
 ## Nächster Schritt
 
-Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen sind WM-E2a und WM-E3; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
+Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen ist WM-E3; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
