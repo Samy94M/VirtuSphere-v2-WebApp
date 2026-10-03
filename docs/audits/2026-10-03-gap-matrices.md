@@ -76,12 +76,8 @@ Anlegen als `pending` (`repo_deploy_create_materialize()`, bei Wiederholung `rep
 
 **Rückbau-Skizze zu WM-E2a, für die spätere Umsetzung:** Aktion `adopt_vm` in `lib/deploy_actions.php`, `repo_adopt_vm_identity()` und `repo_vm_identity_adopt_locked()` entfallen. Die Identitätssperre in `lib/deploy_blockers.php` bietet statt der Übernahme einen Hinweis an: VM auf ESXi umbenennen oder löschen, oder die Portal-VM löschen. Nachzuziehen sind die Hilfe DE/EN, der Abschnitt „VM identity, collision block and adoption“ in `docs/DEPLOYMENT.md` und die Übernahme-Tests in `VmIdentityCollisionTest`. Das Audit-Ereignis der Übernahme bleibt für alte Einträge lesbar.
 
-### Offene Entscheidungen (Nutzer)
-
-| ID | Frage | Vorschlag |
-|---|---|---|
-| WM-E3 | Darf der Devices Sync im ersten Rollout ein vorhandenes MECM-Gerät mit gleichem Namen und gleicher MAC übernehmen (WM-08)? | Nach GR-01 nur Geräte, die der Sync selbst importiert hat; das braucht eine eigene Importliste oder Marke auf der MECM-Seite. Alternativ als dokumentierte Ausnahme für den Fall „Rückruf nach eigenem Import verloren“ behalten. |
+| WM-E3 | Darf der Devices Sync im ersten Rollout ein vorhandenes MECM-Gerät mit gleichem Namen und gleicher MAC übernehmen (WM-08)? | Nur Geräte, die der Sync nachweislich selbst importiert hat: Der MECM-Server führt dafür eine eigene Importliste, ähnlich dem Mitgliedschafts-Journal. Ein fremdes Gerät blockiert mit der Meldung „Gerät existiert schon in MECM, nicht von VirtuSphere importiert“. Bereits gebundene VMs sind nicht betroffen. Umsetzung mit den Serverskripten erst zum Cutover (MC-R4). |
 
 ## Nächster Schritt
 
-Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Offen ist WM-E3; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
+Schritt 2 ist die Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03), danach die Fehlerfälle entlang der Gesamtkette (PI-05), die Zeitbudgets (PI-04), die Meldungsprüfung nach R11 und der Rest von FC2. Alle Entscheidungen zu Schritt 1 sind gefallen; Laborprobe für WM-01 mit der Abfrage oben, nur lesend.
