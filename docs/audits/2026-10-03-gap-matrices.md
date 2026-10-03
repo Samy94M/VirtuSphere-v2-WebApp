@@ -323,6 +323,28 @@ FM-03 braucht zuerst die Laborprobe; FM-05 bis FM-09 sind ohne Entscheid umsetzb
 
 **Maßnahmen:** Den Übersetzungsweg um eine Aktion je Schlüssel erweitern (Auftrag, Mission, Systemstatus), die Hinweise R11-05 bis R11-09 mit den vorhandenen Helfern verlinken. Als Wächter: ein statischer Test, der Meldungen mit Seitennamen aus einer festen Liste nur zusammen mit einer Aktion, einem Link oder einer begründeten Ausnahme zulässt, nach dem Muster von PI-01. Alles P3; R11 ist ein Vertrag, deshalb zählen die Fälle als Abweichung, nicht nur als Komfort.
 
+## Schritt 7: Laborprobenkatalog (PI-09)
+
+**Zweck:** Alle Proben aus dieser Datei und dem [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md) an einer Stelle, geordnet nach Risiko: zuerst nur lesend, dann auf einer Testmission oder Test-VM. Jede Probe sagt, was ihr Ergebnis entscheidet. Die MECM-Pilotproben stehen weiter im [MECM-Plan](2026-09-15-mecm-client-delivery-simplification-plan.md), Abschnitt MC07, und werden hier nicht wiederholt. Abfragen laufen nur lesend in der Portal-Datenbank, etwa über phpMyAdmin.
+
+| ID | Zu | System und Risiko | Probe | Ergebnis entscheidet |
+|---|---|---|---|---|
+| LP-01 | WM-01 | Portal-DB, nur lesend | `SELECT id, mission_id, vm_name, lifecycle_state, mecm_id, mecm_pending_since FROM deploy_vms WHERE mecm_sync_state = 'pending' AND mecm_id IS NOT NULL AND mecm_id <> '';` | Treffer belegen WM-01 im Betrieb; sie sind auch die Liste für eine spätere Reparatur |
+| LP-02 | ZB-01 | Portal-DB, nur lesend | `SELECT job_id, position, TIMESTAMPDIFF(SECOND, started_at, finished_at) AS seconds FROM deploy_create_vm_results WHERE status = 'succeeded' ORDER BY finished_at DESC LIMIT 40;` | Sekunden je VM mal 40 gegen 14400 s: Warnung in der Vorschau oder Budget je Einheit |
+| LP-03 | ZB-02, FC2-E3 | Portal-DB, nur lesend, nach einem großen Auftrag | `SELECT source, last_duration_ms, last_result_at FROM deploy_integration_heartbeats;` | Lauf über 600000 ms belegt ZB-02 und liefert die Zahl für eine Laufschonfrist je Aufgabe |
+| LP-04 | FC2-04, FC2-E2 | Portal-DB, nur lesend | `SELECT stream, COUNT(*) FROM deploy_job_logs WHERE job_id = <Create-Auftrag> GROUP BY stream;` | Zeilenzahl der Statusabfragen; entscheidet, wie stark FC2-E2 kürzen muss |
+| LP-05 | FC2-E6, ZB-I8 | Portal-DB, nur lesend | `SELECT vm_id, MIN(CASE WHEN mecm_sync_state = 'pending' THEN created_at END) AS pending_at, MIN(CASE WHEN mecm_sync_state = 'registered' THEN created_at END) AS registered_at FROM deploy_vm_status_events WHERE created_at > NOW() - INTERVAL 30 DAY GROUP BY vm_id;` | Abstand von `pending` zu `registered` gegen die Start-Wartezeit von 300 s; begründet FC2-E6 |
+| LP-06 | VT-04 | Ubuntu-Host, nur lesend, Testzugang | Nach einem Create mit einem ESXi-Testzugang, dessen Passwort nur dafür existiert: `grep -rl -- '<Testpasswort>' ~/.ansible /tmp` | Fund außerhalb des Auftragsverzeichnisses belegt den Verdachtsteil von VT-04 |
+| LP-07 | FC2-01 | Testmission | Auftrag `start` mit absichtlich falschem Ansible-Passwort | Alle VMs `failed` und MECM `failed` belegen FC2-01 im Betrieb |
+| LP-08 | FM-03 | Testmission, Ubuntu-Host | Auftrag `start` mit 120 s Start-Wartezeit; während der Pause den Worker-Container hart beenden; auf dem Ubuntu-Host `pgrep -af ansible-playbook` und das Auftragsverzeichnis prüfen; beobachten, ob die VMs nach der Pause eingeschaltet werden | Läuft weiter: Terminal oder Prozessgruppe und Sperre je Mission; endet: Kommentar und Zusage in `deploy-chain.md` gelten |
+| LP-09 | AB-01 | Testhost | Im Ansible-Testzugang die Adresse auf einen zweiten Ubuntu-Testhost mit gleichem Benutzer und Passwort ändern und den Volltest starten | Ohne Warnung belegt AB-01; danach Prüfung des Pakets aus AB-E1 |
+| LP-10 | AB-06 | Testmission, ESXi, MECM | Eine ausgerollte Test-VM im Portal löschen und neu anlegen | Identitätssperre oder MAC-Konflikt im Devices Sync belegen AB-06 |
+| LP-11 | FC2-15 | Test-VM | Create auf eine gebundene, eingeschaltete Test-VM mit geänderter CPU-Zahl | Angeglichen, abgelehnt oder Fehler: legt Hilfe und Diagramm fest |
+| LP-12 | IDR-E36 | Testhost | Gelöschte, umbenannte und am selben Pfad neu erstellte VM (Identitätsplan, offen seit P02) | Gleiche BIOS-UUID und MAC: MECM-Zuordnung prüfen statt aus der MAC folgern |
+| LP-13 | VT-E1 B, ZB-04 | MECM, Test-VM | Wo läuft `client_getInfos.ps1`: Tasksequenzschritt oder normale Bereitstellung? Ist eine maskierte Gerätevariable dort lesbar, steht sie in `smsts.log`? Wann wiederholt MECM eine gescheiterte Client-App? | Ob B mit Gerätevariable geht und wie lange der ACK im Skript wiederholen muss |
+
+**Reihenfolge:** LP-01 bis LP-05 kosten nichts und gehen sofort. LP-06 bis LP-11 brauchen eine Testmission. LP-12 und LP-13 gehören zum Labor vor dem Cutover, zusammen mit MC07.
+
 ## Nächster Schritt
 
-Der Rest von FC2 steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „FC2-Rest“ (FC2-14 bis FC2-19). Als Nächstes der Laborprobenkatalog (PI-09), der alle Proben dieser Datei und des Ablaufprüfplans an einer Stelle sammelt, danach die Konfigurationsmatrix (PI-10). Offen sind VT-E2 und FM-E1 bis FM-E3, aus dem Ablaufprüfplan FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.
+Der Rest von FC2 steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „FC2-Rest“ (FC2-14 bis FC2-19). Der Laborprobenkatalog steht oben (Schritt 7). Als Nächstes die Konfigurationsmatrix (PI-10). Offen sind VT-E2 und FM-E1 bis FM-E3, aus dem Ablaufprüfplan FC2-E1, FC2-E2, FC2-E3, FC2-E5, FC2-E6 und AB-E3.
