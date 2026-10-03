@@ -220,6 +220,78 @@ Flowcharts zeigen den Steuerfluss einer Komponente. Die Befunde dieses Plans lag
 | AB-E2 | Welche von AB-02 bis AB-09 kommen zu FC4? | Alle; AB-02 zuerst als Einstieg. |
 | AB-E3 | Welche Instrumente in welcher Reihenfolge? | PI-01, PI-02, PI-03 und PI-09 vor dem Zeichnen von FC4; PI-04 mit FC3; PI-05, PI-06 und PI-08 danach; PI-07 erst nach Aufwandsschätzung für ein Air-Gap-taugliches Image; PI-10 bei Bedarf. |
 
+## Darstellungsarten und Doku-Struktur (03.10.2026)
+
+Online-Recherche auf Wunsch des Nutzers: Wie sinnvoll sind Flowcharts, welche weiteren Dokumentationsarten machen Funktionen und Code verständlich, was muss noch abgedeckt werden, und wie bleibt das übersichtlich? Keine Codeänderung.
+
+### Entscheidungen des Nutzers (03.10.2026)
+
+| ID | Frage | Entscheidung |
+|---|---|---|
+| DA-E1 | Für wen sind die Ablaufdokumente zuerst? | Zuerst für die Entwickler, danach für die Admins im Betrieb. |
+| DA-E2 | Weitere Darstellungsarten neben Flowcharts? | Vorläufig ja: Zustandsdiagramme, Sequenzdiagramme und Entscheidungstabellen, unter denselben Regeln wie Flowcharts (Wächter, Ansichtsseite, `accTitle`). Die Einzelregeln aus dem Register (FC2-E4) folgen mit DS-E1. |
+| DA-E3 | Kontextbild der Systeme | Als normales Mermaid-Flowchart mit Gruppen, nicht in der experimentellen C4-Syntax. |
+| DA-E4 | Aufnahme | Nur als Doku in Plan und Register, ohne Code. |
+
+### Ergebnis der Recherche
+
+- Flowcharts helfen bei verzweigter Logik: Scanlan (1989) maß schnelleres Verstehen und weniger Fehler als mit Pseudocode. Auf Codeebene helfen sie nicht: Shneiderman (1977) fand keinen Nutzen detaillierter Flowcharts, Ramsey und Kollegen (1978) sahen Pseudocode vorn, weil er näher am Code liegt.
+- Diagramme verbessern bei komplexen Änderungen die Korrektheit, sparen aber keine Zeit, und ihre Pflege kostet (Arisholm und Kollegen 2006; „Viskosität“ nach Green und Petre). Veraltete, verstreute und mehrdeutige Doku gehört zu den häufigsten Dokuproblemen (Aghajani und Kollegen 2019).
+- Gestaltung nach Moody (2009): ein Symbol je Begriff, Text und Grafik zusammen, Darstellung passend zum Leser. Screenreader lesen Mermaid ohne `accTitle`, `accDescr` und begleitenden Text als Wortsalat.
+- Für andere Fragen gibt es passendere Arten: Zustandsdiagramme (daraus lassen sich Tests mit Übergangsabdeckung ableiten), Sequenzdiagramme (arc42 „Runtime View“, C4 „Dynamic“), Entscheidungstabellen (Vollständigkeit und Erreichbarkeit prüfbar, DMN), Swimlanes für Übergaben, Datenfluss mit Vertrauensgrenzen für Sicherheit (STRIDE), ein Kontextbild nach C4. Diátaxis ordnet Doku nach Lesebedarf; Google SRE beziffert für Playbooks je Alarm etwa dreimal schnellere Behebung.
+- Quellen: [Shneiderman](https://en.wikipedia.org/wiki/Ben_Shneiderman), [Ramsey und Kollegen](https://journals.sagepub.com/doi/abs/10.1177/1071181378022001186), [Scanlan](https://modeling-languages.com/structured-flowcharts-outperform-pseudocode/), [Arisholm und Kollegen](https://www.semanticscholar.org/paper/The-impact-of-UML-documentation-on-software-an-Arisholm-Briand/a6d9ae2f374025928c003b37e12b24bd905732c5), [Green und Petre](https://en.wikipedia.org/wiki/Cognitive_dimensions_of_notations), [Aghajani und Kollegen](https://www.semanticscholar.org/paper/Software-Documentation-Issues-Unveiled-Aghajani-Nagy/55b6029411225a6eee4f88b3fc4bf3869e667e01), [Moody](https://research.utwente.nl/en/publications/the-physics-of-notations-toward-a-scientific-basis-for-constructi), [Mermaid und Screenreader](https://pulibrary.github.io/2023-03-29-accessible-mermaid), [C4](https://c4model.com/diagrams), [Mermaid C4](https://mermaid.js.org/syntax/c4.html), [arc42 Runtime View](https://docs.arc42.org/section-6/), [Diátaxis](https://diataxis.fr/), [Flowchart und Zustandsautomat](https://www.stateworks.com/technology/flowchart-is-not-state-machine/), [DMN-Entscheidungstabellen](https://arxiv.org/pdf/1603.07466), [Swimlane](https://en.wikipedia.org/wiki/Swimlane), [OWASP Threat Modeling](https://owasp.org/www-community/Threat_Modeling_Process), [Übergangsabdeckung](https://www.researchgate.net/publication/282711162_Coverage_Criteria_for_State_Transition_Testing_and_Model_Checker-Based_Test_Case_Generation), [Living Documentation](https://www.infoq.com/articles/book-review-living-documentation/), [Google SRE](https://sre.google/sre-book/introduction/).
+
+### Darstellungsart je Frage
+
+| Frage | Darstellung |
+|---|---|
+| Was passiert, wenn …? (Entscheidungen eines Akteurs) | Flowchart |
+| In welchem Zustand ist etwas, und was darf von hier aus geschehen? | Zustandsdiagramm mit Übergangstabelle, die je Übergang den Schreiber nennt |
+| Wer ruft wen in welcher Reihenfolge, mit welchem Zeitlimit? | Sequenzdiagramm |
+| Welches Ergebnis bei welcher Kombination von Bedingungen? | Entscheidungstabelle |
+| Wer, Mensch oder System, macht welchen Schritt? | Swimlane |
+| Welche Verbindung trägt welches Geheimnis, mit welchem Vertrauensanker? | Datenfluss mit Vertrauensgrenzen |
+
+### Strukturvorschlag gegen einen Doku-Dschungel (Nutzerentscheid DS-E1 offen)
+
+| ID | Regel |
+|---|---|
+| DS-01 | Ein Einstieg: Übersichtsseite `docs/operations/flows.md` mit Kontextbild, Gesamtkette als Sequenz, Landkarte (Thema → Dokument → Abschnitt), gemeinsamer Legende, kurzem Begriffsverzeichnis und der Tabelle „Darstellungsart je Frage“. Sie ist der erste Tab der Ansichtsseite. |
+| DS-02 | Nach Thema ordnen, nicht nach Darstellungsart: ein Dokument je Bereich (Dokumentkarte unten), darin jede Darstellungsart, die zur Frage passt. Ein neues Ablaufdokument nur mit Entscheidung, sonst ein Abschnitt in einem vorhandenen. |
+| DS-03 | Ein Ort je Ablauf: Jeder Ablauf wird genau einmal gezeichnet; andere Dokumente verlinken den Abschnitt, statt ihn erneut zu beschreiben. Wo ein Diagramm Fließtext ersetzt, wird der Text gekürzt. |
+| DS-04 | Ein Gerüst je Abschnitt: Zweck in einem Satz, Diagramm, „Wenn etwas schiefgeht“ (Fehlerwege mit dem Zustand von VM, Auftrag und MECM danach), „Im Code“ (Einstiegsfunktionen und Konstanten), „Prüfung“ (Tests). In der Admin-Phase kommt „Betrieb“ hinzu, als Link auf Hilfe oder Runbook. |
+| DS-05 | Kleine Diagramme: eine feste Obergrenze für Knoten je Diagramm; größere in verlinkte Teilabläufe teilen. Kurze Knotentexte, Erklärung im Text. |
+| DS-06 | Eine Optik: Formen und Ergebnisklassen (`classDef`) nur aus der gemeinsamen Legende; `accTitle` und `accDescr` in jedem Diagramm. |
+| DS-07 | Ist und Plan getrennt: Ablaufdokumente zeigen nur Ausgeliefertes; Befunde und Pläne bleiben unter `docs/audits/`. |
+| DS-08 | Die Maschine hält Ordnung: Der FC1-Wächter, erweitert um PI-01 und FC2-13, prüft Abdeckung oder begründete Ausnahme, Obergrenze, Legende, `accTitle`, Gerüst und Links. |
+| DS-09 | Bewusst weglassen: Die Übersichtsseite nennt, was kein Diagramm bekommt (reine Verwaltungsseiten, Dashboard, Hilfe, einmalige Skripte, nummerierte Runbooks). |
+
+**Dokumentkarte (Vorschlag):**
+
+| Dokument | Inhalt | Darstellungsarten |
+|---|---|---|
+| `flows.md` (neu) | Einstieg: Kontextbild (DA-E3), Gesamtkette (AB-02), Landkarte, Legende, Begriffe | Flowchart mit Gruppen, Sequenz |
+| `deploy-flows.md` | Einreihen, Worker, Create, Playbooks; dazu Auftrags- und Einheitenzustände, Wiederholen und Freigeben (AB-07), ESXi-Inventar auf Worker-Seite (AB-03), später der Durable Runner | Flowchart, Zustand, Sequenz |
+| `system-status-checks.md` | Ampelregeln des Systemstatus | Entscheidungstabelle oder Flowchart (DA-E5) |
+| `mecm-scheduled-tasks.md` | MECM-Serveraufgaben, nach dem Cutover die Installer | Flowchart |
+| `client-flows.md` (FC4) | Clientphasen, Paketwrapper, Reporter | Flowchart, Sequenz |
+| `machine-api-flows.md` (FC4) | Endpunkte, Rollout-Sperre, MAC-Rückruf (P2) | Flowchart, Sequenz, Entscheidungstabelle |
+| `vm-lifecycle.md` (FC4) | VM-Zustände und die Aktionen, die sie ändern (AB-05), Löschen und Außerbetriebnahme (AB-06), Missionstransfer (P2) | Zustand mit Übergangstabelle, Swimlane |
+| `maintenance-flows.md` (FC4) | Wartungsjobs | Flowchart |
+| `trust-flows.md` (neu) | Verbindungen, Vertrauensanker und Geheimnisse (AB-01, PI-03), Zugänge und Vertrauensmodus (AB-04), Anmeldung und Rechte (P2) | Datenfluss mit Vertrauensgrenzen, Zustand, Matrix |
+| vorhandene Runbooks | Diagramm am Ort statt neuer Dateien: `upgrade-recovery.md` (AB-08), `backup.md` und `https.md` (P3), `troubleshooting.md` mit Entscheidungsbaum (AB-09, Admin-Phase) | Flowchart, Swimlane |
+
+### Offene Entscheidungen (Nutzer)
+
+| ID | Frage | Vorschlag |
+|---|---|---|
+| DS-E1 | Strukturvorschlag DS-01 bis DS-09 mit Dokumentkarte übernehmen, und damit die Einzelregeln aus FC2-E4? | Übernehmen. |
+| DA-E5 | Ampelregeln im Systemstatus als Entscheidungstabelle statt als Flowchart, oder beides? Eine Tabelle zeigt auf einen Blick, wenn ein Ergebnis nie eintreten kann; so wäre FC2-11 aufgefallen. | Tabelle als einzige Quelle; ein kurzes Flowchart nur dort, wo die Reihenfolge der Prüfungen selbst die Aussage ist. |
+
+### Einordnung
+
+Nach DA-E1 kommen zuerst PI-01 bis PI-03, die Einstiegsseite sowie Zustands- und Sequenzdiagramme; Entscheidungsbaum (AB-09), Swimlanes und Playbooks folgen in der Admin-Phase. Die Reihenfolge FC1, FC2, FC3, PS1 bis PS3 bleibt.
+
 ## Nächster Schritt
 
-PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Für FC2 zuerst die Entscheide FC2-E1 bis FC2-E6 einholen und den offenen Rest prüfen, für die Abdeckung die Entscheide AB-E1 bis AB-E3; jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.
+PR #2 ist zusammengeführt, die Verweise und der Registereintrag stehen (Register, 28.09.2026). Reihenfolge laut Register: FC1, FC2, FC3, danach PS1 bis PS3; DF-P0 geht in FC3 auf, DF-P1 bis DF-P4 wie unter „Einordnung in die Reihenfolge“. Für FC2 zuerst die Entscheide FC2-E1 bis FC2-E6 einholen und den offenen Rest prüfen, für die Abdeckung die Entscheide AB-E1 bis AB-E3, für Darstellung und Struktur DS-E1 und DA-E5; jede Umsetzung beginnt mit einem Rot-vor-Fix-Test.
