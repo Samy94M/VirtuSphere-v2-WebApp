@@ -136,7 +136,7 @@ flowchart TD
 
 ## ESXi-Inventar
 
-Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** und nach jedem `create`- oder `full`-Auftrag.
+Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet.
 
 ```mermaid
 flowchart TD
