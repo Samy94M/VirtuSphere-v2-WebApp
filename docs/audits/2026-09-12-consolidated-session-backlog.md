@@ -13,6 +13,7 @@ Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger 
 | S5 | [Powercycle-Detailplan](2026-09-14-powercycle-sequential-plan.md) und lokaler QA-Abschlussbericht `qa-artifacts/powercycle-sequential/sol-medium/report.md` | Sequenzieller Zyklus je VM, lokale Ablauf-/Identitätsnachweise, direkte PC03-Restkorrektur, getrennte Fast-Blocker sowie spätere ESXi-/Releaseabnahme |
 | S6 | [PowerShell-Prüfung 28.09.2026](2026-09-28-powershell-audit.md) | Alle PowerShell-Skripte, Ablaufdiagramme, Doku und Hilfe mit Skriptbezug; Befunde PS-01 bis PS-15, D-01 bis D-09, T-01 bis T-05; Zuordnung im letzten Abschnitt dieses Registers |
 | S7 | [Ablaufprüfung Bereitstellung und Systemstatus](2026-09-28-deploy-flows-review-plan.md) | Ablaufdiagramme für Modi, Playbooks und Systemstatus; Befunde DF-L, DF-D, DF-S, Pakete DF-P0 bis DF-P4, CI-Paket CI-1 bis CI-5; zusammengeführt als PR #2 (`6489f6b`); Code-Abgleich FC2 vom 03.10.2026 mit Befunden FC2-01 bis FC2-13 und Entscheiden FC2-E1 bis FC2-E6, FC2-Rest vom selben Tag mit FC2-14 bis FC2-19; FC1-Wächter und Grundprüfung mit DF-L6 bis DF-L9, DF-D9 und Paket DF-P5 (`af84415`), beide FC2-Durchgänge abgeglichen; Abdeckungsprüfung vom selben Tag mit Lücken AB-01 bis AB-09, Prüfinstrumenten PI-01 bis PI-10 und Entscheiden AB-E1 bis AB-E3; Darstellungsarten und Doku-Struktur mit Entscheiden DA-E1 bis DA-E5 und Regeln DS-01 bis DS-09 |
+| S9 | [Arbeitsauftrag für Codex](2026-10-04-codex-work-order.md) | Reihenfolge, Paketzuschnitt, Abnahme und Stoppregeln für die Umsetzung der Befunde aus S7 und S8 durch Codex (GPT-6.1 Sol), Stand 04.10.2026 |
 | S8 | [Lückensuche mit Matrizen](2026-10-03-gap-matrices.md) | Systematische Lückensuche mit den Prüfinstrumenten aus S7; Schritt 1 Zustands- und Schreibermatrix (PI-02) mit Befunden WM-01 bis WM-08, Grundsatz GR-01 und Entscheiden WM-E1, WM-E2, WM-E2a, WM-E3; Schritt 2 Verbindungs-, Vertrauens- und Geheimnismatrix (PI-03) mit Befunden VT-01 bis VT-07 und Entscheiden VT-E1, VT-E2; Schritt 3 Fehlerfälle entlang der Gesamtkette (PI-05) mit Befunden FM-01 bis FM-09 und Entscheiden FM-E1 bis FM-E3; Schritt 4 Zeitbudgets und Schwellen (PI-04) mit Ungleichungen ZB-I1 bis ZB-I15 und Befunden ZB-01 bis ZB-06; Schritt 5 Meldungen ohne Link nach R11 mit Befunden R11-01 bis R11-09; Schritt 7 Laborprobenkatalog (PI-09) mit LP-01 bis LP-13; Schritt 8 Konfigurationsmatrix (PI-10) mit Befunden KM-01 bis KM-04 |
 
 Fachliche Detailowner bleiben der [Admin-Funktionsplan](2026-09-08-admin-workflow-feature-plan.md), das [Auditregister](2026-09-08-system-chain-audit-register.md), der [U13-Messplan](2026-09-10-u13-measurement-plan.md) und der [gemeinsame QA-Plan](2026-09-10-u13-u14-qa-plan.md). Dieses Dokument bündelt Reihenfolge, Restumfang und Abschlusskriterien; es erfindet keine zweite technische Vertragsquelle.
@@ -991,7 +992,6 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 
 | ID | Frage | Quelle |
 |---|---|---|
-| DF-L8 | IP-Freigabe vor dem Upload: sperren (a, empfohlen) oder nur warnen (b)? Abhängig von MR-02: (a) sperrt erst, nachdem alle VMs auf `deploying` stehen, und färbt sie mit FC2-01 alle `failed`. | S7, Paket DF-P5 |
 | FC2-E1 | VM-Zustand nach einem gescheiterten Auftrag, der die VM nicht berührt hat | S7 |
 | FC2-E2 | Ausgabe der Create-Statusabfragen kürzen oder voll behalten? | S7 |
 | FC2-E3 | „Lauf offen“: Diagramm korrigieren oder Laufschonfrist je Aufgabe? | S7 |
@@ -1006,3 +1006,11 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Prüfung nach dem Zusammenführen:** MR-01 bis MR-04 im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „Prüfung nach dem Zusammenführen“. MR-02 (P2) koppelt DF-L8 an FC2-01. MR-01 korrigiert die Maßnahme zu DF-D9, MR-03 gehört zu FM-05, MR-04 ist eine Frage an den Nutzer (Ablaufseite neu veröffentlichen).
 
 **Nächster Schritt:** Entscheidungen oben; nur lesende Laborproben LP-01 bis LP-05; danach FC3 und die Pakete in der Reihenfolge des Registers, beginnend mit AB-01, sobald Codeänderungen freigegeben sind.
+
+## Entscheidungen 04.10.2026 und Arbeitsauftrag für Codex
+
+**Nutzer, 04.10.2026 („ja für alles“):** DF-L8 nach (a), zusammen mit MR-02: Paket DF-P5 zieht den Host-Preflight vor die Markierung `deploying`. Die Doku-Korrekturen MR-01, MR-03 und die Diagramme zu FC2-11 und FC2-18 sind umgesetzt. Die Ablaufseite ist auf dieselbe URL neu veröffentlicht (MR-04). Der Branch `claude/flocharts-xtzaco` ist gelöscht. DF-L8 steht damit nicht mehr in der Tabelle der offenen Entscheidungen.
+
+**Arbeitsauftrag:** Vor jeder Codeänderung soll Codex (GPT-6.1 Sol) die Befunde nach einem festen Auftrag abarbeiten: [Arbeitsauftrag für Codex](2026-10-04-codex-work-order.md) (S9). Er legt Reihenfolge, Paketzuschnitt, Abnahme und Stoppregeln fest; Befunde und Entscheidungen bleiben in S7, S8 und diesem Register. Die Reihenfolge darin ist ein Vorschlag, den der Nutzer vor dem Start bestätigt.
+
+**Nächster Schritt:** Nutzer bestätigt die Reihenfolge in S9 und startet Codex mit dem Prompt aus S9.

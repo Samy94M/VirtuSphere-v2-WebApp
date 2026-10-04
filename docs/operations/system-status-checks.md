@@ -71,10 +71,13 @@ flowchart TD
   CO -->|ok| GR["OK (grün)"]
   CO -->|warning| YL
   CO -->|sonst| UK
-  L -->|started| ST{"Wie lange ist der Lauf offen?"}
-  ST -->|über Gefahrschwelle| RD
-  ST -->|über Warnschwelle, mindestens Laufschonfrist| YL
-  ST -->|kürzer| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses"]
+  L -->|started| SZ{"Startzeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
+  SZ -->|nein| UK
+  SZ -->|ja| ST{"Lauf länger offen als die Laufschonfrist?"}
+  ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses; ohne lesbares Ergebnis Unbekannt"]
+  ST -->|ja| SD{"Auch über der Gefahrschwelle?"}
+  SD -->|ja| RD
+  SD -->|nein| YL
   L -->|nur alter Heartbeat| LG{"Heartbeat frisch?"}
   LG -->|ja| LE["Alte Skriptversion (gelb)"]
   LG -->|über Warnschwelle| YL
@@ -95,7 +98,7 @@ flowchart TD
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UK
 ```
 
-Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; ein offener Lauf gilt frühestens nach `VIRTUSPHERE_RUN_GRACE_SECONDS` als verzögert. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle und `VIRTUSPHERE_RUN_GRACE_SECONDS`. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Verzögert und Ausgefallen. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
 ## Ansible-Test
 
@@ -155,17 +158,21 @@ Host-Eigenschaften aus einem erfolgreichen Abruf färben die Ampel nicht, sonder
 
 ```mermaid
 flowchart TD
-  A{"Inventar-Cache vorhanden?"} -->|nein| N["Keine Zahl: ohne Inventar ist nichts beweisbar"]
-  A -->|ja| B["Für Missionen, Vorlagen und VMs die gespeicherten Namen sammeln: Datacenter, Datastore, WDS-Portgruppe, VLAN jeder Netzwerkkarte, VM-eigene Ortsangaben"]
-  B --> C{"Enthält das Inventar überhaupt Einträge dieser Art?"}
-  C -->|nein| C1["Art überspringen"]
-  C -->|ja| D{"Name exakt in der Vereinigung aller Zugänge enthalten?"}
+  A{"ESXi-Zugang konfiguriert?"} -->|nein| N["Keine Zahl: keine ESXi-Quelle, Link zu den Zugangsdaten"]
+  A -->|ja| K{"Je Objektart (Datacenter, Datastore, Portgruppe): von jedem Zugang mit exakter Namenssemantik und lesbarem Zeitpunkt beantwortet, auch leer?"}
+  K -->|nein| C1["Art nicht auswertbar: weder Befund noch Freigabe"]
+  K -->|ja| K2{"Letzte Abfrage jedes Zugangs beantwortet und jünger als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle?"}
+  K2 -->|ja| KC["Aktueller Nachweis"]
+  K2 -->|nein| KH["Historischer Nachweis: Treffer sind Diagnose, kein aktueller Negativnachweis"]
+  KC --> B
+  KH --> B["Für Missionen, Vorlagen und VMs die gespeicherten Namen dieser Art sammeln: Datacenter, Datastore, WDS-Portgruppe, VLAN jeder Netzwerkkarte, VM-eigene Ortsangaben"]
+  B --> D{"Name exakt unter den unterstützten Namen aller Zugänge?"}
   D -->|ja| D1["kein Befund"]
   D -->|nein| D2["Befund mit Feld und Wert"]
   D2 --> E["Zählen, filtern, seitenweise anzeigen; VLAN-Befunde lassen sich gesammelt auf eine vorhandene Portgruppe umhängen"]
 ```
 
-Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Die Deploy-Seite zeigt dieselben Befunde je Zugang zusätzlich als Warnung.
+Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Ist keine Art auswertbar, zeigt der Bereich keine Zahl, sondern einen Hinweis mit Link zum ESXi-Inventar. Mit Inventarintervall 0 entfällt die Altersgrenze. Die Inventarwarnungen der Deploy-Seite und die Abweichungs-Badge der Missionsliste folgen einer älteren Regel: Sie lesen den Inventar-Cache ohne Namenssemantik und Altersgrenze und überspringen nur leere Arten. Sie können deshalb anders urteilen als dieser Bereich.
 
 ## Interne Dienste
 
