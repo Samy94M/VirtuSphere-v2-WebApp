@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use phpseclib3\Net\SFTP;
+use phpseclib3\Exception\TimeoutException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/ssh_sftp.php';
@@ -232,6 +234,41 @@ final class SshSftpBudgetTest extends TestCase
         } catch (SshTransportBudgetExceeded $exception) {
             self::assertSame($cause, $exception->getPrevious());
         }
+    }
+
+    /** @return array<string,array{float,string}> */
+    public static function typedTimeoutBudgets(): array
+    {
+        return [
+            'operation limit' => [0.0, 'operation time budget'],
+            'remaining total limit' => [VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS - 0.25, 'total budget'],
+        ];
+    }
+
+    #[DataProvider('typedTimeoutBudgets')]
+    public function testPhpseclibTimeoutTypePreservesBudgetEvenWithoutItsFlag(float $elapsed, string $message): void
+    {
+        $cause = new TimeoutException('fixture packet wait expired');
+        $sftp = $this->createMock(SFTP::class);
+        $sftp->method('isTimeout')->willReturn(false);
+        $sftp->expects(self::never())->method('disconnect');
+        $caught = null;
+        try {
+            ssh_sftp_run_operation(
+                $sftp,
+                'upload fixture.yml',
+                'upload failed',
+                $this->failingOperation($cause),
+                0.0,
+                'total budget',
+                $this->clock($elapsed)
+            );
+        } catch (Throwable $exception) {
+            $caught = $exception;
+        }
+        self::assertInstanceOf(SshTransportBudgetExceeded::class, $caught);
+        self::assertSame($cause, $caught->getPrevious());
+        self::assertStringContainsString($message, $caught->getMessage());
     }
 
     /** @return Closure():float */

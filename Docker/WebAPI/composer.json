@@ -4,9 +4,9 @@
   "type": "project",
   "license": "proprietary",
   "require": {
-    "ext-ldap": "*",
     "php": ">=8.4",
-    "phpseclib/phpseclib": "^3.0"
+    "ext-ldap": "*",
+    "phpseclib/phpseclib": "^3.0.57"
   },
   "require-dev": {
     "phpstan/phpstan": "^2.2",

@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'virtusphere/webapi',
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
-        'reference' => null,
+        'pretty_version' => 'dev-main',
+        'version' => 'dev-main',
+        'reference' => 'bd5f0d68d86991b3050c5665d93d257af20541e5',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -65,9 +65,9 @@
             'dev_requirement' => true,
         ),
         'phpseclib/phpseclib' => array(
-            'pretty_version' => '3.0.55',
-            'version' => '3.0.55.0',
-            'reference' => 'db9744e6d47e742b1f974e965ad49bdd041105af',
+            'pretty_version' => '3.0.57',
+            'version' => '3.0.57.0',
+            'reference' => 'd17e0ddaeaf6f22f7e007cbb437d78792fe2a0e4',
             'type' => 'library',
             'install_path' => __DIR__ . '/../phpseclib/phpseclib',
             'aliases' => array(),
@@ -272,9 +272,9 @@
             'dev_requirement' => true,
         ),
         'virtusphere/webapi' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
-            'reference' => null,
+            'pretty_version' => 'dev-main',
+            'version' => 'dev-main',
+            'reference' => 'bd5f0d68d86991b3050c5665d93d257af20541e5',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

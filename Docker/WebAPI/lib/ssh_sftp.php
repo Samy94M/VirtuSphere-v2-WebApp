@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use phpseclib3\Exception\TimeoutException;
 use phpseclib3\Net\SFTP;
 
 $autoload = __DIR__ . '/../vendor/autoload.php';
@@ -96,7 +97,9 @@ function ssh_sftp_run_operation(
     try {
         $result = $operation();
     } catch (Throwable $exception) {
-        if ($sftp->isTimeout()) {
+        // phpseclib >= 3.0.56 throws TimeoutException from SFTP packet waits; the
+        // type alone proves the budget expired, even without the isTimeout() flag.
+        if ($exception instanceof TimeoutException || $sftp->isTimeout()) {
             throw ssh_sftp_timeout_failure($operationName, $budget, $totalBudgetMessage, $exception);
         }
         throw new SftpTransportFailed($failureMessage, 0, $exception);
