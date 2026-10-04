@@ -34,7 +34,7 @@ require_once __DIR__ . '/ssh.php';
  * @param array<string, mixed> $context
  * @param array<string, mixed> $unit
  * @param array<string, mixed> $extraVars
- * @return array{exit_code:?int,marker:?array<string,mixed>,transport_error:?string,protocol_error:?string}
+ * @return array{exit_code:?int,marker:?array<string,mixed>,transport_error:?string,protocol_error:?string,host_identity_error:?string}
  */
 function deploy_worker_create_control_call(
     DeployWorkerDbChannel $channel,
@@ -75,6 +75,15 @@ function deploy_worker_create_control_call(
             VIRTUSPHERE_CREATE_CONTROL_TOTAL_TIMEOUT_SECONDS
         );
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $collect);
+    } catch (SshHostIdentityRejected $exception) {
+        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $collect);
+        return [
+            'exit_code' => null,
+            'marker' => null,
+            'transport_error' => null,
+            'protocol_error' => null,
+            'host_identity_error' => deploy_worker_redact_secrets($exception->getMessage(), $secrets),
+        ];
     } catch (RuntimeException $exception) {
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $collect);
 
@@ -83,6 +92,7 @@ function deploy_worker_create_control_call(
             'marker' => null,
             'transport_error' => deploy_worker_redact_secrets($exception->getMessage(), $secrets),
             'protocol_error' => null,
+            'host_identity_error' => null,
         ];
     }
 
@@ -96,12 +106,13 @@ function deploy_worker_create_control_call(
             'exit_code' => $exitCode,
             'marker' => null,
             'transport_error' => null,
+            'host_identity_error' => null,
             'protocol_error' => deploy_worker_redact_secrets($exception->getMessage(), $secrets)
                 . ' (control call exit code ' . $exitCode . ')',
         ];
     }
 
-    return ['exit_code' => $exitCode, 'marker' => $marker, 'transport_error' => null, 'protocol_error' => null];
+    return ['exit_code' => $exitCode, 'marker' => $marker, 'transport_error' => null, 'protocol_error' => null, 'host_identity_error' => null];
 }
 
 /**
@@ -147,6 +158,12 @@ function deploy_worker_create_discover_jid(DeployWorkerDbChannel $channel, array
                     'detail' => 'The async directory of this VM holds more than one job id; no second create was started.',
                 ];
             }
+        } catch (SshHostIdentityRejected $exception) {
+            return [
+                'jid' => null,
+                'error_code' => VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
+                'detail' => deploy_worker_redact_secrets($exception->getMessage(), (array) ($context['secrets'] ?? [])),
+            ];
         } catch (RuntimeException) {
             // Still unreachable. Keep the heartbeat and the cancel state alive
             // between attempts rather than blocking the whole window in one

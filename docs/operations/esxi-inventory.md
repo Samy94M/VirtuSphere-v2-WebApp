@@ -48,6 +48,7 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 | `ansible_dns` | Ansible-Hostname nicht auflösbar | Ansible-Hostname sowie DNS/Suchdomäne des Portal-Containers prüfen |
 | `ansible_unreachable` | Verbindung zum Ansible-Host kam nicht zustande | Netzwerk, Firewall und SSH-Port zwischen Portal und Ansible-Host prüfen |
 | `ansible_auth` | Anmeldung am Ansible-Host abgelehnt | Ansible-Zugangsdatum und SSH-Anmeldeverfahren prüfen; der ESXi-Zugang pausiert nicht |
+| `ansible_host_identity` | Host-Schlüssel unbestätigt, abweichend oder nicht dauerhaft prüfbar; Anmeldung gesperrt | [SSH-/SFTP-Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host) unabhängig vergleichen und ausdrücklich bestätigen; der ESXi-Zugang pausiert nicht |
 | `ansible_authz` | Ansible-Sitzung oder entfernte Aktion nicht erlaubt | Rechte der Ansible-Sitzung und der betroffenen Aktion prüfen; der ESXi-Zugang pausiert nicht |
 | `ansible_preflight` | Ansible-Host erreichbar, Toolchain-Vorprüfung fehlgeschlagen | Im Jobprotokoll die fehlgeschlagene Komponente nachsehen und den Host vervollständigen |
 | `ansible_config` | Playbook, Modul, Collection, Controller-Abhängigkeit oder Rechteerhöhung auf dem Ansible-Host unvollständig | Ansible-Installation, Collections, Python-Abhängigkeiten und die become-Konfiguration prüfen |

@@ -12,6 +12,7 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_ansible_activity.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
+require_once __DIR__ . '/credentials_host_identity.php';
 
 /** @param array<string,mixed> $snapshot */
 function system_status_render_ansible(array $snapshot, array $user): void
@@ -65,6 +66,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     <?php } ?>
                     <?php // Shared cadence uses the same configured interval on both pages. ?>
                     <small class="status-cadence"><?php echo h(credential_cadence_ansible((int) $snapshot['ansible']['interval_hours'])); ?></small>
+                    <?php credential_render_host_identity($credential, $canManageCredentials); ?>
                     <?php if (can('system.config', $user)) { ?><p class="hint"><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)); ?>"><?php echo h(__t('ansible_test.configure')); ?></a></p><?php } ?>
                     <?php if ($canManageCredentials || $canViewCredentialAudit) { ?>
                         <div class="actions">

@@ -145,7 +145,7 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
 
 function repo_credentials(mysqli $db): array
 {
-    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.ansible_host_fingerprint, c.ansible_host_key_type, c.ansible_host_first_seen_at, c.ansible_host_confirmed_at, c.ansible_host_confirmed_by, c.ansible_host_accept_new, c.ansible_host_observed_fingerprint, c.ansible_host_observed_type, c.ansible_host_observed_at, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
     $stmt->execute();
 
     return repo_fetch_all($stmt->get_result());
@@ -154,7 +154,7 @@ function repo_credentials(mysqli $db): array
 function repo_credentials_by_type(mysqli $db, string $type): array
 {
     $type = credential_normalize_type($type);
-    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
+    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
     $stmt->bind_param('s', $type);
     $stmt->execute();
 
@@ -164,9 +164,9 @@ function repo_credentials_by_type(mysqli $db, string $type): array
 function repo_credential(mysqli $db, int $id, bool $includeSecret = false): ?array
 {
     if ($includeSecret) {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     } else {
-        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
     }
     $stmt->bind_param('i', $id);
     $stmt->execute();
@@ -193,7 +193,7 @@ function repo_create_credential(mysqli $db, array $data, string $secret, int $cr
     $trustMode = VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW;
 
     return repo_transaction($db, static function () use ($db, $values, $ciphertext, $trustMode, $createdBy): int {
-        $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by, ansible_host_accept_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
         $stmt->bind_param('sssisssssi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustMode, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $createdBy);
         $stmt->execute();
         $credentialId = (int) $db->insert_id;
@@ -241,9 +241,17 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
 
     return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {
         repo_deploy_create_fence_credential_change($db, $id, $values);
+        $locked = repo_fetch_one($db, 'SELECT type, host, port FROM deploy_credentials WHERE id = ? FOR UPDATE', 'i', [$id]);
         $stmt->execute();
         if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
             throw new RuntimeException('Credential not found.');
+        }
+        if ($locked !== null && ((string) $locked['type'] !== $values['type']
+            || (string) $locked['host'] !== $values['host']
+            || credential_ssh_port($locked['port']) !== credential_ssh_port($values['port']))) {
+            $resetIdentity = $db->prepare('UPDATE deploy_credentials SET ansible_host_fingerprint = NULL, ansible_host_key_type = NULL, ansible_host_first_seen_at = NULL, ansible_host_confirmed_at = NULL, ansible_host_confirmed_by = NULL, ansible_host_accept_new = 0, ansible_host_observed_fingerprint = NULL, ansible_host_observed_type = NULL, ansible_host_observed_at = NULL WHERE id = ?');
+            $resetIdentity->bind_param('i', $id);
+            $resetIdentity->execute();
         }
         // The old evidence and the new revision become visible atomically. A
         // test starting for the new revision after commit can therefore never

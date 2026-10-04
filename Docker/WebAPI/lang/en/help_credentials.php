@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'ansible_host_identity_heading' => 'Ubuntu host key',
+    'ansible_host_identity' => 'SSH and SFTP check the stored SHA256 fingerprint before every authentication. Changes to type, host or port reset the pin and upgrade eligibility; the new target needs explicit confirmation. New credentials must obtain the host key through the credential test and confirm it after an independent comparison on the Ubuntu host. Existing credentials provisionally pin the key on their first connection after the update; operation continues until the administrator confirms the fingerprint. Every later mismatch blocks authentication before password transfer and leaves the pin unchanged. Credentials and System status show the stored pin and any observed mismatch. For a legitimate key rotation, check the new value directly on the host and confirm it explicitly. If an attacker is already present on the first connection after the update, their key is provisionally pinned; the independent comparison is therefore necessary. The flow is documented in docs/operations/trust-flows.md in the project directory on the server.',
     'credentials_heading' => 'Which credentials belong here?',
     'credentials_p1' => 'The Credentials page deliberately supports only two account types. Secrets are stored encrypted and are never rendered back into a form or log.',
     'credentials_ansible' => 'Ansible: SSH account of the Linux execution host. Before connecting, VirtuSphere checks the local Ansible source including requirements.yml; connectivity, toolchain, SFTP, the portal return path and IP allowlisting follow.',

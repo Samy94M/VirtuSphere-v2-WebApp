@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'ansible_host_identity_heading' => 'Host-Schlüssel des Ubuntu-Hosts',
+    'ansible_host_identity' => 'SSH und SFTP prüfen den gespeicherten SHA256-Fingerprint vor jeder Anmeldung. Nach Änderungen an Typ, Host oder Port sind Pin und Upgrade-Ausnahme zurückgesetzt; das neue Ziel braucht ausdrückliche Bestätigung. Neue Zugänge müssen den Host-Schlüssel im Zugangstest ermitteln und nach unabhängigem Vergleich auf dem Ubuntu-Host bestätigen. Bestehende Zugänge heften ihn bei der ersten Verbindung nach dem Update vorläufig an; der Betrieb läuft weiter, bis der Administrator den Fingerprint bestätigt. Jede spätere Abweichung sperrt die Anmeldung schon vor der Passwortübertragung und ersetzt den Pin nicht. Zugangsdaten und Systemstatus zeigen den gespeicherten Pin und eine beobachtete Abweichung. Bei einem legitimen Schlüsselwechsel prüfe den neuen Wert direkt auf dem Host und bestätige ihn ausdrücklich. Ist bereits bei der ersten Verbindung nach dem Update ein Angreifer dazwischen, wird dessen Schlüssel vorläufig angeheftet; deshalb ist der unabhängige Vergleich nötig. Den Ablauf beschreibt docs/operations/trust-flows.md im Projektordner auf dem Server.',
     'credentials_heading' => 'Welche Zugangsdaten gehören hierher?',
     'credentials_p1' => 'Die Seite Zugangsdaten hat bewusst nur zwei Kontotypen. Secrets werden verschlüsselt gespeichert und niemals erneut in ein Formular oder Protokoll geschrieben.',
     'credentials_ansible' => 'Ansible: SSH-Konto des Linux-Ausführungs-Hosts. Vor einer Verbindung prüft VirtuSphere die lokale Ansible-Quelle samt requirements.yml; danach folgen Verbindung, Werkzeugkette, SFTP, Portal-Rückweg und IP-Freigabe.',

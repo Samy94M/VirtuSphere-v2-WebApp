@@ -19,6 +19,7 @@ require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/repo/credential_host_identity.php';
 
 
 /**
@@ -150,7 +151,7 @@ function credentials_handle_post(mysqli $connection, array $user): string
 
     try {
         $action = request_string($_POST, 'action');
-        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy'], true)) {
+        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy', 'confirm_host_identity'], true)) {
             http_response_code(400);
             echo h(__t('common.unknown_action'));
             exit;
@@ -206,6 +207,11 @@ function credentials_handle_post(mysqli $connection, array $user): string
             ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_updated'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
+        } elseif ($action === 'confirm_host_identity') {
+            repo_confirm_ansible_host_identity($connection, $id, request_int($_POST, 'config_revision'),
+                request_string($_POST, 'old_host_fingerprint'), request_string($_POST, 'host_fingerprint'),
+                request_string($_POST, 'host_key_type'), (int) $user['id']);
+            flash_set('success', __t('credentials.host_identity_saved'));
         } elseif ($action === 'activate_strict') {
             repo_activate_esxi_strict_trust($connection, $id);
             audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
@@ -283,7 +289,11 @@ function credentials_handle_post(mysqli $connection, array $user): string
             }
         }
     } catch (ValidationException $exception) {
-        $formKey = ($_POST['action'] ?? '') === 'create' ? 'create' : 'row-' . request_int($_POST, 'credential_id');
+        $formKey = match ($_POST['action'] ?? '') {
+            'create' => 'create',
+            'confirm_host_identity' => 'host-identity-' . request_int($_POST, 'credential_id'),
+            default => 'row-' . request_int($_POST, 'credential_id'),
+        };
         form_remember($formKey, $_POST, $exception->errors());
         flash_set('error', portal_error_message($exception));
     } catch (Throwable $exception) {

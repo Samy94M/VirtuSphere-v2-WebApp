@@ -402,7 +402,7 @@ echo 'JSON' . json_encode([
 
     await page.goto('credentials.php');
     const cadenceOf = (name) => page.locator('tr', { hasText: name }).first().locator('[data-credential-cadence]');
-    const badgeOf = (name) => page.locator('tr', { hasText: name }).first().locator('.badge');
+    const badgeOf = (name) => page.locator('tr', { hasText: name }).first().locator('td.status-cell > a .badge');
 
     // Every row states its cadence; the two types must not state the same one,
     // which is exactly what the identical badge/timestamp shape used to imply.

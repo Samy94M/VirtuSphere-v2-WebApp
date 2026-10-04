@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/migrations/reporting.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/vm_location.php';
 require_once __DIR__ . '/mecm_hostname.php'; // Migration 0050 hostname identity; CLI has no bootstrap.
@@ -22,39 +23,7 @@ require_once __DIR__ . '/migrations/0055_ansible_test_schedule.php';
 require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
 require_once __DIR__ . '/migrations/0057_create_replaced_identity.php';
 require_once __DIR__ . '/migrations/0058_mecm_transfer_generation.php';
-function migrator_out(string $message): void
-{
-    if (PHP_SAPI === 'cli') {
-        fwrite(STDOUT, $message . PHP_EOL);
-        return;
-    }
-    echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . "<br>\n";
-}
-function migrator_statement_count(mysqli_stmt $stmt, string $context): int
-{
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    if (!is_array($row) || !array_key_exists('c', $row)) {
-        throw new RuntimeException('Migration check returned no count: ' . $context);
-    }
-    return (int) $row['c'];
-}
-function migrator_query_row(mysqli $db, string $sql, string $context): array
-{
-    $result = $db->query($sql);
-    if (!$result instanceof mysqli_result) {
-        throw new RuntimeException('Migration query did not return a result set: ' . $context);
-    }
-
-    $row = $result->fetch_assoc();
-    $result->free();
-    if (!is_array($row)) {
-        throw new RuntimeException('Migration query returned no rows: ' . $context);
-    }
-
-    return $row;
-}
-
+require_once __DIR__ . '/migrations/0059_ansible_host_identity.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -385,6 +354,16 @@ $migrations = [
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
             ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            ansible_test_started_at TIMESTAMP NULL DEFAULT NULL,
+            ansible_host_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+            ansible_host_key_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+            ansible_host_first_seen_at TIMESTAMP NULL DEFAULT NULL,
+            ansible_host_confirmed_at TIMESTAMP NULL DEFAULT NULL,
+            ansible_host_confirmed_by INT NULL,
+            ansible_host_observed_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+            ansible_host_observed_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+            ansible_host_observed_at TIMESTAMP NULL DEFAULT NULL,
+            ansible_host_accept_new TINYINT UNSIGNED NOT NULL DEFAULT 0,
             UNIQUE KEY credential_name_type_unique (type, name),
             CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -1225,6 +1204,7 @@ SQL;
     '0056_package_report_foundation' => migrate_0056_package_report_foundation(...),
     '0057_create_replaced_identity' => migrate_0057_create_replaced_identity(...),
     '0058_mecm_transfer_generation' => migrate_0058_mecm_transfer_generation(...),
+    '0059_ansible_host_identity' => migrate_0059_ansible_host_identity(...),
 ];
 try {
     $db = db();

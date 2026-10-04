@@ -118,6 +118,19 @@ function deploy_worker_create_poll_unit(
             return ['stop' => true, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST];
         }
 
+        if (($result['host_identity_error'] ?? null) !== null) {
+            // This unit already started. The denied observation proves no
+            // outcome on ESXi and cannot become a safe retry of the launch.
+            $verdict = deploy_worker_create_terminate_unit(
+                $channel,
+                $fence,
+                $unit,
+                VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN,
+                VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
+                $result['host_identity_error']
+            );
+            return ['stop' => $verdict['stop'], 'reason' => $verdict['reason']];
+        }
         if ($result['transport_error'] !== null) {
             $channel->log(
                 VIRTUSPHERE_DEPLOY_LOG_SYSTEM,

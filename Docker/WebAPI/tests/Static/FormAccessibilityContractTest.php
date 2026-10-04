@@ -15,6 +15,7 @@ final class FormAccessibilityContractTest extends TestCase
             static fn (string $path): string => $root . '/' . $path,
             [
                 'lib/credentials_panels.php',
+                'lib/credentials_host_identity.php',
                 'lib/deploy_queue_panel.php',
                 'lib/logs_filter_form.php',
                 'lib/missions_import_panel.php',

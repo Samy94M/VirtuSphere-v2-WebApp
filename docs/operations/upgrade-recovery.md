@@ -54,7 +54,7 @@ bewiesene konsistente Restorestand verwendet.
 |---|---|---|
 | A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
 | N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
-| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
+| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0059 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
@@ -62,6 +62,8 @@ Runtimegeneration, Remoteausführung, Claim-/Supervisorzustand,
 Create-Einheiten, Callbackfences und Rolloutnamen zusammen. 0053 macht
 `edit_version` zum Schreibzaun. Diese Grenzen dürfen bei einem Rückbau weder
 gelöscht noch durch Defaultwerte simuliert werden.
+
+Migration 0059 führt die Prüfung der SSH-Hostidentität vor jeder Anmeldung ein. Alter Code würde ohne Host-Schlüsselprüfung anmelden; ein gemischter Betrieb ist unsicher. Rückkehr ist nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore zulässig.
 
 ## Upgradefolge
 

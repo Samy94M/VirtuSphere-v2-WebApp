@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Wiederverwendete Portal-Begriffe (Buttons, Tabellenköpfe, Zustände).
  */
 return [
+    'conn_ansible_host_identity' => 'Der Host-Schlüssel des Ansible-Zugangs ist abweichend, unbestätigt oder nicht prüfbar. Prüfe den Fingerprint in den Zugangsdaten; vor der Freigabe wird kein Passwort übertragen.',
     'name' => 'Name',
     'status' => 'Status',
     'vms' => 'VMs',

@@ -13,6 +13,7 @@ final class InventoryErrorVocabularyContractTest extends TestCase
         'ansible_dns',
         'ansible_unreachable',
         'ansible_auth',
+        'ansible_host_identity',
         'ansible_authz',
         'ansible_preflight',
         'ansible_config',

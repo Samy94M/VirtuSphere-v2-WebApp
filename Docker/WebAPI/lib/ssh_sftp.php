@@ -12,6 +12,7 @@ if (is_file($autoload)) {
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/ssh_transport_exceptions.php';
+require_once __DIR__ . '/ssh_host_identity.php';
 
 /** @param null|callable():float $now */
 function ssh_transport_monotonic_now(?callable $now = null): float
@@ -121,10 +122,13 @@ function ssh_sftp_run_operation(
     return $result;
 }
 
-function ssh_sftp_login(SFTP $sftp, string $username, string $secret, string $failureMessage): void
+/** @param null|callable(array,array):void $verify */
+function ssh_sftp_login(SFTP $sftp, string $username, string $secret, string $failureMessage, array $credential, ?callable $verify = null): void
 {
     try {
-        $loggedIn = $sftp->login($username, $secret);
+        $loggedIn = ssh_verified_login($sftp, $username, $secret, $credential, $verify);
+    } catch (SshHostIdentityRejected $exception) {
+        throw $exception;
     } catch (Throwable $exception) {
         throw new SftpTransportFailed($failureMessage, 0, $exception);
     }
@@ -156,14 +160,14 @@ function ssh_sftp_upload_directory(
     }
 
     try {
-        $sftp = new SFTP($host, $port, 15);
+        $sftp = new VirtuSphereSftpConnection($host, $port, 15);
     } catch (Throwable $exception) {
         throw new SftpTransportFailed('SFTP connection could not be initialized.', 0, $exception);
     }
 
     try {
         $sftp->setTimeout(VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS);
-        ssh_sftp_login($sftp, $username, $secret, 'SFTP login failed.');
+        ssh_sftp_login($sftp, $username, $secret, 'SFTP login failed.', $credential);
 
         // The total budget starts only after login and uses a monotonic clock:
         // wall-clock adjustments cannot lengthen or shorten a transfer.
@@ -231,7 +235,7 @@ function ssh_sftp_probe(array $credential, string $secret, ?callable $now = null
     }
 
     try {
-        $sftp = new SFTP($host, $port, 15);
+        $sftp = new VirtuSphereSftpConnection($host, $port, 15);
     } catch (Throwable $exception) {
         throw new SftpTransportFailed('SFTP connection could not be initialized.', 0, $exception);
     }
@@ -242,7 +246,8 @@ function ssh_sftp_probe(array $credential, string $secret, ?callable $now = null
             $sftp,
             $username,
             $secret,
-            'SFTP login failed (the SSH login worked, so the SFTP subsystem is likely disabled).'
+            'SFTP login failed (the SSH login worked, so the SFTP subsystem is likely disabled).',
+            $credential
         );
         $startedAt = ssh_transport_monotonic_now($now);
         $totalBudgetMessage = ssh_sftp_total_budget_message('SFTP probe');

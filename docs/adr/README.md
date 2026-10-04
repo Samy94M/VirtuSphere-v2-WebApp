@@ -44,3 +44,4 @@
 - [ADR-0042: The deploy service has two process shapes, and switching between them is a decision](ADR-0042-deploy-supervisor-and-process-contract.md)
 - [ADR-0043: MECM erhält einen eingefrorenen Rolloutnamen, nicht den ESXi-VM-Namen](ADR-0043-mecm-rollout-hostname.md)
 - [ADR-0044: Package-wrapper reports are fenced by VM incarnation and restore generation](ADR-0044-package-wrapper-report-identity-and-replay.md)
+- [ADR-0045: SSH und SFTP prüfen die Hostidentität vor jeder Anmeldung](ADR-0045-ansible-host-identity.md)

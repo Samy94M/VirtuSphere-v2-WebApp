@@ -146,6 +146,7 @@ return [
     'esxi_cause_fix_ansible_sftp' => 'Check the SFTP subsystem, target path, write permissions, free space and file transfer on the Ansible host.',
     'esxi_cause_fix_ansible_timeout' => 'Check the job log and Ansible host for a stalled SSH or SFTP step; this is a VirtuSphere time budget, not an ESXi timeout. For a read-only inventory pull the candidates are a busy Ansible host, a stalling SFTP transfer, a slow ESXi or vCenter query and a large object count.',
     'esxi_cause_fix_ansible_transport' => 'Check the job log plus the SSH service and transport path to the Ansible host.',
+    'esxi_cause_fix_ansible_host_identity' => 'In Credentials, independently compare the observed host key directly on the Ubuntu host and explicitly confirm it. A mismatch keeps authentication blocked; the ESXi credential is not paused.',
     'esxi_cause_fix_http' => 'Readable legacy value only. A fresh pull classifies an old record with the current vocabulary.',
     'esxi_cause_fix_ssh' => 'No fresh pull writes this value any more; it comes from a pull that predates the origin split and names no culprit. The job log of that pull states the real cause; a fresh pull replaces the value with a category that names the culprit.',
     'esxi_cause_fix_worker' => 'Check the deploy worker, database connection and job log; this category does not claim a transport cause.',

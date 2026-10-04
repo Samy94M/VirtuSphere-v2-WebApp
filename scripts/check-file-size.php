@@ -141,7 +141,7 @@ const FILE_SIZE_ALLOWANCES = [
     // IDR-P02 adds the two registry lines for migration 0057; its column and
     // check live in lib/migrations/0057_create_replaced_identity.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1273,
+        'lines' => 1253,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

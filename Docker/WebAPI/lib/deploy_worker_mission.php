@@ -308,6 +308,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
 /** Keeps the exact transport type while adding the failed Ansible step. */
 function deploy_worker_transport_failure_with_step(RuntimeException $exception, ?string $currentStep): RuntimeException
 {
+    if ($exception instanceof SshHostIdentityRejected) {
+        return $exception;
+    }
     $message = $exception->getMessage() . ansible_step_failure_suffix($currentStep);
     if ($exception instanceof SshTransportBudgetExceeded) {
         return new SshTransportBudgetExceeded($message, 0, $exception);

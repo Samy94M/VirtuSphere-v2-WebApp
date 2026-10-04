@@ -14,6 +14,8 @@ declare(strict_types=1);
         </section>
         <section class="panel">
             <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>
+            <h3><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h3>
+            <p><?php echo h(__t('help_credentials.ansible_host_identity')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_why_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_trust_why')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_what_heading')); ?></h3>

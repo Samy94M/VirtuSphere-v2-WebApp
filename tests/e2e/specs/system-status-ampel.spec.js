@@ -401,7 +401,7 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     await page.goto('system_status.php');
 
     const restricted = page.locator('#ansible article.status-row').filter({ hasText: warned });
-    await expect(restricted.locator('.badge')).toHaveText(/Eingeschränkt|Restricted/);
+    await expect(restricted.locator('.status-row-head .badge')).toHaveText(/Eingeschränkt|Restricted/);
     await expect(restricted.locator('.alert-warning')).toContainText(
       /IP-Freigaben|IP allowlist/,
     );
@@ -412,7 +412,7 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     // A real failure still names its component, so suppressing the warning
     // wording did not suppress the diagnosis.
     const broken = page.locator('#ansible article.status-row').filter({ hasText: failed });
-    await expect(broken.locator('.badge')).toHaveText(/Fehlgeschlagen|Failed/);
+    await expect(broken.locator('.status-row-head .badge')).toHaveText(/Fehlgeschlagen|Failed/);
     await expect(broken).toContainText(/pyvmomi/);
     await expect(broken.locator('.alert-warning')).toHaveCount(0);
 

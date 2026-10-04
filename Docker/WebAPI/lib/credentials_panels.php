@@ -17,6 +17,7 @@ require_once __DIR__ . '/esxi_capabilities.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
 require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/credentials_test_message.php';
+require_once __DIR__ . '/credentials_host_identity.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh.php';
@@ -137,6 +138,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                             <?php if ($pfState !== null && empty($pfState['evidence_current'])) { ?><small class="status-cadence"><?php echo h(__t('credentials.test_evidence_invalid')); ?></small><?php } ?>
                             <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible($ansibleTestIntervalHours)); ?></small>
+                            <?php credential_render_host_identity($row); ?>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>
@@ -171,6 +173,12 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
                             <button class="button button-danger" type="submit" name="action" value="delete" data-confirm="<?php echo h(__t('credentials.confirm_delete', ['name' => (string) ($row['name'] ?? '')])); ?>"><?php echo h(__t('common.delete')); ?></button>
                         </form>
+                        <?php if (!$isEsxi) { ?>
+                            <details<?php echo form_has_state('host-identity-' . $rowId) ? ' open' : ''; ?>>
+                                <summary class="button button-secondary"><?php echo h(__t('credentials.host_identity_button')); ?></summary>
+                                <?php credential_render_host_identity_form($row); ?>
+                            </details>
+                        <?php } ?>
                     </td>
                 </tr>
                 <tr class="row-editor" id="<?php echo h($editorId); ?>"<?php echo $editorOpen ? '' : ' hidden'; ?>>

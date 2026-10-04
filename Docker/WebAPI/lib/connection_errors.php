@@ -39,6 +39,7 @@ const VIRTUSPHERE_CONNECTION_MESSAGE_KEYS = [
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS => 'common.conn_ansible_dns',
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE => 'common.conn_ansible_unreachable',
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH => 'common.conn_ansible_auth',
+    VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_HOST_IDENTITY => 'common.conn_ansible_host_identity',
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTHZ => 'common.conn_ansible_authz',
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_PREFLIGHT => 'common.conn_ansible_preflight',
     VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG => 'common.conn_ansible_config',
@@ -190,6 +191,9 @@ function connection_error_excerpt(string $text, int $max = VIRTUSPHERE_CONNECTIO
  */
 function ansible_connection_error_category(Throwable $exception): string
 {
+    if ($exception instanceof SshHostIdentityRejected) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_HOST_IDENTITY;
+    }
     if ($exception instanceof SshTransportBudgetExceeded) {
         return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TIMEOUT;
     }
@@ -212,11 +216,12 @@ function ansible_connection_error_category(Throwable $exception): string
  * that is true wherever it was raised, an untyped one only has words, and the
  * probe's own step name beats a guess at those words. Kept next to the mapping
  * and pinned against its instanceof list by ConnectionErrorMappingContractTest,
- * so a fourth transport type cannot land in one of the two and not the other.
+ * so another transport type cannot land in one of the two and not the other.
  */
 function ansible_connection_error_is_typed(Throwable $exception): bool
 {
-    return $exception instanceof SshTransportBudgetExceeded
+    return $exception instanceof SshHostIdentityRejected
+        || $exception instanceof SshTransportBudgetExceeded
         || $exception instanceof SftpTransportFailed
         || $exception instanceof SshTransportConfigurationException;
 }

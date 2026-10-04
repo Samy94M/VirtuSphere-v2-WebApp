@@ -46,9 +46,11 @@ final class SshSftpBudgetTest extends TestCase
     public function testLoginFalseAndLoginExceptionAreSftpFailures(): void
     {
         $falseLogin = $this->createStub(SFTP::class);
+        $publicKey = 'ssh-ed25519 ' . base64_encode(pack('N', 11) . 'ssh-ed25519' . pack('N', 32) . str_repeat('a', 32));
+        $falseLogin->method('getServerPublicHostKey')->willReturn($publicKey);
         $falseLogin->method('login')->willReturn(false);
         try {
-            ssh_sftp_login($falseLogin, 'worker', 'secret', 'login failed');
+            ssh_sftp_login($falseLogin, 'worker', 'secret', 'login failed', ['username' => 'worker'], static function (): void { });
             self::fail('a false SFTP login passed');
         } catch (SftpTransportFailed $exception) {
             self::assertNull($exception->getPrevious());
@@ -56,9 +58,10 @@ final class SshSftpBudgetTest extends TestCase
 
         $cause = new UnexpectedValueException('unexpected login packet');
         $throwingLogin = $this->createStub(SFTP::class);
+        $throwingLogin->method('getServerPublicHostKey')->willReturn($publicKey);
         $throwingLogin->method('login')->willThrowException($cause);
         try {
-            ssh_sftp_login($throwingLogin, 'worker', 'secret', 'login failed');
+            ssh_sftp_login($throwingLogin, 'worker', 'secret', 'login failed', ['username' => 'worker'], static function (): void { });
             self::fail('a throwing SFTP login passed');
         } catch (SftpTransportFailed $exception) {
             self::assertSame($cause, $exception->getPrevious());

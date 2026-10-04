@@ -55,6 +55,8 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 
 Der Deploy-Worker bearbeitet immer genau einen Auftrag. Ein Abbruch greift an jeder Schrittgrenze: Der laufende Schritt endet auf ESXi vollständig, danach startet kein weiterer.
 
+Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trust-flows.md#ssh-und-sftp-zum-ubuntu-host) den Pin gegen den aktuellen Zugang. Fehlende Bestätigung bei neuen Zugängen, Schlüsselabweichung, nicht dauerhaft speicherbare Prüfung oder interne Wiederanmeldung auf demselben Objekt brechen vor Passwort-/Dateiübertragung ab. Die Fehlerwege dieses Workers bleiben maßgeblich für VM- und Auftragszustände; die Markierung `deploying` steht derzeit weiterhin vor dem Host-Preflight.
+
 ```mermaid
 flowchart TD
   L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist"]
@@ -67,6 +69,7 @@ flowchart TD
   P -->|ja| D["VMs des Auftrags auf deploying setzen, Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
   D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit. Die IP-Freigabe wird dort nur abgefragt und protokolliert, sie sperrt den Auftrag nicht"]
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente"]
+  H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
   H --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
@@ -119,12 +122,14 @@ flowchart TD
   V -->|dieselbe UUID live| SK["skipped (unverändert)"]
   V -->|andere UUID, oder kein früherer Erfolg auffindbar| VF["failed (identity_conflict)"]
   V -->|Transport abgerissen| VT["failed (transport_lost)"]
+  V -->|Hostidentität vor Anmeldung abgelehnt| HF["failed (host_identity_rejected), nichts gestartet"]
   V -->|keine lesbare Antwort| PP["failed (protocol_error)"]
   AC -->|create| B0{"Budget der Create-Phase noch übrig?"}
   B0 -->|nein| BGX["failed (job_timeout), keine VM gestartet"]
   B0 -->|ja| PR["createVMPrepare: Identität lesend prüfen"]
   PR -->|rejected| PF["failed (Identitätsbefund)"]
   PR -->|Transport abgerissen| VT
+  PR -->|Hostidentität vor Anmeldung abgelehnt| HF
   PR -->|keine lesbare Antwort oder unerwartetes Ereignis| PP
   PR -->|prepared| BG{"Budget der Create-Phase noch übrig?"}
   BG -->|nein| BGX
@@ -132,13 +137,16 @@ flowchart TD
   PP --> HOLD
   BG -->|ja| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
   LA -->|rejected| LF["failed"]
+  LA -->|Hostidentität vor Anmeldung abgelehnt| HF
   LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
   JD -->|nein| LU["uncertain"]
+  JD -->|Hostidentität der Suchverbindung abgelehnt| HU["uncertain (host_identity_rejected), Ausgang bleibt unbekannt"]
   JD -->|ja| PO
   LA -->|launched| PO["createVMStatus im Takt VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS"]
   PO -->|running| PO
   PO -->|Transport abgerissen| PO
+  PO -->|Hostidentität vor Anmeldung abgelehnt| HU
   PO -->|Budget der Create-Phase erschöpft| TU["uncertain (job_timeout)"]
   PO -->|Abbruch angefordert| PC["Diese VM bis zum Ende beobachten, danach keine weitere"]
   PC --> PO
@@ -158,9 +166,11 @@ flowchart TD
   LU --> HOLD
   TU --> HOLD
   SU --> HOLD
+  HF --> HOLD
+  HU --> HOLD
 ```
 
-Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost` und `job_timeout` stoppen dagegen die ganze Create-Phase, weil ihr Ausgang auf ESXi nicht feststeht. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis.
+Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
 
 ## Playbooks
 

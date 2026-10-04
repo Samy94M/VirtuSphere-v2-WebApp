@@ -3,6 +3,22 @@
 declare(strict_types=1);
 
 return [
+    'host_identity_confirmed' => 'Host key confirmed',
+    'host_identity_provisional' => 'Provisionally pinned; please confirm',
+    'host_identity_upgrade_pending' => 'Existing credential: the first connection will provisionally pin its key',
+    'host_identity_unconfirmed' => 'New credential: confirm the host key first',
+    'host_identity_mismatch' => 'Host key differs: authentication blocked',
+    'host_identity_observed' => 'Observed: :identity (:when)',
+    'host_identity_confirmation' => 'Confirmed on :when by user #:user',
+    'host_identity_manage' => 'Credentials: check host key',
+    'host_identity_hint' => 'Run the credential test to see the observed fingerprint and key type. Compare both directly on the Ubuntu host using ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (choose the matching public key file for the displayed key type). Enter the fingerprint and SSH key type in the empty fields after the independent comparison. Confirm only the independently checked value. A change replaces the previous pin.',
+    'host_identity_fingerprint' => 'SHA256 fingerprint',
+    'host_identity_type' => 'Key type',
+    'host_identity_button' => 'Confirm checked host key',
+    'host_identity_confirm' => 'Have you compared the host key for “:name” directly on the Ubuntu host? This confirmation may replace the previous pin.',
+    'host_identity_saved' => 'The checked host key was confirmed. An identity change discards the previous full test; run a new credential test in that case.',
+    'host_identity_invalid' => 'Enter the SHA256 fingerprint and key type from the host key check.',
+    'host_identity_changed' => 'The credential or host identity changed. Reload and check the fingerprint again.',
     'title' => 'Credentials',
     'create_heading' => 'Create credential',
     'scope_hint' => 'Only encrypted Ansible and ESXi accounts are stored here.',

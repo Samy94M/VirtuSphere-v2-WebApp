@@ -3,6 +3,22 @@
 declare(strict_types=1);
 
 return [
+    'host_identity_confirmed' => 'Host-Schlüssel bestätigt',
+    'host_identity_provisional' => 'Vorläufig angeheftet, bitte bestätigen',
+    'host_identity_upgrade_pending' => 'Bestehender Zugang: Schlüssel wird bei der ersten Verbindung vorläufig angeheftet',
+    'host_identity_unconfirmed' => 'Neuer Zugang: Host-Schlüssel zuerst bestätigen',
+    'host_identity_mismatch' => 'Host-Schlüssel weicht ab: Anmeldung gesperrt',
+    'host_identity_observed' => 'Beobachtet: :identity (:when)',
+    'host_identity_confirmation' => 'Bestätigt am :when durch Benutzer #:user',
+    'host_identity_manage' => 'Zugangsdaten: Host-Schlüssel prüfen',
+    'host_identity_hint' => 'Starte den Zugangstest, um den beobachteten Fingerprint und Schlüsseltyp zu sehen. Vergleiche beides direkt auf dem Ubuntu-Host mit ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (für den angezeigten Schlüsseltyp die passende öffentliche Schlüsseldatei wählen). Trage Fingerprint und SSH-Schlüsseltyp nach dem unabhängigen Vergleich in die leeren Felder ein. Bestätige nur den unabhängig geprüften Wert. Eine Änderung ersetzt den bisherigen Pin.',
+    'host_identity_fingerprint' => 'SHA256-Fingerprint',
+    'host_identity_type' => 'Schlüsseltyp',
+    'host_identity_button' => 'Geprüften Host-Schlüssel bestätigen',
+    'host_identity_confirm' => 'Hast du den Host-Schlüssel für „:name“ direkt auf dem Ubuntu-Host verglichen? Diese Bestätigung ersetzt gegebenenfalls den bisherigen Pin.',
+    'host_identity_saved' => 'Der geprüfte Host-Schlüssel wurde bestätigt. Eine Änderung der Identität verwirft den bisherigen Volltest; starte dann einen neuen Zugangstest.',
+    'host_identity_invalid' => 'Trage den SHA256-Fingerprint und Schlüsseltyp aus der Prüfung am Host ein.',
+    'host_identity_changed' => 'Der Zugang oder Host-Schlüssel wurde inzwischen geändert. Lade die Seite neu und prüfe den Fingerprint erneut.',
     'title' => 'Zugangsdaten',
     'create_heading' => 'Zugangsdaten anlegen',
     'scope_hint' => 'Hier werden ausschließlich verschlüsselte Ansible- und ESXi-Konten gespeichert.',

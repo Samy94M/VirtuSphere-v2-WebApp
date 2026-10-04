@@ -30,6 +30,7 @@ require_once __DIR__ . '/ssh.php';
 
 /** The error codes that stop the whole job rather than only their unit. */
 const VIRTUSPHERE_CREATE_GLOBAL_STOP_ERROR_CODES = [
+    VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
     VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
     VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST,
     VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT,
@@ -137,6 +138,17 @@ function deploy_worker_create_verify_skip(
     );
     $marker = $result['marker'];
     $expected = trim((string) $source['vm_instance_uuid']);
+    if (($result['host_identity_error'] ?? null) !== null) {
+        $verdict = deploy_worker_create_terminate_unit(
+            $channel,
+            $fence,
+            $unit,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
+            $result['host_identity_error']
+        );
+        return ['stop' => $verdict['stop'], 'reason' => $verdict['reason']];
+    }
     if ($result['transport_error'] !== null || $marker === null) {
         $verdict = deploy_worker_create_terminate_unit(
             $channel,

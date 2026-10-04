@@ -68,6 +68,7 @@ final class CliRequireClosureContractTest extends TestCase
     private const GUARDED = [
         // errors.php calls it inside `if (function_exists(...))`.
         'virtusphere_csp_nonce' => 'guarded by function_exists() in lib/errors.php',
+        'virtusphere_start_session' => 'guarded by function_exists() in lib/auth.php; session_start_secure() has its own fallback when the portal bootstrap is absent',
         // https_config.php short-circuits on `PHP_SAPI === 'cli' ||` first.
         'virtusphere_is_request_secure' => 'unreachable under CLI: https_redirect_if_required() returns on PHP_SAPI === cli',
         // deploy_parse_schedule() parses $_POST, so only a request can call it.
@@ -171,6 +172,20 @@ final class CliRequireClosureContractTest extends TestCase
      * entrypoint that calls a lib/ function no file in its closure defines has
      * to be reported, with the defining file named.
      */
+    public function testMethodDeclarationsAreNotGlobalCallsButGlobalCallsRemainVisible(): void
+    {
+        $fixture = tempnam(sys_get_temp_dir(), 'require-method-');
+        self::assertNotFalse($fixture);
+        try {
+            file_put_contents($fixture, '<?php class Guard { public function login() { parent::login(); } }');
+            self::assertArrayNotHasKey('login', $this->calledFunctions($fixture));
+            file_put_contents($fixture, "\nlogin();", FILE_APPEND);
+            self::assertArrayHasKey('login', $this->calledFunctions($fixture));
+        } finally {
+            unlink($fixture);
+        }
+    }
+
     public function testTheAnalyserReportsACallOutsideTheClosure(): void
     {
         $root = $this->fixtureTree([

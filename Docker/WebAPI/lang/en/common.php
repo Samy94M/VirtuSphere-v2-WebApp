@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Reused portal terms (buttons, table headers, states).
  */
 return [
+    'conn_ansible_host_identity' => 'The Ansible host key differs, is unconfirmed or cannot be checked. Check its fingerprint in Credentials; no password is sent before admission.',
     'name' => 'Name',
     'status' => 'Status',
     'vms' => 'VMs',

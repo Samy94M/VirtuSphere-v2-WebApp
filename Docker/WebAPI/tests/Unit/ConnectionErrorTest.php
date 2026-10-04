@@ -251,7 +251,7 @@ final class ConnectionErrorTest extends TestCase
     {
         $source = (string) file_get_contents(__DIR__ . '/../../lib/ssh.php');
         self::assertMatchesRegularExpression(
-            '/if \(\$ssh->login\(\$username, \$secret\)\).*?VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH/s',
+            '/if \(ssh_verified_login\(\$ssh, \$username, \$secret, \$credential\)\).*?VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH/s',
             $source
         );
         self::assertStringNotContainsString(

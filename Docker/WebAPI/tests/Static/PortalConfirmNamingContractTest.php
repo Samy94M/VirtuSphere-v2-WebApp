@@ -29,6 +29,7 @@ final class PortalConfirmNamingContractTest extends TestCase
         'credentials.confirm_activate_strict',
         'credentials.confirm_delete',
         'credentials.confirm_use_legacy',
+        'credentials.host_identity_confirm',
         'deploy.confirm_cancel',
         // Etappe 14B-F: the release names the one VM whose outcome is being
         // decided. Confirming it for the wrong row would record that a VM

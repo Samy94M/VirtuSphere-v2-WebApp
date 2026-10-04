@@ -6,6 +6,8 @@ Read only the owner sections relevant to the change. These detailed contracts ar
 
 Schema changes must be idempotent, utf8mb4, and preflight data blockers before DDL. Fresh `struktur.sql` and live migrations must converge to the same shape.
 
+Migration `0059_ansible_host_identity` grants one-time accept-new only to existing Ansible credentials. Follow the supported upgrade combination in `docs/operations/upgrade-recovery.md`: portal and workers are not released while migrations are pending. Fresh schema/new credential inserts explicitly default to no upgrade eligibility. The marker comes after the nullable identity/observation columns, so interrupted DDL can be retried without clearing an existing pin or regranting a consumed exception. Its temporary default of 1 bridges interrupted DDL; the new credential writer explicitly inserts 0 even during that interval. An old application writing credentials during this schema transition is outside the supported upgrade contract. Pins and their initial audit commit together; observed mismatches are separate from the anchor. Confirmation carries credential revision plus old pin.
+
 ## R2 ESXi object-name columns use binary collation because case and raw Unicode are operative identi
 
 ESXi object-name columns use binary collation because case and raw Unicode are operative identity. Inventory name semantics, freshness and observation are updated per kind in the same cache transaction; one kind cannot upgrade another, and the VLAN catalog must not retire against semantics-1 evidence. Interface VLAN writers route through `lib/repo/vm_network.php`, preserve effective MACs and take the mission/active-job lock before validating the proposed fingerprint.

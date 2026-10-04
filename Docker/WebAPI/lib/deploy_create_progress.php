@@ -152,6 +152,7 @@ function deploy_create_progress_finding(array $row): array
 {
     $errorCode = (string) ($row['error_code'] ?? '');
     $reasonKey = match ($errorCode) {
+        VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED => 'deploy.create_progress_reason_host_identity',
         VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED => 'deploy.create_progress_reason_module_failed',
         VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT => 'deploy.create_progress_reason_identity_conflict',
         VIRTUSPHERE_CREATE_ERROR_IDENTITY_BOUND_VM_RENAMED => 'deploy.create_progress_reason_renamed',

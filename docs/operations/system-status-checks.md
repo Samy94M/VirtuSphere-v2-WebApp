@@ -104,11 +104,15 @@ Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` In
 
 Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Jetzt vollständig testen**, über **Zugangsdaten, Testen** oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 
+Die getrennte Hostidentitätsanzeige zeigt Pin, Bestätigung und zuletzt beobachtete Abweichung. Sie ist kein Volltest und färbt dessen vorhandenen Nachweis nicht um. Jede SSH-/SFTP-Anmeldung geht über den [gemeinsamen Vertrauensablauf](trust-flows.md#ssh-und-sftp-zum-ubuntu-host); das gilt auch für die SFTP-Probe nach bestandenem SSH-Preflight.
+
 ```mermaid
 flowchart TD
   T["Volltest"] --> T1{"requirements.yml lokal lesbar?"}
   T1 -->|nein| TF["fehlgeschlagen (config), ohne SSH"]
-  T1 -->|ja| T2{"SSH-Anmeldung?"}
+  T1 -->|ja| TK{"Hostidentitäts-Guard gibt die Verbindung frei?"}
+  TK -->|nein| TFK["fehlgeschlagen (ansible_host_identity), kein Login"]
+  TK -->|ja| T2{"SSH-Anmeldung?"}
   T2 -->|nein| TF2["fehlgeschlagen (Anmeldung oder Zeitbudget)"]
   T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit"]
   T3 -->|Komponente fehlt| TF3["fehlgeschlagen mit Name der Komponente"]
@@ -118,6 +122,7 @@ flowchart TD
   T5 -->|abgewiesen| TW["bestanden mit Einschränkung"]
   T5 -->|frei oder ohne URL| TO["bestanden"]
   TF --> R
+  TFK --> R
   TF2 --> R
   TF3 --> R
   TF4 --> R

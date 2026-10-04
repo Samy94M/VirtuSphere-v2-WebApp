@@ -147,6 +147,7 @@ return [
     'esxi_cause_fix_ansible_sftp' => 'SFTP-Subsystem, Zielpfad, Schreibrechte, freien Speicher und Dateiübertragung auf dem Ansible-Host prüfen.',
     'esxi_cause_fix_ansible_timeout' => 'Jobprotokoll und Ansible-Host auf einen stillstehenden SSH- oder SFTP-Schritt prüfen; dies ist ein VirtuSphere-Zeitbudget, kein ESXi-Timeout. Beim lesenden Inventarabruf kommen dafür ein ausgelasteter Ansible-Host, eine stockende SFTP-Übertragung, eine langsame ESXi- oder vCenter-Abfrage und ein großer Objektbestand in Frage.',
     'esxi_cause_fix_ansible_transport' => 'Jobprotokoll sowie SSH-Dienst und Transportweg zum Ansible-Host prüfen.',
+    'esxi_cause_fix_ansible_host_identity' => 'In Zugangsdaten den beobachteten Host-Schlüssel unabhängig am Ubuntu-Host vergleichen und ausdrücklich bestätigen. Bei einer Abweichung bleibt die Anmeldung gesperrt; der ESXi-Zugang pausiert nicht.',
     'esxi_cause_fix_http' => 'Nur lesbarer Legacy-Wert. Erscheint er an einem alten Datensatz, ordnet ein neuer Abruf die Ursache mit dem aktuellen Vokabular ein.',
     'esxi_cause_fix_ssh' => 'Kein neuer Abruf schreibt diesen Wert mehr; er stammt aus einem Abruf vor der Herkunftstrennung und benennt keinen Verursacher. Das Jobprotokoll des Abrufs nennt die tatsächliche Ursache; ein neuer Abruf ersetzt den Wert durch eine Kategorie, die den Verursacher benennt.',
     'esxi_cause_fix_worker' => 'Deploy-Worker, Datenbankverbindung und Jobprotokoll prüfen; die Kategorie behauptet keine Transportursache.',

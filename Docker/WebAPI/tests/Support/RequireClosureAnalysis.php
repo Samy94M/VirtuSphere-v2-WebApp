@@ -134,6 +134,9 @@ trait RequireClosureAnalysis
         $source = (string) file_get_contents($file);
         // Comments carry example calls and prose; only real code counts.
         $source = (string) preg_replace(['!/\*.*?\*/!s', '!^\s*//.*$!m'], '', $source);
+        // A named method declaration is not a call to a global function with
+        // the same name. Keep actual calls in the method body visible.
+        $source = (string) preg_replace('/\bfunction\s+&?\s*[A-Za-z_][A-Za-z0-9_]*\s*\(/', 'function (', $source);
 
         $out = [];
         if (preg_match_all('/(?<![>$:\w])(?<!new\s)([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $source, $matches) !== 0) {

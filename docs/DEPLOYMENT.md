@@ -2,6 +2,8 @@
 
 ## Ubuntu Ansible Host
 
+SSH and SFTP verify the Ubuntu host's public key before every password login, and block in-place phpseclib reauthentication because its signature-validation cache does not establish a new handshake. Each external connection uses a fresh guarded object. Store the Ansible credential, run its test to observe the fingerprint and key type, compare them directly on the host, then explicitly confirm the checked identity in **Credentials**. New credentials cannot authenticate until confirmed. Existing credentials provisionally pin their first key after the upgrade, continue operating and show “please confirm”; every later mismatch blocks before authentication, with no automatic pin replacement. A legitimate key rotation requires another independent comparison and explicit confirmation. Fingerprint, observed mismatch and confirmation are shown in Credentials and System status. The [trust flow](operations/trust-flows.md) and [ADR-0045](adr/ADR-0045-ansible-host-identity.md) describe the upgrade risk and repair path.
+
 VirtuSphere keeps Ansible outside the PHP/nginx stack. The browser queues a deploy job in the portal, the CLI deploy worker uploads generated YAML and playbooks over SFTP, then the Ubuntu Ansible host runs `ansible-playbook` against ESXi.
 
 Required on the Ubuntu host:

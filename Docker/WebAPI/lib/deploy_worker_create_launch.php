@@ -69,6 +69,16 @@ function deploy_worker_create_prepare_unit(
             'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], 'prepare'),
         ]
     );
+    if (($result['host_identity_error'] ?? null) !== null) {
+        return deploy_worker_create_terminate_unit(
+            $channel,
+            $fence,
+            $unit,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
+            $result['host_identity_error']
+        );
+    }
     if ($result['transport_error'] !== null) {
         // Nothing was mutated: a prepare call is read-only, so a broken
         // transport before it returned leaves the unit exactly where it was.
@@ -193,6 +203,17 @@ function deploy_worker_create_launch_unit(
     );
 
     $jid = null;
+    if (($result['host_identity_error'] ?? null) !== null) {
+        // The guard refused before authentication, so this launch ran nothing.
+        return deploy_worker_create_terminate_unit(
+            $channel,
+            $fence,
+            $unit,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED,
+            $result['host_identity_error']
+        );
+    }
     if ($result['transport_error'] !== null) {
         // The channel broke around a call that MAY have started a mutation.
         // Never a second launch on suspicion: the async directory of this one

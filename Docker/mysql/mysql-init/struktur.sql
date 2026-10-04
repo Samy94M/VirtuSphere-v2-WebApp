@@ -431,6 +431,15 @@ CREATE TABLE IF NOT EXISTS deploy_credentials (
     config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
     ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
     ansible_test_started_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_key_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_first_seen_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_confirmed_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_confirmed_by INT NULL,
+    ansible_host_observed_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_observed_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_observed_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_accept_new TINYINT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY credential_name_type_unique (type, name),
     CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

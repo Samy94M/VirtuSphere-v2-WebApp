@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ssh.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/settings_page.php';
 
@@ -118,6 +119,9 @@ function credentials_test_message(array $result): string
  */
 function credentials_test_action(array $result): ?array
 {
+    if ($result['code'] === VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_HOST_IDENTITY && can('credentials.manage')) {
+        return ['url' => 'credentials.php', 'label' => __t('credentials.host_identity_manage')];
+    }
     if (credentials_test_is_allowlist_warning($result)) {
         return [
             'url' => settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API),

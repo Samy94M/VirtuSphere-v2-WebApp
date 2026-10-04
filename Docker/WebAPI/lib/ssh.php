@@ -14,12 +14,14 @@ require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/ssh_transport_exceptions.php';
 require_once __DIR__ . '/ssh_sftp.php';
+require_once __DIR__ . '/ssh_host_identity.php';
 
 /** Files that own the SSH/SFTP transport domain, including this facade. */
 const VIRTUSPHERE_SSH_TRANSPORT_MODULES = [
     'ssh.php',
     'ssh_sftp.php',
     'ssh_transport_exceptions.php',
+    'ssh_host_identity.php',
 ];
 
 /**
@@ -148,10 +150,8 @@ function credential_test_ssh(array $credential, string $secret): array
     $context = ['host' => $host, 'port' => $port];
 
     try {
-        $ssh = new SSH2($host, $port, 8);
-        if ($ssh->login($username, $secret)) {
-            $ssh->disconnect();
-
+        $ssh = new VirtuSphereSshConnection($host, $port, 8);
+        if (ssh_verified_login($ssh, $username, $secret, $credential)) {
             return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_OK);
         }
 
@@ -159,6 +159,10 @@ function credential_test_ssh(array $credential, string $secret): array
         return credential_test_result(false, VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH, 'SSH login rejected for user ' . $username . '.', $context);
     } catch (Throwable $exception) {
         return credential_test_ssh_failure($exception, $secret, $context);
+    } finally {
+        if (isset($ssh)) {
+            $ssh->disconnect();
+        }
     }
 }
 
@@ -253,14 +257,19 @@ function ssh_execute_command(array $credential, string $secret, string $command,
     }
     $totalTimeout = max($totalTimeout, $idleTimeout);
 
-    $ssh = new SSH2($host, $port, 15);
+    $ssh = new VirtuSphereSshConnection($host, $port, 15);
     $ssh->setKeepAlive(VIRTUSPHERE_SSH_KEEPALIVE_INTERVAL_SECONDS);
     // The phpseclib timeout is only the read-slice length: each expiry returns
     // control so the loop below can tick the heartbeat and enforce the real
     // limits. It must never exceed the caller's idle budget.
     $ssh->setTimeout(min(VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS, $idleTimeout));
-    if (!$ssh->login($username, $secret)) {
-        throw new RuntimeException('SSH login failed.');
+    try {
+        if (!ssh_verified_login($ssh, $username, $secret, $credential)) {
+            throw new RuntimeException('SSH login failed.');
+        }
+    } catch (Throwable $exception) {
+        $ssh->disconnect();
+        throw $exception;
     }
 
     // exec() with callback === false only starts the command; the channel is
