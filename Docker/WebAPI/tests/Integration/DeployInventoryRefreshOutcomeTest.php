@@ -104,7 +104,7 @@ final class DeployInventoryRefreshOutcomeTest extends TestCase
         $id = (int) $this->db->insert_id;
         repo_deploy_create_materialize($this->db, $id, [['id' => $this->vmId, 'vm_name' => 'Refresh VM']]);
         if ($launched) {
-            repo_execute($this->db, "UPDATE deploy_create_vm_results SET status = 'uncertain', async_jid = '123456789.1', started_at = NOW() WHERE job_id = ?", 'i', [$id]);
+            repo_execute($this->db, "UPDATE deploy_create_vm_results SET status = 'uncertain', async_jid = '123456789.1', started_at = NOW(), error_code = 'transport_lost', error_detail = 'phpunit: launched, outcome unknown', finished_at = NOW() WHERE job_id = ?", 'i', [$id]);
         }
         $job = repo_deploy_job($this->db, $id);
         self::assertNotNull($job);

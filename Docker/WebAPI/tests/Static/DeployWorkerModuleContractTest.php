@@ -121,6 +121,8 @@ final class DeployWorkerModuleContractTest extends TestCase
         // evaluates the allowlist verdict.
         'deploy_worker_run_host_preflight',
         'deploy_worker_host_preflight_verdict',
+        // K10 (DF-E2): refuses a writing mode on a read-only host before marking.
+        'deploy_worker_esxi_write_preflight',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
         'deploy_worker_cleanup_diagnose',

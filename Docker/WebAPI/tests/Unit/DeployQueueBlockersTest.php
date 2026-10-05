@@ -49,7 +49,9 @@ final class DeployQueueBlockersTest extends TestCase
             // open_remedy finds the action again by code; a shared code would
             // send every conflict's link to the first VM.
             self::assertSame('identity_conflict_9', $blockers[0]['code']);
-            self::assertSame(__t('deploy.identity_conflict', ['name' => 'VM09']), $blockers[0]['message']);
+            // K9 appends the age of the inventory observation; that part is
+            // VmIdentityCollisionTest's. Here: the way-out sentence leads.
+            self::assertStringStartsWith(__t('deploy.identity_conflict', ['name' => 'VM09']), $blockers[0]['message']);
             self::assertSame([
                 'type' => 'link',
                 'url' => vm_edit_url(7, 9),

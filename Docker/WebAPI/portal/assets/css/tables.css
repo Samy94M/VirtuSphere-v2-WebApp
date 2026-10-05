@@ -22,6 +22,13 @@
     color: var(--muted);
 }
 
+/* An empty-table sentence that names its fix links it inside the prose (R11),
+   and colour alone does not mark a link there (WCAG 1.4.1), as for `.alert a`. */
+.table-empty a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 td.actions {
     /* Keep this a real table-cell, NOT display:flex. A flex <td> does not stretch
        to the row height, so when the data cells are taller (wrapped OS names, a

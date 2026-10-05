@@ -309,7 +309,7 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
  * that distinguishes MECM warning (yellow), MECM critical (red) and the grey
  * provider faults (unreachable, access denied) from each other in text.
  *
- * @param list<array{source:string,row:array|null,state:string}> $rows
+ * @param list<array{source:string,row:array|null,state:string,result_state?:string,reporter_state?:string}> $rows
  */
 function system_status_render_site(array $rows): void
 {

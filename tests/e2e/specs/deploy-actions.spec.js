@@ -197,8 +197,9 @@ echo 'JSON' . json_encode($vm) . 'JSON';
   const identity = () => phpJson(`
 $db = db();
 $id = ${Number(fixture.id)};
-$stmt = $db->prepare("SELECT v.vm_moid, v.vm_instance_uuid, (SELECT COUNT(*) FROM deploy_logs l WHERE l.event_code = 'vm.identity_adopted' AND l.object_id = CAST(v.id AS CHAR)) AS adopted_audits FROM deploy_vms v WHERE v.id = ?");
-$stmt->bind_param('i', $id);
+$objectId = (string) $id;
+$stmt = $db->prepare("SELECT v.vm_moid, v.vm_instance_uuid, (SELECT COUNT(*) FROM deploy_logs l WHERE l.event_code = 'vm.identity_adopted' AND l.object_type = 'vm' AND l.object_id = ?) AS adopted_audits FROM deploy_vms v WHERE v.id = ?");
+$stmt->bind_param('si', $objectId, $id);
 $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 `);

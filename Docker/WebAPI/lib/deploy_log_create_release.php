@@ -58,7 +58,15 @@ function deploy_log_render_create_release(mysqli $db, array $job, array $user): 
                         <li><?php echo h(__t('deploy.create_release_blocker_' . $blocker)); ?></li>
                     <?php } ?>
                 </ul>
-                <a href="<?php echo h(system_status_url('credential-' . (int) $job['credential_esxi_id'], ['inventory' => (int) $job['credential_esxi_id']])); ?>"><?php echo h(__t('deploy.create_progress_link_inventory')); ?></a>
+                <?php
+                // A job whose credential was deleted keeps no id (ON DELETE SET
+                // NULL); the card then links the ESXi section instead of a row.
+                $releaseEsxiId = (int) ($job['credential_esxi_id'] ?? 0);
+                $releaseInventoryUrl = $releaseEsxiId > 0
+                    ? system_status_url('credential-' . $releaseEsxiId, ['inventory' => $releaseEsxiId])
+                    : system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI);
+                ?>
+                <a href="<?php echo h($releaseInventoryUrl); ?>"><?php echo h(__t('deploy.create_progress_link_inventory')); ?></a>
             </div>
         <?php } else { ?>
             <form class="form-grid" method="post" action="deploy.php">

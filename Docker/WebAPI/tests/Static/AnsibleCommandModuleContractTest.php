@@ -29,6 +29,8 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_modes_using_start',
         'ansible_mode_expects_mac_result',
         'ansible_mode_creates_vms',
+        // K10 (DF-E2): which modes write to ESXi, derived from the sequence.
+        'ansible_mode_writes_esxi',
         'ansible_step_marker_line',
         'ansible_step_marker_parse',
         'ansible_step_failure_suffix',
