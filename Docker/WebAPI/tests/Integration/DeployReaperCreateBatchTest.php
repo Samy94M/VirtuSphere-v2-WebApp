@@ -133,7 +133,8 @@ final class DeployReaperCreateBatchTest extends TestCase
         };
         $observations = (object) ['count' => 0];
         $reaper->beforePrepare = function (string $sql) use ($first, $second, $observations): void {
-            if (!str_contains($sql, 'SELECT id, lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms')) {
+            if (!str_contains($sql, 'SELECT id, lifecycle_state, mecm_sync_state, vm_status')
+                || !str_contains($sql, 'FROM deploy_vms')) {
                 return;
             }
             $observations->count++;

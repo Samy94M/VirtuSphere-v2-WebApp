@@ -71,7 +71,7 @@ flowchart TD
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente; VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
-  H --> M["VMs des Auftrags auf deploying setzen"]
+  H --> M["VMs des Auftrags auf deploying setzen; bei Modi mit MAC-Ergebnis VMs mit ResourceID auslassen"]
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
@@ -100,7 +100,7 @@ flowchart TD
   E -->|ja| EM{"MAC-Ergebnis des Rückrufs?"}
   EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed"]
   EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial"]
-  EM -->|vollständig| EMS["Auftrag succeeded"]
+  EM -->|vollständig| EMS["Auftrag succeeded; gebundene VMs behalten ihren Zustand ohne neuen MECM-Pickup, fehlende MACs werden nur übernommen"]
   EO --> Z
   EMP --> Z
   EMS --> Z

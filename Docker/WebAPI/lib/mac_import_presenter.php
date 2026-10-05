@@ -26,6 +26,9 @@ function mac_import_present_error(array $error, array $job, bool $vmExists = tru
     $missionId = (int) ($job['mission_id'] ?? 0);
     $vmId = (int) ($error['vm_id'] ?? 0);
     [$actionLabel, $actionUrl] = match ($source) {
+        'binding' => $vmExists && $missionId > 0 && $vmId > 0
+            ? [__t('deploy.mac_action_binding'), vm_edit_url($missionId, $vmId)]
+            : ['', ''],
         'network' => $vmExists && $missionId > 0 && $vmId > 0
             ? [__t('deploy.mac_action_network'), vm_edit_url($missionId, $vmId, 'interfaces')]
             : [__t('deploy.mac_action_mission'), mission_details_url($missionId)],
@@ -36,7 +39,7 @@ function mac_import_present_error(array $error, array $job, bool $vmExists = tru
         default => [__t('deploy.mac_action_log'), deploy_job_raw_log_url((int) ($job['id'] ?? 0))],
     };
     $requiredPermission = match ($source) {
-        'network', 'identity' => 'vms.write',
+        'network', 'identity', 'binding' => 'vms.write',
         'external' => '',
         default => 'deploy.run',
     };
@@ -54,6 +57,25 @@ function mac_import_present_error(array $error, array $job, bool $vmExists = tru
     ];
 }
 
+/**
+ * K3 decision (b): a bound VM took over its first MAC and kept its state. The
+ * notice must not claim MECM knows an old MAC; it names the replacement case
+ * and links the VM editor (where the reset lives) for `vms.write` only.
+ *
+ * @return array{message:string,action_label:string,action_url:string}
+ */
+function mac_import_present_bound_first_mac_notice(int $vmId, array $job, bool $vmExists): array
+{
+    $missionId = (int) ($job['mission_id'] ?? 0);
+    $linkable = $vmExists && $missionId > 0 && $vmId > 0 && function_exists('can') && can('vms.write');
+
+    return [
+        'message' => __t('deploy.mac_notice_bound_first_mac'),
+        'action_label' => $linkable ? __t('deploy.mac_action_binding') : '',
+        'action_url' => $linkable ? vm_edit_url($missionId, $vmId) : '',
+    ];
+}
+
 /** @return list<array<string,mixed>> */
 function mac_import_present_vm_rows(array $result, array $job, ?array $existingVmIds = null): array
 {
@@ -63,6 +85,8 @@ function mac_import_present_vm_rows(array $result, array $job, ?array $existingV
             $errorsByVm[(int) $error['vm_id']][] = $error;
         }
     }
+    $isV2 = (int) ($result['version'] ?? 0) === VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION;
+    $boundFirstMacVmIds = array_map('intval', (array) ($job['mac_bound_first_vm_ids'] ?? []));
     $rows = [];
     foreach ((array) ($result['vm_results'] ?? []) as $vmResult) {
         if (!is_array($vmResult)) {
@@ -74,11 +98,16 @@ function mac_import_present_vm_rows(array $result, array $job, ?array $existingV
         foreach ($errorsByVm[$vmId] ?? [] as $error) {
             $presentedErrors[] = mac_import_present_error($error, $job, $vmExists);
         }
+        $success = (string) ($vmResult['outcome'] ?? '') === 'success';
         $rows[] = [
             'vm_id' => $vmId,
             'vm_name' => (string) ($vmResult['vm_name'] ?? ''),
             'vm_exists' => $vmExists,
             'outcome' => (string) ($vmResult['outcome'] ?? 'failed'),
+            'unchanged' => $isV2 && $success && ($vmResult['updated_interfaces'] ?? null) === 0,
+            'notice' => $isV2 && $success && in_array($vmId, $boundFirstMacVmIds, true)
+                ? mac_import_present_bound_first_mac_notice($vmId, $job, $vmExists)
+                : null,
             'updated_interfaces' => (int) ($vmResult['updated_interfaces'] ?? 0),
             'wds' => is_array($vmResult['wds'] ?? null) ? $vmResult['wds'] : null,
             'errors' => $presentedErrors,

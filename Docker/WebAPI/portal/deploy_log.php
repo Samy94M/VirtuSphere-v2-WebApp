@@ -97,6 +97,7 @@ if ($format === 'json') {
         ? deploy_retry_blockers($connection, (int) $job['id'])
         : null;
     $existingVmIds = deploy_log_existing_vm_ids($connection, $job);
+    $job['mac_bound_first_vm_ids'] = deploy_log_bound_first_mac_vm_ids($connection, $job);
     echo json_encode([
         'ok' => true,
         'job' => [
@@ -199,6 +200,7 @@ $retryEvaluation = deploy_job_is_retryable((string) $job['status'], (int) ($job[
     : null;
 $retryConfirm = deploy_retry_confirmation($retryEvaluation ?? [], (string) ($job['mission_name'] ?? ''));
 $existingVmIds = deploy_log_existing_vm_ids($connection, $job);
+$job['mac_bound_first_vm_ids'] = deploy_log_bound_first_mac_vm_ids($connection, $job);
 $originUrl = deploy_job_origin_url($job);
 // An empty log on an old finished job is almost certainly the retention prune,
 // not a job that printed nothing. Saying so beats an unexplained empty table.

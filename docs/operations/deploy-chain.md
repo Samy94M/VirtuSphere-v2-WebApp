@@ -126,7 +126,43 @@ gleichzeitiger Abbruch, endet der Auftrag ohne Preflight-Resultat als
 Der MAC-Rückruf akzeptiert nur den aktuellen exportfähigen Auftrag und dessen
 Attempt/Generation. Unter der Lockreihenfolge Mission, Job, Runtimeidentität,
 gegebenenfalls Remote-Exporthandle, VM und Interfaces muss exakt eine WDS-Karte
-mit gültiger MAC passen. Nur diese VM wird `deployed/pending`. Version 2 des
+mit gültiger MAC passen. Eine VM ohne gespeicherte ResourceID wird wie bisher
+`deployed/pending`. Bei gespeicherter ResourceID vergleicht der Rückruf die
+MAC-Adressen aller zugeordneten Karten nur mit den gespeicherten Werten
+(WM-E1). Gleiche MACs ergeben `success` mit `updated_interfaces=0`; das Portal
+zeigt die VM als „unverändert“. Der Worker überspringt für diese gebundenen
+VMs bereits die Markierung `deploying` in Modi mit MAC-Ergebnis. Rückruf und
+Abschluss bewahren Lebenszyklus, MECM-Zustand, Pickup-Merker `updated`, Pending-
+und Installationszeitstempel, Hypervisoridentität und Statusereignisse. Eine
+zuvor nicht angebotene VM wird deshalb nicht erneut vom Devices Sync abgeholt;
+eine bereits vorgemerkte Übertragung bleibt vorgemerkt.
+Eine leere gespeicherte MAC heißt „noch nicht bekannt“, nicht „geändert“
+(Nutzerentscheidung K3 (b), 05.10.2026). Das betrifft den Ersatz einer
+gebundenen VM durch Create, der die MACs verwirft, und eine später ergänzte
+Karte. Der Rückruf schreibt nur diese MACs und lässt Lebenszyklus,
+MECM-Zustand, Legacy-Status, Pickup-Merker, Zeitstempel und
+Hypervisoridentität unverändert. Die VM zählt zu den erfolgreichen,
+`updated_interfaces` nennt die geschriebenen Karten. In derselben Transaktion
+schreibt der Rückruf je VM eine Systemzeile ins Auftragslog. Aus ihr zeigt
+das Auftragsergebnis den DE/EN-Hinweis „MAC erstmals übernommen“ mit dem Rat,
+bei einem Ersatz das Gerät in MECM zu löschen und die MECM-ID zurückzusetzen.
+Ein V2-Feld kommt dafür nicht hinzu. Nach der Log-Retention entfällt der
+Hinweis, die VM steht dann als „erfolgreich“ da. Weil jetzt eine MAC
+gespeichert ist, gelingt „MECM-ID zurücksetzen“ (Sperre `no_mac`), und der
+nächste Export importiert ungebunden.
+Eine abweichende, nicht leere gespeicherte MAC ergibt `bound_mac_changed` und
+ein fehlgeschlagenes VM-Ergebnis, ohne MAC oder ResourceID zu überschreiben.
+Das Format zählt nicht: Gespeicherte und gemeldete MAC werden normalisiert
+verglichen. Der reguläre Worker-Abschluss konvergiert die fehlgeschlagene VM
+wie bisher nach `failed/failed`. Sie verliert damit `registered` und
+`os_installed` und mit ihnen die Umbenennungssperre; MECM-ID und gespeicherte
+MAC bleiben. Wird der Auftrag nach dem Rückruf abgebrochen, bleibt dieselbe VM
+dagegen unverändert, weil der Abbruch nur VMs in `deploying` konvergiert und
+gebundene VMs nie markiert wurden. Dieser abweichende Endzustand ist bekannt
+und gewollt unverändert. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
+MAC kennt, und fordert zum Zurücksetzen der MECM-ID auf; mit `vms.write`
+verlinkt er den VM-Editor. Der allgemeine Fehlervertrag und der Reaper bleiben
+unverändert (FC2-E1, K2-R1). Version 2 des
 Ergebnisses speichert per-VM-WDS-Evidenz und den semantischen
 Callback-Fingerprint; V1 bleibt historisch lesbar. Ein identischer zweiter
 Callback ist nur während desselben aktiven Laufs 200 ohne Domainwrite,

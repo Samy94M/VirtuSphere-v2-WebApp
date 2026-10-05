@@ -9,7 +9,9 @@ virtusphere_error_response_mode('json');
 
 require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
+require_once __DIR__ . '/lib/deploy_constants.php';
 require_once __DIR__ . '/lib/mac_import.php';
+require_once __DIR__ . '/lib/mac_import_binding.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -235,13 +237,34 @@ try {
     $legacyStatus = VIRTUSPHERE_STATUS_DEPLOYED;
     $note = 'ansible mac import';
 
+    $logStream = VIRTUSPHERE_DEPLOY_LOG_SYSTEM;
+    // ADR-0032: the line carries its job's correlation id like every helper-written line.
+    $insertJobLog = $connection->prepare(
+        'INSERT INTO deploy_job_logs (job_id, seq, stream, line, correlation_id) '
+        . 'SELECT ?, COALESCE(MAX(l.seq), 0) + 1, ?, ?, (SELECT j.correlation_id FROM deploy_jobs j WHERE j.id = ?) '
+        . 'FROM deploy_job_logs l WHERE l.job_id = ?'
+    );
+
     foreach ($plan['successful_vm_ids'] as $vmId) {
         $vmPlan = $plan['vm_plans'][$vmId];
-        foreach ($vmPlan['updates'] as $update) {
+        $writes = mac_import_plan_writes($vmPlan);
+        foreach ($writes as $update) {
             $mac = (string) $update['mac'];
             $interfaceId = (int) $update['id'];
             $updateInterface->bind_param('sii', $mac, $interfaceId, $vmId);
             $updateInterface->execute();
+        }
+        if (virtusphere_vm_is_mecm_bound($vmPlan['vm'])) {
+            // WM-E1: a bound VM keeps identity, lifecycle, pickup flag,
+            // watch/pending times and event history. K3 (b): first MACs were
+            // written above; the job-log marker carries the portal notice
+            // without a new V2 field. The job row is locked above.
+            if ($writes !== []) {
+                $logLine = mac_import_bound_first_mac_log_line((int) $vmId);
+                $insertJobLog->bind_param('issii', $jobId, $logStream, $logLine, $jobId, $jobId);
+                $insertJobLog->execute();
+            }
+            continue;
         }
 
         $identity = is_array($vmPlan['identity'] ?? null) ? $vmPlan['identity'] : null;

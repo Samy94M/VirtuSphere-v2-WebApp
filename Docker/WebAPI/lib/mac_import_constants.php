@@ -5,6 +5,8 @@ declare(strict_types=1);
 const VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION = 2;
 const VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION = 1;
 const VIRTUSPHERE_MAC_IMPORT_RESULT_KIND = 'mac_import';
+// Fixed system-stream job-log prefix for a bound VM's first MAC (K3 (b)).
+const VIRTUSPHERE_MAC_IMPORT_BOUND_FIRST_MAC_LOG_PREFIX = 'MAC first imported for MECM-bound VM ';
 
 const VIRTUSPHERE_MAC_IMPORT_ERROR_INTERFACE_NOT_FOUND = 'interface_not_found';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_MAC = 'duplicate_mac';
@@ -17,6 +19,7 @@ const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSING_NIC_DATA = 'missing_nic_data';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_ESXI_QUERY_FAILED = 'esxi_query_failed';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_RESULT = 'duplicate_result';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH = 'identity_mismatch';
+const VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED = 'bound_mac_changed';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_MISSION_WDS_MISSING = 'mission_wds_missing';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_MISSING = 'portal_wds_interface_missing';
 const VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_CASE = 'portal_wds_interface_case_mismatch';
@@ -38,6 +41,7 @@ const VIRTUSPHERE_MAC_IMPORT_ERROR_CODES = [
     VIRTUSPHERE_MAC_IMPORT_ERROR_ESXI_QUERY_FAILED,
     VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_RESULT,
     VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH,
+    VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED,
     VIRTUSPHERE_MAC_IMPORT_ERROR_MISSION_WDS_MISSING,
     VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_MISSING,
     VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_CASE,
@@ -62,6 +66,7 @@ const VIRTUSPHERE_MAC_IMPORT_ERROR_META = [
     VIRTUSPHERE_MAC_IMPORT_ERROR_ESXI_QUERY_FAILED => ['source' => 'external', 'retry' => 'external_confirm', 'key' => 'esxi_query_failed'],
     VIRTUSPHERE_MAC_IMPORT_ERROR_DUPLICATE_RESULT => ['source' => 'protocol', 'retry' => 'manual', 'key' => 'duplicate_result'],
     VIRTUSPHERE_MAC_IMPORT_ERROR_IDENTITY_MISMATCH => ['source' => 'identity', 'retry' => 'identity_blocked', 'key' => 'identity_mismatch'],
+    VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED => ['source' => 'binding', 'retry' => 'portal_blocked', 'key' => 'bound_mac_changed'],
     VIRTUSPHERE_MAC_IMPORT_ERROR_MISSION_WDS_MISSING => ['source' => 'network', 'retry' => 'portal_blocked', 'key' => 'mission_wds_missing'],
     VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_MISSING => ['source' => 'network', 'retry' => 'portal_blocked', 'key' => 'portal_wds_interface_missing'],
     VIRTUSPHERE_MAC_IMPORT_ERROR_PORTAL_WDS_CASE => ['source' => 'network', 'retry' => 'portal_blocked', 'key' => 'portal_wds_interface_case_mismatch'],

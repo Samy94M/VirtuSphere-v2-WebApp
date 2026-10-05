@@ -4,6 +4,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/mac.php';
 require_once __DIR__ . '/mac_import_constants.php';
+require_once __DIR__ . '/mac_import_binding.php';
 require_once __DIR__ . '/mac_import_result.php';
 require_once __DIR__ . '/mac_import_callback.php';
 require_once __DIR__ . '/mac_import_network.php';
@@ -241,6 +242,16 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
 
             $interface = $matches[0];
             $interfaceId = (int) $interface['id'];
+            // K3 decision (b): an empty stored MAC is "not known yet" (a
+            // replacement forgot it, or the card was added later), never a
+            // change. Only a stored, differing value is one; the comparison is
+            // normalized, so the stored spelling does not matter.
+            $storedMac = trim((string) ($interface['mac'] ?? ''));
+            $firstMac = $storedMac === '';
+            if (virtusphere_vm_is_mecm_bound($vm) && !$firstMac
+                && virtusphere_normalize_mac($storedMac) !== $normalizedMac) {
+                mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED, $vlan, $normalizedMac);
+            }
             if (isset($vmPlans[$vmId]['updates'][$interfaceId])) {
                 mac_import_add_vm_error($vmPlans[$vmId], VIRTUSPHERE_MAC_IMPORT_ERROR_AMBIGUOUS_VLAN, $vlan, '', null, 'esxi');
                 continue;
@@ -249,6 +260,7 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
                 'id' => $interfaceId,
                 'mac' => $normalizedMac,
                 'vlan' => $vlan,
+                'first_mac' => $firstMac,
             ];
         }
         if ($nics === []) {
@@ -287,7 +299,7 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
 /** @return array{0:array<int,array<string,mixed>>,1:array<string,array<string,mixed>>} */
 function mac_import_mission_vms(mysqli $db, int $missionId): array
 {
-    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated, vm_instance_uuid FROM deploy_vms WHERE mission_id = ? ORDER BY id FOR UPDATE');
+    $stmt = $db->prepare('SELECT id, vm_name, lifecycle_state, mecm_sync_state, vm_status, updated, vm_instance_uuid, mecm_id FROM deploy_vms WHERE mission_id = ? ORDER BY id FOR UPDATE');
     $stmt->bind_param('i', $missionId);
     $stmt->execute();
     $byId = [];

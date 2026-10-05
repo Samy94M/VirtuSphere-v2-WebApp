@@ -55,7 +55,7 @@ function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, 
         $wdsVerified = $wds === null || (bool) ($wds['verified'] ?? false);
         if ($vmErrors === [] && $vmPlan['updates'] !== [] && $wdsVerified) {
             $successful[] = (int) $vmId;
-            $updatedInterfaces += count($vmPlan['updates']);
+            $updatedInterfaces += count(mac_import_plan_writes($vmPlan));
         } else {
             $failed[] = (int) $vmId;
             array_push($errors, ...$vmErrors);
@@ -76,7 +76,7 @@ function mac_import_finalize_plan(array $expected, array $vmPlans, array $rows, 
             'vm_id' => (int) $vmId,
             'vm_name' => (string) ($vm['vm_name'] ?? ''),
             'outcome' => $success ? 'success' : 'failed',
-            'updated_interfaces' => $success ? count($plan['updates']) : 0,
+            'updated_interfaces' => $success ? count(mac_import_plan_writes($plan)) : 0,
             'error_codes' => $codes,
         ];
         if (is_array($plan['wds'] ?? null)) {
@@ -257,7 +257,7 @@ function mac_import_validate_v2_result(array $decoded, array $result): bool
         }
         $isSuccess = in_array($vmId, $successful, true);
         if (($vmResult['outcome'] === 'success') !== $isSuccess
-            || ($isSuccess && ($codes !== [] || $updated <= 0 || $wds['verified'] !== true || !is_int($wds['portal_interface_id'])))
+            || ($isSuccess && ($codes !== [] || $wds['verified'] !== true || !is_int($wds['portal_interface_id'])))
             || (!$isSuccess && ($codes === [] || $updated !== 0 || $wds['verified'] !== false))) {
             return false;
         }

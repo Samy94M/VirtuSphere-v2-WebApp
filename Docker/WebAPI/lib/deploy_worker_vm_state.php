@@ -3,8 +3,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/ansible_command.php';
+require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_ownership.php';
 require_once __DIR__ . '/mac_import.php';
+require_once __DIR__ . '/mac_import_binding.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/status_events.php';
 
@@ -18,7 +21,8 @@ require_once __DIR__ . '/repo/status_events.php';
  * off-limits to every convergence path here.
  */
 /**
- * Marks the job's scope VMs as `deploying` at claim time. Lifecycle only: the
+ * Marks the job's scope VMs as `deploying` after preflight. Export-capable
+ * modes leave VMs with a stored ResourceID alone (WM-E1). Lifecycle only: the
  * MECM sync state and the frozen legacy vm_status are not changed by starting
  * a job.
  *
@@ -35,9 +39,12 @@ function deploy_worker_mark_vms_deploying(mysqli $db, array $job, string $note, 
         $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
         $priorLifecycles = [];
         $keep = deploy_worker_locked_imported_vm_ids($job);
+        $expectsMac = ansible_mode_expects_mac_result((string) deploy_worker_payload($job)['mode']);
         foreach (deploy_worker_scope_vms($db, (int) $job['mission_id'], $vmIds, true) as $vm) {
             $vmId = (int) $vm['id'];
-            if (in_array($vmId, $keep, true)) {
+            // WM-E1: an export verifies a stored MECM binding; it must not
+            // open a new lifecycle bracket before that read-only verdict.
+            if (in_array($vmId, $keep, true) || ($expectsMac && virtusphere_vm_is_mecm_bound($vm))) {
                 continue;
             }
             $priorLifecycles[$vmId] = (string) ($vm['lifecycle_state'] ?? '');
@@ -107,8 +114,9 @@ function deploy_worker_restore_deploying_vms(mysqli $db, array $job, string $not
  * vm_status is never rewritten by a failure (GROK.md legacy status contract);
  * errors live in lifecycle/MECM state only.
  *
- * $keepVmIds are the VMs whose MAC import committed (successful_vm_ids of the
- * job's result_json): their deployed/pending state is the truth and stays.
+ * $keepVmIds are the VMs with a successful MAC result (successful_vm_ids of
+ * result_json): an unbound import keeps deployed/pending; an unchanged bound
+ * export keeps its original lifecycle and MECM state.
  * $onlyDeploying additionally restricts the marking to VMs still in
  * `deploying` - the cancel path, which must not repaint states the import
  * endpoint already finished.
@@ -209,10 +217,10 @@ function deploy_worker_scope_vms(mysqli $db, int $missionId, array $vmIds, bool 
     $vmIds = array_values(array_filter(array_map('intval', $vmIds), static fn (int $id): bool => $id > 0));
     if ($vmIds !== []) {
         $placeholders = implode(', ', array_fill(0, count($vmIds), '?'));
-        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms WHERE mission_id = ? AND id IN (' . $placeholders . ') ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
+        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status, mecm_id FROM deploy_vms WHERE mission_id = ? AND id IN (' . $placeholders . ') ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
         $stmt->bind_param('i' . str_repeat('i', count($vmIds)), $missionId, ...$vmIds);
     } else {
-        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms WHERE mission_id = ? ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
+        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status, mecm_id FROM deploy_vms WHERE mission_id = ? ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
         $stmt->bind_param('i', $missionId);
     }
     $stmt->execute();

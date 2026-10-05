@@ -186,11 +186,20 @@ function deploy_terminal_vm_results_html(array $rows): string
             $html .= '<br><span class="muted">' . deploy_terminal_h(__t('deploy.mac_vm_deleted')) . '</span>';
         }
         $html .= '</td>';
-        $html .= '<td>' . deploy_terminal_h($success ? __t('deploy.mac_vm_success') : __t('deploy.mac_vm_failed')) . '</td>';
+        $label = $success ? (!empty($row['unchanged']) ? __t('deploy.mac_vm_unchanged') : __t('deploy.mac_vm_success')) : __t('deploy.mac_vm_failed');
+        $html .= '<td>' . deploy_terminal_h($label) . '</td>';
         $html .= '<td><code>' . deploy_terminal_h((string) ($wds['configured_portgroup'] ?? '')) . '</code><br>'
             . deploy_terminal_h(!empty($wds['verified']) ? __t('deploy.mac_wds_verified') : __t('deploy.mac_wds_not_verified')) . '</td>';
         $errors = (array) ($row['errors'] ?? []);
-        if ($errors === []) {
+        $notice = is_array($row['notice'] ?? null) ? $row['notice'] : null;
+        if ($errors === [] && $notice !== null) {
+            $html .= '<td>' . deploy_terminal_h((string) $notice['message']) . '</td><td>';
+            if ((string) $notice['action_url'] !== '' && (string) $notice['action_label'] !== '') {
+                $html .= '<a href="' . deploy_terminal_h((string) $notice['action_url']) . '">'
+                    . deploy_terminal_h((string) $notice['action_label']) . '</a>';
+            }
+            $html .= '</td>';
+        } elseif ($errors === []) {
             $html .= '<td>' . deploy_terminal_h(__t('deploy.mac_no_error')) . '</td><td></td>';
         } else {
             $html .= '<td><ul>';

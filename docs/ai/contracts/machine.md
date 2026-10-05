@@ -29,6 +29,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 ## A66 db_importMAC.php: Ansible MAC import; payload { "mission_id": 123, "job_id": 45, "results": [..
 
 - `db_importMAC.php`: Ansible MAC import; payload `{ "mission_id": 123, "job_id": 45, "results": [...] }`, `job_id` required (ADR-0035). New writes use strict result V2 with per-VM exact WDS evidence and semantic callback fingerprint; historical V1 remains readable. The request/result/response bounds are centralized in `lib/mac_import_constants.php`, and callback fencing must preserve the existing endpoint envelope and HTTP meanings.
+- WM-E1: a stored nonempty ResourceID makes export a MAC comparison. Equal MACs preserve the entire VM/interface state and return the existing V2 `success` row with `updated_interfaces=0`; the portal calls it unchanged. A changed mapped MAC returns `bound_mac_changed`, preserves MACs and ResourceID, and is failed by the existing worker conclusion. An empty stored MAC on a bound VM is "not known yet" (K3 decision (b)): the callback writes only those MACs, keeps every VM state field, counts them in `updated_interfaces` and records a fixed system line in the job log in the same transaction; the portal derives its "first MAC" notice from that line. Comparison is on normalized MACs. There is no new response field, outcome token or result version.
 
 ## A67 mecm_report.php: report channel (ADR-0018/ADR-0044), POST-only
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/deploy_log_phases.php';
+require_once __DIR__ . '/mac_import_binding.php';
 require_once __DIR__ . '/mac_import_result.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 
@@ -116,6 +117,48 @@ function deploy_log_existing_vm_ids(mysqli $db, array $job): ?array
         static fn (array $row): int => (int) $row['id'],
         $stmt->get_result()->fetch_all(MYSQLI_ASSOC)
     );
+}
+
+/**
+ * Bound VMs whose first MAC this job's callback took over (K3 decision (b)).
+ * The V2 result cannot say so without a new field, so the callback leaves a
+ * fixed system line in the same transaction and this reads it back. Only
+ * successful rows that wrote something are candidates; after the log
+ * retention the notice is gone and the row reads as an ordinary success.
+ *
+ * @return list<int>
+ */
+function deploy_log_bound_first_mac_vm_ids(mysqli $db, array $job): array
+{
+    $result = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
+    if (!is_array($result) || $result['version'] !== VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION) {
+        return [];
+    }
+    $candidates = [];
+    foreach ($result['vm_results'] as $row) {
+        if (is_array($row) && ($row['outcome'] ?? '') === 'success' && (int) ($row['updated_interfaces'] ?? 0) > 0) {
+            $candidates[(int) ($row['vm_id'] ?? 0)] = true;
+        }
+    }
+    if ($candidates === []) {
+        return [];
+    }
+    $jobId = (int) ($job['id'] ?? 0);
+    $stream = VIRTUSPHERE_DEPLOY_LOG_SYSTEM;
+    $prefix = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], VIRTUSPHERE_MAC_IMPORT_BOUND_FIRST_MAC_LOG_PREFIX) . '%';
+    $stmt = $db->prepare('SELECT line FROM deploy_job_logs WHERE job_id = ? AND stream = ? AND line LIKE ? ORDER BY seq');
+    $stmt->bind_param('iss', $jobId, $stream, $prefix);
+    $stmt->execute();
+    $ids = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $logRow) {
+        $vmId = mac_import_bound_first_mac_log_vm_id((string) $logRow['line']);
+        if ($vmId !== null && isset($candidates[$vmId])) {
+            $ids[$vmId] = $vmId;
+        }
+    }
+    ksort($ids);
+
+    return array_values($ids);
 }
 
 /** @param array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} $page */

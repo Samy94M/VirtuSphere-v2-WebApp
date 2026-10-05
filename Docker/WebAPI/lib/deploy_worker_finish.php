@@ -135,8 +135,8 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
 
 /**
  * Fails a mission job with selective VM marking (E1): VMs whose MAC import
- * already committed are really deployed (their MACs are in, MECM may pick
- * them up) and keep deployed/pending even though the job fails. Everything
+ * already committed keep their proven state: unbound imports stay
+ * deployed/pending, unchanged bound exports keep their original state. Everything
  * else in the job scope becomes failed/failed - lifecycle and mecm_sync_state
  * together, so no failed VM advertises a sync that can never happen.
  * $vmsMarked false (a failure before deploy_worker_mark_vms_deploying()) fails
@@ -176,7 +176,7 @@ function deploy_worker_handle_failure(
         $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
         deploy_worker_mark_vms_failed($db, $job, 'deploy job ' . $jobId . ' failed', $vmIds, $keepVmIds);
         if ($keepVmIds !== []) {
-            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a committed MAC import keep their deployed state.');
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a successful MAC result keep their state.');
         }
         return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
     });
