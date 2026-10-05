@@ -91,6 +91,23 @@ final class VmProgressWatchTest extends TestCase
         self::assertNull($this->row($unwatchedInstall)['os_install_watch_started_at']);
     }
 
+    /**
+     * VT-E1 C: a client ACK before the binding leaves os_installed / pending.
+     * Count, per-mission count and restart all treat that as the pending watch,
+     * the same answer virtusphere_vm_progress_watch_kind() gives.
+     */
+    public function testInstalledButStillPendingIsCountedAndRestartable(): void
+    {
+        $vmId = $this->insertVm(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $this->db->query('UPDATE deploy_vms SET mecm_pending_since = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ' . $vmId);
+
+        self::assertSame(1, repo_vm_progress_attention_count($this->db, $this->missionId));
+        self::assertSame(1, repo_vm_progress_attention_counts_by_mission($this->db)[$this->missionId] ?? 0);
+        self::assertSame(VIRTUSPHERE_VM_PROGRESS_MECM_PENDING, repo_restart_vm_progress_watch($this->db, $this->missionId, $vmId));
+        self::assertSame(0, repo_vm_progress_attention_count($this->db, $this->missionId));
+        self::assertSame(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, $this->row($vmId)['lifecycle_state']);
+    }
+
     private function insertVm(string $lifecycle, string $mecm): int
     {
         $name = 'WATCH' . bin2hex(random_bytes(4));

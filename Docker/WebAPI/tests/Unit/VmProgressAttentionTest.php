@@ -62,15 +62,37 @@ final class VmProgressAttentionTest extends TestCase
         self::assertSame(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS + 1, $attention['age_seconds']);
     }
 
-    public function testOnlyTheTwoExpectedStateCombinationsCanRestartAWatch(): void
+    /**
+     * VT-E1 C: MECM `pending` is watched whatever the lifecycle says. A client
+     * ACK can reach 5/5 before the device-sync binds the VM, and a VM that the
+     * sync then never binds must not fall silent.
+     */
+    public function testPendingIsWatchedIndependentlyOfTheLifecycle(): void
+    {
+        foreach ([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_LIFECYCLE_OS_INSTALLED] as $lifecycle) {
+            $vm = $this->vm([
+                'lifecycle_state' => $lifecycle,
+                'mecm_pending_since' => gmdate('Y-m-d H:i:s', self::NOW - VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS - 1),
+            ]);
+            self::assertSame(VIRTUSPHERE_VM_PROGRESS_MECM_PENDING, virtusphere_vm_progress_watch_kind($vm), $lifecycle);
+            self::assertSame(VIRTUSPHERE_VM_PROGRESS_MECM_PENDING, virtusphere_vm_progress_attention($vm, self::NOW)['kind'] ?? null, $lifecycle);
+        }
+    }
+
+    public function testOnlyPendingAndAnInstallingRegistrationCanRestartAWatch(): void
     {
         self::assertSame(VIRTUSPHERE_VM_PROGRESS_MECM_PENDING, virtusphere_vm_progress_watch_kind($this->vm()));
         self::assertNull(virtusphere_vm_progress_watch_kind($this->vm([
-            'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYING,
-        ])));
-        self::assertNull(virtusphere_vm_progress_watch_kind($this->vm([
             'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED,
             'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED,
+        ])));
+        self::assertNull(virtusphere_vm_progress_watch_kind($this->vm([
+            'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_READY,
+            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_NOT_READY,
+        ])));
+        self::assertNull(virtusphere_vm_progress_watch_kind($this->vm([
+            'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED,
+            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_FAILED,
         ])));
     }
 

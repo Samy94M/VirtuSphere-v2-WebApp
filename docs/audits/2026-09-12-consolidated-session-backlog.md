@@ -1202,3 +1202,27 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Neuer Befund WK-01 (P3, offen):** Es gibt genau einen Deploy-Worker, alle Aufträge aller Missionen laufen nacheinander (ADR-0042). Ein langer Auftrag einer Mission verzögert jeden Auftrag einer anderen. Die Übernahme ist bereits je Mission gesperrt und an den Besitzer gebunden; parallele Aufträge über verschiedene Missionen wären daher denkbar. **Entscheid WK-E1:** Wie viele Aufträge dürfen gleichzeitig laufen, je ESXi-Host und je Ansible-Host? Dazu gehören mehrere Worker im Supervisor-Vertrag (ADR-0042), SSH-Budgets und Herzschlag je Worker. Eigenes Paket mit neuer ADR, nicht jetzt. Den Verspätungshinweis aus FM-E3 ersetzt das nicht.
 
 **Nächster Schritt:** Die Laborproben LP-01 bis LP-05 (nur lesend, Nutzer) liefern die Messwerte für FC2-E1 (Altschäden), FC2-E2 und FC2-E6. Danach die neuen Pakete schneiden und in den Arbeitsauftrag aufnehmen; bis dahin gilt dort die Reihenfolge K4 bis K14.
+
+## Entscheidung 05.10.2026: Abnahme in Blöcken ab K5
+
+**Nutzer, 05.10.2026 („ja klingt gut“):** Ab K5 weicht die Abnahme von S9 Punkt 4 und 6 ab. Je Paket bleiben Befundmessung, Rot-vor-Fix-Nachweis auf dem Stand vor dem Paket, die schnellen Gates (phpunit-unit, phpstan, lang-parity, file-size, betroffene Doc-Gates), phpunit-full bei Integrationstests und ein eigener Commit. Einmal am Ende eines Blocks laufen `e2e-portal`, die Prüfung aller Blockcommits im sauberen LF-Worktree und der Push. Ein Block reicht bis zum nächsten Astra-Halt; der erste ist K5 bis K10 (K11 ist Astra). Bis zum Blocklauf steht ein Paket als „lokal geprüft, gemeinsame Schlussabnahme offen“, danach als „fertig“. Astra-Pakete halten weiter nach Stoppregel 5.
+
+## K4: Client-ACK setzt nur den Lebenszyklus (VT-02, VT-E1 C, FM-09), 05.10.2026
+
+**Stand: fertig.** Ausgangsstand und gefetchtes `origin/main`: `1fc55af`. Umgesetzt von Claude Opus 5.5 als Sol-Ersatz (S9 nennt GPT-6.1 Sol; der Nutzer hat den Auftrag direkt an Claude gegeben). Prüfung Sol: getrennter, begrenzter Selbstreview, kein Astra-Halt.
+
+**Nachgemessen am Code:** `mecm_client_ack.php` schrieb `os_installed` zusammen mit MECM `registered`, und die Wiederholungsprüfung verlangte `registered`. `virtusphere_vm_progress_watch_kind()` und die beiden SQL-Zählungen in `lib/repo/vms_operations.php` beobachteten `pending` nur bei `deployed`. Der Befund besteht wie in S8 beschrieben. `getDeviceList` liefert jede VM mit `mecm_sync_state = pending` unabhängig vom Lebenszyklus, und kein Sync-Skript filtert nach Zustandsfeldern; die Selbstheilung aus Paketskizze C trägt also.
+
+**Änderung:** Der ACK übergibt den gespeicherten MECM-Zustand statt `registered` (Lebenszyklus `os_installed`, Altstatus 5/5, `updated` und `mecm_pending_since` bleiben). Die Wiederholungsprüfung liest nur Lebenszyklus und Altstatus. `pending` wird unabhängig vom Lebenszyklus beobachtet; die beiden Zählungen nutzen jetzt ein gemeinsames Prädikat `repo_vm_progress_attention_sql()`, damit sie nicht wieder auseinanderlaufen. Antwort, HTTP-Codes, Zaun und Clientskripte unverändert, kein Cutover.
+
+**Bewusste Folgen:** Eine `deploying`-VM, die vorher schon auf MECM wartete, zeigt die überfällige Warnung jetzt auch während des Laufs (bisher erst danach, mit derselben Uhr). Ein ACK auf eine VM mit MECM `failed` oder `not_ready` lässt diesen Zustand stehen, statt ihn wie bisher auf `registered` zu heben. Der bestehende Unit-Fall „deploying/pending hat keine Beobachtung“ ist deshalb durch die neue Regel ersetzt.
+
+**Doku und Hilfe:** ADR-0019 Nachtrag 4, ADR-0038 Nachtrag 1, Runbook-Abfrage in `vm-progress-observation.md`, `machine.md` (A63), `mecm-integration.md` (Client-Ready-ACK) und Hilfe 5/5 DE/EN (MECM-Zustand bleibt, „Wartet auf MECM“ bis zum nächsten Sync). Flowcharts binden `registered` nicht an den ACK und bleiben unverändert.
+
+**Rot vor Fix:** `qa-artifacts/k4-2026-10-05/red/` (Stand `1fc55af` plus nur die geänderten Tests, SHA256-Manifest). phpunit-unit fail (1: `deploying/pending` unbeobachtet), qa-stack pass, phpunit-full fail mit genau 4 erwarteten Fehlschlägen in 2419 Tests: ACK schrieb `registered` (idempotenter Fall), Fall „ACK vor Bindung, danach `updateDevice`“, `os_installed/pending` nicht gezählt, dazu der Unit-Fall. Der neue Wire-Test für den ACK mit veralteter Rollout-Revision (409, FM-09) war schon auf dem Ausgangsstand grün; er schließt die Testlücke und ist kein Rotnachweis.
+
+**Grün:** über `scripts/check.ps1` aus PowerShell, `qa-artifacts/k4-2026-10-05/green-2/results.json`: phpunit-unit, phpstan, lang-parity, file-size, doc-hygiene, doc-semantics, qa-stack und phpunit-full pass (2426 Tests ohne Skip). `e2e-portal` funktional bestanden (`qa-artifacts/k4-2026-10-05/e2e/last-run.json`: passed, keine fehlgeschlagenen Tests); der Bildteil meldet `infrastructure_error` wegen der sechs fehlenden UX02-Referenzbilder, laut Nutzer „visuelle Abnahme offen, kein Paketbefund“. Baselines nicht angefasst. Der erste Grünlauf (`green/`) fand in phpunit-unit, dass `VmRepoModuleContractTest` die neue öffentliche Funktion `repo_vm_progress_attention_sql()` nicht in seiner Oberflächenliste führte; eingetragen, Lauf abgebrochen und vollständig wiederholt.
+
+**Offen:** VT-E1 B (Einmalwert je Rollout) mit MC-R4 und LP-13; bis dahin kann eine bekannte MAC eine VM auf 5/5 setzen und deren Installationswarnung beenden. Keine externe Abnahme behauptet.
+
+**Nächster Schritt:** K5.

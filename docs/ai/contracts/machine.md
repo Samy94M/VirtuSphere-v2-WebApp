@@ -16,7 +16,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A63 mecm_client_ack.php: POST-only, idempotent client-ready acknowledgement by known MAC; sole writ
 
-- `mecm_client_ack.php`: POST-only, idempotent client-ready acknowledgement by known MAC; sole writer of the 5/5 transition.
+- `mecm_client_ack.php`: POST-only, idempotent client-ready acknowledgement by known MAC; sole writer of the 5/5 transition. It writes the lifecycle only and keeps the stored MECM sync state (VT-E1 C, ADR-0019 amendment 4); `registered` comes from `updateDevice` alone, and the retry check reads lifecycle and legacy status only.
 
 ## A64 mecm_updateid.php: accepts deviceResourceID and deviceid.
 

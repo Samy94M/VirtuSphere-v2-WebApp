@@ -61,8 +61,7 @@ SELECT
 FROM deploy_vms;
 
 SELECT
-  SUM(lifecycle_state = 'deployed'
-      AND mecm_sync_state = 'pending'
+  SUM(mecm_sync_state = 'pending'
       AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL 7200 SECOND)) AS overdue_mecm,
   SUM(lifecycle_state = 'os_installing'
       AND mecm_sync_state = 'registered'

@@ -61,3 +61,13 @@ history and state preservation. `VmProgressWatchContractTest` pins all writers,
 both indexes, the non-destructive maintenance boundary and browser proof. The
 Playwright VM CRUD flow proves both confirmation-dialog branches and that only
 the dedicated clock changes.
+
+## Amendment 1 (2026-10-05): MECM pending is watched whatever the lifecycle
+
+ADR-0019 amendment 4 (VT-E1 C) lets the client ACK reach 5/5 while the VM is
+still MECM `pending`. The pending observation therefore no longer requires
+`deployed`: every VM at MECM `pending` with an overdue `mecm_pending_since`
+warns, including `os_installed` / `pending` and a `deploying` VM that was
+already waiting for MECM. The ACK preserves the clock. The OS-install
+observation is unchanged. `virtusphere_vm_progress_watch_kind()` decides, and
+`repo_vm_progress_attention_sql()` is its one SQL form for both counts.

@@ -119,19 +119,35 @@ function repo_restart_vm_progress_watch(mysqli $db, int $missionId, int $vmId, ?
     });
 }
 
+/**
+ * The overdue predicate of virtusphere_vm_progress_attention() in SQL, shared
+ * by both counts so they cannot drift apart. MECM pending is watched whatever
+ * the lifecycle (VT-E1 C); the OS-install clock only for an installing,
+ * registered VM.
+ *
+ * @return array{0:string,1:string,2:list<int|string>}
+ */
+function repo_vm_progress_attention_sql(): array
+{
+    return [
+        '((mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND))'
+            . ' OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND)))',
+        'sissi',
+        [
+            VIRTUSPHERE_MECM_SYNC_PENDING,
+            VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS,
+            VIRTUSPHERE_LIFECYCLE_OS_INSTALLING,
+            VIRTUSPHERE_MECM_SYNC_REGISTERED,
+            VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS,
+        ],
+    ];
+}
+
 /** Count overdue display-only observations, optionally scoped to one mission. */
 function repo_vm_progress_attention_count(mysqli $db, ?int $missionId = null): int
 {
-    $sql = "SELECT COUNT(*) FROM deploy_vms WHERE ((lifecycle_state = ? AND mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND)) OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND)))";
-    $params = [
-        VIRTUSPHERE_LIFECYCLE_DEPLOYED,
-        VIRTUSPHERE_MECM_SYNC_PENDING,
-        VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS,
-        VIRTUSPHERE_LIFECYCLE_OS_INSTALLING,
-        VIRTUSPHERE_MECM_SYNC_REGISTERED,
-        VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS,
-    ];
-    $types = 'ssissi';
+    [$predicate, $types, $params] = repo_vm_progress_attention_sql();
+    $sql = 'SELECT COUNT(*) FROM deploy_vms WHERE ' . $predicate;
     if ($missionId !== null) {
         if ($missionId <= 0) {
             return 0;
@@ -147,14 +163,9 @@ function repo_vm_progress_attention_count(mysqli $db, ?int $missionId = null): i
 /** @return array<int,int> Overdue observation count keyed by mission id. */
 function repo_vm_progress_attention_counts_by_mission(mysqli $db): array
 {
-    $stmt = $db->prepare("SELECT mission_id, COUNT(*) AS attention_count FROM deploy_vms WHERE ((lifecycle_state = ? AND mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND)) OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND))) GROUP BY mission_id");
-    $lifecycleDeployed = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
-    $mecmPending = VIRTUSPHERE_MECM_SYNC_PENDING;
-    $pendingSeconds = VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS;
-    $lifecycleInstalling = VIRTUSPHERE_LIFECYCLE_OS_INSTALLING;
-    $mecmRegistered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
-    $installSeconds = VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS;
-    $stmt->bind_param('ssissi', $lifecycleDeployed, $mecmPending, $pendingSeconds, $lifecycleInstalling, $mecmRegistered, $installSeconds);
+    [$predicate, $types, $params] = repo_vm_progress_attention_sql();
+    $stmt = $db->prepare('SELECT mission_id, COUNT(*) AS attention_count FROM deploy_vms WHERE ' . $predicate . ' GROUP BY mission_id');
+    $stmt->bind_param($types, ...$params);
     $stmt->execute();
 
     $counts = [];

@@ -423,7 +423,11 @@ Nach dem vollständigen Schreiben der Registry-Nutzdaten sendet V23
 `POST /mecm_client_ack.php` mit
 `{"mac":"00:50:56:AB:CD:EF","rollout_revision":7}` aus derselben gelesenen
 Rolloutantwort. Nur dieser Endpoint setzt 5/5; `getDeviceInfos` verändert keinen
-Zustand mehr. Scheitert der POST oder seine Antwort, liefert `client_getinfo`
+Zustand mehr. Der ACK setzt nur den Lebenszyklus und lässt den MECM-Zustand,
+wie er ist (ADR-0019 Nachtrag 4): `registered` schreibt allein `updateDevice`
+aus dem Devices Sync. Kommt der ACK vor der Bindung, steht die VM bei 5/5 mit
+MECM „wartet“, bis der nächste Sync-Lauf sie bindet; die Überwachung von
+`pending` läuft dabei weiter. Scheitert der POST oder seine Antwort, liefert `client_getinfo`
 Exitcode 1, damit MECM den Lauf wiederholt. Erst nach der positiven ACK-Antwort
 setzt der Client `SetupState=complete`. Der Server kann 5/5 bereits gespeichert
 haben, obwohl nur seine HTTP-Antwort verloren ging; dann antwortet er beim Retry

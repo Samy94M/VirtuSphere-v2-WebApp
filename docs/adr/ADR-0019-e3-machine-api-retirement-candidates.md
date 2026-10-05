@@ -139,3 +139,32 @@ content, and only afterwards may an operator change a hostname or run a reset,
 because those push the revision above 1 and a not-yet-updated caller is then
 refused with 409. A partially updated site stays queued instead of registering
 a wrong record.
+
+## Amendment 4 (2026-10-05): the client ACK writes the lifecycle only (VT-E1 C)
+
+The ACK's only authority is a known MAC, and `getDeviceInfos` hands the rollout
+revision to anyone who knows that MAC. Until a real per-rollout credential
+exists (VT-E1 B, with the MECM cutover MC-R4 and lab probe LP-13), that is not
+enough to change the MECM binding. `mecm_client_ack.php` therefore still
+advances the lifecycle to 5/5 (`os_installed`, legacy `5/5 OS Installed`), but
+keeps the VM's MECM sync state exactly as it was. `registered` is written only
+by `updateDevice` from the device sync, which also binds the ResourceID.
+
+Consequences:
+
+- Request, response, HTTP codes, the revision fence and the client scripts are
+  unchanged; this is a portal-only change and needs no coordinated cut.
+- The retry check reads lifecycle and legacy status only. A retry against a
+  VM still at MECM `pending` deduplicates instead of writing another status
+  event.
+- An ACK before the binding leaves `os_installed` / `pending`. The next
+  device-sync run still lists the VM (`mecm_sync_state = pending`), the fence
+  accepts `updateDevice`, and `repo_set_vm_state_forward()` sets `registered`
+  without stepping the lifecycle back to 4/5. Before this amendment the VM sat
+  at `registered` without a ResourceID until that run.
+- The `pending` clock (`mecm_pending_since`, ADR-0038) survives the ACK, and
+  `pending` is now observed whatever the lifecycle, so a 5/5 VM the sync never
+  binds still raises the overdue warning.
+- What C does not close: a device that knows a MAC can still mark a VM 5/5,
+  and for that VM the OS-install warning falls silent. That residue is what
+  VT-E1 B is for.

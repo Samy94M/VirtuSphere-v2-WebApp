@@ -191,11 +191,17 @@ final class MachineApiWireTest extends TestCase
     /**
      * The new POST is the sole 5/5 writer. Retrying after an uncertain network
      * result is safe and must not produce another status-history event.
+     *
+     * VT-E1 C: it writes the lifecycle only. A MAC is no authority over the
+     * MECM binding, so `pending` stays `pending`, its watch clock keeps
+     * running and the retry deduplicates without a MECM `registered`.
      */
     public function testClientReadyAcknowledgementIsPostOnlyAndIdempotent(): void
     {
         $db = db(true);
         $fixture = $this->createClientFixture($db, 'client-ready');
+        $pendingSince = '2026-01-02 03:04:05';
+        repo_execute($db, 'UPDATE deploy_vms SET mecm_pending_since = ? WHERE id = ?', 'si', [$pendingSince, $fixture['vm_id']]);
 
         try {
             [$status, , $body] = $this->get('/mecm_client_ack.php');
@@ -212,7 +218,9 @@ final class MachineApiWireTest extends TestCase
 
             $state = $this->vmState($db, $fixture['vm_id']);
             self::assertSame(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, $state['lifecycle_state']);
-            self::assertSame(VIRTUSPHERE_MECM_SYNC_REGISTERED, $state['mecm_sync_state']);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $state['mecm_sync_state'], 'the ACK must not register the VM in MECM');
+            self::assertSame(VIRTUSPHERE_STATUS_OS_INSTALLED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertSame($pendingSince, $this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
             self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
 
             [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac']]);
@@ -222,6 +230,75 @@ final class MachineApiWireTest extends TestCase
                 json_decode($body, true, 512, JSON_THROW_ON_ERROR)
             );
             self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
+            self::assertSame($pendingSince, $this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * VT-E1 C, self-healing: an ACK before the binding leaves os_installed /
+     * pending, and the device-sync's later updateDevice registers the VM
+     * without stepping the lifecycle back to 4/5.
+     */
+    public function testAcknowledgementBeforeBindingEndsInstalledAndRegisteredAfterUpdateDevice(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'ack-before-binding');
+
+        try {
+            [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac'], 'rollout_revision' => $fixture['rollout_revision']]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertNull($this->vmColumn($db, $fixture['vm_id'], 'mecm_id'));
+
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+                'deviceResourceID' => '16777301',
+                'deviceid' => $fixture['vm_id'],
+                'rollout_revision' => $fixture['rollout_revision'],
+            ]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertSame('16777301', $this->vmColumn($db, $fixture['vm_id'], 'mecm_id'));
+            self::assertSame(VIRTUSPHERE_STATUS_OS_INSTALLED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertNull($this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * FM-09: the wire answer of the fence. A client of an earlier rollout gets
+     * 409 with the current revision, and nothing about the VM changes.
+     */
+    public function testAcknowledgementWithAStaleRolloutRevisionIs409AndWritesNothing(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'ack-stale');
+        repo_execute($db, 'UPDATE deploy_vms SET mecm_rollout_revision = 2 WHERE id = ?', 'i', [$fixture['vm_id']]);
+
+        try {
+            [$status, $headers, $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac'], 'rollout_revision' => 1]);
+
+            self::assertSame(409, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            self::assertSame(
+                ['error' => 'Rollout revision is stale', 'rollout_revision' => 2],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertSame(VIRTUSPHERE_STATUS_DEPLOYED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertSame(0, $this->statusEventCount($db, $fixture['vm_id']));
         } finally {
             $this->deleteClientFixture($db, $fixture['mission_id']);
         }
@@ -512,6 +589,14 @@ final class MachineApiWireTest extends TestCase
         self::assertIsArray($state);
 
         return $state;
+    }
+
+    private function vmColumn(mysqli $db, int $vmId, string $column): ?string
+    {
+        self::assertContains($column, ['vm_status', 'mecm_id', 'mecm_pending_since']);
+        $value = repo_scalar($db, 'SELECT ' . $column . ' FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+
+        return $value === null ? null : (string) $value;
     }
 
     private function statusEventCount(mysqli $db, int $vmId): int

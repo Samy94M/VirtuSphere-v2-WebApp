@@ -95,8 +95,12 @@ try {
             machine_api_rollout_revision_refused($connection, $vmId, 'client_ack', $reportedRevision, $vm, $clientIp);
         }
 
+        // VT-E1 C (ADR-0019 amendment 4): a known MAC is no authority over the
+        // MECM binding, so the ACK writes the lifecycle only and passes the
+        // stored MECM state through. `registered` comes from updateDevice
+        // alone. The retry check therefore ignores the MECM state too, or every
+        // retry against a still pending VM would write another status event.
         if ((string) $vm['lifecycle_state'] === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED
-            && (string) $vm['mecm_sync_state'] === VIRTUSPHERE_MECM_SYNC_REGISTERED
             && (string) $vm['vm_status'] === VIRTUSPHERE_STATUS_OS_INSTALLED
         ) {
             $connection->commit();
@@ -107,7 +111,7 @@ try {
             $connection,
             $vmId,
             VIRTUSPHERE_LIFECYCLE_OS_INSTALLED,
-            VIRTUSPHERE_MECM_SYNC_REGISTERED,
+            (string) $vm['mecm_sync_state'],
             VIRTUSPHERE_STATUS_OS_INSTALLED,
             null,
             'mecm client ready acknowledgement'

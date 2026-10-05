@@ -16,7 +16,11 @@ function virtusphere_vm_progress_watch_kind(array $vm): ?string
     $lifecycle = (string) ($vm['lifecycle_state'] ?? '');
     $mecm = (string) ($vm['mecm_sync_state'] ?? '');
 
-    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYED && $mecm === VIRTUSPHERE_MECM_SYNC_PENDING) {
+    // MECM pending is watched whatever the lifecycle says (VT-E1 C): a client
+    // ACK can reach 5/5 before the device-sync binds the VM, and a VM that is
+    // then never bound must not fall silent. repo_vm_progress_attention_sql()
+    // is the SQL twin of this decision.
+    if ($mecm === VIRTUSPHERE_MECM_SYNC_PENDING) {
         return VIRTUSPHERE_VM_PROGRESS_MECM_PENDING;
     }
     if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING && $mecm === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
