@@ -8,7 +8,7 @@ Diese Datei legt nur fest, **was** in welcher Reihenfolge geschieht und wann ein
 
 ## Rahmen
 
-- **Modell:** GPT-6.1 Sol in der Rolle Sol, Effort High. Das Register nennt im Abschnitt „Modell- und Ausführungsvertrag“ noch `gpt-5.6-sol`; für diesen Auftrag gilt GPT-6.1 Sol als Sol. Rollen Terra und Astra führt dieser Lauf nicht selbst aus.
+- **Modell:** GPT-6.1 Sol in der Rolle Sol, Effort High. Das Register nennt im Abschnitt „Modell- und Ausführungsvertrag“ noch `gpt-5.6-sol`; für diesen Auftrag gilt GPT-6.1 Sol als Sol. Rollen Terra und Astra führt dieser Lauf nicht selbst aus. Die Astra-Prüfung (Stoppregel 5) übernimmt Claude Opus als vom Nutzer freigegebener Ersatz (05.10.2026); ihr Ergebnis liegt als `astra-result.md` im Artefaktordner des Pakets.
 - **Vorrang bei Widerspruch:** `AGENTS.md` und die dort gerouteten Verträge gehen vor; danach dieser Auftrag; danach die Pläne. Widerspricht eine Entscheidung in S7, S8 oder im Register diesem Auftrag, gilt die Stoppregel 3.
 - **Quellstand:** Die Befunde beziehen sich auf `3b37025`. Seitdem hat sich am Code nur das geändert, was `git log 3b37025..origin/main` zeigt. Vor jedem Paket den Befund am aktuellen Code nachmessen.
 - **Git:** Trunk-basiert. Vor jedem Paket `git fetch` und auf dem aktuellen `origin/main` aufsetzen; parallel arbeitende Agenten können `main` inzwischen weitergeschrieben haben. Nur die eigenen Dateien stagen, nie den ganzen Baum. Commit und Push auf `main` sind je Paket freigegeben, sobald seine Abnahme erfüllt ist.
@@ -35,7 +35,22 @@ Spalte „Prüfung“: **Sol** heißt getrennter, begrenzter Selbstreview vor de
 | K13 | Status und Bedienung | FC2-07, FM-07, FM-08, KM-03 (Veraltung max. aus sieben Tagen und 2 × Intervall), KM-04, VT-03 | laut S7 und S8 | je Befund ein Fall | Sol | offen |
 | K14 | Konsistenz und Wächter | WM-04, WM-05, WM-06, FC2-12, FC2-13, FC2-18 (Logik: Deploy-Warnungen, Missionswarnung und Missionsbadge nach `esxi_inventory_deviation_report()`) | laut S7 und S8 | je Befund ein Fall; Wächter mit Negativfall | Sol | offen |
 
-Nach K14 endet dieser Auftrag. PS1 bis PS3, AV-, MECM-Client- und UX-Pakete aus dem Register gehören nicht dazu.
+**Ergänzung 05.10.2026** aus den Entscheidungen vom 05.10.2026 (Register, Abschnitt „Entscheidungen 05.10.2026: offene Entscheide FC2, AB, VT, FM“, dazu die Freigaben VT-01, VT-04 und VT-06 im selben Abschnitt). Pakete, deren Werte erst die Laborproben liefern (FC2-E2/LP-04, FC2-E3/LP-03, FC2-E6/LP-05), sind bewusst nicht dabei.
+
+| Nr. | Paket | Befunde und Entscheidungen | Kern der Änderung | Rot vor Fix (mindestens) | Prüfung | Stand |
+|---|---|---|---|---|---|---|
+| K15 | Gescheiterte Aufträge färben nur angefasste VMs | FC2-01, WM-02, K2-R1, FC2-E1; offener K3-Rest „gebundene, nie markierte VM bei Fehler vor dem Rückruf“ | Vorzustand (Lifecycle und MECM-Zustand) je Auftrag und VM dauerhaft speichern (Migration, Schema-Doku). `start` und `autostart` schreiben nie Lifecycle oder MECM-Zustand. Scheitert ein Modus, bevor ein Playbook ESXi berührt hat, gilt wieder der gespeicherte Vorzustand. `failed/failed` nur für VMs, die ein Playbook dieses Auftrags angefasst hat; „angefasst“ im Paket präzisieren und im Register festhalten. Gleiche Regel für Abbruch, Reaper und Konvergenz-Sweep. Selektiver Abschluss aus K3 (`successful_vm_ids`) bleibt. Keine Reparatur von Altschäden (eigener Auftrag nach LP-01). | Je Modus und Fehlerstelle (vor Markierung, nach Markierung vor dem ersten Playbook, nach dem Rückruf), dazu Abbruch, Reaper nach Workerausfall und Sweep: unberührte VMs behalten Lifecycle und MECM-Zustand; registrierte VM bleibt `registered` | Astra | offen |
+| K16 | Nie angelegte VMs mit Hinweis ausnehmen | FM-02, FM-E2 | Start, Export, Power-Cycle und Autostart nehmen VMs ohne gebundene Instance-UUID aus dem Lauf, statt am Playbook zu scheitern; auch bei leerer Auswahl und bei geplanten Aufträgen. Ergebnis und Protokoll melden „N VMs nicht angelegt, übersprungen“ mit Link auf Create (Berechtigung des Ziels). Übersprungene VMs behalten ihren Zustand (K15). Erst nach K15. | Neue, nie angelegte VM in ausgerollter Mission, Modus `start` mit leerer Auswahl: übrige VMs laufen, Hinweis mit Link, die neue VM bleibt unverändert | Sol | offen |
+| K17 | Warnung bei Create auf anderem Host | FM-01, FM-E1 | Keine Sperre und kein Umzugsablauf. Die Bindung merkt sich zusätzlich, über welchen ESXi-Zugang und Host die VM angelegt wurde. Create warnt vor dem Neuanlegen, wenn gebundene VMs auf dem gewählten Zugang oder Host fehlen würden; die Warnung nennt den bisherigen Host und erklärt, dass die alten VMs und MECM-Geräte weiterlaufen. Im Paket festlegen, ob die Warnung beim Einreihen (aus der gespeicherten Bindung) oder als Bestätigung vor dem Start kommt; sie muss vor jedem Neuanlegen sichtbar sein. | Create für eine gebundene VM mit einem zweiten Zugang: Warnung erscheint vor dem Neuanlegen; Create mit dem bisherigen Zugang: keine Warnung | Sol | offen |
+| K18 | Verspätete geplante Aufträge kennzeichnen | FM-04, FM-E3 | Keine Verfallszeit. Liste und Protokoll zeigen den tatsächlichen Start und „startete N Minuten nach Plan“, ab einer im Paket festgelegten Schwelle. | Geplanter Auftrag, der nach der Schwelle übernommen wird: Hinweis in Liste und Protokoll; pünktlicher Auftrag: kein Hinweis | Sol | offen |
+| K19 | Backups asymmetrisch verschlüsseln | VT-05, VT-E2 | Öffentlicher Schlüssel (Zertifikat) in den Einstellungen; der private Schlüssel liegt nie auf dem App-Host. `Docker/backups/backup.sh` verschlüsselt Config-Archiv und Dump mit `openssl` und legt sie getrennt ab. Ohne hinterlegten Schlüssel meldet der Systemstatus „Backups unverschlüsselt“. Restore-Test und `scripts/restore_test.sh` mit Testschlüssel; `docs/operations/backup.md` (Schlüssel erzeugen, aufbewahren, Restore) und ADR-0017 nachziehen. | Backup mit hinterlegtem Schlüssel enthält keinen lesbaren APP_KEY und kein lesbares Dump; Restore mit privatem Testschlüssel gelingt; ohne Schlüssel Statushinweis | Astra | offen |
+| K20 | IP-Freigabe je Rolle | VT-01 (Freigabe 05.10.2026) | Die Freigabeliste der Maschinen-API bekommt eine Rolle je Eintrag (MECM-Server, Ansible-Host, Client); jeder Endpunkt erlaubt nur seine Rollen. Bestehende Einträge ohne Rolle gelten bis zur Zuordnung wie bisher für alle Endpunkte, der Systemstatus weist darauf hin. Migration, Einstellungsseite, Hilfe DE/EN, `machine.md`. | Ansible-Host-IP ruft `updateDevice` auf: abgewiesen mit geschlossener Ursache; MAC-Rückruf derselben IP: angenommen; Eintrag ohne Rolle: wie bisher plus Hinweis | Astra | offen |
+| K21 | ESXi-Passwort nie auf dem Ubuntu-Host zurücklassen | VT-04 (Freigabe 05.10.2026) | `accounts.yml` am Auftragsende immer löschen, auch bei ungeklärter Create-Einheit und gescheitertem Aufräumen (dann beim nächsten Kontakt nachholen und protokollieren). Nur der Async-Status bleibt als Beleg; eine spätere Statusabfrage lädt die Zugangsdatei neu hoch und löscht sie danach. Create-Vertrag (ADR-0041) und seine Vertragstests gemeinsam ändern. Laborprobe LP-06 bleibt beim Nutzer. | Ungeklärte Create-Einheit am Auftragsende: Zugangsdatei gelöscht, Statusabfrage danach gelingt mit neu hochgeladener Datei; Vertragstest des Upload-/Aufräumskripts | Astra | offen |
+| K22 | APP_KEY wechseln | VT-06 (Freigabe 05.10.2026: Anleitung und Werkzeug) | CLI-Werkzeug, das alle mit dem APP_KEY verschlüsselten Zugangsdaten mit einem neuen Schlüssel neu verschlüsselt, in einer Transaktion, mit Trockenlauf und Abbruch ohne Teilzustand. Runbook „APP_KEY wechseln“ (in K6 angelegt) um das Werkzeug ergänzen; Backup vor dem Wechsel verlangen. | Neuverschlüsselung: alle Zugangsdaten danach mit dem neuen Schlüssel lesbar, mit dem alten nicht; Fehler mitten im Lauf hinterlässt den alten Stand | Sol | offen |
+| K23 | Ablaufdiagramme in der Portalhilfe | FC2-E5, KM-01 | Mermaid-Blöcke unter `docs/operations` bleiben die einzige Quelle. Beim Build mit dem im Repo vorhandenen Chromium zu SVG rendern, hell und dunkel, eingecheckt, in der Portalhilfe als Bild eingebunden; keine Lockerung der CSP, kein Mermaid zur Laufzeit. Wächter: Quelle und SVG passen zusammen, sonst rot. KM-01: Hinweis an der API-Basis-URL nennt alle drei Stellen der Portal-Adresse mit Link auf die Anleitung. | Wächter mit Negativfall (geänderte Quelle ohne neues SVG); Hilfeseite zeigt die Diagramme ohne CSP-Verstoß in beiden Themes | Sol | offen |
+| K24 | Reste aus K3 | K3-P3-2, K3-P3-3 (Register, Abschnitt K3) | Retry ohne Befund nicht sofort anbieten, wenn er nachweislich erneut scheitert (im Paket präzisieren). Fehlende Tests nachziehen: Binder-Lauf zwischen Markierung und Rückruf sowie Fehler nach dem Rückruf und Abbruch, jeweils mit gebundener VM. Erst nach K15. | Die beiden Testfälle; Retry-Fall | Sol | offen |
+
+Nach K24 endet dieser Auftrag. PS1 bis PS3, AV-, MECM-Client- und UX-Pakete aus dem Register gehören nicht dazu.
 
 ## K1: Nutzerentscheidungen vom 04.10.2026
 
@@ -49,24 +64,19 @@ Diese ausdrücklich nachgereichten Entscheidungen gelten für K1:
 
 ## Nicht beginnen
 
-Diese Befunde warten auf eine Entscheidung, eine Laborprobe oder den MECM-Cutover. Sie werden in keinem Paket oben mitgenommen. Die Entscheide FC2-E1 bis FC2-E6, VT-E2 und FM-E1 bis FM-E3 sind am 05.10.2026 gefallen (Register, Abschnitt „Entscheidungen 05.10.2026“). Die zugehörigen Befunde bleiben trotzdem hier, bis sie als eigene Pakete geschnitten und in die Tabelle oben aufgenommen sind.
+Diese Befunde warten auf eine Laborprobe, eine Entscheidung oder den MECM-Cutover. Sie werden in keinem Paket oben mitgenommen. Stand 05.10.2026: Die Entscheide FC2-E1 bis FC2-E6, VT-E2 und FM-E1 bis FM-E3 sind gefallen, VT-01, VT-04 und VT-06 freigegeben (Register, Abschnitt „Entscheidungen 05.10.2026“). Was davon ohne Laborprobe umsetzbar ist, steht als K15 bis K24 oben.
 
 | Befund | Wartet auf |
 |---|---|
-| FC2-01, WM-02 | Entscheid FC2-E1; K2 regelt nur Fehler vor der Markierung `deploying` |
-| FC2-04 | Entscheid FC2-E2 |
-| FC2-11 (Logik), ZB-02 | Entscheid FC2-E3, Laborprobe LP-03 |
-| KM-01 | Entscheid FC2-E5 |
-| `full` wartet auf `registered` statt auf eine feste Zeit | Entscheid FC2-E6, Laborprobe LP-05 |
-| VT-05 | Entscheid VT-E2 |
-| FM-01, FM-06 | Entscheid FM-E1 |
-| FM-02 | Entscheid FM-E2 |
+| FC2-04 | Laborprobe LP-04 (Entscheid FC2-E2 gefallen: kürzen) |
+| FC2-11 (Logik), ZB-02 | Laborprobe LP-03 (Entscheid FC2-E3 gefallen: Laufschonfrist je Aufgabe) |
+| `full` wartet auf `registered` statt auf eine feste Zeit | Laborprobe LP-05 (Entscheid FC2-E6 gefallen: auf `registered` warten, Obergrenze, sonst scheitern) |
+| Reparatur bereits falsch gefärbter VMs (FC2-01, WM-01) | Laborprobe LP-01, danach eigener Reparaturauftrag |
+| FM-06 | Entscheid zum Rückabgleich gebundener VMs (nicht Teil von FM-E1) |
 | FM-03 | Laborprobe LP-08 |
-| FM-04 | Entscheid FM-E3 |
 | ZB-01 | Laborprobe LP-02 |
-| VT-04 | Laborprobe LP-06 und Freigabe des Entwurfs |
-| VT-01, Werkzeug zu VT-06 | Freigabe des Entwurfs |
 | FM-05 (Ursache je VM), WM-E3, VT-E1 Variante B, ZB-04 | MECM-Cutover MC-R4, Laborprobe LP-13 |
+| WK-01 (parallele Aufträge) | Entscheid WK-E1, später durch den Nutzer |
 | PI-01 (Rest), PI-06, PI-07, PI-08 | eigener Auftrag |
 
 ## Abnahme je Paket
