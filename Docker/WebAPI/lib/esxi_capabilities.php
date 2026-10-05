@@ -24,6 +24,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/status.php';
+require_once __DIR__ . '/ansible_command_modes.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 
@@ -169,4 +170,16 @@ function esxi_capabilities_log_line(array $facts, bool $fresh): string
         $render($facts['in_maintenance'] ?? null),
         $fresh ? 'fresh' : 'stale-or-missing'
     );
+}
+
+/** @param array<string,mixed>|null $state
+ * @return array{verdict:string,reason:?string,facts:array<string,mixed>}
+ */
+function esxi_write_preflight(?array $state, int $intervalHours, string $mode, ?int $now = null): array
+{
+    $facts = esxi_capabilities($state);
+    $blocked = ansible_mode_writes_esxi($mode)
+        && esxi_capabilities_fresh($state, $intervalHours, $now)
+        && $facts['license_free'] === true;
+    return ['verdict' => $blocked ? 'block' : 'ok', 'reason' => $blocked ? VIRTUSPHERE_ESXI_CAPABILITY_LICENSE_FREE : null, 'facts' => $facts];
 }

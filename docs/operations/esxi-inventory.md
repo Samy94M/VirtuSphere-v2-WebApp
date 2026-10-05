@@ -170,7 +170,7 @@ Das sind **keine Fehlerkategorien**. Die Tabelle oben beschreibt einen Abruf, de
 
 | Hinweis | Badge | Bedeutung | Auswirkung |
 |---|---|---|---|
-| Freie Lizenz | gelb | Die freie ESXi-Lizenz (auch 8.0 U3e) hat nur eine lesende API. | Inventar läuft. Bereitstellen und Autostart sind gesperrt; ein Autostart-Auftrag bricht mit klarer Meldung ab. |
+| Freie Lizenz | gelb | Die freie ESXi-Lizenz (auch 8.0 U3e) hat nur eine lesende API. | Inventar läuft. Ein aktueller Befund sperrt jeden schreibenden Modus beim Einreihen und erneut im Worker; nur MAC-Export und Inventarabruf bleiben möglich. Ein veralteter Befund warnt nur. |
 | HA-Cluster | gelb | Der Host gehört zu einem vSphere-HA-Cluster. | ESXi schaltet dort den Autostart ab. Der Autostart-Schritt wird übersprungen (im Modus `full`) beziehungsweise der Auftrag abgelehnt (im Modus `autostart`). |
 | Wartungsmodus | grau/blau | Vorübergehender Zustand des Hosts. | Nur Information, keine Fehlkonfiguration. |
 

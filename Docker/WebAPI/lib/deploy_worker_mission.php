@@ -6,6 +6,7 @@ require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/ansible_command.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/esxi_capabilities.php';
+require_once __DIR__ . '/esxi_write_capability.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
@@ -83,6 +84,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         }
 
         $esxiCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
+        deploy_worker_esxi_write_preflight($channel->connection(), $jobId, (int) $esxiCredential['id'], (string) deploy_worker_payload($job)['mode']);
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         $esxiSecret = repo_credential_secret($channel->connection(), (int) $esxiCredential['id']);
         $ansibleSecret = repo_credential_secret($channel->connection(), (int) $ansibleCredential['id']);
@@ -347,4 +349,27 @@ function deploy_worker_autostart_preflight(mysqli $db, int $jobId, int $credenti
     }
 
     return $autostartEnabled || $mode === VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
+}
+
+/**
+ * DF-E2 in the worker: logs the evidence, then refuses a writing mode on a
+ * proven read-only host before any VM is marked or file uploaded. The refusal
+ * is configuration_blocked, never execution_failed: no playbook ran.
+ */
+function deploy_worker_esxi_write_preflight(mysqli $db, int $jobId, int $credentialId, string $mode): void
+{
+    if (!ansible_mode_writes_esxi($mode)) {
+        return;
+    }
+    $state = repo_esxi_inventory_state($db, $credentialId);
+    $fresh = esxi_capabilities_fresh($state, esxi_inventory_interval_hours($db));
+    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line(esxi_capabilities($state), $fresh));
+    try {
+        deploy_assert_esxi_write_capability($db, $credentialId, $mode);
+    } catch (ValidationException $blocked) {
+        throw new DeployWorkerConfigurationBlocked($blocked->getMessage(), null, $blocked);
+    }
+    if (!$fresh) {
+        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'ESXi write preflight used stale or missing capability facts. Proceeding: ESXi remains the authority and may reject the write.');
+    }
 }

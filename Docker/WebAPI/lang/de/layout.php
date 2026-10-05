@@ -58,6 +58,7 @@ return [
     // derselbe Grund, und die Ablehnung ist hart (kein stiller Abbruch des
     // Auftrags), damit niemandes laufender Deploy nebenbei beendet wird.
     'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Den Auftrag zuerst abwarten oder abbrechen.',
+    'err_esxi_write_license' => 'Der gewählte ESXi-Host meldet eine freie Lizenz: Seine API ist nur lesend, deshalb lässt sich dieser Modus nicht ausführen. Nur der MAC-Export und der Inventarabruf sind möglich. Nach einem Lizenzwechsel das ESXi-Inventar aktualisieren.',
     // Der Wiederholen-Knopf der Auftragsliste faehrt dasselbe Einreih-Gatter noch
     // einmal, hat aber kein Formular und damit keine Feldmeldung. Ohne diesen
     // Eintrag rendert das Portal an dieser Stelle die rohe englische

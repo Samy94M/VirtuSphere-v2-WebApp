@@ -308,7 +308,7 @@ return [
     'cap_license_free' => 'Free licence: no deploy, no autostart',
     'cap_in_ha_cluster' => 'HA cluster: autostart has no effect',
     'cap_in_maintenance' => 'Maintenance mode',
-    'cap_legend_license_free' => 'The free ESXi licence only allows read-only API access. Inventory pulls work, deploying and autostart do not. A job that writes the autostart policy is refused; any other write fails on the host itself.',
+    'cap_legend_license_free' => 'The free ESXi licence only allows read-only API access. Inventory pulls work, deploying and autostart do not. While the fact is current, no writing mode can be queued, and a job queued earlier ends before it starts; only the MAC export and the inventory pull run. With a stale fact, a write only fails on the host itself.',
     'cap_legend_in_ha_cluster' => 'On hosts inside a vSphere HA cluster, ESXi disables autostart. The HA restart priority controls the order there. An autostart-only job is therefore refused; in a full deployment only that step is dropped.',
     'cap_legend_in_maintenance' => 'The host is in maintenance mode. That is a temporary state, not a misconfiguration.',
     'generated_at' => 'View generated',

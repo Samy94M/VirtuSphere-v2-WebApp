@@ -58,6 +58,7 @@ return [
     // the refusal is hard (no implicit cancel), so nobody's running deploy is
     // ended as a side effect.
     'err_mission_active_job' => 'A deploy job for this mission is queued or running. Wait for it to finish or cancel it first.',
+    'err_esxi_write_license' => 'The selected ESXi host reports a free licence: its API is read-only, so this mode cannot run. Only the MAC export and the inventory pull are possible. After a licence change, refresh the ESXi inventory.',
     // The retry button in the job list re-runs the same enqueue gate, but it has
     // no form and therefore no field message. Without this entry the portal
     // renders the raw English exception there. The sentence names both causes,

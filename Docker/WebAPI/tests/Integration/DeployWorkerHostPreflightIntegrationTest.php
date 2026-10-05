@@ -73,6 +73,7 @@ final class DeployWorkerHostPreflightIntegrationTest extends TestCase
             return;
         }
         repo_execute($this->db, 'DELETE FROM deploy_missions WHERE id = ?', 'i', [$this->missionId]);
+        repo_execute($this->db, 'DELETE FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ?', 'i', [$this->esxiId]);
         foreach ([$this->esxiId, $this->ansibleId] as $credentialId) {
             repo_execute($this->db, 'DELETE FROM deploy_credentials WHERE id = ?', 'i', [$credentialId]);
         }
@@ -129,6 +130,56 @@ final class DeployWorkerHostPreflightIntegrationTest extends TestCase
         $job = repo_deploy_job($this->db, $jobId);
         self::assertNotSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED, $job['terminal_reason_code']);
         self::assertNull(deploy_host_preflight_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null));
+    }
+
+    /** DF-E2: a current free-licence fact refuses every writing mode on every enqueue path; reads stay open. */
+    public function testFreshFreeLicenseBlocksSingleAndStaggeredAdmissionWithoutAJobWrite(): void
+    {
+        $this->freeLicense();
+        foreach (['full', 'create', 'powercycle', 'start', 'autostart'] as $mode) {
+            try {
+                $this->queueJob($mode);
+                self::fail('A writing mode was admitted on a proven read-only host: ' . $mode);
+            } catch (ValidationException $exception) {
+                self::assertSame([
+                    'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
+                    'label_key' => 'deploy.identity_refresh_link',
+                    'permission' => '',
+                ], $exception->portalAction(), $mode);
+            }
+        }
+        foreach (VIRTUSPHERE_DEPLOY_STAGGER_MODES as $mode) {
+            try {
+                repo_enqueue_deploy_group($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => $mode, 'vm_ids' => [$this->vmId]], null, VIRTUSPHERE_DEPLOY_STAGGER_MIN);
+                self::fail('Staggered write admitted on a read-only host.');
+            } catch (ValidationException $exception) {
+                self::assertNotNull($exception->portalAction(), $mode);
+            }
+        }
+        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_jobs WHERE mission_id = ?', 'i', [$this->missionId]));
+        self::assertGreaterThan(0, $this->queueJob('export'));
+        self::assertNotNull(repo_create_system_job($this->db, 'inventory', $this->esxiId, $this->ansibleId, $this->userId));
+    }
+
+    /** DF-E2 in the worker: a scheduled job meets the fact days later and ends configuration_blocked, VMs untouched. */
+    public function testAQueuedWriteIsRecheckedBeforeHostPreflightOrVmMutation(): void
+    {
+        $before = $this->vmState();
+        $id = $this->queueJob('full');
+        $this->freeLicense();
+        $this->processClaimed($id, static function (string $command, callable $onChunk): int {
+            self::fail('A host preflight ran before the known read-only host was refused.');
+        });
+        $job = repo_deploy_job($this->db, $id);
+        self::assertSame('failed', $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED, (string) $job['terminal_reason_code'], 'no playbook ran, so this is not execution_failed');
+        self::assertSame($before, $this->vmState());
+        self::assertSame(0, $this->logCount($id, 'Deploy files prepared:%'));
+    }
+
+    private function freeLicense(): void
+    {
+        repo_execute($this->db, "INSERT INTO deploy_esxi_inventory_state (credential_id,last_success_at,last_attempt_at,last_status,license_free) VALUES (?,UTC_TIMESTAMP(),UTC_TIMESTAMP(),'ok',1) ON DUPLICATE KEY UPDATE last_success_at=UTC_TIMESTAMP(),last_status='ok',license_free=1", 'i', [$this->esxiId]);
     }
 
     /** @return array{lifecycle_state:string,mecm_sync_state:string,events:int} */

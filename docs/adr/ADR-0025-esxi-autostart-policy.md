@@ -71,3 +71,23 @@ ausgeschalteter Mission als Rückbauweg; er entfernt die ausgewählten
 Missions-VMs aus der Autostartliste (`start_action: none`), schreibt aber weiter
 niemals `system_defaults.enabled: false` und schaltet damit keine fremde Mission
 ab. Diese Unterscheidung ist durch `AutostartPolicyTest` festgeschrieben.
+
+## Amendment (2026-10-05): a free licence refuses every writing mode (DF-E2)
+
+The separate decision the second bullet above reserved is made (DF-E2, user
+decision of 04.10.2026). A free-licence fact from a fresh successful pull now
+refuses every mode whose playbooks write (`create`, `full`, `powercycle`,
+`start`, `autostart`), not only the autostart step. The refusal sits where
+the other enqueue gates sit: `deploy_queue_blockers()` on the deploy page and
+`repo_deploy_assert_mission_ready()` for a single job, a stagger group and a
+retry, through the one owner `esxi_write_preflight()` /
+`deploy_assert_esxi_write_capability()`. The worker repeats it before it marks
+a VM, because a scheduled job can start days after it was queued; that ends
+the job `failed` / `configuration_blocked` with no VM change and no upload.
+`export` and the inventory pull stay allowed, because they only read.
+
+The cache-never-blocks rule is unchanged in its substance: only a fresh fact
+refuses, a stale or missing one warns (freshness per ADR-0023 and DF-E3).
+The HA-cluster rule stays as written above. The autostart preflight keeps its
+own free-licence branch; with the earlier refusal it is only reachable if the
+fact turns fresh between the two reads.

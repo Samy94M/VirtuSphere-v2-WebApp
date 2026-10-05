@@ -6,6 +6,7 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../credentials.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../esxi_write_capability.php';
 require_once __DIR__ . '/../deploy_mission_busy_exception.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/helpers.php';
@@ -134,6 +135,7 @@ function repo_deploy_assert_mission_ready(mysqli $db, array $mission, int $esxiC
     if (mission_name_is_template($missionName)) {
         throw new RuntimeException('Templates cannot be deployed directly.');
     }
+    deploy_assert_esxi_write_capability($db, $esxiCredentialId, $mode);
     if (virtusphere_deploy_mode_needs_location($mode)) {
         $datacenterResolution = repo_esxi_datacenter_resolution($db, $esxiCredentialId, virtusphere_request_now());
         if (trim((string) ($mission['hypervisor_datacenter'] ?? '')) === ''

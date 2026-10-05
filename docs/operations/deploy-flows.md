@@ -50,6 +50,7 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 - Auswahl: nicht leer, gehört zur Mission, bleibt unter der Obergrenze je Auftrag.
 - Netz: allgemeine Zuordnung und PXE-Karte laut Netzvertrag; welche Modi sperren und welche nur warnen, steht in [DEPLOYMENT.md](../DEPLOYMENT.md#deploy-modes-and-the-mac-generation-power-cycle).
 - Create-Historie: Eine frühere Create-Einheit derselben VM ist noch ungeklärt (`uncertain`).
+- Host-Fähigkeit: Ein aktueller Befund „freie Lizenz“ des gewählten Hosts sperrt jeden schreibenden Modus (`create`, `full`, `powercycle`, `start`, `autostart`); `export` bleibt erlaubt. Ein veralteter oder fehlender Befund warnt nur. Dieselbe Prüfung läuft für Einzelauftrag, Staffelung und Wiederholung und im Worker erneut.
 
 ## Worker: ein Auftrag
 
@@ -66,7 +67,9 @@ flowchart TD
   K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH; VM-Zustände unverändert"]
   K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
-  P -->|ja| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
+  P -->|ja| W{"Schreibender Modus und aktueller Befund „freie Lizenz“?"}
+  W -->|ja| WX["Auftrag failed (configuration_blocked); nichts hochgeladen, VM-Zustände unverändert"]
+  W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
   D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente; VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
@@ -75,7 +78,7 @@ flowchart TD
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
-  AP -->|freie Lizenz| APX["Auftrag failed, noch vor dem Upload; alle VMs des Umfangs failed/failed"]
+  AP -->|freie Lizenz (nur theoretisch: W hat schon gesperrt)| APX["Auftrag failed, noch vor dem Upload; alle VMs des Umfangs failed/failed"]
   AP -->|HA-Cluster| APH["Modus autostart: failed, alle VMs des Umfangs failed/failed; Modus full: Autostart-Schritt entfällt"]
   AP -->|unbekannt oder veraltet| APW["Hinweis im Protokoll, weiter"]
   AP -->|keine Einschränkung| U
@@ -108,6 +111,7 @@ flowchart TD
   Z["Nach jedem Endzustand von create/full: Inventarabruf für den Host einreihen, wenn eine Create-Einheit eine gespeicherte Ansible-Job-ID hat; fail-soft, dedupliziert"]
   KX --> FIN
   PX --> FIN
+  WX --> FIN
   HX --> FIN
   HAX --> FIN
   HKX --> FIN

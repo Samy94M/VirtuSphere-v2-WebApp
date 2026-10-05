@@ -308,7 +308,7 @@ return [
     'cap_license_free' => 'Freie Lizenz: kein Deploy, kein Autostart',
     'cap_in_ha_cluster' => 'HA-Cluster: Autostart wirkungslos',
     'cap_in_maintenance' => 'Wartungsmodus',
-    'cap_legend_license_free' => 'Die freie ESXi-Lizenz erlaubt nur lesende API-Zugriffe. Inventar-Abrufe laufen, Bereitstellen und Autostart nicht. Ein Auftrag, der den Autostart schreibt, wird abgelehnt; jeder andere Schreibversuch scheitert am Host selbst.',
+    'cap_legend_license_free' => 'Die freie ESXi-Lizenz erlaubt nur lesende API-Zugriffe. Inventar-Abrufe laufen, Bereitstellen und Autostart nicht. Solange der Befund aktuell ist, lässt sich kein schreibender Modus einreihen, und ein schon eingereihter Auftrag endet vor dem Start; nur MAC-Export und Inventarabruf laufen. Ist der Befund veraltet, scheitert ein Schreibversuch erst am Host selbst.',
     'cap_legend_in_ha_cluster' => 'Auf Hosts in einem vSphere-HA-Cluster schaltet ESXi den Autostart ab. Dort steuert die HA-Neustart-Priorität die Reihenfolge. Ein reiner Autostart-Auftrag wird deshalb abgelehnt, in einer vollständigen Bereitstellung entfällt nur dieser Schritt.',
     'cap_legend_in_maintenance' => 'Der Host ist im Wartungsmodus. Das ist ein vorübergehender Zustand, keine Fehlkonfiguration.',
     'generated_at' => 'Stand der Anzeige',

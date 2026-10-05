@@ -315,4 +315,13 @@ function ansible_remote_cleanup_command(string $remoteDir): string
     return 'rm -rf -- ' . ansible_sh_quote($remoteDir);
 }
 
+/** Writing follows the real playbook sequence; system inventory and export read. */
+function ansible_mode_writes_esxi(string $mode): bool
+{
+    if (array_key_exists($mode, VIRTUSPHERE_SYSTEM_PLAYBOOKS)) {
+        return false;
+    }
+    return array_diff(ansible_playbooks_for_mode($mode, true), [VIRTUSPHERE_PLAYBOOKS['export']]) !== [];
+}
+
 // Stage marker echoed before each preflight component; the last one on stdout
