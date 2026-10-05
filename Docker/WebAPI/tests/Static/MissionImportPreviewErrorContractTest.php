@@ -110,7 +110,7 @@ final class MissionImportPreviewErrorContractTest extends TestCase
         // hand-off is simply gone. Fewer means one of them fell silent again.
         self::assertGreaterThanOrEqual(
             3,
-            substr_count($block, 'flash_set('),
+            preg_match_all('/flash_(?:set|portal_error)\(/', $block),
             'a branch of the import hand-off ends without telling the operator anything'
         );
     }
@@ -156,7 +156,7 @@ final class MissionImportPreviewErrorContractTest extends TestCase
         $branches = $this->handOffBranches();
         self::assertArrayHasKey($key, $branches, 'the hand-off chain no longer answers ' . $key);
 
-        self::assertStringContainsString('flash_set(', $branches[$key], 'the ' . $key . ' branch ends silently');
+        self::assertMatchesRegularExpression('/flash_(?:set|portal_error)\(/', $branches[$key], 'the ' . $key . ' branch ends silently');
         if ($mayDelete) {
             self::assertStringContainsString("unset(\$_SESSION['mission_import'])", $branches[$key]);
 
@@ -208,7 +208,7 @@ final class MissionImportPreviewErrorContractTest extends TestCase
             $documentBody,
             'an unreadable file is an expected outcome and must not write a server diagnostic line'
         );
-        self::assertStringContainsString('flash_set(', $documentBody);
+        self::assertStringContainsString('flash_portal_error(', $documentBody);
 
         $faultCatch = strpos($block, 'catch (Throwable');
         self::assertNotFalse($faultCatch, 'the unexpected failure is no longer caught');

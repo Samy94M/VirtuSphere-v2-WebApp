@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_urls.php';
 require_once __DIR__ . '/portal_work_context.php';
 
 /**

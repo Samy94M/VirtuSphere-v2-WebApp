@@ -295,9 +295,9 @@ function credentials_handle_post(mysqli $connection, array $user): string
             default => 'row-' . request_int($_POST, 'credential_id'),
         };
         form_remember($formKey, $_POST, $exception->errors());
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     } catch (Throwable $exception) {
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     }
 
     return $redirect;

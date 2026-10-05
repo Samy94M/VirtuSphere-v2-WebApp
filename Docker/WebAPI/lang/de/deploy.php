@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 return [
+    'err_active_job_scheduled' => 'Für diese Mission läuft oder wartet Auftrag #:id (:mode), geplanter Start: :start.',
+    'create_progress_link_vm' => 'VM bearbeiten',
+
     'err_selection_empty' => 'Wählen Sie mindestens eine VM aus.',
     'blocker_create_history' => 'Das Ergebnis der früheren VM-Erstellung für :name in Auftrag #:job ist ungeklärt. Prüfen Sie das Erstellungsergebnis vor einem neuen Auftrag.',
     'blocker_create_credential_target' => 'Diese Zugangsdaten bestimmen noch das Ziel eines aktiven Bereitstellungsauftrags oder einer ungeklärten VM-Erstellung. Das Ziel kann deshalb derzeit weder geändert noch gelöscht werden.',
@@ -308,7 +311,7 @@ return [
     'err_datacenter_name_timestamp_invalid' => 'Die Datacenter-Evidenz besitzt einen ungültigen Zeitpunkt. Bitte das ESXi-Inventar aktualisieren oder den Missionswert ausdrücklich setzen.',
     'capability_warn' => 'Zum gewählten Host „:host": :notes Der Auftrag kann trotzdem eingereiht werden.',
     'err_mission_no_vms' => 'Diese Mission hat keine VMs; es gibt nichts einzureihen.',
-    'err_active_job' => 'Für diese Mission läuft oder wartet bereits ein Bereitstellungsauftrag.',
+    'err_active_job' => 'Für diese Mission läuft oder wartet Auftrag #:id (:mode).',
     'err_datastore_required' => 'Die Mission hat keinen Datastore. Bitte in den Missions-Details einen setzen; nur der Autostart-Modus kommt ohne aus.',
     'err_selection_gone' => 'Keine der ausgewählten VMs gehört noch zu dieser Mission. Bitte die Auswahl neu treffen.',
     'confirm_retry_external' => 'Den Export für „:name“ erneut ausführen? Die Portal-Konfiguration ist bereit; die Korrektur auf ESXi kann erst beim erneuten Auslesen geprüft werden.',

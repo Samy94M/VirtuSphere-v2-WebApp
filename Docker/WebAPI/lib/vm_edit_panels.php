@@ -110,7 +110,7 @@ declare(strict_types=1);
                 <p><?php echo h(__t('vm_edit.progress_pending_overdue', [
                     'since' => portal_format_timestamp($progressWatchSince),
                     'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
-                ])); ?></p>
+                ])); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
             <?php } elseif ($progressWatchSince === '') { ?>
                 <p><?php echo h(__t('vm_edit.progress_install_unwatched')); ?></p>
             <?php } elseif ($progressAttention !== null) { ?>

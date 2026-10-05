@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+/** @var array<string,mixed> $user Authenticated settings-page user. */
+
 /** @var string $retireThreshold */
 /** @var string $esxiIntervalHours */
 /** @var array{state:string,credential_id:?int,configured_id:int,credentials:array<int,array<string,mixed>>} $esxiAnsibleResolution */
@@ -31,7 +33,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('settings.esxi_title')); ?></h2>
             <?php $esxiHintId = form_hint_id('esxi', 'inventory_group'); ?>
-            <p class="muted" id="<?php echo h($esxiHintId); ?>"><?php echo h(__t('settings.esxi_hint')); ?></p>
+            <p class="muted" id="<?php echo h($esxiHintId); ?>"><?php echo h(__t('settings.esxi_hint')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
             <form class="form-grid" method="post" action="settings.php"<?php echo form_control_attrs('esxi', 'inventory_group', null, [$esxiHintId], ''); ?> role="group" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_esxi_inventory">

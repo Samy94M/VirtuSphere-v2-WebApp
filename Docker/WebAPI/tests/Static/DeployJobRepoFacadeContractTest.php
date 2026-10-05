@@ -104,6 +104,7 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         // database (see DeployJobReapObservationTest).
         'deploy_job_reap_observation',
         'repo_deploy_active_job_exists',
+        'repo_deploy_active_job_id',
         'repo_deploy_lock_mission',
         'repo_deploy_assert_mission_idle',
         'repo_create_deploy_job',

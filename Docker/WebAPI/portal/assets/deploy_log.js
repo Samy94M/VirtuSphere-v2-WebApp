@@ -255,10 +255,19 @@
         if (replacementsContainer && replacementsList) {
             var replacements = Array.isArray(progress.replacements) ? progress.replacements : [];
             replacementsList.replaceChildren();
-            replacements.forEach(function (text) {
+            var replacementActions = Array.isArray(progress.replacement_actions) ? progress.replacement_actions : [];
+            replacements.forEach(function (text, index) {
                 if (typeof text !== 'string') { return; }
                 var item = document.createElement('li');
                 item.textContent = text;
+                var action = replacementActions[index];
+                if (action && typeof action.url === 'string' && typeof action.label === 'string') {
+                    var link = document.createElement('a');
+                    link.href = action.url;
+                    link.textContent = action.label;
+                    item.appendChild(document.createTextNode(' '));
+                    item.appendChild(link);
+                }
                 replacementsList.appendChild(item);
             });
             replacementsContainer.hidden = replacements.length === 0;

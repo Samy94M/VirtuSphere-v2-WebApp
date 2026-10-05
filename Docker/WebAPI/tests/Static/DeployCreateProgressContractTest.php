@@ -59,7 +59,7 @@ final class DeployCreateProgressContractTest extends TestCase
                 // Required AND called. Either alone is the defect this pins.
                 "require_once __DIR__ . '/../lib/deploy_create_progress.php';",
                 'deploy_log_render_create_progress($connection, $job, $user);',
-                "'create_progress' => deploy_create_progress_payload(\$connection, \$job),",
+                "'create_progress' => deploy_create_progress_payload(\$connection, \$job, \$user),",
                 // A link, not a button: the cursor already worked without
                 // JavaScript, it was simply not reachable.
                 'deploy_log_older_url((int) $job[\'id\'], $oldestSeq)',

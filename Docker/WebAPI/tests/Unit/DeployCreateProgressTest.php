@@ -224,7 +224,7 @@ final class DeployCreateProgressTest extends TestCase
         $view = deploy_create_progress_from_rows($rows);
         self::assertNotNull($view);
         self::assertSame([], $view['findings']);
-        self::assertSame([['position' => 2, 'vm_name' => 'VM002']], $view['replacements']);
+        self::assertSame([['position' => 2, 'vm_name' => 'VM002', 'vm_id' => 0]], $view['replacements']);
 
         $payload = deploy_create_progress_payload_from_view($view);
         self::assertNotNull($payload);

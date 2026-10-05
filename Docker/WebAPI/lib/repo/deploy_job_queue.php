@@ -87,8 +87,9 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         repo_deploy_assert_credential_type($db, $ansibleCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         repo_deploy_assert_no_vm_identity_conflicts($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
 
-        if (repo_deploy_active_job_exists($db, $missionId)) {
-            throw new RuntimeException('This mission already has an active deploy job.');
+        $activeJobId = repo_deploy_active_job_id($db, $missionId);
+        if ($activeJobId !== null) {
+            throw new DeployMissionBusyException('This mission already has an active deploy job.', $activeJobId);
         }
         repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
         repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
@@ -235,8 +236,9 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
         repo_deploy_assert_credential_type($db, $esxiCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         repo_deploy_assert_credential_type($db, $ansibleCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
 
-        if (repo_deploy_active_job_exists($db, $missionId)) {
-            throw new RuntimeException('This mission already has an active deploy job.');
+        $activeJobId = repo_deploy_active_job_id($db, $missionId);
+        if ($activeJobId !== null) {
+            throw new DeployMissionBusyException('This mission already has an active deploy job.', $activeJobId);
         }
 
         // Resolve the ordered VM list (shared with the preview so both agree).

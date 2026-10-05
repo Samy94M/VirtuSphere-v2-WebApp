@@ -47,7 +47,6 @@ return [
     'btn_inventory' => 'Inventarabruf starten',
     'btn_inventory_busy' => 'Wird eingereiht…',
     'confirm_delete' => 'Zugangsdaten :name löschen?',
-    'err_in_use' => 'Diese Zugangsdaten werden von einem wartenden oder laufenden Bereitstellungsauftrag verwendet und lassen sich deshalb nicht löschen. Den Auftrag zuerst abwarten oder abbrechen.',
     'btn_test_strict' => 'Strikte Zertifikatsprüfung testen',
     'btn_activate_strict' => 'Strikten Modus aktivieren',
     'btn_use_legacy' => 'Legacy-Modus verwenden',

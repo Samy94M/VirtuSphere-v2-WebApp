@@ -9,6 +9,8 @@ require_once __DIR__ . '/deploy_network_blockers.php';
 require_once __DIR__ . '/deploy_queue_blocker_view.php';
 require_once __DIR__ . '/deploy_preflight_bounds.php';
 require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/layout_response.php';
+require_once __DIR__ . '/deploy_mode_labels.php';
 require_once __DIR__ . '/help_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/repo/credentials.php';
@@ -197,8 +199,20 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
             'credentials.manage'
         );
     }
-    if ($selectedMission !== null && deploy_active_job_visible($db, $missionId)) {
-        $blockers[] = deploy_selection_blocker('active_job', __t('deploy.err_active_job'));
+    $activeJob = $selectedMission !== null ? deploy_active_job_visible($db, $missionId) : null;
+    if ($activeJob !== null) {
+        $scheduledAt = (string) ($activeJob['scheduled_at'] ?? '');
+        $blockers[] = deploy_action_blocker(
+            'active_job',
+            __t($scheduledAt === '' ? 'deploy.err_active_job' : 'deploy.err_active_job_scheduled', [
+                'id' => (int) $activeJob['id'],
+                'mode' => deploy_mode_label(ansible_job_payload($activeJob)['mode']),
+                'start' => portal_format_timestamp($scheduledAt),
+            ]),
+            deploy_job_log_url((int) $activeJob['id']),
+            __t('deploy.flash_open_job_log'),
+            'deploy.run'
+        );
     }
     if ($selectedMission !== null && virtusphere_deploy_mode_needs_location($state['mode'])
         && trim((string) ($selectedMission['hypervisor_datastorage'] ?? '')) === '') {
@@ -309,17 +323,18 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
     return $blockers;
 }
 
-function deploy_active_job_visible(mysqli $db, int $missionId): bool
+/** @return array<string,mixed>|null */
+function deploy_active_job_visible(mysqli $db, int $missionId): ?array
 {
     $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
     $placeholders = implode(', ', array_fill(0, count($active), '?'));
 
     return repo_fetch_one(
         $db,
-        'SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL LIMIT 1',
+        'SELECT id, payload_json, scheduled_at FROM deploy_jobs WHERE mission_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL ORDER BY id LIMIT 1',
         'i' . str_repeat('s', count($active)),
         array_merge([$missionId], $active)
-    ) !== null;
+    );
 }
 
 /** @return array{kind:string,code:string,message:string} */
@@ -357,6 +372,12 @@ function deploy_assert_queue_unblocked(mysqli $db, array $input): void
 {
     $blockers = deploy_queue_blockers($db, $input);
     if ($blockers !== []) {
-        throw new ValidationException([], (string) $blockers[0]['message']);
+        $first = $blockers[0];
+        $action = $first['code'] === 'active_job' ? [
+            'url' => $first['action']['url'],
+            'label_key' => 'deploy.flash_open_job_log',
+            'permission' => $first['action']['permission'],
+        ] : null;
+        throw new ValidationException([], (string) $first['message'], $action);
     }
 }

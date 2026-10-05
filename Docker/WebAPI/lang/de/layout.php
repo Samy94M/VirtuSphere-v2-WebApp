@@ -57,13 +57,12 @@ return [
     // Mission läuft oder wartet. Bewusst für beide Fälle ein Satz: es ist
     // derselbe Grund, und die Ablehnung ist hart (kein stiller Abbruch des
     // Auftrags), damit niemandes laufender Deploy nebenbei beendet wird.
-    'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Brich ihn zuerst in der Bereitstellungsliste ab; solange er offen ist, lässt sich daran nichts löschen.',
+    'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Den Auftrag zuerst abwarten oder abbrechen.',
     // Der Wiederholen-Knopf der Auftragsliste faehrt dasselbe Einreih-Gatter noch
     // einmal, hat aber kein Formular und damit keine Feldmeldung. Ohne diesen
     // Eintrag rendert das Portal an dieser Stelle die rohe englische
     // Exception-Meldung. Der Satz nennt beide Ursachen, weil der Wiederholen-Weg
     // nicht weiss, welche der beiden vorliegt.
-    'err_datacenter_unresolved' => 'Das Datacenter lässt sich nicht bestimmen: die Mission hat keines, und der gewählte ESXi-Zugang meldet nicht genau eines (noch kein Inventar oder mehrere). Setze das Datacenter in der Mission oder aktualisiere das Inventar im Systemstatus.',
     'err_db_generic' => 'Die Datenbank konnte die Aktion nicht speichern. Bitte prüfe die Eingaben.',
     'err_action_failed' => 'Die Aktion konnte nicht abgeschlossen werden.',
 ];

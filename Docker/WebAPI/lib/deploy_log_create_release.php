@@ -16,6 +16,7 @@ declare(strict_types=1);
 // what a person saw is a statement about the moment they looked.
 require_once __DIR__ . '/deploy_create_release.php';
 require_once __DIR__ . '/deploy_recovery_actions.php';
+require_once __DIR__ . '/system_status_urls.php';
 
 /**
  * Renders the release box for the first unresolved create unit of this job.
@@ -57,6 +58,7 @@ function deploy_log_render_create_release(mysqli $db, array $job, array $user): 
                         <li><?php echo h(__t('deploy.create_release_blocker_' . $blocker)); ?></li>
                     <?php } ?>
                 </ul>
+                <a href="<?php echo h(system_status_url('credential-' . (int) $job['credential_esxi_id'], ['inventory' => (int) $job['credential_esxi_id']])); ?>"><?php echo h(__t('deploy.create_progress_link_inventory')); ?></a>
             </div>
         <?php } else { ?>
             <form class="form-grid" method="post" action="deploy.php">

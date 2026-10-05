@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lang.php';
 require_once __DIR__ . '/mac.php';
+require_once __DIR__ . '/portal_actionable_error.php';
 
 /**
  * One DNS label: letter/digit at both ends, hyphens only inside, at most 63
@@ -45,18 +46,24 @@ function validator_label(string $field, string $fallback): string
     return validator_text('validate.field_' . $field, $fallback);
 }
 
-final class ValidationException extends RuntimeException
+final class ValidationException extends RuntimeException implements PortalActionableError
 {
     /** @var array<string, string> */
     private array $errors;
 
     /**
      * @param array<string, string> $errors
+     * @param array{url:string,label_key:string,permission:string}|null $action
      */
-    public function __construct(array $errors, string $message = '')
+    public function __construct(array $errors, string $message = '', private readonly ?array $action = null)
     {
         parent::__construct($message !== '' ? $message : validator_text('validate.failed', 'Validation failed.'));
         $this->errors = $errors;
+    }
+
+    public function portalAction(): ?array
+    {
+        return $this->action;
     }
 
     /**

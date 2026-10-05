@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../credentials.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../validate.php';
+require_once __DIR__ . '/../deploy_urls.php';
 require_once __DIR__ . '/helpers.php';
 
 /**
@@ -170,11 +171,16 @@ function repo_deploy_create_fence_credential_change(mysqli $db, int $id, ?array 
     if ($sameTarget) {
         return;
     }
-    $hasHistory = array_filter($sources, static fn (array $source): bool => isset($esxiJobs[(int) $source['job_id']])) !== [];
-    if ($active !== [] || $hasHistory) {
+    $history = array_values(array_filter($sources, static fn (array $source): bool => isset($esxiJobs[(int) $source['job_id']])));
+    if ($active !== [] || $history !== []) {
+        $jobId = $active !== [] ? (int) array_values($active)[0]['id'] : (int) $history[0]['job_id'];
         throw new ValidationException([], validator_text(
             'deploy.blocker_create_credential_target',
             'This credential still identifies an active deployment job or an unresolved VM creation. Its target cannot currently be changed or deleted.'
-        ));
+        ), [
+            'url' => deploy_job_log_url($jobId),
+            'label_key' => 'deploy.flash_open_job_log',
+            'permission' => 'deploy.run',
+        ]);
     }
 }

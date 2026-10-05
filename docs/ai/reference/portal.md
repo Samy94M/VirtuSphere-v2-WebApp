@@ -32,7 +32,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R8 Portal flash and HTML errors should use ValidationException for field messages and portal_error
 
-- Portal flash and HTML errors should use `ValidationException` for field messages and `portal_error_message()` for general exception mapping. Avoid raw generic `$exception->getMessage()` in user-facing output.
+- Portal flash and HTML errors use `ValidationException` for field messages and `portal_error_message()` for general exception mapping. Exceptions implementing `PortalActionableError` carry a relative URL, translation label key and target permission; `flash_portal_error()` resolves that action through `portal_error_action()` and the shared flash presenter. The sentence stays visible without target permission. `DeployMissionBusyException` carries the blocking job ID from the current locking read; credential-target fences carry the active or historical source job. `MessageLinkContractTest` closes the error map and page-name exceptions in both directions, with negative cases. Avoid raw generic `$exception->getMessage()` in user-facing output.
 
 ## R9 Button/link visibility must use the same permission as the POST/action handler. Do not hand-rol
 

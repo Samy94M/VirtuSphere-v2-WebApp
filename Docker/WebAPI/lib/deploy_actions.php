@@ -219,11 +219,11 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
         redirect_to($redirectBase);
     } catch (ValidationException $exception) {
         form_remember('schedule', $_POST, $exception->errors());
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
         redirect_to($redirectBase);
     } catch (Throwable $exception) {
         form_remember('schedule', $_POST, []);
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
         redirect_to($redirectBase);
     }
 }

@@ -1270,3 +1270,27 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Ablaufseite:** mit `scripts/build-flow-viewer.ps1` neu erzeugt (`qa-artifacts/flow-viewer/index.html`, 4 Dokumente, 27 Diagramme). Veröffentlichen tut sie der Nutzer.
 
 **Nächster Schritt:** K7.
+
+## Paket K7: Meldungen mit Link (R11)
+
+**Stand: lokal geprüft, gemeinsame Schlussabnahme offen** (Block K5 bis K10). Ausgangsstand `f9e0c98`. Prüfung Sol-Ersatz: begrenzter Selbstreview.
+
+**Befundmessung:** R11-01 entfällt: Kein produktiver Wurf der alten Zugangsmeldung; die Sperre liegt im Create-Fence (R11-04). R11-03 entfällt: Die beiden Datacenter-Meldungen erreichen die Portal-Map nicht; Enqueue besitzt den verlinkten Blocker, der Worker schreibt ins Auftragslog. Tote Map-Einträge und Übersetzungsschlüssel entfernt. Zusätzlich den toten alten Import-Map-Eintrag nachgemessen und entfernt.
+
+**Umsetzung:** `PortalActionableError`, `DeployMissionBusyException` und die optionale Aktion der `ValidationException` tragen den konkret sperrenden beziehungsweise Quellauftrag. Die drei Mission-Wurfstellen behalten ihre englischen Diagnosen. `portal_error_action()` und `flash_portal_error()` prüfen die Zielberechtigung und verwenden den bestehenden sicheren Flash-Renderer. Der Aktivauftrag-Blocker nennt Nummer, Modus aus `payload_json` und gegebenenfalls geplanten Start; der Portal-Recheck behält seine Aktion. R11-05 bis R11-09 und die Linkteile FC2-03, ZB-06 und FM-05 verwenden vorhandene URL-Helfer. Ersatz-VMs sind in Servermarkup und Pollingantwort mit ihrer konkreten VM verlinkt.
+
+**Wächter:** Seitennamen aus den DE-Navigationsschlüsseln ableiten; Aufrufstellen verlangen Link oder begründete Ausnahme. Die Fehler-Map ist in beide Richtungen gegen actionable Wurfstellen und begründete Ausnahmen geschlossen. Negativfälle erreichen die jeweiligen Diagnosen; DE/EN-Parität und Berechtigungen sind separat geprüft.
+
+**Rot vor Fix:** Unit/Static rot an den beiden neuen Wächtern. Integration rot für Missionslöschung, zweiten Auftrag, Zugangslöschung und Aktivauftrag-Link (drei fehlende Aktionsfunktionen, drei Assertionfehler einschließlich Wächter). Fixture verwendet synthetische QA-Daten. Quellen und rote Logs unter `qa-artifacts/k7-2026-10-05/red/`.
+
+**Korrekturen während QA:** PHPStan-Rückgabetyp und Settings-Kontext korrigiert. Ein Import über `deploy_urls.php` zog den Systemstatus-Renderer in CLI-Closures; auf den reinen URL-Owner umgestellt. Die Aktivauftrag-Abfrage liest den Modus aus `payload_json`, da es keine SQL-Spalte `mode` gibt. Frühere Fehlversuche bleiben im Paketverzeichnis dokumentiert.
+
+**Gates und Quellen:** green-2/results.json: phpunit-unit (1904 Tests), phpstan, file-size, qa-stack und phpunit-full (2432 Tests), jeweils pass ohne Skips. lang-parity, doc-hygiene, doc-semantics und js-syntax pass aus green/quick-results.json bleiben für ihre unveränderten Quellen gültig. PHP-Lint pass. Quellmanifest: `qa-artifacts/k7-2026-10-05/green/source-manifest.json`; rote und grüne Runnerlogs, JSON und JUnit im Paketverzeichnis. Keine produktiven Remoteaktionen, Schemaänderungen oder Baselineänderungen.
+
+**Offen:** Gemeinsame Schlussabnahme K5 bis K10 (funktionales e2e-portal, LF-Worktree, Fetch und Push). Sechs fehlende UX02-Bilder bleiben offene visuelle Infrastrukturabnahme, kein Paketbefund.
+
+**Nächster Schritt:** K8.
+
+## Entscheidung 05.10.2026: Tests und Prüfungen am Blockende bündeln
+
+**Nutzer während K7:** Tests und Prüfungen müssen nicht nach jeder Etappe laufen; die gebündelte Prüfung am Ende reicht. Dies ersetzt für die verbleibenden Pakete die Einzel-QA aus S9 und dem früheren Blockentscheid. Je Paket bleiben Umsetzung, Befundmessung, vorbereitete Gegenproben, Quellmanifest und eigener Commit. Die neuen Gegenproben werden am gesicherten Vorherstand gesammelt rot nachgewiesen; die abschließenden Gates prüfen den gesamten Block K5 bis K10. Bereits abgeschlossene K7-QA wird wiederverwendet, soweit ihre Quellen und Abhängigkeiten unverändert bleiben. Ohne eigene Paket-QA lautet der Zwischenstatus „lokal umgesetzt, gebündelte Prüfung und Schlussabnahme offen“. Erst nach erfolgreicher Blockprüfung und Push steht „fertig“. Der K11-Astra-Halt und die offene visuelle UX02-Abnahme bleiben bestehen.

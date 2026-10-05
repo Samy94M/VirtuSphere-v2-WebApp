@@ -193,6 +193,11 @@ final class DeployCreateHistoricalFenceTest extends TestCase
                 self::fail('A pinned joined-job snapshot hid the historical credential association');
             } catch (ValidationException $exception) {
                 self::assertNotSame('', $exception->getMessage());
+                self::assertSame([
+                    'url' => deploy_job_log_url($source),
+                    'label_key' => 'deploy.flash_open_job_log',
+                    'permission' => 'deploy.run',
+                ], $exception->portalAction());
             }
         });
         self::assertSame($this->prefix . '.invalid', repo_scalar($this->db, 'SELECT host FROM deploy_credentials WHERE id = ?', 'i', [$this->esxiId]));

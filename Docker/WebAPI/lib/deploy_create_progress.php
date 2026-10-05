@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/deploy_create_progress_actions.php';
 require_once __DIR__ . '/help_page.php';
 require_once __DIR__ . '/portal_time.php';
 require_once __DIR__ . '/layout_response.php';
@@ -85,7 +86,7 @@ function deploy_create_progress_from_rows(array $rows): ?array
     foreach ($rows as $row) {
         if ((string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED
             && trim((string) ($row['replaced_instance_uuid'] ?? '')) !== '') {
-            $replacements[] = ['position' => (int) $row['position'], 'vm_name' => (string) $row['vm_name']];
+            $replacements[] = ['position' => (int) $row['position'], 'vm_name' => (string) $row['vm_name'], 'vm_id' => (int) ($row['vm_id'] ?? 0)];
         }
         if ($unresolved === null && (string) $row['status'] === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN) {
             $unresolved = [
@@ -185,9 +186,9 @@ function deploy_create_progress_finding(array $row): array
  * @param array<string,mixed> $job
  * @return array<string,mixed>|null
  */
-function deploy_create_progress_payload(mysqli $db, array $job): ?array
+function deploy_create_progress_payload(mysqli $db, array $job, ?array $user = null): ?array
 {
-    return deploy_create_progress_payload_from_view(deploy_create_progress_view($db, $job));
+    return deploy_create_progress_payload_from_view(deploy_create_progress_view($db, $job), (int) ($job['mission_id'] ?? 0), $user);
 }
 
 /**
@@ -196,7 +197,7 @@ function deploy_create_progress_payload(mysqli $db, array $job): ?array
  * @param array<string,mixed>|null $view
  * @return array<string,mixed>|null
  */
-function deploy_create_progress_payload_from_view(?array $view): ?array
+function deploy_create_progress_payload_from_view(?array $view, int $missionId = 0, ?array $user = null): ?array
 {
     if ($view === null) {
         return null;
@@ -237,6 +238,10 @@ function deploy_create_progress_payload_from_view(?array $view): ?array
         ),
         'replacements' => array_map(
             static fn(array $replacement): string => deploy_create_progress_replacement_text($replacement),
+            $view['replacements']
+        ),
+        'replacement_actions' => array_map(
+            static fn (array $replacement): ?array => deploy_create_progress_replacement_action($replacement, $missionId, $user),
             $view['replacements']
         ),
     ];
@@ -355,7 +360,7 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
             <p><strong><?php echo h(__t('deploy.create_progress_replacements_heading')); ?></strong></p>
             <ul data-create-replacement-list>
                 <?php foreach ($view['replacements'] as $replacement) { ?>
-                    <li><?php echo h(deploy_create_progress_replacement_text($replacement)); ?></li>
+                    <li><?php echo h(deploy_create_progress_replacement_text($replacement)); ?><?php $action = deploy_create_progress_replacement_action($replacement, (int) ($job['mission_id'] ?? 0), $user); if ($action !== null) { ?> <a href="<?php echo h($action['url']); ?>"><?php echo h($action['label']); ?></a><?php } ?></li>
                 <?php } ?>
             </ul>
         </div>

@@ -15,6 +15,7 @@ require_once __DIR__ . '/../lib/portal_export.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/missions_page.php';
 require_once __DIR__ . '/../lib/esxi_inventory.php';
+require_once __DIR__ . '/../lib/system_status_urls.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -154,13 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // The stored document cannot be read at all any more; there is
                 // nothing left to retry against.
                 unset($_SESSION['mission_import']);
-                flash_set('error', portal_error_message($documentError));
+                flash_portal_error($documentError, $user);
                 redirect_to('missions.php?type=missions');
             } catch (MissionTransferBlockedException|ValidationException $expectedError) {
                 // Expected refusals (a blocked report, a value a validator
                 // rejects). The hand-off stays alive so the admin can correct the
                 // name and retry without re-uploading.
-                flash_set('error', portal_error_message($expectedError));
+                flash_portal_error($expectedError, $user);
                 redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
             } catch (Throwable $importFault) {
                 // The unique index is the last race guard behind the live
@@ -178,9 +179,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (ValidationException $exception) {
         form_remember('create', $_POST, $exception->errors());
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     } catch (Throwable $exception) {
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     }
     redirect_to($missionListActionUrl);
 }
@@ -261,7 +262,7 @@ if ($importToken !== '' && !$isTemplateView && can('missions.write', $user)) {
             // and no log entry, which is exactly the "nothing happens on Preview"
             // the operator reported.
             unset($_SESSION['mission_import']);
-            flash_set('error', portal_error_message($documentError));
+            flash_portal_error($documentError, $user);
         } catch (Throwable $previewFault) {
             // Unexpected (a database failure, a coding error). Only this link's
             // own broken hand-off is dropped, the fault is recorded once, safely,
@@ -344,7 +345,7 @@ layout_header($title, $user, $active, 'missions');
                     <tr id="mission-<?php echo h((string) $mission['id']); ?>">
                         <td><?php echo h($mission['mission_name'] ?? ''); ?>
                             <?php if (isset($deviatingMissions[(int) $mission['id']])) { ?>
-                                <span class="badge badge-warning" title="<?php echo h(__t('missions.deviation_title')); ?>"><?php echo h(__t('missions.deviation_badge')); ?></span>
+                                <?php if (can('system.config', $user)) { ?><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS)); ?>" aria-label="<?php echo h(__t('missions.deviation_title')); ?>"><?php echo portal_badge('warning', __t('missions.deviation_badge')); ?></a><?php } else { echo portal_badge('warning', __t('missions.deviation_badge')); } ?>
                             <?php } ?>
                         </td>
                         <td><?php echo h((string) ($mission['vm_count'] ?? 0)); ?></td>

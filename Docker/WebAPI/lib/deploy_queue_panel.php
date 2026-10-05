@@ -143,7 +143,7 @@ if ($deployPreview !== null) { ?>
         <div class="field-stack" role="group"<?php echo form_control_attrs('schedule', 'verbose_group', null, [$verboseHintId], ''); ?>>
                 <span class="field-label"><?php echo h(__t('deploy.verbose_heading')); ?></span>
                 <label class="checkbox-item"><input type="checkbox" name="verbose" value="1" <?php echo deploy_form_value('verbose') === '1' ? 'checked' : ''; ?>> <?php echo h(__t('deploy.label_verbose')); ?></label>
-            <p class="hint" id="<?php echo h($verboseHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_verbose')); ?>:</span> <?php echo h(__t('deploy.verbose_hint')); ?></p>
+            <p class="hint" id="<?php echo h($verboseHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_verbose')); ?>:</span> <?php echo h(__t('deploy.verbose_hint')); ?> <a href="<?php echo h(help_url('deploy')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         </div>
         <?php if ($hostWarnings !== []) { ?>
             <script type="application/json" data-deploy-host-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($hostWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
@@ -151,7 +151,7 @@ if ($deployPreview !== null) { ?>
         <?php } ?>
         <?php if ($capabilityWarnings !== []) { ?>
             <script type="application/json" data-deploy-capability-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($capabilityWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
-            <p class="alert alert-warning form-grid-full" role="status" data-deploy-capability-warning <?php echo $initialCapabilityWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialCapabilityWarning); ?></span></p>
+            <p class="alert alert-warning form-grid-full" role="status" data-deploy-capability-warning <?php echo $initialCapabilityWarning === '' ? 'hidden' : ''; ?>><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <span data-deploy-warning-text><?php echo h($initialCapabilityWarning); ?></span><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a><?php } ?></p>
         <?php } ?>
         <?php $vmSelectionHintId = form_hint_id('schedule', 'vm_selection'); ?>
         <div class="form-grid-full" role="group"<?php echo form_control_attrs('schedule', 'vm_selection', null, [$vmSelectionHintId], ''); ?>>

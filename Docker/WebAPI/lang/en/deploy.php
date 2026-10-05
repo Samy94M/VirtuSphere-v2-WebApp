@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 return [
+    'err_active_job_scheduled' => 'Job #:id (:mode) for this mission is running or waiting; scheduled start: :start.',
+    'create_progress_link_vm' => 'Edit VM',
+
     'err_selection_empty' => 'Select at least one VM.',
     'blocker_create_history' => 'The earlier create operation for :name in job #:job is unresolved. Review its create result before starting another job.',
     'blocker_create_credential_target' => 'This credential still identifies an active deployment job or an unresolved VM creation. Its target cannot currently be changed or deleted.',
@@ -308,7 +311,7 @@ return [
     'err_datacenter_name_timestamp_invalid' => 'The datacenter evidence has an invalid timestamp. Refresh the selected ESXi inventory or set the mission value explicitly.',
     'capability_warn' => 'For the selected host ":host": :notes The job can still be queued.',
     'err_mission_no_vms' => 'This mission has no VMs; there is nothing to queue.',
-    'err_active_job' => 'A deploy job for this mission is already running or waiting.',
+    'err_active_job' => 'Job #:id (:mode) for this mission is running or waiting.',
     'err_datastore_required' => 'The mission has no datastore. Set one in the mission details; only the autostart mode works without it.',
     'err_selection_gone' => 'None of the selected VMs still belong to this mission. Please make the selection again.',
     'confirm_retry_external' => 'Retry the export for “:name”? The portal configuration is ready, but the ESXi-side correction can only be verified by reading it again.',

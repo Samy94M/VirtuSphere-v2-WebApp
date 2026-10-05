@@ -197,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set($skipped > 0 ? 'warning' : 'success', $message, '', $flashAction);
         }
     } catch (ValidationException $exception) {
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     } catch (RepoMecmResetBlocked $blocked) {
         // A closed reason, mapped to a localized sentence (Etappe 14D). The
         // predecessor recognised "no MAC" by searching the exception TEXT, so a
@@ -205,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // generic error page and taken the operator's next step with it.
         flash_set('error', mecm_reset_blocker_message($blocked->reasonCode()));
     } catch (Throwable $exception) {
-        flash_set('error', portal_error_message($exception));
+        flash_portal_error($exception, $user);
     }
     redirect_to($redirectPath);
 }

@@ -6,6 +6,7 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../credentials.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../deploy_mission_busy_exception.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/helpers.php';
 
@@ -36,18 +37,26 @@ require_once __DIR__ . '/helpers.php';
  */
 function repo_deploy_active_job_exists(mysqli $db, int $missionId): bool
 {
+    return repo_deploy_active_job_id($db, $missionId) !== null;
+}
+
+/** Current locking read; called after the mission lock by every writer. */
+function repo_deploy_active_job_id(mysqli $db, int $missionId): ?int
+{
     // The active set is the SSoT constant (queued/running/cancelling): a
     // cancelling job's playbook may still be executing, so it protects its
     // mission exactly like a running one until the worker confirms (ADR-0033).
     $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
     $placeholders = implode(', ', array_fill(0, count($active), '?'));
 
-    return repo_fetch_one(
+    $job = repo_fetch_one(
         $db,
         'SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL LIMIT 1 FOR UPDATE',
         'i' . str_repeat('s', count($active)),
         array_merge([$missionId], $active)
-    ) !== null;
+    );
+
+    return $job === null ? null : (int) $job['id'];
 }
 
 /**
@@ -83,8 +92,9 @@ function repo_deploy_lock_mission(mysqli $db, int $missionId): ?array
  */
 function repo_deploy_assert_mission_idle(mysqli $db, int $missionId): void
 {
-    if (repo_deploy_active_job_exists($db, $missionId)) {
-        throw new RuntimeException('Mission has an active deploy job.');
+    $jobId = repo_deploy_active_job_id($db, $missionId);
+    if ($jobId !== null) {
+        throw new DeployMissionBusyException('Mission has an active deploy job.', $jobId);
     }
 }
 

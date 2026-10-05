@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/portal_actionable_error.php';
+
 // Display-only timestamp formatter (SSoT). DB values are UTC (db() pins the
 // session to +00:00); portal_format_datetime() converts them to the configured
 // portal timezone (ADR-0022, lib/portal_time.php).
@@ -31,12 +33,9 @@ function portal_error_message(Throwable $exception): string
     // rendered button can trip.
     $operatorReachableErrors = [
         'Mission has no VMs to deploy.' => 'deploy.err_mission_no_vms',
-        'This mission already has an active deploy job.' => 'deploy.err_active_job',
+        'This mission already has an active deploy job.' => 'layout.err_mission_active_job',
         'Mission datastore is required before deployment.' => 'deploy.err_datastore_required',
         'None of the selected VMs belong to this mission.' => 'deploy.err_selection_gone',
-        // credentials.php renders Delete for every credential, including one an
-        // active job holds, so this guard is one click away.
-        'Credential is used by an active deploy job.' => 'credentials.err_in_use',
         'Strict ESXi certificate verification requires HTTPS.' => 'credentials.err_strict_requires_https',
         'Strict ESXi certificate verification must pass a connection test before activation.' => 'credentials.err_strict_test_required',
         'ESXi certificate is required.' => 'credentials.err_certificate_required',
@@ -44,21 +43,10 @@ function portal_error_message(Throwable $exception): string
         // running deploy works on: missions.php renders Delete for every mission
         // and vms.php for every row, both regardless of a running job.
         'Mission has an active deploy job.' => 'layout.err_mission_active_job',
-        // The retry button in the deploy list re-runs the enqueue gate, and that
-        // path has no form and therefore no sticky field error to carry the
-        // sentence. Both wordings are listed because the enqueue gate and the
-        // worker gate phrase the same condition differently; a map keyed on the
-        // exact string needs both, or one of them renders raw English.
-        'Mission datacenter is required: the selected ESXi credential does not report exactly one datacenter.' => 'layout.err_datacenter_unresolved',
-        'Mission datacenter is required: the ESXi credential of this job does not report exactly one datacenter.' => 'layout.err_datacenter_unresolved',
         // Two operators editing the same VM: the optimistic-locking guard in
         // repo_save_vm rejects the second save. Reachable by construction, so it
         // must speak the operator's language, not raw English.
         'VM was changed by another user. Reload before saving.' => 'vm_edit.err_conflict',
-        // The mission import refuses a blocked payload server-side even though
-        // the confirm button is disabled: a preview that went stale between the
-        // render and the click posts straight into this guard.
-        'Import is blocked; resolve the reported issues first.' => 'missions.import_err_blocked',
     ];
     if (isset($operatorReachableErrors[$message])) {
         return __t($operatorReachableErrors[$message]);
@@ -82,6 +70,25 @@ function portal_error_message(Throwable $exception): string
     }
 
     return $message;
+}
+
+/** @return array{url:string,label:string}|null */
+function portal_error_action(Throwable $exception, ?array $user = null): ?array
+{
+    if (!$exception instanceof PortalActionableError) {
+        return null;
+    }
+    $action = $exception->portalAction();
+    if ($action === null || !can($action['permission'], $user)) {
+        return null;
+    }
+
+    return flash_action_normalize(['url' => $action['url'], 'label' => __t($action['label_key'])]);
+}
+
+function flash_portal_error(Throwable $exception, ?array $user = null): void
+{
+    flash_set('error', portal_error_message($exception), '', portal_error_action($exception, $user));
 }
 
 function role_label(string $role): string

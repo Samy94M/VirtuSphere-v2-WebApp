@@ -47,7 +47,6 @@ return [
     'btn_inventory' => 'Start inventory pull',
     'btn_inventory_busy' => 'Queuing…',
     'confirm_delete' => 'Delete credential :name?',
-    'err_in_use' => 'These credentials are in use by a queued or running deploy job and cannot be deleted. Wait for that job to finish, or cancel it first.',
     'btn_test_strict' => 'Test strict certificate verification',
     'btn_activate_strict' => 'Activate strict mode',
     'btn_use_legacy' => 'Use legacy mode',

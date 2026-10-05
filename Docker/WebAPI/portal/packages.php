@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
+require_once __DIR__ . '/../lib/system_status_urls.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -78,7 +79,7 @@ layout_header(__t('packages.title'), $user, 'packages', 'packages');
                 'empty' => __t('packages.empty'),
                 'empty_filtered' => __t('packages.empty_filtered'),
                 'show_all' => __t('packages.show_all'),
-            ], ['sort' => $sort, 'dir' => $dir]); ?></td></tr><?php } ?>
+            ], ['sort' => $sort, 'dir' => $dir]); ?><?php if (!$catalogHasRows && can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></td></tr><?php } ?>
             </tbody>
         </table></div>
     </section>

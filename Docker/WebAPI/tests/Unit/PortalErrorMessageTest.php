@@ -47,9 +47,6 @@ final class PortalErrorMessageTest extends TestCase
             'mission without datastore' => ['Mission datastore is required before deployment.'],
             // The VM selection was deleted between rendering the form and posting.
             'selection gone' => ['None of the selected VMs belong to this mission.'],
-            // credentials.php renders Delete for every credential, including one
-            // an active job holds.
-            'credential in use' => ['Credential is used by an active deploy job.'],
             // Two operators editing the same VM: the second save is rejected by
             // the optimistic-locking guard in repo_save_vm.
             'vm edit conflict' => ['VM was changed by another user. Reload before saving.'],

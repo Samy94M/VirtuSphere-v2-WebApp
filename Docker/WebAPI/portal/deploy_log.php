@@ -124,7 +124,7 @@ if ($format === 'json') {
         // the job has no create section at all, which is not the same as a
         // section with nothing done yet, so the browser removes the card
         // rather than showing it at zero.
-        'create_progress' => deploy_create_progress_payload($connection, $job),
+        'create_progress' => deploy_create_progress_payload($connection, $job, $user),
         'history_html' => deploy_log_history_html($connection, $job),
         'phases_html' => deploy_log_phases_html(deploy_log_phase_timeline(repo_deploy_job_log_step_markers($connection, (int) $job['id']))),
         'empty_state' => $emptyState,
