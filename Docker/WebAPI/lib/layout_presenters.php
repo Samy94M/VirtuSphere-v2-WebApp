@@ -51,6 +51,7 @@ function heartbeat_badge(string $state): string
         'warning' => __t('system_status.status_warning'),
         'danger' => __t('system_status.status_danger'),
         'missing' => __t('system_status.status_missing'),
+        'stale' => __t('system_status.status_stale'),
         default => __t('system_status.status_unknown'),
     };
 

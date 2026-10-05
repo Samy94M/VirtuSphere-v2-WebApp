@@ -40,8 +40,8 @@ function virtusphere_run_completed_state(array $row, ?int $now = null): string
     };
 }
 
-/** Site evidence never invents MECM criticality from age or provider faults. */
-function virtusphere_site_completed_state(array $row, ?int $now = null): string
+/** Freshness of the completed site report, independent of its verdict. */
+function virtusphere_site_evidence_freshness(array $row, ?int $now = null): string
 {
     $current = $now ?? time();
     $resultAt = isset($row['last_result_at']) ? (string) $row['last_result_at'] : null;
@@ -55,6 +55,25 @@ function virtusphere_site_completed_state(array $row, ?int $now = null): string
     );
     if (($current - $timestamp) > $freshFor) {
         return 'stale';
+    }
+
+    return 'ok';
+}
+
+/** The reporter can be overdue without a critical MECM site verdict. */
+function virtusphere_site_reporter_state(array $row, ?int $now = null): string
+{
+    $freshness = virtusphere_site_evidence_freshness($row, $now);
+
+    return $freshness === 'stale' ? 'warning' : $freshness;
+}
+
+/** Site evidence never invents MECM criticality from age or provider faults. */
+function virtusphere_site_completed_state(array $row, ?int $now = null): string
+{
+    $freshness = virtusphere_site_evidence_freshness($row, $now);
+    if ($freshness !== 'ok') {
+        return $freshness;
     }
     $category = (string) ($row['last_error_category'] ?? '');
     if ($category === VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL) {

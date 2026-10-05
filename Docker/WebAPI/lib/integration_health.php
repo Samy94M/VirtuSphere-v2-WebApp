@@ -25,7 +25,7 @@ require_once __DIR__ . '/repo/log.php';
 function integration_health_snapshot(mysqli $db, ?int $now = null): array
 {
     $now ??= time();
-    $rows = repo_integration_status_rows($db, $now);
+    $rows = integration_health_site_evidence_rows(repo_integration_status_rows($db, $now), $now);
     $bySource = [];
     foreach ($rows as $row) {
         $bySource[(string) $row['source']] = $row;
@@ -146,6 +146,27 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
                 && (string) $maintenanceEntry['state'] === 'ok',
         ],
     ];
+}
+
+/**
+ * Keep reporter availability separate from the retained site verdict. Both
+ * cards and dashboard receive these axes at the snapshot's one clock value.
+ * @param list<array{source:string,row:array|null,state:string}> $rows
+ * @return list<array{source:string,row:array|null,state:string,result_state?:string,reporter_state?:string}>
+ */
+function integration_health_site_evidence_rows(array $rows, int $now): array
+{
+    foreach ($rows as &$entry) {
+        if (!in_array($entry['source'], VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES, true) || $entry['row'] === null) {
+            continue;
+        }
+        $entry['result_state'] = virtusphere_site_completed_state($entry['row'], $now);
+        $entry['reporter_state'] = virtusphere_site_reporter_state($entry['row'], $now);
+        $entry['state'] = $entry['reporter_state'] === 'warning' ? 'warning' : $entry['result_state'];
+    }
+    unset($entry);
+
+    return $rows;
 }
 
 /**

@@ -84,13 +84,13 @@ flowchart TD
   LG -->|über Gefahrschwelle oder Status fail| RD
 ```
 
-Der Site-Health-Reporter wird eigens bewertet: Sein Alter färbt die Zeile nie gelb oder rot, weil ein fehlender Nachweis kein kritischer MECM-Zustand ist.
+Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb. Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot.
 
 ```mermaid
 flowchart TD
   A{"Hat der Site-Health-Reporter je gemeldet, mit lesbarer und nicht künftiger Ergebniszeit?"} -->|nein| UK["Unbekannt (grau)"]
   A -->|ja| S{"Letztes Ergebnis älter als die Warnschwelle?"}
-  S -->|ja| SS["Veraltet: grau, Beschriftung „Unbekannt“, Hinweis „Befund ist historisch“"]
+  S -->|ja| SS["Reporter überfällig (gelb); letzter Site-Befund Veraltet (grau), historisch"]
   S -->|nein| SC{"MECM-Site-Status?"}
   SC -->|kritisch| RD["Ausgefallen (rot)"]
   SC -->|Warnung| YL["Verzögert (gelb)"]

@@ -319,7 +319,8 @@ function system_status_render_site(array $rows): void
         ?><div class="empty-state"><p><?php echo h(__t('system_status.mecm_site_empty')); ?></p></div><?php
         return;
     }
-    $state = (string) ($entry['state'] ?? 'unknown');
+    $state = (string) ($entry['result_state'] ?? $entry['state'] ?? 'unknown');
+    $reporterState = (string) ($entry['reporter_state'] ?? ($state === 'stale' ? 'warning' : ($state === 'unknown' ? 'unknown' : 'ok')));
     $summary = !empty($row['last_summary']) ? json_decode((string) $row['last_summary'], true) : [];
     $siteCode = is_array($summary) && isset($summary['site_code']) ? (string) $summary['site_code'] : '';
     $provider = is_array($summary) && isset($summary['provider']) ? (string) $summary['provider'] : '';
@@ -330,12 +331,14 @@ function system_status_render_site(array $rows): void
     <article class="status-row">
         <?php if ($state === 'stale') { ?><p class="status-action"><?php echo h(__t('system_status.site_historical_result')); ?></p><?php } ?>
         <?php
-        // Seven fixed fields, same shape as the sync rows above. This card used
+        // Fixed facts, with reporter availability separate from the result. This card used
         // to be the one whose only child was the list, so neither the
         // space-between of the old head nor its first-child rule applied and the
         // block sat left while the job cards sat right: an asymmetry that was
         // pure accident and read as a difference in kind.
         echo system_status_fact_list([
+            ['label' => __t('system_status.site_reporter_label'), 'html' => $reporterState === 'warning'
+                ? portal_badge('warning', __t('system_status.site_reporter_overdue')) : heartbeat_badge($reporterState)],
             ['label' => __t('system_status.site_code_label'), 'html' => $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'],
             ['label' => __t('system_status.site_provider_label'), 'html' => $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'],
             ['label' => __t('system_status.site_state_label'), 'html' => heartbeat_badge($state) . ($errorLabel !== '' ? ' <span>' . h($errorLabel) . '</span>' : '')],

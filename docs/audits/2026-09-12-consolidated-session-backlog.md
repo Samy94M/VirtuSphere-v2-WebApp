@@ -1294,3 +1294,13 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 ## Entscheidung 05.10.2026: Tests und Prüfungen am Blockende bündeln
 
 **Nutzer während K7:** Tests und Prüfungen müssen nicht nach jeder Etappe laufen; die gebündelte Prüfung am Ende reicht. Dies ersetzt für die verbleibenden Pakete die Einzel-QA aus S9 und dem früheren Blockentscheid. Je Paket bleiben Umsetzung, Befundmessung, vorbereitete Gegenproben, Quellmanifest und eigener Commit. Die neuen Gegenproben werden am gesicherten Vorherstand gesammelt rot nachgewiesen; die abschließenden Gates prüfen den gesamten Block K5 bis K10. Bereits abgeschlossene K7-QA wird wiederverwendet, soweit ihre Quellen und Abhängigkeiten unverändert bleiben. Ohne eigene Paket-QA lautet der Zwischenstatus „lokal umgesetzt, gebündelte Prüfung und Schlussabnahme offen“. Erst nach erfolgreicher Blockprüfung und Push steht „fertig“. Der K11-Astra-Halt und die offene visuelle UX02-Abnahme bleiben bestehen.
+
+## Paket K8: Veralteter Site-Befund (DF-P1)
+
+**Stand: lokal umgesetzt, gebündelte Prüfung und Schlussabnahme offen.** Ausgangsstand `b69b60a`. DF-L4, DF-E4 und DF-E5 am Owner `virtusphere_site_completed_state()` und dessen Presenter nachgemessen: Der Befund wurde bereits `stale`, aber Badge und Reporteranzeige vermischten ihn mit fehlenden Daten.
+
+**Umsetzung:** Gemeinsame Site-Frischeberechnung mit unveränderter Schwelle. Der Snapshot trägt getrennte Zustände für Reporter und letzten Site-Befund; ein überfälliger Reporter ist gelb, sein historischer Befund grau „Veraltet“. Alte Fehlerdetails bleiben erhalten und werden nicht als aktuelle Site-Kritikalität dargestellt. Site-Karte und Dashboard lesen denselben Snapshot mit derselben Uhrzeit. Keine Änderungen an Machine-Wire-Feldern, Reportern oder Persistenz. DE/EN-Badge, Legende, Hilfe und Diagramm nachgezogen.
+
+**Gegenproben:** `SystemStatusSiteEvidenceTest` prüft altes kritisches Ergebnis, frische Kritikalität, inklusive Frist, ungültige und künftige Zeitstempel sowie die vorhandene Renderstelle. Rotnachweis gegen den gesicherten Vorherstand und sämtliche Gates laufen gemäß neuem Nutzerentscheid gebündelt am Blockende. Keine Einzel-QA behauptet.
+
+**Quellen:** `qa-artifacts/k8-2026-10-05/source-manifest.json`; begrenzter Selbstreview dort unter `self-review.md`. **Offen:** gebündelter Rotnachweis, Gates, LF-Worktree, funktionales e2e-portal und Push; visuelle UX02-Abnahme unverändert offen. **Nächster Schritt:** K9.
