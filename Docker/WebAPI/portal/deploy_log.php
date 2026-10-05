@@ -128,7 +128,7 @@ if ($format === 'json') {
         'phases_html' => deploy_log_phases_html(deploy_log_phase_timeline(repo_deploy_job_log_step_markers($connection, (int) $job['id']))),
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
-        'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds),
+        'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds, can('system.config', $user)),
         'actions' => [
             'can_cancel' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true),
         ],
@@ -268,7 +268,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         ); ?></span></article>
     </section>
 
-    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds); ?></div>
+    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds, can('system.config', $user)); ?></div>
 
     <?php // Above the recovery and phase blocks on purpose: the question this
           // card answers ("which of the fifteen VMs exist") is the one the

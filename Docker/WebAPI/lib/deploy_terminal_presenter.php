@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_job_result.php';
+require_once __DIR__ . '/deploy_host_preflight_result.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/mac_import_presenter.php';
 require_once __DIR__ . '/vm_network_display.php';
@@ -11,6 +12,7 @@ require_once __DIR__ . '/vm_network_preflight_result.php';
 require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/portal_time.php';
 require_once __DIR__ . '/layout_response.php';
+require_once __DIR__ . '/settings_page.php';
 
 /** @return array{result:?array,reason:?array,cancel:?array,last_error:?string} */
 function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): array
@@ -21,11 +23,16 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
         $mac = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
         $network = vm_network_preflight_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
         $genericResult = deploy_job_decode_terminal_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
-        $resultKey = $network !== null ? 'deploy.result_network_preflight' : match ($status) {
-            VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => $mac === null ? 'deploy.result_succeeded' : 'deploy.result_succeeded_counts',
-            VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => $mac === null ? 'deploy.result_partial' : 'deploy.result_partial_counts',
-            VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'deploy.result_failed',
-            VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'deploy.result_cancelled',
+        $hostPreflight = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED
+            ? deploy_host_preflight_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null)
+            : null;
+        $resultKey = match (true) {
+            $network !== null => 'deploy.result_network_preflight',
+            $hostPreflight !== null => 'deploy.result_allowlist_denied',
+            $status === VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => $mac === null ? 'deploy.result_succeeded' : 'deploy.result_succeeded_counts',
+            $status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => $mac === null ? 'deploy.result_partial' : 'deploy.result_partial_counts',
+            $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'deploy.result_failed',
+            $status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'deploy.result_cancelled',
         };
         $counts = $mac['counts'] ?? [];
         $result = [
@@ -35,8 +42,9 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
                 'failed' => (int) ($counts['failed_vms'] ?? count($mac['failed_vm_ids'] ?? [])),
                 'blocked' => (int) ($network['counts']['blocked_vms'] ?? 0),
                 'expected' => (int) ($network['counts']['expected_vms'] ?? 0),
+                'ip' => (string) ($hostPreflight['ip'] ?? '') !== '' ? (string) $hostPreflight['ip'] : __t('deploy.allowlist_ip_unknown'),
             ]),
-            'structured' => $mac !== null || $network !== null || ($genericResult !== null && $genericResult['outcome'] === $status),
+            'structured' => $mac !== null || $network !== null || $hostPreflight !== null || ($genericResult !== null && $genericResult['outcome'] === $status),
             'mac_version' => (int) ($mac['version'] ?? 0),
             'vm_rows' => $mac !== null ? mac_import_present_vm_rows($mac, $job, $existingVmIds) : [],
             'network_rows' => $network !== null ? deploy_terminal_network_rows($network, $job, $existingVmIds) : [],
@@ -45,6 +53,9 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
             // decision, so the table has to say that it is not all of it;
             // otherwise "3 of 40 blocked" reads as a table with 3 missing rows.
             'network_omitted' => (int) ($network['vm_results_omitted_count'] ?? 0),
+            // K2: an allowlist block names its fix; the link itself is only
+            // rendered for readers who may change the list (system.config).
+            'allowlist_denied' => $hostPreflight !== null,
         ];
     }
 
@@ -96,7 +107,7 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
     ];
 }
 
-function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null): string
+function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null, bool $canConfigure = false): string
 {
     $view = deploy_terminal_presenter($job, $existingVmIds);
     $html = '';
@@ -112,6 +123,10 @@ function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null,
         }
         if ($name === 'result' && (array) ($block['vm_rows'] ?? []) !== []) {
             $html .= deploy_terminal_vm_results_html((array) $block['vm_rows']);
+        }
+        if ($name === 'result' && !empty($block['allowlist_denied']) && $canConfigure) {
+            $html .= '<p><a href="' . deploy_terminal_h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)) . '">'
+                . deploy_terminal_h(__t('deploy.allowlist_open_settings')) . '</a></p>';
         }
         if ($name === 'result' && (array) ($block['network_rows'] ?? []) !== []) {
             $html .= deploy_terminal_network_results_html((array) $block['network_rows']);

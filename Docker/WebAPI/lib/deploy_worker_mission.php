@@ -13,6 +13,7 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_network_preflight.php';
+require_once __DIR__ . '/deploy_worker_host_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
 require_once __DIR__ . '/deploy_worker_create.php';
@@ -43,6 +44,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     $esxiSecret = null;
     $ansibleSecret = null;
     $exitCode = null;
+    // Set once deploy_worker_mark_vms_deploying() ran. Before that the job has
+    // not touched its VMs, and the failure path must leave them as they are.
+    $vmsMarked = false;
 
     $vmIds = deploy_worker_payload($job)['vm_ids'] ?? [];
 
@@ -77,8 +81,6 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         if ($vmIds === []) {
             $vmIds = $materializedVmIds;
         }
-        $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), $job, 'deploy job ' . $jobId . ' started', $vmIds);
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
         $esxiCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
@@ -92,38 +94,14 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $apiBaseUrl = ansible_resolve_api_base_url($channel->connection());
         $payload = deploy_worker_payload($job);
 
-        $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Running Ansible host preflight.');
-        $channel->tick(0);
-        $preflightBuffer = '';
-        // Accumulated separately from the stream buffer (which the chunk logger
-        // consumes): on failure the last stage marker in here names the broken
-        // component for the job's error message.
-        $preflightOutput = '';
-        $preflightObserver = static function (string $line) use (&$preflightOutput): void {
-            if (ansible_preflight_failed_component($line) !== null) {
-                $preflightOutput = $line;
-            }
-        };
-        // The portal/allowlist probes gate exactly the modes whose sequence
-        // uploads MACs: those jobs strand at stage 2/5 when the host cannot
-        // reach the portal, while a create-only job must not be failed for a
-        // route it never uses (B6; same derivation as the missing-result rule).
-        $preflightApiBaseUrl = ansible_mode_expects_mac_result((string) $payload['mode']) ? $apiBaseUrl : '';
-        $preflightCommand = ansible_preflight_command($preflightApiBaseUrl);
-        $preflightExitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
+        // Read-only host checks, including the portal/allowlist probes, run
+        // before any VM is marked (K2 / MR-02): a job that ends here touched
+        // nothing, so its failure must not repaint a VM either.
+        deploy_worker_run_host_preflight($channel, $job, $workerId, $ansibleCredential, $ansibleSecret, $apiBaseUrl, $heartbeatOnSilence, $options);
 
-            deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
-        }, 45, $heartbeatOnSilence);
-        deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
-        deploy_worker_settle_db_channel($channel, $options, null);
+        $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), $job, 'deploy job ' . $jobId . ' started', $vmIds);
+        $vmsMarked = true;
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
-        if ($preflightExitCode !== 0) {
-            $failedComponent = ansible_preflight_failed_component($preflightOutput);
-            throw new RuntimeException(
-                'Ansible host preflight failed with exit code ' . $preflightExitCode . '.'
-                . ($failedComponent !== null ? ' (failed at: ' . $failedComponent . ')' : '')
-            );
-        }
 
         $artifacts = ansible_prepare_job_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
         $localDir = (string) $artifacts['local_dir'];
@@ -291,7 +269,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             $workerId,
             $vmIds,
             deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]),
-            deploy_terminal_reason_for_exception($exception)
+            deploy_terminal_reason_for_exception($exception),
+            $vmsMarked
         );
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a

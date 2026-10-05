@@ -55,7 +55,7 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 
 Der Deploy-Worker bearbeitet immer genau einen Auftrag. Ein Abbruch greift an jeder Schrittgrenze: Der laufende Schritt endet auf ESXi vollständig, danach startet kein weiterer.
 
-Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trust-flows.md#ssh-und-sftp-zum-ubuntu-host) den Pin gegen den aktuellen Zugang. Fehlende Bestätigung bei neuen Zugängen, Schlüsselabweichung, nicht dauerhaft speicherbare Prüfung oder interne Wiederanmeldung auf demselben Objekt brechen vor Passwort-/Dateiübertragung ab. Die Fehlerwege dieses Workers bleiben maßgeblich für VM- und Auftragszustände; die Markierung `deploying` steht derzeit weiterhin vor dem Host-Preflight.
+Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trust-flows.md#ssh-und-sftp-zum-ubuntu-host) den Pin gegen den aktuellen Zugang. Fehlende Bestätigung bei neuen Zugängen, Schlüsselabweichung, nicht dauerhaft speicherbare Prüfung oder interne Wiederanmeldung auf demselben Objekt brechen vor Passwort-/Dateiübertragung ab. Die Fehlerwege dieses Workers bleiben maßgeblich für VM- und Auftragszustände; der Host-Preflight läuft vor der Markierung `deploying`: Scheitert der Auftrag davor, bleiben alle VM-Zustände unverändert.
 
 ```mermaid
 flowchart TD
@@ -66,11 +66,13 @@ flowchart TD
   K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH"]
   K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
-  P -->|ja| D["VMs des Auftrags auf deploying setzen, Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
-  D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit. Die IP-Freigabe wird dort nur abgefragt und protokolliert, sie sperrt den Auftrag nicht"]
-  H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente"]
+  P -->|ja| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
+  D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
+  H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente; VM-Zustände unverändert"]
+  H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
-  H --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
+  H --> M["VMs des Auftrags auf deploying setzen"]
+  M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
   AP -->|freie Lizenz| APX["Auftrag failed, noch vor dem Upload"]

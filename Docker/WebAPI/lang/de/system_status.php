@@ -273,7 +273,7 @@ return [
     'ansible_job_cancelled' => 'Abgebrochen',
     'ansible_job_unknown' => 'Unbekannter Ausgang',
     'ansible_failed_component' => 'Fehlgeschlagen an: :component',
-    'ansible_allowlist_detail' => 'Host und Toolchain in Ordnung, aber die Host-IP fehlt in den Machine-API IP-Freigaben; der MAC-Upload eines Deploys würde abgelehnt. Freigeben unter Einstellungen, Machine-API.',
+    'ansible_allowlist_detail' => 'Host und Toolchain in Ordnung, aber die Host-IP fehlt in den Machine-API IP-Freigaben; Aufträge mit MAC-Export werden vor jeder VM-Änderung abgewiesen. Freigeben unter Einstellungen, Machine-API.',
     'ansible_test_link' => 'Seite Zugangsdaten',
     'ansible_test_now' => 'Volltest jetzt starten',
     'ansible_testing' => 'Volltest läuft…',

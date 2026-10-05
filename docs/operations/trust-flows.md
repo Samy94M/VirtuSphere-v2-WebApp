@@ -44,7 +44,7 @@ flowchart TD
 
 Ein fehlender/unprüfbarer Schlüssel, ein veralteter Zugangssnapshot oder eine fehlgeschlagene dauerhafte Speicherung führt vor der Passwortübertragung zum Abbruch. Bei einem abweichenden Schlüssel bleibt der gespeicherte Pin stehen; die beobachtete Abweichung erscheint in Zugangsdaten und Systemstatus. Der Auftrag protokolliert die geschlossene Hostidentitätsursache. Zwei erste Verbindungen werden am selben Zugangsdatensatz serialisiert; nur der erste Schlüssel wird angeheftet.
 
-Dieser Vertrauenscheck schreibt selbst keinen VM-, Auftrags- oder MECM-Zustand. Die vorhandenen Worker-Fehlerwege entscheiden den Auftrags- und VM-Endzustand; der [Worker-Ablauf](deploy-flows.md#worker-ein-auftrag) beschreibt die derzeitige Markierung vor dem Host-Preflight. Insbesondere garantiert dieses Paket keine Wiederherstellung eines VM-Vorzustands nach einem Auftragsfehler. Bei einem Zugangstest ändern sich nur das getrennte Testresultat und die Hostbeobachtung.
+Dieser Vertrauenscheck schreibt selbst keinen VM-, Auftrags- oder MECM-Zustand. Die vorhandenen Worker-Fehlerwege entscheiden den Auftrags- und VM-Endzustand; der [Worker-Ablauf](deploy-flows.md#worker-ein-auftrag) beschreibt, dass der Host-Preflight vor der Markierung `deploying` läuft: Ein Abbruch durch die Hostidentität vor dieser Markierung lässt alle VM-Zustände unverändert. Nach der Markierung garantiert dieser Check keine Wiederherstellung eines VM-Vorzustands nach einem Auftragsfehler. Bei einem Zugangstest ändern sich nur das getrennte Testresultat und die Hostbeobachtung.
 
 ### Im Code
 

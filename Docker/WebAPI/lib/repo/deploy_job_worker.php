@@ -6,6 +6,7 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_job_output.php';
 require_once __DIR__ . '/../deploy_job_result.php';
+require_once __DIR__ . '/../deploy_host_preflight_result.php';
 require_once __DIR__ . '/../deploy_preflight_bounds.php';
 require_once __DIR__ . '/../remote_execution.php';
 require_once __DIR__ . '/helpers.php';
@@ -222,6 +223,13 @@ function repo_append_deploy_job_log(mysqli $db, int $jobId, string $stream, stri
  */
 function repo_encode_deploy_preflight_result(array $result): string
 {
+    // The host preflight result (K2) has no row list to bound: it is one
+    // fixed-size document, and the bounding fields would make its strict
+    // decoder reject it.
+    if (($result['kind'] ?? null) === VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_RESULT_KIND) {
+        return json_encode($result, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
     return deploy_preflight_bounded_result($result, VIRTUSPHERE_DEPLOY_PREFLIGHT_JSON_MAX_BYTES)['json'];
 }
 

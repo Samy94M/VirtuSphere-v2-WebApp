@@ -139,6 +139,8 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
  * them up) and keep deployed/pending even though the job fails. Everything
  * else in the job scope becomes failed/failed - lifecycle and mecm_sync_state
  * together, so no failed VM advertises a sync that can never happen.
+ * $vmsMarked false (a failure before deploy_worker_mark_vms_deploying()) fails
+ * only the job and leaves every VM as it was.
  *
  * @param int[] $vmIds
  */
@@ -148,10 +150,11 @@ function deploy_worker_handle_failure(
     string $workerId,
     array $vmIds,
     string $message,
-    string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED
+    string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+    bool $vmsMarked = true
 ): void
 {
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode): ?string {
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked): ?string {
         if ((string) $locked['locked_by'] !== $workerId) {
             return null;
         }
@@ -160,6 +163,15 @@ function deploy_worker_handle_failure(
         }
         $jobId = (int) $job['id'];
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
+        if (!$vmsMarked) {
+            // K2 / MR-02: the job failed before it marked any VM `deploying`
+            // (network or host preflight, credentials). Nothing ran on ESXi, so
+            // every VM keeps its lifecycle and MECM state. An empty $vmIds would
+            // mean "the whole mission" below, which is why this is a flag.
+            repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'The job failed before any VM was marked deploying; VM states are unchanged.');
+
+            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
+        }
         $macResult = deploy_worker_job_mac_result($db, $jobId);
         $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
         deploy_worker_mark_vms_failed($db, $job, 'deploy job ' . $jobId . ' failed', $vmIds, $keepVmIds);

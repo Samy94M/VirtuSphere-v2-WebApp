@@ -117,6 +117,10 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_transport_failure_with_step',
         'deploy_worker_autostart_preflight',
         'deploy_worker_network_preflight',
+        // K2: the host preflight runs before the `deploying` mark and
+        // evaluates the allowlist verdict.
+        'deploy_worker_run_host_preflight',
+        'deploy_worker_host_preflight_verdict',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
         'deploy_worker_cleanup_diagnose',

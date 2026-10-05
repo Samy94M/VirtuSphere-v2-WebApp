@@ -273,7 +273,7 @@ return [
     'ansible_job_cancelled' => 'Cancelled',
     'ansible_job_unknown' => 'Unknown outcome',
     'ansible_failed_component' => 'Failed at: :component',
-    'ansible_allowlist_detail' => 'Host and toolchain are fine, but the host IP is missing from the machine API IP allowlist; a deploy\'s MAC upload would be rejected. Allow it under Settings, Machine API.',
+    'ansible_allowlist_detail' => 'Host and toolchain are fine, but the host IP is missing from the machine API IP allowlist; jobs with a MAC export are refused before any VM is changed. Allow it under Settings, Machine API.',
     'ansible_test_link' => 'Credentials page',
     'ansible_test_now' => 'Run full test now',
     'ansible_testing' => 'Full test running…',
