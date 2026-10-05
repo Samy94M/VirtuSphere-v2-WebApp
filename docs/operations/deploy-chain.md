@@ -357,7 +357,7 @@ Eine Aufsicht, die selbst gerade erst verbunden ist, urteilt nicht: sie kann in 
 
 ## Vor jeder Mutation: VM-Identität
 
-Der VM-Name ist nur die Suche, nicht der Identitätsbeweis. Portal und Playbooks verwenden die gespeicherte Instance-UUID; die MOID ist der aktuelle Hostgriff und darf sich nach erneuter Registrierung ändern. Eine unbekannte namensgleiche VM blockiert. Die ausdrücklich bestätigte Adoption ist nur erlaubt, nachdem ein Administrator die VM am Host geprüft hat; sie speichert die Identität und verändert weder Hardware noch Energiezustand.
+Der VM-Name ist nur die Suche, nicht der Identitätsbeweis. Portal und Playbooks verwenden die gespeicherte Instance-UUID; die MOID ist der aktuelle Hostgriff und darf sich nach erneuter Registrierung ändern. Eine unbekannte namensgleiche VM blockiert, bis sie auf ESXi umbenannt oder gelöscht oder die Portal-VM gelöscht ist; eine Übernahme gibt es nicht (WM-E2a).
 
 ## Ergebnis je VM eines Create-Auftrags
 

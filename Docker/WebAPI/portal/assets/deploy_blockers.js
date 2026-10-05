@@ -118,29 +118,6 @@
             box.appendChild(actions);
         }
 
-        if (action && action.type === 'adopt') {
-            var adoptForm = document.createElement('form');
-            adoptForm.className = 'inline-form';
-            adoptForm.method = 'post';
-            adoptForm.action = action.url;
-            var csrf = form.querySelector('input[name="_csrf"]');
-            if (csrf) {
-                appendHidden(adoptForm, '_csrf', csrf.value);
-            }
-            appendHidden(adoptForm, 'action', 'adopt_vm');
-            Object.keys(action.fields || {}).forEach(function (name) {
-                appendHidden(adoptForm, name, action.fields[name]);
-            });
-            appendDraftFields(adoptForm);
-            var adopt = document.createElement('button');
-            adopt.className = 'button button-secondary';
-            adopt.type = 'submit';
-            adopt.textContent = action.label;
-            adopt.setAttribute('data-confirm', action.confirm);
-            adoptForm.appendChild(adopt);
-            box.appendChild(adoptForm);
-        }
-
         return box;
     }
 
@@ -274,11 +251,11 @@
 
     // A live response may have rendered while the operator was still changing
     // another field. Refresh the one-shot draft at the actual submit boundary,
-    // including server-rendered remedy and identity forms, so a fast click
-    // cannot restore an older live-request snapshot.
+    // including server-rendered remedy forms, so a fast click cannot restore
+    // an older live-request snapshot.
     root.addEventListener('submit', function (event) {
         var actionField = event.target.querySelector('input[name="action"]');
-        if (actionField && (actionField.value === 'open_remedy' || actionField.value === 'adopt_vm')) {
+        if (actionField && actionField.value === 'open_remedy') {
             appendDraftFields(event.target);
         }
     }, true);

@@ -29,9 +29,9 @@
 
     # Keep the export's per-VM result contract: a query failure stays a failure,
     # while a successful reply about a namesake is converted into one before the
-    # callback can write MACs or lifecycle state. In a full pipeline an empty
-    # stored UUID is allowed because create in the same sequence just proved the
-    # name absent; the callback binds the returned UUID atomically.
+    # callback can write MACs or lifecycle state. A stored UUID is required: in a
+    # full pipeline the worker rewrites serverlist.yml after create, so the export
+    # already carries the UUID that create bound.
     - name: Name und Instance-UUID je Export-Ergebnis validieren
       ansible.builtin.set_fact:
         vm_info_identity_results: >-

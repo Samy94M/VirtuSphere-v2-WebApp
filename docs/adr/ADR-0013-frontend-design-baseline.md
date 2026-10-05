@@ -112,7 +112,8 @@ cause from the current complete blocker and warning union before using its
 permission-filtered link. It stores only the allowlisted queue fields in the
 session for at most one hour; secrets and CSRF tokens never enter that draft or
 a return URL. The draft is consumed once when deployment is opened again.
-Identity adoption carries the same draft and returns directly to it. Cancelling
+(Identity adoption, which carried the same draft, was removed by the ADR-0036
+amendment of 2026-10-05.) Cancelling
 a schedule preview is an in-document jump to the still-rendered POST form and
 therefore neither discards values nor creates another server action.
 

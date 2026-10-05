@@ -138,7 +138,7 @@ them). `createVMLaunch` starts exactly one `vmware_guest` call with `async` and
   an equal UUID and writes nothing on a differing one. A create-only job does not
   need a later export to learn who the VM is.
 
-### VM identity, collision block and adoption
+### VM identity and collision block
 
 The name is an address, not an identity. VirtuSphere binds a portal VM to vSphere's `instance_uuid`; `vm_moid` is retained as the current managed-object handle but may legitimately change when the same VM is unregistered and registered again. The inventory mirror supplies name, UUID and MOID. A matching UUID with a changed MOID therefore refreshes the handle; a different UUID means a different VM.
 
@@ -151,7 +151,7 @@ rewritten. Operators inventory the two affected result shapes read-only with
 evidence boundary is documented in
 [`operations/deploy-chain.md`](operations/deploy-chain.md#historische-create-ergebnisse-lesend-bewerten).
 
-An operator may explicitly choose **Adopt identity** on the deploy page after comparing the VM in the ESXi Host Client. That confirmed action copies only MOID and instance UUID from inventory, under the mission lock and only without an active job. It does not change VM hardware or power state and does not queue a deploy. Adoption does not resolve an `uncertain` create unit and does not lift its retry block: the new identity proves which VM exists now, not how the original asynchronous module call ended or whether its requested hardware converged. This is the only route for taking ownership of a pre-existing namesake; do not use it for a foreign VM. A standalone `powercycle`, `export`, `start` or `autostart` mode requires a stored UUID. Only `full` may carry an unbound VM after its own create step, because that same sequential run proved the name absent before creating it; the export callback then persists the identity.
+There is no adoption (WM-E2a). A namesake that is not bound to the portal row blocks until an operator renames or deletes it on ESXi or deletes the portal VM; after a change on ESXi the VM inventory has to be refreshed before the block lifts. Legacy VMs without a binding are not taken over. Audit rows of the former **Adopt identity** action (`vm.identity_adopted`) stay registered, labelled and filterable. Every mode after create requires a stored UUID: standalone `powercycle`, `export`, `start` and `autostart` refuse an unbound VM, and inside `full` the worker rewrites `serverlist.yml` after its create section, so the following steps carry the UUID that create bound.
 
 `full` appends the autostart step only for a mission whose `autostart_enabled` is set. A full deploy of any other mission must not touch the host's autostart manager: one host can carry VMs of several missions, and writing `system_defaults` from a mission that never asked for autostart would overwrite the policy of the missions that did. The explicit `autostart` mode always runs, including for a disabled mission, because setting every one of its VMs to `start_action: none` is how a policy is withdrawn. Before the step runs, the worker checks the cached capability facts of the target credential: a fresh free-licence fact aborts the job, a fresh HA-cluster fact aborts mode `autostart` and skips the step inside `full`. Unknown or stale facts only warn, because the inventory cache never blocks a deploy (ADR-0023).
 

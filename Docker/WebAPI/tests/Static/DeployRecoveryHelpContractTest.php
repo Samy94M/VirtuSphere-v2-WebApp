@@ -9,14 +9,12 @@ final class DeployRecoveryHelpContractTest extends TestCase
 {
     private const REQUIRED = [
         'de' => [
-            'Identität übernehmen beendet die ungeklärte Create-Einheit nicht',
             'vorhandene VM weder als nicht erstellt freigeben noch als allgemeine Reparatur löschen',
             'erfolgreicher VM-Inventarabruf',
             'neuer als Auftrag und Einheit',
             'Recent Tasks',
         ],
         'en' => [
-            'Adopting identity does not resolve the unresolved create unit',
             'neither release an existing VM as not created nor delete it as a general repair',
             'successful VM inventory pull',
             'newer than both the job and the unit',

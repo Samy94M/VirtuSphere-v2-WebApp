@@ -175,13 +175,14 @@ echo 'JSON' . json_encode(['logLines' => $logLines, 'auditRows' => $auditRows]) 
   expect(trace.auditRows, 'the audit row carries the same trace').toBeGreaterThan(0);
 });
 
-// e2e-covers: deploy.php:adopt_vm
-// e2e-covers-cancel: deploy.php:adopt_vm
-test('adopt_vm: Cancel keeps the VM foreign, Confirm stores identity only', async ({ page }) => {
+// WM-E2a: "adopt identity" was removed. A foreign namesake blocks with links to
+// the portal VM and to the inventory refresh, and a hand-made adopt_vm POST
+// (an old tab, a bookmark) binds nothing and writes no audit row.
+test('identity conflict: links instead of adoption, a forged adopt_vm POST changes nothing', async ({ page }) => {
   const seed = seedBase();
   const fixture = phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT id, vm_name, vm_cpu, vm_ram, vm_guest_id FROM deploy_vms WHERE mission_id = ? ORDER BY id LIMIT 1');
+$stmt = $db->prepare('SELECT id, vm_name FROM deploy_vms WHERE mission_id = ? ORDER BY id LIMIT 1');
 $mid = ${Number(seed.missionId)};
 $stmt->bind_param('i', $mid);
 $stmt->execute();
@@ -196,7 +197,7 @@ echo 'JSON' . json_encode($vm) . 'JSON';
   const identity = () => phpJson(`
 $db = db();
 $id = ${Number(fixture.id)};
-$stmt = $db->prepare('SELECT vm_moid, vm_instance_uuid, vm_cpu, vm_ram, vm_guest_id FROM deploy_vms WHERE id = ?');
+$stmt = $db->prepare("SELECT v.vm_moid, v.vm_instance_uuid, (SELECT COUNT(*) FROM deploy_logs l WHERE l.event_code = 'vm.identity_adopted' AND l.object_id = CAST(v.id AS CHAR)) AS adopted_audits FROM deploy_vms v WHERE v.id = ?");
 $stmt->bind_param('i', $id);
 $stmt->execute();
 echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
@@ -206,32 +207,30 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
   const queue = page.locator('#deploy-queue-form');
   await queue.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
   await queue.locator('select[name="mode"]').selectOption('powercycle');
-  const adopt = page.locator('form:has(input[name="action"][value="adopt_vm"]) button');
-  const dialog = page.locator('[data-confirm-dialog]');
-  await expect(adopt, 'a foreign namesake exposes the explicit adoption action').toBeVisible();
 
-  await adopt.click();
-  await expect(dialog, 'adoption asks before replacing identity').toBeVisible();
-  await dialog.locator('button[value="cancel"]').click();
-  await expect(dialog).toBeHidden();
-  expect(identity().vm_instance_uuid, 'dismissing adoption stores no identity').toBeNull();
+  const blocker = page.locator('[data-deploy-blocker]', { hasText: fixture.vm_name });
+  await expect(blocker, 'a foreign namesake still blocks the queue').toBeVisible();
+  await expect(page.locator('form:has(input[name="action"][value="adopt_vm"])'), 'no adoption is offered').toHaveCount(0);
+  await expect(blocker.locator('input[name="remedy_code"][value^="identity_conflict_"]'), 'the portal VM is linked').toHaveCount(1);
+  await expect(blocker.locator('a[data-deploy-blocker-help]'), 'the inventory refresh is linked').toHaveAttribute('href', /system_status\.php/);
 
-  await adopt.click();
-  await Promise.all([
-    page.waitForURL(/deploy\.php\?resume_draft=1/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
-  await expect(queue.locator('select[name="mission_id"]'), 'adoption restores the mission draft').toHaveValue(String(seed.missionId));
-  await expect(queue.locator('select[name="credential_esxi_id"]'), 'adoption restores the ESXi draft').toHaveValue(String(seed.esxi));
-  await expect(queue.locator('select[name="credential_ansible_id"]'), 'adoption restores the Ansible draft').toHaveValue(String(seed.ansible));
-  await expect(queue.locator('select[name="mode"]'), 'adoption restores the selected mode').toHaveValue('powercycle');
+  const csrf = await page.getByRole('banner').locator('form[action="logout.php"] input[name="_csrf"]').inputValue();
+  const response = await page.request.post(`deploy.php?mission_id=${seed.missionId}`, {
+    form: {
+      _csrf: csrf,
+      action: 'adopt_vm',
+      mission_id: String(seed.missionId),
+      credential_esxi_id: String(seed.esxi),
+      vm_id: String(fixture.id),
+    },
+    maxRedirects: 0,
+  });
+  expect(response.status(), 'the retired action is answered by the plain redirect').toBe(302);
   const after = identity();
-  expect(after.vm_moid).toBe('vm-e2e-44');
-  expect(after.vm_instance_uuid).toBe('e2e-instance-uuid-44');
-  expect(after.vm_cpu).toBe(fixture.vm_cpu);
-  expect(after.vm_ram).toBe(fixture.vm_ram);
-  expect(after.vm_guest_id).toBe(fixture.vm_guest_id);
-  expect(missionJobs(seed.missionId), 'adoption does not enqueue or mutate ESXi').toHaveLength(0);
+  expect(after.vm_moid, 'a forged adoption binds no MOID').toBeNull();
+  expect(after.vm_instance_uuid, 'a forged adoption binds no instance UUID').toBeNull();
+  expect(Number(after.adopted_audits), 'a forged adoption writes no audit row').toBe(0);
+  expect(missionJobs(seed.missionId), 'nothing is enqueued').toHaveLength(0);
 });
 
 // e2e-covers: deploy.php:cancel

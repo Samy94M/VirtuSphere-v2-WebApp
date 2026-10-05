@@ -107,6 +107,40 @@ final class AuditProducerContractTest extends TestCase
     }
 
     /**
+     * A historical event keeps its registration, label and presenter line so
+     * that rows written before its producer was removed stay readable and
+     * filterable (WM-E2a: "adopt identity"). It must stay registered, and no
+     * audit call may write it again: that would be the removed action back.
+     */
+    public function testHistoricalEventsStayReadableAndAreNeverWrittenAgain(): void
+    {
+        $values = $this->registeredConstantValues();
+        $historical = [];
+        foreach (VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL as $event) {
+            $constant = array_search($event, $values, true);
+            self::assertIsString($constant, $event . ' is listed as historical but not registered; old rows would lose their label');
+            $historical[$constant] = true;
+        }
+        self::assertNotSame([], $historical, 'the historical list is empty; the guard would prove nothing');
+
+        $written = [];
+        foreach ($this->firstPartyFiles() as $relative => $source) {
+            preg_match_all(
+                '/(?<!function )\b(?:audit_event|audit_event_required|audit|machine_api_audit_warning)\s*\(\s*[^,()]{1,80},\s*(VIRTUSPHERE_AUDIT_EVENT_[A-Z0-9_]+)/s',
+                $this->withoutComments($source),
+                $calls
+            );
+            foreach ($calls[1] as $constant) {
+                if (isset($historical[$constant])) {
+                    $written[] = $relative . ': ' . $constant;
+                }
+            }
+        }
+
+        self::assertSame([], $written, 'a historical audit event is written again');
+    }
+
+    /**
      * The free-text sinks stay gone. `addLog()` was never called and one call
      * away from persisting a token into a table with a 365-day window;
      * `audit_auth()` was the parallel entry point whose existence is what let
@@ -485,6 +519,17 @@ final class AuditProducerContractTest extends TestCase
         self::assertNotEmpty($matches[1], 'the event-constant scan matched nothing');
 
         return $matches[1];
+    }
+
+    /** @return array<string,string> constant name => event code */
+    private function registeredConstantValues(): array
+    {
+        $values = [];
+        foreach ($this->registeredConstants() as $constant) {
+            $values[$constant] = (string) constant($constant);
+        }
+
+        return $values;
     }
 
     private function source(string $relative): string

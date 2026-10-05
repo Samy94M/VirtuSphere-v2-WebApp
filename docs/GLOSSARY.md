@@ -43,7 +43,7 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 
 - **MOID:** Managed Object ID; aktueller Griff eines vSphere-Inventarobjekts. Sie kann sich bei erneuter Registrierung ändern und ist allein kein dauerhafter Identitätsbeweis.
 - **Instance-UUID:** dauerhafte VM-Identität, die vor jeder ESXi-Mutation zusammen mit dem Namen geprüft wird.
-- **Adoption:** ausdrücklich bestätigte Übernahme einer bereits vorhandenen, vorher unbekannten VM-Identität. Sie verändert die VM nicht.
+- **Adoption (VM):** frühere, ausdrücklich bestätigte Übernahme einer vorhandenen VM-Identität. Seit WM-E2a zurückgebaut; eine namensgleiche fremde VM blockiert, alte Auditzeilen bleiben lesbar.
 - **Korrelations-ID:** durchgängige Kennung für eine Portal-Anfrage oder einen Auftrag. Sie verbindet Fehlermeldung, Auftragsprotokoll, Maschinenrückruf und Auditzeile.
 - **Trust-Modus `strict`:** ESXi-Zertifikat wird gegen ein CA-Bundle oder ein hinterlegtes Serverzertifikat geprüft.
 - **Trust-Modus `legacy_insecure`:** Zertifikatsprüfung ist ausdrücklich abgeschaltet. Der Modus ist für sichtbare Bestandsmigration gedacht, nicht als stiller Fallback.

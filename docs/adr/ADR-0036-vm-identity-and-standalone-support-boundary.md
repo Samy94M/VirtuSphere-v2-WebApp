@@ -122,3 +122,17 @@ tests and the adoption Playwright scenario cover repository, live-playbook,
 callback and browser boundaries. `check-doc-semantics.sh` plus its positive,
 negative and zero-match harness cases prevents the vCenter matrix from drifting.
 
+
+## Amendment (2026-10-05): adoption removed (WM-E2a)
+
+The explicit **Adopt identity** action is withdrawn. It could replace an
+existing binding to a different instance UUID without the guarantees of the
+create replacement (IDR-P02), and nothing on a VM proves that VirtuSphere ever
+created it. A namesake that is not bound now blocks until an operator renames
+or deletes it on ESXi or deletes the portal VM; the block links the portal VM
+and the inventory refresh. Unbound legacy VMs are not taken over. `adopt_vm`,
+`repo_adopt_vm_identity()` and `repo_vm_identity_adopt_locked()` are gone; a
+POST of the old action changes nothing. The audit event `vm.identity_adopted`
+stays registered and labelled as a historical event so that old rows remain
+readable. The consequence above about "explicit adoption" no longer applies:
+an unbound portal VM is bound only by its own create.

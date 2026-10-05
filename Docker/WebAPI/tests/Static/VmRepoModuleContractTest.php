@@ -18,7 +18,6 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_validate_disks',
         'repo_validate_vm_payload',
         'getVMs',
-        'repo_adopt_vm_identity',
         'repo_fetch_related',
         'repo_source_to_array',
         'deleteVM',

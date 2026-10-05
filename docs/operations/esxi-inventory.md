@@ -132,7 +132,7 @@ Die Namen in der Zeile sind die Abfragen, nicht die Kartenzahlen. Welche es gibt
 | `datastores` | die Zahl „Datastores" samt Kapazität und freiem Speicher |
 | `networks_standard`, `networks_dvs` | gemeinsam die Zahl „Portgruppen" und den VLAN-Katalog |
 | `hosts` | die Zahl „Hosts" samt RAM, Kernen und Uhrabweichung |
-| `vms` | den nicht als Kartenzahl angezeigten Namens-/MOID-/Instance-UUID-Spiegel für Kollisionsprüfung und ausdrückliche Adoption |
+| `vms` | den nicht als Kartenzahl angezeigten Namens-/MOID-/Instance-UUID-Spiegel für die Kollisionsprüfung |
 | `about`, `host_runtime` | die Hinweise zum Host (Produkt, Lizenz, HA-Cluster, Wartungsmodus), keine Kartenzahl |
 
 Eine Zeile ohne `Inventory queries:` stammt aus einem Abruf, der älter ist als dieser Bericht; sie behauptet bewusst nichts über Vollständigkeit.

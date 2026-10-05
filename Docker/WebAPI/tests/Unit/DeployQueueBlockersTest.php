@@ -27,21 +27,65 @@ final class DeployQueueBlockersTest extends TestCase
         self::assertSame('vms.php?mission_id=7', $empty[0]['action']['url']);
     }
 
-    public function testIdentityConflictIsItsOwnExhaustiveVariant(): void
+    /**
+     * WM-E2a: "adopt identity" is gone. Whether or not the inventory knows
+     * MOID and UUID, the block names the three ways out and links the portal
+     * VM plus an inventory refresh (after a rename on ESXi the cache has to
+     * see it). No variant posts anything.
+     */
+    public function testIdentityConflictOffersLinksAndNoAdoption(): void
     {
-        $conflict = [
-            'vm_id' => 9,
-            'vm_name' => 'VM09',
-            'inventory_moid' => 'vm-9',
-            'inventory_instance_uuid' => 'uuid-9',
-        ];
-        $blockers = deploy_queue_base_blockers(true, true, true, true, '', true, ['id' => 7], [['id' => 9]], [$conflict], 12);
-        self::assertCount(1, $blockers);
-        self::assertSame(VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT, $blockers[0]['kind']);
-        self::assertSame($conflict, $blockers[0]['conflict']);
-        self::assertSame('adopt', $blockers[0]['action']['type']);
-        self::assertSame('vms.write', $blockers[0]['action']['permission']);
-        self::assertSame(12, $blockers[0]['action']['fields']['credential_esxi_id']);
+        foreach ([['vm-9', 'uuid-9'], ['', '']] as [$moid, $uuid]) {
+            $conflict = [
+                'vm_id' => 9,
+                'vm_name' => 'VM09',
+                'inventory_moid' => $moid,
+                'inventory_instance_uuid' => $uuid,
+            ];
+            $blockers = deploy_queue_base_blockers(true, true, true, true, '', true, ['id' => 7], [['id' => 9]], [$conflict]);
+            self::assertCount(1, $blockers);
+            self::assertSame(VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT, $blockers[0]['kind']);
+            self::assertSame($conflict, $blockers[0]['conflict']);
+            // open_remedy finds the action again by code; a shared code would
+            // send every conflict's link to the first VM.
+            self::assertSame('identity_conflict_9', $blockers[0]['code']);
+            self::assertSame(__t('deploy.identity_conflict', ['name' => 'VM09']), $blockers[0]['message']);
+            self::assertSame([
+                'type' => 'link',
+                'url' => vm_edit_url(7, 9),
+                'label' => __t('deploy.identity_vm_link'),
+                'permission' => 'vms.write',
+            ], $blockers[0]['action']);
+            self::assertSame([
+                'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
+                'label' => __t('deploy.identity_refresh_link'),
+            ], $blockers[0]['help']);
+        }
+    }
+
+    public function testIdentityConflictRendersBothLinksAndNoAdoptionForm(): void
+    {
+        $conflict = ['vm_id' => 9, 'vm_name' => 'VM09', 'inventory_moid' => 'vm-9', 'inventory_instance_uuid' => 'uuid-9'];
+        $blockers = deploy_queue_base_blockers(true, true, true, true, '', true, ['id' => 7], [['id' => 9]], [$conflict]);
+        // The remedy form carries a CSRF field, which needs a session.
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            $_SESSION = [];
+            session_start();
+        }
+        ob_start();
+        try {
+            deploy_render_blockers($blockers, ['role' => VIRTUSPHERE_ROLE_USER]);
+        } finally {
+            $html = (string) ob_get_clean();
+        }
+
+        self::assertStringNotContainsString('adopt_vm', $html);
+        self::assertStringNotContainsString('data-confirm', $html);
+        // The VM link is a draft-keeping remedy form keyed by its own code; the
+        // refresh link is a plain follow-up in the same actions row.
+        self::assertStringContainsString('name="remedy_code" value="identity_conflict_9"', $html);
+        self::assertStringContainsString(h(__t('deploy.identity_vm_link')), $html);
+        self::assertStringContainsString('href="' . h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)) . '"', $html);
     }
 
     public function testRendererRejectsAnUnknownVariant(): void

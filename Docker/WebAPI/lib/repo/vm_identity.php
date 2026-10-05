@@ -12,7 +12,7 @@ final class VmIdentityConflictException extends RuntimeException
     public function __construct(private readonly array $identityConflicts)
     {
         $names = array_map(static fn (array $row): string => (string) ($row['vm_name'] ?? ''), $identityConflicts);
-        parent::__construct('Foreign or unadopted VM namesake blocks deployment: ' . implode(', ', $names) . '.');
+        parent::__construct('Foreign VM namesake blocks deployment: ' . implode(', ', $names) . '.');
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -86,52 +86,4 @@ function repo_deploy_assert_no_vm_identity_conflicts(mysqli $db, int $missionId,
     if ($conflicts !== []) {
         throw new VmIdentityConflictException($conflicts);
     }
-}
-
-/**
- * Identity-only write used inside the mission/job lock transaction. The
- * inventory row is the credential-scoped read-back from ESXi; no hardware
- * setting is copied and no remote operation is issued.
- *
- * @return array{vm_id:int, vm_name:string, vm_moid:string, vm_instance_uuid:string}
- */
-function repo_vm_identity_adopt_locked(mysqli $db, int $missionId, int $vmId, int $credentialId): array
-{
-    if ($missionId <= 0 || $vmId <= 0 || $credentialId <= 0) {
-        throw new InvalidArgumentException('Mission, VM and ESXi credential are required for adoption.');
-    }
-
-    $credential = repo_fetch_one($db, 'SELECT id, type FROM deploy_credentials WHERE id = ? LIMIT 1', 'i', [$credentialId]);
-    if ($credential === null || (string) $credential['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
-        throw new RuntimeException('Selected ESXi credential not found.');
-    }
-
-    $vm = repo_fetch_one($db, 'SELECT id, vm_name FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1 FOR UPDATE', 'ii', [$vmId, $missionId]);
-    if ($vm === null) {
-        throw new RuntimeException('VM not found in mission.');
-    }
-
-    $inventory = repo_fetch_one(
-        $db,
-        'SELECT meta_json FROM deploy_esxi_inventory WHERE credential_id = ? AND kind = ? AND name = ? LIMIT 1',
-        'iss',
-        [$credentialId, VIRTUSPHERE_INVENTORY_KIND_VM, (string) $vm['vm_name']]
-    );
-    $meta = $inventory !== null ? json_decode((string) ($inventory['meta_json'] ?? ''), true) : null;
-    $moid = is_array($meta) ? trim((string) ($meta['moid'] ?? '')) : '';
-    $instanceUuid = is_array($meta) ? trim((string) ($meta['instance_uuid'] ?? '')) : '';
-    if ($moid === '' || $instanceUuid === '') {
-        throw new RuntimeException('The inventory namesake has no complete MOID and instance UUID; refresh the ESXi inventory before adoption.');
-    }
-
-    $stmt = $db->prepare('UPDATE deploy_vms SET vm_moid = ?, vm_instance_uuid = ?, updated_at = NOW() WHERE id = ? AND mission_id = ?');
-    $stmt->bind_param('ssii', $moid, $instanceUuid, $vmId, $missionId);
-    $stmt->execute();
-
-    return [
-        'vm_id' => $vmId,
-        'vm_name' => (string) $vm['vm_name'],
-        'vm_moid' => $moid,
-        'vm_instance_uuid' => $instanceUuid,
-    ];
 }

@@ -120,7 +120,8 @@ final class DeployBlockerContractTest extends TestCase
         $client = $this->source('portal/assets/deploy_blockers.js');
         self::assertStringContainsString("root.addEventListener('submit'", $client);
         self::assertStringContainsString("actionField.value === 'open_remedy'", $client);
-        self::assertStringContainsString("actionField.value === 'adopt_vm'", $client);
+        // WM-E2a: the adoption form is gone from both renderers.
+        self::assertStringNotContainsString('adopt_vm', $client);
         self::assertStringContainsString('appendDraftFields(event.target)', $client);
     }
 }

@@ -96,6 +96,17 @@ const VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP = 'mecm.client_event_cap_reached';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED = 'mecm.reporter_upgraded';
 
 /**
+ * Events nothing writes any more. They stay registered and labelled so that
+ * rows written before their producer was removed remain readable and
+ * filterable (with their line in `audit_presenter.php`);
+ * `AuditProducerContractTest` fails if any audit call writes one again.
+ * `vm.identity_adopted`: "adopt identity" was removed (WM-E2a).
+ */
+const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [
+    VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED,
+];
+
+/**
  * Registry owner for every persisted first-party event.
  *
  * `required` and `optional` are disjoint. `required_by_result` adds conditional

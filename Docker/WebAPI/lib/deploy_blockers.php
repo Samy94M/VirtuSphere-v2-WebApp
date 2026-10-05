@@ -35,8 +35,7 @@ function deploy_queue_base_blockers(
     bool $missionSelected,
     ?array $selectedMission,
     array $missionVms,
-    array $identityConflicts,
-    int $selectedEsxiCredentialId = 0
+    array $identityConflicts
 ): array {
     $blockers = deploy_prerequisite_notices(
         $hasMissions,
@@ -78,33 +77,28 @@ function deploy_queue_base_blockers(
         ];
     }
 
+    // WM-E2a: adopting a namesake was removed. The way out is on ESXi (rename
+    // or delete that VM) or in the portal (delete this VM), so the block links
+    // the portal VM and the inventory refresh that has to see an ESXi change
+    // before the block lifts. The code carries the VM id because open_remedy
+    // finds the action again by code; a shared code would send every
+    // conflict's link to the first VM.
     foreach ($identityConflicts as $conflict) {
-        $identityComplete = (string) $conflict['inventory_moid'] !== ''
-            && (string) $conflict['inventory_instance_uuid'] !== '';
-        $action = $identityComplete
-            ? [
-                'type' => 'adopt',
-                'url' => deploy_mission_url((int) ($selectedMission['id'] ?? 0)),
-                'label' => __t('deploy.identity_adopt_button'),
-                'permission' => 'vms.write',
-                'confirm' => __t('deploy.identity_adopt_confirm', ['name' => (string) $conflict['vm_name']]),
-                'fields' => [
-                    'mission_id' => (int) ($selectedMission['id'] ?? 0),
-                    'credential_esxi_id' => $selectedEsxiCredentialId,
-                    'vm_id' => (int) $conflict['vm_id'],
-                ],
-            ]
-            : [
-                'type' => 'link',
-                'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
-                'label' => __t('deploy.identity_refresh_link'),
-                'permission' => '',
-            ];
+        $vmId = (int) $conflict['vm_id'];
         $blockers[] = [
             'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT,
-            'code' => 'identity_conflict',
+            'code' => 'identity_conflict_' . $vmId,
             'message' => __t('deploy.identity_conflict', ['name' => (string) $conflict['vm_name']]),
-            'action' => $action,
+            'action' => [
+                'type' => 'link',
+                'url' => vm_edit_url((int) ($selectedMission['id'] ?? 0), $vmId),
+                'label' => __t('deploy.identity_vm_link'),
+                'permission' => 'vms.write',
+            ],
+            'help' => [
+                'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
+                'label' => __t('deploy.identity_refresh_link'),
+            ],
             'conflict' => $conflict,
         ];
     }
@@ -178,8 +172,7 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
         $missionId > 0,
         $selectedMission,
         $missionVms,
-        $identityConflicts,
-        $state['credential_esxi_id']
+        $identityConflicts
     );
 
     if ($missionId > 0 && $esxiCredentials !== [] && $state['credential_esxi_id'] <= 0) {

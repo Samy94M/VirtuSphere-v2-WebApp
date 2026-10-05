@@ -289,11 +289,9 @@ return [
     'storage_hint' => 'Provisioned disk sizes of the selected VMs per target datastore, compared against the free space of the last inventory pull. Thin disks use less at first. This is a snapshot and never blocks the deploy.',
     // The pointer to System status is the link beside the sentence now, not a
     // parenthesis inside it: otherwise the message names the page twice.
-    'identity_conflict_flash' => 'Deploy blocked: the selected ESXi credential already reports a foreign or not-yet-adopted VM with this name: :names.',
-    'identity_conflict' => 'Deploy blocked: the selected ESXi credential already reports a VM named “:name” whose instance UUID does not belong to the portal VM. Verify the VM and adopt it only through the explicit action. No hardware settings are changed.',
-    'identity_adopt_button' => 'Adopt existing VM',
-    'identity_adopt_confirm' => 'Explicitly adopt the existing VM “:name”? Its MOID and instance UUID will be bound to the portal VM. ESXi hardware will not be changed.',
-    'identity_adopted' => 'The existing VM “:name” was explicitly adopted. Its MOID and instance UUID are now stored. An unresolved create unit remains unresolved; retry stays blocked.',
+    'identity_conflict_flash' => 'Deploy blocked: the selected ESXi credential already reports a foreign VM with this name: :names.',
+    'identity_conflict' => 'Deploy blocked: the selected ESXi credential already reports a VM named “:name” whose instance UUID does not belong to the portal VM. Rename or delete that VM on ESXi, or delete the portal VM. An existing VM is not adopted; after a change on ESXi the inventory has to see it before the block lifts.',
+    'identity_vm_link' => 'Edit VM',
     'identity_refresh_link' => 'Refresh ESXi inventory',
     'inventory_deviation_warn' => 'The datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values.',
     'inventory_deviation_link' => 'View the inventory under System status',
@@ -374,7 +372,7 @@ return [
     'create_progress_count_failed' => 'Failed',
     'create_progress_count_uncertain' => 'Unresolved',
     'create_progress_count_not_started' => 'Not started yet',
-    'create_progress_unresolved' => 'Whether the VM for :name (position :position) was created is not established. Retry stays blocked; adopting identity does not resolve this unit either.',
+    'create_progress_unresolved' => 'Whether the VM for :name (position :position) was created is not established. Retry stays blocked.',
     'create_progress_findings_heading' => 'Stored causes',
     'create_progress_finding' => ':name (position :position): :reason',
     'create_progress_reason_module_failed' => 'The remote VM module reported a failure.',

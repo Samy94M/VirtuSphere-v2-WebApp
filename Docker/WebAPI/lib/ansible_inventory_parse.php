@@ -77,8 +77,8 @@ function ansible_inventory_network_item(mixed $raw, string $source): ?array
 
 /**
  * One VM the host holds, as `vmware_vm_info` reports it (decision 6). The name
- * is what the collision gate compares, the MOID is the handle it matches an
- * adopted VM against. The pinned module reports both the product `uuid` and
+ * is what the collision gate compares, the MOID is the current handle of a
+ * bound VM. The pinned module reports both the product `uuid` and
  * durable `instance_uuid`; only the latter decides whether a namesake is ours.
  *
  * A VM without a MOID is kept with a null handle rather than dropped: the name

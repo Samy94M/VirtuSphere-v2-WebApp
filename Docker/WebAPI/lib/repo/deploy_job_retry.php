@@ -146,7 +146,7 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     }
 
     // The current identity view, not the historical red result, decides if an
-    // adoption/recovery has already repaired this scope.
+    // rename, deletion or recovery has already repaired this scope.
     foreach (repo_vm_identity_conflicts($db, $missionId, (int) $job['credential_esxi_id'], $scopeIds) as $conflict) {
         $findings[] = deploy_retry_finding('identity', 'retry_identity_unresolved', true, $conflict);
     }
@@ -277,8 +277,8 @@ function deploy_retry_evaluation_unavailable(string $code): array
  *    the retry would materialize a unit the worker refuses at its first check;
  *  - a source job with NO create rows at all that would create VMs is refused
  *    fail-closed (10.4). It has no per-VM evidence, so a retry could only
- *    invent one; the operator checks ESXi, adopts what is really theirs, and
- *    queues a fresh job through the form.
+ *    invent one; the operator checks ESXi, removes or renames what is not
+ *    bound, and queues a fresh job through the form.
  *
  * A source whose retry no longer creates anything (the export-only follow-up
  * of a partial job) is not asked the third question: it materializes no create

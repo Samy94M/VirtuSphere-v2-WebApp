@@ -16,8 +16,8 @@ require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
 
 /**
  * Decision 6: an occupied name is not proof that the host VM is ours. The
- * durable instance UUID decides ownership; adoption is the only operation
- * allowed to replace that identity and it never changes ESXi hardware.
+ * durable instance UUID decides ownership. Adopting a namesake was removed
+ * (WM-E2a): a foreign namesake blocks until it is renamed or deleted.
  */
 final class VmIdentityCollisionTest extends TestCase
 {
@@ -107,44 +107,6 @@ final class VmIdentityCollisionTest extends TestCase
         self::assertSame([], repo_vm_identity_conflicts($this->db, $this->missionId, $this->esxiId));
         $jobId = repo_create_deploy_job($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'full']);
         self::assertGreaterThan(0, $jobId);
-    }
-
-    public function testAdoptionCannotReplaceIdentityDuringAnActiveJob(): void
-    {
-        $jobId = repo_create_deploy_job($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'full']);
-        self::assertGreaterThan(0, $jobId);
-        $this->replaceInventoryVm('vm-66', 'uuid-new');
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('active deploy job');
-        repo_adopt_vm_identity($this->db, $this->missionId, $this->vmId, $this->esxiId);
-    }
-
-    public function testExplicitAdoptionStoresBothHandlesAndChangesNoHardware(): void
-    {
-        $this->setStoredIdentity('vm-old', 'uuid-old');
-        $this->replaceInventoryVm('vm-44', 'uuid-adopted');
-        $before = repo_fetch_one($this->db, 'SELECT vm_cpu, vm_ram, vm_guest_id, vm_datastore, vm_datacenter FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]);
-
-        $adopted = repo_adopt_vm_identity($this->db, $this->missionId, $this->vmId, $this->esxiId);
-
-        self::assertSame(self::VM_NAME, $adopted['vm_name']);
-        self::assertSame('vm-44', $adopted['vm_moid']);
-        self::assertSame('uuid-adopted', $adopted['vm_instance_uuid']);
-        $after = repo_fetch_one($this->db, 'SELECT vm_cpu, vm_ram, vm_guest_id, vm_datastore, vm_datacenter, vm_moid, vm_instance_uuid FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]);
-        self::assertSame($before, array_intersect_key($after, $before));
-        self::assertSame('vm-44', $after['vm_moid']);
-        self::assertSame('uuid-adopted', $after['vm_instance_uuid']);
-        self::assertSame([], repo_vm_identity_conflicts($this->db, $this->missionId, $this->esxiId));
-    }
-
-    public function testAdoptionRejectsAnIncompleteInventoryIdentity(): void
-    {
-        $this->replaceInventoryVm('vm-55', '');
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('complete MOID and instance UUID');
-        repo_adopt_vm_identity($this->db, $this->missionId, $this->vmId, $this->esxiId);
     }
 
     private function replaceInventoryVm(string $moid, string $instanceUuid): void

@@ -74,25 +74,6 @@ function getVMs($connection, $missionId)
     return $vms;
 }
 
-/**
- * Explicitly binds one portal VM to the namesake currently reported by a
- * selected ESXi credential. Mission lock and active-job gate prevent identity
- * replacement while a worker may still be mutating or exporting that VM.
- *
- * @return array{vm_id:int, vm_name:string, vm_moid:string, vm_instance_uuid:string}
- */
-function repo_adopt_vm_identity(mysqli $db, int $missionId, int $vmId, int $credentialId): array
-{
-    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $credentialId): array {
-        if (repo_deploy_lock_mission($db, $missionId) === null) {
-            throw new RuntimeException('Mission not found.');
-        }
-        repo_deploy_assert_mission_idle($db, $missionId);
-
-        return repo_vm_identity_adopt_locked($db, $missionId, $vmId, $credentialId);
-    });
-}
-
 function repo_fetch_related(mysqli $connection, string $sql, int $vmId): array
 {
     $stmt = $connection->prepare($sql);

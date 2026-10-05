@@ -1226,3 +1226,23 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Offen:** VT-E1 B (Einmalwert je Rollout) mit MC-R4 und LP-13; bis dahin kann eine bekannte MAC eine VM auf 5/5 setzen und deren Installationswarnung beenden. Keine externe Abnahme behauptet.
 
 **Nächster Schritt:** K5.
+
+## K5: „Identität übernehmen“ zurückgebaut (WM-E2a, WM-03, DF-L5 Übernahme-Teil, DF-D1), 05.10.2026
+
+**Stand: lokal geprüft, gemeinsame Schlussabnahme offen** (Block K5 bis K10: `e2e-portal`, LF-Worktree und Push am Blockende). Ausgangsstand `a3c89b8` (K4, gepusht; `origin/main` gleich). Prüfung Sol: begrenzter Selbstreview.
+
+**Nachgemessen am Code:** Aktion `adopt_vm` in `lib/deploy_actions.php`, `repo_adopt_vm_identity()` und `repo_vm_identity_adopt_locked()` sowie der Übernahme-Button der Identitätssperre (Server und `deploy_blockers.js`) bestanden wie in S8 beschrieben. WM-03 (Übernahme überschreibt eine bestehende Bindung) bestand damit ebenfalls. DF-D1 bestätigt: Der Kommentar im Export-Playbook erlaubte eine leere UUID, der Code darunter verlangt eine; `DEPLOYMENT.md` sagte dasselbe.
+
+**Änderung:** Aktion und beide Repo-Funktionen entfallen; ein POST `adopt_vm` fällt ohne Schreibzugriff auf die gewöhnliche Weiterleitung. Die Identitätssperre zeigt jetzt den Hinweis „auf ESXi umbenennen oder löschen, oder die Portal-VM löschen“ mit zwei Links: „VM bearbeiten“ (Berechtigung `vms.write`, über die vorhandene Remedy-Form mit Formularentwurf) und „ESXi-Inventar aktualisieren“. Der Blocker-Code trägt die VM-ID (`identity_conflict_<id>`), weil `open_remedy` die Aktion per Code wiederfindet und ein gemeinsamer Code jeden Link auf die erste VM gelenkt hätte. Der nur für die Übernahme genutzte Parameter von `deploy_queue_base_blockers()` ist entfernt. Das Audit-Ereignis `vm.identity_adopted` bleibt registriert und beschriftet; die neue geschlossene Liste `VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL` erlaubt ihm als einzigem, keinen Schreiber zu haben, und `AuditProducerContractTest` prüft sie in beide Richtungen.
+
+**Doku und Hilfe:** Hilfe DE/EN (Überschrift, `deploy_identity_p2`, Sätze zur Übernahme in `create_progress_p3` und `create_progress_unresolved`), Sperr- und Flash-Text, `DEPLOYMENT.md` (Abschnitt neu, DF-D1), Kommentar im Export-Playbook (DF-D1), `deploy-chain.md`, `esxi-inventory.md`, Glossar, `QA.md`, ADR-0036 Nachtrag, Hinweis in ADR-0013, drei Code-Kommentare. Die Diagramme unter `docs/operations` enthielten keine Übernahme. DF-D8 („fresh VM inventory“) bleibt bei K9 (DF-P2).
+
+**Rot vor Fix:** `qa-artifacts/k5-2026-10-05/red/` (Stand `a3c89b8` plus nur die geänderten Tests, SHA256-Manifest). phpunit-unit fail: beide Blocker-Fälle (Übernahme statt Links), `AuditProducerContractTest` (Historienliste fehlt; das ist ein Wächterfall, kein Verhaltensnachweis) und `E2eActionCoverageContractTest` (Marke für `adopt_vm` entfernt, Formular noch da). `e2e-portal` fail mit genau einem Fall von 289: „no adoption is offered“, gefunden wurde 1 Übernahmeformular (`red/e2e/`).
+
+**Grün:** über `scripts/check.ps1` aus PowerShell, `qa-artifacts/k5-2026-10-05/green-2/results.json`: phpunit-unit, phpstan, lang-parity, file-size, doc-hygiene, doc-semantics, js-syntax, yaml-lint, qa-stack und phpunit-full pass (2418 Tests ohne Skip). Der erste Grünlauf (`green/`, abgebrochen) fand drei Testfehler: Der Render-Fall brauchte eine Session für das CSRF-Feld; `DeployRecoveryHelpContractTest` pinnte den entfernten Hilfesatz zur Übernahme als Pflichtklausel (Klausel gestrichen, die übrigen vier bleiben); und die erste Fassung des Historien-Wächters zählte die Leserzeile in `audit_presenter.php` als Schreiber. Er prüft jetzt echte Audit-Aufrufe. `e2e-portal`, LF-Worktree und Push folgen am Blockende.
+
+**WM-07 neu bewertet:** entfällt. Die Herkunftsmarke an der ESXi-VM hatte als einzigen Verbraucher die Übernahme („Übernahme nur für markierte VMs“). Ohne Übernahme bindet das Portal nur, was sein eigenes Create angelegt hat, und GR-01 hängt nicht mehr am Urteil des Operators. Ein späterer Wunsch, fremde und eigene namensgleiche VMs im Sperrhinweis zu unterscheiden, wäre ein neuer Befund.
+
+**Neuer Befund K5-N1 (außerhalb K5, S9 Regel 2, nicht behoben):** `deploy_network_finding_item()` vergibt den Fundcode als Blocker-Code. Haben mehrere VMs denselben Netzbefund, teilen sich ihre Blocker den Code, und `open_remedy` leitet jeden Link „VM-Netzwerke öffnen“ zur ersten passenden VM. Gefunden beim Bau des Identitätslinks, nur per Codelesung belegt.
+
+**Nächster Schritt:** K6.

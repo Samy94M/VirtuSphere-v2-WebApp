@@ -140,33 +140,6 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
             redirect_to(deploy_job_log_url($jobId));
         }
 
-        if ($action === 'adopt_vm') {
-            if (!can('vms.write', $user)) {
-                portal_forbid($connection, $user, 'vms.write');
-            }
-            $missionIdPost = request_int($_POST, 'mission_id');
-            $esxiId = request_int($_POST, 'credential_esxi_id');
-            $vmId = request_int($_POST, 'vm_id');
-            // The binding and its audit row commit together (identity plan 6.4):
-            // an adoption must never be stored without its trace.
-            $adopted = repo_transaction($connection, static function () use ($connection, $missionIdPost, $vmId, $esxiId, $user): array {
-                $adopted = repo_adopt_vm_identity($connection, $missionIdPost, $vmId, $esxiId);
-                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'credential_id' => $esxiId,
-                    'mission_id' => $missionIdPost,
-                    'moid' => (string) $adopted['vm_moid'],
-                    'instance_uuid' => (string) $adopted['vm_instance_uuid'],
-                ], (int) $user['id']);
-
-                return $adopted;
-            });
-            if (is_array($_POST['draft'] ?? null)) {
-                deploy_form_draft_store($_POST['draft']);
-            }
-            flash_set('success', __t('deploy.identity_adopted', ['name' => $adopted['vm_name']]));
-            redirect_to('deploy.php?resume_draft=1');
-        }
-
         if ($action === 'cancel') {
             $jobId = request_int($_POST, 'job_id');
             $job = repo_deploy_job($connection, $jobId);

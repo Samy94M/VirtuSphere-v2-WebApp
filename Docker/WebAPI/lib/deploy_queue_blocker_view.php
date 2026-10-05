@@ -84,7 +84,7 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
             $id = (string) ($blocker['target_id'] ?? ('deploy-blocker-' . ($index + 1)));
             $kind = (string) ($blocker['kind'] ?? '');
             $action = deploy_blocker_action_for_user($blocker, $user);
-            if ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_VM_NETWORK_MAPPING) { ?>
+            if ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_VM_NETWORK_MAPPING || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) { ?>
                 <?php
                 // Follow-ups go into the shared .alert-actions row, not after the
                 // sentence: two underlined links separated by one space read as a
@@ -106,26 +106,6 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
                             <?php if ($help !== null) { ?><a href="<?php echo h((string) $help['url']); ?>" data-deploy-blocker-help><?php echo h((string) $help['label']); ?></a><?php } ?>
                         </div>
                     <?php } ?>
-                </div>
-            <?php } elseif ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) {
-                ?>
-                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker tabindex="-1">
-                    <p><?php echo h((string) $blocker['message']); ?></p>
-                    <?php if ($action !== null && (string) $action['type'] === 'adopt') { ?>
-                        <form class="inline-form" method="post" action="<?php echo h((string) $action['url']); ?>">
-                            <?php echo csrf_field(); ?>
-                            <input type="hidden" name="action" value="adopt_vm">
-                            <?php foreach ($action['fields'] as $field => $value) { ?>
-                                <input type="hidden" name="<?php echo h((string) $field); ?>" value="<?php echo h((string) $value); ?>">
-                            <?php } ?>
-                            <?php echo deploy_form_draft_hidden_fields($formValues); ?>
-                            <button class="button button-secondary" type="submit" data-confirm="<?php echo h((string) $action['confirm']); ?>"><?php echo h((string) $action['label']); ?></button>
-                        </form>
-                    <?php } elseif ($action !== null && (string) $action['type'] === 'link') { ?>
-                        <?php deploy_render_remedy_form($action, (string) $blocker['code'], $formValues); ?>
-                    <?php } elseif ($action !== null) {
-                        throw new LogicException('Unknown deploy identity action: ' . (string) $action['type']);
-                    } ?>
                 </div>
             <?php } else {
                 throw new LogicException('Unknown deploy blocker kind: ' . $kind);
