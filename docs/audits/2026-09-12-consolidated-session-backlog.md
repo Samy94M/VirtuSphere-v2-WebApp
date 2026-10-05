@@ -988,7 +988,7 @@ Quelle S8, Abschnitt „Schritt 8: Konfigurationsmatrix (PI-10)“ in der [Lück
 
 Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Doku) ist mit `af84415` (FC1-Wächter, Grundprüfung) auf `main` zusammengeführt. Die beiden FC2-Durchgänge haben sich teils gedeckt; die Zuordnung steht im [Ablaufprüfplan](2026-09-28-deploy-flows-review-plan.md), Abschnitt „Abgleich der FC2-Durchgänge“. Kurz: FC2-09, FC2-19 und der Diagrammteil von FC2-14 sind erledigt. FC2-03 ist DF-L6, FC2-14 im Code DF-L9, FC2-15 im Kern DF-L1 und ZB-06 ist DF-L3; führend ist jeweils die DF-ID mit ihrem Paket. FC2-10, FC2-11 und FC2-13 sind nur teilweise erledigt.
 
-**Offene Entscheidungen des Nutzers.** Diese Liste ersetzt die Aufzählungen in den „Nächster Schritt“-Zeilen der Abschnitte darüber; diese bleiben als Stand ihres Tages stehen.
+**Offene Entscheidungen des Nutzers.** Diese Liste ersetzt die Aufzählungen in den „Nächster Schritt“-Zeilen der Abschnitte darüber; diese bleiben als Stand ihres Tages stehen. **Stand 05.10.2026:** alle zehn entschieden, siehe Abschnitt „Entscheidungen 05.10.2026: offene Entscheide FC2, AB, VT, FM“.
 
 | ID | Frage | Quelle |
 |---|---|---|
@@ -1178,3 +1178,25 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Außerhalb K3, offen:** FC2-E1 (gebundene, nie markierte VM bei Fehler vor dem Rückruf), K2-R1 (Reaper), WM-02 (Vorzustand nicht dauerhaft gespeichert) und LP-01 (Laborprobe für Altschäden aus WM-01). Ebenfalls offen ist P3-2: Ein Retry ohne Befund ist sofort erlaubt und scheitert erneut. Der Binder-Lauf und der Fehler nach dem Rückruf mit gebundener VM sind weiter nicht durch eigene Tests belegt.
 
 **Nächster Schritt:** K4.
+
+## Entscheidungen 05.10.2026: offene Entscheide FC2, AB, VT, FM
+
+**Nutzer, 05.10.2026.** Damit sind alle zehn Entscheide aus der Tabelle „Offene Entscheidungen des Nutzers“ (Abschnitt vom 03.10.2026) gefallen. Die Befunde bleiben im Abschnitt „Nicht beginnen“ des Arbeitsauftrags, bis sie als Pakete geschnitten sind. Jedes Paket beginnt mit einem Rot-vor-Fix-Test.
+
+| ID | Entscheidung | Folgerung für das Paket |
+|---|---|---|
+| FC2-E1 | Vorschlag S7. `start` und `autostart` schreiben nie Lifecycle oder MECM-Zustand. Scheitert ein anderer Modus, bevor ein Playbook ESXi berührt hat, gilt wieder der vorige Zustand. `failed/failed` nur für VMs, die ein Playbook dieses Auftrags tatsächlich angefasst hat. | Voraussetzung ist WM-02: Vorzustand (Lifecycle und MECM) je Auftrag und VM dauerhaft speichern, mit Migration. Dieselbe Regel gilt für Abbruch, Reaper und Sweep; damit sind K2-R1 und die in K3 offene gebundene, nie markierte VM erfasst. „Angefasst“ wird im Paket präzisiert. Integrationstests je Modus und Fehlerstelle. |
+| FC2-E1, Altschäden | Erst messen, dann ein eigener, belegter Reparaturauftrag; keine automatische Reparatur. | Zuerst die nur lesenden Laborproben LP-01 bis LP-05 auf Prod (Nutzer). Reparatur nur bei Befund. |
+| FM-E2 | Nie angelegte VMs im Umfang von Start, Export, Power-Cycle und Autostart **ausnehmen mit Hinweis**, nicht sperren. | Der Auftrag läuft für die übrigen VMs. Das Ergebnis meldet „N VMs nicht angelegt, übersprungen“ mit Link auf Create. Die übersprungenen VMs behalten ihren Zustand (FC2-E1). Gilt auch für geplante Aufträge. |
+| FM-E1 | **Nur warnen.** Create bleibt möglich, warnt aber vorher, wenn gebundene VMs auf dem gewählten Host fehlen würden. Eine Mission zieht nicht absichtlich um, eine Sperre oder ein Umzugsablauf wird nicht gebaut. | Dafür muss die Bindung kennen, auf welchem Zugang beziehungsweise Host die VM angelegt wurde. Im Paket ist zu klären, ob die Warnung beim Einreihen aus der gespeicherten Bindung (Zugang/Host weicht ab) oder erst aus der Identitätsprüfung im Lauf kommt; die Warnung muss vor dem Neuanlegen stehen. |
+| FC2-E6 | `full` wartet auf `registered` aller VMs des Auftrags, `StartWaitSeconds` ist die Obergrenze. Läuft sie ohne `registered` ab, scheitert der Auftrag mit klarer Ursache statt blind zu starten. | Vorher LP-05 messen. `registered` belegt gesetzte Mitgliedschaften, nicht die Collection-Auswertung in MECM; das bleibt dokumentiert. |
+| FC2-E2 | Kürzen. Statusabfragen ohne `skipping`/`ok`-Zeilen außer bei ausführlicher Ausgabe, volle Ausgabe beim Endergebnis oder Fehler einer Einheit, `POLL`-Zeile seltener mit Laufzeit und Restbudget. | Vorher an einem echten Auftragsprotokoll messen (LP-04). |
+| FC2-E3 | Laufschonfrist je Aufgabe, kürzer für Devices Sync als für den Autoimporter. Ein hängender Lauf wird erst gelb, dann rot. | Diagramm in `system-status-checks.md` angleichen. |
+| FM-E3 | Nur Hinweis „startete N Minuten nach Plan“ in Liste und Protokoll, keine Verfallszeit. | Siehe WK-01 zur Frage nach parallelen Aufträgen. |
+| VT-E2 | Backups verschlüsseln, asymmetrisch. Im Portal wird nur der öffentliche Schlüssel (Zertifikat) hinterlegt; der private Schlüssel liegt offline beim Nutzer und nie auf dem App-Host. | Werkzeug `openssl` auf dem Host (Air-Gap). Config-Archiv und Dump getrennt ablegen. Ohne hinterlegten Schlüssel meldet der Systemstatus „Backups unverschlüsselt“. Restore und Schlüsselerzeugung in `docs/operations/backup.md`; ADR-0017 nachtragen. |
+| FC2-E5 | Diagramme auch in der Portalhilfe, als **vorgerenderte SVGs**, nicht Mermaid im Browser. | Begründung: Die CSP mit Style-Nonce bleibt streng, kein JavaScript nötig, im Air-Gap statisch. Rendern beim Build mit dem im Repo vorhandenen Chromium, SVGs eingecheckt, helle und dunkle Variante. Ein Wächter vergleicht Mermaid-Quelle und SVG, damit kein veraltetes Bild durchgeht. Die Mermaid-Blöcke unter `docs/operations` bleiben die einzige Quelle. |
+| AB-E3 | Vorschlag S7: PI-01, PI-02, PI-03 und PI-09 vor FC4; PI-04 mit FC3; PI-05, PI-06 und PI-08 danach; PI-07 erst nach Aufwandsschätzung für ein Air-Gap-taugliches Image; PI-10 bei Bedarf. | Nur Prüfarbeit. |
+
+**Neuer Befund WK-01 (P3, offen):** Es gibt genau einen Deploy-Worker, alle Aufträge aller Missionen laufen nacheinander (ADR-0042). Ein langer Auftrag einer Mission verzögert jeden Auftrag einer anderen. Die Übernahme ist bereits je Mission gesperrt und an den Besitzer gebunden; parallele Aufträge über verschiedene Missionen wären daher denkbar. **Entscheid WK-E1:** Wie viele Aufträge dürfen gleichzeitig laufen, je ESXi-Host und je Ansible-Host? Dazu gehören mehrere Worker im Supervisor-Vertrag (ADR-0042), SSH-Budgets und Herzschlag je Worker. Eigenes Paket mit neuer ADR, nicht jetzt. Den Verspätungshinweis aus FM-E3 ersetzt das nicht.
+
+**Nächster Schritt:** Die Laborproben LP-01 bis LP-05 (nur lesend, Nutzer) liefern die Messwerte für FC2-E1 (Altschäden), FC2-E2 und FC2-E6. Danach die neuen Pakete schneiden und in den Arbeitsauftrag aufnehmen; bis dahin gilt dort die Reihenfolge K4 bis K14.

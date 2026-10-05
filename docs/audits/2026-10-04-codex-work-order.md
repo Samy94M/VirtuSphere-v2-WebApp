@@ -49,7 +49,7 @@ Diese ausdrücklich nachgereichten Entscheidungen gelten für K1:
 
 ## Nicht beginnen
 
-Diese Befunde warten auf eine Entscheidung, eine Laborprobe oder den MECM-Cutover. Sie werden in keinem Paket oben mitgenommen.
+Diese Befunde warten auf eine Entscheidung, eine Laborprobe oder den MECM-Cutover. Sie werden in keinem Paket oben mitgenommen. Die Entscheide FC2-E1 bis FC2-E6, VT-E2 und FM-E1 bis FM-E3 sind am 05.10.2026 gefallen (Register, Abschnitt „Entscheidungen 05.10.2026“). Die zugehörigen Befunde bleiben trotzdem hier, bis sie als eigene Pakete geschnitten und in die Tabelle oben aufgenommen sind.
 
 | Befund | Wartet auf |
 |---|---|
