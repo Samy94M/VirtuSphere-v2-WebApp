@@ -34,7 +34,7 @@ final class AnsiblePlaybookUploadTest extends TestCase
     {
         require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
         $uploaded = ansible_required_files();
-        self::assertContains('powercycle_vm_tasks.yml', $uploaded);
+        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_TASKS, $uploaded);
 
         foreach ($this->everyDispatchablePlaybook() as $mode => $playbook) {
             self::assertContains(
@@ -43,6 +43,44 @@ final class AnsiblePlaybookUploadTest extends TestCase
                 'mode "' . $mode . '" runs ' . $playbook . ', but it is never copied to the Ansible host'
             );
         }
+    }
+
+    /**
+     * DF-S1: an included task file is shipped like a playbook, or the include
+     * dies on the Ansible host exactly as the inventory playbook once did. The
+     * targets are read from the uploaded YAML, never listed here.
+     */
+    public function testEveryIncludedTaskFileIsUploaded(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        $uploaded = ansible_required_files();
+        self::assertSame([], $this->missingIncludes($uploaded, ansible_source_dir()));
+
+        // Negative case: the same derivation must notice a dropped include.
+        $without = array_values(array_diff($uploaded, [VIRTUSPHERE_POWERCYCLE_VM_TASKS]));
+        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_TASKS, $this->missingIncludes($without, ansible_source_dir()));
+    }
+
+    /**
+     * @param list<string> $uploaded
+     * @return list<string> include targets of uploaded YAML files that are not uploaded
+     */
+    private function missingIncludes(array $uploaded, string $sourceDir): array
+    {
+        $targets = [];
+        foreach ($uploaded as $file) {
+            if (!str_ends_with($file, '.yml')) {
+                continue;
+            }
+            $source = (string) file_get_contents($sourceDir . DIRECTORY_SEPARATOR . $file);
+            preg_match_all('/\b(?:include|import)_tasks:\s*\.\/([\w.-]+\.yml)/', $source, $matches);
+            foreach ($matches[1] as $target) {
+                $targets[$target] = true;
+            }
+        }
+        self::assertNotSame([], $targets, 'no include_tasks found at all; the scan cannot be trusted');
+
+        return array_values(array_diff(array_keys($targets), $uploaded));
     }
 
     public function testEveryUploadedFileExistsInTheSourceTree(): void

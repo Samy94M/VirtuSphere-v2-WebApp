@@ -10,6 +10,22 @@ declare(strict_types=1);
  * before the first attempt, else ok. Interval 0 means the automation is off:
  * age proves nothing then, so staleness never warns and only real failures
  * colour the light. $now is injectable for tests.
+ *
+ * The traffic light shown for one ESXi credential anywhere in the portal: its
+ * fetch health, and nothing else. Green means the last pull succeeded and is
+ * current; it does NOT promise the host can deploy.
+ *
+ * There is exactly one of these because three call sites (the credential row,
+ * the system-status heading and the dashboard rollup) must never disagree on the
+ * same colour. It answers one question: "is the inventory pull healthy?"
+ *
+ * A host capability (a free licence, an HA cluster, maintenance mode) does not
+ * colour this light. Those are properties of a *successful* pull, not fetch
+ * problems, so they surface as their own badges (esxi_capability_warnings()) and
+ * gate deploys through the deploy preflights. Painting a perfectly healthy
+ * pull amber because the host has a free licence made "amber" mean two unrelated
+ * things and hid the one it was built for. Keeping them apart is the point of
+ * having a separate capability module at all.
  */
 function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = null): string
 {
@@ -39,7 +55,7 @@ function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = nul
  * ESXi credential.
  *
  * Carries the raw `state` row and deliberately NOT a traffic-light state. The
- * badge the portal shows is esxi_credential_state() (lib/esxi_capabilities.php),
+ * badge the portal shows is esxi_inventory_ampel() above,
  * which is the fetch health. Returning a second state field here would hand a
  * caller a parallel "ampel" to render, and the two would eventually disagree on
  * the same page.

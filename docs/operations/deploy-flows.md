@@ -16,7 +16,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet oder dessen Abbruch erst an der letzten Schrittgrenze bestätigt wird. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
@@ -63,7 +63,7 @@ flowchart TD
   L --> I{"Systemmodus inventory?"}
   I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
   I -->|nein| K["Collection-Sperre (requirements.yml) lokal lesen"]
-  K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH"]
+  K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH; VM-Zustände unverändert"]
   K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
   P -->|ja| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
@@ -75,8 +75,8 @@ flowchart TD
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
-  AP -->|freie Lizenz| APX["Auftrag failed, noch vor dem Upload"]
-  AP -->|HA-Cluster| APH["Modus autostart: failed; Modus full: Autostart-Schritt entfällt"]
+  AP -->|freie Lizenz| APX["Auftrag failed, noch vor dem Upload; alle VMs des Umfangs failed/failed"]
+  AP -->|HA-Cluster| APH["Modus autostart: failed, alle VMs des Umfangs failed/failed; Modus full: Autostart-Schritt entfällt"]
   AP -->|unbekannt oder veraltet| APW["Hinweis im Protokoll, weiter"]
   AP -->|keine Einschränkung| U
   AS -->|nein| U["Arbeitsverzeichnis per SFTP auf den Ansible-Host laden"]
@@ -91,21 +91,32 @@ flowchart TD
   R -->|ja, nach Create| RS["serverlist.yml mit den soeben gebundenen UUIDs neu schreiben und hochladen"]
   RS --> ST
   R -->|ja| ST["Nächstes Playbook: Schrittgrenze prüfen (eigener Auftrag, kein Abbruch), dann ansible-playbook ausführen"]
-  ST -->|Exitcode ungleich 0| STX["Auftrag failed mit Name des Schritts"]
+  ST -->|Exitcode ungleich 0| STX["Auftrag failed mit Name des Schritts; alle VMs des Umfangs failed/failed, außer VMs mit erfolgreichem MAC-Ergebnis"]
   ST -->|Abbruch angefordert| CX["Auftrag cancelled; VMs in deploying werden failed"]
   ST -->|nächster Schritt| ST
   ST -->|letzter Schritt fertig| E
   R -->|nein| E{"Modus erwartet MAC-Ergebnis?"}
   E -->|nein| EO["VM-Zustand zurücksetzen, Auftrag succeeded"]
   E -->|ja| EM{"MAC-Ergebnis des Rückrufs?"}
-  EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed"]
+  EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed; alle VMs des Umfangs failed/failed"]
   EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial"]
   EM -->|vollständig| EMS["Auftrag succeeded; gebundene VMs behalten ihren Zustand ohne neuen MECM-Pickup, fehlende MACs werden nur übernommen"]
   EO --> Z
   EMP --> Z
   EMS --> Z
   CAX --> Z
-  Z["Nach create oder full mit succeeded oder partial: Inventarabruf für den Host einreihen; zuletzt die Arbeitsverzeichnisse auf dem Ansible-Host und lokal löschen, außer ein Schritt läuft dort noch"]
+  Z["Nach create oder full mit succeeded oder partial, oder wenn ein Abbruch erst an der letzten Schrittgrenze bestätigt wird: Inventarabruf für den Host einreihen"]
+  KX --> FIN
+  PX --> FIN
+  HX --> FIN
+  HAX --> FIN
+  HKX --> FIN
+  APX --> FIN
+  APH -->|autostart| FIN
+  STX --> FIN
+  CX --> FIN
+  EMX --> FIN
+  Z --> FIN["Auf jedem Weg (finally): Arbeitsverzeichnisse auf dem Ansible-Host und lokal löschen, außer ein Schritt läuft dort noch"]
 ```
 
 ## Create je VM
@@ -337,6 +348,7 @@ flowchart TD
   C -->|ja| D["Host-Standardwerte setzen: Autostart ein, Verzögerungen, Stoppaktion, Heartbeat"]
   C -->|nein| E
   D --> E["Je VM per UUID schreiben: powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault)"]
+  E -.->|Schreiben scheitert für einzelne VMs| EX["Teilerfolg: Die Schleife schreibt die übrigen VMs trotzdem, nur die gescheiterten behalten die alte Richtlinie. Der Auftrag endet failed; welche VMs geschrieben wurden, steht nur in den Ansible-Zeilen des Protokolls"]
 ```
 
 Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.

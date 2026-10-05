@@ -83,6 +83,17 @@ bei einem gespeicherten Portalwert sichtbar und entfernt ihn. Die Übersicht
 **Wirksame Deploy-Konfiguration** zeigt den wirksamen Wert samt Quelle; der
 Ansible-Zugang selbst wird beim Einreihen des Auftrags ausgewählt.
 
+**`.env` wirkt in den Workern erst nach einem Neustart.** PHP-FPM liest die
+`.env` je Anfrage, Deploy-, Wartungs- und Aufsichtsprozess nur einmal beim
+Start. Wer `APP_PUBLIC_BASE_URL` in der `.env` ändert, sieht die neue Adresse
+sofort im Portal, der Deploy-Worker schreibt aber bis zu seinem Neustart die
+alte in die Auftragsdateien, und der MAC-Rückruf geht dorthin. Deshalb nach
+jeder `.env`-Änderung beide Worker neu starten
+(`docker compose restart deploy-worker maintenance-worker`, bei der
+Supervisor-Form zusätzlich mit `-f docker-compose.supervisor.yml`). Einfacher
+ist, die API-Basis-URL nur im Portal zu pflegen: Der Portalwert gilt ohne
+Neustart für alle Prozesse.
+
 Auf dem Host installieren und bereitstellen:
 
 | Braucht | Warum |

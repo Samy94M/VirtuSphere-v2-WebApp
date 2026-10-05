@@ -546,8 +546,8 @@ $migrations = [
         migrator_add_index($db, 'deploy_jobs', 'deploy_jobs_group', 'INDEX deploy_jobs_group (group_id)');
     },
     '0012_vm_hotplug' => function (mysqli $db): void {
-        // CPU/RAM hot-add options (Paket F); default on, applied only at VM
-        // creation. Existing (incl. legacy-API-created) rows get the default.
+        // CPU/RAM hot-add options (Paket F); default on, written by create, which
+        // also aligns an existing bound VM (FC2-15). Existing rows get the default.
         migrator_add_column($db, 'deploy_vms', 'cpu_hotplug', 'TINYINT(1) NOT NULL DEFAULT 1');
         migrator_add_column($db, 'deploy_vms', 'ram_hotplug', 'TINYINT(1) NOT NULL DEFAULT 1');
     },

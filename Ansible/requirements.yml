@@ -37,7 +37,7 @@
 #   Of the community.vmware modules the playbooks call, exactly one is
 #   deprecated in 6.2.0: vmware_guest_powerstate (removal in 7.0.0, successor
 #   vmware.vmware.vm_powerstate), used by startVMs-ESXi_playbook.yml and
-#   powercycleVMs-ESXi_playbook.yml. The successor ships in vmware.vmware 2.9.0.
+#   powercycle_vm_tasks.yml. The successor ships in vmware.vmware 2.9.0.
 #   community.vmware declares vmware.vmware >=2.5.0 as a dependency; pinning
 #   2.9.0 explicitly below makes rebuilt QA images and offline bundles consume
 #   the same bytes instead of whichever compatible release is newest that day.

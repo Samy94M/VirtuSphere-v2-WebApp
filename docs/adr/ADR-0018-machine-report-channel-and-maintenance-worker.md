@@ -33,7 +33,7 @@ ADR-0015).
      (`device-sync|packages-sync|autoimporter`). Auth: IP-Allowlist.
    - Optionaler Shared-Token-Header `X-VirtuSphere-Token`
      (Setting `machine_report_token`; nur geprüft, wenn gesetzt —
-     Bestands-Skripte laufen unverändert). Gilt nur für `action=heartbeat`
+     Bestands-Skripte laufen unverändert). Gilt für `action=heartbeat` und das spätere `action=reportRun`
      (siehe Amendment 2026-07-08); `reportPhase` bleibt MAC-authentifiziert.
 2. **Zwei neue Tabellen** statt Überladung von `deploy_vm_status_events`:
    `deploy_client_events` (FK auf `deploy_vms`, ON DELETE CASCADE) und
@@ -100,7 +100,8 @@ nicht als stillschweigende Annahmen weiterleben:
 
 ## Amendment (2026-07-08)
 
-Der Token-Header wird nur noch für `action=heartbeat` erzwungen. `action=reportPhase`
+Der Token-Header wird nur noch für die Serverkanäle erzwungen: `action=heartbeat` und
+seit dem Nachtrag zu `reportRun` (unten) auch `action=reportRun`. `action=reportPhase`
 authentifiziert ausschließlich über IP-Allowlist bzw. bekannte MAC (wie oben unter
 Punkt 1 für reportPhase ohnehin vorgesehen) und verlangt nie einen Token.
 

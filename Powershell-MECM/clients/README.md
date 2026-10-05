@@ -69,7 +69,7 @@ vorhandener Report-MAC `finished` **vor** dem Reboot zu melden; Domain-Skip und
 bereits passender Name brauchen keinen Rename-Reboot. Fehlende Telemetrie
 blockiert die Fachaktion nicht und belegt weder Erfolg noch Fehler.
 
-Davon getrennt ist der verbindliche Client-Ready-ACK von `client_getinfo`:
+Davon getrennt ist der verbindliche Client-Ready-ACK von `client_getInfos`:
 Basisfelder und Interfaces werden zunächst unter einem neuen, versionierten
 `Snapshots`-Schlüssel vorbereitet und vollständig nachgelesen. Erst der finale
 `ActiveSnapshot`-Zeiger veröffentlicht diesen Satz für die Folgephasen. Danach sendet V23 die MAC
@@ -83,7 +83,7 @@ Seit Etappe 14D (ADR-0043, ADR-0019-Amendment 3) trägt der ACK zusätzlich die
 gelesen und geschrieben hat. Ohne sie könnte der Client eines Rollouts, der
 zwischenzeitlich zurückgesetzt wurde, den Lebenszyklus des neuen abschließen;
 der Server prüft sie unter demselben VM-Lock wie seinen Write und antwortet
-sonst mit 409 ohne Seiteneffekt. Der Wert ist reine Korrelation: `client_getinfo`
+sonst mit 409 ohne Seiteneffekt. Der Wert ist reine Korrelation: `client_getInfos`
 whitelistet und speichert ihn, `Confirm-VsClientReady` schickt ihn zurück, und
 **kein** Skript der Kette entscheidet anhand seines Werts. Ein Clientpaket von
 vor dem Cutover sendet das Feld gar nicht, statt eine `0` zu erfinden; der Server
@@ -111,7 +111,8 @@ ist Pflichtwert (`http` oder `https`), kein im Client eingebauter Default.
 | client_staticip | `HKLM:\SOFTWARE\VirtuSphere\staticip\installed` | `1` | 0 = ok, 1 = Fehler |
 
 Programm-Befehlszeile jeweils:
-`powershell.exe -ExecutionPolicy Bypass -File "<skript>.ps1"`,
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "<skript>.ps1"`
+(`Get-VsPowerShellCommandLine` in `VirtuSphere-Common.ps1`),
 als System ausführen, Administratorrechte erforderlich. Für `client_hostname`
 den Rückgabecode **1641** als „Erfolg mit Neustart" konfigurieren.
 Maximale Laufzeit (Maximum Runtime) jeder Phase: **15 Minuten**. Das Programm
@@ -174,7 +175,7 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
 
 ## Wichtige Verhaltensdetails
 
-- **client_getinfo** schreibt jeden Lauf in einen neuen Snapshot; leere oder
+- **client_getInfos** schreibt jeden Lauf in einen neuen Snapshot; leere oder
   entfernte optionale Werte können deshalb nicht aus einem Vorlauf überleben.
   `client_hostname`, `client_staticip` und der Phasen-MAC-Leser akzeptieren nur
   den vollständig publizierten aktiven Snapshot zusammen mit
@@ -198,7 +199,7 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
   IP-Konfiguration bleiben getrennte Aussagen.
 - Nur **Workgroup**-Computer werden umbenannt; Domain-Computer überspringt
   `client_hostname`.
-- **Set-VMDisksOnline** schaltet vorhandene GPT-/MBR-Datenplatten nur online und
+- **client_VMDisksOnline** schaltet vorhandene GPT-/MBR-Datenplatten nur online und
   formatiert sie nie. Vor der ersten Änderung einer neuen Offline-RAW-Platte
   schreibt es unter
   `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement\Operations` ein versioniertes

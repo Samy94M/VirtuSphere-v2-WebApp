@@ -16,6 +16,8 @@ require_once __DIR__ . '/ssh_transport_exceptions.php';
  */
 
 const VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT = 'upload_mac_list.py';
+// Included by the powercycle playbook, never dispatched itself (DF-S1).
+const VIRTUSPHERE_POWERCYCLE_VM_TASKS = 'powercycle_vm_tasks.yml';
 
 /**
  * Files that must be copied into every deploy work dir: every playbook a job
@@ -46,7 +48,7 @@ function ansible_required_files(): array
         // belongs to a mode; the other five would be the exact repeat of the
         // inventory-playbook defect if they were only dispatched.
         VIRTUSPHERE_CREATE_ARTIFACTS,
-        [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, 'powercycle_vm_tasks.yml']
+        [VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, VIRTUSPHERE_POWERCYCLE_VM_TASKS]
     )));
 }
 

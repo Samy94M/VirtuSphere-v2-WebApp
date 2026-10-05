@@ -18,7 +18,7 @@ sh scripts/backup.sh
 
 Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Dateimuster; ein Restore braucht deshalb weiterhin das vollständige Zeitstempel-Tripel. MySQL-Binlogs sind deaktiviert: Es gibt keinen Replikations- oder Point-in-Time-Recovery-Verbraucher, und der zugesagte Wiederherstellungspunkt ist ausschließlich ein erfolgreich geprüftes Backuptripel. Vorhandene historische Binlogdateien niemals direkt im Datenverzeichnis löschen.
 
-Die Backup-Dateien enthalten Secrets (`.env`, DB-Inhalte inkl. verschlüsselter Credentials). `Docker/backups/` gehört auf ein zugriffsbeschränktes Ziel (`chmod 700`) und sollte zusätzlich auf einen zweiten Host synchronisiert werden (Pull vom Backup-Host, nicht Push vom App-Host).
+Die Backup-Dateien enthalten Secrets (`.env`, DB-Inhalte inkl. verschlüsselter Credentials). `Docker/backups/` gehört auf ein zugriffsbeschränktes Ziel (`chmod 700`) und sollte zusätzlich auf einen zweiten Host synchronisiert werden (Pull vom Backup-Host, nicht Push vom App-Host). Den `APP_KEY` zu wechseln beschreibt [APP_KEY wechseln](app-key-rotation.md); ältere Backups bleiben nur mit dem alten Schlüssel lesbar.
 
 ## Zeitplan einrichten (ADR-0024)
 

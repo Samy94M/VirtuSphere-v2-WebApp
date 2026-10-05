@@ -1,7 +1,8 @@
 ---
 # Read-only ESXi/vCenter inventory (ADR-0023). Uses only community.vmware
 # *_info / *_facts modules; it never changes anything on the host. The worker
-# parses the single base64-JSON marker line at the end (VirtuSphere_inventory).
+# parses the single base64-JSON marker line at the end
+# (VIRTUSPHERE_INVENTORY_B64_BEGIN ... VIRTUSPHERE_INVENTORY_B64_END).
 #
 # Field paths follow the documented community.vmware module outputs; they are
 # verified against the productive host on first rollout (see docs/operations/

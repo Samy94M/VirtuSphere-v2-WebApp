@@ -118,7 +118,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                     <td class="status-cell">
                         <?php if ($isEsxi) {
                             $esxiState = $esxiStates[$rowId] ?? null;
-                            $esxiAmpel = esxi_credential_state($esxiState, $inventoryIntervalHours, $renderedAt);
+                            $esxiAmpel = esxi_inventory_ampel($esxiState, $inventoryIntervalHours, $renderedAt);
                             ?>
                             <a href="<?php echo h(system_status_url('credential-' . $rowId, ['inventory' => $rowId])); ?>" title="<?php echo h(__t('credentials.esxi_state_link_title')); ?>"><?php echo esxi_state_badge($esxiAmpel); ?></a>
                             <small class="status-time"><?php echo $esxiState !== null && !empty($esxiState['last_attempt_at']) ? h(portal_format_timestamp($esxiState['last_attempt_at'])) : h(__t('credentials.status_never')); ?></small>

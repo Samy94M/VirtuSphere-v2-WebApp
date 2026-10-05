@@ -1036,7 +1036,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Fall | Verhalten | Log |
 |---|---|---|
 | Registry-Konfiguration fehlt komplett | wartet in 60-s-Schleife auf den Installer (Selbstheilung, kein Exit) | ERROR einmalig (Default-LogRoot) |
-| WebApp/MECM-Fehler im Durchlauf | Backoff 30 s; ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung | ERROR je Versuch |
+| WebApp/MECM-Fehler im Durchlauf | Devices und Packages Sync: Backoff 30 s, ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung. Autoimporter: immer 60 s und sofortige Neuinitialisierung, der nächste Lauf scannt voll | ERROR je Versuch |
 | Berichts-Zustellung scheitert | Lauf läuft weiter (der Bericht bricht ihn nie ab); lokal gedrosselt protokolliert | gedrosselt (WARN); Portal-Ampel wird stale/rot |
 | Registry-Änderung zur Laufzeit | greift erst nach Task-Neustart (Konfig wird beim Start gelesen; Installer-Re-Run startet die Tasks neu) | — |
 | Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess); derselbe Fehler warnt pro Prozess und Störung höchstens einmal, eine Erholung genau einmal | lokale PowerShell-Warnung `Log-Sink gestört` / `Log-Sink wieder verfügbar`; kein zusätzlicher Heartbeat, `reportRun` oder Auditeintrag |
@@ -1057,7 +1057,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Rückmeldung mit veralteter Rolloutrevision (`stale_rollout_revision`, HTTP 409) | Portal weist ab; der nächste Scan läuft mit der aktuellen Revision durch | WARN |
 | Import-Race (paralleler Scan) | toleriert; nach dem Import werden Name UND MAC erneut eindeutig gelesen, kein Fehlertext-Parsing und kein `-MergeIfExist` | still |
 | Mehrere DHCP-Interfaces an einer VM | erste MAC wird genutzt | WARN |
-| Auto-Approve scheitert / ResourceID fehlt noch | Retry im nächsten Scan | DEBUG + WARN |
+| ResourceID fehlt noch (Import noch nicht sichtbar) | Retry im nächsten Scan | WARN |
 | Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |
 | Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
 | Eigene Regel nicht mehr zugewiesen (Provenienz, ADR-0034) | wird nur bei erfolgreich gelesenem Live-Bestand entfernt und mit ID, autoritativem Namen und Typ an `reportMembership` gemeldet; Hand-Regeln in MECM sind ohne Provenienzzeile unantastbar | INFO |
@@ -1070,7 +1070,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Journal ist voll, nicht schreibbar oder beschädigt | Mutierender Device-Sync blockiert vor dem nächsten MECM-Write. Beschädigte Evidenz bleibt als `membership-journal.json.quarantine.*.json` erhalten und sperrt auch spätere Starts sowie ein ersetztes Hauptjournal. Speicher/ACL reparieren, Evidenz und Logs sichern; Operationen gegen aktuelle Rolloutrevision, ResourceID und exakte CollectionID in MECM und Portal klären. Quarantäne erst nach dokumentierter Ownership-Entscheidung entfernen, niemals lediglich als Neustartmaßnahme. | ERROR |
 | Client-Snapshot nicht veröffentlicht oder ACK ausstehend | `client_getinfo` entfernt zuerst `SetupState`, schreibt einen neuen versionierten Snapshot, liest Identität und Interfaceanzahl nach und veröffentlicht ihn über `ActiveSnapshot`. Folgephasen lesen nur diesen vollständigen Stand. Erst ein bestätigter Client-Ready-ACK setzt `SetupState=complete`; ein Retry erzeugt einen neuen Snapshot und der ACK bleibt idempotent. | ERROR/Phase `failed` |
 | Client-Application vorhanden, Deployment Type oder Abhängigkeit fehlt | Im MC01-Zwischenstand keine automatische Reparatur: Client- und Serverinstaller sind vor Writes gesperrt. Den Bestand im MC02-Preflight read-only erfassen; jede Änderung wartet auf den geordneten Cutover. | Blocker vor Mutation |
-| Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok | WARN |
+| Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok; der Lauf meldet trotzdem „warning“ mit Ursache `collection_folder_failed` | WARN |
 | Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
 | ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |
 | MECM-Vollabfrage (Devices/Task Sequences/Collections) scheitert | Lauf bricht ab und meldet `mecm_unavailable`; **kein** Weiterlaufen mit leeren Caches | ERROR |

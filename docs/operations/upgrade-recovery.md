@@ -77,7 +77,8 @@ Migration 0059 führt die Prüfung der SSH-Hostidentität vor jeder Anmeldung ei
    `scripts/restore_test.sh` beweisen. Ohne grünen Drill kein Schemaübergang.
 5. Worker stoppen. Erst jetzt verifizierte Quellen/Assets und erforderliche
    Images bereitstellen. `.env`, Host-Override, Schlüssel und Laufzeitdaten
-   nicht aus einem Quellarchiv überschreiben.
+   nicht aus einem Quellarchiv überschreiben. Wer dabei die `.env` ändert: Die Worker
+   lesen sie nur beim Start; der Neustart in Schritt 7 ist deshalb Pflicht.
 6. `migrate.php --check` ausführen. Bei roten Daten-Preflights abbrechen. Danach
    Migration genau einmal starten und anschließend `pending=0` sowie
    Schemakonvergenz prüfen.

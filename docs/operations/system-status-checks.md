@@ -114,7 +114,7 @@ flowchart TD
   TK -->|nein| TFK["fehlgeschlagen (ansible_host_identity), kein Login"]
   TK -->|ja| T2{"SSH-Anmeldung?"}
   T2 -->|nein| TF2["fehlgeschlagen (Anmeldung oder Zeitbudget)"]
-  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit"]
+  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit. Zeitbudget 25 s ohne Ausgabe; ein Auftrag gibt demselben Preflight 45 s, ein langsamer Host kann den Volltest also rot färben, während Aufträge durchlaufen"]
   T3 -->|Komponente fehlt| TF3["fehlgeschlagen mit Name der Komponente"]
   T3 --> T4{"SFTP-Schreibprobe in /tmp?"}
   T4 -->|nein| TF4["fehlgeschlagen (SFTP)"]
@@ -128,7 +128,8 @@ flowchart TD
   TF4 --> R
   TW --> R
   TO --> R
-  R["Ergebnis mit Konfigurationsstand speichern"] --> A{"Ergebnis gehört zum aktuellen Stand des Zugangs?"}
+  R{"Zugang während des Tests geändert?"} -->|ja| RX["Ergebnis verworfen (discarded), Audit warning; bisheriger Nachweis bleibt unverändert"]
+  R -->|nein| RS["Ergebnis mit Konfigurationsstand speichern"] --> A{"Ergebnis gehört zum aktuellen Stand des Zugangs?"}
   A -->|nein, Zugang seither geändert oder nie getestet| U["Nicht getestet (grau)"]
   A -->|ja| B{"Ergebnis?"}
   B -->|fehlgeschlagen| D["Fehlgeschlagen (rot), altert nie"]
@@ -141,7 +142,7 @@ flowchart TD
 
 ## ESXi-Inventar
 
-Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet.
+Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet oder dessen Abbruch erst an der letzten Schrittgrenze bestätigt wird.
 
 ```mermaid
 flowchart TD

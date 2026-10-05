@@ -151,8 +151,8 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
         $out .= '    vm_instance_uuid: ' . ansible_yaml_string(trim((string) ($vm['vm_instance_uuid'] ?? ''))) . "\n";
         $out .= '    memory: ' . ansible_positive_int($vm['vm_ram'] ?? null, (int) VIRTUSPHERE_VM_DEFAULTS['ram_mb']) . "\n";
         $out .= '    vcpus: ' . ansible_positive_int($vm['vm_cpu'] ?? null, (int) VIRTUSPHERE_VM_DEFAULTS['cpu_count']) . "\n";
-        // Hot-add options (Paket F), applied by the create playbook only. Absent
-        // (pre-migration) rows default to on.
+        // Hot-add options (Paket F), applied by the create playbook to new and to
+        // existing bound VMs alike (FC2-15). Absent (pre-migration) rows default to on.
         $out .= '    hotadd_cpu: ' . ((int) ($vm['cpu_hotplug'] ?? 1) === 0 ? 'false' : 'true') . "\n";
         $out .= '    hotadd_memory: ' . ((int) ($vm['ram_hotplug'] ?? 1) === 0 ? 'false' : 'true') . "\n";
         $out .= "    disks:\n";

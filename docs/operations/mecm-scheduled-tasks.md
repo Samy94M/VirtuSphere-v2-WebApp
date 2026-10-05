@@ -41,7 +41,7 @@ Trägt VMs aus der Warteschlange des Portals in MECM ein und setzt ihre Mitglied
 ```mermaid
 flowchart TD
   L["Einmal beim Start: Mitgliedschafts-Journal für die ganze Laufzeit sperren"] --> LJ{"Sperre und Journal in Ordnung?"}
-  LJ -->|nein| LX["Skript endet ohne MECM-Änderung; die Aufgabenplanung startet es neu"]
+  LJ -->|nein| LX["Skript endet ohne MECM-Änderung und ohne Meldung ans Portal (Ursache nur im Serverlog); die Aufgabenplanung startet es neu. Liegt eine Journal-Quarantäne vor, endet jeder Neustart genauso, bis sie geklärt ist"]
   LJ -->|ja| S["Neuer Lauf, „started“ melden"]
   S --> Q["Warteschlange holen (getDeviceList): neue VMs und zur Übertragung markierte"]
   Q --> QE{"Warteschlange leer?"}
@@ -57,11 +57,13 @@ flowchart TD
     ID -->|ja| G{"Gerät schon in MECM?"}
     G -->|nein| IMP["Rolloutname und MAC importieren und nachlesen; nicht sichtbar oder Fehler: VM wartet auf den nächsten Lauf"]
     IMP -->|importiert| RID
-    G -->|ja| RID["Neues Gerät freigeben, ResourceID lesen; fehlt sie: nächster Lauf"]
+    G -->|ja| RID["ResourceID lesen; fehlt sie: nächster Lauf. Die vorgesehene Freigabe per Approve-CMDevice läuft nur ohne ResourceID und wird praktisch nie erreicht (PS-05)"]
     RID --> J{"Offene Einträge im Mitgliedschafts-Journal?"}
     J -->|ja| J1["Erst nachmelden; unklare Einträge bleiben zur Klärung stehen; VM wartet auf den nächsten Lauf"]
     J -->|nein| PL["Plan: Soll (OS-, Paket-, Missions-Collection) gegen eigene und vorhandene Regeln"]
-    PL --> RD{"Mitgliedschaften lesbar?"}
+    PL --> SE{"Soll eindeutig, eigene Regeln mit gültiger Provenienz?"}
+    SE -->|nein| SE1["Keine Änderung, VM bleibt in der Warteschlange (membership_identity_ambiguous, membership_provenance_invalid)"]
+    SE -->|ja| RD{"Mitgliedschaften lesbar?"}
     RD -->|nein| RD1["Keine Änderung, VM bleibt in der Warteschlange (membership_query_failed)"]
     RD -->|ja| AP["Fehlende Direktregeln hinzufügen, eigene, nicht mehr gewünschte entfernen; jede Änderung steht vorher im Journal; fehlt eine Collection: collection_missing"]
     AP --> RM["Änderungen melden (reportMembership); abgelehnt: VM bleibt in der Warteschlange"]
@@ -77,12 +79,12 @@ flowchart TD
 
 ## Packages Sync
 
-Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach 30 Tagen und nur, wenn keine VM sie mehr nutzt.
+Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal auf eine höhere Version umgehängt wurden, bleibt dauerhaft stehen.
 
 ```mermaid
 flowchart TD
   S["Neuer Lauf, „started“ melden"] --> M["Mit MECM verbinden (einmal)"]
-  M --> F{"Ordner VirtuSphere_Applications gefunden?"}
+  M --> F{"Ordner VirtuSphere_Applications gefunden? Ein Providerfehler beim Suchen zählt als nicht gefunden"}
   F -->|nein| F1["Nichts senden (Sende-Schutz), Warnung source_missing"] --> R
   F -->|ja| K["Collections im Ordner (Pakete) und alle Task Sequences (Betriebssysteme) lesen"]
   K --> E{"Katalog leer?"}
@@ -90,7 +92,7 @@ flowchart TD
   E -->|nein| U{"Unverändert und letzter Versand unter einer Stunde?"}
   U -->|ja| U1["Nichts senden, Ergebnis „ok“ (unverändert)"] --> R
   U -->|nein| P["Katalog an mecm_packages.php senden"]
-  P --> T{"Portal: fehlen über 30 % der aktiven Einträge?"}
+  P --> T{"Portal: mindestens VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE aktive Einträge, und fehlen mehr als die eingestellte Schwelle (5 bis 90 %, Standard 30 %)?"}
   T -->|ja| T1["Portal lehnt ab (409), Warnung catalog_conflict; der nächste Lauf sendet erneut"] --> R
   T -->|nein| RT["Portal: fehlende Einträge „zurückgezogen“, neue und wieder aufgetauchte aktiv"]
   RT --> RL["Portal: VM-Zuweisungen auf eine höhere Version umhängen, wenn diese in diesem Katalog neu ist; sonst „Update verfügbar“ im VM-Editor"]
@@ -101,7 +103,7 @@ flowchart TD
 
 ## Package Import (Autoimporter)
 
-Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, Verteilung, Collection und Deployments. Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte.
+Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type und Verteilung, mit `generateOwnDeviceColletion` auch Collection und Deployments. Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte.
 
 ```mermaid
 flowchart TD
@@ -121,7 +123,9 @@ flowchart TD
   subgraph JP["Je Paketordner"]
     T["Vorlage (install.ps1, Reporter) ins Paket kopieren, wenn sie abweicht"]
     T -.->|nicht kopierbar| T1["Paket übersprungen, offener Punkt package_template_failed"]
-    T --> A{"Application Name-Version vorhanden?"}
+    T --> AM{"Applicationname eindeutig?"}
+    AM -->|nein, mehrere| AM1["Paket übersprungen, keine Definition und kein Content verändert, offener Punkt package_definition_drift"]
+    AM -->|ja| A{"Application Name-Version vorhanden?"}
     A -->|nein| A1["Application (Marker) und Deployment Type anlegen: install.ps1, Erkennung per Registry-Schlüssel der Version"] --> DT
     A1 -.->|Deployment Type scheitert| A2["Application wieder entfernen; der ganze Lauf endet mit „fail“"]
     A -->|ja| DT{"Genau ein Deployment Type, Identität lesbar?"}
@@ -129,7 +133,7 @@ flowchart TD
     DT -->|ja| CR{"Dateien anders als beim letzten Auftrag, oder noch keiner?"}
     CR -->|ja| CR1["Erstverteilung an die DP-Gruppe oder neue Contentversion anfordern"] --> TR
     CR -->|nein| TR["Auftrag binden, Verteilung verfolgen; offen oder fehlerhaft ist ein offener Punkt"]
-    TR --> CO["Collection Name-Version und Deployment „Erforderlich“ anlegen, bei DeployTo zusätzlich „Verfügbar“; Fehlendes nachziehen"]
+    TR --> CO["Nur mit generateOwnDeviceColletion: Collection Name-Version und Deployment „Erforderlich“ anlegen, bei DeployTo zusätzlich „Verfügbar“; Fehlendes nachziehen. Ohne das Feld entsteht keine Collection, und das Paket fehlt im Portalkatalog, weil der Packages Sync nur Collections liest"]
     CO --> RO{"removeOldVersion und höchste Version?"}
     RO -->|ja| RO1["Bereinigungsplan zweimal lesen; bereit: Deployments, Applications und Collections älterer Versionen löschen; gesperrt: offener Punkt"]
   end

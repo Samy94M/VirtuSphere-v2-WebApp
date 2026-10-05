@@ -234,10 +234,10 @@ final class EsxiCapabilitiesTest extends TestCase
     {
         $healthy = ['last_attempt_at' => gmdate('Y-m-d H:i:s'), 'last_success_at' => gmdate('Y-m-d H:i:s'), 'last_status' => 'ok'];
 
-        self::assertSame('ok', esxi_credential_state($healthy, 6));
-        self::assertSame('ok', esxi_credential_state($healthy + ['license_free' => 1], 6));
-        self::assertSame('ok', esxi_credential_state($healthy + ['in_ha_cluster' => 1], 6));
-        self::assertSame('ok', esxi_credential_state($healthy + ['in_maintenance' => 1], 6));
+        self::assertSame('ok', esxi_inventory_ampel($healthy, 6));
+        self::assertSame('ok', esxi_inventory_ampel($healthy + ['license_free' => 1], 6));
+        self::assertSame('ok', esxi_inventory_ampel($healthy + ['in_ha_cluster' => 1], 6));
+        self::assertSame('ok', esxi_inventory_ampel($healthy + ['in_maintenance' => 1], 6));
 
         // The capability is still reported, just not through the traffic light.
         self::assertSame(
@@ -251,13 +251,13 @@ final class EsxiCapabilitiesTest extends TestCase
         // A paused credential is danger; a capability fact never lowers it.
         $paused = ['last_attempt_at' => gmdate('Y-m-d H:i:s'), 'paused_until_credential_change' => 1, 'license_free' => 1];
 
-        self::assertSame('danger', esxi_credential_state($paused, 6));
+        self::assertSame('danger', esxi_inventory_ampel($paused, 6));
     }
 
     public function testAnUnknownCredentialStaysUnknownRatherThanWarning(): void
     {
         // Never pulled: no facts, so nothing to warn about.
-        self::assertSame('unknown', esxi_credential_state(null, 6));
+        self::assertSame('unknown', esxi_inventory_ampel(null, 6));
     }
 
     public function testTheLogLineNamesUnknownFactsAsUnknown(): void

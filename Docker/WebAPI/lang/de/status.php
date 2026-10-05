@@ -41,7 +41,11 @@ return [
 
     // Bereitstellungsmodi. Die sechs postbaren Modi stehen technisch in
     // virtusphere_deploy_mode_labels(); `inventory` kann das Portal zeigen,
-    // aber niemand einreihen, weil nur der Scheduler ihn erzeugt.
+    // aber nicht über das Bereitstellungsformular einreihen. Erzeugt wird er
+    // vom Zeitplan, von „Alle aktualisieren“ und dem Einzelabruf im
+    // Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach
+    // `create` oder `full` mit `succeeded` oder `partial` (auf dem Sequenzweg
+    // auch nach einem bestätigten Abbruch).
     'mode_full' => 'Vollständige Kette',
     'mode_create' => 'VMs anlegen',
     'mode_powercycle' => 'Ein- und ausschalten mit MAC-Export',

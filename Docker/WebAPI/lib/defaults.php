@@ -24,8 +24,8 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'disk_type' => 'eagerzeroedthick',
     'interface_mode' => 'dhcp',
     'interface_type' => 'vmxnet3',
-    // CPU/RAM hot-add, enabled by default; only applied when a VM is created
-    // (Paket F). Existing ESXi VMs are never reconfigured.
+    // CPU/RAM hot-add, enabled by default; written by the create playbook, whose
+    // launch also aligns an existing bound ESXi VM with it (Paket F, FC2-15).
     'cpu_hotplug' => true,
     'ram_hotplug' => true,
 ];

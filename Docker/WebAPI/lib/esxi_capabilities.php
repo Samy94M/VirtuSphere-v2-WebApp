@@ -70,7 +70,8 @@ function esxi_capabilities(?array $state): array
  * known AND true produce an entry, so an unpulled credential warns about nothing.
  *
  * A free licence and an HA cluster are `warning`: the inventory keeps working,
- * but a deploy or autostart run on this host will not. Maintenance mode is
+ * but on a free licence no writing job will, and in an HA cluster autostart
+ * will not (deploys still run there). Maintenance mode is
  * `info`: it is a temporary, deliberate state of the host, not a misconfiguration.
  *
  * @param array<string, mixed>|null $state
@@ -118,29 +119,6 @@ function esxi_capabilities_fresh(?array $state, int $intervalHours, ?int $now = 
     return $age <= VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR * $intervalHours * 3600;
 }
 
-/**
- * The traffic light shown for one ESXi credential anywhere in the portal: its
- * fetch health, and nothing else. Green means the last pull succeeded and is
- * current; it does NOT promise the host can deploy.
- *
- * There is exactly one of these because three call sites (the credential row,
- * the system-status heading and the dashboard rollup) must never disagree on the
- * same colour. It answers one question: "is the inventory pull healthy?"
- *
- * A host capability (a free licence, an HA cluster, maintenance mode) does not
- * colour this light. Those are properties of a *successful* pull, not fetch
- * problems, so they surface as their own badges (esxi_capability_warnings()) and
- * gate deploys through esxi_autostart_preflight(). Painting a perfectly healthy
- * pull amber because the host has a free licence made "amber" mean two unrelated
- * things and hid the one it was built for. Keeping them apart is the point of
- * having a separate capability module at all.
- *
- * @param array<string, mixed>|null $state
- */
-function esxi_credential_state(?array $state, int $intervalHours, ?int $now = null): string
-{
-    return esxi_inventory_ampel($state, $intervalHours, $now);
-}
 
 /**
  * Preflight verdict for a job that would write the autostart policy.

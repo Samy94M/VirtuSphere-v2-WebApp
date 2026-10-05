@@ -364,7 +364,7 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
      Wire-Feld `vm_hostname`, nicht der ESXi-Name. Danach wird **nicht** nach
      Fehlertext geraten, sondern Name und MAC werden erneut eindeutig gelesen
      (kein `-MergeIfExist`, kein Name-only-Fallback).
-   - ResourceID beschaffen, notfalls per `Approve-CMDevice` nachhelfen;
+   - ResourceID beschaffen. Der vorgesehene `Approve-CMDevice`-Zweig läuft nur bei leerer ResourceID und wird nach „use“ oder bestätigtem Import praktisch nie erreicht (PS-05, offen);
      ohne ResourceID: nächster Scan.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
      Vor jedem Remote-Write wird ein lokaler Journal-Intent dauerhaft
@@ -563,7 +563,7 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
 **Konvention:** Die **Version darf keinen Bindestrich enthalten** (die WebApp
 splittet `Name-Version` am letzten Bindestrich).
 
-`config.json` (Pflichtfelder: `ProjectName`, `version`):
+`config.json` (Pflichtfelder für den Autoimporter: `ProjectName`, `version`; die Paketvorlage `install.ps1` verlangt zusätzlich `ErrorAction` mit `Stop` oder `Continue` und bricht sonst mit Exit-Code 1 ab):
 
 ```json
 {
