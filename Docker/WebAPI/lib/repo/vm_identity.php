@@ -38,7 +38,7 @@ function repo_vm_identity_conflicts(mysqli $db, int $missionId, int $credentialI
     }
 
     $vmIds = array_values(array_unique(array_filter(array_map('intval', $vmIds), static fn (int $id): bool => $id > 0)));
-    $sql = 'SELECT v.id AS vm_id, v.vm_name, v.vm_moid AS stored_moid, v.vm_instance_uuid AS stored_instance_uuid, i.meta_json
+    $sql = 'SELECT v.id AS vm_id, v.vm_name, v.vm_moid AS stored_moid, v.vm_instance_uuid AS stored_instance_uuid, i.meta_json, i.fetched_at AS inventory_fetched_at
             FROM deploy_vms v
             INNER JOIN deploy_esxi_inventory i
               ON i.credential_id = ? AND i.kind = ? AND i.name = v.vm_name
@@ -73,6 +73,7 @@ function repo_vm_identity_conflicts(mysqli $db, int $missionId, int $credentialI
             'stored_instance_uuid' => $storedUuid,
             'inventory_moid' => trim((string) ($meta['moid'] ?? '')),
             'inventory_instance_uuid' => $inventoryUuid,
+            'inventory_fetched_at' => $row['inventory_fetched_at'],
         ];
     }
 

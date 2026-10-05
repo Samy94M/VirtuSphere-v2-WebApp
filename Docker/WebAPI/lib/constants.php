@@ -547,7 +547,7 @@ const VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS = 3600;
 // last so a legend reads from healthy to broken. `legacy` is a fresh V1
 // heartbeat whose result the script has not yet confirmed (script rollout gap).
 const VIRTUSPHERE_HEARTBEAT_STATES = ['ok', 'legacy', 'warning', 'missing', 'danger', 'stale', 'unknown'];
-const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown'];
+const VIRTUSPHERE_ESXI_AMPEL_STATES = ['ok', 'warning', 'danger', 'unknown', 'stale'];
 // `stale` sits next to `ok` because that is what it was: a passing preflight
 // whose age has taken it out of evidence, not a new kind of problem.
 const VIRTUSPHERE_ANSIBLE_AMPEL_STATES = ['ok', 'stale', 'warning', 'danger', 'unknown'];

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/status_evidence.php';
 require_once __DIR__ . '/esxi_datacenter_presenter.php';
 require_once __DIR__ . '/esxi_object_names.php';
 
@@ -45,4 +46,23 @@ function esxi_inventory_kind_evidence(?array $state, string $kind, array $rows, 
         );
     }
     return $evidence;
+}
+
+/** The automation schedule does not suspend the expiry of successful evidence. */
+function esxi_inventory_evidence_window_seconds(int $intervalHours): int
+{
+    return $intervalHours > 0
+        ? VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR * $intervalHours * 3600
+        : VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS * 86400;
+}
+
+/** @param array<string,mixed>|null $state */
+function esxi_inventory_success_evidence_state(?array $state, int $intervalHours, ?int $now = null): string
+{
+    $current = $now ?? time();
+    $timestamp = virtusphere_evidence_timestamp(isset($state['last_success_at']) ? (string) $state['last_success_at'] : null, $current);
+    if ($timestamp === null) {
+        return 'unknown';
+    }
+    return ($current - $timestamp) > esxi_inventory_evidence_window_seconds($intervalHours) ? 'stale' : 'ok';
 }

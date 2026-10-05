@@ -1304,3 +1304,15 @@ Der Branch `claude/flocharts-xtzaco` (Lückensuche S8, FC2-Code-Abgleich, nur Do
 **Gegenproben:** `SystemStatusSiteEvidenceTest` prüft altes kritisches Ergebnis, frische Kritikalität, inklusive Frist, ungültige und künftige Zeitstempel sowie die vorhandene Renderstelle. Rotnachweis gegen den gesicherten Vorherstand und sämtliche Gates laufen gemäß neuem Nutzerentscheid gebündelt am Blockende. Keine Einzel-QA behauptet.
 
 **Quellen:** `qa-artifacts/k8-2026-10-05/source-manifest.json`; begrenzter Selbstreview dort unter `self-review.md`. **Offen:** gebündelter Rotnachweis, Gates, LF-Worktree, funktionales e2e-portal und Push; visuelle UX02-Abnahme unverändert offen. **Nächster Schritt:** K9.
+
+## Paket K9: Alter der ESXi-Nachweise (DF-P2)
+
+**Stand: lokal umgesetzt, gebündelte Prüfung und Schlussabnahme offen.** Ausgangsstand `e9d01bb`. DF-L3 (= ZB-06), DF-E3, DF-L5 (Einreihsperre), DF-L6 (= FC2-03), DF-L7 und DF-D8 nachgemessen.
+
+**Umsetzung:** Gemeinsamer Frische-Owner für Abrufampel und Host-Eigenschaften. Intervall 0 verwendet die eigene Konstante `VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS`, zunächst sieben Tage wie die Betriebsfrist des Ansible-Volltests, mit getrennten Fachkonstanten. Bei positivem Intervall bleibt die Frist von zwei Intervallen. Veraltet ist grau und gleichrangig mit unbekannt; echte Fehlversuche bleiben gelb/rot. `virtusphere_evidence_timestamp()` verwirft ungültige und zu weit künftige Erfolgszeitstempel. Badge, Legende, DE/EN-Hilfe und Doku nachgezogen.
+
+**Identität und Inventarabruf:** Ein alter Cache-Konflikt sperrt weiterhin, zeigt aber Zeit und Alter seiner konkreten Inventarbeobachtung neben dem Aktualisierungslink. Create/full reihen nach jedem eigenen Endstatus einen Abruf ein, sobald eine Create-Einheit einen gespeicherten `async_jid` besitzt. Ausfälle und Abbruch werden nach bestätigter eigener Publikation abgedeckt; fremde Claims erzeugen keinen Folgeabruf. Ohne Launch kein Abruf. Der bestehende deduplizierende Writer bleibt fail-soft außerhalb der Domain-Transaktion. Diagramme und DF-D8 verwenden diese Ist-Regel.
+
+**Gegenproben:** Neue Frischetests für Intervall 0, inklusive Grenzen und Zukunft/Ungelesen; Integrationsfälle für Fehler, Abbruch, `uncertain`, vor Launch, fremden Claim und Deduplizierung; alter Namenskonflikt mit Alter und Links. Bestehende Erwartungen für unbegrenzt frische Intervall-0-Befunde an die freigegebene Regel angepasst; geschlossene Inventory-Ownersurface erweitert. Rotnachweis und Gates gemäß Nutzerentscheid gebündelt am Blockende, noch nicht als bestanden behauptet.
+
+**Quellen:** `qa-artifacts/k9-2026-10-05/source-manifest.json`, Selbstreview und vorbereitete Gegenproben im Paketverzeichnis. **Offen:** gebündelte Prüfung, Blockabnahme, Push und visuelle UX02-Abnahme. **Nächster Schritt:** K10.

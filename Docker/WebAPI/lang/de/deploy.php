@@ -296,6 +296,8 @@ return [
     'identity_conflict' => 'Deploy blockiert: Auf dem gewählten ESXi-Zugang existiert bereits eine VM namens „:name“, deren Instance-UUID nicht zur Portal-VM gehört. Benennen Sie die VM auf ESXi um oder löschen Sie sie dort, oder löschen Sie die Portal-VM. Eine vorhandene VM wird nicht übernommen; nach einer Änderung auf ESXi muss das Inventar sie sehen, bevor die Sperre fällt.',
     'identity_vm_link' => 'VM bearbeiten',
     'identity_refresh_link' => 'ESXi-Inventar aktualisieren',
+    'identity_inventory_age' => 'Inventarbeobachtung: :time (Alter: :age). Die Sperre bleibt bis zu einer bestätigten Änderung bestehen.',
+    'identity_inventory_age_unknown' => 'Das Alter der Inventarbeobachtung ist nicht belegt. Inventar aktualisieren; die Identitätssperre bleibt bestehen.',
     'inventory_deviation_warn' => 'Datacenter, Datastore oder VLAN dieser Mission kommt nicht im aktuellen ESXi-Inventar vor. Der Deploy wird nicht blockiert; bitte die Werte prüfen.',
     'inventory_deviation_link' => 'Inventar im Systemstatus ansehen',
     'host_missing_warn' => 'Nicht im Inventar des gewählten Hosts ":host", aber auf anderen Hosts vorhanden: :values. Der Deploy wird nicht blockiert; bitte die Host-Wahl prüfen.',

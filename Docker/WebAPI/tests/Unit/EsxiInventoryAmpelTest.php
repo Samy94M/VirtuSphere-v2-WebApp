@@ -8,8 +8,8 @@ require_once dirname(__DIR__, 2) . '/lib/esxi_inventory.php';
 
 /**
  * Traffic-light matrix for esxi_inventory_ampel (ADR-0023). $now is injected so
- * the staleness branch is deterministic. Interval 0 (automation off) must never
- * warn about age; only real failures colour the light then.
+ * the staleness branch is deterministic. Interval 0 expires success after the
+ * fixed lifetime; an expired result is grey rather than a proven fetch error.
  */
 final class EsxiInventoryAmpelTest extends TestCase
 {
@@ -68,18 +68,18 @@ final class EsxiInventoryAmpelTest extends TestCase
         self::assertSame('ok', esxi_inventory_ampel($this->state(['last_success_at' => '2026-07-09 11:00:00']), 6, $this->now()));
     }
 
-    public function testSuccessOlderThanStaleFactorTimesIntervalIsWarning(): void
+    public function testSuccessOlderThanStaleFactorTimesIntervalIsStale(): void
     {
         // 24h old success with a 6h interval: 24h > 2 x 6h.
         $stale = $this->state(['last_success_at' => '2026-07-08 12:00:00']);
-        self::assertSame('warning', esxi_inventory_ampel($stale, 6, $this->now()));
+        self::assertSame('stale', esxi_inventory_ampel($stale, 6, $this->now()));
     }
 
-    public function testIntervalZeroSuppressesStalenessWarning(): void
+    public function testIntervalZeroUsesTheFixedSuccessLifetime(): void
     {
-        // Automation off: a months-old but successful pull stays ok.
+        // Automation off: a months-old success is no current evidence.
         $old = $this->state(['last_success_at' => '2026-01-01 00:00:00']);
-        self::assertSame('ok', esxi_inventory_ampel($old, 0, $this->now()));
+        self::assertSame('stale', esxi_inventory_ampel($old, 0, $this->now()));
     }
 
     public function testIntervalZeroStillWarnsOnFailedLastFetch(): void

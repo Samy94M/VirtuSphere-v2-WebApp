@@ -9,6 +9,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
+require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_vm_state.php';
 
@@ -75,10 +76,9 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
         }
     });
     // A create/full deploy changed ESXi resource usage (new VMs, datastore
-    // allocation): enqueue an inventory refresh for this credential (E3.4b).
-    // Fail-soft and after the job is finalized, so it can never taint the
-    // deploy result; the double-enqueue guard prevents pile-up. A partial
-    // job created VMs too, so it refreshes as well.
+    // allocation): refresh after any durable Create launch, regardless of the
+    // terminal verdict. Fail-soft after publication; system-job deduplication
+    // prevents pile-up with the interval or a second scheduling request.
     if ($terminalStatus !== null) {
         // A caught audit deadlock must never roll back the domain transaction.
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $summary);
@@ -101,7 +101,9 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
 function deploy_worker_handle_cancelled(mysqli $db, array $job, array $vmIds, string $reason = 'Deploy job was cancelled.'): void
 {
     $jobId = (int) $job['id'];
-    if (!deploy_worker_confirm_owned_cancel($db, $job, $reason)) {
+    if (deploy_worker_confirm_owned_cancel($db, $job, $reason)) {
+        deploy_worker_refresh_inventory_after_deploy($db, $job);
+    } else {
         error_log('[deploy-worker] job ' . $jobId . ': worker stopped without a VM write; ' . virtusphere_redact_log_text($reason));
     }
 }
@@ -182,6 +184,7 @@ function deploy_worker_handle_failure(
     });
     if ($terminalStatus !== null) {
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
+        deploy_worker_refresh_inventory_after_deploy($db, $job);
     }
 }
 
@@ -291,13 +294,7 @@ function deploy_worker_outcome_audit_result(string $status): string
     };
 }
 
-/**
- * After a successful resource-changing deploy (create/full), enqueue an ESXi
- * inventory refresh for the job's credential so datastore usage etc. catch up
- * without waiting for the interval (ADR-0023, E3.4b). Fail-soft: a scheduling
- * hiccup must never taint the already-finished deploy job. The double-enqueue
- * guard in repo_create_system_job prevents pile-up with the interval automation.
- */
+/** Every terminal create/full path refreshes after a durable Create launch. */
 function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): void
 {
     $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
@@ -306,7 +303,16 @@ function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): v
         return;
     }
     try {
-        esxi_inventory_enqueue_for_credential($db, $credentialId);
+        $launched = false;
+        foreach (repo_deploy_create_results($db, (int) $job['id']) as $unit) {
+            if (trim((string) ($unit['async_jid'] ?? '')) !== '') {
+                $launched = true;
+                break;
+            }
+        }
+        if ($launched) {
+            esxi_inventory_enqueue_for_credential($db, $credentialId);
+        }
     } catch (Throwable $exception) {
         error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }

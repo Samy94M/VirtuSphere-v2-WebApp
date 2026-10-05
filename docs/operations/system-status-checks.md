@@ -142,7 +142,7 @@ flowchart TD
 
 ## ESXi-Inventar
 
-Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet oder dessen Abbruch erst an der letzten Schrittgrenze bestätigt wird.
+Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach jedem Endzustand eines `create`- oder `full`-Auftrags, sobald eine Create-Einheit ihre Ansible-Job-ID dauerhaft gespeichert hat. Der Abruf ist fail-soft und wird durch den vorhandenen Systemauftrag-Writer dedupliziert.
 
 ```mermaid
 flowchart TD
@@ -151,11 +151,13 @@ flowchart TD
   B -->|ja| D["Fehler (rot)"]
   B -->|nein| C{"Je erfolgreich?"}
   C -->|nein| W["Prüfen (gelb)"]
-  C -->|ja| E{"Intervall größer 0 und letzter Erfolg älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle?"}
-  E -->|ja| W
-  E -->|nein| F{"Letzter Abruf fehlgeschlagen?"}
+  C -->|ja| F{"Letzter Abruf fehlgeschlagen?"}
   F -->|ja| W
-  F -->|nein| O["OK (grün)"]
+  F -->|nein| T{"Erfolgszeit gültig, nicht zu weit in der Zukunft?"}
+  T -->|nein| U
+  T -->|ja| E{"Älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle, bei Intervall 0 älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS?"}
+  E -->|ja| S["Veraltet (grau)"]
+  E -->|nein| O["OK (grün)"]
 ```
 
 Host-Eigenschaften aus einem erfolgreichen Abruf färben die Ampel nicht, sondern erscheinen als eigene Badges: freie Lizenz, HA-Cluster, Wartungsmodus. Über den Karten nennt eine Zeile, warum kein automatischer Abruf läuft: Intervall 0, kein Ansible-Zugang für den Abruf, Deploy-Worker nicht aktiv oder Anmeldung pausiert.

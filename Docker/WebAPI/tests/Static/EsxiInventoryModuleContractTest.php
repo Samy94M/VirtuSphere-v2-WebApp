@@ -66,6 +66,8 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'esxi_inventory_detail',
         'esxi_inventory_enqueue_due',
         'esxi_inventory_kind_evidence',
+        'esxi_inventory_evidence_window_seconds',
+        'esxi_inventory_success_evidence_state',
     ];
 
     public function testRegistriesMatchTheirFilesystemsInBothDirections(): void

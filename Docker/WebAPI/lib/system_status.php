@@ -62,6 +62,7 @@ function system_status_legend_items(string $kind): void
     $params = [
         'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER],
         'esxi_legend_danger' => ['streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER],
+        'esxi_legend_stale' => ['days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS, 'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR],
         'ansible_legend_stale' => ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS],
         'directory_legend_warning' => ['days' => VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS],
         'directory_legend_stale' => ['days' => VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS],

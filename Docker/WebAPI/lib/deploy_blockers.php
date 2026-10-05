@@ -11,6 +11,7 @@ require_once __DIR__ . '/deploy_preflight_bounds.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/layout_response.php';
 require_once __DIR__ . '/deploy_mode_labels.php';
+require_once __DIR__ . '/deploy_identity_inventory_age.php';
 require_once __DIR__ . '/help_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/repo/credentials.php';
@@ -90,7 +91,7 @@ function deploy_queue_base_blockers(
         $blockers[] = [
             'kind' => VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT,
             'code' => 'identity_conflict_' . $vmId,
-            'message' => __t('deploy.identity_conflict', ['name' => (string) $conflict['vm_name']]),
+            'message' => __t('deploy.identity_conflict', ['name' => (string) $conflict['vm_name']]) . ' ' . deploy_identity_inventory_age_message(isset($conflict['inventory_fetched_at']) ? (string) $conflict['inventory_fetched_at'] : null),
             'action' => [
                 'type' => 'link',
                 'url' => vm_edit_url((int) ($selectedMission['id'] ?? 0), $vmId),

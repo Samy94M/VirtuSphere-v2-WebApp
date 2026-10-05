@@ -274,3 +274,24 @@ inclusive). One request samples the current time once. An explicit mission
 datacenter bypasses derivation. Zero, unsupported, stale, future-dated or
 ambiguous evidence is a configuration blocker; a normal inventory deviation is
 still warn-only and never becomes an absence proof.
+
+## Amendment (2026-10-05): successful evidence expires with automation off
+
+`esxi_inventory_success_evidence_state()` owns the fetch-success freshness used
+by the portal traffic light and capability preflights. A positive schedule keeps
+the existing two-interval window. Schedule zero uses the separate
+`VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS` constant, initially seven days,
+matching the operational lifetime of an Ansible full test without coupling the
+two domain constants. Expiry is grey `stale`, ranked like `unknown`; an actual
+failed pull remains a warning or danger. Invalid or excessively future-dated
+timestamps cannot prove a current successful fetch.
+
+A cached foreign namesake continues to block admission even when old. Its exact
+inventory observation time and age are displayed next to the existing refresh
+link; the portal never assumes that expiry means the foreign VM disappeared.
+
+After any worker-owned terminal outcome of create/full, a stored Create
+`async_jid` is enough to schedule the existing credential inventory refresh.
+Failure, cancellation and uncertainty can all leave changes on ESXi. Publication
+and VM convergence retain their existing transactions and ownership fences;
+scheduling occurs afterwards, fail-soft and through the deduplicating writer.

@@ -13,6 +13,7 @@ require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vm_identity.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_blockers.php';
 
 /**
  * Decision 6: an occupied name is not proof that the host VM is ours. The
@@ -115,6 +116,22 @@ final class VmIdentityCollisionTest extends TestCase
             'name' => self::VM_NAME,
             'meta_json' => ['moid' => $moid, 'instance_uuid' => $instanceUuid, 'power_state' => 'poweredOff'],
         ]], true);
+    }
+
+    public function testAnOldNamesakeStillBlocksWithItsObservationAgeAndRefreshLink(): void
+    {
+        Lang::load('de');
+        $this->replaceInventoryVm('vm-24', 'uuid-foreign');
+        repo_execute($this->db, 'UPDATE deploy_esxi_inventory SET fetched_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY) WHERE credential_id = ? AND kind = ?', 'is', [$this->esxiId, VIRTUSPHERE_INVENTORY_KIND_VM]);
+        $conflicts = repo_vm_identity_conflicts($this->db, $this->missionId, $this->esxiId);
+        self::assertCount(1, $conflicts);
+        self::assertNotEmpty($conflicts[0]['inventory_fetched_at']);
+        $items = deploy_queue_base_blockers(true, true, true, true, '', true, ['id' => $this->missionId], [['id' => $this->vmId]], $conflicts);
+        $item = array_values(array_filter($items, static fn (array $item): bool => $item['kind'] === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT))[0];
+        self::assertStringContainsString('Alter:', $item['message']);
+        self::assertStringContainsString(portal_format_timestamp($conflicts[0]['inventory_fetched_at']), $item['message']);
+        self::assertSame(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI), $item['help']['url']);
+        self::assertSame(vm_edit_url($this->missionId, $this->vmId), $item['action']['url']);
     }
 
     private function setStoredIdentity(string $moid, string $instanceUuid): void

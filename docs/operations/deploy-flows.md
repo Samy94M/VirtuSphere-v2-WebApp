@@ -16,7 +16,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, der `succeeded` oder `partial` endet oder dessen Abbruch erst an der letzten Schrittgrenze bestätigt wird. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
@@ -105,7 +105,7 @@ flowchart TD
   EMP --> Z
   EMS --> Z
   CAX --> Z
-  Z["Nach create oder full mit succeeded oder partial, oder wenn ein Abbruch erst an der letzten Schrittgrenze bestätigt wird: Inventarabruf für den Host einreihen"]
+  Z["Nach jedem Endzustand von create/full: Inventarabruf für den Host einreihen, wenn eine Create-Einheit eine gespeicherte Ansible-Job-ID hat; fail-soft, dedupliziert"]
   KX --> FIN
   PX --> FIN
   HX --> FIN
@@ -113,9 +113,9 @@ flowchart TD
   HKX --> FIN
   APX --> FIN
   APH -->|autostart| FIN
-  STX --> FIN
-  CX --> FIN
-  EMX --> FIN
+  STX --> Z
+  CX --> Z
+  EMX --> Z
   Z --> FIN["Auf jedem Weg (finally): Arbeitsverzeichnisse auf dem Ansible-Host und lokal löschen, außer ein Schritt läuft dort noch"]
 ```
 

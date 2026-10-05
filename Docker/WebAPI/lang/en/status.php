@@ -41,7 +41,8 @@ return [
 
     // Deploy modes. The six postable ones are the technical set in
     // virtusphere_deploy_mode_labels(); the portal can SHOW `inventory` but
-    // nobody can queue it, because the scheduler is its only producer.
+    // it is scheduled, manually refreshed, triggered by credential save/test,
+    // or triggered after any create/full terminal outcome with a durable Create JID.
     'mode_full' => 'Full pipeline',
     'mode_create' => 'Create VMs',
     'mode_powercycle' => 'Power cycle and export MACs',

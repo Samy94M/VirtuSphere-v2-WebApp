@@ -80,6 +80,7 @@ function esxi_state_badge(string $state): string
         'ok' => __t('system_status.esxi_state_ok'),
         'warning' => __t('system_status.esxi_state_warning'),
         'danger' => __t('system_status.esxi_state_danger'),
+        'stale' => __t('system_status.esxi_state_stale'),
         default => __t('system_status.esxi_state_unknown'),
     };
 

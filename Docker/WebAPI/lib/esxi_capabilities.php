@@ -100,23 +100,14 @@ function esxi_capability_warnings(?array $state): array
  * licence we last saw a month ago would be a guess with consequences.
  *
  * The freshness window is the same one the traffic light uses for staleness. An
- * interval of 0 (automation deliberately off) makes age meaningless, exactly as
- * in esxi_inventory_ampel(), so the facts count as fresh.
+ * interval of 0 uses the fixed evidence lifetime; automation off does not
+ * make a months-old host property current evidence.
  *
  * @param array<string, mixed>|null $state
  */
 function esxi_capabilities_fresh(?array $state, int $intervalHours, ?int $now = null): bool
 {
-    if ($state === null || empty($state['last_success_at'])) {
-        return false;
-    }
-    if ($intervalHours <= 0) {
-        return true;
-    }
-
-    $age = ($now ?? time()) - (int) strtotime((string) $state['last_success_at'] . ' UTC');
-
-    return $age <= VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR * $intervalHours * 3600;
+    return esxi_inventory_success_evidence_state($state, $intervalHours, $now) === 'ok';
 }
 
 

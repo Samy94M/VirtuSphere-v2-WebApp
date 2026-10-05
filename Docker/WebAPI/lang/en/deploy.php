@@ -296,6 +296,8 @@ return [
     'identity_conflict' => 'Deploy blocked: the selected ESXi credential already reports a VM named “:name” whose instance UUID does not belong to the portal VM. Rename or delete that VM on ESXi, or delete the portal VM. An existing VM is not adopted; after a change on ESXi the inventory has to see it before the block lifts.',
     'identity_vm_link' => 'Edit VM',
     'identity_refresh_link' => 'Refresh ESXi inventory',
+    'identity_inventory_age' => 'Inventory observation: :time (age: :age). The block remains until a change is confirmed.',
+    'identity_inventory_age_unknown' => 'The age of the inventory observation is unconfirmed. Refresh inventory; the identity block remains.',
     'inventory_deviation_warn' => 'The datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values.',
     'inventory_deviation_link' => 'View the inventory under System status',
     'host_missing_warn' => 'Not in the inventory of the selected host ":host" but present on other hosts: :values. The deploy is not blocked; please check the host choice.',

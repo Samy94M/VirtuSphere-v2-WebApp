@@ -199,6 +199,7 @@ declare(strict_types=1);
                 echo h(__t('help_system_status.esxi_inv_ampel_p1', [
                     'streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER,
                     'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR,
+                    'days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS,
                 ]));
             ?></p>
             <?php system_status_legend_items('esxi'); ?>

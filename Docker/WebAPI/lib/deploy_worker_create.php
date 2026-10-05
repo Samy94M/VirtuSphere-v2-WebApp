@@ -352,10 +352,6 @@ function deploy_worker_conclude_create_section(
     });
     if ($terminalStatus !== null) {
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
-    }
-    if ($terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL) {
-        // VMs were created, so the ESXi cache is out of date exactly as it is
-        // after a fully successful job.
         deploy_worker_refresh_inventory_after_deploy($db, $job);
     }
 }

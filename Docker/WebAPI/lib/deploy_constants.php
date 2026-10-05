@@ -310,12 +310,11 @@ const VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS = 300;
 // ESXi host clock skew above this (seconds) is flagged as a warning (E9).
 const VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS = 120;
 
-// Inventory fetch traffic light (esxi_inventory_ampel): danger at this many
-// consecutive failures; a last success older than STALE_FACTOR x interval turns
-// warning. The system-status legend interpolates these same constants, so the
-// user-facing text cannot drift from the code.
+// Fetch failures drive danger; success expires after STALE_FACTOR intervals
+// or the fixed lifetime with automation off. Legend and help use these values.
 const VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER = 3;
 const VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR = 2;
+const VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS = 7;
 
 // Capability facts of a SUCCESSFUL pull (ADR-0023 amendment 3), stored on
 // deploy_esxi_inventory_state. Deliberately separate from the error categories

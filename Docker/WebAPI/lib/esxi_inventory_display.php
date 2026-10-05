@@ -2,31 +2,9 @@
 
 declare(strict_types=1);
 
-/**
- * Traffic-light state for one credential's fetch health: danger when auth-paused
- * or the failure streak reaches VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER,
- * warning when the last fetch failed, none ever succeeded, or the last success
- * is older than VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR x interval; unknown
- * before the first attempt, else ok. Interval 0 means the automation is off:
- * age proves nothing then, so staleness never warns and only real failures
- * colour the light. $now is injectable for tests.
- *
- * The traffic light shown for one ESXi credential anywhere in the portal: its
- * fetch health, and nothing else. Green means the last pull succeeded and is
- * current; it does NOT promise the host can deploy.
- *
- * There is exactly one of these because three call sites (the credential row,
- * the system-status heading and the dashboard rollup) must never disagree on the
- * same colour. It answers one question: "is the inventory pull healthy?"
- *
- * A host capability (a free licence, an HA cluster, maintenance mode) does not
- * colour this light. Those are properties of a *successful* pull, not fetch
- * problems, so they surface as their own badges (esxi_capability_warnings()) and
- * gate deploys through the deploy preflights. Painting a perfectly healthy
- * pull amber because the host has a free licence made "amber" mean two unrelated
- * things and hid the one it was built for. Keeping them apart is the point of
- * having a separate capability module at all.
- */
+require_once __DIR__ . '/esxi_inventory_evidence.php';
+
+/** Fetch health, with expired success grey and proven fetch failures retained. */
 function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = null): string
 {
     if ($state === null || empty($state['last_attempt_at'])) {
@@ -40,14 +18,10 @@ function esxi_inventory_ampel(?array $state, int $intervalHours, ?int $now = nul
     if ($lastSuccess === null) {
         return 'warning';
     }
-    if ($intervalHours > 0) {
-        $staleSeconds = VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR * $intervalHours * 3600;
-        if ((($now ?? time()) - (int) strtotime((string) $lastSuccess . ' UTC')) > $staleSeconds) {
-            return 'warning';
-        }
+    if (($state['last_status'] ?? '') === 'failed') {
+        return 'warning';
     }
-
-    return ($state['last_status'] ?? '') === 'failed' ? 'warning' : 'ok';
+    return esxi_inventory_success_evidence_state($state, $intervalHours, $now);
 }
 /**
  * Compact cards in one fixed set of bulk queries. Full inventory rows are not

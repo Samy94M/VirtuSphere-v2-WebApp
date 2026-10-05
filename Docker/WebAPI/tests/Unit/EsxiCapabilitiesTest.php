@@ -163,11 +163,11 @@ final class EsxiCapabilitiesTest extends TestCase
         self::assertFalse(esxi_capabilities_fresh(['last_success_at' => $pastWindow], 6, $now));
     }
 
-    public function testIntervalZeroMakesAgeMeaningless(): void
+    public function testIntervalZeroStillExpiresSuccessfulEvidence(): void
     {
-        // Automation deliberately off: age proves nothing, exactly as in the ampel.
+        // Turning automation off does not renew an old success.
         $ancient = gmdate('Y-m-d H:i:s', 1_000_000_000);
-        self::assertTrue(esxi_capabilities_fresh(['last_success_at' => $ancient], 0, 1_800_000_000));
+        self::assertFalse(esxi_capabilities_fresh(['last_success_at' => $ancient], 0, 1_800_000_000));
     }
 
     // --- preflight ---------------------------------------------------------
