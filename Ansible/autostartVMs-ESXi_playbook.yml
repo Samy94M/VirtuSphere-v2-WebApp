@@ -91,25 +91,43 @@
     # that. `item.autostart.enabled` is already the EFFECTIVE value (the VM's own
     # checkbox AND the mission's), computed in ansible_vm_autostart(); this task
     # does not re-derive it. A VM outside this job keeps what the host has for it.
-    - name: Autostart je VM schreiben
-      community.vmware.vmware_host_auto_start:
-        hostname: "{{ esxi_hostname }}"
-        port: "{{ esxi_port | int }}"
-        username: "{{ esxi_username }}"
-        password: "{{ esxi_password }}"
-        validate_certs: "{{ esxi_validate_certs | bool }}"
-        esxi_hostname: "{{ vs_esxi_host }}"
-        uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
-        use_instance_uuid: true
-        power_info:
-          start_action: "{{ 'powerOn' if ((item['item'] | default({}))['autostart']['enabled'] | bool) else 'none' }}"
-          start_order: -1
-          start_delay: "{{ ((item['item'] | default({}))['autostart']['start_delay']) | int }}"
-          stop_delay: "{{ ((item['item'] | default({}))['autostart']['stop_delay']) | int }}"
-          stop_action: systemDefault
-          wait_for_heartbeat: systemDefault
-      delegate_to: localhost
-      loop: "{{ autostart_identity_results.results | default([]) }}"
-      loop_control:
-        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+    #
+    # FC2-16: a write that fails for one VM leaves the others with the policy
+    # they just received, so the step can end half done. The `always` part
+    # reports how many entries were written before the job fails, and the worker
+    # puts that number into the terminal reason; without it the split was only
+    # readable from the per-item Ansible lines.
+    - name: Autostart je VM schreiben und Ergebnis melden
       when: autostart_identity_results.results | default([]) | length > 0
+      block:
+        - name: Autostart je VM schreiben
+          community.vmware.vmware_host_auto_start:
+            hostname: "{{ esxi_hostname }}"
+            port: "{{ esxi_port | int }}"
+            username: "{{ esxi_username }}"
+            password: "{{ esxi_password }}"
+            validate_certs: "{{ esxi_validate_certs | bool }}"
+            esxi_hostname: "{{ vs_esxi_host }}"
+            uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
+            use_instance_uuid: true
+            power_info:
+              start_action: "{{ 'powerOn' if ((item['item'] | default({}))['autostart']['enabled'] | bool) else 'none' }}"
+              start_order: -1
+              start_delay: "{{ ((item['item'] | default({}))['autostart']['start_delay']) | int }}"
+              stop_delay: "{{ ((item['item'] | default({}))['autostart']['stop_delay']) | int }}"
+              stop_action: systemDefault
+              wait_for_heartbeat: systemDefault
+          delegate_to: localhost
+          loop: "{{ autostart_identity_results.results | default([]) }}"
+          loop_control:
+            label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+          register: autostart_power_results
+      always:
+        - name: Zahl geschriebener Autostart-Eintraege melden
+          ansible.builtin.debug:
+            msg: >-
+              ::virtusphere-autostart:: written={{
+                (autostart_power_results | default({})).results | default([])
+                | map(attribute='failed', default=false)
+                | reject | list | length
+              }} total={{ autostart_identity_results.results | default([]) | length }}

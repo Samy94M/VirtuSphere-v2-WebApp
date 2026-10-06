@@ -32,6 +32,7 @@ const VIRTUSPHERE_DEPLOY_WORKER_MODULES = [
     'lib/deploy_worker_host_preflight.php',
     'lib/deploy_worker_inventory.php',
     'lib/deploy_worker_stream.php',
+    'lib/deploy_worker_step_failure.php',
     'lib/deploy_worker_db_channel.php',
     'lib/deploy_worker_db_operations.php',
     'lib/deploy_worker_db_recovery.php',

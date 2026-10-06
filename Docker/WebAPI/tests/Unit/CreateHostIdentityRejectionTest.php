@@ -141,6 +141,7 @@ namespace HostIdentityCreateProbe {
         public function tick(): void { }
         public function log(string $type, string $message): void { }
         public function hasLostOwnership(): bool { return false; }
+        public function redact(string $text): string { return $text; }
     }
 
     function time(): int { return Probe::$clock; }

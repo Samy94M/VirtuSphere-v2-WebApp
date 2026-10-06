@@ -93,7 +93,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $preflightExit = ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, static function (string $chunk) use ($channel, &$preflightBuffer, $preflightObserver): void {
 
             deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $chunk, $preflightObserver);
-        }, 45, $heartbeatOnSilence);
+        }, VIRTUSPHERE_ANSIBLE_PREFLIGHT_IDLE_SECONDS, $heartbeatOnSilence);
         deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
         deploy_worker_settle_db_channel($channel, $options, null);
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);

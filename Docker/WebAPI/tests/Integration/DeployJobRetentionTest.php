@@ -66,6 +66,40 @@ final class DeployJobRetentionTest extends TestCase
         self::assertNotNull(repo_deploy_job($this->db, $oldSucceeded));
     }
 
+    /**
+     * ZB-05: an unresolved create unit is open without a time limit, and its
+     * remote output exists only in the job log. The log stays until the unit is
+     * released; afterwards the job ages out like any other.
+     */
+    public function testAJobWithAnUnresolvedCreateUnitKeepsItsOutputUntilRelease(): void
+    {
+        $unresolved = $this->makeJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, 90);
+        $stmt = $this->db->prepare(
+            "INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status, error_code, error_detail, finished_at)
+             VALUES (?, 'PHPUNIT-ZB05', 1, 1, 'create', ?, ?, 'fixture: outcome on the host unknown', UTC_TIMESTAMP())"
+        );
+        $uncertain = VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN;
+        $code = VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST;
+        $stmt->bind_param('iss', $unresolved, $uncertain, $code);
+        $stmt->execute();
+        $plain = $this->makeJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, 90);
+
+        repo_purge_deploy_job_logs($this->db, VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS);
+
+        self::assertSame(1, $this->logCount($unresolved), 'the output of an unresolved create unit was purged');
+        self::assertSame(0, $this->logCount($plain), 'an ordinary old job must still be purged');
+
+        repo_execute(
+            $this->db,
+            'UPDATE deploy_create_vm_results SET status = ?, error_code = ? WHERE job_id = ?',
+            'ssi',
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED, $unresolved]
+        );
+        repo_purge_deploy_job_logs($this->db, VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS);
+
+        self::assertSame(0, $this->logCount($unresolved), 'a released unit no longer holds the output');
+    }
+
     public function testFinishedSystemJobsAreRemovedButMissionJobsAreKept(): void
     {
         $oldSystem = $this->makeJob(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, 90, null);

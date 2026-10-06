@@ -148,6 +148,12 @@ final class DeployJobOutputGate
         ));
     }
 
+    /** The redaction of accept() alone, for text that is not a log line. */
+    public function redact(string $text): string
+    {
+        return deploy_worker_redact_secrets($text, $this->secrets);
+    }
+
     /**
      * What should actually be written for one incoming line, in order.
      *

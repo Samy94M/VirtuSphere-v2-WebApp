@@ -167,6 +167,12 @@ final class DeployWorkerDbChannel
         $this->gate->withSecrets($secrets);
     }
 
+    /** FC2-08: text stored outside the log (error_detail), same secrets as the log gate. */
+    public function redact(string $text): string
+    {
+        return $this->gate->redact($text);
+    }
+
     /**
      * Writes one finished job-log line, or spools it while the database is gone.
      *

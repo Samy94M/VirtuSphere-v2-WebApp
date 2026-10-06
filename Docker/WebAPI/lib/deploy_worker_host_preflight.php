@@ -66,7 +66,7 @@ function deploy_worker_run_host_preflight(
     $runner = $options['host_preflight_runner'] ?? null;
     $preflightExitCode = is_callable($runner)
         ? (int) $runner($preflightCommand, $onChunk)
-        : ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, $onChunk, 45, $heartbeatOnSilence);
+        : ssh_execute_command($ansibleCredential, $ansibleSecret, $preflightCommand, $onChunk, VIRTUSPHERE_ANSIBLE_PREFLIGHT_IDLE_SECONDS, $heartbeatOnSilence);
     deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
     deploy_worker_settle_db_channel($channel, $options, null);
     deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);

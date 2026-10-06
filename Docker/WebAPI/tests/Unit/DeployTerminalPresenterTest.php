@@ -63,6 +63,33 @@ final class DeployTerminalPresenterTest extends TestCase
         self::assertSame('redacted failure', $view['last_error']);
     }
 
+    /**
+     * FC2-05: a failed step keeps its last Ansible failure line as the reason
+     * detail, and the job view links to that place in the log through the
+     * shared filter URL instead of leaving the reader to scroll for it.
+     */
+    public function testAQuotedAnsibleFailureLinksToItsPlaceInTheLog(): void
+    {
+        $job = [
+            'id' => 42,
+            'status' => VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            'terminal_reason_code' => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+            'terminal_reason_detail' => 'TASK [Autostart je VM schreiben] failed: [localhost] (item=VM-03) => {"changed": false, "msg": "Insufficient permissions"}',
+            'last_error' => 'Ansible command failed with exit code 2 (playbook step: autostartVMs-ESXi_playbook.yml).',
+        ];
+
+        $html = deploy_terminal_blocks_html($job);
+
+        self::assertStringContainsString('Insufficient permissions', $html);
+        self::assertStringContainsString(
+            deploy_terminal_h('deploy_log.php?' . http_build_query(['id' => '42', 'q' => 'failed: [localhost] (item=VM-03)', 'source' => VIRTUSPHERE_DEPLOY_LOG_ANSIBLE])),
+            $html
+        );
+
+        $plain = deploy_terminal_blocks_html(['terminal_reason_detail' => 'Remote command produced no output for 1800 seconds (idle timeout).'] + $job);
+        self::assertStringNotContainsString('q=', $plain, 'a detail without an Ansible failure line has nothing to jump to');
+    }
+
     public function testPartialResultLivesInResultBlockAndNeverInLastError(): void
     {
         $result = json_encode([

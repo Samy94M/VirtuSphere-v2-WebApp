@@ -3,9 +3,11 @@ import importlib.util
 import io
 import json
 import socket
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.error import HTTPError, URLError
 
 
@@ -47,6 +49,13 @@ class SequenceOpener:
 
 
 class UploadMacListTest(unittest.TestCase):
+    def setUp(self):
+        # Retries pause for real seconds; the tests record the pauses instead.
+        self.sleeps = []
+        patcher = mock.patch('time.sleep', side_effect=self.sleeps.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def run_upload(self, events, data=None, mission='12', job='34'):
         if data is None:
             data = [{'instance': {'hw_name': 'vm01'}}]
@@ -260,26 +269,46 @@ class UploadMacListTest(unittest.TestCase):
 
         self.assertEqual(UPLOAD.EXIT_SUCCESS, exit_code)
         self.assertEqual(2, len(opener.requests))
+        self.assertEqual([5], self.sleeps)
         self.assertNotIn('private-server-detail', output)
 
-    def test_repeated_timeout_is_retried_exactly_once(self):
-        exit_code, output, opener = self.run_upload([
-            URLError(socket.timeout()),
-            URLError(socket.timeout()),
-        ])
+    def test_a_timeout_is_retried_with_growing_pauses_up_to_four_attempts(self):
+        exit_code, output, opener = self.run_upload([URLError(socket.timeout()) for _ in range(4)])
 
         self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
-        self.assertEqual(2, len(opener.requests))
+        self.assertEqual(4, len(opener.requests))
+        self.assertEqual([5, 15, 45], self.sleeps)
         self.assertIn('Netzwerkfehler', output)
 
-    def test_non_timeout_network_error_is_not_retried(self):
+    def test_a_refused_or_reset_connection_is_retried(self):
+        # ZB-03: a portal restart refuses the connection. Before, that ended the
+        # export at once and the job failed although a later attempt would have
+        # been accepted; the callback is idempotent for the same run.
         exit_code, output, opener = self.run_upload([
-            URLError('connection refused'),
+            URLError(ConnectionRefusedError(111, 'Connection refused')),
+            ConnectionResetError(104, 'Connection reset by peer'),
+            self.response({'outcome': 'success'}),
         ])
 
-        self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
-        self.assertEqual(1, len(opener.requests))
-        self.assertIn('Netzwerkfehler', output)
+        self.assertEqual(UPLOAD.EXIT_SUCCESS, exit_code)
+        self.assertEqual(3, len(opener.requests))
+        self.assertEqual([5, 15], self.sleeps)
+        self.assertIn('Neuer Versuch in 5 s (2/4)', output)
+        self.assertIn('Neuer Versuch in 15 s (3/4)', output)
+
+    def test_a_permanent_network_error_is_not_retried(self):
+        for error in (
+            URLError(socket.gaierror(-2, 'Name or service not known')),
+            URLError(ssl.SSLCertVerificationError(1, 'certificate verify failed')),
+        ):
+            with self.subTest(error=error):
+                self.sleeps.clear()
+                exit_code, output, opener = self.run_upload([error])
+
+                self.assertEqual(UPLOAD.EXIT_HTTP_ERROR, exit_code)
+                self.assertEqual(1, len(opener.requests))
+                self.assertEqual([], self.sleeps)
+                self.assertIn('Netzwerkfehler', output)
 
     def test_a_network_error_names_its_reason(self):
         # A pinned-certificate mismatch and an unplugged cable both used to read

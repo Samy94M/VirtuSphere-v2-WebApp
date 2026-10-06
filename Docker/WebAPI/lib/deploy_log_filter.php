@@ -19,6 +19,25 @@ require_once __DIR__ . '/deploy_log_phases.php';
 
 const VIRTUSPHERE_DEPLOY_LOG_SEARCH_MAX_LENGTH = 120;
 
+// The head of an Ansible failure line: `fatal: [host]: FAILED!`, `fatal:
+// [host]: UNREACHABLE!` or, for one loop item, `failed: [host] (item=x)`. The
+// worker keeps the last such line of a failed step as the terminal reason
+// detail (FC2-05), and the job view searches the log for the same head.
+const VIRTUSPHERE_ANSIBLE_FAILURE_HEAD_PATTERN = '/(?:fatal|failed): \[[^\]\r\n]+\](?: \(item=[^)\r\n]*\))?(?:: (?:FAILED|UNREACHABLE)!)?/';
+
+/**
+ * The log search that finds the failure a terminal reason detail quotes, or
+ * null when the detail holds no Ansible failure line.
+ */
+function deploy_log_failure_needle(?string $detail): ?string
+{
+    if ($detail === null || preg_match(VIRTUSPHERE_ANSIBLE_FAILURE_HEAD_PATTERN, $detail, $head) !== 1) {
+        return null;
+    }
+
+    return mb_substr($head[0], 0, VIRTUSPHERE_DEPLOY_LOG_SEARCH_MAX_LENGTH, 'UTF-8');
+}
+
 /**
  * The display sources a reader may filter by, each mapped to the stored stream
  * values it covers.

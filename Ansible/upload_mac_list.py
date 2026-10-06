@@ -2,6 +2,7 @@ import hashlib
 import json
 import socket
 import ssl
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener, urlopen
 
@@ -36,6 +37,11 @@ OUTCOME_EXIT_CODES = {
 }
 
 REQUEST_TIMEOUT_SECONDS = 30
+# ZB-03: pauses before the second, third and fourth attempt. The callback is
+# idempotent for the same run, so repeating it is safe, and a portal restart
+# takes longer than two immediate attempts. Worst case 65 s of pauses plus four
+# request timeouts, far inside the worker's idle budget for one step.
+RETRY_DELAYS_SECONDS = (5, 15, 45)
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_ERROR_BODY_BYTES = 4096
 
@@ -98,6 +104,19 @@ def is_timeout_error(error):
         return True
 
     return isinstance(error, URLError) and isinstance(error.reason, (socket.timeout, TimeoutError))
+
+
+def is_transient_network_error(error):
+    """A timeout or a refused, reset or aborted connection.
+
+    That is what a portal restart looks like from here. A TLS failure, a name
+    that does not resolve or a missing route is not: waiting does not repair a
+    wrong certificate or a wrong address.
+    """
+    if is_timeout_error(error) or isinstance(error, ConnectionError):
+        return True
+
+    return isinstance(error, URLError) and isinstance(error.reason, ConnectionError)
 
 
 def response_counter(response, key):
@@ -237,8 +256,20 @@ def default_opener(url, pinned_fingerprint=''):
     return build_https_opener(normalized_fingerprint(pinned_fingerprint)).open
 
 
-def send_request(request, opener=urlopen):
-    for attempt in range(2):
+def announce_retry(reason, attempt, sleeper):
+    delay = RETRY_DELAYS_SECONDS[attempt]
+    print(
+        f'MAC-Upload: Portal voruebergehend nicht erreichbar ({reason}). '
+        f'Neuer Versuch in {delay} s ({attempt + 2}/{len(RETRY_DELAYS_SECONDS) + 1}).',
+        flush=True,
+    )
+    sleeper(delay)
+
+
+def send_request(request, opener=urlopen, sleeper=None):
+    sleeper = time.sleep if sleeper is None else sleeper
+    last_attempt = len(RETRY_DELAYS_SECONDS)
+    for attempt in range(last_attempt + 1):
         try:
             with opener(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 status = response.getcode()
@@ -258,7 +289,8 @@ def send_request(request, opener=urlopen):
 
                 return OUTCOME_EXIT_CODES[decoded['outcome']], decoded
         except HTTPError as error:
-            if 500 <= error.code < 600 and attempt == 0:
+            if 500 <= error.code < 600 and attempt < last_attempt:
+                announce_retry(f'HTTP {error.code}', attempt, sleeper)
                 continue
             # The portal's own error field is surfaced (WP-12); everything else
             # about the body stays unlogged (see portal_error_reason).
@@ -268,8 +300,9 @@ def send_request(request, opener=urlopen):
             else:
                 print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
             return EXIT_HTTP_ERROR, None
-        except (URLError, socket.timeout, TimeoutError) as error:
-            if is_timeout_error(error) and attempt == 0:
+        except (URLError, socket.timeout, TimeoutError, ConnectionError) as error:
+            if is_transient_network_error(error) and attempt < last_attempt:
+                announce_retry(short_reason(error), attempt, sleeper)
                 continue
             # The reason matters here too: a pinned-certificate mismatch and an
             # unplugged cable both used to read "Netzwerkfehler".
@@ -292,6 +325,7 @@ def send_data_to_server(
     job_value=job_id,
     opener=None,
     pinned_fingerprint=None,
+    sleeper=None,
 ):
     data = load_vm_infos(path)
     if data is None:
@@ -305,7 +339,7 @@ def send_data_to_server(
         opener = default_opener(url, cert_sha256 if pinned_fingerprint is None else pinned_fingerprint)
     body = json.dumps(build_payload(data, mission_value, job_value)).encode('utf-8')
     request = Request(url, data=body, headers={'Content-Type': 'application/json'}, method='POST')
-    exit_code, response = send_request(request, opener)
+    exit_code, response = send_request(request, opener, sleeper)
     if response is not None:
         log_redacted_result(response, len(data))
 

@@ -61,7 +61,7 @@ final class AnsibleMacExportContractTest extends TestCase
         // rather than as one exact import line: the line grew when the script
         // learned TLS, and a contract that breaks on adding `import ssl` tests
         // its own wording instead of the rule.
-        $allowed = ['hashlib', 'http.client', 'io', 'json', 'socket', 'ssl', 'urllib.error', 'urllib.request'];
+        $allowed = ['hashlib', 'http.client', 'io', 'json', 'socket', 'ssl', 'time', 'urllib.error', 'urllib.request'];
         // One capture group for both forms: `from X import ...` and `import X`.
         // Indented imports count too, or a lazy import inside a function would be
         // the one place the rule does not reach.

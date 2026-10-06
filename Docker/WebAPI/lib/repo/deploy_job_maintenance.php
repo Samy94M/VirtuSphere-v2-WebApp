@@ -30,19 +30,31 @@ require_once __DIR__ . '/deploy_create_identity.php';
  *
  * The job row survives with its status and last_error, so the deploy list keeps
  * its history; deploy_log.php tells the reader that the output was pruned.
+ *
+ * ZB-05: a job with a create unit that is still `prepared`, `running` or
+ * `uncertain` keeps its output however old it is. That unit stays open until an
+ * operator releases it, and its remote output, often the only trace of the VM
+ * that may exist on the host, lives in this log. Once the unit is released the
+ * job ages out like any other.
  */
 function repo_purge_deploy_job_logs(mysqli $db, int $retentionDays = VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS): int
 {
     $terminal = VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES;
     $placeholders = implode(',', array_fill(0, count($terminal), '?'));
+    $open = VIRTUSPHERE_CREATE_RESULT_INFLIGHT_STATUSES;
+    $openPlaceholders = implode(',', array_fill(0, count($open), '?'));
     $stmt = $db->prepare(
         'DELETE l FROM deploy_job_logs l
          JOIN deploy_jobs j ON j.id = l.job_id
          WHERE j.status IN (' . $placeholders . ')
-           AND j.updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)'
+           AND j.updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+           AND NOT EXISTS (
+               SELECT 1 FROM deploy_create_vm_results r
+               WHERE r.job_id = j.id AND r.status IN (' . $openPlaceholders . ')
+           )'
     );
-    $params = array_merge($terminal, [$retentionDays]);
-    $stmt->bind_param(str_repeat('s', count($terminal)) . 'i', ...$params);
+    $params = array_merge($terminal, [$retentionDays], $open);
+    $stmt->bind_param(str_repeat('s', count($terminal)) . 'i' . str_repeat('s', count($open)), ...$params);
     $stmt->execute();
 
     return $stmt->affected_rows;

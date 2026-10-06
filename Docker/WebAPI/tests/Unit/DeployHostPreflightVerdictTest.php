@@ -118,7 +118,7 @@ final class DeployHostPreflightVerdictTest extends TestCase
         self::assertIsInt($mark);
         self::assertLessThan($mark, $preflight, 'MR-02: the host preflight must run before any VM is marked deploying');
         self::assertMatchesRegularExpression('/mark_vms_deploying\([^;]+;\s*\$vmsMarked = true;/', $mission);
-        self::assertMatchesRegularExpression('/deploy_worker_handle_failure\([^;]*\$vmsMarked\s*\);/s', $mission);
+        self::assertMatchesRegularExpression('/deploy_worker_handle_failure\([^;]*\$vmsMarked\s*[,)]/s', $mission);
     }
 
     private function allowlist(string $verdict): string

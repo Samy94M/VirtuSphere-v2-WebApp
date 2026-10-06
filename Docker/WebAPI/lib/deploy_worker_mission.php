@@ -16,6 +16,7 @@ require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_network_preflight.php';
 require_once __DIR__ . '/deploy_worker_host_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
+require_once __DIR__ . '/deploy_worker_step_failure.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
 require_once __DIR__ . '/deploy_worker_create.php';
 require_once __DIR__ . '/deploy_worker_cleanup.php';
@@ -197,23 +198,27 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             // failure at the very start of a step is named too.
             $currentStep = $step['playbook'];
             $buffer = '';
+            // FC2-05: the last task and failure line of this step, kept for the
+            // terminal reason if the step fails.
+            $trace = new DeployWorkerStepTrace();
+            $observe = $trace->observe(...);
             // Only a step that RETURNS proves nothing is running on the host
             // any more. A cancel or a broken transport leaves that open, and
             // the remote signal trap is what removes the material then.
             $remoteStepInFlight = true;
             try {
-                $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $step['command'], static function (string $chunk) use ($channel, &$buffer): void {
-                    deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $chunk);
+                $exitCode = ssh_execute_command($ansibleCredential, $ansibleSecret, $step['command'], static function (string $chunk) use ($channel, &$buffer, $observe): void {
+                    deploy_worker_log_stream_chunk($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $chunk, $observe);
                 }, 0, $heartbeatOnSilence);
                 $remoteStepInFlight = false;
             } catch (DeployWorkerCancelled $cancelled) {
-                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
+                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $observe);
                 throw $cancelled;
             } catch (RuntimeException $transportError) {
-                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
+                deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $observe);
                 throw deploy_worker_transport_failure_with_step($transportError, $currentStep);
             }
-            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer);
+            deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $buffer, $observe);
 
             // The step is over and its exit code exists only in this process. If
             // the database went away during the run, waiting for it here is worth
@@ -231,7 +236,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
                 // Finalised through the same ownership recheck as a success:
                 // the throw lands in the catch below, which finishes the job
                 // with the compare-and-swap, exactly once.
-                throw new RuntimeException('Ansible command failed with exit code ' . $exitCode . ansible_step_failure_suffix($currentStep) . '.');
+                throw deploy_worker_step_failed($channel, $exitCode, $currentStep, $trace);
             }
         }
 
@@ -272,7 +277,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             $vmIds,
             deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]),
             deploy_terminal_reason_for_exception($exception),
-            $vmsMarked
+            $vmsMarked,
+            $exception instanceof DeployWorkerStepFailed ? $exception->detail : null
         );
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a

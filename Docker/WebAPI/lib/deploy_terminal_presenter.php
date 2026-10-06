@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_job_result.php';
+require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/deploy_host_preflight_result.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/mac_import_presenter.php';
@@ -72,6 +73,8 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
             // never localized; an invalid future value remains visible too.
             'code' => $code,
             'detail' => deploy_terminal_reason_detail(isset($job['terminal_reason_detail']) ? (string) $job['terminal_reason_detail'] : null),
+            // FC2-05: a quoted Ansible failure line links to its place in the log.
+            'log_needle' => deploy_log_failure_needle(isset($job['terminal_reason_detail']) ? (string) $job['terminal_reason_detail'] : null),
         ];
     }
 
@@ -148,6 +151,11 @@ function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null,
         if ($name === 'reason' && (string) ($block['detail'] ?? '') !== '') {
             $html .= '<p><span class="muted">' . deploy_terminal_h(__t('deploy.terminal_reason_detail')) . '</span> '
                 . '<code class="log-line">' . deploy_terminal_h((string) $block['detail']) . '</code></p>';
+        }
+        if ($name === 'reason' && is_string($block['log_needle'] ?? null)) {
+            $filter = ['q' => (string) $block['log_needle'], 'source' => VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, 'phase' => '', 'active' => true];
+            $html .= '<p><a href="' . deploy_terminal_h(deploy_log_filter_url((int) $job['id'], $filter)) . '">'
+                . deploy_terminal_h(__t('deploy.terminal_reason_detail_in_log')) . '</a></p>';
         }
         if ($name === 'cancel') {
             $html .= '<p>' . deploy_terminal_h(__t('deploy.cancel_requested_by', ['actor' => (string) $block['actor']])) . '</p>';

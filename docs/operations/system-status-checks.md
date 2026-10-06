@@ -114,7 +114,7 @@ flowchart TD
   TK -->|nein| TFK["fehlgeschlagen (ansible_host_identity), kein Login"]
   TK -->|ja| T2{"SSH-Anmeldung?"}
   T2 -->|nein| TF2["fehlgeschlagen (Anmeldung oder Zeitbudget)"]
-  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit. Zeitbudget 25 s ohne Ausgabe; ein Auftrag gibt demselben Preflight 45 s, ein langsamer Host kann den Volltest also rot färben, während Aufträge durchlaufen"]
+  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit. Zeitbudget 45 s ohne Ausgabe, dasselbe wie im Auftrag"]
   T3 -->|Komponente fehlt| TF3["fehlgeschlagen mit Name der Komponente"]
   T3 --> T4{"SFTP-Schreibprobe in /tmp?"}
   T4 -->|nein| TF4["fehlgeschlagen (SFTP)"]

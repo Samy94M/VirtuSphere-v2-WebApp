@@ -142,7 +142,8 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
  * else in the job scope becomes failed/failed - lifecycle and mecm_sync_state
  * together, so no failed VM advertises a sync that can never happen.
  * $vmsMarked false (a failure before deploy_worker_mark_vms_deploying()) fails
- * only the job and leaves every VM as it was.
+ * only the job and leaves every VM as it was. $reasonDetail is the failure the
+ * step printed (FC2-05); without one the message is the detail, as before.
  *
  * @param int[] $vmIds
  */
@@ -153,10 +154,12 @@ function deploy_worker_handle_failure(
     array $vmIds,
     string $message,
     string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
-    bool $vmsMarked = true
+    bool $vmsMarked = true,
+    ?string $reasonDetail = null
 ): void
 {
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked): ?string {
+    $reasonDetail ??= $message;
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail): ?string {
         if ((string) $locked['locked_by'] !== $workerId) {
             return null;
         }
@@ -172,7 +175,7 @@ function deploy_worker_handle_failure(
             // mean "the whole mission" below, which is why this is a flag.
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'The job failed before any VM was marked deploying; VM states are unchanged.');
 
-            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
+            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail);
         }
         $macResult = deploy_worker_job_mac_result($db, $jobId);
         $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
@@ -180,7 +183,7 @@ function deploy_worker_handle_failure(
         if ($keepVmIds !== []) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a successful MAC result keep their state.');
         }
-        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $message);
+        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail);
     });
     if ($terminalStatus !== null) {
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);

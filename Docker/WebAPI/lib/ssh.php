@@ -90,7 +90,7 @@ function credential_test_ansible(array $credential, string $secret, string $apiB
     }
 
     try {
-        $result = ssh_execute_capture($credential, $secret, $preflightCommand, 25);
+        $result = ssh_execute_capture($credential, $secret, $preflightCommand, VIRTUSPHERE_ANSIBLE_PREFLIGHT_IDLE_SECONDS);
         $exitCode = (int) $result['exit_code'];
         if ($exitCode !== 0) {
             // The login worked, so this is not a credential problem: the remote

@@ -412,6 +412,8 @@ Der Abschluss folgt einer festen Matrix: alles erfolgreich oder übersprungen er
 
 Der Reaper konvergiert in derselben Transaktion nur die noch fliegenden Einheiten nach `uncertain`; bestätigte Erfolge, Fehler und Übersprungene bleiben unangetastet. Ein stehengelassenes `running` wäre die Behauptung eines Polls, den niemand mehr ausführt.
 
+Die Protokollaufbewahrung nimmt einen Auftrag aus, solange eine seiner Einheiten `prepared`, `running` oder `uncertain` ist (ZB-05). Die Fernausgabe einer ungeklärten Einheit steht nur im Auftragsprotokoll; sie bleibt erhalten, bis die Einheit freigegeben ist, und altert danach wie jedes andere Protokoll.
+
 Die Create-Karte zählt weiterhin ausschließlich diese Ergebniszeilen. Unter den
 Zählern ordnet sie gespeicherte Fehler zusätzlich fachlich ein, ohne den
 technischen Code zu verstecken: entfernter Modulfehler, ungeklärte Beobachtung,

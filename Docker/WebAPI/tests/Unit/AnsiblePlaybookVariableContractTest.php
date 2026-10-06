@@ -31,6 +31,8 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         'to_json', 'to_nice_json', 'from_json', 'b64encode', 'trim', 'lookup',
         // Filters and tests the create control playbooks use (Etappe 14B).
         'string', 'replace', 'truncate', 'match', 'equalto',
+        // K12 (FC2-16): the autostart playbook counts written entries.
+        'reject',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',
         'true', 'false', 'True', 'False', 'none', 'None',
         'item', 'ansible_date_time', 'ansible_facts', 'hostvars',

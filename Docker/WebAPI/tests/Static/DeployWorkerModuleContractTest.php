@@ -120,6 +120,9 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_id',
         'deploy_worker_process_job',
         'deploy_worker_transport_failure_with_step',
+        // K12 (FC2-05, FC2-16): a failed step carries its last failure line
+        // and, for autostart, the reported written count.
+        'deploy_worker_step_failed',
         'deploy_worker_autostart_preflight',
         'deploy_worker_network_preflight',
         // K2: the host preflight runs before the `deploying` mark and

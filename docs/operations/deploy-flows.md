@@ -329,7 +329,7 @@ flowchart TD
   B -->|ja| BO["Einzelergebnis übernehmen"]
   BX --> C
   BO --> C["Alle Ergebnisse als vm_infos.json schreiben (Modus 0600)"]
-  C --> D["upload_mac_list.py: Rückruf an db_importMAC.php mit Mission und Auftrag"]
+  C --> D["upload_mac_list.py: Rückruf an db_importMAC.php mit Mission und Auftrag; bei Zeitüberschreitung, abgewiesener oder abgebrochener Verbindung und 5xx bis zu drei Wiederholungen nach 5, 15 und 45 s"]
   D --> E{"Exitcode?"}
   E -->|0 vollständig| E0["Schritt erfolgreich"]
   E -->|20 teilweise| E20["Schritt erfolgreich, Teilergebnis im Auftrag"]
@@ -358,7 +358,7 @@ flowchart TD
   C -->|ja| D["Host-Standardwerte setzen: Autostart ein, Verzögerungen, Stoppaktion, Heartbeat"]
   C -->|nein| E
   D --> E["Je VM per UUID schreiben: powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault)"]
-  E -.->|Schreiben scheitert für einzelne VMs| EX["Teilerfolg: Die Schleife schreibt die übrigen VMs trotzdem, nur die gescheiterten behalten die alte Richtlinie. Der Auftrag endet failed; welche VMs geschrieben wurden, steht nur in den Ansible-Zeilen des Protokolls"]
+  E -.->|Schreiben scheitert für einzelne VMs| EX["Teilerfolg: Die Schleife schreibt die übrigen VMs trotzdem, nur die gescheiterten behalten die alte Richtlinie. Der Auftrag endet failed; der Endgrund nennt, wie viele VMs ihren Eintrag erhalten haben, und die letzte Fehlerzeile mit Sprung ins Protokoll"]
 ```
 
 Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.

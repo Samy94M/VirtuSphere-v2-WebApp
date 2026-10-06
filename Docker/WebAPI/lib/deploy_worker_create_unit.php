@@ -255,7 +255,7 @@ function deploy_worker_create_terminate_unit(
     string $errorCode,
     string $detail
 ): array {
-    $detail = deploy_worker_redact_secrets(trim($detail), []);
+    $detail = $channel->redact(trim($detail));
     if ($detail === '') {
         $detail = 'No further detail was established.';
     }

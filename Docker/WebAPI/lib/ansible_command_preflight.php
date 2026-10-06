@@ -18,6 +18,12 @@ require_once __DIR__ . '/ansible_command_probes.php';
 
 const VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER = '::virtusphere-preflight::';
 
+// FC2-17: the preflight runs in the credential's full test, before every
+// mission job and before every inventory pull, and all of them give it this one
+// idle budget. With two values (25 s and 45 s) a slow host failed the full test
+// while every job on it went through.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_IDLE_SECONDS = 45;
+
 // Component token for the optional portal-reachability probe (the MAC return
 // route). Appended by ansible_preflight_command() only when an API base URL is
 // configured; kept as a constant so ansible_preflight_failed_component() names
