@@ -1403,3 +1403,5 @@ Ausführung in der Sol-Rolle durch Claude Opus 5.5 auf ausdrücklichen Auftrag d
 **e2e-portal** (`e2e/`): funktional bestanden (`e2e/last-run.json`: passed, keine fehlgeschlagenen Tests); Bildteil `infrastructure_error` wegen der sechs fehlenden UX02-Referenzbilder, akzeptiert, kein Paketbefund.
 
 **Grenzen:** Kein Prüfpfad führt die Mission-Schritte des Workers dynamisch aus; FC2-05/FC2-16 sind über Spur, Presenter, Playbookvertrag und die Ad-hoc-Probe belegt. ZB-03 ohne realen Portal-Neustart. Ablaufseite (`build-flow-viewer.ps1`) erzeugt der Nutzer.
+
+**LF-Worktree und Push:** Commit `2cc528c`. Sauberer LF-Worktree am Kopf `2cc528c` (`qa-artifacts/k12-2026-10-06/clean-lf/results.json`): phpunit-unit, phpstan, lang-parity, file-size, doc-hygiene, doc-semantics, yaml-lint, ansible-lint und python-client-tests pass, Exit 0; damit auch der gekürzte Docblock und dieses Register am endgültigen Stand geprüft. `origin/main` vor dem Push gefetcht, unverändert `27ae09a`; danach Push des Paketcommits und dieses Registereintrags auf `main`. **Nächster Schritt:** K13.
