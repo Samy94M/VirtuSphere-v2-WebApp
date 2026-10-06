@@ -1381,4 +1381,4 @@ Ausführung in der Sol-Rolle durch Claude Opus 5.5 auf ausdrückliche Fortsetzun
 
 **Offen, nicht blockierend:** P3-1 aus `astra-result.md` (Erfolgscommit `prepared -> succeeded` soll `existed_before` und `precheck_instance_uuid` der gesperrten Zeile selbst gegenprüfen, ein Unit-Fall). Ebenfalls offen bleiben die visuelle UX02-Abnahme, eine reale ESXi-Laborprobe (LP-11) und ein dynamischer `drive_unit`-Ablauf über SSH.
 
-**Nächster Schritt:** Commit, sauberer LF-Worktree am neuen Kopf, Fetch, Push, danach K12.
+**LF-Worktree und Push:** Commit `2a9a581` „Keep a running existing VM unchanged in the Create contract“. Sauberer LF-Worktree am Kopf `2a9a581` (`qa-artifacts/k11-2026-10-05/clean-lf/results.json`, LF-Konfiguration, `.env`, `composer install`): phpunit-unit, phpstan, lang-parity, file-size, doc-hygiene, doc-semantics, yaml-lint und ansible-create-async (26/26) pass, Exit 0. `origin/main` vor dem Push gefetcht, unverändert `22080bb`; danach Push des Paketcommits und dieses Registereintrags auf `main`. **Nächster Schritt:** K12.
