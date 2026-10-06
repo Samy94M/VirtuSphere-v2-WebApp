@@ -172,3 +172,43 @@ Not covered here and deliberately open: transport loss, a cancel during a runnin
 VM and a database outage are proven against the pure functions and the stored
 rows, not against a real SSH transport, and the controlled standalone-ESXi staging
 cases remain a site acceptance.
+
+## Amendment (2026-10-05): an existing own VM is aligned only while powered off (K11)
+
+DF-E1, user decision of 04.10.2026: a new `create` or `full` job that meets an
+existing own VM (bound instance UUID) aligns its hardware only while it is
+powered off. A powered-on or suspended VM is only verified and reported as
+unchanged; an unknown state counts as on, because `vmware_guest state:
+present` would otherwise reconfigure a running machine or fail on firmware,
+hardware version or a smaller disk.
+
+The create marker contract changes together with its contract tests, on both
+sides of the wire (`emit_create_result.py`, `ansible_create_protocol.php`):
+
+- `prepared` gains `precheck_power_state`, read from the same
+  `vmware_vm_info` answer as the identity. It is null when no VM existed, and
+  may be null for an existing VM whose state the module did not report.
+- `vm_not_powered_off` joins the closed error codes. The launch rechecks the
+  live state after its identity and drift checks and before its one mutating
+  call, because the VM can be switched on between prepare and launch; it then
+  reports this code without a mutation. The worker never stores it as a
+  failure.
+- The state table gains `prepared -> succeeded`. `repo_deploy_create_commit_success()`
+  takes it only for an existing VM with `changed = false`, so the one legal
+  answer of a launch-less unit is `unchanged`, and the binding goes through the
+  same commit as every other success. The schema is unchanged: `skipped` stays
+  reserved for `verify_skip` retries.
+
+Two neighbours of the same contract: a failed power-state read after a proven
+async success no longer leaves the unit `uncertain`; the status playbook
+reports `unknown` (DF-L9). And when the success commit refuses a binding, the
+live MOID and instance UUID are kept in `error_detail` and in their own job-log
+line (FC2-02), because the async state file is removed afterwards.
+
+The live power-state read and the hardware mutation are separate ESXi calls:
+another actor can power on the VM in the remaining interval. The recheck cannot
+make them atomic without an ESXi-side lock; it does not guarantee protection
+against a power-on after the read. A unit left unchanged because of its power
+state requires a new Create job to align it later. Retrying the earlier job only
+verifies successful units through `verify_skip`. The reason for not aligning is
+recorded only in the job log and is no longer distinguishable after its retention.

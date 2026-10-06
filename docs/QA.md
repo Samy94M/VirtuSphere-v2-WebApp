@@ -482,6 +482,15 @@ cleanup removes exactly that status file. It also pins the reason the whole
 design hangs off the status file: an unknown job id answers `finished` without
 `failed`, so a lost job would otherwise look like a completed one.
 
+The same gate runs the production Prepare, Launch and Status playbooks against
+local VMware module stubs. Prepare carries the observed power state or null.
+Launch must reject powered-on, suspended and unknown own VMs without any guest
+module call or async artifact; a powered-off own VM makes exactly one call bound
+by instance UUID. A failed informational power read after proven async success
+returns success with `unknown`, while a failed identity read aborts without a
+result marker. These are executed Jinja/Ansible branches, not text assertions;
+the stubs do not establish real ESXi behavior or close the read-to-mutation race.
+
 **The state machine** is `CreateFlowWorkerContractTest` (no database, no SSH):
 no cleanup trap in the control command, 0700 creation without following
 symlinks, extra-vars as typed JSON in both directions, the budget boundary at

@@ -145,6 +145,17 @@ Describe 'Visible progress reporting contract' {
         $script:FastGates | Should -Match "create-async-contract\.py'.+-Live"
     }
 
+    It 'keeps launch and status read-failure samples inside the counted create loop' {
+        foreach ($label in @('prepare-bound-powered-on', 'launch-powered-on', 'launch-power-unknown', 'launch-suspended', 'launch-powered-off', 'status-power-read-failure', 'status-identity-read-failure')) {
+            $script:CreateAsyncContract | Should -Match ([regex]::Escape($label))
+        }
+        $loop = $script:CreateAsyncContract.Substring($script:CreateAsyncContract.IndexOf('for index, (label, case)'))
+        $loop | Should -Match 'run_launch_case\(repo, label, case\[1\]\)'
+        $loop | Should -Match 'read_failure=case\[1\]'
+        $loop.IndexOf('] RUN') | Should -BeLessThan $loop.IndexOf('run_launch_case(')
+        $loop.IndexOf('run_launch_case(') | Should -BeLessThan $loop.IndexOf('] PASS')
+    }
+
     It 'reports every selected guard case before and after execution' {
         $script:GuardRunner | Should -Match '\$caseTotal\s*=\s*\$selected\.Count'
         $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"

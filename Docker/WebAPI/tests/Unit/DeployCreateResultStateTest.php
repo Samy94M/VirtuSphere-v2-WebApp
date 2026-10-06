@@ -57,9 +57,13 @@ final class DeployCreateResultStateTest extends TestCase
         self::assertTrue(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN, VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED));
         // The poll refresh of a running unit.
         self::assertTrue(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING, VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING));
-        // A unit cannot skip its preparation and cannot be launched twice.
+        // A unit cannot skip its preparation.
         self::assertFalse(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING, VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING));
-        self::assertFalse(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED));
+        self::assertFalse(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING, VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED));
+        // DF-E1: an existing own VM that is not powered off is verified and
+        // concluded without a launch. The edge exists, and the success commit
+        // restricts it to `unchanged` (DeployCreateRunningVmTest).
+        self::assertTrue(deploy_create_transition_allowed(VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED));
 
         // Every target that appears anywhere in the table is a known status; a
         // typo would otherwise create a transition to a state nothing reads.

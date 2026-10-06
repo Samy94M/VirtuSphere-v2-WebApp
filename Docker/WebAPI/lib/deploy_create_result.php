@@ -41,6 +41,10 @@ function deploy_create_transitions(): array
             VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING,
             VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN,
             VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            // DF-E1: an existing own VM that is not powered off is verified
+            // and concluded `unchanged` without a launch. The success commit
+            // allows this edge only for that outcome.
+            VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED,
         ],
         VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING => [
             VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING,

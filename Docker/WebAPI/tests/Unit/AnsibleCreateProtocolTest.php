@@ -37,7 +37,42 @@ final class AnsibleCreateProtocolTest extends TestCase
             'precheck_moid' => null,
             'precheck_instance_uuid' => null,
             'replaced_instance_uuid' => null,
+            'precheck_power_state' => null,
         ], $overrides);
+    }
+
+    /** DF-E1: the power state of the existing own VM travels with the prepared event. */
+    public function testAnExistingVmCarriesItsPowerState(): void
+    {
+        $marker = ansible_create_marker_parse($this->marker($this->prepared([
+            'existed_before' => true,
+            'precheck_moid' => 'vm-7',
+            'precheck_instance_uuid' => '503c-1',
+            'precheck_power_state' => 'poweredOn',
+        ])));
+
+        self::assertSame('poweredOn', $marker['precheck_power_state']);
+    }
+
+    public function testAPowerStateWithoutAnExistingVmIsRefused(): void
+    {
+        $this->expectException(CreateMarkerProtocolException::class);
+        $this->expectExceptionMessage('precheck_power_state contradicts');
+        ansible_create_marker_parse($this->marker($this->prepared(['precheck_power_state' => 'poweredOff'])));
+    }
+
+    /** DF-E1: the launch recheck refuses a VM switched on since prepare with its own closed code. */
+    public function testTheLaunchRecheckHasItsOwnClosedCode(): void
+    {
+        $marker = ansible_create_marker_parse($this->marker([
+            'event' => VIRTUSPHERE_CREATE_EVENT_REJECTED,
+            'portal_vm_id' => 5,
+            'vm_name' => 'VM',
+            'error_code' => 'vm_not_powered_off',
+            'error' => 'the existing VM is not powered off',
+        ]));
+
+        self::assertSame('vm_not_powered_off', $marker['error_code']);
     }
 
     public function testAValidMarkerSurvivesTheRoundTrip(): void

@@ -29,6 +29,7 @@ PREPARED = {
     'precheck_moid': None,
     'precheck_instance_uuid': None,
     'replaced_instance_uuid': None,
+    'precheck_power_state': None,
 }
 
 SUCCEEDED = {
@@ -124,6 +125,33 @@ class EmitCreateResultTest(unittest.TestCase):
         with self.assertRaises(EMIT.ContractError) as caught:
             EMIT.validate(payload)
         self.assertIn('replaced_instance_uuid', str(caught.exception))
+
+    def test_an_existing_vm_carries_its_power_state(self):
+        # DF-E1: the worker launches an existing own VM only when it is off,
+        # so the prepared event says what the live inventory reported.
+        payload = dict(PREPARED)
+        payload['existed_before'] = True
+        payload['precheck_moid'] = 'vm-7'
+        payload['precheck_instance_uuid'] = '503c-1'
+        payload['precheck_power_state'] = 'poweredOn'
+        self.assertEqual(payload, decode(EMIT.build_marker(EMIT.validate(dict(payload)))))
+
+    def test_a_power_state_without_an_existing_vm_is_refused(self):
+        payload = dict(PREPARED)
+        payload['precheck_power_state'] = 'poweredOff'
+        with self.assertRaises(EMIT.ContractError) as caught:
+            EMIT.validate(payload)
+        self.assertIn('precheck_power_state', str(caught.exception))
+
+    def test_the_launch_recheck_has_its_own_closed_code(self):
+        payload = {
+            'event': 'rejected',
+            'portal_vm_id': 5,
+            'vm_name': 'VM',
+            'error_code': 'vm_not_powered_off',
+            'error': 'the existing VM is not powered off',
+        }
+        self.assertEqual('vm_not_powered_off', EMIT.validate(payload)['error_code'])
 
     def test_a_portal_vm_id_must_be_a_real_id(self):
         for value in (0, -1, '123', True, None):

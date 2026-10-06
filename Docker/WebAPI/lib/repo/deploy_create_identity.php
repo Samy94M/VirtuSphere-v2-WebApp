@@ -45,6 +45,9 @@ require_once __DIR__ . '/helpers.php';
  * first one committed and writes nothing, which is what lets the poll loop
  * retry a status call after a database outage without a second DONE line.
  *
+ * DF-E1: $fromStatus is `prepared` only for an existing own VM that was not
+ * powered off and is therefore concluded unchanged without a launch.
+ *
  * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
  * @return array{committed:bool,replayed:bool,outcome:?string,error_code:?string,replaced_instance_uuid?:string}
  *         replaced_instance_uuid is present only on a committed replacement.
@@ -57,12 +60,20 @@ function repo_deploy_create_commit_success(
     bool $changed,
     string $liveMoid,
     string $liveInstanceUuid,
-    array $fence
+    array $fence,
+    string $fromStatus = VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING
 ): array {
     $liveMoid = trim($liveMoid);
     $liveInstanceUuid = trim($liveInstanceUuid);
     if ($liveMoid === '' || $liveInstanceUuid === '') {
         throw new InvalidArgumentException('A create success needs a live MOID and instance UUID.');
+    }
+    // DF-E1: a unit concluded without a launch only ever verified an existing
+    // own VM, so its one legal answer is unchanged.
+    if ($fromStatus !== VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING
+        && !($fromStatus === VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED && $existedBefore && !$changed)
+    ) {
+        throw new InvalidArgumentException('A create success without a launch can only be an unchanged existing VM.');
     }
 
     return repo_transaction($db, static function () use (
@@ -73,9 +84,10 @@ function repo_deploy_create_commit_success(
         $changed,
         $liveMoid,
         $liveInstanceUuid,
-        $fence
+        $fence,
+        $fromStatus
     ): array {
-        $running = VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING;
+        $running = $fromStatus;
         $stmt = $db->prepare(
             'SELECT r.id, r.vm_id, r.status, r.outcome, r.vm_instance_uuid, r.replaced_instance_uuid, j.mission_id'
             . ' FROM deploy_create_vm_results r JOIN deploy_jobs j ON j.id = r.job_id'
@@ -188,7 +200,7 @@ function repo_deploy_create_commit_success(
             $db,
             $jobId,
             $position,
-            VIRTUSPHERE_CREATE_RESULT_STATUS_RUNNING,
+            $fromStatus,
             VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED,
             [
                 'outcome' => $outcome,

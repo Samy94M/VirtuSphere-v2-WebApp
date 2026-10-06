@@ -228,14 +228,7 @@ function deploy_worker_create_finish_unit(
         if ($commit['error_code'] === VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST || $commit['error_code'] === null) {
             return ['stop' => true, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST];
         }
-        $verdict = deploy_worker_create_terminate_unit(
-            $channel,
-            $fence,
-            $unit,
-            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
-            (string) $commit['error_code'],
-            'The create module reported success, but the live identity does not match what this VM is bound to.'
-        );
+        $verdict = deploy_worker_create_record_refused_success($channel, $fence, $unit, $marker, (string) $commit['error_code']);
         deploy_worker_create_cleanup_async($channel, $context, $unit);
 
         return ['stop' => $verdict['stop'], 'reason' => $verdict['reason']];
@@ -281,4 +274,42 @@ function deploy_worker_create_finish_unit(
     );
 
     return ['stop' => $verdict['stop'], 'reason' => $verdict['reason']];
+}
+
+/**
+ * FC2-02: the module reported success, so a VM was created or changed on the
+ * host, but the identity commit refused it. The unit fails, and the live MOID
+ * and instance UUID stay findable: in the stored detail and in their own log
+ * line, because the async state file is removed afterwards and the marker
+ * itself is only base64 in the log.
+ *
+ * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
+ * @param array<string, mixed> $unit
+ * @param array<string, mixed> $marker the succeeded marker (moid, instance_uuid)
+ * @return array{stop:bool,continue:bool,reason:?string,unit:array<string,mixed>}
+ */
+function deploy_worker_create_record_refused_success(
+    DeployWorkerDbChannel $channel,
+    array $fence,
+    array $unit,
+    array $marker,
+    string $errorCode
+): array {
+    $identity = 'MOID ' . (string) ($marker['moid'] ?? '') . ', instance UUID ' . (string) ($marker['instance_uuid'] ?? '');
+    $verdict = deploy_worker_create_terminate_unit(
+        $channel,
+        $fence,
+        $unit,
+        VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+        $errorCode,
+        'The create module reported success, but the live identity does not match what this VM is bound to. Live VM on the host: '
+        . $identity . '.'
+    );
+    $channel->log(
+        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+        'Create of ' . (string) $unit['vm_name'] . ' succeeded on the host, but the binding was refused. Live VM: ' . $identity
+        . '. Check it in the ESXi Host Client; rename or delete it there if it is not the VM this portal entry means.'
+    );
+
+    return $verdict;
 }

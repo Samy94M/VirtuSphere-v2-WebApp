@@ -115,6 +115,9 @@ const VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT = 'job_timeout';
 const VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR = 'protocol_error';
 const VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST = 'ownership_lost';
 const VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED = 'operator_released';
+// DF-E1: the launch found the existing own VM no longer powered off. Never
+// stored as a failure: the worker concludes the unit as verified, unchanged.
+const VIRTUSPHERE_CREATE_ERROR_VM_NOT_POWERED_OFF = 'vm_not_powered_off';
 
 const VIRTUSPHERE_CREATE_ERROR_CODES = [
     VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT,
@@ -129,6 +132,7 @@ const VIRTUSPHERE_CREATE_ERROR_CODES = [
     VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
     VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST,
     VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED,
+    VIRTUSPHERE_CREATE_ERROR_VM_NOT_POWERED_OFF,
 ];
 
 // Which codes an automatic retry may re-run without a human deciding first.

@@ -64,6 +64,16 @@ function deploy_worker_create_drive_unit(
                 return ['stop' => $prepared['stop'], 'reason' => $prepared['reason']];
             }
             $unit = $prepared['unit'];
+            if (!deploy_worker_create_prepared_needs_launch($unit)) {
+                $verified = deploy_worker_create_conclude_unchanged(
+                    $channel,
+                    $fence,
+                    $unit,
+                    isset($unit['precheck_power_state']) ? (string) $unit['precheck_power_state'] : null
+                );
+
+                return ['stop' => $verified['stop'], 'reason' => $verified['reason']];
+            }
             $status = VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED;
         }
     }
@@ -273,5 +283,81 @@ function deploy_worker_create_terminate_unit(
         'continue' => false,
         'reason' => $stop ? $errorCode : null,
         'unit' => array_merge($unit, ['status' => $status, 'error_code' => $errorCode]),
+    ];
+}
+
+/**
+ * DF-E1: a fresh create unit launches unless it met an existing own VM that is
+ * not provably powered off. A new VM always launches; an existing one only in
+ * the state `poweredOff`. Suspended, powered on and unknown count as on: the
+ * launch would align the hardware of a running machine.
+ *
+ * @param array<string, mixed> $prepared the prepared unit or marker
+ */
+function deploy_worker_create_prepared_needs_launch(array $prepared): bool
+{
+    if (!(bool) ($prepared['existed_before'] ?? false)) {
+        return true;
+    }
+
+    return ($prepared['precheck_power_state'] ?? null) === 'poweredOff';
+}
+
+/**
+ * DF-E1: concludes a prepared unit for an existing own VM that is not powered
+ * off. Nothing is launched: the identity the preparation proved is committed
+ * as `succeeded` / `unchanged`, through the one success commit, and the job log
+ * names the VM whose portal hardware was not aligned.
+ *
+ * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
+ * @param array<string, mixed> $unit
+ * @return array{stop:bool,continue:bool,reason:?string,unit:array<string,mixed>}
+ */
+function deploy_worker_create_conclude_unchanged(
+    DeployWorkerDbChannel $channel,
+    array $fence,
+    array $unit,
+    ?string $powerState
+): array {
+    $commit = repo_deploy_create_commit_success(
+        $channel->connection(),
+        (int) $unit['job_id'],
+        (int) $unit['position'],
+        true,
+        false,
+        (string) ($unit['precheck_moid'] ?? ''),
+        (string) ($unit['precheck_instance_uuid'] ?? ''),
+        $fence,
+        VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED
+    );
+    if (!$commit['committed'] && !$commit['replayed']) {
+        if ($commit['error_code'] === null || $commit['error_code'] === VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST) {
+            return ['stop' => true, 'continue' => false, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST, 'unit' => $unit];
+        }
+
+        return deploy_worker_create_terminate_unit(
+            $channel,
+            $fence,
+            $unit,
+            VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
+            (string) $commit['error_code'],
+            'The existing VM was verified without a launch, but its identity does not match what this VM is bound to.'
+        );
+    }
+    if ($commit['committed']) {
+        $channel->log(
+            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+            'Hardware of VM ' . (string) $unit['vm_name'] . ' not aligned: the existing VM is '
+            . ($powerState ?? 'not provably powered off')
+            . '. Identity verified, unit concluded unchanged. Power it off and run create again to align it.'
+        );
+        $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, deploy_worker_create_progress_line($unit, 'DONE', VIRTUSPHERE_CREATE_OUTCOME_UNCHANGED));
+    }
+
+    return [
+        'stop' => false,
+        'continue' => false,
+        'reason' => null,
+        'unit' => array_merge($unit, ['status' => VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED]),
     ];
 }

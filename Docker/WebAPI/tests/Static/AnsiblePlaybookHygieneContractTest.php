@@ -37,7 +37,9 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
      * that justification is the review conversation this test exists to force.
      */
     private const IGNORE_ERRORS_ALLOWLIST = [
-        'createVMStatus-ESXi_playbook.yml' => 1,
+        // 2: the async status read and, since DF-L9, the informational power
+        // state read after a proven success (reported as unknown on error).
+        'createVMStatus-ESXi_playbook.yml' => 2,
         'exportVMs-Informations-ESXi_playbook.yml' => 1,
         'inventoryESXi_playbook.yml' => 7,
         'powercycle_vm_tasks.yml' => 1,

@@ -148,12 +148,15 @@ flowchart TD
   PR -->|Transport abgerissen| VT
   PR -->|Hostidentität vor Anmeldung abgelehnt| HF
   PR -->|keine lesbare Antwort oder unerwartetes Ereignis| PP
-  PR -->|prepared| BG{"Budget der Create-Phase noch übrig?"}
+  PR -->|prepared| PW{"Eigene VM vorhanden und nicht nachweislich ausgeschaltet?"}
+  PW -->|ja, eingeschaltet, angehalten oder unbekannt| UV["succeeded (unchanged) ohne Launch, Bindung bestätigt; Protokoll nennt die nicht angeglichene VM"]
+  PW -->|nein: neue VM oder ausgeschaltet| BG{"Budget der Create-Phase noch übrig?"}
   BG -->|nein| BGX
   BGX --> HOLD
   PP --> HOLD
   BG -->|ja| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
-  LA -->|rejected| LF["failed"]
+  LA -->|rejected: vm_not_powered_off| UV
+  LA -->|rejected, anderer Code| LF["failed"]
   LA -->|Hostidentität vor Anmeldung abgelehnt| HF
   LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
@@ -171,11 +174,12 @@ flowchart TD
   PO -->|rejected oder unlesbar| SU["uncertain"]
   PO -->|succeeded| CM{"Identität binden: UUID und MOID in einer Transaktion; ersetzte Instanz übernehmen"}
   CM -->|gebunden| CL["createVMCleanup: Statusdatei genau dieser Job-ID löschen"]
-  CM -->|abgelehnt, etwa andere UUID schon gebunden| CMF["failed mit Code der Ablehnung"]
+  CM -->|abgelehnt, etwa andere UUID schon gebunden| CMF["failed mit Code der Ablehnung; MOID und UUID der Live-VM in Detail und eigener Protokollzeile"]
   CMF --> CL
   MF --> CL
   CL --> N
   SK --> N
+  UV --> N
   VF --> N
   VT --> N
   PF --> N
@@ -187,7 +191,7 @@ flowchart TD
   HU --> HOLD
 ```
 
-Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
+Trifft ein neuer Auftrag auf eine vorhandene eigene VM, wird sie nur ausgeschaltet angeglichen (DF-E1). Ist sie eingeschaltet, angehalten oder ihr Zustand unbekannt, endet die Einheit nach Prepare als `succeeded` mit `unchanged`, ohne Launch; das Protokoll nennt die nicht angeglichene VM. Launch prüft den Zustand erneut, weil die VM dazwischen eingeschaltet werden kann. Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
 
 ## Playbooks
 
@@ -204,7 +208,7 @@ flowchart TD
   B -->|ja| C["Identitätsprüfung (create_identity_check_tasks.yml)"]
   C --> D{"Identitätsbefund?"}
   D -->|ja| DR["Ergebnis rejected mit Code, keine Änderung"]
-  D -->|nein| DP["Ergebnis prepared: existierte vorher, MOID, Instance-UUID, ersetzte UUID"]
+  D -->|nein| DP["Ergebnis prepared: existierte vorher, MOID, Instance-UUID, ersetzte UUID, Energiezustand der vorhandenen VM"]
 ```
 
 ### create_identity_check_tasks
@@ -240,9 +244,11 @@ flowchart TD
   C -->|ja| CX["rejected, keine Änderung"]
   C -->|nein| D{"Live-Identität gleich dem Prepare-Ergebnis?"}
   D -->|nein| DX["rejected: live identity differs, keine Änderung"]
-  D -->|ja| E{"VM existierte vorher?"}
+  D -->|ja| W{"VM existierte vorher und ist nicht ausgeschaltet (auch unbekannt)?"}
+  W -->|ja| WX["rejected: vm_not_powered_off, keine Änderung; der Worker meldet die Einheit unverändert"]
+  W -->|nein| E{"VM existierte vorher?"}
   E -->|nein| E1["vmware_guest per Name: neue VM anlegen"]
-  E -->|ja| E2["vmware_guest per gebundener Instance-UUID: Hardware angleichen"]
+  E -->|ja, ausgeschaltet| E2["vmware_guest per gebundener Instance-UUID: Hardware angleichen"]
   E1 --> F["Async-Job mit poll 0 starten: Hardwareversion 21, EFI, Secure Boot, CPU, RAM, Disks, Netze"]
   E2 --> F
   F --> G["Ergebnis launched mit Job-ID und Async-Verzeichnis"]
@@ -270,7 +276,7 @@ flowchart TD
   G -->|nein| GX["rejected: identity_result_invalid"]
   G -->|ja| H{"Energiezustand per MOID lesbar?"}
   H -->|ja| H1["Ergebnis succeeded mit MOID, UUID, changed, Energiezustand"]
-  H -->|nein| HX["Lauf endet ohne Ergebniszeile; der Worker setzt die Einheit uncertain"]
+  H -->|nein| HX["Ergebnis succeeded mit Energiezustand unknown (Lesefehler toleriert)"]
 ```
 
 Den Zustand bestimmt die Statusdatei, die `inspect_create_async_state.py` gebunden liest; `async_status` muss ihr nur widerspruchsfrei zustimmen.

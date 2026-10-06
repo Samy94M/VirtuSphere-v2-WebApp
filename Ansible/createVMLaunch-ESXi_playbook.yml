@@ -114,6 +114,32 @@
         - name: Lauf ohne Mutation beenden
           ansible.builtin.meta: end_play
 
+    # DF-E1: eine vorhandene eigene VM wird nur ausgeschaltet angeglichen. Sie
+    # kann seit der Vorbereitung eingeschaltet worden sein; ein unbekannter
+    # Zustand zählt wie eingeschaltet. Dann meldet der Start ohne Mutation, und
+    # der Worker schließt die Einheit als unverändert ab.
+    - name: Nicht ausgeschaltete eigene VM ohne Mutation melden
+      when: (vs_existed_before | bool) and (vs_precheck_power_state | default('')) != 'poweredOff'
+      block:
+        - name: Ablehnung wegen Energiezustand schreiben
+          ansible.builtin.copy:
+            dest: "{{ vs_result_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                {
+                  'event': 'rejected',
+                  'portal_vm_id': vs_target.portal_vm_id | int,
+                  'vm_name': vs_target.vm_name,
+                  'error_code': 'vm_not_powered_off',
+                  'error': 'the existing VM is not powered off (' ~ (vs_precheck_power_state | default('unknown', true)) ~ '); its hardware is not aligned'
+                } | to_nice_json
+              }}
+          delegate_to: localhost
+
+        - name: Start ohne Angleichen beenden
+          ansible.builtin.meta: end_play
+
     # Genau zwei geschlossene Selektionszweige. Im Absent-Zweig bekommt das
     # Modul den Snapshotnamen und KEINE UUID. Im Vorhanden-Zweig bekommt es
     # ausschließlich die bereits gebundene Instance-UUID, weil Ansible eine UUID

@@ -91,6 +91,41 @@ final class CreateFlowPlaybookContractTest extends TestCase
         self::assertStringNotContainsString('ANSIBLE_ASYNC_DIR', $launch);
     }
 
+    /**
+     * DF-E1: an existing own VM is aligned only while it is powered off. It can
+     * be switched on between prepare and launch, so the launch rechecks the
+     * live state BEFORE its one mutating call and reports the closed code.
+     */
+    public function testTheLaunchRechecksThePowerStateBeforeItsOnlyMutation(): void
+    {
+        $launch = $this->tasksOnly((string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH));
+
+        $recheck = strpos($launch, "'error_code': 'vm_not_powered_off'");
+        $mutation = strpos($launch, 'community.vmware.vmware_guest:');
+        self::assertNotFalse($recheck, 'the launch must report a VM that is no longer off');
+        self::assertNotFalse($mutation);
+        self::assertLessThan($mutation, $recheck, 'the recheck must come before the mutating call');
+        self::assertStringContainsString("vs_precheck_power_state | default('')) != 'poweredOff'", $launch);
+
+        $identity = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_CREATE_IDENTITY_TASKS);
+        self::assertStringContainsString('vs_precheck_power_state:', $identity, 'the one identity read also yields the power state');
+        $prepare = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE);
+        self::assertStringContainsString("'precheck_power_state':", $prepare);
+    }
+
+    /**
+     * DF-L9: after a proven async success and a passed identity check, the power
+     * state is information only. A transient read error must not turn the unit
+     * uncertain and stop the create phase; it reports `unknown`.
+     */
+    public function testAPowerStateReadErrorAfterASuccessReportsUnknown(): void
+    {
+        $status = $this->tasksOnly((string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_CREATE_PLAYBOOK_STATUS));
+
+        self::assertMatchesRegularExpression('/vmware_guest_info:.*?register: vs_guest\s*\n\s*ignore_errors: true/s', $status);
+        self::assertStringContainsString("'power_state': (vs_guest.instance.hw_power_status | default('unknown')) if not (vs_guest.failed | default(false)) else 'unknown'", $status);
+    }
+
     public function testTheMutatingPlaybookSelectsByUuidWhenTheVmAlreadyExists(): void
     {
         $launch = $this->tasksOnly((string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH));

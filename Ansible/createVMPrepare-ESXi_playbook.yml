@@ -79,6 +79,7 @@
     # `to_nice_json` schreibt genau die Felder unten und nichts sonst: kein
     # registriertes Gesamtobjekt, keine invocation.module_args, keine
     # Zugangsdaten. Modus 0600, weil die Datei im Handle-Verzeichnis liegt.
+    # `precheck_power_state` (DF-E1) ist nur bei vorhandener VM gesetzt.
     # `replaced_instance_uuid` nennt die gespeicherte UUID, die im Live-Inventar
     # nachweislich fehlte (IDR-P02); ohne diesen Befund ist sie null.
     - name: Ergebnis der Vorbereitung schreiben
@@ -94,7 +95,8 @@
               'existed_before': vs_existed_before | bool,
               'precheck_moid': (vs_precheck_moid if (vs_precheck_moid | length > 0) else None),
               'precheck_instance_uuid': (vs_precheck_instance_uuid if (vs_precheck_instance_uuid | length > 0) else None),
-              'replaced_instance_uuid': (vs_replaced_instance_uuid if (vs_replaced_instance_uuid | length > 0) else None)
+              'replaced_instance_uuid': (vs_replaced_instance_uuid if (vs_replaced_instance_uuid | length > 0) else None),
+              'precheck_power_state': (vs_precheck_power_state if ((vs_existed_before | bool) and (vs_precheck_power_state | length > 0)) else None)
             } | to_nice_json
           }}
       delegate_to: localhost

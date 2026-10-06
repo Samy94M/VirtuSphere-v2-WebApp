@@ -62,6 +62,7 @@ ERROR_CODES = (
     "protocol_error",
     "ownership_lost",
     "operator_released",
+    "vm_not_powered_off",
 )
 
 # Field name -> its check. The event tables below name fields only; what a field
@@ -74,6 +75,7 @@ FIELD_RULES = {
     "precheck_moid": ("moid_or_null", None),
     "precheck_instance_uuid": ("uuid_or_null", None),
     "replaced_instance_uuid": ("uuid_or_null", None),
+    "precheck_power_state": ("power_state_or_null", None),
     "async_jid": ("jid", None),
     "async_dir": ("abs_path", None),
     "changed": ("bool", None),
@@ -85,7 +87,7 @@ FIELD_RULES = {
 }
 
 EVENTS = {
-    "prepared": ("portal_vm_id", "vm_name", "existed_before", "precheck_moid", "precheck_instance_uuid", "replaced_instance_uuid"),
+    "prepared": ("portal_vm_id", "vm_name", "existed_before", "precheck_moid", "precheck_instance_uuid", "replaced_instance_uuid", "precheck_power_state"),
     "launched": ("portal_vm_id", "vm_name", "async_jid", "async_dir", "existed_before", "precheck_moid", "precheck_instance_uuid"),
     "running": ("portal_vm_id", "async_jid"),
     "succeeded": ("portal_vm_id", "vm_name", "async_jid", "changed", "moid", "instance_uuid", "power_state"),
@@ -121,6 +123,12 @@ def _check_field(name, value):
     if kind in ("moid", "uuid", "jid", "power_state"):
         pattern = {"moid": MOID_PATTERN, "uuid": UUID_PATTERN, "jid": JID_PATTERN, "power_state": POWER_STATE_PATTERN}[kind]
         if not isinstance(value, str) or pattern.match(value) is None:
+            raise ContractError("%s is outside its allowed character class" % name)
+        return value
+    if kind == "power_state_or_null":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not POWER_STATE_PATTERN.match(value):
             raise ContractError("%s is outside its allowed character class" % name)
         return value
     if kind in ("moid_or_null", "uuid_or_null"):
@@ -172,6 +180,10 @@ def validate(payload):
     # found the VM cannot at the same time name its stored UUID as absent.
     if event == "prepared" and canonical["replaced_instance_uuid"] is not None and canonical["existed_before"]:
         raise ContractError("replaced_instance_uuid contradicts an existing VM")
+    # DF-E1: a power state describes the VM that exists; without one it is a
+    # claim about nothing. An existing VM may still report none (unknown).
+    if event == "prepared" and canonical["precheck_power_state"] is not None and not canonical["existed_before"]:
+        raise ContractError("precheck_power_state contradicts a VM that does not exist")
 
     return canonical
 

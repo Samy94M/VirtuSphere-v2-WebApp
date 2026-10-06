@@ -262,6 +262,10 @@
         - name: Ohne Erfolgsmeldung beenden
           ansible.builtin.meta: end_play
 
+    # DF-L9: Nach nachgewiesenem Async-Erfolg und bestandener Identitätsprüfung
+    # ist der Energiezustand nur noch Information. Ein vorübergehender Lesefehler
+    # darf die Einheit nicht ungeklärt machen und die Create-Phase stoppen; er
+    # wird als `unknown` gemeldet. Die Argumente sind dieselben wie zuvor.
     - name: Aktuellen Energiezustand der Ziel-VM lesen
       community.vmware.vmware_guest_info:
         hostname: "{{ esxi_hostname }}"
@@ -273,6 +277,7 @@
         moid: "{{ vs_precheck_moid }}"
       delegate_to: localhost
       register: vs_guest
+      ignore_errors: true
 
     - name: Erfolg mit verifizierter Identitaet schreiben
       ansible.builtin.copy:
@@ -288,7 +293,7 @@
               'changed': vs_async_snapshot.changed | bool,
               'moid': vs_precheck_moid,
               'instance_uuid': vs_precheck_instance_uuid,
-              'power_state': vs_guest.instance.hw_power_status | default('unknown')
+              'power_state': (vs_guest.instance.hw_power_status | default('unknown')) if not (vs_guest.failed | default(false)) else 'unknown'
             } | to_nice_json
           }}
       delegate_to: localhost

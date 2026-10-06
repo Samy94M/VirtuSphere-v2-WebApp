@@ -14,6 +14,7 @@
 #
 # Erwartet: vs_target (genau ein Eintrag aus vm_configurations).
 # Setzt: vs_existed_before, vs_precheck_moid, vs_precheck_instance_uuid,
+#        vs_precheck_power_state,
 #        vs_identity_conflict, vs_identity_conflict_code,
 #        vs_identity_conflict_reason, vs_replaced_instance_uuid.
 #
@@ -63,6 +64,11 @@
     vs_precheck_moid: "{{ (vs_identity_matches | first).moid | default('') if (vs_identity_matches | length) == 1 else '' }}"
     vs_precheck_instance_uuid: >-
       {{ (vs_identity_matches | first).instance_uuid | default('')
+         if (vs_identity_matches | length) == 1 else '' }}
+    # DF-E1: dieselbe Antwort nennt den Energiezustand. Ein leerer Wert heißt
+    # „nicht bekannt“ und zählt beim Angleichen wie eingeschaltet.
+    vs_precheck_power_state: >-
+      {{ (vs_identity_matches | first).power_state | default('')
          if (vs_identity_matches | length) == 1 else '' }}
 
 # IDR-P02: dieselbe Inventarantwort, zweiter Blick über die gespeicherte UUID.

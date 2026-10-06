@@ -147,7 +147,12 @@ function deploy_worker_create_prepare_unit(
         'stop' => false,
         'continue' => true,
         'reason' => null,
-        'unit' => array_merge($unit, $fields, ['status' => VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED]),
+        // The power state decides launch-or-verify right now (DF-E1) and is not
+        // stored: a resumed prepared unit is rechecked by the launch itself.
+        'unit' => array_merge($unit, $fields, [
+            'status' => VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED,
+            'precheck_power_state' => $marker['precheck_power_state'],
+        ]),
     ];
 }
 
@@ -245,6 +250,15 @@ function deploy_worker_create_launch_unit(
                 VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
                 'The launch of this VM produced no usable marker: ' . (string) $result['protocol_error']
             );
+        }
+        if ($marker['event'] === VIRTUSPHERE_CREATE_EVENT_REJECTED
+            && $marker['error_code'] === VIRTUSPHERE_CREATE_ERROR_VM_NOT_POWERED_OFF
+            && (int) ($unit['existed_before'] ?? 0) === 1
+        ) {
+            // DF-E1: the existing own VM was switched on since its preparation
+            // (or the unit resumed without the prepared power state). The launch
+            // refused before the module ran; the unit is verified, unchanged.
+            return deploy_worker_create_conclude_unchanged($channel, $fence, $unit, null);
         }
         if ($marker['event'] === VIRTUSPHERE_CREATE_EVENT_REJECTED) {
             // Refused before the module ran, so no async job exists and the

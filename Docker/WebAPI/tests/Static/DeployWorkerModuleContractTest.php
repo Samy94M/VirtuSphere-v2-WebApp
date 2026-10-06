@@ -97,6 +97,11 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_create_launch_unit',
         'deploy_worker_create_verify_skip',
         'deploy_worker_create_terminate_unit',
+        // K11 (DF-E1, FC2-02): an existing own VM that is not off is verified
+        // and concluded unchanged; a refused success keeps the live identity.
+        'deploy_worker_create_prepared_needs_launch',
+        'deploy_worker_create_conclude_unchanged',
+        'deploy_worker_create_record_refused_success',
         'deploy_worker_create_poll_unit',
         'deploy_worker_create_finish_unit',
         'deploy_worker_create_control_call',
