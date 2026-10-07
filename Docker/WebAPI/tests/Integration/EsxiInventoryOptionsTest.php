@@ -164,8 +164,8 @@ final class EsxiInventoryOptionsTest extends TestCase
         $this->datastores($b, [self::PREFIX . 'ds-shared' => 100]);
         $this->networks($a, [self::PREFIX . 'vlan-known']);
         $this->networks($b, [self::PREFIX . 'vlan-known']);
-        $this->recordSuccess($a);
-        $this->recordSuccess($b);
+        $this->recordQualifiedSuccess($a);
+        $this->recordQualifiedSuccess($b);
 
         $missionId = repo_create_mission($this->db, [
             'mission_name' => self::PREFIX . 'm',
@@ -175,9 +175,19 @@ final class EsxiInventoryOptionsTest extends TestCase
             'domain' => 'dc.example.com',
         ]);
 
-        $perHost = esxi_inventory_mission_missing_by_credential($this->db, $missionId);
+        $summaries = esxi_inventory_summaries($this->db);
+        $intervalHours = esxi_inventory_interval_hours($this->db);
+        $now = time();
+        $report = esxi_inventory_deviation_report($this->db, $summaries, $intervalHours, $now);
+        $perHost = esxi_inventory_current_mission_missing_by_credential(
+            $this->db,
+            $missionId,
+            $summaries,
+            $intervalHours,
+            $now
+        );
         $union = [];
-        foreach (esxi_inventory_mission_deviations($this->db, true) as $entry) {
+        foreach (esxi_inventory_current_deviation_rows($report) as $entry) {
             if ((int) $entry['mission_id'] === $missionId) {
                 foreach ($entry['issues'] as $issue) {
                     $union[] = (string) $issue['value'];
@@ -195,6 +205,53 @@ final class EsxiInventoryOptionsTest extends TestCase
         self::assertArrayNotHasKey($a, $perHost, 'host A has it, so it has nothing to warn about');
         self::assertSame([self::PREFIX . 'vlan-nowhere'], $union, 'the VLAN exists nowhere, so only the union warning names it');
         self::assertSame([], array_intersect($union, $missingOnB), 'the two boxes must never name the same value');
+    }
+
+    public function testHistoricalEvidenceRemainsDiagnosticButDoesNotDriveCurrentWarnings(): void
+    {
+        $a = $this->credential('historical-a', '10.0.5.21');
+        $b = $this->credential('historical-b', '10.0.5.22');
+        foreach ([$a, $b] as $credentialId) {
+            $this->datastores($credentialId, [self::PREFIX . 'ds-known' => 100]);
+            $this->networks($credentialId, [self::PREFIX . 'vlan-known']);
+            repo_esxi_inventory_replace_kind(
+                $this->db,
+                $credentialId,
+                VIRTUSPHERE_INVENTORY_KIND_DATACENTER,
+                repo_esxi_inventory_name_items([self::PREFIX . 'dc-known'])
+            );
+            $this->recordQualifiedSuccess($credentialId);
+        }
+
+        $missionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'historical',
+            'wds_vlan' => self::PREFIX . 'vlan-missing',
+            'hypervisor_datastorage' => self::PREFIX . 'ds-missing',
+            'hypervisor_datacenter' => self::PREFIX . 'dc-known',
+            'domain' => 'dc.example.com',
+        ]);
+        // A retained successful cache becomes historical after its latest
+        // observation fails; it cannot prove a current absence.
+        repo_esxi_inventory_record_failed_observations($this->db, $b, VIRTUSPHERE_INVENTORY_ERROR_WORKER, null);
+
+        $summaries = esxi_inventory_summaries($this->db);
+        $intervalHours = esxi_inventory_interval_hours($this->db);
+        $now = time();
+        $report = esxi_inventory_deviation_report($this->db, $summaries, $intervalHours, $now);
+
+        self::assertTrue($report['kinds'][VIRTUSPHERE_INVENTORY_KIND_DATASTORE]['historical']);
+        self::assertNotSame([], array_filter(
+            $report['deviations'],
+            static fn (array $entry): bool => (int) $entry['mission_id'] === $missionId
+        ), 'the System status report retains the qualified historical diagnostic');
+        self::assertArrayNotHasKey($missionId, esxi_inventory_current_deviation_mission_ids($report));
+        self::assertSame([], esxi_inventory_current_mission_missing_by_credential(
+            $this->db,
+            $missionId,
+            $summaries,
+            $intervalHours,
+            $now
+        ), 'neither side of a host comparison has enough current peer evidence');
     }
 
     /** @param array<int, array<string, mixed>> $buckets */
@@ -265,6 +322,16 @@ final class EsxiInventoryOptionsTest extends TestCase
     private function recordSuccess(int $credentialId): void
     {
         repo_esxi_inventory_record_success($this->db, $credentialId);
+    }
+
+    private function recordQualifiedSuccess(int $credentialId): void
+    {
+        $this->recordSuccess($credentialId);
+        repo_esxi_inventory_touch_kind_freshness($this->db, $credentialId, [
+            VIRTUSPHERE_INVENTORY_KIND_DATACENTER,
+            VIRTUSPHERE_INVENTORY_KIND_DATASTORE,
+            VIRTUSPHERE_INVENTORY_KIND_NETWORK,
+        ]);
     }
 
     private function cleanup(): void

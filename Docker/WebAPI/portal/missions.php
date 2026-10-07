@@ -222,9 +222,15 @@ if ($scheduledResult !== false) {
     }
 }
 
-// Inventory-deviation badge (E4.3): missions whose datacenter/datastore/VLAN is
-// not in the current ESXi inventory.
-$deviatingMissions = $isTemplateView ? [] : esxi_inventory_deviating_mission_ids($connection);
+// Inventory-deviation badge: current, evidence-qualified comparisons only.
+$deviationSummaries = esxi_inventory_summaries($connection);
+$deviationReport = esxi_inventory_deviation_report(
+    $connection,
+    $deviationSummaries,
+    esxi_inventory_interval_hours($connection),
+    time()
+);
+$deviatingMissions = $isTemplateView ? [] : esxi_inventory_current_deviation_mission_ids($deviationReport);
 
 // Import dry-run preview (A2/A4): if a valid, non-expired hand-off exists in the
 // session, recompute the report against the live DB and render the confirm step.

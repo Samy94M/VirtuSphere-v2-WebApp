@@ -15,6 +15,7 @@ return [
     'ipv4' => ':field must be a valid IPv4 address.',
     'ipv4_or_cidr' => ':field must be an IPv4 subnet mask or CIDR mask from /0 to /30.',
     'mac' => ':field must be a valid MAC address.',
+    'mac_duplicate' => ':field is already assigned to another interface.',
     'enum' => ':field has an invalid value.',
     'netbios_hostname' => ':field must be a Windows computer name: at most 15 characters, only letters, numbers and internal hyphens, no dots.',
     'name_taken' => ':field already exists.',

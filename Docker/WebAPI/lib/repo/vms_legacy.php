@@ -98,13 +98,42 @@ function vmListToCreate($missionId, $vmList, $mysqli)
     if (empty($vmList) || !is_iterable($vmList)) {
         return 0;
     }
+    $vmRows = is_array($vmList) ? array_values($vmList) : iterator_to_array($vmList, false);
 
     // Legacy wire contract: any failure rolls the whole batch back and answers
     // with 0, never with an exception (the desktop client checks the count).
     try {
-        return repo_transaction($mysqli, static function () use ($mysqli, $missionId, $vmList): int {
+        return repo_transaction($mysqli, static function () use ($mysqli, $missionId, $vmRows): int {
+            $missionIds = [];
+            $hasMacAssignments = false;
+            foreach ($vmRows as $vm) {
+                $vmMissionId = repo_id(repo_object_get($vm, 'mission_id', $missionId));
+                if ($vmMissionId === 0) {
+                    throw new RuntimeException('VM create skipped: missing mission_id.');
+                }
+                $missionIds[$vmMissionId] = true;
+                $hasMacAssignments = $hasMacAssignments
+                    || repo_vm_network_has_new_mac_assignments(repo_object_get($vm, 'interfaces', []), false);
+            }
+            if ($hasMacAssignments) {
+                // A legacy batch can name more than one mission. Acquire every
+                // parent and job lock before the shared Runtime fence so no VM
+                // lock from an earlier row can invert the global lock order.
+                $missionIds = array_map('intval', array_keys($missionIds));
+                sort($missionIds, SORT_NUMERIC);
+                foreach ($missionIds as $macMissionId) {
+                    if (repo_deploy_lock_mission($mysqli, $macMissionId) === null) {
+                        throw new RuntimeException('VM create skipped: mission not found.');
+                    }
+                }
+                foreach ($missionIds as $macMissionId) {
+                    repo_vm_network_lock_active_jobs_for_mac_assignment($mysqli, $macMissionId);
+                }
+                repo_vm_network_lock_mac_assignments($mysqli);
+            }
+
             $successCount = 0;
-            foreach ($vmList as $vm) {
+            foreach ($vmRows as $vm) {
                 $vmMissionId = repo_id(repo_object_get($vm, 'mission_id', $missionId));
                 if ($vmMissionId === 0) {
                     throw new RuntimeException('VM create skipped: missing mission_id.');
@@ -141,12 +170,50 @@ function vmListToUpdate($vmList, $connection)
     if (empty($vmList) || !is_iterable($vmList)) {
         return 0;
     }
+    $vmRows = is_array($vmList) ? array_values($vmList) : iterator_to_array($vmList, false);
 
     // Legacy wire contract: batch-or-nothing, failures answer 0 (see create).
     try {
-        return repo_transaction($connection, static function () use ($connection, $vmList): int {
+        return repo_transaction($connection, static function () use ($connection, $vmRows): int {
+            $hasMacAssignments = false;
+            $missionByVm = [];
+            foreach ($vmRows as $vm) {
+                $vmId = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
+                if ($vmId <= 0) {
+                    continue;
+                }
+                $currentVm = repo_fetch_one($connection, 'SELECT mission_id FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]);
+                if ($currentVm === null) {
+                    throw new RuntimeException('VM update skipped: VM not found.');
+                }
+                $missionByVm[$vmId] = (int) $currentVm['mission_id'];
+                $hasMacAssignments = $hasMacAssignments
+                    || (repo_object_has($vm, 'interfaces')
+                        && repo_vm_network_has_new_mac_assignments(repo_object_get($vm, 'interfaces', []), true));
+            }
+            if ($hasMacAssignments) {
+                // Since this is a batch, acquire all involved Mission and Job
+                // locks before Runtime and before the per-row VM locks below.
+                $missionIds = array_values(array_unique(array_map('intval', array_values($missionByVm))));
+                sort($missionIds, SORT_NUMERIC);
+                foreach ($missionIds as $missionId) {
+                    if (repo_deploy_lock_mission($connection, $missionId) === null) {
+                        throw new RuntimeException('VM update skipped: mission not found.');
+                    }
+                }
+                foreach ($missionByVm as $vmId => $expectedMissionId) {
+                    if ((int) (repo_scalar($connection, 'SELECT mission_id FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$vmId]) ?? 0) !== $expectedMissionId) {
+                        throw new RuntimeException('VM update skipped: VM changed mission or was removed.');
+                    }
+                }
+                foreach ($missionByVm as $vmId => $missionId) {
+                    repo_vm_network_assert_scope_idle($connection, $missionId, [(int) $vmId]);
+                }
+                repo_vm_network_lock_mac_assignments($connection);
+            }
+
             $successCount = 0;
-            foreach ($vmList as $vm) {
+            foreach ($vmRows as $vm) {
                 $vmId = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
                 if ($vmId === 0) {
                     throw new RuntimeException('VM update skipped: missing Id.');

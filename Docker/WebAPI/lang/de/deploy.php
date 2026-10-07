@@ -301,7 +301,7 @@ return [
     'identity_inventory_age_unknown' => 'Das Alter der Inventarbeobachtung ist nicht belegt. Inventar aktualisieren; die Identitätssperre bleibt bestehen.',
     'inventory_deviation_warn' => 'Datacenter, Datastore oder VLAN dieser Mission kommt nicht im aktuellen ESXi-Inventar vor. Der Deploy wird nicht blockiert; bitte die Werte prüfen.',
     'inventory_deviation_link' => 'Inventar im Systemstatus ansehen',
-    'host_missing_warn' => 'Nicht im Inventar des gewählten Hosts ":host", aber auf anderen Hosts vorhanden: :values. Der Deploy wird nicht blockiert; bitte die Host-Wahl prüfen.',
+    'host_missing_warn' => 'Nicht im aktuellen, qualifizierten Inventar des gewählten Hosts ":host", aber auf einem anderen aktuellen Host vorhanden: :values. Der Deploy wird nicht blockiert; bitte die Host-Wahl prüfen.',
     'err_datacenter_unresolved' => 'Datacenter nicht bestimmbar.',
     'err_datacenter_no_inventory' => 'Die Mission hat kein Datacenter, und für den gewählten ESXi-Zugang liegt noch kein Inventar vor. Bitte im Systemstatus aktualisieren oder das Datacenter in der Mission setzen.',
     'err_datacenter_ambiguous' => 'Die Mission hat kein Datacenter, und der gewählte ESXi-Zugang meldet mehrere: :names. Bitte eines in der Mission auswählen.',

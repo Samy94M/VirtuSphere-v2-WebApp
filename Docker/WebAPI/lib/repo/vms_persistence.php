@@ -30,6 +30,7 @@ function repo_replace_interfaces(mysqli $db, int $vmId, mixed $interfaces, bool 
         $effective['mac'] = repo_interface_mac_value($db, $vmId, $interfaceId, $interface, $preserveExistingMacs);
         $effectiveInterfaces[] = $effective;
     }
+    repo_vm_network_assert_new_macs_unique($db, $vmId, $effectiveInterfaces, $preserveExistingMacs);
     repo_vm_network_assert_bundle_write_allowed($db, $missionId, $vmId, (string) $vm['vm_name'], $effectiveInterfaces);
 
     $seenIds = [];
@@ -69,7 +70,10 @@ function repo_interface_mac_value(mysqli $db, int $vmId, int $interfaceId, objec
         // The MAC callback is the authority for an existing interface. Portal,
         // legacy and transfer writers may round-trip a stale or forged value,
         // but the effective bundle and its fingerprint must keep the stored MAC.
-        $stmt = $db->prepare('SELECT mac FROM deploy_interfaces WHERE id = ? AND vm_id = ?');
+        // A callback may have committed a newer address while this transaction
+        // waited on the VM row. A locking read sees that current value instead
+        // of replaying an older REPEATABLE READ snapshot over callback state.
+        $stmt = $db->prepare('SELECT mac FROM deploy_interfaces WHERE id = ? AND vm_id = ? FOR UPDATE');
         $stmt->bind_param('ii', $interfaceId, $vmId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
@@ -226,6 +230,10 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
 
         if ($vmId > 0) {
             repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
+            if (repo_vm_network_has_new_mac_assignments($interfaces, true)) {
+                // Keep the shared callback/editor fence ahead of the VM row.
+                repo_vm_network_lock_mac_assignments($db);
+            }
             $current = repo_fetch_one($db, 'SELECT id, edit_version, vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE', 'ii', [$vmId, $missionId]);
             if ($current === null) {
                 throw new RuntimeException('VM not found.');
@@ -261,6 +269,10 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
             repo_replace_packages($db, $vmId, $packages);
             repo_advance_vm_edit_version($db, $vmId);
         } else {
+            if (repo_vm_network_has_new_mac_assignments($interfaces, false)) {
+                repo_vm_network_lock_active_jobs_for_mac_assignment($db, $missionId);
+                repo_vm_network_lock_mac_assignments($db);
+            }
             $values['mission_id'] = $missionId;
             $values['vm_status'] = VIRTUSPHERE_STATUS_REGISTERED;
             $values['lifecycle_state'] = VIRTUSPHERE_LIFECYCLE_READY;

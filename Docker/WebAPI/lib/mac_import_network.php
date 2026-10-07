@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/esxi_object_names.php';
 require_once __DIR__ . '/mac.php';
 require_once __DIR__ . '/mac_import_constants.php';
+require_once __DIR__ . '/vm_network_mac_assignments.php';
 
 function mac_import_exact_name_key(string $name): string
 {
@@ -164,18 +165,9 @@ function mac_import_validate_duplicate_macs(mysqli $db, array &$vmPlans): void
     if ($planned === []) {
         return;
     }
-    $macs = array_keys($planned);
-    $lookup = $db->prepare(
-        "SELECT id, vm_id, mac FROM deploy_interfaces WHERE mac IN ("
-        . implode(',', array_fill(0, count($macs), '?')) . ") AND mac <> '' ORDER BY mac, id FOR UPDATE"
-    );
-    $lookup->bind_param(str_repeat('s', count($macs)), ...$macs);
-    $lookup->execute();
-    $existingByMac = [];
-    foreach ($lookup->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
-        $normalized = virtusphere_normalize_mac((string) $row['mac']) ?? (string) $row['mac'];
-        $existingByMac[$normalized][] = $row;
-    }
+    // Callback and editor writes share one normalized current-read query. The
+    // runtime singleton is already locked by db_importMAC.php at this point.
+    $existingByMac = virtusphere_mac_assignment_existing_owners($db, array_keys($planned));
     foreach ($planned as $mac => $owners) {
         $existing = $existingByMac[$mac] ?? [];
         if (count($existing) > 1) {

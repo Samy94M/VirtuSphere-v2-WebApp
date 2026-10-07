@@ -16,7 +16,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`; Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`. MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet; die Staffelung und die Inventaraktualisierung verwenden dagegen die festen Listen `VIRTUSPHERE_DEPLOY_STAGGER_MODES` und `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES`. Der Worker erkennt die Create-Einheit weiterhin mit dem Modusliteral `create`. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 ## Einreihen
 
@@ -71,7 +71,7 @@ flowchart TD
   W -->|ja| WX["Auftrag failed (configuration_blocked); nichts hochgeladen, VM-Zustände unverändert"]
   W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
   D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
-  H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente; VM-Zustände unverändert"]
+  H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
   H --> M["VMs des Auftrags auf deploying setzen; bei Modi mit MAC-Ergebnis VMs mit ResourceID auslassen"]
@@ -94,15 +94,15 @@ flowchart TD
   R -->|ja, nach Create| RS["serverlist.yml mit den soeben gebundenen UUIDs neu schreiben und hochladen"]
   RS --> ST
   R -->|ja| ST["Nächstes Playbook: Schrittgrenze prüfen (eigener Auftrag, kein Abbruch), dann ansible-playbook ausführen"]
-  ST -->|Exitcode ungleich 0| STX["Auftrag failed mit Name des Schritts; alle VMs des Umfangs failed/failed, außer VMs mit erfolgreichem MAC-Ergebnis"]
-  ST -->|Abbruch angefordert| CX["Auftrag cancelled; VMs in deploying werden failed"]
+  ST -->|Exitcode ungleich 0| STX["Auftrag failed (terminal_reason execution_failed) mit Name des Schritts; alle VMs des Umfangs failed/failed, außer VMs mit erfolgreichem MAC-Ergebnis"]
+  ST -->|Abbruch angefordert| CX["Auftrag cancelled (terminal_reason operator_cancelled); VMs in deploying werden failed"]
   ST -->|nächster Schritt| ST
   ST -->|letzter Schritt fertig| E
   R -->|nein| E{"Modus erwartet MAC-Ergebnis?"}
-  E -->|nein| EO["VM-Zustand zurücksetzen, Auftrag succeeded"]
+  E -->|nein| EO["VM-Zustand zurücksetzen, Auftrag succeeded (terminal_reason completed)"]
   E -->|ja| EM{"MAC-Ergebnis des Rückrufs?"}
   EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed; alle VMs des Umfangs failed/failed"]
-  EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial"]
+  EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial (terminal_reason partial_result)"]
   EM -->|vollständig| EMS["Auftrag succeeded; gebundene VMs behalten ihren Zustand ohne neuen MECM-Pickup, fehlende MACs werden nur übernommen"]
   EO --> Z
   EMP --> Z
@@ -158,7 +158,7 @@ flowchart TD
   LA -->|rejected: vm_not_powered_off| UV
   LA -->|rejected, anderer Code| LF["failed"]
   LA -->|Hostidentität vor Anmeldung abgelehnt| HF
-  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU
+  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU["uncertain (launch_unconfirmed)"]
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
   JD -->|nein| LU["uncertain"]
   JD -->|Hostidentität der Suchverbindung abgelehnt| HU["uncertain (host_identity_rejected), Ausgang bleibt unbekannt"]
@@ -192,6 +192,18 @@ flowchart TD
 ```
 
 Trifft ein neuer Auftrag auf eine vorhandene eigene VM, wird sie nur ausgeschaltet angeglichen (DF-E1). Ist sie eingeschaltet, angehalten oder ihr Zustand unbekannt, endet die Einheit nach Prepare als `succeeded` mit `unchanged`, ohne Launch; das Protokoll nennt die nicht angeglichene VM. Launch prüft den Zustand erneut, weil die VM dazwischen eingeschaltet werden kann. Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
+
+## Diagrammausnahmen für geschlossene Werte
+
+Der Vokabular-Wächter leitet Werte aus den Code-Listen ab. Ein Wert ohne Knoten braucht hier eine begründete Ausnahme; ein neuer Wert kann nicht durch diese Liste stillschweigend passieren.
+
+| Vokabular | Wert | Ausnahmegrund |
+|---|---|---|
+| Create-Fehler | `ownership_lost` | Das Token steht im geschlossenen Registry-Array, hat im Produktionscode aber derzeit keinen Writer; bei Einführung eines Writers gehört es in den Worker- oder Create-Fluss. |
+| Create-Fehler | `operator_released` | Dieses Token entsteht nur durch die explizite Operatorfreigabe einer ungeklärten Create-Einheit; die Freigabe liegt in der Wiederholungs-/Verwaltungsaktion, nicht im Worker-Ablauf. |
+| Terminalgrund | `stale_heartbeat` | Der Wartungsdienst beendet veraltete Aufträge; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
+| Terminalgrund | `cancel_converged` | Der Wartungsdienst konvergiert eine bereits angeforderte Abbrechung; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
+| Terminalgrund | `ownership_lost` | Das Token steht im geschlossenen Terminalgrund-Array, hat im Produktionscode derzeit keinen Writer; ein neuer Writer muss den passenden Ablauf ergänzen. |
 
 ## Playbooks
 

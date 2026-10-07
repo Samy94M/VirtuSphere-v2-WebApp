@@ -22,6 +22,8 @@ final class VmNetworkContractIntegrationTest extends TestCase
     private int $userId;
     private int $esxiId;
     private int $ansibleId;
+    /** @var list<int> */
+    private array $otherMissionIds = [];
 
     protected function setUp(): void
     {
@@ -66,8 +68,10 @@ final class VmNetworkContractIntegrationTest extends TestCase
             return;
         }
         $stmt = $this->db->prepare('DELETE FROM deploy_missions WHERE id = ?');
-        $stmt->bind_param('i', $this->missionId);
-        $stmt->execute();
+        foreach (array_merge($this->otherMissionIds, [$this->missionId]) as $missionId) {
+            $stmt->bind_param('i', $missionId);
+            $stmt->execute();
+        }
         foreach ([$this->esxiId, $this->ansibleId] as $credentialId) {
             $stmt = $this->db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
             $stmt->bind_param('i', $credentialId);
@@ -177,6 +181,89 @@ final class VmNetworkContractIntegrationTest extends TestCase
             repo_scalar($this->db, 'SELECT mac FROM deploy_interfaces WHERE vm_id = ? LIMIT 1', 'i', [$this->vmId]),
             'an interface writer must preserve the callback-owned stored MAC even when its input carries another valid MAC'
         );
+    }
+
+    public function testRuntimeFenceSerializesDifferentMissionsAndLockingReadSeesCommittedMac(): void
+    {
+        self::assertNotNull($this->second);
+        $otherMissionId = $this->insertOtherMission();
+        $mac = sprintf('02:50:56:%02x:%02x:%02x', ...array_values(unpack('C*', random_bytes(3))));
+
+        // Editor A owns Mission A -> Job A -> Runtime. Editor B owns another
+        // mission and establishes an older REPEATABLE READ snapshot before it
+        // waits at the same Runtime fence. Once A commits, B's current/locking
+        // MAC candidate read must see A's assignment despite that snapshot.
+        $this->db->begin_transaction();
+        $this->second->begin_transaction();
+        $aOpen = true;
+        $bOpen = true;
+        try {
+            repo_fetch_one($this->db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$this->missionId]);
+            repo_vm_network_assert_scope_idle($this->db, $this->missionId, []);
+            repo_fetch_one($this->db, 'SELECT id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+
+            repo_fetch_one($this->second, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$otherMissionId]);
+            repo_vm_network_assert_scope_idle($this->second, $otherMissionId, []);
+            repo_scalar($this->second, 'SELECT COUNT(*) FROM deploy_interfaces');
+            self::assertTrue($this->second->query('SELECT id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE', MYSQLI_ASYNC));
+
+            $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
+            $empty = '';
+            $vlan = 'APP';
+            $stmt->bind_param('isssss', $this->vmId, $empty, $empty, $empty, $vlan, $mac);
+            $stmt->execute();
+            $this->db->commit();
+            $aOpen = false;
+
+            $read = [$this->second];
+            $errors = $connectErrors = [];
+            self::assertSame(1, mysqli_poll($read, $errors, $connectErrors, 5), 'the second editor resumes after Runtime commits');
+            $lockResult = $this->second->reap_async_query();
+            if ($lockResult instanceof mysqli_result) {
+                $lockResult->free();
+            }
+            $stmt = $this->second->prepare('SELECT id, vm_id, mac FROM deploy_interfaces WHERE mac = ? FOR UPDATE');
+            $stmt->bind_param('s', $mac);
+            $stmt->execute();
+            $currentOwner = $stmt->get_result()->fetch_assoc();
+            self::assertNotFalse($currentOwner, 'the locking/current read sees the assignment committed after B established its snapshot');
+            self::assertSame($this->vmId, (int) $currentOwner['vm_id']);
+        } catch (Throwable $exception) {
+            if ($aOpen) {
+                $this->db->rollback();
+            }
+            if ($bOpen) {
+                $this->second->rollback();
+            }
+            throw $exception;
+        }
+        $this->second->rollback();
+    }
+
+    public function testNewInterfaceAndNewVmRejectMacOwnedByAnotherMission(): void
+    {
+        $otherMissionId = $this->insertOtherMission();
+        $ownerVmId = $this->insertVmInMission($otherMissionId, 'OTHER1');
+        $mac = '02:50:56:ab:cd:ef';
+        repo_execute($this->db, 'UPDATE deploy_interfaces SET mac = ? WHERE vm_id = ?', 'si', [$mac, $ownerVmId]);
+
+        foreach ([[$this->vmId, true], [0, false]] as [$targetVmId, $preserveExistingMacs]) {
+            try {
+                repo_transaction($this->db, function () use ($targetVmId, $preserveExistingMacs, $mac): void {
+                    repo_deploy_lock_mission($this->db, $this->missionId);
+                    repo_vm_network_assert_scope_idle($this->db, $this->missionId, $targetVmId > 0 ? [$targetVmId] : []);
+                    repo_vm_network_assert_new_macs_unique(
+                        $this->db,
+                        $targetVmId,
+                        [['id' => 0, 'mac' => $mac]],
+                        $preserveExistingMacs
+                    );
+                });
+                self::fail($targetVmId > 0 ? 'a new interface cannot reuse another mission’s MAC' : 'a new VM cannot reuse another mission’s MAC');
+            } catch (ValidationException $exception) {
+                self::assertSame(['interfaces.0.mac'], array_keys($exception->errors()));
+            }
+        }
     }
 
     public function testRunningScopeRejectsWriterRaceBeforeItsNetworkRowsChange(): void
@@ -404,6 +491,38 @@ final class VmNetworkContractIntegrationTest extends TestCase
         $stmt->execute();
         $vmId = (int) $this->db->insert_id;
         $empty = '';
+        $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssss', $vmId, $empty, $empty, $empty, $vlan, $empty);
+        $stmt->execute();
+        return $vmId;
+    }
+
+    private function insertOtherMission(): int
+    {
+        $name = $this->prefix . '_other';
+        $active = 'active';
+        $dc = 'DC1';
+        $ds = 'DS1';
+        $wds = 'WDS';
+        $stmt = $this->db->prepare(
+            'INSERT INTO deploy_missions (mission_name, mission_status, hypervisor_datacenter, hypervisor_datastorage, wds_vlan) VALUES (?, ?, ?, ?, ?)'
+        );
+        $stmt->bind_param('sssss', $name, $active, $dc, $ds, $wds);
+        $stmt->execute();
+        $missionId = (int) $this->db->insert_id;
+        $this->otherMissionIds[] = $missionId;
+        return $missionId;
+    }
+
+    private function insertVmInMission(int $missionId, string $suffix): int
+    {
+        $name = $this->prefix . '_' . $suffix;
+        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
+        $stmt->bind_param('iss', $missionId, $name, $name);
+        $stmt->execute();
+        $vmId = (int) $this->db->insert_id;
+        $empty = '';
+        $vlan = 'WDS';
         $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
         $stmt->bind_param('isssss', $vmId, $empty, $empty, $empty, $vlan, $empty);
         $stmt->execute();

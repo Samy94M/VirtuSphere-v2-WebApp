@@ -30,13 +30,20 @@ require_once dirname(__DIR__, 2) . '/lib/status.php';
 final class StatusWriterContractTest extends TestCase
 {
     /**
-     * stage => [file that writes it, the lifecycle state it writes]. One writer
-     * per stage: two would make the stage meaningless as a diagnosis.
+     * stage => list of [file that writes it, lifecycle state]. Stage 3 has two
+     * explicit writers: the MAC callback and the operator's MECM-ID reset.
      */
     private const WRITERS = [
-        VIRTUSPHERE_STATUS_DEPLOYED => ['db_importMAC.php', VIRTUSPHERE_LIFECYCLE_DEPLOYED],
-        VIRTUSPHERE_STATUS_OS_INSTALLING => ['mecm_updateid.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING],
-        VIRTUSPHERE_STATUS_OS_INSTALLED => ['mecm_client_ack.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLED],
+        VIRTUSPHERE_STATUS_DEPLOYED => [
+            ['db_importMAC.php', VIRTUSPHERE_LIFECYCLE_DEPLOYED],
+            ['lib/repo/vms_mecm_reset.php', VIRTUSPHERE_LIFECYCLE_DEPLOYED],
+        ],
+        VIRTUSPHERE_STATUS_OS_INSTALLING => [
+            ['mecm_updateid.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING],
+        ],
+        VIRTUSPHERE_STATUS_OS_INSTALLED => [
+            ['mecm_client_ack.php', VIRTUSPHERE_LIFECYCLE_OS_INSTALLED],
+        ],
     ];
 
     /**
@@ -86,8 +93,10 @@ final class StatusWriterContractTest extends TestCase
     /** @return iterable<string, array{0:string, 1:string, 2:string}> */
     public static function writers(): iterable
     {
-        foreach (self::WRITERS as $stage => [$file, $lifecycle]) {
-            yield $stage . ' <- ' . $file => [$stage, $file, $lifecycle];
+        foreach (self::WRITERS as $stage => $writers) {
+            foreach ($writers as [$file, $lifecycle]) {
+                yield $stage . ' <- ' . $file => [$stage, $file, $lifecycle];
+            }
         }
     }
 

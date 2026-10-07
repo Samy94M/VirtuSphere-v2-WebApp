@@ -301,7 +301,7 @@ return [
     'identity_inventory_age_unknown' => 'The age of the inventory observation is unconfirmed. Refresh inventory; the identity block remains.',
     'inventory_deviation_warn' => 'The datacenter, datastore or VLAN of this mission is not in the current ESXi inventory. The deploy is not blocked; please check the values.',
     'inventory_deviation_link' => 'View the inventory under System status',
-    'host_missing_warn' => 'Not in the inventory of the selected host ":host" but present on other hosts: :values. The deploy is not blocked; please check the host choice.',
+    'host_missing_warn' => 'Not in the selected host ":host" current, qualified inventory, but present on another current host: :values. The deploy is not blocked; please check the host choice.',
     'err_datacenter_unresolved' => 'Datacenter cannot be determined.',
     'err_datacenter_no_inventory' => 'The mission has no datacenter and the selected ESXi credential has no inventory yet. Refresh it under System status or set the datacenter on the mission.',
     'err_datacenter_ambiguous' => 'The mission has no datacenter and the selected ESXi credential reports several: :names. Please pick one on the mission.',

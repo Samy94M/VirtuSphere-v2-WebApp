@@ -110,6 +110,8 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(virtusphere_normalize_mac($this->mac('b0')), $this->interfaceMac($vmB, 'WDS'));
         self::assertSame(['ready', 'not_ready', 0], $this->vmState($vmA));
         self::assertSame(['deployed', 'pending', 1], $this->vmState($vmB));
+        self::assertSame(1, $this->transferGeneration($vmB), 'the successful callback queues one generation with updated=1');
+        self::assertSame(0, $this->transferGeneration($vmA), 'failed VMs do not queue a MECM transfer');
 
         $result = $this->jobResult($jobId);
         self::assertSame(2, $result['version']);
@@ -227,6 +229,7 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(200, $secondStatus, $secondBody);
         self::assertSame('success', json_decode($secondBody, true, 512, JSON_THROW_ON_ERROR)['outcome']);
         self::assertSame(1, $this->statusEventCount($vmId, 'ansible mac import'));
+        self::assertSame(1, $this->transferGeneration($vmId), 'an identical callback replay does not queue twice');
         self::assertSame('success', $this->jobResult($jobId)['outcome']);
 
         $conflicting = $payload;
@@ -565,6 +568,15 @@ final class MacImportCallbackTest extends TestCase
         $row = $stmt->get_result()->fetch_assoc();
 
         return [(string) $row['lifecycle_state'], (string) $row['mecm_sync_state'], (int) $row['updated']];
+    }
+
+    private function transferGeneration(int $vmId): int
+    {
+        $stmt = $this->db->prepare('SELECT mecm_transfer_generation FROM deploy_vms WHERE id = ?');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+
+        return (int) ($stmt->get_result()->fetch_assoc()['mecm_transfer_generation'] ?? -1);
     }
 
     private function rawJobResult(int $jobId): ?string

@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/defaults.php';
 require_once dirname(__DIR__, 2) . '/lib/ansible_command_modes.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_create_constants.php';
 
 /**
  * docs/operations/deploy-flows.md draws the deploy modes and every Ansible
@@ -62,6 +63,78 @@ final class DeployFlowsDocContractTest extends TestCase
         $stems = self::ansibleStems(dirname(__DIR__, 4) . '/Ansible');
 
         self::assertSame([], self::playbookSectionProblems($stems, $doc));
+    }
+
+    public function testModeProseSeparatesPlaybookDerivedFactsFromFixedModeLists(): void
+    {
+        $doc = self::loadDoc();
+        self::assertStringContainsString('MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet', $doc);
+        self::assertStringContainsString('VIRTUSPHERE_DEPLOY_STAGGER_MODES', $doc);
+        self::assertStringContainsString('VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES', $doc);
+        self::assertStringContainsString('Modusliteral `create`', $doc);
+        self::assertStringNotContainsString('Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet', $doc);
+    }
+
+    public function testClosedFlowchartVocabularyIsCoveredOrHasAReasonedException(): void
+    {
+        $root = dirname(__DIR__, 4);
+        $deploy = str_replace("\r\n", "\n", (string) file_get_contents($root . '/docs/operations/deploy-flows.md'));
+        $system = str_replace("\r\n", "\n", (string) file_get_contents($root . '/docs/operations/system-status-checks.md'));
+        self::assertNotSame('', $deploy);
+        self::assertNotSame('', $system);
+
+        $createChunk = self::between($deploy, '## Create je VM', '## Diagrammausnahmen für geschlossene Werte')
+            . self::between($deploy, '## Playbooks', '### powercycleVMs');
+        $workerChunk = self::between($deploy, '## Worker: ein Auftrag', '## Create je VM');
+        $exceptions = self::documentedVocabularyExceptions($deploy);
+        self::assertSame([], self::closedVocabularyProblems(
+            VIRTUSPHERE_CREATE_ERROR_CODES,
+            self::mermaidBlocks($createChunk),
+            $exceptions['Create-Fehler'] ?? [],
+            'Create-Fehler'
+        ));
+        self::assertSame([], self::closedVocabularyProblems(
+            array_keys(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES),
+            self::mermaidBlocks($workerChunk),
+            $exceptions['Terminalgrund'] ?? [],
+            'Terminalgrund'
+        ));
+
+        $systemExceptions = self::documentedVocabularyExceptions($system);
+        self::assertSame([], self::closedVocabularyProblems(
+            VIRTUSPHERE_ESXI_AMPEL_STATES,
+            self::mermaidBlocks(self::sectionBody($system, 'ESXi-Inventar')),
+            $systemExceptions['Ampelzustand'] ?? [],
+            'ESXi-Ampelzustand'
+        ));
+        self::assertSame([], self::closedVocabularyProblems(
+            VIRTUSPHERE_ANSIBLE_AMPEL_STATES,
+            self::mermaidBlocks(self::sectionBody($system, 'Ansible-Test')),
+            $systemExceptions['Ampelzustand'] ?? [],
+            'Ansible-Ampelzustand'
+        ));
+        $heartbeatCharts = self::mermaidBlocks(
+            self::sectionBody($system, 'MECM') . self::sectionBody($system, 'Interne Dienste')
+        );
+        self::assertSame([], self::closedVocabularyProblems(
+            VIRTUSPHERE_HEARTBEAT_STATES,
+            $heartbeatCharts,
+            $systemExceptions['Ampelzustand'] ?? [],
+            'Heartbeat-Ampelzustand'
+        ));
+    }
+
+    public function testClosedVocabularyGuardHasARealNegativeAndRejectsStaleExceptions(): void
+    {
+        self::assertSame(
+            ['Create-Fehler `brand_new_code` is missing from its flowchart and exception list.'],
+            self::closedVocabularyProblems(['brand_new_code'], "flowchart TD\n A --> B[known_code]", [], 'Create-Fehler')
+        );
+        self::assertSame(
+            ['Create-Fehler exception `removed_code` is not in the derived closed list.'],
+            self::closedVocabularyProblems([], "flowchart TD\n A --> B", ['removed_code' => 'reason'], 'Create-Fehler')
+        );
+        self::assertNotSame([], self::closedVocabularyProblems([], '', [], 'Create-Fehler'), 'zero-match must fail');
     }
 
     public function testGuardRejectsMissingModeRow(): void
@@ -272,6 +345,82 @@ final class DeployFlowsDocContractTest extends TestCase
         }
 
         return $problems;
+    }
+
+    /** @param list<string> $values @param array<string,string> $exceptions @return list<string> */
+    public static function closedVocabularyProblems(array $values, string $diagram, array $exceptions, string $label): array
+    {
+        $problems = [];
+        if ($values === []) {
+            $problems[] = $label . ' has no values derived from code (zero-match must not pass).';
+        }
+        if ($diagram === '') {
+            $problems[] = $label . ' has no flowchart source (zero-match must not pass).';
+        }
+        foreach ($exceptions as $value => $reason) {
+            if (!in_array((string) $value, $values, true)) {
+                $problems[] = sprintf('%s exception `%s` is not in the derived closed list.', $label, $value);
+            }
+            if (trim($reason) === '') {
+                $problems[] = sprintf('%s exception `%s` has no reason.', $label, $value);
+            }
+        }
+        foreach ($values as $value) {
+            $token = preg_quote($value, '/');
+            if (preg_match('/(?<![A-Za-z0-9_])' . $token . '(?![A-Za-z0-9_])/', $diagram) !== 1
+                && !isset($exceptions[$value])) {
+                $problems[] = sprintf('%s `%s` is missing from its flowchart and exception list.', $label, $value);
+            }
+        }
+
+        return $problems;
+    }
+
+    /** @return array<string,array<string,string>> vocabulary => value => reason */
+    private static function documentedVocabularyExceptions(string $doc): array
+    {
+        $section = self::between($doc, '## Diagrammausnahmen für geschlossene Werte', '## Playbooks');
+        $exceptions = [];
+        preg_match_all('/^\| (Create-Fehler|Terminalgrund|Ampelzustand) \| `([^`]+)` \| ([^|]+) \|$/m', $section, $rows, PREG_SET_ORDER);
+        foreach ($rows as $row) {
+            $exceptions[$row[1]][$row[2]] = trim($row[3]);
+        }
+
+        return $exceptions;
+    }
+
+    private static function sectionBody(string $doc, string $heading): string
+    {
+        $parts = preg_split('/^## /m', $doc) ?: [];
+        array_shift($parts);
+        foreach ($parts as $part) {
+            $newline = strpos($part, "\n");
+            $title = trim($newline === false ? $part : substr($part, 0, $newline));
+            if ($title === $heading) {
+                return $newline === false ? '' : substr($part, $newline + 1);
+            }
+        }
+
+        return '';
+    }
+
+    private static function mermaidBlocks(string $text): string
+    {
+        preg_match_all('/```mermaid\s*\R(.*?)```/s', $text, $matches);
+
+        return implode("\n", $matches[1] ?? []);
+    }
+
+    private static function between(string $text, string $start, string $end): string
+    {
+        $startAt = strpos($text, $start);
+        if ($startAt === false) {
+            return '';
+        }
+        $startAt += strlen($start);
+        $endAt = strpos($text, $end, $startAt);
+
+        return $endAt === false ? substr($text, $startAt) : substr($text, $startAt, $endAt - $startAt);
     }
 
     /**

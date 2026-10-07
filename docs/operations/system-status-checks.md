@@ -57,13 +57,13 @@ Die drei Sync-Aufgaben (Devices Sync, Packages Sync, Package Import) und der Sit
 ```mermaid
 flowchart TD
   A{"Hat die Sync-Aufgabe je gemeldet?"} -->|nein| A1{"Meldet eine andere Sync-Aufgabe?"}
-  A1 -->|ja| MI["Fehlt (gelb)"]
-  A1 -->|nein| UK["Unbekannt (grau)"]
+  A1 -->|ja| MI["Fehlt (missing, gelb)"]
+  A1 -->|nein| UK["Unbekannt (unknown, grau)"]
   A -->|ja| L{"Letztes Ereignis?"}
   L -->|completed| CT{"Ergebniszeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
   CT -->|nein| UK
   CT -->|ja| CP{"Ergebnis fail?"}
-  CP -->|ja| RD["Ausgefallen (rot)"]
+  CP -->|ja| RD["Ausgefallen (danger, rot)"]
   CP -->|nein| CA{"Alter des letzten Ergebnisses?"}
   CA -->|über Gefahrschwelle| RD
   CA -->|über Warnschwelle| YL["Verzögert (gelb)"]
@@ -79,7 +79,7 @@ flowchart TD
   SD -->|ja| RD
   SD -->|nein| YL
   L -->|nur alter Heartbeat| LG{"Heartbeat frisch?"}
-  LG -->|ja| LE["Alte Skriptversion (gelb)"]
+  LG -->|ja| LE["Alte Skriptversion (legacy, gelb)"]
   LG -->|über Warnschwelle| YL
   LG -->|über Gefahrschwelle oder Status fail| RD
 ```
@@ -90,7 +90,7 @@ Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt
 flowchart TD
   A{"Hat der Site-Health-Reporter je gemeldet, mit lesbarer und nicht künftiger Ergebniszeit?"} -->|nein| UK["Unbekannt (grau)"]
   A -->|ja| S{"Letztes Ergebnis älter als die Warnschwelle?"}
-  S -->|ja| SS["Reporter überfällig (gelb); letzter Site-Befund Veraltet (grau), historisch"]
+  S -->|ja| SS["Reporter überfällig (warning, gelb); letzter Site-Befund Veraltet (stale, grau), historisch"]
   S -->|nein| SC{"MECM-Site-Status?"}
   SC -->|kritisch| RD["Ausgefallen (rot)"]
   SC -->|Warnung| YL["Verzögert (gelb)"]
@@ -119,7 +119,7 @@ flowchart TD
   T3 --> T4{"SFTP-Schreibprobe in /tmp?"}
   T4 -->|nein| TF4["fehlgeschlagen (SFTP)"]
   T4 -->|ja| T5{"IP-Freigabe für den MAC-Rückruf?"}
-  T5 -->|abgewiesen| TW["bestanden mit Einschränkung"]
+  T5 -->|abgewiesen| TW["bestanden mit Einschränkung (warning)"]
   T5 -->|frei oder ohne URL| TO["bestanden"]
   TF --> R
   TFK --> R
@@ -130,14 +130,14 @@ flowchart TD
   TO --> R
   R{"Zugang während des Tests geändert?"} -->|ja| RX["Ergebnis verworfen (discarded), Audit warning; bisheriger Nachweis bleibt unverändert"]
   R -->|nein| RS["Ergebnis mit Konfigurationsstand speichern"] --> A{"Ergebnis gehört zum aktuellen Stand des Zugangs?"}
-  A -->|nein, Zugang seither geändert oder nie getestet| U["Nicht getestet (grau)"]
+  A -->|nein, Zugang seither geändert oder nie getestet| U["Nicht getestet (unknown, grau)"]
   A -->|ja| B{"Ergebnis?"}
-  B -->|fehlgeschlagen| D["Fehlgeschlagen (rot), altert nie"]
+  B -->|fehlgeschlagen| D["Fehlgeschlagen (danger, rot), altert nie"]
   B -->|bestanden oder eingeschränkt| C0{"Prüfzeit vorhanden, lesbar und nicht künftig?"}
   C0 -->|nein| U
   C0 -->|ja| C{"Älter als max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS, doppeltes Volltestintervall)?"}
-  C -->|ja| S["Test veraltet (grau)"]
-  C -->|nein| O["bestanden: OK (grün); eingeschränkt: Eingeschränkt (gelb)"]
+  C -->|ja| S["Test veraltet (stale, grau)"]
+  C -->|nein| O["bestanden (ok, grün); eingeschränkt (warning, gelb)"]
 ```
 
 ## ESXi-Inventar
@@ -146,18 +146,18 @@ Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Work
 
 ```mermaid
 flowchart TD
-  A{"Je ein Abruf versucht?"} -->|nein| U["Noch kein Abruf (grau)"]
+  A{"Je ein Abruf versucht?"} -->|nein| U["Noch kein Abruf (unknown, grau)"]
   A -->|ja| B{"Anmeldung pausiert oder Fehlerserie ab VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER?"}
-  B -->|ja| D["Fehler (rot)"]
+  B -->|ja| D["Fehler (danger, rot)"]
   B -->|nein| C{"Je erfolgreich?"}
-  C -->|nein| W["Prüfen (gelb)"]
+  C -->|nein| W["Prüfen (warning, gelb)"]
   C -->|ja| F{"Letzter Abruf fehlgeschlagen?"}
   F -->|ja| W
   F -->|nein| T{"Erfolgszeit gültig, nicht zu weit in der Zukunft?"}
   T -->|nein| U
   T -->|ja| E{"Älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle, bei Intervall 0 älter als VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS?"}
-  E -->|ja| S["Veraltet (grau)"]
-  E -->|nein| O["OK (grün)"]
+  E -->|ja| S["Veraltet (stale, grau)"]
+  E -->|nein| O["OK (ok, grün)"]
 ```
 
 Host-Eigenschaften aus einem erfolgreichen Abruf färben die Ampel nicht, sondern erscheinen als eigene Badges: freie Lizenz, HA-Cluster, Wartungsmodus. Über den Karten nennt eine Zeile, warum kein automatischer Abruf läuft: Intervall 0, kein Ansible-Zugang für den Abruf, Deploy-Worker nicht aktiv oder Anmeldung pausiert.
@@ -172,15 +172,16 @@ flowchart TD
   K -->|ja| K2{"Letzte Abfrage jedes Zugangs beantwortet und jünger als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle?"}
   K2 -->|ja| KC["Aktueller Nachweis"]
   K2 -->|nein| KH["Historischer Nachweis: Treffer sind Diagnose, kein aktueller Negativnachweis"]
-  KC --> B
-  KH --> B["Für Missionen, Vorlagen und VMs die gespeicherten Namen dieser Art sammeln: Datacenter, Datastore, WDS-Portgruppe, VLAN jeder Netzwerkkarte, VM-eigene Ortsangaben"]
-  B --> D{"Name exakt unter den unterstützten Namen aller Zugänge?"}
+  KC --> B["Aktuelle Deploy-Warnungen und Missions-Badges nur mit diesem Nachweis berechnen"]
+  KH --> H["Historische Treffer bleiben Diagnose im Systemstatus; keine aktuelle Deploy-Warnung und kein Missions-Badge"]
+  B --> B2["Für Missionen, Vorlagen und VMs die gespeicherten Namen dieser Art sammeln: Datacenter, Datastore, WDS-Portgruppe, VLAN jeder Netzwerkkarte, VM-eigene Ortsangaben"]
+  B2 --> D{"Name exakt unter den unterstützten Namen aller Zugänge?"}
   D -->|ja| D1["kein Befund"]
   D -->|nein| D2["Befund mit Feld und Wert"]
   D2 --> E["Zählen, filtern, seitenweise anzeigen; VLAN-Befunde lassen sich gesammelt auf eine vorhandene Portgruppe umhängen"]
 ```
 
-Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Ist keine Art auswertbar, zeigt der Bereich keine Zahl, sondern einen Hinweis mit Link zum ESXi-Inventar. Mit Inventarintervall 0 entfällt die Altersgrenze. Die Inventarwarnungen der Deploy-Seite und die Abweichungs-Badge der Missionsliste folgen einer älteren Regel: Sie lesen den Inventar-Cache ohne Namenssemantik und Altersgrenze und überspringen nur leere Arten. Sie können deshalb anders urteilen als dieser Bereich.
+Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Ist keine Art auswertbar, zeigt der Bereich keine Zahl, sondern einen Hinweis mit Link zum ESXi-Inventar. Mit Inventarintervall 0 entfällt die Altersgrenze. Deploy-Missionswarnung und Missionslisten-Badge verwenden denselben Bericht und zeigen nur aktuelle Treffer für Arten mit Namenssemantik v2. Die Host-Warnung vergleicht dieselbe Art für den gewählten Host und mindestens einen anderen Host; beide Nachweise müssen aktuell sein. Historische Treffer bleiben Diagnose im Systemstatus und erscheinen nicht als aktuelle Warnung. Die Host-Warnung nennt nur Werte, die auf einem anderen aktuellen Host vorhanden sind; ein Wert, der auf keinem aktuellen Host vorkommt, bleibt ausschließlich in der Missionswarnung.
 
 ## Interne Dienste
 

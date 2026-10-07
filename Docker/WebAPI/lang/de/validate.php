@@ -15,6 +15,7 @@ return [
     'ipv4' => ':field muss eine gültige IPv4-Adresse sein.',
     'ipv4_or_cidr' => ':field muss eine IPv4-Subnetzmaske oder CIDR-Maske von /0 bis /30 sein.',
     'mac' => ':field muss eine gültige MAC-Adresse sein.',
+    'mac_duplicate' => ':field ist bereits einer anderen Schnittstelle zugeordnet.',
     'enum' => ':field hat einen ungültigen Wert.',
     'netbios_hostname' => ':field muss ein Windows-Computername sein: höchstens 15 Zeichen, nur Buchstaben, Zahlen und Bindestriche im Inneren, keine Punkte.',
     'name_taken' => ':field existiert bereits.',

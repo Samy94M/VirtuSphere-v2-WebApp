@@ -128,6 +128,36 @@ final class NetworkMacContractTest extends TestCase
         self::assertSame(VIRTUSPHERE_MAC_IMPORT_ERROR_CODES, array_keys(VIRTUSPHERE_MAC_IMPORT_ERROR_META));
     }
 
+    public function testEditorAndCallbackShareTheCurrentReadMacUniquenessOwner(): void
+    {
+        $shared = $this->source('lib/vm_network_mac_assignments.php');
+        self::assertStringContainsString('virtusphere_normalize_mac(', $shared);
+        self::assertStringContainsString('ORDER BY mac, id FOR UPDATE', $shared, 'the candidate-owner lookup must be a current read');
+        self::assertStringContainsString('virtusphere_mac_assignment_existing_owners(', $this->source('lib/repo/vm_network.php'));
+        $callbackNetwork = $this->source('lib/mac_import_network.php');
+        self::assertStringContainsString('virtusphere_mac_assignment_existing_owners(', $callbackNetwork);
+        self::assertStringNotContainsString('SELECT id, vm_id, mac FROM deploy_interfaces WHERE mac IN', $callbackNetwork, 'the callback has no parallel duplicate-query owner');
+
+        $persistence = $this->source('lib/repo/vms_persistence.php');
+        $save = substr($persistence, strpos($persistence, 'function repo_save_vm('));
+        $update = substr($save, strpos($save, 'if ($vmId > 0)'));
+        $runtimeLock = strpos($update, 'repo_vm_network_lock_mac_assignments($db)');
+        $vmLock = strpos($update, 'SELECT id, edit_version, vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE');
+        self::assertIsInt($runtimeLock);
+        self::assertIsInt($vmLock);
+        self::assertLessThan($vmLock, $runtimeLock, 'an editor must take Runtime before its VM row');
+
+        $legacy = $this->source('lib/repo/vms_legacy.php');
+        self::assertStringContainsString('repo_vm_network_lock_mac_assignments($mysqli)', $legacy);
+        self::assertStringContainsString('repo_vm_network_lock_mac_assignments($connection)', $legacy);
+        $endpoint = $this->source('db_importMAC.php');
+        $callbackRuntime = strpos($endpoint, 'deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        $callbackPlan = strpos($endpoint, 'mac_import_build_plan(');
+        self::assertIsInt($callbackRuntime);
+        self::assertIsInt($callbackPlan);
+        self::assertLessThan($callbackPlan, $callbackRuntime, 'callback owner rows are checked after the same Runtime fence');
+    }
+
     public function testExactNameAndBodyContractsHaveNoRetiredFallback(): void
     {
         $import = $this->source('lib/mac_import.php') . $this->source('lib/mac_import_network.php');

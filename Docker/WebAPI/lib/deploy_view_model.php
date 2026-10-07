@@ -35,8 +35,18 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
     $serviceSnapshot = deploy_service_health_snapshot($connection);
     $ansibleTestSnapshot = integration_health_snapshot($connection)['ansible'];
     $missionVms = $selectedMission !== null ? getVMs($connection, $selectedMissionId) : [];
+    $esxiInventorySummaries = esxi_inventory_summaries($connection);
+    $esxiInventoryIntervalHours = esxi_inventory_interval_hours($connection);
+    $esxiInventoryNow = time();
+    $deviationReport = esxi_inventory_deviation_report(
+        $connection,
+        $esxiInventorySummaries,
+        $esxiInventoryIntervalHours,
+        $esxiInventoryNow
+    );
+    $currentDeviationMissionIds = esxi_inventory_current_deviation_mission_ids($deviationReport);
     $selectedMissionDeviates = $selectedMissionId > 0
-        && isset(esxi_inventory_deviating_mission_ids($connection)[$selectedMissionId]);
+        && isset($currentDeviationMissionIds[$selectedMissionId]);
 
     $hostWarnings = [];
     if ($selectedMission !== null && $esxiCredentials !== []) {
@@ -44,7 +54,13 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         foreach ($esxiCredentials as $credential) {
             $credentialNames[(int) $credential['id']] = (string) ($credential['name'] ?? '');
         }
-        foreach (esxi_inventory_mission_missing_by_credential($connection, $selectedMissionId) as $credId => $missingValues) {
+        foreach (esxi_inventory_current_mission_missing_by_credential(
+            $connection,
+            $selectedMissionId,
+            $esxiInventorySummaries,
+            $esxiInventoryIntervalHours,
+            $esxiInventoryNow
+        ) as $credId => $missingValues) {
             $hostWarnings[(string) $credId] = __t('deploy.host_missing_warn', [
                 'host' => $credentialNames[$credId] ?? ('#' . $credId),
                 'values' => implode(', ', $missingValues),
