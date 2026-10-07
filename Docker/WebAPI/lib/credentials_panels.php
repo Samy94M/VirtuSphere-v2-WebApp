@@ -134,7 +134,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                                 ? __t('credentials.ansible_state_link_title', ['when' => portal_format_timestamp((string) $pfState['last_checked_at'])])
                                 : __t('credentials.ansible_state_untested_title');
                             ?>
-                            <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState, $renderedAt); ?></a>
+                            <a href="<?php echo h(system_status_url('credential-' . $rowId)); ?>" title="<?php echo h($pfTitle); ?>"><?php echo ansible_preflight_badge($pfState, $renderedAt, $ansibleTestIntervalHours); ?></a>
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                             <?php if ($pfState !== null && empty($pfState['evidence_current'])) { ?><small class="status-cadence"><?php echo h(__t('credentials.test_evidence_invalid')); ?></small><?php } ?>
                             <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible($ansibleTestIntervalHours)); ?></small>

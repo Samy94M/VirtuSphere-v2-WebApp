@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/client_events.php';
 
 final class VmProgressWatchTest extends TestCase
 {
@@ -14,6 +15,18 @@ final class VmProgressWatchTest extends TestCase
 
     private mysqli $db;
     private int $missionId = 0;
+
+    public function testReceivedPhaseFailureAppearsUntilANewerFinishAndSilenceDoesNot(): void
+    {
+        $vmId = $this->insertVm(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_SYNC_REGISTERED);
+        $other = $this->insertVm(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, VIRTUSPHERE_MECM_SYNC_REGISTERED);
+        repo_record_client_event($this->db, $vmId, '00:11:22:33:44:55', VIRTUSPHERE_CLIENT_PHASES[0], VIRTUSPHERE_CLIENT_EVENT_FAILED, 'synthetic failure', '127.0.0.1');
+        $ids = array_column(repo_client_phase_failures($this->db), 'id');
+        self::assertContains($vmId, array_map('intval', $ids));
+        self::assertNotContains($other, array_map('intval', $ids));
+        repo_record_client_event($this->db, $vmId, '00:11:22:33:44:55', VIRTUSPHERE_CLIENT_PHASES[0], VIRTUSPHERE_CLIENT_EVENT_FINISHED, null, '127.0.0.1');
+        self::assertNotContains($vmId, array_map('intval', array_column(repo_client_phase_failures($this->db), 'id')));
+    }
 
     protected function setUp(): void
     {

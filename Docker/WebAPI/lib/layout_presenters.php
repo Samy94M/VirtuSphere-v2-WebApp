@@ -130,9 +130,9 @@ function ansible_state_badge(string $state): string
 }
 
 /** @param array<string, mixed>|null $state */
-function ansible_preflight_badge(?array $state, ?int $now = null): string
+function ansible_preflight_badge(?array $state, ?int $now = null, int $intervalHours = 0): string
 {
-    return ansible_state_badge(ansible_preflight_ampel($state, $now));
+    return ansible_state_badge(ansible_preflight_ampel($state, $now, $intervalHours));
 }
 
 /**

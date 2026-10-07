@@ -109,10 +109,14 @@ function directory_health_snapshot(?array $config, array $controllers, ?int $now
         $overall = 'danger';
     } else {
         $usable = 0;
+        $untested = 0;
         $ok = 0;
         $danger = 0;
         foreach ($rows as $row) {
             $controller = $row['controller'];
+            if ((int) $controller['enabled'] === 1 && (int) ($controller['validated_revision'] ?? 0) !== $revision) {
+                $untested++;
+            }
             if ((int) $controller['enabled'] === 1 && (int) ($controller['validated_revision'] ?? 0) === $revision) {
                 $usable++;
                 if ($row['state'] === 'ok') {
@@ -130,7 +134,7 @@ function directory_health_snapshot(?array $config, array $controllers, ?int $now
             // Every usable controller has an actual, recent, recorded
             // failure: an outage, not merely unconfirmed or degraded.
             $danger === $usable => 'danger',
-            $ok === $usable => 'ok',
+            $ok === $usable && $untested === 0 => 'ok',
             default => 'warning',
         };
     }

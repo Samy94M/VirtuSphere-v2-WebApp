@@ -135,7 +135,7 @@ flowchart TD
   B -->|fehlgeschlagen| D["Fehlgeschlagen (rot), altert nie"]
   B -->|bestanden oder eingeschränkt| C0{"Prüfzeit vorhanden, lesbar und nicht künftig?"}
   C0 -->|nein| U
-  C0 -->|ja| C{"Älter als VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS?"}
+  C0 -->|ja| C{"Älter als max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS, doppeltes Volltestintervall)?"}
   C -->|ja| S["Test veraltet (grau)"]
   C -->|nein| O["bestanden: OK (grün); eingeschränkt: Eingeschränkt (gelb)"]
 ```
@@ -226,8 +226,16 @@ flowchart TD
   I -->|keiner| G1
   I -->|ja| J{"Zustand der nutzbaren Controller?"}
   J -->|alle Gestört| G1
-  J -->|alle Aktiv| G2["Gesamt: Aktiv (grün)"]
-  J -->|sonst, auch alle veraltet| G3["Gesamt: Eingeschränkt (gelb)"]
+  J -->|alle Aktiv und kein aktivierter Controller ungetestet| G2["Gesamt: Aktiv (grün)"]
+  J -->|sonst, auch alle veraltet oder aktivierte Controller für aktuelle Revision ungetestet| G3["Gesamt: Eingeschränkt (gelb)"]
 ```
 
-Das Zertifikat kennt die Seite nur aus dem letzten manuellen Test. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen.
+Das Zertifikat kennt die Seite nur aus dem letzten manuellen Test. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen. Aktivierte Controller ohne Test für die aktuelle Revision fehlen im zugelassenen Pool und verhindern eine grüne Gesamtampel. Die Speichermeldung nennt ihre Anzahl.
+
+## Hinweise zur Bedienung
+
+Die Deploy-Seite übernimmt die Ansible-Volltest-Ampel und den Prüfzeitpunkt aus `integration_health_snapshot()`. Der gewählte Zugang zeigt dieselbe Evidenz wie seine Systemstatus-Karte; ohne JavaScript bleiben die beschrifteten Nachweise aller Zugänge sichtbar. Der Hinweis sperrt keinen Auftrag. Seine Karte bietet berechtigten Benutzern **Jetzt vollständig testen**.
+
+Bei HTTP warnt der Systemstatus vor unverschlüsselten lokalen Anmeldungen und Sitzungscookies. Zertifikatsüberschreiben nennt in der Bestätigung die gepinnten MECM-Server und Client-Bundles. Die HTTPS-Karte zeigt den neuen SHA-1-Thumbprint im Installer-Befehl; Windows-Vertrauenskette und Client-Bundles müssen ebenfalls geprüft werden. Siehe [HTTPS](https.md).
+
+Missionsliste und Dashboard zeigen aktuelle empfangene Clientphasenfehler mit VM-Anzahl und Links. `repo_client_phase_failures()` liest je VM und Phase nur die letzte Meldung. Schweigen erzeugt keinen Fehler; ein neuerer Abschluss derselben Phase entfernt den Hinweis. Fehlermeldungen anderer Phasen bleiben bestehen.

@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/client_phase_attention.php';
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
@@ -298,6 +299,7 @@ if ($importToken !== '' && !$isTemplateView && can('missions.write', $user)) {
 layout_header($title, $user, $active, 'missions');
 ?>
 <div class="stack">
+    <?php if (!$isTemplateView) { client_phase_attention_render(repo_client_phase_failures($connection)); } ?>
     <?php if (can('missions.write', $user)) { ?>
         <section class="panel">
             <h2><?php echo h($isTemplateView ? __t('missions.create_heading_template') : __t('missions.create_heading_mission')); ?></h2>

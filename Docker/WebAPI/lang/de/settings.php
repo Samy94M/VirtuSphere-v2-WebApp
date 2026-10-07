@@ -6,6 +6,7 @@ declare(strict_types=1);
  * System-Einstellungen und Deploy-Laufzeit (ADR-0014).
  */
 return [
+    'https_pin_consumers' => 'Bei einem Zertifikatswechsel müssen gepinnte MECM-Server und Client-Bundles den neuen SHA-1-Fingerabdruck erhalten. Prüfen Sie die Windows-Zertifikatskette; aktualisieren Sie den Installer mit -CertThumbprint und bauen Sie Client-Bundles neu.',
     'title' => 'Einstellungen',
     'tabs_label' => 'Einstellungsbereiche',
     'tab_deploy' => 'Bereitstellung',
@@ -184,7 +185,7 @@ return [
     'https_key_label' => 'Privater Schlüssel (nur bei PEM)',
     'https_password_label' => 'PFX-Passwort (falls gesetzt)',
     'https_upload_button' => 'Zertifikat installieren',
-    'https_confirm_overwrite' => 'Vorhandenes Zertifikat überschreiben?',
+    'https_confirm_overwrite' => 'Vorhandenes Zertifikat überschreiben? Der Fingerabdruck ändert sich. Aktualisieren Sie gepinnte MECM-Server und Client-Bundles, sonst können sie keine Verbindung mehr herstellen.',
     'https_uploaded' => 'Zertifikat installiert. Ein aktivierter HTTPS-Listener übernimmt es innerhalb weniger Sekunden.',
     'https_err_no_file' => 'Bitte eine Zertifikatsdatei auswählen.',
     'https_err_too_large' => 'Die Datei ist zu groß für ein Zertifikat.',

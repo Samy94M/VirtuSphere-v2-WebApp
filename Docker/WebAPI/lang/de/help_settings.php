@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'k13_status' => 'Die Deploy-Seite zeigt Zustand und Zeitpunkt des Ansible-Volltests. Ein alter Test ist ein Hinweis, keine Auftragssperre. Die Veraltung gilt nach dem Maximum aus :days Tagen und dem doppelten Intervall. HTTP überträgt lokale Anmeldungen und Sitzungscookies unverschlüsselt. Bei AD-Konfigurationsänderungen fehlen andere aktivierte Controller bis zu ihrem erneuten Test; die Gesamtampel bleibt bis dahin gelb.',
     'settings_heading' => 'Einstellungen: der Admin-Bereich Schritt für Schritt',
     'settings_p1' => 'Die Seite „Einstellungen" ist nur für Administratoren sichtbar und bündelt alle systemweiten Schalter. Sie ist in die Bereiche Bereitstellung, Machine-API, Kataloge und Inventar, HTTPS und System gegliedert; die Abschnitte dieser Hilfe folgen derselben Aufteilung. Jede Änderung wirkt sofort (kein Neustart nötig) und wird im Audit-Protokoll unter „System & Integrationen → Einstellungen" mit Benutzer und Zeit festgehalten. Für wechselndes Personal gilt: Die Standardwerte sind bewusst sicher gewählt. Im Zweifel nichts ändern und zuerst die Übersicht „Wirksame Deploy-Konfiguration" im Bereich Bereitstellung prüfen.',
     'settings_api_heading' => 'API-Basis-URL (Deploy)',

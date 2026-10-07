@@ -16,6 +16,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/integration_health.php';
 
 /** @return array<string,mixed> */
 function deploy_build_view_model(mysqli $connection, int $selectedMissionId): array
@@ -32,6 +33,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
     // System status card read the same function, so the page cannot promise an
     // immediate start while the card says the service is paused.
     $serviceSnapshot = deploy_service_health_snapshot($connection);
+    $ansibleTestSnapshot = integration_health_snapshot($connection)['ansible'];
     $missionVms = $selectedMission !== null ? getVMs($connection, $selectedMissionId) : [];
     $selectedMissionDeviates = $selectedMissionId > 0
         && isset(esxi_inventory_deviating_mission_ids($connection)[$selectedMissionId]);
@@ -127,6 +129,7 @@ function deploy_build_view_model(mysqli $connection, int $selectedMissionId): ar
         'initialHostWarning',
         'initialCapabilityWarning',
         'serviceSnapshot',
+        'ansibleTestSnapshot',
         'initialCapacity',
         'scheduleMinLocal',
         'groupPositions',

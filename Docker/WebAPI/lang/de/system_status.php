@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'http_plaintext' => 'Dieser Portalaufruf verwendet HTTP. Lokale Anmeldungen und Sitzungscookies werden unverschlüsselt übertragen.',
     // Bereitstellungsdienst (Etappe 13R). Drei Achsen, die unabhaengig wahr
     // sind: 'laeuft gerade' und 'pausiert nach dem aktuellen Auftrag' gelten
     // gleichzeitig, und genau deshalb steht keine davon fuer die anderen mit.
@@ -290,7 +291,7 @@ return [
     'ansible_state_unknown' => 'Nicht getestet',
     'ansible_legend_heading' => 'Ampel je Ansible-Zugang',
     'ansible_legend_ok' => 'Der letzte Volltest hat alles bestanden.',
-    'ansible_legend_stale' => 'Der letzte bestandene oder eingeschränkt bestandene Volltest ist älter als :days Tage. Das ist kein Fehlernachweis; der heutige Zustand ist unbekannt. Missionsaufträge werden getrennt angezeigt und erneuern diesen Test nicht.',
+    'ansible_legend_stale' => 'Der letzte bestandene oder eingeschränkt bestandene Volltest ist älter als das Maximum aus :days Tagen und dem doppelten Volltestintervall. Das ist kein Fehlernachweis; der heutige Zustand ist unbekannt. Missionsaufträge werden getrennt angezeigt und erneuern diesen Test nicht.',
     'ansible_legend_warning' => 'Der Volltest lief durch, aber die Host-IP fehlt in den Machine-API IP-Freigaben.',
     'ansible_legend_danger' => 'Der letzte Volltest ist fehlgeschlagen. Die betroffene Komponente steht in der Zeile.',
     'ansible_legend_unknown' => 'Für diesen Zugang liegt noch kein gültiger Volltest vor. Automatische Prüfungen folgen dem eingestellten Intervall; ein manueller Start ist ebenfalls möglich.',

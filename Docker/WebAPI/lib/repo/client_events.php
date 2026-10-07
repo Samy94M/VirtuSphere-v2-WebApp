@@ -95,6 +95,19 @@ function repo_client_phase_summary(mysqli $db, int $vmId): array
     return $summary;
 }
 
+/** @return list<array<string,mixed>> Latest received failures; silence is never a failure. */
+function repo_client_phase_failures(mysqli $db): array
+{
+    return repo_fetch_all($db->execute_query(
+        'SELECT DISTINCT v.id, v.vm_name, v.mission_id FROM deploy_vms v'
+        . ' JOIN deploy_client_events e ON e.vm_id = v.id'
+        . ' WHERE e.event = ? AND NOT EXISTS (SELECT 1 FROM deploy_client_events newer'
+        . ' WHERE newer.vm_id = e.vm_id AND newer.phase = e.phase AND newer.id > e.id)'
+        . ' ORDER BY v.mission_id, v.id',
+        [VIRTUSPHERE_CLIENT_EVENT_FAILED]
+    ));
+}
+
 // Retention: called by the maintenance worker, returns deleted row count.
 function repo_purge_client_events(mysqli $db, int $retentionDays = VIRTUSPHERE_CLIENT_EVENT_RETENTION_DAYS): int
 {

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'http_plaintext' => 'This portal request uses HTTP. Local sign-ins and session cookies are transmitted without encryption.',
     // Deploy service (Etappe 13R). Three axes that are independently true:
     // 'working' and 'pausing after the current job' hold at the same time, and
     // that is exactly why none of them stands in for the others.
@@ -290,7 +291,7 @@ return [
     'ansible_state_unknown' => 'Not tested',
     'ansible_legend_heading' => 'Traffic light per Ansible credential',
     'ansible_legend_ok' => 'The last full test passed everything.',
-    'ansible_legend_stale' => 'The last passed or restricted full test is older than :days days. This does not report a failure; today\'s state is unknown. Mission jobs are shown separately and do not refresh this test.',
+    'ansible_legend_stale' => 'The last passed or restricted full test is older than the maximum of :days days and twice the full-test interval. This does not report a failure; today\'s state is unknown. Mission jobs are shown separately and do not refresh this test.',
     'ansible_legend_warning' => 'The full test ran through, but the host IP is missing from the machine API IP allowlist.',
     'ansible_legend_danger' => 'The last full test failed. The affected component is named in the row.',
     'ansible_legend_unknown' => 'No valid full test is recorded for this credential. Automatic tests follow the configured interval; manual testing is also available.',

@@ -61,6 +61,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         }
     }
 
+    $ansibleIntervalHours = ansible_test_interval_hours($db);
     $preflightStates = repo_ansible_preflight_states($db);
     $ansibleCredentials = repo_credentials_by_type($db, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
     // Actual mission history is a second, display-only signal. It never enters
@@ -81,7 +82,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         // Same derivation as the badge on the Credentials page. This used to be
         // a second copy of that match, so the staleness axis would have landed
         // on one page only and the two would have disagreed about the same row.
-        $state = ansible_preflight_ampel($stateRow, $now);
+        $state = ansible_preflight_ampel($stateRow, $now, $ansibleIntervalHours);
         if ($ansibleWorst === null || virtusphere_heartbeat_state_rank($state) > virtusphere_heartbeat_state_rank($ansibleWorst)) {
             $ansibleWorst = $state;
         }
@@ -126,7 +127,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         // runs every minute against a closed IP gate, and the portal looks like a
         // server where MECM was never installed.
         'machine_api_denials' => repo_recent_machine_api_denial_summary($db, VIRTUSPHERE_MACHINE_API_DENIAL_WINDOW_SECONDS),
-        'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst, 'interval_hours' => ansible_test_interval_hours($db)],
+        'ansible' => ['rows' => $ansibleRows, 'state' => $ansibleWorst, 'interval_hours' => $ansibleIntervalHours],
         // ansible_selected is what esxi_inventory_automation_blocker() needs as
         // its third input, and it is resolved here rather than in the renderer:
         // this function already resolves the interval, and no other renderer on

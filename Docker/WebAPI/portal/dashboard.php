@@ -11,6 +11,7 @@ require_once __DIR__ . '/../lib/repo/heartbeats.php';
 require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
+require_once __DIR__ . '/../lib/client_phase_attention.php';
 // The three label helpers of the service warning below live here, and the page
 // called them without loading the module. Nothing noticed for two stages: the
 // call sits inside the branch that renders only while the deploy service wants
@@ -70,6 +71,7 @@ $serviceNeedsAttention = in_array($serviceSnapshot['availability'], [VIRTUSPHERE
 layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
 ?>
 <div class="stack">
+    <?php client_phase_attention_render(repo_client_phase_failures($connection)); ?>
     <?php if ($serviceNeedsAttention) { ?>
         <?php // The sentence names the state and the link leads to the card that
               // can act on it, per the rule that a message naming a condition

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'client_phase_failed' => ':count VMs: Clientphase fehlgeschlagen (empfangene Fehlermeldung).',
     'title_missions' => 'Missionen',
     'title_templates' => 'Vorlagen',
     'tab_missions' => 'Missionen',

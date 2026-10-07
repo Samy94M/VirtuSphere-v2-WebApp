@@ -27,6 +27,7 @@ declare(strict_types=1);
 /** @var array<string,mixed>|null $storageIsland */
 /** @var string $scheduleMinLocal */
 /** @var bool $canQueue */
+/** @var array<string,mixed> $ansibleTestSnapshot */
 
 if ($deployPreview !== null) { ?>
     <section class="panel">
@@ -98,13 +99,25 @@ if ($deployPreview !== null) { ?>
         </label>
         <label><?php echo h(__t('deploy.label_ansible')); ?>
             <?php $selectedAnsibleId = deploy_form_value('credential_ansible_id'); ?>
-            <select name="credential_ansible_id" required <?php echo $ansibleCredentials === [] ? 'disabled' : ''; ?>>
+            <select name="credential_ansible_id" required data-deploy-ansible <?php echo $ansibleCredentials === [] ? 'disabled' : ''; ?>>
                 <option value=""><?php echo h(__t('deploy.select_ansible')); ?></option>
                 <?php foreach ($ansibleCredentials as $credential) { ?>
                     <option value="<?php echo h((string) $credential['id']); ?>" <?php echo $selectedAnsibleId === (string) $credential['id'] ? 'selected' : ''; ?>><?php echo h($credential['name'] ?? ''); ?></option>
                 <?php } ?>
             </select>
         </label>
+        <div class="form-grid-full" data-deploy-ansible-tests>
+            <?php foreach ($ansibleTestSnapshot['rows'] as $entry) { ?>
+                <p data-ansible-test="<?php echo h((string) $entry['credential']['id']); ?>">
+                    <?php echo h((string) $entry['credential']['name']); ?>:
+                    <?php echo h(__t('system_status.ansible_th_last_full_test')); ?>
+                    <?php echo ansible_state_badge((string) $entry['state']); ?>
+                    <?php echo h(portal_format_timestamp($entry['state_row']['last_checked_at'] ?? '')); ?>
+                    <a href="<?php echo h(system_status_url('credential-' . $entry['credential']['id'])); ?>"><?php echo h(__t('system_status.ansible_th_last_full_test')); ?></a>
+                    <?php if (can('credentials.manage', $user)) { ?><a href="credentials.php"><?php echo h(__t('system_status.ansible_test_now')); ?></a><?php } ?>
+                </p>
+            <?php } ?>
+        </div>
         <?php
         $selectedMode = deploy_form_value('mode', VIRTUSPHERE_DEPLOY_MODE_FULL);
         $staggerLockHintId = form_hint_id('schedule', 'mode_stagger_lock');

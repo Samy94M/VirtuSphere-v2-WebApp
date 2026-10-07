@@ -8,6 +8,7 @@ declare(strict_types=1);
 // cut through one catalog. Keys are reached as __t('help_system_status.<key>').
 
 return [
+    'k13_client_failure' => 'Missionsliste und Dashboard zeigen empfangene Clientphasenfehler mit Anzahl und Links auf die betroffenen VMs. Ausbleibende Meldungen erzeugen keinen Fehler; eine neuere Abschlussmeldung derselben Phase hebt den Hinweis auf.',
     'jump_heading' => 'Sprungziele im Systemstatus-Hilfereiter',
     'jump_overview' => 'Signale und Beweisstand',
     'jump_deploy' => 'Bereitstellungsdienst',

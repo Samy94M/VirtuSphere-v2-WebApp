@@ -69,7 +69,7 @@ require_once __DIR__ . '/../ansible_test_config.php';
                 'port' => envboot_optional('WEB_HTTPS_PORT', '8443'),
                 'days' => intdiv(VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS, 86400),
             ])); ?></p>
-            <p><?php echo h(__t('help_settings.settings_https_p4')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_https_p4')); ?></p><p><?php echo h(__t('settings.https_pin_consumers')); ?></p><p><?php echo h(__t('help_settings.k13_status', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
         </section>
 
         <section class="panel">

@@ -60,7 +60,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                         ['label' => __t('system_status.ansible_th_last_mission_job'), 'html' => system_status_ansible_job_fact($lastMissionJob, $canOpenJobLog)],
                     ]); ?>
                     <?php if ((string) $entry['state'] === 'stale') { ?>
-                        <p class="status-action"><?php echo h(__t('system_status.ansible_stale_detail', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+                        <p class="status-action"><?php echo h(__t('system_status.ansible_stale_detail', ['days' => max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS, 2 * (int) $snapshot['ansible']['interval_hours'] / 24)])); ?></p>
                     <?php } elseif ($stateRow !== null && empty($stateRow['evidence_current'])) { ?>
                         <p class="status-action"><?php echo h(__t('system_status.ansible_invalidated_detail')); ?></p>
                     <?php } ?>

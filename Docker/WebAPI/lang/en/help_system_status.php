@@ -8,6 +8,7 @@ declare(strict_types=1);
 // cut through one catalog. Keys are reached as __t('help_system_status.<key>').
 
 return [
+    'k13_client_failure' => 'The mission list and dashboard show received client phase failures with a count and links to the affected VMs. Missing reports do not create a failure; a newer finish report for the same phase clears the warning.',
     'jump_heading' => 'Jump targets in the System status help tab',
     'jump_overview' => 'Signals and evidence',
     'jump_deploy' => 'Deploy service',

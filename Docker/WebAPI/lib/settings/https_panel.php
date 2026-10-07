@@ -14,6 +14,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('settings.https_title')); ?></h2>
             <p class="muted"><?php echo h(__t('settings.https_hint')); ?></p>
+            <p class="hint"><?php echo h(__t('settings.https_pin_consumers')); ?> <a href="<?php echo h(help_url('settings')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <?php if ($httpsEnabled && !$httpsListenerLive) { ?>
                 <?php // The setting says "on" but the web server threw the generated config
                       // out (init.sh quarantine). Without this the card claims HTTPS is live
@@ -80,6 +81,8 @@ declare(strict_types=1);
                         <tr><th><?php echo h(__t('settings.https_meta_fingerprint')); ?></th><td><code class="wrap-anywhere"><?php echo h($httpsMeta['fingerprint']); ?></code></td></tr>
                     </tbody>
                 </table></div>
+                <p class="hint"><?php echo h(__t('settings.https_pin_consumers')); ?></p>
+                <code class="wrap-anywhere">install-VirtuSphere-MECM.ps1 -Scheme https -CertThumbprint <?php echo h($httpsMeta['thumbprint']); ?> ...</code>
             <?php } ?>
         </section>
 

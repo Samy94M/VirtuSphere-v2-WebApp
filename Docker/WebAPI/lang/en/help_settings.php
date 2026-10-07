@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'k13_status' => 'The deploy page shows the state and timestamp of the Ansible full test. An old test is advisory and does not block a job. Evidence expires after the maximum of :days days and twice the interval. HTTP transmits local sign-ins and session cookies without encryption. After AD configuration changes, other enabled controllers are excluded until tested again; the overall status stays yellow meanwhile.',
     'settings_heading' => 'Settings: the admin area step by step',
     'settings_p1' => 'The "Settings" page is visible to administrators only and bundles every system-wide switch. It is organized into the areas Deployment, Machine API, Catalog and inventory, HTTPS, and System; the sections in this help follow the same layout. Each change takes effect immediately (no restart needed) and is recorded in the audit log under "System & integrations → Settings" with user and time. For rotating staff: the defaults are deliberately safe. When in doubt, change nothing and first check the "Effective deploy configuration" overview in the Deployment area.',
     'settings_api_heading' => 'API base URL (deploy)',

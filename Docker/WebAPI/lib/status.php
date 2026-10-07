@@ -201,7 +201,7 @@ function virtusphere_heartbeat_state_rank(string $state): int
  *
  * @param array<string, mixed>|null $state
  */
-function ansible_preflight_ampel(?array $state, ?int $now = null): string
+function ansible_preflight_ampel(?array $state, ?int $now = null, int $intervalHours = 0): string
 {
     if ($state === null
         || (array_key_exists('evidence_current', $state) && !$state['evidence_current'])
@@ -231,7 +231,7 @@ function ansible_preflight_ampel(?array $state, ?int $now = null): string
         return 'unknown';
     }
 
-    return ($current - $checkedEpoch) > VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400
+    return ($current - $checkedEpoch) > max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400, 2 * max(0, $intervalHours) * 3600)
         ? 'stale'
         : $ampel;
 }

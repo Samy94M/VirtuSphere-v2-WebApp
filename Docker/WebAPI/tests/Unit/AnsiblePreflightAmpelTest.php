@@ -16,6 +16,16 @@ final class AnsiblePreflightAmpelTest extends TestCase
 {
     private const NOW = '2026-07-24 12:00:00';
 
+    public function testWeeklyScheduleHasTwoIntervalsOfEvidence(): void
+    {
+        $state = ['last_status' => 'ok', 'last_checked_at' => $this->daysAgo(8)];
+        self::assertSame('ok', ansible_preflight_ampel($state, $this->now(), 168));
+        self::assertSame('stale', ansible_preflight_ampel($state, $this->now(), 24));
+        $state['last_checked_at'] = $this->daysAgo(14);
+        self::assertSame('ok', ansible_preflight_ampel($state, $this->now(), 168));
+        self::assertSame('stale', ansible_preflight_ampel($state, $this->now() + 1, 168));
+    }
+
     private function now(): int
     {
         return (int) strtotime(self::NOW . ' UTC');

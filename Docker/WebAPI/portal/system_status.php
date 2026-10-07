@@ -98,6 +98,11 @@ $refreshUrl = $selectedInventoryId > 0
 layout_header(__t('system_status.title'), $user, 'system-status', 'system-status');
 ?>
 <div class="stack">
+    <?php if (!virtusphere_is_request_secure()) { ?>
+        <div class="alert alert-warning"><?php echo h(__t('system_status.http_plaintext')); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_HTTPS)); ?>"><?php echo h(__t('settings.https_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
     <?php // The topbar (lib/layout.php) already renders the page title and the
           // help link for this page. A second <h1> here made the page's own title
           // larger than the one in the chrome above it and gave the document two

@@ -42,4 +42,14 @@
 
 
     initDeployHostWarning();
+    var ansibleSelect = document.querySelector('[data-deploy-ansible]');
+    if (ansibleSelect) {
+        var updateTests = function () {
+            document.querySelectorAll('[data-ansible-test]').forEach(function (row) {
+                row.hidden = row.getAttribute('data-ansible-test') !== ansibleSelect.value;
+            });
+        };
+        ansibleSelect.addEventListener('change', updateTests);
+        updateTests();
+    }
 }());

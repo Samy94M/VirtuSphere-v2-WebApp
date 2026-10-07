@@ -133,7 +133,7 @@ declare(strict_types=1);
 
         <section class="panel">
             <h2><?php echo h(__t('help_system_status.clientphases_heading')); ?></h2>
-            <p><?php echo h(__t('help_system_status.clientphases_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.clientphases_p1')); ?></p><p><?php echo h(__t('help_system_status.k13_client_failure')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_system_status.clientphases_step1')); ?></li>
                 <li><?php echo h(__t('help_system_status.clientphases_step2')); ?></li>

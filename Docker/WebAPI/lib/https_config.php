@@ -93,7 +93,7 @@ function https_split_pem_certificates(string $pem): array
 /**
  * Display metadata for the settings card. Never returns key material.
  *
- * @return array{subject:string, sans:string, issuer:string, valid_from:int, valid_to:int, fingerprint:string, days_remaining:int}
+ * @return array{subject:string, sans:string, issuer:string, valid_from:int, valid_to:int, fingerprint:string, thumbprint:string, days_remaining:int}
  */
 function https_cert_metadata(string $certPem): array
 {
@@ -119,6 +119,7 @@ function https_cert_metadata(string $certPem): array
         'valid_from' => (int) ($parsed['validFrom_time_t'] ?? 0),
         'valid_to' => $validTo,
         'fingerprint' => $fingerprint,
+        'thumbprint' => strtoupper((string) openssl_x509_fingerprint($certPem, 'sha1')),
         'days_remaining' => $validTo !== 0 ? (int) floor(($validTo - time()) / 86400) : 0,
     ];
 }

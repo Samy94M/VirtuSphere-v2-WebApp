@@ -18,6 +18,14 @@ final class DirectoryHealthSnapshotTest extends TestCase
 {
     private const NOW = '2026-08-17 12:00:00';
 
+    public function testEnabledControllerNotTestedAtCurrentRevisionDegradesThePool(): void
+    {
+        $controllers = [$this->controller(), $this->controller(['id' => 2, 'validated_revision' => 2])];
+        self::assertSame('warning', directory_health_snapshot($this->config(), $controllers, $this->now())['overall']);
+        $controllers[1]['enabled'] = 0;
+        self::assertSame('ok', directory_health_snapshot($this->config(), $controllers, $this->now())['overall']);
+    }
+
     private function now(): int
     {
         return (int) strtotime(self::NOW . ' UTC');

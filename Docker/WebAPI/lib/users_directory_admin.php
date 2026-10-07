@@ -50,7 +50,9 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
             'action' => 'saved',
             'revision' => $revision,
         ], $actorId);
-        flash_set('success', __t('directory.flash_config_saved'));
+        $untested = count(array_filter(repo_directory_controllers($db), static fn (array $row): bool =>
+            (int) $row['enabled'] === 1 && (int) ($row['validated_revision'] ?? 0) !== $revision));
+        flash_set($untested > 0 ? 'warning' : 'success', __t('directory.flash_config_saved', ['count' => $untested]));
 
         return true;
     }

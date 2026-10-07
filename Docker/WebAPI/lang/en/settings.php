@@ -6,6 +6,7 @@ declare(strict_types=1);
  * System settings and deploy runtime (ADR-0014).
  */
 return [
+    'https_pin_consumers' => 'When the certificate changes, pinned MECM servers and client bundles need its new SHA-1 thumbprint. Check the Windows certificate chain; update the installer with -CertThumbprint and rebuild client bundles.',
     'title' => 'Settings',
     'tabs_label' => 'Settings sections',
     'tab_deploy' => 'Deployment',
@@ -184,7 +185,7 @@ return [
     'https_key_label' => 'Private key (PEM only)',
     'https_password_label' => 'PFX password (if set)',
     'https_upload_button' => 'Install certificate',
-    'https_confirm_overwrite' => 'Overwrite the installed certificate?',
+    'https_confirm_overwrite' => 'Overwrite the installed certificate? The thumbprint changes. Update pinned MECM servers and client bundles or they may no longer connect.',
     'https_uploaded' => 'Certificate installed. An enabled HTTPS listener picks it up within a few seconds.',
     'https_err_no_file' => 'Please choose a certificate file.',
     'https_err_too_large' => 'The file is too large for a certificate.',

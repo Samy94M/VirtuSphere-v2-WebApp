@@ -101,7 +101,7 @@ return [
     'err_import_expired' => 'Das Suchergebnis ist abgelaufen oder wurde bereits verwendet. Suchen Sie den Benutzer erneut.',
     'err_import_disabled' => 'Ein im AD deaktiviertes Konto kann nicht importiert werden.',
     'err_import_name_conflict' => 'Der UPN ist bereits als anderer VirtuSphere-Benutzername vergeben. Es wurde nichts importiert.',
-    'flash_config_saved' => 'AD-Konfiguration gespeichert. Testen Sie geänderte Controller erneut.',
+    'flash_config_saved' => 'AD-Konfiguration gespeichert. :count aktivierte Controller fehlen bis zum erneuten Test im zugelassenen Pool.',
     'flash_controller_added' => 'Controller hinzugefügt. Testen und aktivieren Sie ihn jetzt.',
     'flash_test_ok' => 'LDAPS, Suchkonto, Domäne, Suchbereich und schreibbarer Controller wurden erfolgreich geprüft.',
     'flash_controller_enabled' => 'Controller aktiviert.',
