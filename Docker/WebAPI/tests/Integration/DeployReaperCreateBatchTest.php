@@ -7,6 +7,11 @@ use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/../../lib/db.php';
 require_once __DIR__ . '/../../lib/repo/deploy_jobs.php';
 require_once __DIR__ . '/../../lib/repo/deploy_create_identity.php';
+require_once __DIR__ . '/../../lib/deploy_worker_outcome.php';
+$vmJournalRepo = __DIR__ . '/../../lib/repo/deploy_job_vm_states.php';
+if (is_file($vmJournalRepo)) {
+    require_once $vmJournalRepo;
+}
 
 /** Full reaper transactions, including the terminal log guard (SC-001). */
 final class DeployReaperCreateBatchTest extends TestCase
@@ -113,6 +118,54 @@ final class DeployReaperCreateBatchTest extends TestCase
         self::assertSame('uncertain', repo_deploy_create_results($this->db, $jobId)[0]['status']);
     }
 
+    public function testReaperDistinguishesPreparedWithoutIntentFromPreparedWithIntent(): void
+    {
+        if (!function_exists('deploy_worker_vm_create_launch_intent')) {
+            self::markTestSkipped('K15 create-launch intent is not installed on this baseline.');
+        }
+        $notLaunched = $this->job('create', ['prepared']);
+        $intentMayHaveLaunched = $this->job('create', ['prepared']);
+        $vmWithoutIntent = (int) repo_deploy_create_results($this->db, $notLaunched)[0]['vm_id'];
+        $vmWithIntent = (int) repo_deploy_create_results($this->db, $intentMayHaveLaunched)[0]['vm_id'];
+        repo_execute($this->db, 'UPDATE deploy_create_vm_results SET async_jid = NULL, async_deadline_at = NULL WHERE job_id IN (?, ?)',
+            'ii', [$notLaunched, $intentMayHaveLaunched]);
+
+        $claimWithoutIntent = repo_deploy_job($this->db, $notLaunched);
+        $claimWithIntent = repo_deploy_job($this->db, $intentMayHaveLaunched);
+        deploy_worker_mark_vms_deploying($this->db, $claimWithoutIntent, 'reaper prepared journal', [$vmWithoutIntent]);
+        deploy_worker_mark_vms_deploying($this->db, $claimWithIntent, 'reaper prepared journal', [$vmWithIntent]);
+        self::assertSame(true, deploy_worker_vm_create_launch_intent($this->db, $claimWithIntent, $vmWithIntent, true));
+
+        $reaped = repo_reap_stale_deploy_jobs($this->db, 600);
+
+        self::assertEqualsCanonicalizing([$notLaunched, $intentMayHaveLaunched], array_map('intval', array_column($reaped, 'id')));
+        $withoutResult = repo_deploy_create_results($this->db, $notLaunched)[0];
+        $withResult = repo_deploy_create_results($this->db, $intentMayHaveLaunched)[0];
+        self::assertSame('failed', $withoutResult['status'], 'prepared without intent proves no module launch began');
+        self::assertSame(VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST, $withoutResult['error_code']);
+        self::assertSame('uncertain', $withResult['status'], 'prepared with durable intent contains the launch crash gap');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmWithoutIntent));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmWithIntent));
+    }
+
+    public function testReaperDoesNotGuessRemoteTouchForHistoricalJobWithoutJournal(): void
+    {
+        $jobId = $this->job('export');
+        $missionId = (int) repo_deploy_job($this->db, $jobId)['mission_id'];
+        $name = 'phpunit_reap_no_journal_' . bin2hex(random_bytes(4));
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)',
+            'issss', [$missionId, $name, $name, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY]);
+        $vmId = (int) $this->db->insert_id;
+        $payload = json_encode(['mode' => 'export', 'vm_ids' => [$vmId]], JSON_THROW_ON_ERROR);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET payload_json = ? WHERE id = ?', 'si', [$payload, $jobId]);
+
+        $reaped = repo_reap_stale_deploy_jobs($this->db, 600);
+
+        self::assertContains($jobId, array_map('intval', array_column($reaped, 'id')));
+        self::assertSame('failed', repo_deploy_job($this->db, $jobId)['status']);
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmId));
+    }
+
     public function testReversedHeartbeatBatchLocksAllCreateRowsBeforeAnyVmConvergence(): void
     {
         $first = $this->job('create', ['running']);
@@ -174,7 +227,11 @@ final class DeployReaperCreateBatchTest extends TestCase
             $selection[] = ['id' => (int) $this->db->insert_id, 'vm_name' => $vmName];
         }
         $payload = json_encode(['mode' => $mode, 'vm_ids' => array_column($selection, 'id')], JSON_THROW_ON_ERROR);
-        repo_execute($this->db, "INSERT INTO deploy_jobs (mission_id, status, locked_by, locked_at, heartbeat_at, payload_json) VALUES (?, 'running', 'phpunit-reaper', NOW(), NOW(), ?)", 'is', [$missionId, $payload]);
+        $contract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+        $worker = 'phpunit-reaper';
+        $token = bin2hex(random_bytes(16));
+        repo_execute($this->db, "INSERT INTO deploy_jobs (mission_id, status, locked_by, lock_token, locked_at, heartbeat_at, payload_json, worker_epoch, attempts, execution_contract, execution_generation_id) SELECT ?, 'running', ?, ?, NOW(), NOW(), ?, 1, 1, ?, current_generation_id FROM deploy_runtime_identity WHERE id = 1",
+            'issss', [$missionId, $worker, $token, $payload, $contract]);
         $jobId = (int) $this->db->insert_id;
         if ($selection !== []) {
             repo_deploy_create_materialize($this->db, $jobId, $selection);
@@ -204,6 +261,13 @@ final class DeployReaperCreateBatchTest extends TestCase
         }
 
         return $jobId;
+    }
+
+    /** @return array{0:string,1:string} */
+    private function vmState(int $vmId): array
+    {
+        $row = repo_fetch_one($this->db, 'SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+        return [(string) $row['lifecycle_state'], (string) $row['mecm_sync_state']];
     }
 
     private function logs(int $jobId): array

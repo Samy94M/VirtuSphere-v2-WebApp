@@ -35,18 +35,18 @@
       ansible.builtin.set_fact:
         powercycle_targets: "{{ vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
 
-    - name: Ausgangszustand jeder Ziel-VM erfassen
-      community.vmware.vmware_guest_info:
-        hostname: "{{ esxi_hostname }}"
-        port: "{{ esxi_port | int }}"
-        username: "{{ esxi_username }}"
-        password: "{{ esxi_password }}"
-        validate_certs: "{{ esxi_validate_certs | bool }}"
-        datacenter: "{{ item.datacenter_name }}"
-        name: "{{ item.vm_name }}"
-      delegate_to: localhost
+    - name: Powercycle-Ergebnisse initialisieren
+      ansible.builtin.set_fact:
+        powercycle_initial:
+          results: []
+
+    - name: Marker und Ausgangszustand VM fuer VM erfassen
+      ansible.builtin.include_tasks: ./powercycle_vm_info.yml
       loop: "{{ powercycle_targets }}"
-      register: powercycle_initial
+      loop_control:
+        loop_var: powercycle_target
+        index_var: powercycle_info_index
+        label: "{{ powercycle_target['vm_name'] }}"
 
     - name: Name und Instance-UUID vor dem Power-Cycle validieren
       ansible.builtin.assert:

@@ -83,6 +83,21 @@ final class AnsibleMacExportContractTest extends TestCase
         self::assertStringNotContainsString('response.read().decode', $script);
     }
 
+    public function testVmTouchReporterUsesTheSharedTransportAndKeepsTlsClosed(): void
+    {
+        $script = $this->source('report_vm_touch.py');
+        $allowed = ['argparse', 'json', 're', 'socket', 'ssl', 'urllib.error', 'urllib.parse', 'urllib.request'];
+        preg_match_all('/^\\s*(?:from|import)\\s+([\\w.]+)/m', $script, $imports);
+        self::assertNotSame([], $imports[1], 'no imports found; the scan stopped working');
+        foreach (array_unique($imports[1]) as $module) {
+            self::assertContains($module, $allowed, sprintf('report_vm_touch.py imports "%s", outside the air-gap stdlib list.', $module));
+        }
+        self::assertStringContainsString('transport.default_opener(url, fingerprint)', $script);
+        self::assertStringContainsString('transport.retry_open_request(request, opener, sleeper, operation)', $script);
+        self::assertStringNotContainsString('verify=False', $script);
+        self::assertStringNotContainsString('ssl._create_unverified_context', $script);
+    }
+
     public function testWorkerRejectsATemplateWhoseJobPlaceholderDriftedAway(): void
     {
         $temporary = tempnam(sys_get_temp_dir(), 'vs-upload-');

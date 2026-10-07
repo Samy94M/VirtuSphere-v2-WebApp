@@ -49,6 +49,7 @@ function deploy_worker_create_drive_unit(
     array $unit,
     array $context
 ): array {
+    $context['job_claim'] = $job;
     $status = (string) $unit['status'];
     if ($status === VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING) {
         if ((string) $unit['action'] === VIRTUSPHERE_CREATE_ACTION_VERIFY_SKIP) {

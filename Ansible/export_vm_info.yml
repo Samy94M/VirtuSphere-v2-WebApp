@@ -1,0 +1,92 @@
+- name: Beginn der Export-Statusabfrage melden
+  ansible.builtin.debug:
+    msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] RUN Export info {{ export_vm_config['vm_name'] }}"
+
+- name: Export-Marker fuer genau diese VM bestaetigen lassen
+  block:
+    - name: ESXi-Zugriffsversuch vor der ersten VM-Abfrage journalisieren
+      ansible.builtin.command:
+        argv:
+          - python3
+          - ./report_vm_touch.py
+          - --vm-id
+          - "{{ export_vm_config['portal_vm_id'] | string }}"
+          - --phase
+          - export
+          - --attempt
+          - "{{ job_execution['attempt'] | string }}"
+          - --generation
+          - "{{ job_execution['generation'] }}"
+      register: export_touch
+      changed_when: false
+  rescue:
+    - name: Abgelehnten Export-Marker als geschlossene Ursache melden
+      ansible.builtin.debug:
+        msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] fail Export info {{ export_vm_config['vm_name'] }}: touch_refused"
+
+    - name: Keine Exportabfrage ohne Markerbestaetigung starten
+      ansible.builtin.fail:
+        msg: >-
+          Export access marker was refused for portal VM
+          {{ export_vm_config['portal_vm_id'] }}; no ESXi query was started.
+
+- name: Informationen dieser VM abfragen
+  community.vmware.vmware_guest_info:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    datacenter: "{{ export_vm_config['datacenter_name'] }}"
+    name: "{{ export_vm_config['vm_name'] }}"
+  delegate_to: localhost
+  register: vm_info_current
+  # Keep query failures as per-VM callback results; a touch refusal above is a
+  # hard playbook stop and never reaches this query.
+  ignore_errors: true
+
+- name: Loop-Ergebnisform der Exportabfrage erhalten
+  ansible.builtin.set_fact:
+    vm_info:
+      results: "{{ vm_info.results + [vm_info_current | combine({'item': export_vm_config})] }}"
+
+- name: Name und Instance-UUID des Exportergebnisses validieren
+  ansible.builtin.set_fact:
+    vm_info_identity_results: >-
+      {{
+        vm_info_identity_results
+        +
+        [
+          vm_info_current | combine({'item': export_vm_config})
+          if
+          (
+            vm_info_current['failed'] | default(false) | bool
+            or
+            (
+              ((vm_info_current['instance'] | default({}))['hw_name'] | default(''))
+              == (export_vm_config['vm_name'] | default(''))
+              and
+              (
+                (
+                  (export_vm_config['vm_instance_uuid'] | default('')) | trim | length > 0
+                  and
+                  ((vm_info_current['instance'] | default({}))['instance_uuid'] | default('')) | lower
+                  == (export_vm_config['vm_instance_uuid'] | default('')) | lower
+                )
+              )
+            )
+          )
+          else
+          (
+            vm_info_current | combine({
+              'item': export_vm_config,
+              'failed': true,
+              'msg': 'VirtuSphere VM identity mismatch'
+            })
+          )
+        ]
+      }}
+
+- name: Ergebnis dieser Exportabfrage melden
+  ansible.builtin.debug:
+    msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] {{ 'fail' if (vm_info_identity_results | last)['failed'] | default(false) | bool else 'pass' }} Export info {{ export_vm_config['vm_name'] }}"

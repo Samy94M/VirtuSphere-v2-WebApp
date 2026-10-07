@@ -10,66 +10,19 @@
     REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   tasks:
-    - name: Sammle VM-Informationen
-      community.vmware.vmware_guest_info:
-        hostname: "{{ esxi_hostname }}"
-        port: "{{ esxi_port | int }}"
-        username: "{{ esxi_username }}"
-        password: "{{ esxi_password }}"
-        validate_certs: "{{ esxi_validate_certs | bool }}"
-        datacenter: "{{ item.datacenter_name }}"
-        name: "{{ item.vm_name }}"
-      delegate_to: localhost
-      loop: "{{ vm_configurations }}"
-      register: vm_info
-      # A missing/unreachable VM is a per-VM MAC result, not a reason to hide
-      # every other VM result. ignore_errors keeps the failed item (including
-      # item/failed/msg) in vm_info.results for db_importMAC.php to classify.
-      ignore_errors: true
-
-    # Keep the export's per-VM result contract: a query failure stays a failure,
-    # while a successful reply about a namesake is converted into one before the
-    # callback can write MACs or lifecycle state. A stored UUID is required: in a
-    # full pipeline the worker rewrites serverlist.yml after create, so the export
-    # already carries the UUID that create bound.
-    - name: Name und Instance-UUID je Export-Ergebnis validieren
+    - name: Export-Ergebnisse initialisieren
       ansible.builtin.set_fact:
-        vm_info_identity_results: >-
-          {{
-            (vm_info_identity_results | default([]))
-            +
-            [
-              item
-              if
-              (
-                item['failed'] | default(false) | bool
-                or
-                (
-                  ((item['instance'] | default({}))['hw_name'] | default(''))
-                  == ((item['item'] | default({}))['vm_name'] | default(''))
-                  and
-                  (
-                    (
-                      ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
-                      and
-                      ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
-                      == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
-                    )
-                  )
-                )
-              )
-              else
-              (
-                item | combine({
-                  'failed': true,
-                  'msg': 'VirtuSphere VM identity mismatch'
-                })
-              )
-            ]
-          }}
-      loop: "{{ vm_info.results | default([]) }}"
+        vm_info:
+          results: []
+        vm_info_identity_results: []
+
+    - name: Marker und Export-Status VM fuer VM erfassen
+      ansible.builtin.include_tasks: ./export_vm_info.yml
+      loop: "{{ vm_configurations }}"
       loop_control:
-        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+        loop_var: export_vm_config
+        index_var: export_info_index
+        label: "{{ export_vm_config['vm_name'] }}"
 
     - name: Speichere gesammelte Informationen in einer temporaeren Datei
       ansible.builtin.copy:

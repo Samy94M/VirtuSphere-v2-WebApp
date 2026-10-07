@@ -6,140 +6,72 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/ansible_command.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_ownership.php';
+require_once __DIR__ . '/deploy_worker_vm_journal.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/mac_import_binding.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/status_events.php';
 
-/**
- * VM lifecycle transitions a job owns: marking its scope as deploying,
- * restoring it when nothing was touched, failing what is left, and reading the
- * durable MAC-import verdict that decides which VMs a failure may still claim.
- *
- * Kept apart from the job's own outcome because these writes touch deploy_vms,
- * not deploy_jobs, and because a MAC import that already committed makes a VM
- * off-limits to every convergence path here.
- */
-/**
- * Marks the job's scope VMs as `deploying` after preflight. Export-capable
- * modes leave VMs with a stored ResourceID alone (WM-E1). Lifecycle only: the
- * MECM sync state and the frozen legacy vm_status are not changed by starting
- * a job.
- *
- * @param int[] $vmIds Empty means "all VMs of the mission".
- * @return array<int,string> vmId => lifecycle the VM had before the job, for
- *         deploy_worker_restore_deploying_vms() on a resultless success.
- */
+/** @param int[] $vmIds @return array<int,string> Compatibility return; persistence is authoritative. */
 function deploy_worker_mark_vms_deploying(mysqli $db, array $job, string $note, array $vmIds = []): array
 {
     return deploy_worker_owned_transaction($db, $job, static function (array $job) use ($db, $note, $vmIds): array {
         if ((string) $job['status'] !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
             return [];
         }
-        $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
-        $priorLifecycles = [];
+        repo_deploy_job_vm_capture($db, $job, $vmIds);
+        $mode = (string) deploy_worker_payload($job)['mode'];
+        if (deploy_worker_mode_preserves_vm_state($mode)) {
+            return [];
+        }
+        $vms = deploy_worker_scope_vms($db, (int) $job['mission_id'], $vmIds, true);
+        $states = repo_deploy_job_vm_states($db, (int) $job['id']);
         $keep = deploy_worker_locked_imported_vm_ids($job);
-        $expectsMac = ansible_mode_expects_mac_result((string) deploy_worker_payload($job)['mode']);
-        foreach (deploy_worker_scope_vms($db, (int) $job['mission_id'], $vmIds, true) as $vm) {
+        $expectsMac = ansible_mode_expects_mac_result($mode);
+        $priorLifecycles = [];
+        foreach ($vms as $vm) {
             $vmId = (int) $vm['id'];
-            // WM-E1: an export verifies a stored MECM binding; it must not
-            // open a new lifecycle bracket before that read-only verdict.
-            if (in_array($vmId, $keep, true) || ($expectsMac && virtusphere_vm_is_mecm_bound($vm))) {
+            $state = $states[$vmId];
+            if (in_array($vmId, $keep, true) || ($expectsMac && virtusphere_vm_is_mecm_bound($vm))
+                || (string) $vm['lifecycle_state'] === VIRTUSPHERE_LIFECYCLE_DEPLOYING
+                || (string) $vm['lifecycle_state'] !== (string) $state['lifecycle_before']
+                || (string) $vm['mecm_sync_state'] !== (string) $state['mecm_before']) {
                 continue;
             }
-            $priorLifecycles[$vmId] = (string) ($vm['lifecycle_state'] ?? '');
-            $prior = $priorLifecycles[$vmId];
+            $prior = (string) $state['lifecycle_before'];
+            $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
             $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, updated_at = NOW() WHERE id = ? AND lifecycle_state = ?');
             $stmt->bind_param('sis', $lifecycle, $vmId, $prior);
             $stmt->execute();
             if ($stmt->affected_rows !== 1) {
                 continue;
             }
-            repo_record_vm_status_event($db, $vmId, $lifecycle, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_SYNC_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
+            $jobId = (int) $job['id'];
+            $stmt = $db->prepare('UPDATE deploy_job_vm_states SET marked_deploying = 1 WHERE job_id = ? AND vm_id = ?');
+            $stmt->bind_param('ii', $jobId, $vmId);
+            $stmt->execute();
+            $priorLifecycles[$vmId] = $prior;
+            repo_record_vm_status_event($db, $vmId, $lifecycle, (string) $vm['mecm_sync_state'], (string) $vm['vm_status'], $note);
         }
-
         return $priorLifecycles;
     }) ?? [];
 }
 
-/**
- * Returns still-`deploying` scope VMs to the lifecycle they had before the
- * job. Only meaningful for sequences without an export step (a create does
- * not install an OS, a start does not provision), where success leaves no
- * per-VM result behind that could say anything better. VMs without a known
- * prior state are left alone rather than guessed at - for those the
- * convergence sweep stays the authority. MECM state and the frozen legacy
- * vm_status are not touched.
- *
- * @param int[] $vmIds Empty means "all VMs of the mission".
- * @param array<int,string> $priorLifecycles vmId => lifecycle before the job
- * @return int Number of VMs actually restored.
- */
+/** @param int[] $vmIds @param array<int,string> $priorLifecycles Legacy argument, never authority after process loss. */
 function deploy_worker_restore_deploying_vms(mysqli $db, array $job, string $note, array $vmIds, array $priorLifecycles): int
 {
-    return deploy_worker_owned_transaction($db, $job, static function (array $job) use ($db, $note, $vmIds, $priorLifecycles): int {
-        $keep = deploy_worker_locked_imported_vm_ids($job);
-        $restored = 0;
-        foreach (deploy_worker_scope_vms($db, (int) $job['mission_id'], $vmIds, true) as $vm) {
-            $vmId = (int) $vm['id'];
-            if (in_array($vmId, $keep, true)) {
-                continue;
-            }
-            if ((string) ($vm['lifecycle_state'] ?? '') !== VIRTUSPHERE_LIFECYCLE_DEPLOYING) {
-                continue;
-            }
-            $prior = $priorLifecycles[$vmId] ?? '';
-            if ($prior === '' || $prior === VIRTUSPHERE_LIFECYCLE_DEPLOYING || !in_array($prior, VIRTUSPHERE_LIFECYCLE_STATES, true)) {
-                continue;
-            }
-            $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, updated_at = NOW() WHERE id = ? AND lifecycle_state = ?');
-            $deploying = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
-            $stmt->bind_param('sis', $prior, $vmId, $deploying);
-            $stmt->execute();
-            if ($stmt->affected_rows !== 1) {
-                continue;
-            }
-            repo_record_vm_status_event($db, $vmId, $prior, (string) ($vm['mecm_sync_state'] ?? VIRTUSPHERE_MECM_SYNC_NOT_READY), (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
-            $restored++;
-        }
-
-        return $restored;
-    }) ?? 0;
+    return deploy_worker_owned_transaction($db, $job, static fn (array $locked): int =>
+        deploy_worker_restore_locked_vm_journal($db, $locked, $note, $vmIds)) ?? 0;
 }
 
-/**
- * Failure convergence for a job's VMs: lifecycle_state AND mecm_sync_state
- * become `failed` together. A failed lifecycle with a stale `pending` sync
- * state would advertise a MECM pickup that can never happen. The frozen legacy
- * vm_status is never rewritten by a failure (GROK.md legacy status contract);
- * errors live in lifecycle/MECM state only.
- *
- * $keepVmIds are the VMs with a successful MAC result (successful_vm_ids of
- * result_json): an unbound import keeps deployed/pending; an unchanged bound
- * export keeps its original lifecycle and MECM state.
- * $onlyDeploying additionally restricts the marking to VMs still in
- * `deploying` - the cancel path, which must not repaint states the import
- * endpoint already finished.
- *
- * @param int[] $vmIds Empty means "all VMs of the mission".
- * @param int[] $keepVmIds
- * @return int Number of VMs actually marked.
- */
+/** @param int[] $vmIds @param int[] $keepVmIds */
 function deploy_worker_mark_vms_failed(mysqli $db, array $job, string $note, array $vmIds = [], array $keepVmIds = [], bool $onlyDeploying = false): int
 {
     return deploy_worker_owned_transaction($db, $job, static fn (array $locked): int =>
         deploy_worker_fail_locked_job_vms($db, $locked, $note, $vmIds, $onlyDeploying, $keepVmIds)) ?? 0;
 }
 
-/**
- * Reaper/worker shared convergence. The caller holds Mission -> Job -> Runtime
- * in repo_transaction(), and MUST call before terminalizing the locked job.
- * Historical tokenless jobs may be reaped; returning workers never get this
- * capability from an in-memory claim. Current MAC successes are read here.
- *
- * @param int[] $vmIds
- * @param int[] $keepVmIds
- */
+/** Active owner rule shared by worker and reaper. @param int[] $vmIds @param int[] $keepVmIds */
 function deploy_worker_fail_locked_job_vms(mysqli $db, array $job, string $note, array $vmIds = [], bool $onlyDeploying = false, array $keepVmIds = []): int
 {
     if (repo_transaction_depth($db) === 0) {
@@ -148,47 +80,17 @@ function deploy_worker_fail_locked_job_vms(mysqli $db, array $job, string $note,
     if (!in_array((string) $job['status'], [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING], true)) {
         return 0;
     }
-    $keep = array_flip(array_merge(array_map('intval', $keepVmIds), deploy_worker_locked_imported_vm_ids($job)));
-    $failedLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
-    $failedMecm = VIRTUSPHERE_MECM_SYNC_FAILED;
-    $marked = 0;
-
-    foreach (deploy_worker_scope_vms($db, (int) ($job['mission_id'] ?? 0), $vmIds, true) as $vm) {
-        $vmId = (int) $vm['id'];
-        if (isset($keep[$vmId])) {
-            continue;
-        }
-        $lifecycle = (string) ($vm['lifecycle_state'] ?? '');
-        if ($onlyDeploying && $lifecycle !== VIRTUSPHERE_LIFECYCLE_DEPLOYING) {
-            continue;
-        }
-        if ($lifecycle === $failedLifecycle && (string) ($vm['mecm_sync_state'] ?? '') === $failedMecm) {
-            // Already converged; keep the status-event stream sparse.
-            continue;
-        }
-        $mecm = (string) $vm['mecm_sync_state'];
-        $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated_at = NOW() WHERE id = ? AND lifecycle_state = ? AND mecm_sync_state = ?');
-        $stmt->bind_param('ssiss', $failedLifecycle, $failedMecm, $vmId, $lifecycle, $mecm);
-        $stmt->execute();
-        if ($stmt->affected_rows !== 1) {
-            continue;
-        }
-        repo_record_vm_status_event($db, $vmId, $failedLifecycle, $failedMecm, (string) ($vm['vm_status'] ?? VIRTUSPHERE_STATUS_REGISTERED), $note);
-        $marked++;
-    }
-
-    return $marked;
+    return deploy_worker_apply_locked_vm_journal($db, $job, $note, $vmIds, $onlyDeploying, $keepVmIds);
 }
 
-/** @return int[] The locked job row is newer than any caller's cached result. */
+/** @return int[] Always the current locked result, never an earlier snapshot. */
 function deploy_worker_locked_imported_vm_ids(array $job): array
 {
     $result = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
-
     return $result !== null ? $result['successful_vm_ids'] : [];
 }
 
-/** The VM convergence and cancel confirmation are one ownership decision. */
+/** VM convergence and cancellation terminality share one ownership transaction. */
 function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $message = null): bool
 {
     return deploy_worker_owned_transaction($db, $claim, static function (array $job) use ($db, $message): bool {
@@ -198,54 +100,26 @@ function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $m
         $jobId = (int) $job['id'];
         $payload = json_decode((string) $job['payload_json'], true);
         $vmIds = is_array($payload) && is_array($payload['vm_ids'] ?? null) ? $payload['vm_ids'] : [];
-        deploy_worker_fail_locked_job_vms($db, $job, 'deploy job ' . $jobId . ' cancelled while deploying', $vmIds, true);
-
+        deploy_worker_fail_locked_job_vms($db, $job, 'deploy job ' . $jobId . ' cancelled', $vmIds);
         return repo_confirm_deploy_job_cancelled($db, $jobId, (string) $job['locked_by'], $message);
     }) ?? false;
 }
 
-/**
- * @param int[] $vmIds Empty means "all VMs of the mission".
- * @return array<int, array<string, mixed>>
- */
+/** @param int[] $vmIds @return array<int,array<string,mixed>> */
 function deploy_worker_scope_vms(mysqli $db, int $missionId, array $vmIds, bool $lock = false): array
 {
-    if ($missionId <= 0) {
-        return [];
-    }
-
-    $vmIds = array_values(array_filter(array_map('intval', $vmIds), static fn (int $id): bool => $id > 0));
-    if ($vmIds !== []) {
-        $placeholders = implode(', ', array_fill(0, count($vmIds), '?'));
-        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status, mecm_id FROM deploy_vms WHERE mission_id = ? AND id IN (' . $placeholders . ') ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
-        $stmt->bind_param('i' . str_repeat('i', count($vmIds)), $missionId, ...$vmIds);
-    } else {
-        $stmt = $db->prepare('SELECT id, lifecycle_state, mecm_sync_state, vm_status, mecm_id FROM deploy_vms WHERE mission_id = ? ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
-        $stmt->bind_param('i', $missionId);
-    }
-    $stmt->execute();
-
-    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    return repo_deploy_job_vm_scope($db, $missionId, $vmIds, $lock);
 }
 
 /**
- * The job's durable MAC import verdict. The DB result written by
- * db_importMAC.php is the SSoT for success/partial of an export sequence;
- * stdout never is. NULL means "no usable result".
- *
  * @return array{version:int,outcome:string,successful_vm_ids:list<int>,failed_vm_ids:list<int>,counts:array<string,int>,errors:list<mixed>,retry:array<mixed>,vm_results:list<mixed>,callback_fingerprint:string}|null
  */
 function deploy_worker_job_mac_result(mysqli $db, int $jobId): ?array
 {
-    // A surrounding REPEATABLE READ snapshot may predate a callback that won
-    // the mission lock. Finish must consume the current row it owns, not that
-    // earlier snapshot, exactly like the lifecycle writer below its fence.
     $stmt = $db->prepare('SELECT result_json FROM deploy_jobs WHERE id = ? LIMIT 1'
         . (repo_transaction_depth($db) > 0 ? ' FOR UPDATE' : ''));
     $stmt->bind_param('i', $jobId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
-    $json = is_array($row) && $row['result_json'] !== null ? (string) $row['result_json'] : null;
-
-    return mac_import_decode_result($json);
+    return mac_import_decode_result(is_array($row) && $row['result_json'] !== null ? (string) $row['result_json'] : null);
 }

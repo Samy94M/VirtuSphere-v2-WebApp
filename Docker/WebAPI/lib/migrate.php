@@ -24,6 +24,7 @@ require_once __DIR__ . '/migrations/0056_package_report_foundation.php';
 require_once __DIR__ . '/migrations/0057_create_replaced_identity.php';
 require_once __DIR__ . '/migrations/0058_mecm_transfer_generation.php';
 require_once __DIR__ . '/migrations/0059_ansible_host_identity.php';
+require_once __DIR__ . '/migrations/0060_deploy_vm_prestate.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -87,16 +88,8 @@ function migrator_check_exists(mysqli $db, string $table, string $constraint): b
 }
 
 /**
- * Whether a FOREIGN KEY of that name already exists on the table.
- *
- * Its own helper because migrator_check_exists() deliberately filters on
- * `CONSTRAINT_TYPE = "CHECK"` and can therefore never find a foreign key. Using
- * it for one reads correct and passes every unit test, and then fails only
- * against a FRESH schema that already carries the key: the live upgrade path
- * adds it once and is happy, while `struktur.sql` and the migration collide
- * with `Duplicate foreign key constraint name`. That is exactly the fresh/live
- * convergence the database rule exists for, and it is invisible until the QA
- * stack builds from scratch.
+ * Detect foreign keys separately: migrator_check_exists() only looks for CHECK.
+ * Fresh schema and upgrade converge without adding an existing foreign key twice.
  */
 function migrator_foreign_key_exists(mysqli $db, string $table, string $constraint): bool
 {
@@ -1205,6 +1198,7 @@ SQL;
     '0057_create_replaced_identity' => migrate_0057_create_replaced_identity(...),
     '0058_mecm_transfer_generation' => migrate_0058_mecm_transfer_generation(...),
     '0059_ansible_host_identity' => migrate_0059_ansible_host_identity(...),
+    '0060_deploy_vm_prestate' => migrate_0060_deploy_vm_prestate(...),
 ];
 try {
     $db = db();

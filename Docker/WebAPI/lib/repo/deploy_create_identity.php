@@ -239,7 +239,10 @@ function repo_deploy_create_commit_success(
  * would assert an active poll that no process performs - the same shape of lie
  * as the idle timeout this whole stage exists to remove.
  *
- * It therefore says what is established and nothing more: `uncertain`. That
+ * K15 first closes journaled prepared units with no launch intent as a known
+ * pre-launch failure. They have no remote work to reconcile. The remaining
+ * started or historically unjournaled units say only what is established:
+ * `uncertain`. That
  * asserts nothing about the VM, keeps the stored async job id and deadline as
  * the evidence a reconciliation needs, and is exactly the state the operator
  * release of section 10.5 consumes. Confirmed successes, failures and skips of
@@ -253,6 +256,18 @@ function repo_deploy_create_converge_reaped(mysqli $db, int $jobId, string $deta
     if ($detail === '') {
         throw new InvalidArgumentException('A converged create unit needs its observation.');
     }
+    // K15 can prove no launch only for a captured VM with no durable intent.
+    // Rows from before the journal retain their conservative historical rule.
+    $prepared = VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED;
+    $failed = VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED;
+    $code = VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST;
+    $stmt = $db->prepare(
+        'UPDATE deploy_create_vm_results r JOIN deploy_job_vm_states s ON s.job_id = r.job_id AND s.vm_id = r.vm_id'
+        . ' SET r.status = ?, r.error_code = ?, r.error_detail = ?, r.finished_at = UTC_TIMESTAMP()'
+        . ' WHERE r.job_id = ? AND r.status = ? AND s.create_launch_intent = 0 AND COALESCE(r.async_jid, \'\') = \'\''
+    );
+    $stmt->bind_param('sssis', $failed, $code, $detail, $jobId, $prepared);
+    $stmt->execute();
     $stmt = $db->prepare(
         'UPDATE deploy_create_vm_results SET status = ?, error_code = ?, error_detail = ?,'
         . ' finished_at = UTC_TIMESTAMP() WHERE job_id = ? AND status IN (?, ?)'

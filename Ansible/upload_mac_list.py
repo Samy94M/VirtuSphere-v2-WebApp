@@ -256,66 +256,82 @@ def default_opener(url, pinned_fingerprint=''):
     return build_https_opener(normalized_fingerprint(pinned_fingerprint)).open
 
 
-def announce_retry(reason, attempt, sleeper):
+def announce_retry(reason, attempt, sleeper, operation='MAC-Upload'):
     delay = RETRY_DELAYS_SECONDS[attempt]
     print(
-        f'MAC-Upload: Portal voruebergehend nicht erreichbar ({reason}). '
+        f'{operation}: Portal voruebergehend nicht erreichbar ({reason}). '
         f'Neuer Versuch in {delay} s ({attempt + 2}/{len(RETRY_DELAYS_SECONDS) + 1}).',
         flush=True,
     )
     sleeper(delay)
 
 
-def send_request(request, opener=urlopen, sleeper=None):
+def retry_open_request(request, opener=urlopen, sleeper=None, operation='MAC-Upload'):
+    """Open a request with the shared bounded transient-retry policy.
+
+    The caller owns response validation and closing. HTTP 4xx, permanent
+    network/TLS failures and exhausted retries are raised to that caller.
+    """
     sleeper = time.sleep if sleeper is None else sleeper
     last_attempt = len(RETRY_DELAYS_SECONDS)
     for attempt in range(last_attempt + 1):
         try:
-            with opener(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                status = response.getcode()
-                if not isinstance(status, int) or status < 200 or status >= 300:
-                    print('MAC-Upload abgebrochen: HTTP-Antwort war nicht erfolgreich.')
-                    return EXIT_HTTP_ERROR, None
-
-                raw_response = response.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw_response) > MAX_RESPONSE_BYTES:
-                    print('MAC-Upload abgebrochen: Serverantwort ist zu gross.')
-                    return EXIT_RESPONSE_ERROR, None
-
-                decoded = decode_response(raw_response)
-                if decoded is None:
-                    print('MAC-Upload abgebrochen: Serverantwort ist semantisch ungueltig.')
-                    return EXIT_RESPONSE_ERROR, None
-
-                return OUTCOME_EXIT_CODES[decoded['outcome']], decoded
+            return opener(request, timeout=REQUEST_TIMEOUT_SECONDS)
         except HTTPError as error:
             if 500 <= error.code < 600 and attempt < last_attempt:
-                announce_retry(f'HTTP {error.code}', attempt, sleeper)
+                error.close()
+                announce_retry(f'HTTP {error.code}', attempt, sleeper, operation)
                 continue
-            # The portal's own error field is surfaced (WP-12); everything else
-            # about the body stays unlogged (see portal_error_reason).
-            reason = portal_error_reason(error)
-            if reason:
-                print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}. Portal-Antwort: {reason}')
-            else:
-                print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
-            return EXIT_HTTP_ERROR, None
+            raise
         except (URLError, socket.timeout, TimeoutError, ConnectionError) as error:
             if is_transient_network_error(error) and attempt < last_attempt:
-                announce_retry(short_reason(error), attempt, sleeper)
+                announce_retry(short_reason(error), attempt, sleeper, operation)
                 continue
-            # The reason matters here too: a pinned-certificate mismatch and an
-            # unplugged cable both used to read "Netzwerkfehler".
-            print(f'MAC-Upload abgebrochen: Netzwerkfehler. {short_reason(error)}')
-            return EXIT_HTTP_ERROR, None
-        except ssl.SSLError as error:
-            print(f'MAC-Upload abgebrochen: TLS-Fehler. {short_reason(error)}')
-            return EXIT_HTTP_ERROR, None
-        except Exception as error:
-            print(f'MAC-Upload abgebrochen: unerwarteter Transportfehler. {short_reason(error)}')
-            return EXIT_HTTP_ERROR, None
+            raise
 
-    return EXIT_HTTP_ERROR, None
+    raise RuntimeError('request retry loop ended without a response')
+
+
+def send_request(request, opener=urlopen, sleeper=None):
+    sleeper = time.sleep if sleeper is None else sleeper
+    try:
+        with retry_open_request(request, opener, sleeper) as response:
+            status = response.getcode()
+            if not isinstance(status, int) or status < 200 or status >= 300:
+                print('MAC-Upload abgebrochen: HTTP-Antwort war nicht erfolgreich.')
+                return EXIT_HTTP_ERROR, None
+
+            raw_response = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw_response) > MAX_RESPONSE_BYTES:
+                print('MAC-Upload abgebrochen: Serverantwort ist zu gross.')
+                return EXIT_RESPONSE_ERROR, None
+
+            decoded = decode_response(raw_response)
+            if decoded is None:
+                print('MAC-Upload abgebrochen: Serverantwort ist semantisch ungueltig.')
+                return EXIT_RESPONSE_ERROR, None
+
+            return OUTCOME_EXIT_CODES[decoded['outcome']], decoded
+    except HTTPError as error:
+        # The portal's own error field is surfaced (WP-12); everything else
+        # about the body stays unlogged (see portal_error_reason).
+        reason = portal_error_reason(error)
+        if reason:
+            print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}. Portal-Antwort: {reason}')
+        else:
+            print(f'MAC-Upload abgebrochen: HTTP-Fehler {error.code}.')
+        return EXIT_HTTP_ERROR, None
+    except (URLError, socket.timeout, TimeoutError, ConnectionError) as error:
+        # The reason matters here too: a pinned-certificate mismatch and an
+        # unplugged cable both used to read "Netzwerkfehler".
+        print(f'MAC-Upload abgebrochen: Netzwerkfehler. {short_reason(error)}')
+        return EXIT_HTTP_ERROR, None
+    except ssl.SSLError as error:
+        print(f'MAC-Upload abgebrochen: TLS-Fehler. {short_reason(error)}')
+        return EXIT_HTTP_ERROR, None
+    except Exception as error:
+        print(f'MAC-Upload abgebrochen: unerwarteter Transportfehler. {short_reason(error)}')
+        return EXIT_HTTP_ERROR, None
 
 
 def send_data_to_server(

@@ -10,6 +10,23 @@ import yaml
 ROOT = Path('/repo')
 PLAY = 'powercycleVMs-ESXi_playbook.yml'
 TASKS = 'powercycle_vm_tasks.yml'
+INFO_TASKS = 'powercycle_vm_info.yml'
+
+TOUCH_STUB = '''
+import json
+import os
+import sys
+import time
+
+args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
+vm_id = int(args['--vm-id'])
+with open(os.environ['PC_EVENTS'], 'a') as stream:
+    denied = vm_id == int(json.loads(open(os.environ['PC_SCENARIO']).read()).get('touch_failure_vm_id', 0))
+    event = ['touch_refused' if denied else 'touch', vm_id, args['--phase'], time.monotonic()]
+    stream.write(json.dumps(event) + '\\n')
+if denied:
+    raise SystemExit(1)
+'''
 
 ACTION = '''
 import json
@@ -68,20 +85,22 @@ def run_case(name, settings, expected, failed=False):
         plugins.mkdir()
         (plugins / 'qa_vmware.py').write_text(ACTION)
         (plugins / 'qa_pause.py').write_text(PAUSE)
-        for filename in (PLAY, TASKS):
+        for filename in (PLAY, TASKS, INFO_TASKS):
             source = (ROOT / 'Ansible' / filename).read_text()
-            # Replace only external actions. Loops, guards, includes and failure
-            # propagation are the production YAML, not a reimplemented fixture.
-            source = source.replace('community.vmware.vmware_guest_info:', 'qa_vmware:\n        qa_kind: info')
-            source = source.replace('community.vmware.vmware_guest_powerstate:', 'qa_vmware:')
             lines = source.splitlines()
             for index in range(len(lines) - 1, -1, -1):
-                if lines[index].strip() == 'qa_vmware:' and filename == TASKS:
-                    indent = len(lines[index]) - len(lines[index].lstrip()) + 2
-                    lines.insert(index + 1, ' ' * indent + 'qa_kind: power')
+                stripped = lines[index].strip()
+                indent = len(lines[index]) - len(lines[index].lstrip())
+                if stripped == 'community.vmware.vmware_guest_info:':
+                    lines[index] = ' ' * indent + 'qa_vmware:'
+                    lines.insert(index + 1, ' ' * (indent + 2) + 'qa_kind: info')
+                elif stripped == 'community.vmware.vmware_guest_powerstate:':
+                    lines[index] = ' ' * indent + 'qa_vmware:'
+                    lines.insert(index + 1, ' ' * (indent + 2) + 'qa_kind: power')
             source = '\n'.join(lines).replace('ansible.builtin.pause:', 'qa_pause:')
             (work / filename).write_text(source)
-        configs = [dict(vm_name=f'vm{i}', vm_instance_uuid=f'uuid-vm{i}',
+        (work / 'report_vm_touch.py').write_text(TOUCH_STUB)
+        configs = [dict(vm_name=f'vm{i}', vm_instance_uuid=f'uuid-vm{i}', portal_vm_id=1000 + i,
                         datacenter_name='qa', needs_mac=True) for i in range(1, settings.get('count', 3) + 1)]
         if settings.get('empty'):
             configs = []
@@ -89,7 +108,9 @@ def run_case(name, settings, expected, failed=False):
             configs[0]['needs_mac'] = False
             configs[1].pop('needs_mac')
         wait_seconds = settings.get('wait', 1)
-        variables = dict(vm_configurations=configs, PowerCycleWaitSeconds=wait_seconds,
+        variables = dict(vm_configurations=configs,
+                         job_execution={'attempt': 1, 'generation': 'a' * 32},
+                         PowerCycleWaitSeconds=wait_seconds,
                          esxi_hostname='never-connect.invalid', esxi_port=443,
                          esxi_username='synthetic', esxi_password='synthetic',
                          esxi_validate_certs=True, esxi_ca_bundle_path='/dev/null')
@@ -105,6 +126,21 @@ def run_case(name, settings, expected, failed=False):
         mutations = [(event[1], event[2]) for event in events if event[0] == 'power']
         assert (result.returncode != 0) == failed, result.stdout + result.stderr
         assert mutations == expected, (name, mutations, expected, result.stdout)
+        names = {f'vm{i}': 1000 + i for i in range(1, settings.get('count', 3) + 1)}
+        if settings.get('empty'):
+            names = {}
+        if settings.get('known_mac'):
+            names = {'vm3': 1003}
+        for position, event in enumerate(events):
+            if event[0] == 'info':
+                previous = events[position - 1]
+                assert previous[0] == 'touch' and previous[1] == names[event[1]], (name, events)
+        refused = [event for event in events if event[0] == 'touch_refused']
+        if refused:
+            refused_index = events.index(refused[0])
+            assert not any(event[0] == 'info' and event[1] == f'vm{refused[0][1] - 1000}'
+                           for event in events[refused_index + 1:]), (name, events)
+            assert not any(event[0] == 'touch' for event in events[refused_index + 1:]), (name, events)
         # Every successful own cycle includes its real pause before power-off.
         for index, event in enumerate(events):
             if event[0] == 'power' and event[2] == 'powered-off' and not settings.get('pause_failure'):
@@ -137,6 +173,8 @@ CASES = [
     ('missing-instance-uuid', {'broken': 'instance_uuid'}, [], True),
     ('wrong-instance-identity', {'broken': 'hw_name'}, [], True),
     ('mismatched-instance-identity', {'live_name': {'vm2': 'foreign-vm'}}, [], True),
+    ('touch-refused-before-first-info', {'touch_failure_vm_id': 1001}, [], True),
+    ('touch-refused-does-not-query-or-mark-neighbor', {'touch_failure_vm_id': 1002}, [], True),
 ]
 
 for position, case in enumerate(CASES, 1):

@@ -9,6 +9,7 @@ require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/deploy_worker_create_remote.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
+require_once __DIR__ . '/deploy_worker_vm_journal.php';
 
 /**
  * Bringing one create unit into flight (Etappe 14B, Teiletappe E; plan 9.3 and
@@ -191,7 +192,14 @@ function deploy_worker_create_launch_unit(
     $position = (int) $unit['position'];
     $existedBefore = (int) ($unit['existed_before'] ?? 0) === 1;
 
-    $result = deploy_worker_create_control_call(
+    $newIntent = deploy_worker_vm_create_launch_intent($channel->connection(), $context['job_claim'], (int) $unit['vm_id'], true);
+    if ($newIntent === null) {
+        return ['stop' => true, 'continue' => false, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST, 'unit' => $unit];
+    }
+
+    $result = $newIntent === false
+        ? ['exit_code' => null, 'marker' => null, 'transport_error' => 'Resuming a durable launch intent; discover only, never launch again.', 'protocol_error' => null, 'host_identity_error' => null]
+        : deploy_worker_create_control_call(
         $channel,
         $context,
         VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH,
@@ -210,6 +218,7 @@ function deploy_worker_create_launch_unit(
     $jid = null;
     if (($result['host_identity_error'] ?? null) !== null) {
         // The guard refused before authentication, so this launch ran nothing.
+        deploy_worker_vm_create_launch_intent($channel->connection(), $context['job_claim'], (int) $unit['vm_id'], false);
         return deploy_worker_create_terminate_unit(
             $channel,
             $fence,
@@ -250,6 +259,9 @@ function deploy_worker_create_launch_unit(
                 VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
                 'The launch of this VM produced no usable marker: ' . (string) $result['protocol_error']
             );
+        }
+        if ($marker['event'] === VIRTUSPHERE_CREATE_EVENT_REJECTED) {
+            deploy_worker_vm_create_launch_intent($channel->connection(), $context['job_claim'], (int) $unit['vm_id'], false);
         }
         if ($marker['event'] === VIRTUSPHERE_CREATE_EVENT_REJECTED
             && $marker['error_code'] === VIRTUSPHERE_CREATE_ERROR_VM_NOT_POWERED_OFF

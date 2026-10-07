@@ -121,6 +121,35 @@ final class PowercyclePlaybookContractTest extends TestCase
         self::assertLessThan($selectionPos, $watchdogPos, 'the watchdog assert must run before the selection derives from the replies');
     }
 
+    public function testEachPowercycleInfoCallHasItsOwnConfirmedTouchAndPreservesLoopResultShape(): void
+    {
+        $playbook = (string) file_get_contents(
+            ansible_source_dir() . DIRECTORY_SEPARATOR . self::PLAYBOOK
+        );
+        $infoTasks = (string) file_get_contents(
+            ansible_source_dir() . DIRECTORY_SEPARATOR . 'powercycle_vm_info.yml'
+        );
+        self::assertStringContainsString('include_tasks: ./powercycle_vm_info.yml', $playbook);
+        self::assertStringContainsString('loop: "{{ powercycle_targets }}"', $playbook);
+        self::assertStringContainsString('loop_var: powercycle_target', $playbook);
+
+        $touchPos = strpos($infoTasks, './report_vm_touch.py');
+        $queryPos = strpos($infoTasks, 'community.vmware.vmware_guest_info:');
+        self::assertIsInt($touchPos);
+        self::assertIsInt($queryPos);
+        self::assertLessThan($queryPos, $touchPos, 'the per-VM touch must be confirmed before that VM first reaches ESXi');
+        self::assertStringContainsString("powercycle_target['portal_vm_id']", $infoTasks);
+        self::assertStringContainsString("job_execution['attempt']", $infoTasks);
+        self::assertStringContainsString("job_execution['generation']", $infoTasks);
+        self::assertStringContainsString('- --phase', $infoTasks);
+        self::assertStringContainsString('- powercycle', $infoTasks);
+        self::assertStringContainsString('register: powercycle_current_info', $infoTasks);
+        self::assertStringContainsString("combine({'item': powercycle_target})", $infoTasks);
+        self::assertStringContainsString('powercycle_initial.results', $infoTasks);
+        self::assertStringContainsString("['failed']", $infoTasks);
+        self::assertStringContainsString("['msg']", $infoTasks);
+    }
+
     public function testPowerOnAndCleanupLoopOverTheSameDerivedListInsideBlockAlways(): void
     {
         $source = $this->playbook();

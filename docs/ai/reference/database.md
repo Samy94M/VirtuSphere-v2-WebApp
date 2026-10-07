@@ -66,3 +66,7 @@ separate. Search `%`, `_` and `!` are literal, exact package/version remains
 binary, and a similar-error predicate binds category and known child code to
 the same first-failure row. Neither a GET nor a count extends retention or
 reconstructs a run from its permanent replay marker.
+
+## R9 Deploy VM prestate is an immutable per-job journal, not a history backfill
+
+Migration 0060 creates `deploy_job_vm_states`, keyed by durable `id` with unique `(job_id, vm_id)`. `lifecycle_before` and `mecm_before` are captured once and never overwritten; `marked_deploying`, `esxi_touched`, `create_launch_intent` and `touch_phase` record the current job's evidence. There is no historical backfill. A sweep chooses the newest owner by journal `id`, then checks that job's generation still matches `deploy_runtime_identity` before writing the VM. A missing or stale-generation journal proves no authority to repair. Failure/cancel/reaper/sweep consumers share the same locked journal decision, and imported successful VM IDs remain excluded.

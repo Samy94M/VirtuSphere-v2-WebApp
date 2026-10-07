@@ -13,11 +13,10 @@ require_once dirname(__DIR__, 2) . '/lib/ansible_inventory_modules.php';
  * habits. Every rule here pins an existing, commented decision; a new
  * violation fails the build until it is classified the same way.
  *
- *  - `ignore_errors: true` is a scalpel, never a blanket: each use must
- *    register its result (so something evaluates the failure) and appear in
- *    the per-file allowlist below. The export playbook's per-item tolerance
- *    (AP1.3/L1) and the inventory's optional info modules (ADR-0023) are the
- *    only documented cases.
+     *  - `ignore_errors: true` is a scalpel, never a blanket: each use must
+     *    register its result (so something evaluates the failure) and appear in
+     *    the per-file allowlist below. Export's per-VM result include and the
+     *    inventory's optional info modules (ADR-0023) are documented cases.
  *  - Every `command`/`shell` task declares changed_when or failed_when: an
  *    unclassified command reports "changed" forever and hides real failures
  *    in the second (idempotence) run.
@@ -40,8 +39,10 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         // 2: the async status read and, since DF-L9, the informational power
         // state read after a proven success (reported as unknown on error).
         'createVMStatus-ESXi_playbook.yml' => 2,
-        'exportVMs-Informations-ESXi_playbook.yml' => 1,
+        'exportVMs-Informations-ESXi_playbook.yml' => 0,
+        'export_vm_info.yml' => 1,
         'inventoryESXi_playbook.yml' => 7,
+        'powercycle_vm_info.yml' => 1,
         'powercycle_vm_tasks.yml' => 1,
     ];
 
@@ -185,8 +186,8 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
             }
         }
 
-        // Zero-match guard: the export upload and the linux smoke command exist.
-        self::assertGreaterThanOrEqual(2, $commandTasks, 'Command-task scan found fewer tasks than the repo contains.');
+        // Zero-match guard: upload, smoke and both per-VM touch clients exist.
+        self::assertGreaterThanOrEqual(4, $commandTasks, 'Command-task scan found fewer tasks than the repo contains.');
     }
 
     public function testEsxiPasswordOnlyAppearsAsTheNoLogModuleArgument(): void
@@ -262,7 +263,11 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         $paths = glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_playbook.yml');
         self::assertIsArray($paths);
         self::assertNotEmpty($paths, 'No playbooks found (zero-match must not pass).');
-        $paths = array_merge($paths, glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_tasks.yml') ?: []);
+        $paths = array_merge(
+            $paths,
+            glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_tasks.yml') ?: [],
+            glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_vm_info.yml') ?: []
+        );
 
         $playbooks = [];
         foreach ($paths as $path) {

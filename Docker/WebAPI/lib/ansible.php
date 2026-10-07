@@ -88,7 +88,7 @@ function ansible_prepare_job_artifacts(
     $trustFile = ansible_write_esxi_trust_artifact($workDir, $esxiCredential);
     ansible_write_file(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
-        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'])
+        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait']) . ansible_job_execution_yml($job)
     );
     ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId, $jobId);
 
@@ -162,8 +162,19 @@ function ansible_refresh_serverlist_after_create(mysqli $db, array $job, array $
             (string) ($context['host_datacenter'] ?? ''),
             (string) ($context['esxi_host_name'] ?? ''),
             $payload['start_wait']
-        )
+        ) . ansible_job_execution_yml($job)
     );
+}
+
+/** Per-claim fences; neither is a secret or an authentication token. */
+function ansible_job_execution_yml(array $job): string
+{
+    $attempt = (int) ($job['attempts'] ?? 0);
+    $generation = (string) ($job['execution_generation_id'] ?? '');
+    if ($attempt <= 0 || preg_match('/^[a-f0-9]{32}$/', $generation) !== 1) {
+        throw new RuntimeException('Deploy job execution fence is missing.');
+    }
+    return "\njob_execution:\n  attempt: " . $attempt . "\n  generation: " . ansible_yaml_string($generation) . "\n";
 }
 
 /**

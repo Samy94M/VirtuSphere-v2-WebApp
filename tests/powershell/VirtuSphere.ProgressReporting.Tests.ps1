@@ -12,6 +12,8 @@ BeforeAll {
     $script:CheckRuntime = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'runtime.ps1') -Raw
     $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
     $script:CreateAsyncContract = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'qa-ansible') 'create-async-contract.py') -Raw
+    $script:PowercycleInfoTasks = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Ansible') 'powercycle_vm_info.yml') -Raw
+    $script:ExportInfoTasks = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Ansible') 'export_vm_info.yml') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
     $script:DocHygiene = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-doc-hygiene.sh') -Raw
     $script:PowerShellRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'run-pester.ps1') -Raw
@@ -85,6 +87,20 @@ Describe 'Visible progress reporting contract' {
         $source | Should -Match '\] pass '
         $source | Should -Match '\] fail '
         $script:FastGates | Should -Match "powercycle-sequence-contract\.py'\) -Live"
+    }
+
+    It 'reports each per-VM touch and info boundary before the ESXi read' {
+        $script:PowercycleInfoTasks | Should -Match '\[\{\{ powercycle_info_index \+ 1 \}\}/\{\{ powercycle_targets \| length \}\}\] RUN Powercycle info'
+        $script:PowercycleInfoTasks | Should -Match '\[\{\{ powercycle_info_index \+ 1 \}\}/\{\{ powercycle_targets \| length \}\}\] (pass|fail) Powercycle info'
+        $script:ExportInfoTasks | Should -Match '\[\{\{ export_info_index \+ 1 \}\}/\{\{ vm_configurations \| length \}\}\] RUN Export info'
+        $script:ExportInfoTasks | Should -Match '\[\{\{ export_info_index \+ 1 \}\}/\{\{ vm_configurations \| length \}\}\] (pass|fail) Export info'
+
+        foreach ($source in @($script:PowercycleInfoTasks, $script:ExportInfoTasks)) {
+            $touchPosition = $source.IndexOf('./report_vm_touch.py')
+            $infoPosition = $source.IndexOf('community.vmware.vmware_guest_info:')
+            $touchPosition | Should -BeGreaterThanOrEqual 0
+            $infoPosition | Should -BeGreaterThan $touchPosition
+        }
     }
 
     It 'binds future agents and multi-unit runners to the n/total convention' {

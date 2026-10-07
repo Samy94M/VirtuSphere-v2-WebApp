@@ -6,6 +6,10 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_worker_outcome.php';
+$vmJournalRepo = dirname(__DIR__, 2) . '/lib/repo/deploy_job_vm_states.php';
+if (is_file($vmJournalRepo)) {
+    require_once $vmJournalRepo;
+}
 
 /**
  * Drives the worker's job-outcome state machine (lib/deploy_worker_outcome.php)
@@ -68,6 +72,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$ok, $bad], $this->resultJson('partial', [$ok], [$bad]));
+        $this->markAndTouch($jobId, [$ok, $bad], [$bad]);
 
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
 
@@ -85,6 +90,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$vmA, $vmB], $this->resultJson('failed', [], [$vmA, $vmB]));
+        $this->markAndTouch($jobId, [$vmA, $vmB], [$vmA, $vmB]);
         $job = $this->job($jobId);
 
         $message = '';
@@ -109,6 +115,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $missionId = $this->insertMission('m17a');
         $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$vmId], null);
+        $this->markAndTouch($jobId, [$vmId], [$vmId]);
         $job = $this->job($jobId);
 
         $message = '';
@@ -178,6 +185,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $unfinished = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_MODE_FULL, [$imported, $unfinished], $this->resultJson('partial', [$imported], [$unfinished]));
+        $this->markAndTouch($jobId, [$imported, $unfinished], [$unfinished]);
 
         deploy_worker_handle_failure($this->db, $this->job($jobId), self::WORKER, [$imported, $unfinished], 'Ansible command failed with exit code 2.');
 
@@ -199,7 +207,9 @@ final class DeployWorkerOutcomeTest extends TestCase
         $mac = '02:AB:CD:EF:00:11';
         $this->insertInterface($imported, 'WDS', $mac);
         $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
-        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], null, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]));
+        $this->markAndTouch($jobId, [$imported, $stuck], [$stuck]);
+        $this->setJobStatus($jobId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
 
         deploy_worker_handle_cancelled($this->db, $this->job($jobId), [$imported, $stuck]);
 
@@ -219,6 +229,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]), VIRTUSPHERE_DEPLOY_STATUS_RUNNING, true);
+        $this->markAndTouch($jobId, [$imported, $stuck], [$stuck]);
 
         // The reaper only trusts an observer that has been connected longer than
         // its grace; an unset one counts as blind, which is the production
@@ -269,8 +280,10 @@ final class DeployWorkerOutcomeTest extends TestCase
         $payload = json_encode(['mode' => $mode, 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
         $worker = self::WORKER;
         $heartbeat = $staleHeartbeat ? 'DATE_SUB(NOW(), INTERVAL 1 DAY)' : 'NOW()';
-        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, result_json, locked_at, locked_by, lock_token, worker_epoch, heartbeat_at) VALUES (?, ?, ?, ?, NOW(), ?, REPEAT(CHAR(97), 32), 1, ' . $heartbeat . ')');
-        $stmt->bind_param('issss', $missionId, $status, $payload, $resultJson, $worker);
+        $contract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, result_json, locked_at, locked_by, lock_token, worker_epoch, heartbeat_at, attempts, execution_contract, execution_generation_id) '
+            . 'SELECT ?, ?, ?, ?, NOW(), ?, REPEAT(CHAR(97), 32), 1, ' . $heartbeat . ', 1, ?, current_generation_id FROM deploy_runtime_identity WHERE id = 1');
+        $stmt->bind_param('isssss', $missionId, $status, $payload, $resultJson, $worker, $contract);
         $stmt->execute();
 
         return (int) $this->db->insert_id;
@@ -311,6 +324,33 @@ final class DeployWorkerOutcomeTest extends TestCase
     private function jobStatus(int $jobId): string
     {
         return (string) $this->job($jobId)['status'];
+    }
+
+    /** @param list<int> $vmIds @param list<int> $touchedVmIds */
+    private function markAndTouch(int $jobId, array $vmIds, array $touchedVmIds): void
+    {
+        if (!function_exists('repo_deploy_job_vm_admit_touch')) {
+            self::markTestSkipped('K15 journal admission is not installed on this baseline.');
+        }
+        $job = $this->job($jobId);
+        deploy_worker_mark_vms_deploying($this->db, $job, 'K15 journal setup', $vmIds);
+        foreach ($touchedVmIds as $vmId) {
+            self::assertTrue(repo_deploy_job_vm_admit_touch(
+                $this->db,
+                $jobId,
+                $vmId,
+                (int) $job['attempts'],
+                (string) $job['execution_generation_id'],
+                'export'
+            ), 'fixture must persist a touch admitted for the exact active VM');
+        }
+    }
+
+    private function setJobStatus(int $jobId, string $status): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET status = ? WHERE id = ?');
+        $stmt->bind_param('si', $status, $jobId);
+        $stmt->execute();
     }
 
     /** @return array{0:string,1:string} */

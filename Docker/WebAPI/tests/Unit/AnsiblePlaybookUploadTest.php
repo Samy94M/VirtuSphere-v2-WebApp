@@ -35,6 +35,9 @@ final class AnsiblePlaybookUploadTest extends TestCase
         require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
         $uploaded = ansible_required_files();
         self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_TASKS, $uploaded);
+        self::assertContains(VIRTUSPHERE_REPORT_VM_TOUCH_SCRIPT, $uploaded);
+        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, $uploaded);
+        self::assertContains(VIRTUSPHERE_EXPORT_VM_INFO_TASKS, $uploaded);
 
         foreach ($this->everyDispatchablePlaybook() as $mode => $playbook) {
             self::assertContains(
@@ -57,8 +60,10 @@ final class AnsiblePlaybookUploadTest extends TestCase
         self::assertSame([], $this->missingIncludes($uploaded, ansible_source_dir()));
 
         // Negative case: the same derivation must notice a dropped include.
-        $without = array_values(array_diff($uploaded, [VIRTUSPHERE_POWERCYCLE_VM_TASKS]));
-        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_TASKS, $this->missingIncludes($without, ansible_source_dir()));
+        foreach ([VIRTUSPHERE_POWERCYCLE_VM_TASKS, VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $requiredInclude) {
+            $without = array_values(array_diff($uploaded, [$requiredInclude]));
+            self::assertContains($requiredInclude, $this->missingIncludes($without, ansible_source_dir()));
+        }
     }
 
     /**

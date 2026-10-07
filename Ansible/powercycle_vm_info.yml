@@ -1,0 +1,54 @@
+- name: Beginn der Powercycle-Statusabfrage melden
+  ansible.builtin.debug:
+    msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] RUN Powercycle info {{ powercycle_target['vm_name'] }}"
+
+- name: Powercycle-Marker fuer genau diese VM bestaetigen lassen
+  block:
+    - name: ESXi-Zugriffsversuch vor der ersten VM-Abfrage journalisieren
+      ansible.builtin.command:
+        argv:
+          - python3
+          - ./report_vm_touch.py
+          - --vm-id
+          - "{{ powercycle_target['portal_vm_id'] | string }}"
+          - --phase
+          - powercycle
+          - --attempt
+          - "{{ job_execution['attempt'] | string }}"
+          - --generation
+          - "{{ job_execution['generation'] }}"
+      register: powercycle_touch
+      changed_when: false
+  rescue:
+    - name: Abgelehnten Powercycle-Marker als geschlossene Ursache melden
+      ansible.builtin.debug:
+        msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] fail Powercycle info {{ powercycle_target['vm_name'] }}: touch_refused"
+
+    - name: Keine ESXi-Abfrage ohne Markerbestaetigung starten
+      ansible.builtin.fail:
+        msg: >-
+          Powercycle access marker was refused for portal VM
+          {{ powercycle_target['portal_vm_id'] }}; no ESXi query was started.
+
+- name: Ausgangszustand dieser VM erfassen
+  community.vmware.vmware_guest_info:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    datacenter: "{{ powercycle_target['datacenter_name'] }}"
+    name: "{{ powercycle_target['vm_name'] }}"
+  delegate_to: localhost
+  register: powercycle_current_info
+  ignore_errors: true
+
+- name: Loop-Ergebnisform der Statusabfrage erhalten
+  ansible.builtin.set_fact:
+    powercycle_initial:
+      results: "{{ powercycle_initial.results + [powercycle_current_info | combine({'item': powercycle_target})] }}"
+
+- name: Statusabfrageergebnis dieser VM melden
+  ansible.builtin.debug:
+    msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] {{ 'fail' if powercycle_current_info['failed'] | default(false) | bool else 'pass' }} Powercycle info {{ powercycle_target['vm_name'] }}"
+

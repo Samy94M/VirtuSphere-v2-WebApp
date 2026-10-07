@@ -148,12 +148,12 @@ final class CreateFlowBaselineContractTest extends TestCase
     }
 
     /**
-     * Etappe E muss diesen Vertrag erhalten, nicht ersetzen: Entscheidung F3 des
-     * Plans sagt, dass "Create only" den fachlichen Lifecycle nicht veraendert.
-     * Heute wird das durch Markieren und Zuruecksetzen erreicht, nicht durch
-     * Nichtstun, und genau diese Klammer muss die neue Orchestrierung behalten.
+     * K15 preserves the successful Create-only contract: a fully completed
+     * Create-only job restores its lifecycle bracket. Incomplete Create-only
+     * now follows the per-VM launch-intent journal decision instead of F3's
+     * former unconditional restoration rule.
      */
-    public function testCreateOnlyLeavesNoNetLifecycleChange(): void
+    public function testSuccessfulCreateOnlyLeavesNoNetLifecycleChange(): void
     {
         $finish = $this->repoSource('Docker/WebAPI/lib/deploy_worker_finish.php');
         $mission = $this->repoSource('Docker/WebAPI/lib/deploy_worker_mission.php');

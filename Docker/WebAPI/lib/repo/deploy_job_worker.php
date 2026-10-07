@@ -14,6 +14,7 @@ require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
 require_once __DIR__ . '/deploy_job_input.php';
 require_once __DIR__ . '/deploy_create_fence.php';
+require_once __DIR__ . '/deploy_job_vm_states.php';
 
 /**
  * Worker ownership: claim, heartbeat, finish and the job log append.
@@ -56,6 +57,7 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
             $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
             $jobId = (int) $candidate['id'];
             $missionId = (int) ($candidate['mission_id'] ?? 0);
+            $scope = [];
             if ($missionId > 0) {
                 repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$missionId]);
             }
@@ -105,6 +107,9 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
                 return null;
             }
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
+            if ($missionId > 0) {
+                repo_deploy_job_vm_capture($db, ['id' => $jobId, 'mission_id' => $missionId], $scope);
+            }
 
             return repo_deploy_job($db, $jobId);
         });

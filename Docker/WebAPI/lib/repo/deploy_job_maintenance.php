@@ -166,7 +166,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             }
             $job = repo_fetch_one(
                 $db,
-                'SELECT id, mission_id, status, payload_json, result_json, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
+                'SELECT id, mission_id, status, payload_json, result_json, LOWER(HEX(execution_generation_id)) AS execution_generation_id, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
                 'issi',
                 [(int) $candidate['id'], $running, $cancelling, $staleAfterSeconds]
             );
@@ -265,60 +265,66 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
 }
 
 /**
- * Convergence sweep for orphaned deploying VMs. A VM left in `deploying` whose
- * mission has no queued/running job any more can never be finished by a
- * worker: the job that owned it is terminal, and the worker died (or was
- * cancelled and then died) before its own failure path could mark the VM. The
- * heartbeat reaper cannot help either - it only touches jobs still `running`.
- *
- * Convergence means failed/failed: lifecycle_state and mecm_sync_state
- * together, so no orphan advertises a MECM pickup that can never happen.
- * Stored MACs are untouched and the frozen legacy vm_status is not rewritten.
- * VMs of missions with an active job are never touched, however long they
- * have been deploying - the running worker owns them.
- *
- * SKIP LOCKED for the same reason as the reaper: a concurrent import callback
- * holds row locks on its mission's VMs, and the sweep must neither block on it
- * nor deadlock; skipped rows converge on the next interval.
- *
- * @return array<int, array{vm_id:int, mission_id:int, vm_name:string}>
+ * Converge only a journaled bracket of its latest terminal owner. Historical
+ * deploying rows without a prestate, newer owners and unknown Create units are
+ * not repair authority. Locks remain Mission -> Job -> Runtime -> VM.
+ * @return array<int,array{vm_id:int,mission_id:int,vm_name:string}>
  */
 function repo_sweep_orphaned_deploying_vms(mysqli $db): array
 {
-    $deploying = VIRTUSPHERE_LIFECYCLE_DEPLOYING;
-    $failedLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
-    $failedMecm = VIRTUSPHERE_MECM_SYNC_FAILED;
-    $note = 'convergence sweep: stuck in deploying without an active deploy job';
-
-    return repo_transaction($db, static function () use ($db, $deploying, $failedLifecycle, $failedMecm, $note): array {
-        // The active SSoT again: a cancelling job's VMs belong to that job's
-        // own convergence (worker confirm or reaper), never to this sweep.
-        $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
-        $placeholders = implode(', ', array_fill(0, count($active), '?'));
-        $stmt = $db->prepare(
-            'SELECT v.id, v.mission_id, v.vm_name, v.vm_status FROM deploy_vms v
-             WHERE v.lifecycle_state = ?
-               AND NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (' . $placeholders . '))
-             ORDER BY v.id
-             FOR UPDATE SKIP LOCKED'
-        );
-        $stmt->bind_param('s' . str_repeat('s', count($active)), $deploying, ...$active);
-        $stmt->execute();
-        $vms = repo_fetch_all($stmt->get_result());
-
-        $swept = [];
-        foreach ($vms as $vm) {
-            $vmId = (int) $vm['id'];
-            $stmt = $db->prepare('UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated_at = NOW() WHERE id = ? AND lifecycle_state = ?');
-            $stmt->bind_param('ssis', $failedLifecycle, $failedMecm, $vmId, $deploying);
-            $stmt->execute();
-            if ($stmt->affected_rows !== 1) {
-                continue;
+    $candidates = repo_fetch_all($db->query(
+        "SELECT v.id AS vm_id, v.mission_id, s.job_id FROM deploy_vms v
+         JOIN deploy_job_vm_states s ON s.vm_id = v.id AND s.marked_deploying = 1
+         WHERE v.lifecycle_state = 'deploying'
+           AND NOT EXISTS (SELECT 1 FROM deploy_job_vm_states newer WHERE newer.vm_id = v.id AND newer.id > s.id)
+         ORDER BY v.mission_id, s.job_id, v.id"
+    ));
+    $swept = [];
+    foreach ($candidates as $candidate) {
+        $changed = repo_transaction($db, static function () use ($db, $candidate): ?array {
+            $missionId = (int) $candidate['mission_id'];
+            $jobId = (int) $candidate['job_id'];
+            $vmId = (int) $candidate['vm_id'];
+            if (repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE SKIP LOCKED', 'i', [$missionId]) === null) {
+                return null;
             }
-            repo_record_vm_status_event($db, $vmId, $failedLifecycle, $failedMecm, (string) ($vm['vm_status'] ?? ''), $note);
-            $swept[] = ['vm_id' => $vmId, 'mission_id' => (int) $vm['mission_id'], 'vm_name' => (string) $vm['vm_name']];
+            $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+            $stmt = $db->prepare('SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (' . implode(',', array_fill(0, count($active), '?')) . ') ORDER BY id FOR UPDATE');
+            $stmt->bind_param('i' . str_repeat('s', count($active)), $missionId, ...$active);
+            $stmt->execute();
+            if ($stmt->get_result()->num_rows !== 0) {
+                return null;
+            }
+            $job = repo_fetch_one($db, 'SELECT *, LOWER(HEX(execution_generation_id)) AS execution_generation_id FROM deploy_jobs WHERE id = ? AND mission_id = ? FOR UPDATE SKIP LOCKED', 'ii', [$jobId, $missionId]);
+            if ($job === null || !in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
+                return null;
+            }
+            $runtime = repo_fetch_one($db, 'SELECT LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+            if ($runtime === null || (string) ($job['execution_generation_id'] ?? '') === ''
+                || !hash_equals((string) $runtime['generation_id'], (string) $job['execution_generation_id'])) {
+                return null;
+            }
+            // Create result locks precede VM locks. The shared rule rereads them
+            // under the same transaction and will not turn uncertainty into failure.
+            deploy_worker_vm_create_evidence($db, $jobId);
+            $vm = repo_fetch_one($db, 'SELECT id, vm_name, lifecycle_state FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE SKIP LOCKED', 'ii', [$vmId, $missionId]);
+            if ($vm === null || (string) $vm['lifecycle_state'] !== VIRTUSPHERE_LIFECYCLE_DEPLOYING) {
+                return null;
+            }
+            $owner = repo_fetch_one($db, 'SELECT job_id, marked_deploying FROM deploy_job_vm_states WHERE vm_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+            if ($owner === null || (int) $owner['job_id'] !== $jobId || (int) $owner['marked_deploying'] !== 1) {
+                return null;
+            }
+            if ((string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED) {
+                $changed = deploy_worker_restore_locked_vm_journal($db, $job, 'convergence sweep: restore completed job bracket', [$vmId]);
+            } else {
+                $changed = deploy_worker_apply_locked_vm_journal($db, $job, 'convergence sweep: apply recorded job/VM outcome', [$vmId]);
+            }
+            return $changed > 0 ? ['vm_id' => $vmId, 'mission_id' => $missionId, 'vm_name' => (string) $vm['vm_name']] : null;
+        });
+        if ($changed !== null) {
+            $swept[] = $changed;
         }
-
-        return $swept;
-    });
+    }
+    return $swept;
 }

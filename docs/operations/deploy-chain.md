@@ -156,13 +156,9 @@ Das Format zählt nicht: Gespeicherte und gemeldete MAC werden normalisiert
 verglichen. Der reguläre Worker-Abschluss konvergiert die fehlgeschlagene VM
 wie bisher nach `failed/failed`. Sie verliert damit `registered` und
 `os_installed` und mit ihnen die Umbenennungssperre; MECM-ID und gespeicherte
-MAC bleiben. Wird der Auftrag nach dem Rückruf abgebrochen, bleibt dieselbe VM
-dagegen unverändert, weil der Abbruch nur VMs in `deploying` konvergiert und
-gebundene VMs nie markiert wurden. Dieser abweichende Endzustand ist bekannt
-und gewollt unverändert. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
+MAC bleiben. Ein Abbruch folgt derselben K15-Journalregel: bestätigte Exportversuche scheitern nur ihre eigene VM, unberührte markierte VMs erhalten beide Vorzustände zurück, und erfolgreiche MAC-IDs bleiben geschützt. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
 MAC kennt, und fordert zum Zurücksetzen der MECM-ID auf; mit `vms.write`
-verlinkt er den VM-Editor. Der allgemeine Fehlervertrag und der Reaper bleiben
-unverändert (FC2-E1, K2-R1). Version 2 des
+verlinkt er den VM-Editor. Version 2 des
 Ergebnisses speichert per-VM-WDS-Evidenz und den semantischen
 Callback-Fingerprint; V1 bleibt historisch lesbar. Ein identischer zweiter
 Callback ist nur während desselben aktiven Laufs 200 ohne Domainwrite,
@@ -408,9 +404,9 @@ Create summary: total=15 created=14 updated=0 unchanged=0 skipped=0 failed=1 unc
 
 `RUN`, `POLL`, `DONE`, `FAIL` und `HOLD` sind die fünf Verben; `HOLD` bedeutet, dass diese Einheit den Auftrag angehalten hat. Die Schlüssel der Zusammenfassung bleiben technisch, weil ein Operator sie greppt; die sichtbaren Zähler im Portal kommen aus denselben Zeilen über die Sprachkataloge.
 
-Der Abschluss folgt einer festen Matrix: alles erfolgreich oder übersprungen ergibt `succeeded`, mindestens ein Erfolg ergibt `partial`, kein Erfolg ergibt `failed`. `partial` ist hier eine echte Kategorie und keine gerundete Niederlage: Ein Auftrag, der vierzehn von fünfzehn VMs erstellt hat, hat den Zielhost verändert. Ein Create-only-Auftrag lässt den fachlichen Lebenszyklus der VMs netto unverändert, ein `full` bricht vor dem Powercycle ab und konvergiert wie bisher.
+Der Abschluss folgt einer festen Matrix: alles erfolgreich oder übersprungen ergibt `succeeded`, mindestens ein Erfolg ergibt `partial`, kein Erfolg ergibt `failed`. `partial` ist hier eine echte Kategorie und keine gerundete Niederlage: Ein Auftrag, der vierzehn von fünfzehn VMs erstellt hat, hat den Zielhost verändert. Ein erfolgreiches Create-only stellt den fachlichen Lebenszyklus aus dem gespeicherten Vorzustand wieder her. Bei Fehler oder Abbruch entscheidet für jede VM der K15-Nachweis: nicht begonnene Einheiten werden wiederhergestellt, bekannte mutierende Einheiten fehlgeschlagen geführt, und ungeklärte Starts bleiben offen. Ein `full`-Auftrag nutzt dieselbe Regel für Create und die Folgeschritte.
 
-Der Reaper konvergiert in derselben Transaktion nur die noch fliegenden Einheiten nach `uncertain`; bestätigte Erfolge, Fehler und Übersprungene bleiben unangetastet. Ein stehengelassenes `running` wäre die Behauptung eines Polls, den niemand mehr ausführt.
+Der Reaper schließt `prepared` ohne gespeicherte Create-Startabsicht als nachweislich nicht gestartet ab; `prepared` mit Startabsicht, `running` und `uncertain` bleiben ungeklärt. Parallel konvergiert er VM-Zustände nur anhand des aktuellen, exakt zugeordneten Journals. Ein stehengelassenes `running` wäre die Behauptung eines Polls, den niemand mehr ausführt.
 
 Die Protokollaufbewahrung nimmt einen Auftrag aus, solange eine seiner Einheiten `prepared`, `running` oder `uncertain` ist (ZB-05). Die Fernausgabe einer ungeklärten Einheit steht nur im Auftragsprotokoll; sie bleibt erhalten, bis die Einheit freigegeben ist, und altert danach wie jedes andere Protokoll.
 
@@ -472,6 +468,40 @@ Mehrere VM-Ergebnisse werden nicht zu einem falschen Gesamterfolg verdichtet. Da
 ## Diagnose
 
 Vom Symptom aus führt die [Störungsdiagnose](troubleshooting.md) zur richtigen Portal-Seite, Log-Kategorie und ersten Maßnahme. Die Supportgrenzen für Standalone ESXi und vCenter stehen in der [Deployment-Matrix](../DEPLOYMENT.md); die Begriffe der Kette stehen im [Glossar](../GLOSSARY.md).
+
+## Vorzustand und ESXi-Arbeitsversuch je VM (K15)
+
+Migration 0060 legt `deploy_job_vm_states` an. Jede Zeile gehört genau zu einem
+Auftrag und einer VM; ihre dauerhafte `id` bestimmt den jüngsten Job/VM-Eigentümer
+für den Sweep. `lifecycle_before` und `mecm_before` werden einmal gespeichert.
+`marked_deploying` hält fest, ob der Worker diese VM in `deploying` gesetzt hat;
+`esxi_touched` und `touch_phase` halten einen bestätigten Zugriffversuch fest.
+`create_launch_intent` schließt die Lücke zwischen dem Beginn eines Create-Starts
+und dem Speichern seiner Async-ID. Es gibt keine Rückfüllung für alte Aufträge.
+
+`start` und `autostart` schreiben Lifecycle und MECM nie. Bei den übrigen Modi
+stellen Fehler, Abbruch, Reaper und Sweep eine markierte, nicht angefasste VM auf
+beide gespeicherten Vorzustände zurück. Eine bestätigte, genau dieser VM
+zugeordnete ESXi-Arbeit führt nur diese VM zu `failed/failed`. Dazu zählt ein
+dauerhaft zugelassener Zugriffversuch, nicht nur eine bestätigte Änderung.
+Erfolgreiche VM-IDs aus dem MAC-Rückruf bleiben unangetastet. Der Sweep wählt
+den jüngsten Journalbesitzer nach `id` und schreibt nur, wenn dessen
+Ausführungsgeneration noch aktuell ist. Fehlt das Journal, wird ein historischer
+Schaden nicht geraten oder automatisch korrigiert.
+
+Powercycle und Export speichern die per-VM Zulassung synchron vor der ersten
+`vmware_guest_info`-Abfrage. Jede VM erhält sie erst unmittelbar vor ihrer
+eigenen Abfrage; es gibt keine Sammelrunde über die Auswahl. Ohne exakt passende
+Antwort startet diese Abfrage nicht. Der MAC-Reporter verwendet denselben
+API-URL-, TLS-Fingerprint- und transienten Retry-Eigentümer wie der Callback.
+Abfragefehler bleiben als VM-Fehler aggregiert.
+
+Create ist ebenfalls pro VM belegt. `pending` oder `prepared` ohne Startabsicht
+belegt eine nicht gestartete Einheit. `prepared` mit Startabsicht enthält die
+Crashlücke vor einer gespeicherten Async-ID; `running` und `uncertain` beweisen
+keinen bekannten Abschluss. Diese Zustände bleiben ungeklärt. Eine gestartete
+Async-Einheit mit bestätigtem mutierendem Fehler kann nur ihre eigene VM
+fehlgeschlagen setzen. `unchanged` und `skipped` stellen den Vorzustand her.
 
 ## Powercycle pro VM
 

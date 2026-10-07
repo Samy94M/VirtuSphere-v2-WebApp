@@ -63,7 +63,7 @@ flowchart TD
   L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist"]
   L --> I{"Systemmodus inventory?"}
   I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
-  I -->|nein| K["Collection-Sperre (requirements.yml) lokal lesen"]
+  I -->|nein| J["Claim speichert den Vorzustand pro Auftrag und VM; keine Rückfüllung alter Jobs"] --> K["Collection-Sperre (requirements.yml) lokal lesen"]
   K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH; VM-Zustände unverändert"]
   K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
@@ -74,12 +74,12 @@ flowchart TD
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
-  H --> M["VMs des Auftrags auf deploying setzen; bei Modi mit MAC-Ergebnis VMs mit ResourceID auslassen"]
+  H --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
-  AP -->|freie Lizenz (nur theoretisch: W hat schon gesperrt)| APX["Auftrag failed, noch vor dem Upload; alle VMs des Umfangs failed/failed"]
-  AP -->|HA-Cluster| APH["Modus autostart: failed, alle VMs des Umfangs failed/failed; Modus full: Autostart-Schritt entfällt"]
+  AP -->|freie Lizenz (nur theoretisch: W hat schon gesperrt)| APX["Auftrag failed, noch vor dem Upload; unberührte VM-Zustände bleiben erhalten"]
+  AP -->|HA-Cluster| APH["Modus autostart: failed ohne Lifecycle-/MECM-Schreibzugriff; Modus full: Autostart-Schritt entfällt"]
   AP -->|unbekannt oder veraltet| APW["Hinweis im Protokoll, weiter"]
   AP -->|keine Einschränkung| U
   AS -->|nein| U["Arbeitsverzeichnis per SFTP auf den Ansible-Host laden"]
@@ -88,20 +88,20 @@ flowchart TD
   U --> C{"Modus legt VMs an?"}
   C -->|ja| CS["Create je VM (Abschnitt unten)"]
   CS --> CA{"Alle Create-Einheiten erfolgreich?"}
-  CA -->|nein| CAX["Kein weiteres Playbook; create: VM-Zustand zurücksetzen, full: VMs failed; Auftrag partial oder failed"]
+  CA -->|nein| CAX["Kein weiteres Playbook; Create-Startbeleg entscheidet je VM: unberührt restore, bekannte Änderung failed, unbekannt bleibt offen"]
   CA -->|ja| R{"Weitere Playbooks im Modus?"}
   C -->|nein| R
   R -->|ja, nach Create| RS["serverlist.yml mit den soeben gebundenen UUIDs neu schreiben und hochladen"]
   RS --> ST
   R -->|ja| ST["Nächstes Playbook: Schrittgrenze prüfen (eigener Auftrag, kein Abbruch), dann ansible-playbook ausführen"]
-  ST -->|Exitcode ungleich 0| STX["Auftrag failed (terminal_reason execution_failed) mit Name des Schritts; alle VMs des Umfangs failed/failed, außer VMs mit erfolgreichem MAC-Ergebnis"]
-  ST -->|Abbruch angefordert| CX["Auftrag cancelled (terminal_reason operator_cancelled); VMs in deploying werden failed"]
+  ST -->|Exitcode ungleich 0| STX["Auftrag failed (terminal_reason execution_failed); Journal stellt unberührte VMs wieder her und scheitert nur bestätigte angefasste VMs; MAC-Erfolge bleiben"]
+  ST -->|Abbruch angefordert| CX["Auftrag cancelled (terminal_reason operator_cancelled); dieselbe VM-Journalregel gilt"]
   ST -->|nächster Schritt| ST
   ST -->|letzter Schritt fertig| E
   R -->|nein| E{"Modus erwartet MAC-Ergebnis?"}
   E -->|nein| EO["VM-Zustand zurücksetzen, Auftrag succeeded (terminal_reason completed)"]
   E -->|ja| EM{"MAC-Ergebnis des Rückrufs?"}
-  EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed; alle VMs des Umfangs failed/failed"]
+  EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed; nur bestätigte angefasste VMs failed, unberührte VMs behalten beide Vorzustände"]
   EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial (terminal_reason partial_result)"]
   EM -->|vollständig| EMS["Auftrag succeeded; gebundene VMs behalten ihren Zustand ohne neuen MECM-Pickup, fehlende MACs werden nur übernommen"]
   EO --> Z
@@ -309,23 +309,25 @@ Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten
 
 ```mermaid
 flowchart TD
-  A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC)"] --> B["Je Ziel Zustand per Name lesen (vmware_guest_info)"]
-  B --> C{"Name gleich und Instance-UUID gleich der gebundenen?"}
-  C -->|nein| CX["Abbruch: Identitätsabweichung"]
-  C -->|ja| D{"Jede Antwort trägt einen bekannten Energiezustand?"}
-  D -->|nein| DX["Abbruch: Modulantwort passt nicht"]
-  D -->|ja| E["Nur anfangs ausgeschaltete VMs schalten; laufende und angehaltene bleiben, wie sie sind"]
+  A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
+  B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM per vmware_guest_info"]
+  B -->|abgelehnt oder keine Bestätigung| BR["Globaler Abbruch vor der ESXi-Abfrage dieser VM"]
+  C --> D{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  D -->|nein| CX["Abbruch: Identitätsabweichung"]
+  D -->|ja| E{"Jede Antwort trägt einen bekannten Energiezustand?"}
+  E -->|nein| DX["Abbruch: Modulantwort passt nicht"]
+  E -->|ja| F["Nur anfangs ausgeschaltete VMs schalten; laufende und angehaltene bleiben, wie sie sind"]
   subgraph JE["Je VM nacheinander"]
-    F["Einschalten per UUID"] --> G{"Eigene Einschaltung bestätigt (changed, nicht failed)?"}
-    G -->|ja| H["PowerCycleWaitSeconds warten"]
-    H --> I["Immer: bestätigte eigene Einschaltung hart ausschalten"]
-    G -->|nein| I
-    I -->|Ausschalten scheitert, VM kann eingeschaltet bleiben| KX
-    I -->|ausgeschaltet oder nichts auszuschalten| K{"Einschaltung fehlgeschlagen oder unklar?"}
+    G["Einschalten per UUID"] --> H{"Eigene Einschaltung bestätigt (changed, nicht failed)?"}
+    H -->|ja| I["PowerCycleWaitSeconds warten"]
+    I --> J["Immer: bestätigte eigene Einschaltung hart ausschalten"]
+    H -->|nein| J
+    J -->|Ausschalten scheitert, VM kann eingeschaltet bleiben| KX
+    J -->|ausgeschaltet oder nichts auszuschalten| K{"Einschaltung fehlgeschlagen oder unklar?"}
     K -->|ja| KX["Abbruch vor der nächsten VM: Zustand der UUID im ESXi Host Client prüfen"]
     K -->|nein| KP["VM fertig, nächste VM"]
   end
-  E --> F
+  F --> G
 ```
 
 Je VM meldet das Playbook `[n/total] RUN`, `pass` oder `fail Powercycle <VM>`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
@@ -336,16 +338,20 @@ Liest die MACs und schickt sie an das Portal. Ein Fehler betrifft nur die einzel
 
 ```mermaid
 flowchart TD
-  A["Je VM Informationen per Name lesen; ein Fehler bleibt als fehlgeschlagenes Einzelergebnis stehen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
-  B -->|nein| BX["Einzelergebnis als fehlgeschlagen markieren (identity mismatch)"]
-  B -->|ja| BO["Einzelergebnis übernehmen"]
-  BX --> C
-  BO --> C["Alle Ergebnisse als vm_infos.json schreiben (Modus 0600)"]
-  C --> D["upload_mac_list.py: Rückruf an db_importMAC.php mit Mission und Auftrag; bei Zeitüberschreitung, abgewiesener oder abgebrochener Verbindung und 5xx bis zu drei Wiederholungen nach 5, 15 und 45 s"]
-  D --> E{"Exitcode?"}
-  E -->|0 vollständig| E0["Schritt erfolgreich"]
-  E -->|20 teilweise| E20["Schritt erfolgreich, Teilergebnis im Auftrag"]
-  E -->|sonst| EX["Schritt fehlgeschlagen"]
+  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per Namen lesen (vmware_guest_info)"]
+  A -->|Refusal oder fehlende Antwort| AX["Globaler Abbruch vor dieser VM-Abfrage"]
+  B -->|Abfragefehler| QX["Fehler im vm_info.results Einzelergebnis sammeln"]
+  B -->|Abfrage erfolgreich| C{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  C -->|nein| BX["Einzelergebnis als fehlgeschlagen markieren (identity mismatch)"]
+  C -->|ja| BO["Einzelergebnis übernehmen"]
+  BX --> D
+  BO --> D
+  QX --> D
+  D["Alle Ergebnisse als vm_infos.json schreiben (Modus 0600)"] --> E["upload_mac_list.py: Rückruf an db_importMAC.php mit Mission und Auftrag; bei Zeitüberschreitung, abgewiesener oder abgebrochener Verbindung und 5xx bis zu drei Wiederholungen nach 5, 15 und 45 s"]
+  E --> F{"Exitcode?"}
+  F -->|0 vollständig| E0["Schritt erfolgreich"]
+  F -->|20 teilweise| E20["Schritt erfolgreich, Teilergebnis im Auftrag"]
+  F -->|sonst| EX["Schritt fehlgeschlagen"]
 ```
 
 ### startVMs

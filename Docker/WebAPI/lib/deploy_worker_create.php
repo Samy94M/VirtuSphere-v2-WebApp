@@ -276,15 +276,7 @@ function deploy_worker_create_job_status(array $summary): string
  * precisely the situation the 13.08.2026 incident left behind, minus the
  * evidence that would have shown it.
  *
- * The lifecycle differs by mode, and deliberately so. Decision F3 says a
- * create-only job does not change the business VM lifecycle, so the bracket
- * painted at job start is taken back for every VM whatever the outcome: the
- * per-VM truth now lives in deploy_create_vm_results, and a second, coarser
- * copy of it in deploy_vms would be a second opinion. A full pipeline is a
- * different promise - power-cycle, export and start did not run - and keeps the
- * existing convergence for an incomplete run.
- *
- * @param int[] $vmIds
+ * K15 applies the durable per-VM convergence rule to incomplete Create\n * as well: restore untouched brackets, fail confirmed touched VMs and hold\n * unknown starts. A fully successful Create still restores its bracket.\n *\n * @param int[] $vmIds
  * @param array<int,string> $priorLifecycles
  * @param array{all_successful:bool,summary:array<string,mixed>,stop_reason:?string} $createOutcome
  */
@@ -305,7 +297,6 @@ function deploy_worker_conclude_create_section(
             return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
         }
         $jobId = (int) $job['id'];
-        $mode = (string) deploy_worker_payload($job)['mode'];
         $status = deploy_worker_create_job_status($createOutcome['summary']);
         $summary = $createOutcome['summary'];
         $message = 'The per-VM create section ended without creating every VM: '
@@ -313,26 +304,12 @@ function deploy_worker_conclude_create_section(
             . (int) $summary['failed'] . ' failed, ' . (int) $summary['uncertain'] . ' unresolved, '
             . (int) $summary['not_started'] . ' not started. No further playbook of this job was started.';
 
-        // The literal is how this codebase names the mode everywhere else
-        // (VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, ansible_playbooks_for_mode);
-        // there is no constant for it, and inventing one here would create a
-        // second name for the same token.
-        if ($mode === 'create') {
-            deploy_worker_restore_deploying_vms(
-                $db,
-                $job,
-                'deploy job ' . $jobId . ' create section ended; lifecycle restored',
-                $vmIds,
-                $priorLifecycles
-            );
-        } else {
-            deploy_worker_mark_vms_failed(
-                $db,
-                $job,
-                'deploy job ' . $jobId . ' stopped before its pipeline because the create section did not complete',
-                $vmIds
-            );
-        }
+        deploy_worker_mark_vms_failed(
+            $db,
+            $job,
+            'deploy job ' . $jobId . ' stopped before its pipeline because the create section did not complete',
+            $vmIds
+        );
 
         if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);

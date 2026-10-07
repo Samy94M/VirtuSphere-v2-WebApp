@@ -26,6 +26,7 @@ const VIRTUSPHERE_DEPLOY_JOB_REPO_MODULES = [
     'lib/repo/deploy_job_recovery_actions.php',
     'lib/repo/deploy_job_log_search.php',
     'lib/repo/deploy_job_guards.php',
+    'lib/repo/deploy_job_vm_states.php',
     'lib/repo/deploy_job_worker.php',
     'lib/repo/deploy_job_retry.php',
     'lib/repo/deploy_job_queue.php',

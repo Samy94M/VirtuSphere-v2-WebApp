@@ -50,6 +50,7 @@ require_once __DIR__ . '/deploy_job_queries.php';
 require_once __DIR__ . '/deploy_job_recovery_actions.php';
 require_once __DIR__ . '/deploy_job_log_search.php';
 require_once __DIR__ . '/deploy_job_guards.php';
+require_once __DIR__ . '/deploy_job_vm_states.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/deploy_job_retry.php';
 require_once __DIR__ . '/deploy_job_queue.php';

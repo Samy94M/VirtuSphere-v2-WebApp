@@ -93,6 +93,9 @@ final class EsxiTrustModeTest extends TestCase
                 $paths[] = ansible_source_dir() . DIRECTORY_SEPARATOR . $artifact;
             }
         }
+        foreach ([VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $artifact) {
+            $paths[] = ansible_source_dir() . DIRECTORY_SEPARATOR . $artifact;
+        }
 
         $vmwarePlaybooks = 0;
         foreach ($paths as $path) {
@@ -113,10 +116,9 @@ final class EsxiTrustModeTest extends TestCase
             self::assertStringContainsString('SSL_CERT_FILE', $source, basename($path));
             self::assertStringContainsString('REQUESTS_CA_BUNDLE', $source, basename($path));
         }
-        // Eight since Etappe 14B-E deleted createVMs-ESXi_playbook.yml: the
-        // create mutation moved into createVMLaunch, one VM per call, and a
-        // second create path would be a second trust contract.
-        self::assertSame(8, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook must share the trust contract');
+        // Ten after K15 added per-VM powercycle/export query includes. Every
+        // VMware access path must inherit the same certificate trust contract.
+        self::assertSame(10, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook and query include must share the trust contract');
     }
 
     public function testCertificateFailuresNeverFallThroughToParse(): void
