@@ -34,6 +34,12 @@ Bei den von Compose verwalteten Named Volumes initialisieren PHP- und
 nginx-Image diese Verzeichnisse automatisch als `33:0` mit Modus `0770`.
 Nur bei Bind-Mounts muss der Betreiber die Host-Rechte selbst passend setzen.
 
+Bei HTTP warnt der Systemstatus vor unverschlüsselten lokalen Anmeldungen und
+Sitzungscookies. Zertifikatsüberschreiben nennt in der Bestätigung die gepinnten
+MECM-Server und Client-Bundles. Die HTTPS-Karte zeigt den neuen SHA-1-Thumbprint
+im Installer-Befehl; Windows-Vertrauenskette und Client-Bundles müssen ebenfalls
+geprüft werden.
+
 ## Erneuerung
 
 Neues Zertifikat einfach über denselben Upload installieren (Überschreiben

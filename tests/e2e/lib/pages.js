@@ -44,6 +44,12 @@ const PORTAL_PAGES = [
   // matrix scanning missions.php under this page's name.
   { path: 'vm_edit.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
 
+  // Package-run diagnosis. The list renders without parameters; the detail page
+  // needs a mission and a VM and, without a seeded run, renders its
+  // "not available" state, which is a real page state with its own layout.
+  { path: 'package_reports.php', access: 'user' },
+  { path: 'package_run.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
+
   { path: 'credentials.php', access: 'admin' },
   // system_status.php is viewable by any signed-in user: it uses
   // portal_require_user() and gates the privileged actions per feature (inventory
@@ -67,6 +73,19 @@ const NON_PAGE_ENDPOINTS = [
   'session_ping.php',
   'index.php',
   'health.php',
+  // JSON answer for the deploy form's live blocker check, not a page.
+  'deploy_blockers.php',
+];
+
+// Full HTML pages the matrix does not scan yet, each with the reason. Every
+// file in Docker/WebAPI/portal/ must sit in exactly one of the three lists;
+// PortalPageInventoryContractTest derives that set from the directory, so a new
+// page cannot stay unscanned without an entry here.
+const MATRIX_DEFERRED_PAGES = [
+  {
+    path: 'deploy_log.php',
+    reason: 'needs a seeded deploy job; the matrix seed creates none while the deploy job schema is in flux',
+  },
 ];
 
 /**
@@ -97,4 +116,4 @@ function pageLabel(pageDef) {
   return pageDef.label || pageDef.path;
 }
 
-module.exports = { PORTAL_PAGES, NON_PAGE_ENDPOINTS, pageUrl, pageLabel };
+module.exports = { PORTAL_PAGES, NON_PAGE_ENDPOINTS, MATRIX_DEFERRED_PAGES, pageUrl, pageLabel };

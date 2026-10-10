@@ -241,7 +241,9 @@ function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int
     }
     $values['vm_creator'] = $validator->optionalString('vm_creator', $vmData['vm_creator'] ?? '', validator_label('creator', 'Creator'), 255);
     $values['vm_notes'] = $validator->optionalString('vm_notes', $vmData['vm_notes'] ?? '', validator_label('notes', 'Notes'), 65535);
-    // Hot-add flags (Paket F): only applied at ESXi creation time, default on.
+    // Hot-add flags (Paket F), default on. Every create run sends them, for an
+    // existing bound VM too (FC2-15); whether ESXi applies a change to an
+    // existing VM is the host's call, so the portal promises it only at creation.
     $values['cpu_hotplug'] = repo_vm_flag_value($vmData, 'cpu_hotplug');
     $values['ram_hotplug'] = repo_vm_flag_value($vmData, 'ram_hotplug');
     // Autostart override (ADR-0025). Normalized rather than validated: an out of

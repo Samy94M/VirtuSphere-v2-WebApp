@@ -52,9 +52,9 @@ bewiesene konsistente Restorestand verwendet.
 
 | Klasse | Migrationen | Rückkehrvertrag |
 |---|---|---|
-| A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
+| A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
 | N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
-| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0059, 0060 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
+| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
@@ -79,8 +79,9 @@ Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal
    `scripts/restore_test.sh` beweisen. Ohne grünen Drill kein Schemaübergang.
 5. Worker stoppen. Erst jetzt verifizierte Quellen/Assets und erforderliche
    Images bereitstellen. `.env`, Host-Override, Schlüssel und Laufzeitdaten
-   nicht aus einem Quellarchiv überschreiben. Wer dabei die `.env` ändert: Die Worker
-   lesen sie nur beim Start; der Neustart in Schritt 7 ist deshalb Pflicht.
+   nicht aus einem Quellarchiv überschreiben. Wer dabei die `.env` ändert: Compose
+   übernimmt sie nur beim Erzeugen eines Containers; in Schritt 7 deshalb neu
+   erstellen, nicht nur neu starten.
 6. `migrate.php --check` ausführen. Bei roten Daten-Preflights abbrechen. Danach
    Migration genau einmal starten und anschließend `pending=0` sowie
    Schemakonvergenz prüfen.

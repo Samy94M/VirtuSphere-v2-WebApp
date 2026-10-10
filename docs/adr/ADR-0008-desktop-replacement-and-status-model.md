@@ -1,7 +1,7 @@
 # ADR-0008: Desktop Replacement and Status Model
 
 Date: 2026-06-28
-Status: Accepted
+Status: Accepted. The desktop replacement in the title is completed by ADR-0035; the status model below stays in force.
 
 ## Context
 

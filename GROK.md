@@ -100,7 +100,7 @@ The `data-confirm` attribute is the SSoT for portal confirmations (ADR-0013). It
 
 ## 4. ADR Index
 
-See `docs/adr/README.md`. ADR-0001 through ADR-0013 are the initial decision baseline; ADR-0014 adds the portal i18n and user-facing error-message contract; ADR-0015 defines the PHPUnit baseline and blocking hook policy; ADR-0016 adds the SSoT drift checks and doc-hygiene budgets; ADR-0017 defines backup and restore.
+See `docs/adr/README.md`, the sole ADR index. Read the ADR a contract cites.
 
 ## 5. Integration Contracts
 

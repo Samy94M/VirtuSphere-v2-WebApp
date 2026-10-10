@@ -46,8 +46,11 @@ den letzten erfolgreichen Kontakt sowie pro Controller Priorität, letzten Test,
 letzten Erfolg, Zertifikatsablauf und einen typisierten Zustand (aktiv,
 Zertifikat läuft bald ab, gestört, veraltet, nicht getestet). Die Gesamtampel
 ist neutral ohne Konfiguration oder bei deaktiviertem AD, rot ohne
-einsatzbereiten Controller oder bei abgewiesenem Suchkonto, gelb sobald
-mindestens ein Controller funktioniert und ein anderer nicht, sonst grün; die
+einsatzbereiten Controller, bei abgewiesenem Suchkonto oder wenn alle
+einsatzbereiten Controller gestört sind, grün nur, wenn alle einsatzbereiten
+Controller aktiv sind und kein aktivierter Controller für die aktuelle Revision
+ungetestet ist, in jedem anderen Fall gelb (zum Beispiel bei veralteten
+Controllern oder einem noch ungetesteten aktivierten Controller); die
 Hilfe (Systemstatus-Tab) erklärt dieselbe Legende. Detailereignisse stehen im
 Sicherheitsprotokoll in der Kategorie `directory`; Secrets, Benutzerpasswörter,
 DNs und rohe LDAP-Fehler werden dort nicht gespeichert.

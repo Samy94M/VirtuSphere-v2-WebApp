@@ -14,6 +14,13 @@ Verwandte Dokumente: `docs/operations/go-live.md` ist ab Schritt 2 (Migrationen)
 identisch und bleibt maßgeblich; dieses Dokument ersetzt nur, wie Code und Images
 auf den Host kommen und wie der Stack startet.
 
+Zwei Hosts: Schritt 1 bis 3 (erster Teil) und 5 bis 7 laufen auf dem
+**Docker-Host**, Schritt 3 („Auf dem Ansible-Host“) und 4 auf dem
+**Ansible-Host**. Ist das eine eigene Maschine, das Bundle dorthin ebenfalls
+übertragen und dort zuerst Schritt 1 ausführen. Die Gesamtreihenfolge beider
+Hosts steht im Wegweiser von
+[go-live.md](go-live.md#wegweiser-docker-host-und-ansible-host).
+
 ## Voraussetzungen auf dem Host
 
 | Braucht | Prüfen mit |
@@ -68,11 +75,14 @@ mkdir -p virtusphere && tar xzf source.tar.gz -C virtusphere
 tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI
 ```
 
-`vendor/` ist bewusst nicht im Git-Archiv: es kommt aus dem Bundle, weil
-`composer install` hier keinen Packagist erreicht. Ohne diesen Schritt startet
-PHP mit „vendor/autoload.php missing".
+`source.tar.gz` enthält zwar das versionierte `vendor/`, aber mit den
+Entwicklungspaketen. `deps/vendor.tar.gz` ist der Produktionsstand
+(`composer install --no-dev`) und wird darüber entpackt, weil `composer install`
+hier keinen Packagist erreicht.
 
-Auf dem **Ansible-Host** zuerst die Python-Voraussetzungen aus dem Wheelhouse
+### Auf dem Ansible-Host
+
+Zuerst die Python-Voraussetzungen aus dem Wheelhouse
 des Bundles installieren (ansible-core, pyvmomi, requests; die Versionen pinnt
 `deps/requirements-ansible-host.txt` auf den QA-geprüften Stand). Das
 Wheelhouse zielt auf glibc/x86_64 mit Python 3.12, also Ubuntu 24.04;
@@ -88,7 +98,7 @@ Vor dem Wheelhouse hieß „BEFORE the network is air-gapped" in
 `Ansible/requirements.yml` faktisch „vorher im Netz installieren“; für einen
 frisch aufzusetzenden Air-Gap-Host war das ein Widerspruch in sich.
 
-## Schritt 4: deaktivierten Durable Runner installieren und prüfen
+## Schritt 4: deaktivierten Durable Runner installieren und prüfen (Ansible-Host)
 
 Das Bundle enthält unter `runner/` den in Etappe 8R-O entwickelten Runner. Der
 Installer prüft dessen eigenes `SHA256SUMS`, kopiert den geschlossenen Dateisatz
@@ -183,8 +193,8 @@ und der Restore-Drill prüft, dass der archivierte Compose-Satz auflösbar ist. 
 cd virtusphere
 docker compose config --quiet
 docker compose up -d --wait
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php
+docker compose exec -T php php /var/www/html/lib/migrate.php --check
+docker compose exec -T php php /var/www/html/lib/migrate.php
 ```
 
 `--wait` kehrt erst zurück, wenn jeder Healthcheck grün ist. Kommt der Stack

@@ -25,7 +25,7 @@ return [
     'usersmgmt_action_reset' => 'Reset password: enter a new password (at least :min characters) in the row field and reset. The mandatory change on next sign-in applies here as well.',
     'usersmgmt_safety_heading' => 'Built-in safeguards',
     'usersmgmt_safety_1' => 'You cannot deactivate your own account, so nobody locks themselves out by accident.',
-    'usersmgmt_safety_2' => 'The last active administrator can neither be deactivated nor demoted to the "User" role. There is always at least one admin left.',
+    'usersmgmt_safety_2' => 'The last active local administrator can neither be deactivated nor demoted to the "User" role. There is always at least one local admin left; an Active Directory administrator does not count here.',
     'usersmgmt_safety_3' => 'After several failed sign-in attempts an account is locked automatically for :minutes minutes; the "Active" column then shows a "Locked" badge. The lock expires on its own; while a lock is active an administrator can also clear it immediately with "Clear lock".',
     'usersmgmt_safety_4' => 'One exception remains: you can demote your own role as long as another administrator exists. The portal asks first, because user management is closed to you afterwards; only the other administrator can undo it.',
     'usersmgmt_audit_p1' => 'Every account change (creation, role change, active state, password reset, own password change) is recorded in the audit log under "Security" with user and timestamp. Sign-ins, sign-outs, failed sign-in attempts and automatic account locks appear there as well.',

@@ -4,7 +4,7 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 
 ## VM-Statusstufen
 
-- **1/5 Initializing:** reservierte Nummerierung; kein aktiver Codepfad schreibt diese Stufe.
+- **1/5 Initializing:** wird nie gespeichert, erscheint aber als Rückfallanzeige im Legacy-Statusstring, wenn keine spätere Stufe zutrifft (zum Beispiel Lebenszyklus initializing, deploying oder failed).
 - **2/5 Registered:** Portal-Datensatz existiert. Auf ESXi muss noch keine VM vorhanden sein.
 - **3/5 Deployed:** der scoped MAC-Rückruf des Ansible-Hosts wurde angenommen. MECM hat noch keine ResourceID bestätigt.
 - **4/5 OS Installing:** MECM Device-Sync hat ResourceID und Zuordnung zurückgemeldet. Die VM kann per PXE in die Task Sequence gehen.

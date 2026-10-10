@@ -77,7 +77,7 @@ beide Installer und die Abnahmecheckliste.
    ausdrücklich leer übergebenen Parameter. Alle drei Ausgänge (behalten,
    ersetzt, gelöscht) stehen im Tageslog, die Löschung als WARN-Zeile, nie der
    Wert selbst.
-3. Im Portal unter *Einstellungen → Machine-API IP-Freigaben* die IP des
+3. Im Portal unter *Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)* die IP des
    MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
    drei Sync-Quellen und der MECM-Site-Status sollten auf „OK“ springen.
 
@@ -543,9 +543,11 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
   die Site-Health-Aufgabe nur `completed`; das macht tote Tasks und fachliche
   Fehlschläge auf der Portal-Seite *Systemstatus* sichtbar, ohne den Lauf je
   auszubremsen. Ein fehlgeschlagener Bericht bricht den Lauf nie ab.
-- **Backoff und Site-Drive-Recovery:** durchgängiges try/catch; nach
-  3 Fehlern in Folge wird das Site-Drive verworfen und im nächsten Durchlauf
-  neu initialisiert (fängt WMI-/Drive-Hänger ab).
+- **Backoff und Site-Drive-Recovery:** durchgängiges try/catch. Devices und
+  Packages Sync verwerfen das Site-Drive nach 3 Fehlern in Folge, der
+  Autoimporter schon beim ersten Fehler; beide initialisieren es im nächsten
+  Durchlauf neu (fängt WMI-/Drive-Hänger ab). Site Health nutzt kein Site-Drive
+  und zählt Provider-Fehler in zwei Stufen.
 - **Change-Detection vor Arbeit:** Sendungen und nachgelagerte Mutationen werden
   bei unverändertem, bestätigtem Stand vermieden. Die Skripte können dafür
   weiterhin vollständige lokale Inhaltsmanifeste lesen; eine konkrete
@@ -557,7 +559,7 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
 
 1. Unter `<PackagesRoot>\files\<Paketname>\` einen Ordner mit `config.json` und
    den Installationsdateien ablegen.
-2. Der Autoimporter erkennt die Änderung (mtime) und legt automatisch
+2. Der Autoimporter erkennt die Änderung (SHA-256-Manifest der Dateien) und legt automatisch
    Application, Collection und Deployment an. Collection-Name = `Name-Version`.
 
 **Konvention:** Die **Version darf keinen Bindestrich enthalten** (die WebApp
@@ -673,17 +675,20 @@ die Erkennung helfen zusätzlich `AppEnforce.log` und `AppDiscovery.log`. Ein
 erfolgreicher Wrapper-Aufruf bestätigt keine späteren Arbeiten einer geplanten
 Aufgabe.
 
-**Liefergrundlage implementiert, Laufzeit noch nicht aktiviert:** Der
+**Paketlauf-Reporting:** Der
 Serverinstaller erzeugt aus den vier kanonischen Clientquellen eine
 inhaltsadressierte Reporter-Generation mit vollständigem Manifest und
 Wrapperbindung. Der Autoimporter berücksichtigt diesen gesamten Satz im
 Änderungsstempel, stellt die Generation vor dem Wrapper bereit und schaltet den
 kleinen Deskriptor zuletzt um. Paket-`config.json`, `powershell/` und ältere
-Reporter-Generationen bleiben unangetastet. Adapter und Host senden derzeit
-noch nichts; das Reporting-Log nennt deshalb `transport_not_integrated`.
-Prozesskapselung, Zeitbudgets und Wrapper-Anbindung sind die nächste Etappe.
-Danach folgen Start-, Schritt- und Abschlussmeldungen vom Client zum Portal. Die vorgesehene Portaldiagnose soll Ergebnisse,
-Empfangszeit und kopierbare Client-Logpfade anzeigen. Das Portal ruft dabei
+Reporter-Generationen bleiben unangetastet. Der Wrapper (`install.ps1`) startet
+den Reporter je Lauf als überwachten Prozess mit festem Zeitbudget und meldet
+`started`, `step_result` und `completed` über
+`mecm_report.php?action=reportPackageRun` an das Portal. Treten dabei Probleme
+auf, wird der Reporter mit einem protokollierten Grund deaktiviert; der
+Paketlauf selbst geht weiter. Die Portaldiagnose (Seiten für Paketberichte und
+Paketlauf) zeigt Ergebnisse, Empfangszeit und kopierbare Client-Logpfade. Das
+Portal ruft dabei
 keine Dateien vom Client ab. Eine fehlende Rückmeldung beweist weder einen
 Installationsfehler noch einen Verbindungsfehler.
 
@@ -695,8 +700,11 @@ Diese Planung ist keine bereits gemessene Leistungs- oder Lieferzusage.
 ## Client-Skripte (`clients/`)
 
 Werden als MECM-Anwendungen auf die Clients verteilt; Reihenfolge über
-Anwendungsabhängigkeiten: `client_getinfo` → `client_hostname` →
-`client_staticip` → `Set-VMDisksOnline`. Details in `clients/README.md`.
+Anwendungsabhängigkeiten. Heute ausgerollt ist der alte Graph `client_getinfo`
+→ `client_hostname` → `client_staticip` → Disk-Schritt. Der MC01-Zielgraph
+`client_getInfos` → `client_hostname` → `client_VMDisksOnline` →
+`client_staticip` ist im Packaging verdrahtet, aber noch nicht freigegeben
+(Installer gesperrt). Details in `clients/README.md`.
 V23 trennt das read-only `getDeviceInfos` vom verbindlichen, idempotenten
 `mecm_client_ack.php`-POST. Beide verwenden denselben Schema-Schalter; mit dem
 Default `http` funktionieren sie ohne CA, Zertifikat oder Thumbprint.
@@ -718,7 +726,7 @@ Die Modusnamen gehören `VIRTUSPHERE_INTERFACE_MODES` in
 `Docker/WebAPI/lib/defaults.php`; ein Pester-Test hält die beiden
 PowerShell-Literale dagegen.
 
-`Set-VMDisksOnline` trennt die aktuelle Offline-Auswahl von offenen eigenen
+`client_VMDisksOnline.ps1` trennt die aktuelle Offline-Auswahl von offenen eigenen
 Operationen. Für eine neue Offline-RAW-Platte wird vor `Set-Disk` ein
 versioniertes Registry-Journal mit stabiler Storage-Identität und erwarteter
 Größe geschrieben. Ein Retry findet diesen Eintrag unabhängig von Disknummer

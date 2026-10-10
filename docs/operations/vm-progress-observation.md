@@ -11,6 +11,11 @@ werden.
 - Eine OS-Installation erhält erst nach der bestätigten Aktion „PXE jetzt
   beobachten“ eine Uhr und wird nach mehr als sechs Stunden gelb markiert.
 - Keine Warnung setzt eine VM fehl, löscht sie oder startet eine externe Aktion.
+- Missionsliste und Dashboard zeigen aktuelle empfangene Clientphasenfehler mit
+  VM-Anzahl und Links. `repo_client_phase_failures()` liest je VM und Phase nur
+  die letzte Meldung. Schweigen erzeugt keinen Fehler; ein neuerer Abschluss
+  derselben Phase entfernt den Hinweis. Fehlermeldungen anderer Phasen bleiben
+  bestehen.
 - Bestehende MECM-pending-Zeilen beginnen beim Migrationslauf frisch. Bestehende
   OS-Installationen bleiben ohne Uhr, bis PXE tatsächlich ausgelöst wurde.
 

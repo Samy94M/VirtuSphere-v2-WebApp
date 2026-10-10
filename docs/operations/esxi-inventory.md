@@ -84,17 +84,18 @@ Ampel je Zugangsdatum: Sie zeigt **nur die Gesundheit des Abrufs**. `warning` be
 
 Dieselbe Ampel erscheint an drei Stellen und wird aus demselben Health-Snapshot berechnet: auf der ESXi-Karte im Systemstatus, als Zeiger-Badge auf der Seite Zugangsdaten und als Dashboard-Kachel „Hypervisor". Host-Eigenschaften (freie Lizenz, HA-Cluster, Wartungsmodus) färben diese Ampel nicht; sie sind eigene Badges und werden beim Deploy über den Preflight (ADR-0025) durchgesetzt, nicht über die Ampelfarbe.
 
-Was die Ampel nicht beantwortet, steht als Taktzeile darunter: auf der Seite Zugangsdaten und auf der Inventarkarte im Systemstatus nennt jede Zeile unter Badge und Zeitpunkt, ob sich der Wert von allein erneuert. Badge über Zeitstempel heißt im Portal sonst überall „letzte Abfrage", und gepollt wird nur ESXi. Drei Dinge halten diesen Abruf an, und jedes muss die Zeile beim Namen nennen, sonst ist sie dieselbe stille Behauptung an neuer Stelle:
+Was die Ampel nicht beantwortet, steht als Taktzeile darunter: auf der Seite Zugangsdaten und auf der Inventarkarte im Systemstatus nennt jede Zeile unter Badge und Zeitpunkt, ob sich der Wert von allein erneuert. Badge über Zeitstempel heißt im Portal sonst überall „letzte Abfrage", und gepollt wird nur ESXi. Vier Dinge halten diesen Abruf an, und jedes muss die Zeile beim Namen nennen, sonst ist sie dieselbe stille Behauptung an neuer Stelle:
 
 | Blocker | Reichweite | Zeile sagt |
 |---|---|---|
 | Intervall 0 | alle Zugangsdaten | kein automatischer Abruf (Intervall 0) |
 | Kein auflösbarer Ansible-Zugang (keiner, mehrere ohne Auswahl, Auswahl gelöscht) | alle Zugangsdaten | kein automatischer Abruf, kein Ansible-Zugang gewählt |
+| Bereitstellungsdienst läuft nicht | alle Zugangsdaten | kein automatischer Abruf, der Bereitstellungsdienst läuft nicht |
 | Auth-Pause | dieses Zugangsdatum | pausiert, kein automatischer Abruf |
 
 Die Reihenfolge ist die, in der ein Betreiber sie beheben muss, nicht die der Prüfung: „pausiert" zu melden, während das Intervall auf 0 steht, verspräche, dass das Aufheben der Pause den Zyklus startet. Der zweite Fall ist der stillste: ohne Ansible-Host wird kein Abruf eingereiht und nicht einmal ein Versuch gestempelt, der Zeitstempel friert also ein, während die Einstellung weiter sechs Stunden liest.
 
-Wer prüft und wer anzeigt, entscheidet dabei nicht getrennt: `esxi_inventory_automation_blocker()` (`lib/esxi_automation.php`, Werteliste `VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS`) ist dieselbe Bedingung, auf die der Wartungsdienst überspringt und aus der die Zeile ihren Satz macht. Ein vierter Grund, der nur im Dienst ergänzt würde, hätte die Zeile sonst wieder einen Zyklus versprechen lassen, den es nicht gibt; die Zuordnung Grund → Satz ist ein `match` ohne Default und wird gegen die Werteliste getestet, bricht also im Build und nicht auf der Seite.
+Wer prüft und wer anzeigt, entscheidet dabei nicht getrennt: `esxi_inventory_automation_blocker()` (`lib/esxi_automation.php`, Werteliste `VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS`) ist dieselbe Bedingung, auf die der Wartungsdienst überspringt und aus der die Zeile ihren Satz macht. Ein weiterer Grund, der nur im Dienst ergänzt würde, hätte die Zeile sonst wieder einen Zyklus versprechen lassen, den es nicht gibt; die Zuordnung Grund → Satz ist ein `match` ohne Default und wird gegen die Werteliste getestet, bricht also im Build und nicht auf der Seite.
 
 ## Grüner Abruf, trotzdem eine 0
 

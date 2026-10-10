@@ -56,7 +56,7 @@ Das Portal liest den Kanal an genau einer Stelle (`lib/backup_status.php`) und z
 
 - **Backup-Karte** auf der Einstellungen-Seite (`settings.php`, Gate `system.config`): Zustand, Zeitplan samt Fundort, letzter Lauf, Alter, nächster Lauf, Überfälligkeitsgrenze, Größen, freier Speicher, Aufbewahrung. Darunter stehen nur der Einrichtungs-Befehl für den Cron-Zeitplan und ein Link in die Hilfe (Tab "Architektur"), die Ablauf, Ablageort und Restore-Weg erklärt; der frühere aufklappbare Erklärtext war ein Duplikat dieser Hilfe-Abschnitte.
 - **Dashboard-Banner** für Admins, sobald der Zustand nicht `ok` ist (fail-soft; ein defekter Reader legt keine Seite lahm).
-- **health.php**: informatives Feld `backup` (ändert den HTTP-Code nicht).
+- **health.php** meldet den Backupzustand nicht; es liefert nur `status`, `db` und `php`. Backupzustand und -alter stehen ausschließlich im Portal.
 
 Abgeleitete Zustände (Schwere `failed` > `stale` > `disk_low`): `ok`, `failed` (letzter Lauf gescheitert), `stale` (der erwartete Lauf blieb samt Kulanzzeit aus), `disk_low` (freier Speicher unter 10 %), `unknown` (kein lesbarer Status: Skript lief nie oder der Mount fehlt).
 
@@ -84,7 +84,7 @@ normalisierten Standardroot. Die Ausgabe verbindet den normalisierten Prüfroot
 mit dem ausgewählten Backupstand, damit die Gateevidenz beide eindeutig
 zuordnet.
 
-Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem Stack-Image `mysql:8.4`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
+Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
 1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
@@ -110,11 +110,11 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
 3. Stack starten und warten, bis MySQL initialisiert ist: `docker compose up -d mysql`.
 4. Dump einspielen:
    ```sh
-   gunzip -c Docker/backups/db-<ts>.sql.gz | docker exec -i virtusphere-v2-webapp-mysql-1 mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
+   gunzip -c Docker/backups/db-<ts>.sql.gz | docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
    ```
 4a. **Nur bei einem Alt-Archiv** (Dump aus der Zeit vor dem Formatwechsel, erkennbar an `-- Current Database: mysql` im Dump; neue Dumps enthalten nur die Anwendungsdatenbank): der Import hat die mysql-Grant-Tabellen mitgebracht und ersetzt damit die Konten des Zielservers durch den archivierten Stand. Zwei Folgen, beide mit dem archivierten `.env` behebbar. Erstens kann nach dem nächsten `FLUSH PRIVILEGES`/Neustart das **Root-Passwort** das aus der archivierten `.env` sein statt des aktuellen. Zweitens passt der **App-User** nach einer Passwortrotation nicht mehr zur aktuellen `.env`; dann die Grants aus der wirksamen `.env` neu setzen:
    ```sh
-   docker exec -i virtusphere-v2-webapp-mysql-1 mysql -uroot -p"<wirksames Root-Passwort>" <<'SQL'
+   docker compose exec -T mysql mysql -uroot -p"<wirksames Root-Passwort>" <<'SQL'
    CREATE USER IF NOT EXISTS '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASS>';
    ALTER USER '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASS>';
    GRANT ALL PRIVILEGES ON `<DB_NAME>`.* TO '<DB_USER>'@'%';
@@ -123,8 +123,8 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
    ```
    `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
 5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a). Zunächst ausschließlich PHP samt seiner MySQL-Abhängigkeit starten: `docker compose up -d --wait php`. Ohne Webserver ist die Maschinen-API während der Konvergenz noch nicht erreichbar.
-6. Restore-Konvergenz vor dem Webserverstart ausführen: zuerst `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php`, danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/package_report_restore_converge.php`. Der erste Schritt deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; der zweite rotiert die Paketbericht-Annahmegeneration, sodass Berichte aus dem Backup oder vom späteren verlorenen Live-Stand nicht als aktuelle Evidenz angenommen werden. Beide Befehle müssen erfolgreich enden; Details zur Verzeichnisanmeldung stehen in `docs/operations/active-directory.md`.
-7. Erst jetzt den übrigen Stack starten: `docker compose up -d --wait`. Danach `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
+6. Restore-Konvergenz vor dem Webserverstart ausführen: zuerst `docker compose exec -T php php /var/www/html/lib/directory_restore_converge.php`, danach `docker compose exec -T php php /var/www/html/lib/package_report_restore_converge.php`. Der erste Schritt deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; der zweite rotiert die Paketbericht-Annahmegeneration, sodass Berichte aus dem Backup oder vom späteren verlorenen Live-Stand nicht als aktuelle Evidenz angenommen werden. Beide Befehle müssen erfolgreich enden; Details zur Verzeichnisanmeldung stehen in `docs/operations/active-directory.md`.
+7. Erst jetzt den übrigen Stack starten: `docker compose up -d --wait`. Danach `docker compose exec -T php php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
 
 ## Was deckt das Backup ab, was kommt aus Git
 

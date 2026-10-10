@@ -16,19 +16,19 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite; `SystemStatusChecksDocContractTest` leitet die Namen aus den Kachelbeschriftungen ab.
 
-Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`): rot vor „fehlt“ vor gelb vor „alte Skriptversion“ vor grau vor grün.
+Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`): rot vor „Erwartet, nie gemeldet“ vor gelb vor „Legacy“ vor grau vor grün.
 
 ## Bereitstellungsdienst
 
 ```mermaid
 flowchart TD
-  A{"Supervisor-Vertrag bekannt und Prozessform passend?"} -->|nein| DG["Eingeschränkt"]
+  A{"Supervisor-Vertrag bekannt und Prozessform passend?"} -->|nein| DG["Beeinträchtigt"]
   A -->|ja| B{"Dienstprozess lebt? (Supervisor-Heartbeat frisch, sonst Worker-Status ok)"}
-  B -->|nein| OF["Offline"]
+  B -->|nein| OF["Nicht erreichbar"]
   B -->|ja| SV{"Läuft der Dienst unter Supervisor?"}
   SV -->|nein, Einzelprozess| E
   SV -->|ja| C{"Supervisor in der Neustart-Abkühlphase?"}
-  C -->|ja| CO["Abkühlphase"]
+  C -->|ja| CO["Wartet vor Neustart"]
   C -->|nein| D{"Worker-Kindprozess lebt?"}
   D -->|nein| DG
   D -->|ja| E{"Aktiver Auftrag widersprüchlich?"}
@@ -36,7 +36,7 @@ flowchart TD
   E -->|nein| F{"Kein aktiver Auftrag, Annahme offen, fälliger Auftrag länger als die Schonfrist nicht beansprucht?"}
   F -->|ja| DG
   F -->|nein| G{"Aktiver Auftrag?"}
-  G -->|ja| BU["Beschäftigt"]
+  G -->|ja| BU["Arbeitet"]
   G -->|nein| RE["Bereit"]
   OF --> X
   CO --> X
@@ -45,7 +45,7 @@ flowchart TD
   RE --> X
   X{"Prüffälle?"} -->|manuelle Prüfung nötig oder ungeklärter Altfall| XR["Badge rot"]
   X -->|Wiederherstellung läuft| XY["Badge gelb, sofern nicht schon rot"]
-  X -->|keine| XN["Badge aus Verfügbarkeit: Offline rot, Eingeschränkt und Abkühlphase gelb, Beschäftigt blau, Bereit grün"]
+  X -->|keine| XN["Badge aus Verfügbarkeit: Nicht erreichbar rot, Beeinträchtigt und Wartet vor Neustart gelb, Arbeitet blau, Bereit grün"]
 ```
 
 Die Schonfrist für einen nicht beanspruchten Auftrag ist `VIRTUSPHERE_DEPLOY_CLAIM_GRACE_SECONDS`. Ist die Annahme pausiert, sagt die Karte das ausdrücklich, statt einen Rückstand zu melden.
@@ -57,8 +57,8 @@ Die drei Sync-Aufgaben (Devices Sync, Packages Sync, Package Import) und der Sit
 ```mermaid
 flowchart TD
   A{"Hat die Sync-Aufgabe je gemeldet?"} -->|nein| A1{"Meldet eine andere Sync-Aufgabe?"}
-  A1 -->|ja| MI["Fehlt (missing, gelb)"]
-  A1 -->|nein| UK["Unbekannt (unknown, grau)"]
+  A1 -->|ja| MI["Erwartet, nie gemeldet (missing, gelb)"]
+  A1 -->|nein| UK["Noch keine Daten (unknown, grau)"]
   A -->|ja| L{"Letztes Ereignis?"}
   L -->|completed| CT{"Ergebniszeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
   CT -->|nein| UK
@@ -74,12 +74,12 @@ flowchart TD
   L -->|started| SZ{"Startzeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
   SZ -->|nein| UK
   SZ -->|ja| ST{"Lauf länger offen als die Laufschonfrist?"}
-  ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses; ohne lesbares Ergebnis Unbekannt"]
+  ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses; ohne lesbares Ergebnis Noch keine Daten"]
   ST -->|ja| SD{"Auch über der Gefahrschwelle?"}
   SD -->|ja| RD
   SD -->|nein| YL
   L -->|nur alter Heartbeat| LG{"Heartbeat frisch?"}
-  LG -->|ja| LE["Alte Skriptversion (legacy, gelb)"]
+  LG -->|ja| LE["Legacy (legacy, gelb)"]
   LG -->|über Warnschwelle| YL
   LG -->|über Gefahrschwelle oder Status fail| RD
 ```
@@ -102,7 +102,7 @@ Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` In
 
 ## Ansible-Test
 
-Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Jetzt vollständig testen**, über **Zugangsdaten, Testen** oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
+Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Volltest jetzt starten**, über **Verbindung und Umgebung prüfen** (Zugangsdaten) oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 
 Die getrennte Hostidentitätsanzeige zeigt Pin, Bestätigung und zuletzt beobachtete Abweichung. Sie ist kein Volltest und färbt dessen vorhandenen Nachweis nicht um. Jede SSH-/SFTP-Anmeldung geht über den [gemeinsamen Vertrauensablauf](trust-flows.md#ssh-und-sftp-zum-ubuntu-host); das gilt auch für die SFTP-Probe nach bestandenem SSH-Preflight.
 
@@ -139,6 +139,8 @@ flowchart TD
   C -->|ja| S["Test veraltet (stale, grau)"]
   C -->|nein| O["bestanden (ok, grün); eingeschränkt (warning, gelb)"]
 ```
+
+Die Deploy-Seite übernimmt die Ansible-Volltest-Ampel und den Prüfzeitpunkt aus `integration_health_snapshot()`. Der gewählte Zugang zeigt dieselbe Evidenz wie seine Systemstatus-Karte; ohne JavaScript bleiben die beschrifteten Nachweise aller Zugänge sichtbar. Der Hinweis sperrt keinen Auftrag. Seine Karte bietet berechtigten Benutzern **Volltest jetzt starten**.
 
 ## ESXi-Inventar
 
@@ -190,8 +192,8 @@ Wartungsdienst und Deploy-Worker schreiben ihren Status direkt in dieselbe Tabel
 ```mermaid
 flowchart TD
   A{"Hat der Dienst je gemeldet?"} -->|nein| A1{"Meldet der andere interne Dienst?"}
-  A1 -->|ja| MI["Fehlt (gelb)"]
-  A1 -->|nein| UK["Unbekannt (grau)"]
+  A1 -->|ja| MI["Erwartet, nie gemeldet (gelb)"]
+  A1 -->|nein| UK["Noch keine Daten (grau)"]
   A -->|ja| B{"Letzte Meldung fail?"}
   B -->|ja| RD["Ausgefallen (rot)"]
   B -->|nein| C{"Alter der letzten Meldung?"}
@@ -233,10 +235,3 @@ flowchart TD
 
 Das Zertifikat kennt die Seite nur aus dem letzten manuellen Test. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen. Aktivierte Controller ohne Test für die aktuelle Revision fehlen im zugelassenen Pool und verhindern eine grüne Gesamtampel. Die Speichermeldung nennt ihre Anzahl.
 
-## Hinweise zur Bedienung
-
-Die Deploy-Seite übernimmt die Ansible-Volltest-Ampel und den Prüfzeitpunkt aus `integration_health_snapshot()`. Der gewählte Zugang zeigt dieselbe Evidenz wie seine Systemstatus-Karte; ohne JavaScript bleiben die beschrifteten Nachweise aller Zugänge sichtbar. Der Hinweis sperrt keinen Auftrag. Seine Karte bietet berechtigten Benutzern **Jetzt vollständig testen**.
-
-Bei HTTP warnt der Systemstatus vor unverschlüsselten lokalen Anmeldungen und Sitzungscookies. Zertifikatsüberschreiben nennt in der Bestätigung die gepinnten MECM-Server und Client-Bundles. Die HTTPS-Karte zeigt den neuen SHA-1-Thumbprint im Installer-Befehl; Windows-Vertrauenskette und Client-Bundles müssen ebenfalls geprüft werden. Siehe [HTTPS](https.md).
-
-Missionsliste und Dashboard zeigen aktuelle empfangene Clientphasenfehler mit VM-Anzahl und Links. `repo_client_phase_failures()` liest je VM und Phase nur die letzte Meldung. Schweigen erzeugt keinen Fehler; ein neuerer Abschluss derselben Phase entfernt den Hinweis. Fehlermeldungen anderer Phasen bleiben bestehen.

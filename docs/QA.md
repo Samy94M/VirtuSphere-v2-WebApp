@@ -88,7 +88,7 @@ powershell -NoProfile -File scripts\check.ps1 -Gate enum-sync,phpstan   # geziel
 powershell -NoProfile -File scripts\check.ps1 -Json qa.json -KeepArtifacts
 ```
 
-Every gate reports `pass`, `fail`, `skip`, `not_applicable` or `infrastructure_error`; a missing tool is an infrastructure error, never a skip. Runner exit codes: `0` all gates green, `1` at least one gate failed (dominates), `2` environment incomplete, `3` invalid invocation. Containerized linters (yamllint, actionlint, ShellCheck, Hadolint, ansible-lint) run through Docker; on Windows the Fast lane therefore requires Docker. `-NoNetwork` marks network-dependent gates (`composer-audit`, `secret-scan`, the AP8 supply-chain gates) as not applicable and never pulls images.
+Every gate reports `pass`, `fail`, `skip`, `not_applicable` or `infrastructure_error`; a missing tool is an infrastructure error, never a skip. Runner exit codes: `0` all gates green, `1` at least one gate failed (dominates), `2` environment incomplete, `3` invalid invocation. Containerized linters (yamllint, actionlint, ShellCheck, Hadolint, ansible-lint) run through Docker; on Windows the Fast lane therefore requires Docker. `-NoNetwork` marks every gate that carries the network flag in the registry (`composer-audit`, `e2e-portal`, `e2e-browser-matrix`, `e2e-msedge`, `secret-scan`, `sbom`, `image-cve`, `offline-bundle`, `npm-audit`; `check.ps1 -List` shows them as `[netz]`) as not applicable and never pulls images.
 
 ### Observable progress
 
@@ -373,10 +373,10 @@ more slowly than Chromium, late in a run where the machine is busiest.
 
 Two changes address it without hiding anything:
 
-- Firefox and WebKit get a per-project test timeout of 60 s and an expect
-  timeout of 15 s, against Chromium's 30 s and 7 s. More waiting time changes
-  nothing about what is asserted, so a real defect still fails; it only stops
-  the clock from deciding the outcome. Retries stay at zero on purpose: a retry
+- All engines run with the same global test timeout of 30 s and expect
+  timeout of 7 s (`tests/e2e/playwright.config.js`); the Firefox and WebKit
+  projects set no per-project override. Navigation has its own 15 s limit.
+  Retries stay at zero on purpose: a retry
   turns a genuine intermittent defect green and tells nobody.
 - Each Playwright gate writes its HTML report into its own folder
   (`VIRTUSPHERE_E2E_REPORT_DIR`, set from the project list in
@@ -743,7 +743,7 @@ docker compose up -d php deploy-worker maintenance-worker
 docker exec virtusphere-v2-webapp-php-1 php -r "echo ini_get('upload_max_filesize'), ' ', ini_get('post_max_size'), PHP_EOL;"
 ```
 
-Erwartet wird die Ausgabe `4M 6M`. Ein blosses `docker compose restart` genügt
+Erwartet wird die Ausgabe `4M 20M`. Ein blosses `docker compose restart` genügt
 nicht: es startet den alten Image-Stand mit den alten Grenzen.
 
 Run the migration preflight without mutating the database:
@@ -908,7 +908,7 @@ Every portal error page shows a reference like `error [a1b2c3d4e5f60718]`. That 
 
 ## Drift Checks
 
-These checks guard SSoT mirrors, doc hygiene and the file-size budget. They run quietly on every Claude session start and must be green before commits that touch the mirrored places:
+These checks guard SSoT mirrors, doc hygiene and the file-size budget. All but `check-audit-contract` (which runs as the gate `audit-contract`) run quietly on every Claude session start, and all must be green before commits that touch the mirrored places:
 
 ```powershell
 sh scripts/check-enum-sync.sh          # PHP-Const-SSoT vs. ENUM in struktur.sql und migrate.php
@@ -922,11 +922,11 @@ php scripts/check-audit-contract.php   # Etappe 10C: Auditproducer nur ueber die
 
 `check-doc-semantics` (AP9) polices the operating docs the way `check-bounds-sync` polices portal texts: `PRE-SHIP-CHECKLIST.md` must stay an empty template (no `[x]`, no dated evidence), no active doc may hardcode test/migration counts or load metrics, and PHPStan-level, MySQL- and Node-version mentions must match their SSoT (`phpstan.neon.dist`, `docker-compose.yml`, `ci.yml`). Retired backup paths may only appear next to a retirement marker. Historical documents (`docs/audits/`, `docs/CHANGELOG.md`, ADRs) are exempt: they describe a dated state on purpose.
 
-Five more rules cover failure classes that were each found the hard way. A file path claimed in backticks needs a producer outside `docs/` (the go-live runbook sent the admin to an initial-password file nothing ever writes). Every `.env.example` key that compose interpolates without a default must be named in the go-live runbook, or nobody can set it without reading the compose file. A migration *range* spanning from the first migration to the current one is as stale as a count, even though both ends look like legitimate references, which is why this sentence cannot show you one. German documents write real umlauts, the same rule the portal catalog follows, with code spans and fenced blocks excluded because an ASCII identifier in backticks is a quoted value (`Uebersprungen` is a string a PowerShell script really compares against); `docs/INSTALLATION-ANLEITUNG.md` carries a named exemption until its own umlaut pass lands. And the hardware version in `createVMLaunch-ESXi_playbook.yml` is checked against the ESXi support matrix: vmx-21 needs 8.0 Update 2, so a matrix that promises 7.0 for *creating* VMs promises a hard failure.
+Five more rules cover failure classes that were each found the hard way. A file path claimed in backticks needs a producer outside `docs/` (the go-live runbook sent the admin to an initial-password file nothing ever writes). Every `.env.example` key that compose interpolates without a default must be named in the go-live runbook, or nobody can set it without reading the compose file. A migration *range* spanning from the first migration to the current one is as stale as a count, even though both ends look like legitimate references, which is why this sentence cannot show you one. German documents write real umlauts, the same rule the portal catalog follows, with code spans and fenced blocks excluded because an ASCII identifier in backticks is a quoted value (`Uebersprungen` is a string a PowerShell script really compares against); no document carries an exemption. And the hardware version in `createVMLaunch-ESXi_playbook.yml` is checked against the ESXi support matrix: vmx-21 needs 8.0 Update 2, so a matrix that promises 7.0 for *creating* VMs promises a hard failure.
 
 `check-file-size` turns the ADR-0006 target into a gate. A hook warning nobody has to answer is a budget nobody keeps: twenty-three files under `lib/` and `portal/` had grown past it, the largest bundling five independent transaction domains on 1220 lines. The scope is `lib/` and `portal/` (the machine-API root files are a frozen wire surface, the same reason PHPStan excludes them). `FILE_SIZE_ALLOWANCES` records every file that is over budget today with its exact size, the reason and the stage that splits it, which makes the list a ratchet in both directions: an unlisted file may not cross 400 lines (`file-size.oversize`), a listed file may not gain one line (`file-size.grown`), and one that came back under the budget must leave the list (`file-size.stale`). An empty scan is a finding, never a pass (`file-size.zero-match`). `php scripts/check-file-size.php --list` prints the current sizes against their allowances, which is how the table is maintained after a split.
 
-`check-audit-contract` (Etappe 10C) proves that a persisted event has exactly one owner. Before it, an audit line was a free English sentence plus a category chosen at the call site, which is a convention rather than a contract, and it had already degraded in three places: the auth flood check matched on prose with a `LIKE` over a `TEXT` column, the System status counted a whole category as IP-allowlist refusals, and two producers of one event had drifted into two sentences. The guard reports `free-producer` (a call passing a category instead of a `VIRTUSPHERE_AUDIT_EVENT_*` constant), `unknown-event`, `registry-bypass` (any `INSERT INTO deploy_logs` outside `lib/repo/log.php`), `forbidden-field` (a context key that could carry a secret, a payload, an exception or a search term), `dead-sink` (`addLog()`/`audit_auth()` reintroduced), `token-sink` (a log or audit *signature* that can be handed a credential, which is what the dead `addLog($db, $token, …)` was), `sentinel` (a credential-shaped literal in a log call), `unredacted-sink` (an exception message sent directly to `error_log()` or worker STDERR without the central redactor), `unused-event` (a registered code no producer writes) and three `zero-match` cases. The last is the one that matters in a year: every other rule searches for something bad, and a search that silently matches nothing reads exactly like a clean repository. It strips comments before scanning, so the constants file may go on explaining why `addLog()` was removed. `tests/Static/AuditProducerContractTest.php` enforces the same rules in the unit lane by walking the parsed registry rather than the text, so neither is a copy of the other's assertions.
+`check-audit-contract` (Etappe 10C) proves that a persisted event has exactly one owner. Before it, an audit line was a free English sentence plus a category chosen at the call site, which is a convention rather than a contract, and it had already degraded in three places: the auth flood check matched on prose with a `LIKE` over a `TEXT` column, the System status counted a whole category as IP-allowlist refusals, and two producers of one event had drifted into two sentences. The guard reports `free-producer` (a call passing a category instead of a `VIRTUSPHERE_AUDIT_EVENT_*` constant), `unknown-event`, `registry-bypass` (any `INSERT INTO deploy_logs` outside `lib/repo/log.php`), `forbidden-field` (a context key that could carry a secret, a payload, an exception or a search term), `dead-sink` (`addLog()`/`audit_auth()` reintroduced), `token-sink` (a log or audit *signature* that can be handed a credential, which is what the dead `addLog($db, $token, …)` was), `sentinel` (a credential-shaped literal in a log call), `unredacted-sink` (an exception message sent directly to `error_log()` or worker STDERR without the central redactor), `unused-event` (a registered code no producer writes) and four `zero-match` cases (empty registry, event-constant pattern, file scan, producer pattern). The last is the one that matters in a year: every other rule searches for something bad, and a search that silently matches nothing reads exactly like a clean repository. It strips comments before scanning, so the constants file may go on explaining why `addLog()` was removed. `tests/Static/AuditProducerContractTest.php` enforces the same rules in the unit lane by walking the parsed registry rather than the text, so neither is a copy of the other's assertions.
 
 `AuditRegistryTest` walks every registered event through every object type and result it declares, builds a minimal valid context for each and renders it; a new event cannot skip it, which its hand-written predecessor shape could not promise. The refusals are the point: unknown code, unknown object, a result outside the event's own set, an object id outside a closed allowlist, a missing required field, a field required only by one result, an unknown field, a known field on an event that does not declare it, an explicit `null`, a coerced type, a map passed as a typed list, an over-long list, and every secret-shaped field name. Over-length object ids are refused rather than truncated, because a truncated id points at a different row than the event happened to. `deploy.vlan_reassigned` is the one event whose object id is a `name` (a VLAN has no id and its operator-typed name may contain a space); it is still bounded and still refuses control characters, and the test pins that it is the only one.
 
@@ -981,14 +981,14 @@ sh scripts/check-schema-convergence.sh
 
 The script builds one throwaway DB from `struktur.sql` alone and one from `struktur.sql` + all migrations, then diffs the `--no-data` dumps (AUTO_INCREMENT stripped). Before the migration run it reconstructs the schema directly preceding migrations 0019/0020 and seeds the default-interface edge cases: materializable VM, empty WDS VLAN, template, and an already stored interface. It asserts the JSON column, exact backfill, named skip report, untouched rows, and a forced second run of migration 0020. The script is mandatory after any schema change touching either side. The migrations are deltas on the `struktur.sql` base, not a from-empty rebuild, so "build DB from migrations on an empty DB" is not a valid check; this script is. On Git Bash it exports `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` itself, because Git Bash otherwise mangles the container-absolute paths.
 
-## Concurrency and HTTPS Integration Tests
+## Concurrency and HTTPS Tests
 
-These live in `Docker/WebAPI/tests/Integration/` and need a running MySQL, so they skip in CI (no DB) and run against the dev stack:
+The first three live in `Docker/WebAPI/tests/Integration/` and need a running MySQL. They are not part of the Fast lane; the gate `phpunit-full` runs them against the isolated QA stack with `--fail-on-skipped` (`scripts/lib/check/gates-integration.ps1`), where they must not skip:
 
 - `DeployEnqueueRaceTest` pins the one-active-job-per-mission guard under two overlapping enqueues. It reproduces the interleaving deterministically with two connections (session A pins its snapshot, session B commits, A enqueues inside the old snapshot), so it cannot flake on timing. Both enqueue paths (single job and staggered group) are covered.
 - `RepoTransactionReentrancyTest` proves `repo_transaction()` re-entrancy against the live server: nested calls commit exactly once (observed through a second connection, i.e. what is actually committed), an inner failure rolls back the outer work, and the depth tracker recovers after an exception.
 - `DeployJobReaperTest` (Phase C) exercises the stale-job reaper on the real DB path.
-- `HttpsConfigTest` pins the WP7 HTTPS admin flow, including that the redirect only fires while the generated listener config exists (the boot-quarantine lockout guard) and that the HTTP and generated HTTPS server blocks keep the same deny rules and fallback security headers. It reads `Docker/nginx/default.conf`, which is not mounted into the PHP container, so run it against a repo checkout:
+- `HttpsConfigTest` lives in `Docker/WebAPI/tests/Unit/`, needs no database and runs in `phpunit-unit`. It pins the WP7 HTTPS admin flow, including that the redirect only fires while the generated listener config exists (the boot-quarantine lockout guard) and that the HTTP and generated HTTPS server blocks keep the same deny rules and fallback security headers. It reads `Docker/nginx/default.conf`, which is not mounted into the PHP container, so run it against a repo checkout:
 
 ```powershell
 docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling ./vendor/bin/phpunit --filter HttpsConfig
@@ -1136,8 +1136,8 @@ powershell -NoProfile -File scripts\run-pester.ps1 -SkipTests   # analyzer only
 The modules are dev-host tooling and are **not vendored** (same rule as Playwright and Infection). Install once:
 
 ```powershell
-Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
 ```
 
 Windows ships Pester **3.4** in the box, whose syntax is incompatible; the script refuses to run against it and says so. If `Install-Module` fails with a NuGet provider error, force TLS 1.2 first (`[Net.ServicePointManager]::SecurityProtocol = 'Tls12'`) — Windows PowerShell 5.1 still negotiates TLS 1.0 by default and the gallery no longer accepts it.
@@ -1214,7 +1214,7 @@ The baseline run is deferred to a dev host on purpose: this stack is air-gapped 
 
 ## Hook Scan
 
-The Claude hook delegates to the project script:
+The Claude hook (`.claude/hooks/lint-csp-patterns.sh`) calls the project script directly, without Docker, for each edited `*.php` file with `--file`. The manual whole-worktree call is `--all-changed` (alias of `--worktree`):
 
 ```powershell
 docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-php:8.4-tooling sh scripts/lint-csp-patterns.sh --all-changed

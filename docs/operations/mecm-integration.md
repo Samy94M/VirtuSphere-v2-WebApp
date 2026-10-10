@@ -37,9 +37,10 @@ verknüpfen                  Rolloutnamen, weist
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
 ```
 
-- Zielreihenfolge der Client-Phasen ist über MECM-Anwendungsabhängigkeiten
-  festgelegt: `getInfos → hostname → VMDisksOnline → staticip`. Der neue
-  Dependency-Graph ist noch nicht freigegeben.
+- Heute ausgerollt ist der alte Graph `getinfo → hostname → staticip → disks`.
+  Die Zielreihenfolge des MC01-Graphen über MECM-Anwendungsabhängigkeiten ist
+  `getInfos → hostname → VMDisksOnline → staticip`. Der neue Dependency-Graph
+  ist noch nicht freigegeben.
 - Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
 - **Was MECM als Gerätenamen bekommt, ist der Windows-Hostname, nicht der
   ESXi-Name** (Etappe 14D, ADR-0043). Genauer: der für diesen Rollout
@@ -102,7 +103,7 @@ Bei HTTPS `https://` und den tatsächlich veröffentlichten Port verwenden.
 
 ### 3. Portal und MECM vorbereiten
 
-Im Portal unter *Einstellungen → Machine-API IP-Freigaben* mindestens die IP des
+Im Portal unter *Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)* mindestens die IP des
 MECM-Servers eintragen. Die IP des Ansible-Hosts ebenfalls freischalten, weil er
 die ermittelten MAC-Adressen über `db_importMAC.php` meldet. Optional unter
 *Einstellungen → Rückkanal-Token* einen Token erzeugen und sicher bereithalten.
@@ -350,8 +351,9 @@ automatisch aus aktualisiertem Content.
 > Zwei bewusste Aliasse und ein additives Feld: `vm_hostname` trägt den
 > eingefrorenen Rolloutnamen (nie den aktuellen Portal-Sollwert),
 > `previous_resource_id` ist der Lösch-Tombstone unter einem Wire-Namen, und
-> `rollout_revision` ist der Fence. `getDeviceInfos` bleibt minimal und bekommt
-> genau ein Feld dazu, `rollout_revision`; sein `vm_hostname` ist ebenfalls der
+> `rollout_revision` ist der Fence. `getDeviceInfos` bleibt schlank: Neben den
+> Basisfeldern liefert es `rollout_revision` sowie die beiden Generationen
+> `device_generation` und `acceptance_generation` (ADR-0044); sein `vm_hostname` ist ebenfalls der
 > Snapshot, weil der Client Windows nach dem benennt, was er dort liest.
 
 ## VM außer Betrieb nehmen
@@ -395,7 +397,7 @@ try {
 Gültige `source`-Werte: `device-sync`, `packages-sync`, `autoimporter`.
 Antworten: `200 {"success":true,...}`, `400` bei ungültiger Quelle/Intervall,
 `403` wenn die Absender-IP nicht freigeschaltet ist (Portal → Einstellungen →
-IP-Freigaben), `401` bei falschem Token.
+Machine-API → Zugriff auf das Portal (eingehend)), `401` bei falschem Token.
 
 Die aktuellen Skripte senden statt eines Heartbeats einen **Ergebnisbericht**
 (`action=reportRun`, additiv; siehe „MECM-Server: Installation & Aufgabenplanung").
@@ -459,8 +461,8 @@ rein anzeigend und best effort bleiben.
   IPs, eine begrenzte Liste und ausgelassene Einträge. Sie ordnet eine IP ohne
   weitere positive Evidenz weder MECM noch Ansible zu und behauptet nach einer
   späteren Erholung keine aktuelle Blockade.
-- **VM-Detail**: Abschnitt „Client-Phasen" mit den vier Phasen und den letzten
-  20 Roh-Ereignissen.
+- **VM bearbeiten**: Abschnitt „Client-Phasen" mit den vier Phasen und den
+  letzten 20 Roh-Ereignissen.
 - MECM-relevante Audit-Einträge stehen im Log unter der Kategorie
   „MECM-Integration" (nur Admins); Heartbeats und Phase-Events werden dort
   bewusst nicht dupliziert.
@@ -540,7 +542,7 @@ Der Compose-Service `maintenance-worker` (Container
 Deploy-Worker und erledigt:
 
 1. **Eigen-Heartbeat** (alle 60 s): erscheint im Systemstatus unter
-   „Interne Dienste" als „Wartungsdienst (WebApp)". Fehlt er, läuft der
+   „Interne Dienste" als „Wartungsdienst (Portal)". Fehlt er, läuft der
    Container nicht. Sein Zustand verändert den MECM-Gesamtzustand nicht.
 2. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
    Sicherheits-Protokolle (Anmeldung, Benutzer, Zugangsdaten) älter als 365 Tage,
@@ -667,15 +669,18 @@ Lebenszyklus eines Katalogeintrags:
 2. **Zurückgezogen (Retired)**: fehlt ein Eintrag im Sync-Payload (z. B.
    Versionswechsel mit `removeOldVersion`), wird er markiert statt gelöscht.
    VM-Zuweisungen bleiben erhalten; existiert eine aktive Nachfolge-Version
-   (gleicher Namensstamm), werden die Zuweisungen **automatisch umgehängt**
-   (protokolliert im Log, Kategorie „MECM-Integration"). Taucht der Name
+   (gleicher Namensstamm), die im selben Sync neu angelegt wurde und eine
+   höhere Version hat, werden die Zuweisungen **automatisch umgehängt**
+   (protokolliert im Log, Kategorie „MECM-Integration"). Sonst bleibt die
+   Zuweisung bestehen und der VM-Editor zeigt „Update verfügbar". Taucht der Name
    wieder auf, wird er automatisch reaktiviert.
 3. **Endgültig gelöscht**: erst nach 30 Tagen im Zustand „Zurückgezogen"
    **und** ohne verbleibende VM-Verknüpfung (Wartungsdienst). Verknüpfte
-   zurückgezogene Pakete bleiben dauerhaft erhalten.
+   zurückgezogene Pakete bleiben dauerhaft erhalten, ebenso einmal umgehängte
+   Pakete.
 
 **Schutzschwelle:** Würde ein einzelner Sync mehr als X % (Standard 30 %,
-Portal → Einstellungen) der aktiven Pakete zurückziehen (typisch bei
+Portal → Einstellungen → Tab „Kataloge und Inventar") der aktiven Pakete zurückziehen (typisch bei
 WMI-Lesefehlern oder falschem Collections-Ordner), wird er mit HTTP 409
 abgelehnt und im Log vermerkt. Der Sync wiederholt sich dann sichtbar, statt
 still den Katalog zu leeren. Task Sequences (`deploy_os`) haben denselben
@@ -1253,7 +1258,7 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
 4. Log auf dem MECM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.
 
 **Deployment hängt auf dem Client**
-1. VM-Detail im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
+1. VM bearbeiten im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
    (getinfo/hostname/staticip/disks)?
 2. Phasenmeldungen sind best effort. „Ausgeführt, Bestätigung ausstehend"
    bedeutet nur, dass `started` ankam und kein terminales Event gespeichert ist;
@@ -1265,11 +1270,11 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
    `C:\Program Files\VirtuSphere\Logs` gemeinsam prüfen.
 
 **Pakete verschwinden / Sync abgelehnt (409)**
-1. Im Log (Kategorie „MECM-Integration") nach „Katalog-Sync abgelehnt" suchen:
+1. Im Log (Kategorie „MECM-Integration") nach „Katalogabgleich abgewiesen" suchen:
    Der Paket-Sync hätte mehr als die Schutzschwelle zurückgezogen, meist ein
    WMI-Aussetzer oder falscher Collections-Ordner auf dem MECM-Server.
 2. Katalogquelle prüfen; notfalls Schwelle temporär anheben (Portal →
-   Einstellungen → Paket-Sync-Schutzschwelle).
+   Einstellungen → Tab „Kataloge und Inventar" → Paket-Sync-Schutzschwelle).
 
 **MECM-Server offline oder Site kritisch**
 - Es gibt keine Portal-Probe mehr; das Portal spricht MECM nicht aktiv an. Fällt

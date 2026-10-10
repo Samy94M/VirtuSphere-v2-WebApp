@@ -1,7 +1,7 @@
 # ADR-0003: Full Desktop Feature Parity
 
 Date: 2026-06-28
-Status: Accepted
+Status: Superseded by ADR-0035 (2026-07-27). The parity condition was met and the desktop client and its token API are removed.
 
 ## Context
 

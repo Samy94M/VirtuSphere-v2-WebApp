@@ -2,6 +2,8 @@
 
 Diese Anleitung beschreibt die Installation und den Betrieb der VirtuSphere PHP-Web-App auf Ubuntu mit Docker. Der Stack startet bewusst über HTTP; HTTPS wird anschließend im Portal aktiviert (Abschnitt „HTTPS“), ohne den grundlegenden Ablauf zu ändern.
 
+Dieser Weg braucht Internet, weil `setup.sh` die Images baut. Für einen Produktionshost ohne Internet gilt stattdessen die [Offline-Installation](operations/offline-install.md). Welcher Schritt auf den Docker-Host und welcher auf den Ansible-Host gehört, zeigt der [Wegweiser im Go-Live-Runbook](operations/go-live.md#wegweiser-docker-host-und-ansible-host).
+
 ## Begriffe kurz erklärt
 
 - Ubuntu: Linux-Serverbetriebssystem, auf dem Docker läuft.
@@ -190,7 +192,7 @@ docker compose logs --tail 100 webserver
 
 Die Container laufen mit `restart: unless-stopped`. Nach einem Neustart des Hosts oder einem Absturz starten sie wieder, sofern sie zuvor nicht ausdrücklich gestoppt wurden. Der Deploy-Worker hält zudem eine MySQL-Unterbrechung aus: Er verbindet sich mit Backoff neu, statt abzustürzen und Deploy-Jobs im Status `queued` hängen zu lassen. Ein Supervisor mit ungeklärtem altem Kind oder unlesbarem Restartbudget bleibt absichtlich im Zustand `manual` und startet keinen Ersatz; auch ein dauerhaft fehlerhafter Container braucht einen manuellen Eingriff (`docker compose ps` prüfen).
 
-Jeder Dienst hat einen Healthcheck: `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurück, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Prüfergebnisse.
+Jeder Dienst des Kernstacks hat einen Healthcheck (das optionale phpMyAdmin nicht): `docker compose ps` zeigt hinter dem Status `(healthy)`, und ein Start mit `docker compose up -d --wait` kehrt erst zurück, wenn die ganze Kette (MySQL, PHP-FPM, nginx, beide Worker) wirklich Anfragen annimmt. Zeigt ein Container `(unhealthy)`, nennt `docker inspect --format '{{json .State.Health}}' <container>` die letzten Prüfergebnisse.
 
 ### phpMyAdmin (optional)
 

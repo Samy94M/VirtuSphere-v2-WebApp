@@ -34,6 +34,7 @@ declare(strict_types=1);
             <ul>
                 <li><?php echo h(__t('help_credentials.credentials_cadence_off')); ?></li>
                 <li><?php echo h(__t('help_credentials.credentials_cadence_no_ansible')); ?></li>
+                <li><?php echo h(__t('help_credentials.credentials_cadence_no_worker')); ?></li>
                 <li><?php echo h(__t('help_credentials.credentials_cadence_paused')); ?></li>
             </ul>
         </section>

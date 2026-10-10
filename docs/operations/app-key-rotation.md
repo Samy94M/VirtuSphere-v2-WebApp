@@ -38,9 +38,10 @@ der Quelle (ESXi, Ansible-Host, AD).
 4. **Neuen Schlüssel erzeugen** (32 Zufallsbytes, base64), wie in `.env.example`
    beschrieben, etwa `openssl rand -base64 32`, und in der `.env` als
    `APP_KEY=base64:<Wert>` eintragen.
-5. **Alle Prozesse neu starten:** `php`, `deploy-worker` und
-   `maintenance-worker` (bei der Supervisor-Form zusätzlich mit
-   `-f docker-compose.supervisor.yml`). Die Worker lesen die `.env` nur beim Start.
+5. **Alle Prozesse neu erzeugen:** `docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker`,
+   danach `docker compose restart webserver` (bei der Supervisor-Form zusätzlich mit
+   `-f docker-compose.supervisor.yml`). Compose übernimmt die `.env` nur beim
+   Erzeugen eines Containers; ein `restart` behält den alten Schlüssel.
 6. **Geheimnisse neu eintragen.** Jeden Zugang bearbeiten und sein Passwort neu
    speichern, danach **Testen**. Das AD-Suchkonto unter **Benutzer > Active
    Directory** mit Passwort neu speichern und testen. Bis dahin scheitern

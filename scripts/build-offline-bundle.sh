@@ -365,7 +365,8 @@ Alle Schritte laufen ohne Internetzugang.
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. Der Kernlauf lädt und startet
    phpMyAdmin nicht. Das separat verifizierte Teilbundle wird bei Bedarf aus dem
-   entpackten Projektwurzelverzeichnis mit `sh tools/install.sh` installiert.
+   entpackten Bundle-Verzeichnis (dort liegt `tools/install.sh`, nicht in der
+   Projektwurzel) mit `sh tools/install.sh` installiert.
 
 NICHT `Docker/scripts/setup.sh` benutzen: es ruft `docker compose build` auf, und
 die Basis-Images sind digest-gepinnt und liegen nicht im Bundle. Auf einem Host

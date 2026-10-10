@@ -10,6 +10,31 @@ Dieses Dokument führt die **erste** produktive Inbetriebnahme der VirtuSphere-W
 auf dem Ubuntu-Host durch. Zielgruppe sind Administratoren ohne tiefes Docker- oder
 MECM-Vorwissen. Es ist von oben nach unten abarbeitbar (Abhängigkeitsreihenfolge).
 
+## Wegweiser: Docker-Host und Ansible-Host
+
+Die Installation betrifft zwei Rollen. Der **Docker-Host** trägt Portal,
+Datenbank und Worker. Der **Ansible-Host** führt die Playbooks gegen ESXi aus und
+meldet die MACs an das Portal zurück. Beide Rollen können auf derselben
+Ubuntu-Maschine liegen; dann gelten alle Zeilen für diese eine Maschine. Jeder
+Schritt steht genau einmal in einem Runbook. Diese Tabelle sagt nur, wo.
+
+| Nr. | Host | Was | Ohne Internet (Produktion) | Mit Internet (Test, Entwicklung) |
+|---|---|---|---|---|
+| 1 | Docker-Host | Code, Images, `.env`, Stack starten, Migrationen | [Offline-Installation](offline-install.md) Schritt 1 bis 3 und 5 bis 7; kommt der Code über den internen Gitea, stattdessen hier Schritt 1 und 2 | [Installationsanleitung](../INSTALLATION-ANLEITUNG.md) mit `Docker/scripts/setup.sh` |
+| 2 | Docker-Host | Log-Rechte, Docker-Subnetz, Proxy-Variablen | [Schritt 1a](#schritt-1a-stolpersteine-auf-einem-echten-linux-host) | [Schritt 1a](#schritt-1a-stolpersteine-auf-einem-echten-linux-host), sobald es ein echter Linux-Host ist |
+| 3 | Ansible-Host | dediziertes Konto, Schreibrechte, Netzwege zu ESXi und Portal | [Ansible-Host vorbereiten](#ansible-host-vorbereiten-vor-schritt-4) | wie links |
+| 4 | Ansible-Host | Python-Pakete und Collections | [Offline-Installation](offline-install.md) Schritt 3 (Abschnitt „Auf dem Ansible-Host“) und Schritt 4 | `pip` und `ansible-galaxy` aus der Tabelle in [Ansible-Host vorbereiten](#ansible-host-vorbereiten-vor-schritt-4) |
+| 5 | Docker-Host | Backup, erstes Admin-Konto, Portal im Browser, Zugriff auf das Portal (eingehend) | hier Schritt 3 und 4 | wie links |
+| 6 | Portal | Ansible-Zugang anlegen und „Verbindung und Umgebung prüfen“ | [Ansible-Host vorbereiten](#ansible-host-vorbereiten-vor-schritt-4), Absatz zum Volltest | wie links |
+| 7 | beide | ein echter `create`-Auftrag vor der Freigabe | [Create-Rauchtest](#create-rauchtest-vor-der-produktivfreigabe) | wie links |
+
+Schritt 0 gilt vor allen Zeilen. Die Zeilen 1 bis 2 (Docker-Host) und 3 bis 4
+(Ansible-Host) hängen nicht voneinander ab und können parallel laufen. Zeile 5
+braucht einen laufenden Stack, Zeile 6 beide Hosts. Fehlt die Ansible-Host-IP in
+der Freigabe-Liste aus Schritt 4.4 (Zugriff auf das Portal, eingehend), endet die Prüfung in Zeile 6 als Warnung mit
+genau dieser IP. Danach geht es mit MECM in Schritt 5 weiter. Updates folgen
+[Upgrade und Recovery](upgrade-recovery.md), nicht dieser Tabelle.
+
 ## Schritt 0: Kompromittiertes Alt-Credential rotieren (einmalig, vor allem anderen)
 
 Bis zum 2026-07-13 lag im Repository eine Datei `functions.psm1` mit einem **Klartext-MySQL-Passwort** (Benutzer `testkonto`, fester Host, `SslMode=none`). Die Datei war toter WinForms-Code, von nirgends aufgerufen, und ist gelöscht.
@@ -83,18 +108,24 @@ bei einem gespeicherten Portalwert sichtbar und entfernt ihn. Die Übersicht
 **Wirksame Deploy-Konfiguration** zeigt den wirksamen Wert samt Quelle; der
 Ansible-Zugang selbst wird beim Einreihen des Auftrags ausgewählt.
 
-**`.env` wirkt in den Workern erst nach einem Neustart.** PHP-FPM liest die
-`.env` je Anfrage, Deploy-, Wartungs- und Aufsichtsprozess nur einmal beim
-Start. Wer `APP_PUBLIC_BASE_URL` in der `.env` ändert, sieht die neue Adresse
-sofort im Portal, der Deploy-Worker schreibt aber bis zu seinem Neustart die
-alte in die Auftragsdateien, und der MAC-Rückruf geht dorthin. Deshalb nach
-jeder `.env`-Änderung beide Worker neu starten
-(`docker compose restart deploy-worker maintenance-worker`, bei der
-Supervisor-Form zusätzlich mit `-f docker-compose.supervisor.yml`). Einfacher
-ist, die API-Basis-URL nur im Portal zu pflegen: Der Portalwert gilt ohne
-Neustart für alle Prozesse.
+**`.env` wirkt erst nach einer Neuerzeugung der Container.** Die Werte aus der
+`.env` übernimmt Compose beim Erzeugen eines Containers in dessen Umgebung
+(`environment:`-Interpolation, kein `env_file`). PHP-FPM, Deploy-Worker und
+Wartungsprozess (samt Aufsichtsprozess) sehen eine geänderte `.env` deshalb erst
+nach der Neuerzeugung; ein `restart` genügt nicht. Wer `APP_PUBLIC_BASE_URL` in
+der `.env` ändert, schreibt mit dem alten Container-Stand weiter die alte Adresse
+in die Auftragsdateien, und der MAC-Rückruf geht dorthin. Deshalb nach jeder
+`.env`-Änderung wie in Schritt 3a neu erzeugen und den Webserver neu starten
+(`docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker`,
+danach `docker compose restart webserver`; bei der Supervisor-Form zusätzlich mit
+`-f docker-compose.supervisor.yml`). Einfacher ist, die API-Basis-URL nur im
+Portal zu pflegen: Der Portalwert gilt ohne Neustart für alle Prozesse.
 
-Auf dem Host installieren und bereitstellen:
+Auf dem Host installieren und bereitstellen. Die `pip`- und
+`ansible-galaxy`-Befehle in der Tabelle brauchen Internet; ohne Internet kommen
+dieselben gepinnten Pakete aus dem Offline-Bundle
+([Offline-Installation](offline-install.md) Schritt 3 und 4). Konto, Rechte und
+Netzwege gelten in beiden Fällen.
 
 | Braucht | Warum |
 |---|---|
@@ -108,11 +139,13 @@ Auf dem Host installieren und bereitstellen:
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
-„Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login,
-`ansible-playbook`, `python3`, `pyvmomi`, `requests`, `community.vmware`) und benennt bei
+„Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login mit
+SFTP-Schreibtest, `ansible-playbook`, `python3`, `pyvmomi`, `requests`,
+`community.vmware` samt gepinnter Version, ansible-core-Untergrenze und
+0700-Async-Verzeichnis) und benennt bei
 einem Fehler die fehlende Komponente. Bei gesetzter API-Basis-URL prüft er
 zusätzlich den Rückweg: die Portal-Erreichbarkeit vom Host aus und ob die
-Host-IP in den Machine-API IP-Freigaben steht; fehlt die Freigabe, warnt das
+Host-IP in der Freigabe-Liste unter Einstellungen → Machine-API → Zugriff auf das Portal (eingehend) steht; fehlt die Freigabe, warnt das
 Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.4). Die eigentlichen vSphere-Rechte liegen im
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
 erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
@@ -137,7 +170,7 @@ Handler ignoriert und dieses Image `STOPSIGNAL SIGQUIT` erbt. Einmal belegen:
 
 ```bash
 time docker compose stop deploy-worker
-docker inspect --format '{{.State.ExitCode}}' virtusphere-v2-webapp-deploy-worker-1
+docker inspect --format '{{.State.ExitCode}}' "$(docker compose ps -q deploy-worker)"
 ```
 
 Erwartet wird ein Bruchteil einer Sekunde und Exitcode 0. Dauert es die volle
@@ -266,10 +299,13 @@ Start-Reihenfolge, die funktioniert: PHP-Log-`chmod`, Override anlegen,
 Dies ist der am höchsten eingeschätzte ungetestete Pfad (`struktur.sql` und
 `migrate.php` müssen zur selben Zielform konvergieren).
 
+Die Befehle laufen im Projektverzeichnis (dort liegt die `docker-compose.yml`);
+`docker compose exec` ist unabhängig vom Containernamen, der am Ordnernamen hängt.
+
 ```bash
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --status
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php        # falls offen
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check # muss sauber melden
+docker compose exec -T php php /var/www/html/lib/migrate.php --status
+docker compose exec -T php php /var/www/html/lib/migrate.php        # falls offen
+docker compose exec -T php php /var/www/html/lib/migrate.php --check # muss sauber melden
 ```
 
 Erwartet: `--check` meldet `migrations pending=0` und keine Drift. Die Anzahl
@@ -279,8 +315,9 @@ Aussage. (Auf ubuntu-102 am 2026-07-22 einmal produktiv bestätigt.)
 
 ## Schritt 3: Backup einrichten (vor dem ersten echten Datenbestand)
 
-Backup/Restore folgt ADR-0017. Voll-Dump (`--all-databases`) sichert die neuen
-Tabellen automatisch mit.
+Backup/Restore folgt ADR-0017. Der Dump enthält die komplette
+Anwendungsdatenbank (`--databases`, nicht `--all-databases`); neue Tabellen sind
+damit automatisch mitgesichert.
 
 ```bash
 sh scripts/backup.sh            # Erstsicherung, Ablage/Runbook siehe docs/operations/backup.md
@@ -309,7 +346,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    erzeugten PHP-Containers beim eigenen Start auf; ohne Neustart kann trotz
    gesundem PHP-Container ein HTTP 502 zurückbleiben.
 4. Mit `docker compose ps`, `health.php`,
-   `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check`
+   `docker compose exec -T php php /var/www/html/lib/migrate.php --check`
    und den Container-Logs prüfen.
 5. Beim Rollback Passwort und `.env` in umgekehrter Reihenfolge zurücksetzen
    und anschließend dieselben Container erneut erzeugen bzw. neu starten.
@@ -322,7 +359,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    setzt du das Passwort selbst.
 
    ```bash
-   docker exec -it virtusphere-v2-webapp-php-1 \
+   docker compose exec php \
      php /var/www/html/lib/seed.php admin '<starkes Passwort>' admin@example.lan
    ```
 
@@ -330,7 +367,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    setzen (in `.env.example` als Kommentar vorbereitet), dann legt
    `Docker/scripts/setup.sh` das Konto beim Hochfahren mit an; ohne beide Werte
    überspringt es den Schritt mit einer Meldung. Auf einem Produktionshost ist der
-   `docker exec`-Weg der bessere, weil das Passwort danach nicht in einer Datei
+   `docker compose exec`-Weg der bessere, weil das Passwort danach nicht in einer Datei
    liegen bleibt.
 
    Beide Wege legen **genau ein** Konto an, Rolle `admin`, mit
@@ -352,7 +389,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Systemstatus → Logs. Damit sind Navigation, Sessions, CSRF, RBAC und i18n
    einmal produktiv bestätigt. Die kontextsensitive Portal-Hilfe erklärt die
    Bedienung; die Betriebs-Runbooks liegen im Projektordner auf dem Server.
-4. **IP-Freigaben füllen** (Einstellungen → IP-Freigaben). Die Maschinen-
+4. **IP-Freigaben füllen** (Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)). Die Maschinen-
    Schnittstelle ist per Allowlist gesperrt und antwortet jeder nicht
    freigegebenen IP mit **403**, ohne dass im Portal etwas kaputt aussieht.
    Eine frische Datenbank kennt nur `127.0.0.1`, eine migrierte Bestands-DB
@@ -379,7 +416,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    `HKLM:\SOFTWARE\VirtuSphere\MECM` (Vererbung aus, Lesezugriff nur SYSTEM und
    Administratoren), legt Ordner an, kopiert die Skripte und registriert die vier
    selbstheilenden Aufgaben (Devices Sync, Packages Sync, Package Import, Site
-   Health; alle SYSTEM, AtStartup, `MultipleInstances IgnoreNew`,
+   Health; alle SYSTEM, je zwei Trigger (AtStartup und stündliche Wiederholung), `MultipleInstances IgnoreNew`,
    `ExecutionTimeLimit=PT0S`). Provider und Site-Health-Intervall
    (`MECM_ProviderMachine`, `SiteHealthIntervalSeconds`) sind Registry-Werte, keine
    Portal-Einstellungen. Die von oben nach unten ausführbare Anleitung für
@@ -388,7 +425,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    `docs/operations/mecm-integration.md`; technische Details stehen zusätzlich in
    `Powershell-MECM/README.md`.
 2. **MECM-Server-IP im Portal freischalten**, falls in Schritt 4 nicht schon
-   geschehen: Einstellungen → IP-Freigaben. Der Installer meldet 403 mit genau
+   geschehen: Einstellungen → Machine-API → Zugriff auf das Portal (eingehend). Der Installer meldet 403 mit genau
    diesem Hinweis, falls vergessen.
 3. **Optional: Report-Token** im Portal generieren (Einmal-Anzeige). Den Installer
    ohne `-ReportToken` starten, dann fragt er ihn verdeckt ab (nicht als Klartext-
@@ -458,8 +495,11 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 1. **DNS-Eintrag** `virtusphere.lan` → Ubuntu-Host-IP im Deploy-Netz muss jetzt
    existieren (sonst greift nur die hartkodierte IP-Fallback-Stufe).
 2. **Eine Test-VM durch alle vier Phasen** ausrollen
-   (`getinfo → hostname → staticip → disks`) und die Zeitleiste im VM-Detail des
-   Portals mitverfolgen.
+   (heute ausgerollt: `getinfo → hostname → staticip → disks`) und die Zeitleiste
+   im Abschnitt „Client-Phasen“ auf „VM bearbeiten“ mitverfolgen. Der Zielgraph
+   `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip` ist
+   im Packaging verdrahtet, aber noch nicht freigegeben; die Portal-Anzeige bleibt
+   bei `getinfo`, `hostname`, `staticip`, `disks`.
 3. Dabei die kritischen E5-Fixes real bestätigen: staticip-Idempotenz (Re-Run
    stirbt nicht mehr), ehrlicher Erfolgsstatus, getinfo-Stale-Registry-Bereinigung,
    Set-VMDisksOnline-try/finally.
@@ -537,7 +577,7 @@ cd /opt/VirtuSphere-v2-WebApp
 git pull --ff-only
 docker compose exec -T php php /var/www/html/lib/migrate.php --check  # offene Migrationen?
 docker compose exec -T php php /var/www/html/lib/migrate.php          # anwenden, falls offen
-docker compose restart php deploy-worker maintenance-worker webserver
+docker compose restart php deploy-worker maintenance-worker webserver   # bei geänderter .env oder docker-compose.yml stattdessen neu erzeugen (Schritt 3a)
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8021/portal/login.php
 ```
 

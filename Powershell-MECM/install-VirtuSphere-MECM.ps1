@@ -1132,7 +1132,7 @@ try {
 } catch {
     $code = Get-VsErrorStatusCode -ErrorRecord $_
     if ($code -eq 403) {
-        Write-Warn 'Portal antwortet mit 403 - IP dieses Servers im Portal unter Einstellungen > IP-Freigaben freischalten.'
+        Write-Warn 'Portal antwortet mit 403 - IP dieses Servers im Portal unter Einstellungen > Machine-API > Zugriff auf das Portal (eingehend) freischalten.'
     } else {
         # Get-VsErrorDetail statt .Exception.Message: bei einem Fehler der WebApp
         # steht der Grund in ihrer JSON-Envelope, nicht in der Statuszeile.
@@ -1199,7 +1199,7 @@ if ($script:VsInstallBlockers -eq 0) {
 Write-Host ('Logs: {0}' -f $logRoot) -ForegroundColor Gray
 Write-Host ''
 Write-Host 'Naechste Schritte:' -ForegroundColor Gray
-Write-Host '  1. Im Portal die IP DIESES MECM-Servers freischalten (Einstellungen > IP-Freigaben).' -ForegroundColor Gray
+Write-Host '  1. Im Portal die IP DIESES MECM-Servers freischalten (Einstellungen > Machine-API > Zugriff auf das Portal (eingehend)).' -ForegroundColor Gray
 Write-Host '  2. Auch die IP des ANSIBLE-Hosts freischalten - sonst laeuft ein Deploy durch, ohne dass je eine MAC zurueckkommt (der Ansible-Host meldet die MACs ueber db_importMAC.php).' -ForegroundColor Gray
 if (-not $webApiIsIp) {
     Write-Host ('  3. DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $webApiHost) -ForegroundColor Gray
