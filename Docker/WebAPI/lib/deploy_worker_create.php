@@ -276,7 +276,12 @@ function deploy_worker_create_job_status(array $summary): string
  * precisely the situation the 13.08.2026 incident left behind, minus the
  * evidence that would have shown it.
  *
- * K15 applies the durable per-VM convergence rule to incomplete Create\n * as well: restore untouched brackets, fail confirmed touched VMs and hold\n * unknown starts. A fully successful Create still restores its bracket.\n *\n * @param int[] $vmIds
+ * K15 applies the durable per-VM convergence rule to incomplete Create
+ * as well: restore untouched brackets, fail confirmed touched VMs and hold
+ * unknown starts. A fully successful Create still restores its bracket.
+ * $priorLifecycles is no longer read; the journal holds the prestate.
+ *
+ * @param int[] $vmIds
  * @param array<int,string> $priorLifecycles
  * @param array{all_successful:bool,summary:array<string,mixed>,stop_reason:?string} $createOutcome
  */
@@ -289,7 +294,7 @@ function deploy_worker_conclude_create_section(
     array $createOutcome
 ): void {
     $message = null;
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $priorLifecycles, $createOutcome, &$message): ?string {
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $createOutcome, &$message): ?string {
         if ((string) $locked['locked_by'] !== $workerId) {
             return null;
         }

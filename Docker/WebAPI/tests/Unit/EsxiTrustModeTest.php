@@ -79,46 +79,50 @@ final class EsxiTrustModeTest extends TestCase
 
     public function testEveryVmwarePlaybookUsesTheGeneratedTrustVariablesWithoutHardFalse(): void
     {
-        $paths = glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*_playbook.yml');
+        // Derived from the directory, not from a list: Etappe 14B and K15 each
+        // moved VMware calls into task files, and every named list missed one
+        // (powercycle_vm_tasks.yml was in none of them). requirements.yml only
+        // pins the collection and runs nothing.
+        $paths = glob(ansible_source_dir() . DIRECTORY_SEPARATOR . '*.yml');
         self::assertIsArray($paths);
-        self::assertNotEmpty($paths, 'zero-match: no playbook found');
-
-        // Not only the files whose name ends in _playbook.yml. The per-VM create
-        // (Etappe 14B) moved the shared identity query into a task file that
-        // three playbooks include, and a scan over the naming convention alone
-        // would have left the one file that actually issues a VMware call
-        // outside the trust contract. The registry names them, not a glob.
-        foreach (VIRTUSPHERE_CREATE_ARTIFACTS as $artifact) {
-            if (str_ends_with($artifact, '.yml') && !str_contains($artifact, '_playbook')) {
-                $paths[] = ansible_source_dir() . DIRECTORY_SEPARATOR . $artifact;
+        $sources = [];
+        foreach ($paths as $path) {
+            if (basename($path) !== 'requirements.yml') {
+                $sources[basename($path)] = (string) file_get_contents($path);
             }
         }
-        foreach ([VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $artifact) {
-            $paths[] = ansible_source_dir() . DIRECTORY_SEPARATOR . $artifact;
-        }
 
-        $vmwarePlaybooks = 0;
-        foreach ($paths as $path) {
-            $source = file_get_contents($path);
-            self::assertIsString($source);
+        $vmwareFiles = 0;
+        foreach ($sources as $file => $source) {
             if (!str_contains($source, 'community.vmware.')) {
                 continue;
             }
-            $vmwarePlaybooks++;
-            self::assertStringNotContainsString('validate_certs: false', $source, basename($path));
-            self::assertStringContainsString('validate_certs: "{{ esxi_validate_certs | bool }}"', $source, basename($path));
-            if (!str_contains($path, '_playbook')) {
-                // An included task file has no play of its own; the CA bundle
-                // environment is inherited from the play that includes it, and
-                // every one of those plays is checked below.
+            $vmwareFiles++;
+            self::assertStringNotContainsString('validate_certs: false', $source, $file);
+            self::assertStringContainsString('validate_certs: "{{ esxi_validate_certs | bool }}"', $source, $file);
+            if (str_contains($file, '_playbook')) {
+                self::assertStringContainsString('SSL_CERT_FILE', $source, $file);
+                self::assertStringContainsString('REQUESTS_CA_BUNDLE', $source, $file);
                 continue;
             }
-            self::assertStringContainsString('SSL_CERT_FILE', $source, basename($path));
-            self::assertStringContainsString('REQUESTS_CA_BUNDLE', $source, basename($path));
+            // A task file has no play of its own; it inherits the CA bundle
+            // environment from every playbook that includes it.
+            $includers = array_filter(
+                $sources,
+                static fn (string $candidate, string $name): bool => str_contains($name, '_playbook')
+                    && preg_match('/include_tasks: \.\/' . preg_quote($file, '/') . '\b/', $candidate) === 1,
+                ARRAY_FILTER_USE_BOTH
+            );
+            self::assertNotSame([], $includers, $file . ' issues VMware calls but no playbook includes it');
+            foreach ($includers as $name => $includer) {
+                self::assertStringContainsString('SSL_CERT_FILE', $includer, $name . ' includes ' . $file);
+                self::assertStringContainsString('REQUESTS_CA_BUNDLE', $includer, $name . ' includes ' . $file);
+            }
         }
-        // Ten after K15 added per-VM powercycle/export query includes. Every
-        // VMware access path must inherit the same certificate trust contract.
-        self::assertSame(10, $vmwarePlaybooks, 'zero-match/count drift: every VMware playbook and query include must share the trust contract');
+        self::assertGreaterThan(0, $vmwareFiles, 'zero-match: no VMware access path found');
+        foreach ([VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $registered) {
+            self::assertStringContainsString('community.vmware.', $sources[$registered] ?? '', $registered . ' is no longer a VMware access path');
+        }
     }
 
     public function testCertificateFailuresNeverFallThroughToParse(): void

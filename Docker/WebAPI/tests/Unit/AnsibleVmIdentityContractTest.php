@@ -164,10 +164,17 @@ final class AnsibleVmIdentityContractTest extends TestCase
         $source = file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $file);
         self::assertIsString($source);
 
-        if ($file === 'powercycleVMs-ESXi_playbook.yml') {
-            $source .= "\n" . file_get_contents(ansible_source_dir() . '/powercycle_vm_tasks.yml');
-        }
+        // Splice every local task include in at its own position, so the
+        // order checks above still measure the order Ansible executes.
+        return (string) preg_replace_callback(
+            '/include_tasks: \.\/([\w.-]+\.yml)/',
+            static function (array $match): string {
+                $included = file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $match[1]);
+                self::assertIsString($included, $match[1]);
 
-        return $source;
+                return $match[0] . "\n" . $included;
+            },
+            $source
+        );
     }
 }

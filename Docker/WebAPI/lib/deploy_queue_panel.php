@@ -42,6 +42,14 @@ if ($deployPreview !== null) { ?>
             <?php if ($deployPreview['rows'] === []) { ?><tr><td colspan="2"><?php echo h(__t('deploy.vms_empty')); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
+        <?php if ($deployPreview['skipped_vms'] !== []) { ?>
+            <p class="alert alert-warning">
+                <?php echo h(__t(count($deployPreview['skipped_vms']) === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many', ['count' => count($deployPreview['skipped_vms'])])); ?>
+                <?php if (can('deploy.run', $user)) { ?>
+                    <a href="<?php echo h(deploy_mission_url($selectedMissionId) . '&mode=create#deploy-queue-form'); ?>"><?php echo h(__t('status.mode_create')); ?></a>
+                <?php } ?>
+            </p>
+        <?php } ?>
         <?php if ($deployPreview['storage'] !== []) { ?>
             <h3><?php echo h(__t('deploy.storage_heading')); ?></h3>
             <?php deploy_render_storage_table($deployPreview['storage'], $deployPreview['capacity']); ?>

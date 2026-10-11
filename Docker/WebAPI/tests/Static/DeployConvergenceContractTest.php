@@ -97,8 +97,12 @@ final class DeployConvergenceContractTest extends TestCase
         $outcome = $this->workerSource();
 
         self::assertStringContainsString('catch (DeployWorkerCancelled', $this->workerSource());
-        self::assertStringContainsString("cancelled while deploying', \$vmIds, true)", $outcome);
+        // K15: cancel, reaper and sweep share the journal owner. Only a marked
+        // bracket that is still deploying is restored; imported VMs are kept.
+        self::assertMatchesRegularExpression('/function deploy_worker_confirm_owned_cancel.*?deploy_worker_fail_locked_job_vms\(/s', $outcome);
+        self::assertMatchesRegularExpression('/function deploy_worker_fail_locked_job_vms.*?deploy_worker_apply_locked_vm_journal\(/s', $outcome);
         self::assertStringContainsString("\$lifecycle !== VIRTUSPHERE_LIFECYCLE_DEPLOYING", $outcome);
+        self::assertStringContainsString("\$result !== null ? \$result['successful_vm_ids'] : []", $outcome);
         // The reaper keeps VMs whose import already committed.
         self::assertMatchesRegularExpression(
             '/deploy_worker_fail_locked_job_vms.*deploy_worker_locked_imported_vm_ids/s',
@@ -124,10 +128,19 @@ final class DeployConvergenceContractTest extends TestCase
         // Only deploying orphans: an ACTIVE job (the SSoT set, cancelling
         // included since ADR-0033) protects its mission's VMs, and the sweep
         // must not block on concurrent row locks.
-        self::assertStringContainsString("NOT EXISTS (SELECT 1 FROM deploy_jobs j WHERE j.mission_id = v.mission_id AND j.status IN (' . \$placeholders . '))", $repo);
-        self::assertMatchesRegularExpression('/lifecycle_state = \?\s+AND NOT EXISTS/s', $repo);
+        // K15: the active-job check runs per candidate under the mission lock,
+        // and only the latest journal owner of a deploying VM is a candidate.
+        self::assertMatchesRegularExpression('/\$active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;.*?status IN \(.*?num_rows !== 0\) \{\s*return null;/s', $repo);
+        self::assertMatchesRegularExpression("/lifecycle_state = 'deploying'\\s+AND NOT EXISTS \\(SELECT 1 FROM deploy_job_vm_states newer/s", $repo);
         self::assertMatchesRegularExpression('/repo_sweep_orphaned_deploying_vms.*?FOR UPDATE SKIP LOCKED/s', $repo);
-        self::assertStringContainsString('WHERE id = ? AND lifecycle_state = ?', $repo);
+        // K15: the sweep no longer writes deploy_vms itself. It hands the VM to
+        // the shared journal owner, whose compare-and-set update only applies
+        // while lifecycle AND MECM state still match what was read.
+        self::assertMatchesRegularExpression('/function repo_sweep_orphaned_deploying_vms.*?deploy_worker_restore_locked_vm_journal\(.*?deploy_worker_apply_locked_vm_journal\(/s', $repo);
+        self::assertStringContainsString(
+            'WHERE id = ? AND lifecycle_state = ? AND mecm_sync_state = ?',
+            $this->source('lib/deploy_worker_vm_journal.php')
+        );
     }
 
     public function testMaintenanceWorkerRunsTheSecondReaper(): void

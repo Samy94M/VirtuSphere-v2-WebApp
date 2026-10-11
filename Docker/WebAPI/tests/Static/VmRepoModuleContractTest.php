@@ -49,6 +49,11 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_network_assert_deploy_ready',
         'repo_vm_network_assert_scope_within_bounds',
         'repo_vm_network_assert_scope_idle',
+        // K14/WM-06: one MAC assignment owner for editor, legacy writers and callback.
+        'repo_vm_network_lock_mac_assignments',
+        'repo_vm_network_has_new_mac_assignments',
+        'repo_vm_network_lock_active_jobs_for_mac_assignment',
+        'repo_vm_network_assert_new_macs_unique',
         'repo_vm_network_update_vlan_ids',
         'repo_vm_network_forget_observed_macs',
         'repo_vm_network_assert_bundle_write_allowed',

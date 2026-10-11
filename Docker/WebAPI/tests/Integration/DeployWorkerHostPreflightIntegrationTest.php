@@ -55,8 +55,9 @@ final class DeployWorkerHostPreflightIntegrationTest extends TestCase
         $vmName = strtoupper($this->prefix . '_vm');
         $lifecycle = VIRTUSPHERE_LIFECYCLE_OS_INSTALLED;
         $mecm = VIRTUSPHERE_MECM_SYNC_REGISTERED;
-        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)');
-        $stmt->bind_param('issss', $this->missionId, $vmName, $vmName, $lifecycle, $mecm);
+        $instanceUuid = 'hostpf-' . bin2hex(random_bytes(8));
+        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state, vm_instance_uuid) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssss', $this->missionId, $vmName, $vmName, $lifecycle, $mecm, $instanceUuid);
         $stmt->execute();
         $this->vmId = (int) $this->db->insert_id;
         repo_execute(

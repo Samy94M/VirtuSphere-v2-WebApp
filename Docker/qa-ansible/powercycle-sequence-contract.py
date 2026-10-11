@@ -45,6 +45,8 @@ class ActionModule(ActionBase):
         with open(os.environ['PC_EVENTS'], 'a') as stream:
             stream.write(json.dumps(event) + '\\n')
         if kind == 'info':
+            if scenario.get('info_failure') == identity:
+                return dict(failed=True, msg='synthetic info failure')
             state = scenario.get('initial', {}).get(identity, 'poweredOff')
             live_name = scenario.get('live_name', {}).get(identity, identity)
             instance = dict(hw_name=live_name, instance_uuid='uuid-' + identity,
@@ -141,6 +143,11 @@ def run_case(name, settings, expected, failed=False):
             assert not any(event[0] == 'info' and event[1] == f'vm{refused[0][1] - 1000}'
                            for event in events[refused_index + 1:]), (name, events)
             assert not any(event[0] == 'touch' for event in events[refused_index + 1:]), (name, events)
+        failed_info = settings.get('info_failure')
+        if failed_info:
+            info_index = next(i for i, event in enumerate(events) if event[0] == 'info' and event[1] == failed_info)
+            assert not any(event[0] in ('touch', 'info') for event in events[info_index + 1:]), (name, events)
+            assert 'synthetic info failure' in result.stdout, (name, result.stdout)
         # Every successful own cycle includes its real pause before power-off.
         for index, event in enumerate(events):
             if event[0] == 'power' and event[2] == 'powered-off' and not settings.get('pause_failure'):
@@ -175,6 +182,7 @@ CASES = [
     ('mismatched-instance-identity', {'live_name': {'vm2': 'foreign-vm'}}, [], True),
     ('touch-refused-before-first-info', {'touch_failure_vm_id': 1001}, [], True),
     ('touch-refused-does-not-query-or-mark-neighbor', {'touch_failure_vm_id': 1002}, [], True),
+    ('info-failure-stops-before-next-touch', {'info_failure': 'vm1'}, [], True),
 ]
 
 for position, case in enumerate(CASES, 1):

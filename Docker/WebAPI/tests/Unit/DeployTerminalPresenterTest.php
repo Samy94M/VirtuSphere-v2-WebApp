@@ -112,6 +112,28 @@ final class DeployTerminalPresenterTest extends TestCase
         self::assertNull($view['last_error']);
     }
 
+    public function testSkippedUncreatedVmCountIsLocalizedAndCreateLinkRequiresDeployPermission(): void
+    {
+        $job = [
+            'id' => 42,
+            'mission_id' => 9,
+            'status' => VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+            'payload_json' => json_encode(['mode' => 'start', 'vm_ids' => [7], 'skipped_vm_ids' => [8]], JSON_THROW_ON_ERROR),
+        ];
+
+        Lang::load('de');
+        $view = deploy_terminal_presenter($job);
+        self::assertSame(1, $view['result']['skipped_count']);
+        $allowedHtml = deploy_terminal_blocks_html($job, null, null, false, true);
+        self::assertStringContainsString('1 VM nicht angelegt, übersprungen.', $allowedHtml);
+        self::assertStringContainsString('deploy.php?mission_id=9&amp;mode=create#deploy-queue-form', $allowedHtml);
+        $deniedHtml = deploy_terminal_blocks_html($job, null, null, false, false);
+        self::assertStringNotContainsString('deploy.php?mission_id=9&amp;mode=create#deploy-queue-form', $deniedHtml);
+
+        Lang::load('en');
+        self::assertStringContainsString('1 VM not created, skipped.', deploy_terminal_blocks_html($job, null, null, false, true));
+    }
+
     public function testGenericSuccessResultIsVersionedAndExistingMacResultWins(): void
     {
         $generic = deploy_job_terminal_result_json(null, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);

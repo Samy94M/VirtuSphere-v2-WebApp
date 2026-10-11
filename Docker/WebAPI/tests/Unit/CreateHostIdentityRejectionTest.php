@@ -31,6 +31,7 @@ namespace {
             Probe::$calls = Probe::$discoveries = Probe::$sleeps = 0;
             Probe::$loseLaunch = false;
             Probe::$writes = [];
+            Probe::$intents = [];
         }
 
         public function testLaunchRejectedBeforeAuthenticationFailsAndStopsWithoutDiscovery(): void
@@ -42,6 +43,9 @@ namespace {
             self::assertSame(0, Probe::$discoveries);
             self::assertSame(0, Probe::$sleeps);
             self::assertSame(1, Probe::$calls);
+            // K15: a refusal before authentication ran nothing, so the durable
+            // launch intent is written and then cleared again.
+            self::assertSame([true, false], Probe::$intents);
             self::assertNotContains(VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED, VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES);
         }
 
@@ -55,6 +59,7 @@ namespace {
             self::assertSame(1, Probe::$calls);
             self::assertSame(1, Probe::$discoveries);
             self::assertSame(0, Probe::$sleeps);
+            self::assertSame([true], Probe::$intents, 'a possibly started launch keeps its intent');
         }
 
         public function testReadOnlyPrepareAndVerifySkipStopWithTheSameClosedCause(): void
@@ -111,7 +116,7 @@ namespace {
         private function context(): array
         {
             return ['credential' => [], 'secret' => 'fixture', 'secrets' => ['fixture'],
-                'remote_dir' => '/tmp/fixture-job', 'create_started_at' => gmdate('Y-m-d H:i:s', Probe::$clock), 'options' => []];
+                'remote_dir' => '/tmp/fixture-job', 'create_started_at' => gmdate('Y-m-d H:i:s', Probe::$clock), 'options' => [], 'job_claim' => ['id' => 1]];
         }
 
         private function unit(string $status): array
@@ -132,6 +137,8 @@ namespace HostIdentityCreateProbe {
         /** @var list<array{status:string,fields:array<string,mixed>}> */
         public static array $writes = [];
         public static bool $loseLaunch = false;
+        /** @var list<bool> */
+        public static array $intents = [];
         public static function resetWrites(): void { self::$writes = []; }
     }
 
@@ -157,6 +164,11 @@ namespace HostIdentityCreateProbe {
     function deploy_worker_settle_db_channel(...$args): void { }
     function deploy_worker_log_stream_flush(...$args): void { }
     function deploy_worker_log_stream_chunk(...$args): void { }
+    function deploy_worker_vm_create_launch_intent($db, array $claim, int $vmId, bool $intent): bool
+    {
+        Probe::$intents[] = $intent;
+        return $intent;
+    }
     function repo_deploy_create_skip_source(...$args): array { return ['vm_instance_uuid' => 'fixture-uuid']; }
     function repo_deploy_create_transition($db, int $jobId, int $position, string $from, string $status, array $fields, array $fence): bool
     {

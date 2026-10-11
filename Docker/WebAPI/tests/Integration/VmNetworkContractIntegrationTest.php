@@ -60,6 +60,7 @@ final class VmNetworkContractIntegrationTest extends TestCase
         $stmt->execute();
         $this->missionId = (int) $this->db->insert_id;
         $this->vmId = $this->insertVm('VM1', '');
+        repo_execute($this->db, 'UPDATE deploy_vms SET vm_instance_uuid = ? WHERE id = ?', 'si', ['net-' . bin2hex(random_bytes(8)), $this->vmId]);
     }
 
     protected function tearDown(): void
@@ -196,7 +197,6 @@ final class VmNetworkContractIntegrationTest extends TestCase
         $this->db->begin_transaction();
         $this->second->begin_transaction();
         $aOpen = true;
-        $bOpen = true;
         try {
             repo_fetch_one($this->db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$this->missionId]);
             repo_vm_network_assert_scope_idle($this->db, $this->missionId, []);
@@ -232,9 +232,7 @@ final class VmNetworkContractIntegrationTest extends TestCase
             if ($aOpen) {
                 $this->db->rollback();
             }
-            if ($bOpen) {
-                $this->second->rollback();
-            }
+            $this->second->rollback();
             throw $exception;
         }
         $this->second->rollback();

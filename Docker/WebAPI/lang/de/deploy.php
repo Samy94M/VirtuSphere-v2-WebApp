@@ -225,6 +225,8 @@ return [
     'system_job' => 'Systemauftrag (ESXi-Inventar)',
     'last_error' => 'Letzter Fehler',
     'result_heading' => 'Ergebnis',
+    'uncreated_vm_skipped_one' => '1 VM nicht angelegt, übersprungen.',
+    'uncreated_vm_skipped_many' => ':count VMs nicht angelegt, übersprungen.',
     'result_succeeded' => 'Der Auftrag wurde erfolgreich abgeschlossen.',
     'result_succeeded_counts' => 'Der Auftrag wurde erfolgreich abgeschlossen. Erfolgreiche VMs: :successful.',
     'result_partial' => 'Der Auftrag wurde mit einem Teilergebnis abgeschlossen.',

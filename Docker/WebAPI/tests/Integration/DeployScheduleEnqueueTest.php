@@ -132,6 +132,63 @@ final class DeployScheduleEnqueueTest extends TestCase
         self::assertSame([$ownedId], $payload['vm_ids']);
     }
 
+    /** Baseline red counterprobe: this uses the pre-existing queue API only. */
+    public function testEmptyUserSelectionExpandsBeforeUnboundVmsAreSkipped(): void
+    {
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start'], null);
+
+        $payload = $this->payload($jobId);
+        $eligibleIds = array_map('intval', array_column($this->db->query(
+            'SELECT id FROM deploy_vms WHERE mission_id = ' . $this->missionId . ' AND vm_instance_uuid IS NOT NULL ORDER BY vm_name'
+        )->fetch_all(MYSQLI_ASSOC), 'id'));
+        self::assertSame($eligibleIds, $payload['vm_ids'], 'an empty user selection means all mission VMs before eligibility filtering');
+        self::assertSame([$unboundId], $payload['skipped_vm_ids'] ?? []);
+    }
+
+    /** Baseline red counterprobe: explicit scopes keep eligible VMs and record skipped IDs. */
+    public function testExplicitSelectionSkipsOnlyItsUnboundMember(): void
+    {
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $boundId = (int) $this->db->query('SELECT id FROM deploy_vms WHERE mission_id = ' . $this->missionId . ' AND vm_instance_uuid IS NOT NULL ORDER BY id LIMIT 1')->fetch_assoc()['id'];
+        $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start', 'vm_ids' => [$boundId, $unboundId]], null);
+
+        $payload = $this->payload($jobId);
+        self::assertSame([$boundId], $payload['vm_ids']);
+        self::assertSame([$unboundId], $payload['skipped_vm_ids'] ?? []);
+    }
+
+    /** The group API is an existing behavior surface and must use the same eligibility resolver. */
+    public function testStaggeredGroupCountsOnlyEligibleVmsAndCarriesTheSkippedDiagnosis(): void
+    {
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $eligibleIds = array_map('intval', array_column($this->db->query(
+            'SELECT id FROM deploy_vms WHERE mission_id = ' . $this->missionId . ' AND vm_instance_uuid IS NOT NULL ORDER BY vm_name'
+        )->fetch_all(MYSQLI_ASSOC), 'id'));
+        $result = repo_enqueue_deploy_group($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start'], null, 10);
+
+        self::assertSame(count($eligibleIds), $result['count']);
+        self::assertSame([$unboundId], $result['skipped_vm_ids']);
+        $rows = $this->jobRows();
+        self::assertCount(count($eligibleIds), $rows);
+        foreach ($rows as $row) {
+            $payload = $this->payload((int) $row['id']);
+            self::assertContains((int) $payload['vm_ids'][0], $eligibleIds);
+            self::assertSame([$unboundId], $payload['skipped_vm_ids'] ?? []);
+        }
+    }
+
+    /** Current-branch structural probe for the sentinel that prevents [] from widening to a mission. */
+    public function testAllSkippedSelectionPersistsAnExplicitEmptyRunnableScope(): void
+    {
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start', 'vm_ids' => [$unboundId]], null);
+
+        $payload = $this->payload($jobId);
+        self::assertSame([], $payload['vm_ids']);
+        self::assertSame([$unboundId], $payload['skipped_vm_ids'] ?? []);
+    }
+
     /** @return array<int, array<string, mixed>> */
     private function jobRows(): array
     {
@@ -142,9 +199,9 @@ final class DeployScheduleEnqueueTest extends TestCase
         return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     }
 
-    private function makeVm(string $name, string $ip): void
+    private function makeVm(string $name, string $ip, bool $bound = true): int
     {
-        repo_save_vm(
+        $vmId = repo_save_vm(
             $this->db,
             $this->missionId,
             null,
@@ -155,6 +212,18 @@ final class DeployScheduleEnqueueTest extends TestCase
             '',
             1
         );
+        if ($bound) {
+            repo_execute($this->db, 'UPDATE deploy_vms SET vm_instance_uuid = ? WHERE id = ?', 'si', ['sched-' . bin2hex(random_bytes(8)), $vmId]);
+        }
+        return $vmId;
+    }
+
+    /** @return array<string,mixed> */
+    private function payload(int $jobId): array
+    {
+        $row = repo_fetch_one($this->db, 'SELECT payload_json FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+        $payload = json_decode((string) ($row['payload_json'] ?? '{}'), true);
+        return is_array($payload) ? $payload : [];
     }
 
     private function makeCredential(string $type, int $port): int

@@ -171,6 +171,27 @@ function ansible_mode_creates_vms(string $mode): bool
     return in_array(VIRTUSPHERE_PLAYBOOKS['create'], ansible_playbooks_for_mode($mode), true);
 }
 
+/**
+ * Modes that address existing VMs by their bound ESXi instance UUID need a
+ * durable portal binding before they enter the job's run scope. A full/create
+ * sequence is exempt because its Create owner establishes that binding before
+ * the later UUID-addressed steps run.
+ */
+function ansible_mode_requires_bound_instance_uuid(string $mode): bool
+{
+    if (ansible_mode_creates_vms($mode)) {
+        return false;
+    }
+
+    foreach (['powercycle', 'export', 'start', 'autostart'] as $step) {
+        if (in_array(VIRTUSPHERE_PLAYBOOKS[$step], ansible_playbooks_for_mode($mode), true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Step markers (AP6): every per-playbook remote command is bracketed by a begin
 // and an end line on stdout. The worker controls and names the step from its
 // descriptor; the persisted markers are the technical display evidence. The

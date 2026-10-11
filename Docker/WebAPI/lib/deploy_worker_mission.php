@@ -11,6 +11,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/credentials.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_network_preflight.php';
@@ -50,7 +51,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     // not touched its VMs, and the failure path must leave them as they are.
     $vmsMarked = false;
 
-    $vmIds = deploy_worker_payload($job)['vm_ids'] ?? [];
+    $payload = deploy_worker_payload($job);
+    $vmIds = $payload['vm_ids'] ?? [];
+    $explicitEmptyScope = deploy_job_payload_has_explicit_empty_scope($payload);
 
     // Every database write of this job goes through the channel, and every read
     // asks it for the live handle. A local $db captured in a closure is a dead
@@ -67,6 +70,10 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     };
 
     try {
+        if ($explicitEmptyScope) {
+            deploy_worker_finish_all_skipped_job($channel, $job, $workerId, count($payload['skipped_vm_ids']));
+            return;
+        }
         // Resolve the local source contract before any lifecycle write or
         // remote call. Missing requirements are a local configuration fault.
         ansible_pinned_collection_version();

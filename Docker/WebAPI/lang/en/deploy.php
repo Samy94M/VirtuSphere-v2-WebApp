@@ -225,6 +225,8 @@ return [
     'system_job' => 'System job (ESXi inventory)',
     'last_error' => 'Last error',
     'result_heading' => 'Result',
+    'uncreated_vm_skipped_one' => '1 VM not created, skipped.',
+    'uncreated_vm_skipped_many' => ':count VMs not created, skipped.',
     'result_succeeded' => 'The job completed successfully.',
     'result_succeeded_counts' => 'The job completed successfully. Successful VMs: :successful.',
     'result_partial' => 'The job completed with a partial result.',

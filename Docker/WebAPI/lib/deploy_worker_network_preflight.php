@@ -8,6 +8,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/vm_network.php';
 require_once __DIR__ . '/vm_network_preflight_result.php';
 require_once __DIR__ . '/repo/deploy_create_fence.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 
 final class DeployWorkerConfigurationBlocked extends RuntimeException
 {
@@ -24,6 +25,9 @@ function deploy_worker_network_preflight(DeployWorkerDbChannel $channel, array $
     $jobId = (int) $job['id'];
     $missionId = (int) $job['mission_id'];
     $payload = deploy_worker_payload($job);
+    if (deploy_job_payload_has_explicit_empty_scope($payload)) {
+        return [];
+    }
     try {
         repo_transaction($channel->connection(), static function () use ($channel, $job, $missionId, $jobId, $payload): void {
             $db = $channel->connection();

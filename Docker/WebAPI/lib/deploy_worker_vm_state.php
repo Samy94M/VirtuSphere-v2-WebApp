@@ -7,6 +7,7 @@ require_once __DIR__ . '/ansible_command.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_ownership.php';
 require_once __DIR__ . '/deploy_worker_vm_journal.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/mac_import_binding.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
@@ -19,8 +20,12 @@ function deploy_worker_mark_vms_deploying(mysqli $db, array $job, string $note, 
         if ((string) $job['status'] !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
             return [];
         }
+        $payload = deploy_worker_payload($job);
+        if (deploy_job_payload_has_explicit_empty_scope($payload)) {
+            return [];
+        }
         repo_deploy_job_vm_capture($db, $job, $vmIds);
-        $mode = (string) deploy_worker_payload($job)['mode'];
+        $mode = (string) $payload['mode'];
         if (deploy_worker_mode_preserves_vm_state($mode)) {
             return [];
         }

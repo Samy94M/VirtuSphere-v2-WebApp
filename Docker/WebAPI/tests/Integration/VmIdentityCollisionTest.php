@@ -82,6 +82,7 @@ final class VmIdentityCollisionTest extends TestCase
 
     public function testForeignNamesakeBlocksSingleAndStaggeredEnqueue(): void
     {
+        $this->setStoredIdentity('vm-old', '503c89f1-5734-4d4d-a930-4d92b97a7289');
         $this->replaceInventoryVm('vm-24', 'uuid-foreign');
 
         foreach (['single', 'group'] as $path) {

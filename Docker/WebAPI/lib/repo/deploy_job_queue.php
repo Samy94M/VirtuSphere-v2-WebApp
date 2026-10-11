@@ -11,6 +11,7 @@ require_once __DIR__ . '/vm_network.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_input.php';
 require_once __DIR__ . '/deploy_job_queries.php';
+require_once __DIR__ . '/deploy_job_scope.php';
 require_once __DIR__ . '/deploy_job_guards.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/deploy_job_retry.php';
@@ -57,11 +58,15 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
         }
         repo_deploy_assert_mission_ready($db, $mission, $esxiCredentialId, (string) $payload['mode']);
 
-        // Keep only VM ids that actually belong to this mission; drop the rest.
-        // No selection at all means "whole mission"; a selection that filters down
-        // to nothing (its VMs were deleted since the form was rendered) throws
-        // rather than silently widening to the whole mission.
-        $payload['vm_ids'] = repo_deploy_filter_mission_vm_ids($db, $missionId, $payload['vm_ids']);
+        // Freeze the selected mission scope before applying mode eligibility.
+        // The resolver expands an unmarked empty selection first, then keeps
+        // unbound VMs out of UUID-addressed modes without turning an all-skipped
+        // empty result back into "whole mission".
+        $scope = repo_deploy_mode_vm_selection($db, $missionId, $payload['vm_ids'], (string) $payload['mode']);
+        $payload['vm_ids'] = array_map(static fn (array $vm): int => $vm['id'], $scope['eligible_vms']);
+        if ($scope['skipped_vms'] !== []) {
+            $payload['skipped_vm_ids'] = array_map(static fn (array $vm): int => $vm['id'], $scope['skipped_vms']);
+        }
 
         // A create-capable job resolves "whole mission" HERE instead of leaving
         // it to the worker (Etappe 14B). "Everything, decided later" means a VM
@@ -85,14 +90,20 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
 
         repo_deploy_assert_credential_type($db, $esxiCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
         repo_deploy_assert_credential_type($db, $ansibleCredentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
-        repo_deploy_assert_no_vm_identity_conflicts($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
+        if ($payload['vm_ids'] !== []) {
+            repo_deploy_assert_no_vm_identity_conflicts($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
+        }
 
         $activeJobId = repo_deploy_active_job_id($db, $missionId);
         if ($activeJobId !== null) {
             throw new DeployMissionBusyException('This mission already has an active deploy job.', $activeJobId);
         }
-        repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
-        repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
+        if ($payload['vm_ids'] !== []) {
+            repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
+        }
+        if ($payload['vm_ids'] !== []) {
+            repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
+        }
 
         $correlationId = virtusphere_correlation_id();
         $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, correlation_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -110,7 +121,8 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
             repo_deploy_create_materialize($db, $jobId, $createSelection);
         }
         $logSuffix = $scheduledAtUtc !== null ? ' scheduled for ' . $scheduledAtUtc . ' UTC' : '';
-        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued: ' . deploy_job_payload_summary($payloadJson) . $logSuffix);
+        $skipSuffix = $scope['skipped_vms'] === [] ? '' : '; ' . count($scope['skipped_vms']) . ' VMs without a bound Instance UUID skipped; Create: deploy.php?mission_id=' . $missionId . '&mode=create#deploy-queue-form';
+        repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued: ' . deploy_job_payload_summary($payloadJson) . $logSuffix . $skipSuffix);
 
         return $jobId;
     });
@@ -201,7 +213,7 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
  * offset by $staggerMinutes from $baseUtc (or from now when $baseUtc is null).
  * The single-active-per-mission guard is checked ONCE for the whole group.
  *
- * @return array{group_id:string, count:int, schedule:array<int,array{vm_id:int,vm_name:string,scheduled_at:string}>}
+ * @return array{group_id:string, count:int, schedule:array<int,array{vm_id:int,vm_name:string,scheduled_at:string}>, skipped_vm_ids:list<int>}
  */
 function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int $esxiCredentialId, int $ansibleCredentialId, array $payloadData, ?string $baseUtc, int $staggerMinutes): array
 {
@@ -241,26 +253,29 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             throw new DeployMissionBusyException('This mission already has an active deploy job.', $activeJobId);
         }
 
-        // Resolve the ordered VM list (shared with the preview so both agree).
-        $vms = repo_deploy_group_vm_list($db, $missionId, $basePayload['vm_ids']);
-        if ($vms === []) {
+        // Resolve the queue-time eligible scope through the same owner as the
+        // schedule preview and single-job path.
+        $scope = repo_deploy_mode_vm_selection($db, $missionId, $basePayload['vm_ids'], (string) $basePayload['mode']);
+        $vms = $scope['eligible_vms'];
+        if ($vms === [] && $scope['skipped_vms'] === []) {
             throw new RuntimeException('Mission has no VMs to deploy.');
         }
-        repo_deploy_assert_no_vm_identity_conflicts(
-            $db,
-            $missionId,
-            $esxiCredentialId,
-            array_map(static fn (array $vm): int => (int) $vm['id'], $vms)
-        );
         $scopeIds = array_map(static fn (array $vm): int => (int) $vm['id'], $vms);
-        repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $scopeIds);
+        if ($scopeIds !== []) {
+            repo_deploy_assert_no_vm_identity_conflicts($db, $missionId, $esxiCredentialId, $scopeIds);
+        }
+        if ($scopeIds !== []) {
+            repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $scopeIds);
+        }
         // Union pre-check for the whole group: it fans out into one job per VM
         // below, so the per-job scope cap is deliberately not applied here.
-        repo_vm_network_assert_deploy_ready($db, $missionId, $scopeIds, (string) ($mission['wds_vlan'] ?? ''), (string) $basePayload['mode'], true, false);
+        if ($scopeIds !== []) {
+            repo_vm_network_assert_deploy_ready($db, $missionId, $scopeIds, (string) ($mission['wds_vlan'] ?? ''), (string) $basePayload['mode'], true, false);
+        }
 
         // Horizon guard for the LAST staggered slot (base + (n-1)*stagger).
         $baseEpoch = $baseUtc !== null ? strtotime($baseUtc . ' UTC') : time();
-        $lastEpoch = $baseEpoch + (count($vms) - 1) * $staggerMinutes * 60;
+        $lastEpoch = $baseEpoch + (max(1, count($vms)) - 1) * $staggerMinutes * 60;
         if ($lastEpoch > time() + VIRTUSPHERE_DEPLOY_SCHEDULE_HORIZON_DAYS * 86400) {
             throw new ValidationException(
                 ['scheduled_at' => validator_text('validate.deploy_schedule_horizon', 'The last staggered start is beyond the :days-day scheduling horizon.', ['days' => VIRTUSPHERE_DEPLOY_SCHEDULE_HORIZON_DAYS])],
@@ -270,6 +285,25 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
 
         $groupId = bin2hex(random_bytes(6)); // 12 hex chars -> CHAR(12)
         $schedule = [];
+        $skippedVmIds = array_map(static fn (array $vm): int => $vm['id'], $scope['skipped_vms']);
+        if ($vms === []) {
+            // A single diagnostic no-op job gives an all-skipped stagger the
+            // same durable result/log surface as an all-skipped single job.
+            $payload = $basePayload;
+            $payload['vm_ids'] = [];
+            $payload['skipped_vm_ids'] = $skippedVmIds;
+            $payloadJson = json_encode($payload, JSON_THROW_ON_ERROR);
+            $slotUtc = gmdate('Y-m-d H:i:s', $baseEpoch);
+            $correlationId = virtusphere_correlation_id();
+            $stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, user_id, payload_json, credential_esxi_id, credential_ansible_id, scheduled_at, group_id, correlation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->bind_param('iisiisss', $missionId, $userId, $payloadJson, $esxiCredentialId, $ansibleCredentialId, $slotUtc, $groupId, $correlationId);
+            $stmt->execute();
+            $jobId = (int) $db->insert_id;
+            $skipSuffix = count($skippedVmIds) . ' VMs without a bound Instance UUID skipped; Create: deploy.php?mission_id=' . $missionId . '&mode=create#deploy-queue-form';
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued (group ' . $groupId . ', all-skipped notice) scheduled for ' . $slotUtc . ' UTC; ' . $skipSuffix);
+
+            return ['group_id' => $groupId, 'count' => 1, 'schedule' => [], 'skipped_vm_ids' => $skippedVmIds];
+        }
         $index = 0;
         foreach ($vms as $vm) {
             $vmId = (int) $vm['id'];
@@ -277,6 +311,9 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
             $slotUtc = gmdate('Y-m-d H:i:s', $baseEpoch + $index * $staggerMinutes * 60);
             $payload = $basePayload;
             $payload['vm_ids'] = [$vmId];
+            if ($skippedVmIds !== []) {
+                $payload['skipped_vm_ids'] = $skippedVmIds;
+            }
             $payloadJson = json_encode($payload, JSON_THROW_ON_ERROR);
 
             // All slots share the enqueueing request's id (ADR-0032): one
@@ -295,12 +332,13 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
                 // One slot is one VM, hence one unit at position 1 of 1.
                 repo_deploy_create_materialize($db, $jobId, [['id' => $vmId, 'vm_name' => (string) $vm['vm_name']]]);
             }
-            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued (group ' . $groupId . ', slot ' . ($index + 1) . '/' . count($vms) . ') scheduled for ' . $slotUtc . ' UTC');
+            $skipSuffix = $skippedVmIds === [] ? '' : '; ' . count($skippedVmIds) . ' VMs without a bound Instance UUID skipped; Create: deploy.php?mission_id=' . $missionId . '&mode=create#deploy-queue-form';
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job queued (group ' . $groupId . ', slot ' . ($index + 1) . '/' . count($vms) . ') scheduled for ' . $slotUtc . ' UTC' . $skipSuffix);
             $schedule[] = ['vm_id' => $vmId, 'vm_name' => (string) ($vm['vm_name'] ?? ''), 'scheduled_at' => $slotUtc];
             $index++;
         }
 
-        return ['group_id' => $groupId, 'count' => count($vms), 'schedule' => $schedule];
+        return ['group_id' => $groupId, 'count' => count($vms), 'schedule' => $schedule, 'skipped_vm_ids' => $skippedVmIds];
     });
 }
 

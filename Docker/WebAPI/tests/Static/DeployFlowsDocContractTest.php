@@ -132,7 +132,9 @@ final class DeployFlowsDocContractTest extends TestCase
         );
         self::assertSame(
             ['Create-Fehler exception `removed_code` is not in the derived closed list.'],
-            self::closedVocabularyProblems([], "flowchart TD\n A --> B", ['removed_code' => 'reason'], 'Create-Fehler')
+            // One real derived value, so only the stale exception is reported
+            // and not also the zero-match guard.
+            self::closedVocabularyProblems(['known_code'], "flowchart TD\n A --> B[known_code]", ['removed_code' => 'reason'], 'Create-Fehler')
         );
         self::assertNotSame([], self::closedVocabularyProblems([], '', [], 'Create-Fehler'), 'zero-match must fail');
     }
@@ -408,7 +410,7 @@ final class DeployFlowsDocContractTest extends TestCase
     {
         preg_match_all('/```mermaid\s*\R(.*?)```/s', $text, $matches);
 
-        return implode("\n", $matches[1] ?? []);
+        return implode("\n", $matches[1]);
     }
 
     private static function between(string $text, string $start, string $end): string

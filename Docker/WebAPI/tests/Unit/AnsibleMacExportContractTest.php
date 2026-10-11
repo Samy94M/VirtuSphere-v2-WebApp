@@ -11,10 +11,12 @@ final class AnsibleMacExportContractTest extends TestCase
     public function testExportKeepsPerVmFailuresAndClassifiesUploadExitCodes(): void
     {
         $playbook = $this->source('exportVMs-Informations-ESXi_playbook.yml');
-
+        // K15 moved the per-VM query into the include so each VM is admitted
+        // right before its own read; a failed read still stays a per-VM result.
+        self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_EXPORT_VM_INFO_TASKS, $playbook);
         self::assertMatchesRegularExpression(
-            '/register:\\s+vm_info.*?ignore_errors:\\s+true/s',
-            $playbook
+            '/register:\\s+vm_info_current.*?ignore_errors:\\s+true/s',
+            $this->source(VIRTUSPHERE_EXPORT_VM_INFO_TASKS)
         );
         self::assertStringContainsString(
             'content: \'{{ vm_info_identity_results | to_nice_json }}\'',
@@ -86,7 +88,9 @@ final class AnsibleMacExportContractTest extends TestCase
     public function testVmTouchReporterUsesTheSharedTransportAndKeepsTlsClosed(): void
     {
         $script = $this->source('report_vm_touch.py');
-        $allowed = ['argparse', 'json', 're', 'socket', 'ssl', 'urllib.error', 'urllib.parse', 'urllib.request'];
+        // upload_mac_list is the sibling script this one shares its transport
+        // with; it is uploaded together and held to the stdlib list above.
+        $allowed = ['argparse', 'json', 're', 'socket', 'ssl', 'urllib.error', 'urllib.parse', 'urllib.request', 'upload_mac_list'];
         preg_match_all('/^\\s*(?:from|import)\\s+([\\w.]+)/m', $script, $imports);
         self::assertNotSame([], $imports[1], 'no imports found; the scan stopped working');
         foreach (array_unique($imports[1]) as $module) {

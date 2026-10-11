@@ -89,4 +89,6 @@
 
 - name: Ergebnis dieser Exportabfrage melden
   ansible.builtin.debug:
-    msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] {{ 'fail' if (vm_info_identity_results | last)['failed'] | default(false) | bool else 'pass' }} Export info {{ export_vm_config['vm_name'] }}"
+    msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}]
+      {{ 'fail' if (vm_info_identity_results | last)['failed'] | default(false) | bool else 'pass' }}
+      Export info {{ export_vm_config['vm_name'] }}"

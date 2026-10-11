@@ -27,7 +27,7 @@ final class K15DeployVmJournalPolicyTest extends TestCase
             [$unit, $expected] = $case;
             $intent = $case[2] ?? 0;
             $fixture = $state;
-            $fixture['create_launch_intent'] = (int) ($intent ?? 0);
+            $fixture['create_launch_intent'] = (int) $intent;
             self::assertSame($expected, deploy_worker_vm_journal_disposition($fixture, $unit), $label);
         }
     }

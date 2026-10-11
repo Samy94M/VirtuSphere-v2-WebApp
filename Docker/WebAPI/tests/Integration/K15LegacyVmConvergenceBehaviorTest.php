@@ -57,7 +57,7 @@ final class K15LegacyVmConvergenceBehaviorTest extends TestCase
     public function testStartAndAutostartFailureDoNotChangeVmLifecycleOrMecm(string $mode): void
     {
         $missionId = $this->mission('preserve-' . $mode);
-        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, true);
         $jobId = $this->job($missionId, $mode, [$vmId]);
         $job = $this->jobRow($jobId);
 
@@ -70,7 +70,7 @@ final class K15LegacyVmConvergenceBehaviorTest extends TestCase
     public function testFailureBeforeVmMarkKeepsLifecycleAndMecmUnchanged(): void
     {
         $missionId = $this->mission('pre-mark');
-        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, true);
         $jobId = $this->job($missionId, 'powercycle', [$vmId]);
 
         deploy_worker_handle_failure($this->db, $this->jobRow($jobId), self::WORKER, [$vmId], 'preflight rejected', vmsMarked: false);
@@ -81,7 +81,7 @@ final class K15LegacyVmConvergenceBehaviorTest extends TestCase
     public function testRegisteredVmRemainsUntouchedBeforeItsPerVmEsxiAttempt(): void
     {
         $missionId = $this->mission('registered');
-        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered');
+        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered', true);
         $stmt = $this->db->prepare("UPDATE deploy_vms SET mecm_id = '4812' WHERE id = ?");
         $stmt->bind_param('i', $vmId);
         $stmt->execute();
@@ -95,7 +95,7 @@ final class K15LegacyVmConvergenceBehaviorTest extends TestCase
     public function testPreflightCancellationLeavesUnmarkedRegisteredVmAlone(): void
     {
         $missionId = $this->mission('cancel-registered');
-        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered');
+        $vmId = $this->vm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered', true);
         $stmt = $this->db->prepare("UPDATE deploy_vms SET mecm_id = '4813' WHERE id = ?");
         $stmt->bind_param('i', $vmId);
         $stmt->execute();
@@ -134,11 +134,12 @@ final class K15LegacyVmConvergenceBehaviorTest extends TestCase
         return $id;
     }
 
-    private function vm(int $missionId, string $lifecycle, string $mecm): int
+    private function vm(int $missionId, string $lifecycle, string $mecm, bool $bound = false): int
     {
         $name = strtoupper($this->prefix . '_VM' . bin2hex(random_bytes(2)));
-        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)');
-        $stmt->bind_param('issss', $missionId, $name, $name, $lifecycle, $mecm);
+        $uuid = $bound ? 'uuid-' . bin2hex(random_bytes(8)) : null;
+        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state, vm_instance_uuid) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssss', $missionId, $name, $name, $lifecycle, $mecm, $uuid);
         $stmt->execute();
         return (int) $this->db->insert_id;
     }

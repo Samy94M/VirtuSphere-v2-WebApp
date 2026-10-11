@@ -84,3 +84,8 @@ Read the sections relevant to the current change. Paths below are relative to Do
 - `lib/copy_control.php` renders the one accessible copy button and bounded status region. Static displays keep the exact value as selectable text and pass that same value through `data-copy-value`; editor buttons carry only `data-copy-source` and `assets/core.js` reads the control's current value when activated. Buttons are `type="button"`, retain focus and announce success only after the Clipboard promise resolves.
 - Empty values and a configured-IP field disabled by DHCP expose no copy action. Clipboard absence, a synchronous refusal or a rejected promise produces the localized manual-selection message while the visible value remains intact. Multiple IP/MAC controls name their network-adapter position and update that accessible name when repeat rows change.
 - A caller may offer only a value already rendered to the current authorized reader. It must not add hidden secrets or a second value snapshot merely to make copying possible. “Configured IP address” is intended portal configuration, never an observed runtime address.
+
+## A45 Deploy skip diagnostics are additive to the result and permission-check their Create link
+
+- deploy_terminal_presenter() reads skipped IDs from the stored job payload and displays the localized DE/EN skipped count alongside the existing MAC/network/generic result semantics. It does not fabricate a MAC outcome or treat queueing as remote success.
+- The Create link is rendered only for deploy.run readers and uses deploy_mission_url() with the fixed Create selection fragment. Schedule preview shows only eligible start rows plus the same count and link; the backend resolver remains the queue-scope authority.

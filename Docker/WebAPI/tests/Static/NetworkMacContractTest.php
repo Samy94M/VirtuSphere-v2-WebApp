@@ -133,7 +133,7 @@ final class NetworkMacContractTest extends TestCase
         $shared = $this->source('lib/vm_network_mac_assignments.php');
         self::assertStringContainsString('virtusphere_normalize_mac(', $shared);
         self::assertStringContainsString('ORDER BY mac, id FOR UPDATE', $shared, 'the candidate-owner lookup must be a current read');
-        self::assertStringContainsString('virtusphere_mac_assignment_existing_owners(', $this->source('lib/repo/vm_network.php'));
+        self::assertStringContainsString('virtusphere_mac_assignment_existing_owners(', $this->source('lib/repo/vms_mac_assignments.php'));
         $callbackNetwork = $this->source('lib/mac_import_network.php');
         self::assertStringContainsString('virtusphere_mac_assignment_existing_owners(', $callbackNetwork);
         self::assertStringNotContainsString('SELECT id, vm_id, mac FROM deploy_interfaces WHERE mac IN', $callbackNetwork, 'the callback has no parallel duplicate-query owner');
@@ -152,7 +152,8 @@ final class NetworkMacContractTest extends TestCase
         self::assertStringContainsString('repo_vm_network_lock_mac_assignments($connection)', $legacy);
         $endpoint = $this->source('db_importMAC.php');
         $callbackRuntime = strpos($endpoint, 'deploy_runtime_identity WHERE id = 1 FOR UPDATE');
-        $callbackPlan = strpos($endpoint, 'mac_import_build_plan(');
+        // The call, not the earlier comment that names the function.
+        $callbackPlan = strpos($endpoint, '$plan = mac_import_build_plan(');
         self::assertIsInt($callbackRuntime);
         self::assertIsInt($callbackPlan);
         self::assertLessThan($callbackPlan, $callbackRuntime, 'callback owner rows are checked after the same Runtime fence');

@@ -114,6 +114,10 @@ function deploy_job_payload(array $data): array
         'mode' => deploy_job_normalize_mode((string) ($data['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL)),
         'verbose' => deploy_job_bool($data['verbose'] ?? false),
         'vm_ids' => deploy_job_normalize_vm_ids($data['vm_ids'] ?? []),
+        // K16 keeps the skipped IDs beside the runnable scope. In particular,
+        // vm_ids=[] plus a non-empty skipped_vm_ids is an explicit no-op scope;
+        // an old empty selection without this diagnostic still means all VMs.
+        'skipped_vm_ids' => deploy_job_normalize_vm_ids($data['skipped_vm_ids'] ?? []),
         'powercycle_wait' => deploy_job_normalize_wait($data['powercycle_wait'] ?? null),
         'start_wait' => deploy_job_normalize_start_wait($data['start_wait'] ?? null),
         // System-inventory only: a legacy credential can prove its stored
@@ -121,6 +125,13 @@ function deploy_job_payload(array $data): array
         // that mode. Harmless false on mission jobs and old payloads.
         'strict_trust_probe' => deploy_job_bool($data['strict_trust_probe'] ?? false),
     ];
+}
+
+/** An explicit empty runnable scope, distinct from a legacy empty selection. */
+function deploy_job_payload_has_explicit_empty_scope(array $payload): bool
+{
+    return deploy_job_normalize_vm_ids($payload['vm_ids'] ?? []) === []
+        && deploy_job_normalize_vm_ids($payload['skipped_vm_ids'] ?? []) !== [];
 }
 
 /**

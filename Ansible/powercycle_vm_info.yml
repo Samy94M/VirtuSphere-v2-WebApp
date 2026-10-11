@@ -50,5 +50,17 @@
 
 - name: Statusabfrageergebnis dieser VM melden
   ansible.builtin.debug:
-    msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] {{ 'fail' if powercycle_current_info['failed'] | default(false) | bool else 'pass' }} Powercycle info {{ powercycle_target['vm_name'] }}"
+    msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}]
+      {{ 'fail' if powercycle_current_info['failed'] | default(false) | bool else 'pass' }}
+      Powercycle info {{ powercycle_target['vm_name'] }}"
 
+# Die Abfrage laeuft mit ignore_errors nur, damit die fail-Zeile oben noch
+# erscheint. Danach endet der Lauf hier: ohne diesen Abbruch wuerde die naechste
+# VM noch beim Portal als angefasst gemeldet und abgefragt, und erst das
+# Identitaets-Assert brache mit einer falschen Ursache ab.
+- name: Fehlgeschlagene Statusabfrage vor der naechsten VM abbrechen
+  ansible.builtin.fail:
+    msg: >-
+      vmware_guest_info failed for {{ powercycle_target['vm_name'] }}:
+      {{ powercycle_current_info['msg'] | default('no module message') }}
+  when: powercycle_current_info['failed'] | default(false) | bool

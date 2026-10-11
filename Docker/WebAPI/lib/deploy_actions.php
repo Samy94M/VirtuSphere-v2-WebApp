@@ -82,12 +82,14 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
             if ($schedule['has_schedule'] && !$confirmed) {
                 $previewMission = repo_get_mission($connection, $missionIdPost);
+                $previewRows = deploy_preview_rows($connection, $missionIdPost, $payloadData, $schedule);
 
                 return [
                     'schedule' => $schedule,
-                    'rows' => deploy_preview_rows($connection, $missionIdPost, $payloadData, $schedule),
-                    'storage' => $previewMission !== null
-                        ? ansible_storage_by_datastore($previewMission, deploy_selected_vms(getVMs($connection, $missionIdPost), $payloadData['vm_ids']))
+                    'rows' => $previewRows['rows'],
+                    'skipped_vms' => $previewRows['skipped_vms'],
+                    'storage' => $previewMission !== null && $previewRows['eligible_vm_ids'] !== []
+                        ? ansible_storage_by_datastore($previewMission, deploy_selected_vms(getVMs($connection, $missionIdPost), $previewRows['eligible_vm_ids']))
                         : [],
                     'capacity' => deploy_datastore_capacity($connection, $esxiId),
                 ];
@@ -109,7 +111,12 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
                     return $result;
                 });
-                flash_set('success', __t('deploy.flash_group_queued', ['count' => $result['count']]), '', [
+                $groupMessage = __t('deploy.flash_group_queued', ['count' => $result['count']]);
+                if ($result['skipped_vm_ids'] !== []) {
+                    $skipCount = count($result['skipped_vm_ids']);
+                    $groupMessage .= ' ' . __t($skipCount === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many', ['count' => $skipCount]);
+                }
+                flash_set('success', $groupMessage, '', [
                     'url' => deploy_mission_url($missionIdPost) . '#deploy-jobs',
                     'label' => __t('deploy.flash_open_jobs'),
                 ]);
@@ -126,14 +133,25 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
                 return $jobId;
             });
+            $queuedJob = repo_deploy_job($connection, $jobId);
+            $queuedPayload = is_array($queuedJob) ? json_decode((string) ($queuedJob['payload_json'] ?? '{}'), true) : null;
+            $skipCount = is_array($queuedPayload) ? count(deploy_job_normalize_vm_ids($queuedPayload['skipped_vm_ids'] ?? [])) : 0;
             if ($schedule['base_utc'] !== null) {
-                flash_set('success', __t('deploy.flash_scheduled', ['id' => $jobId]), '', [
+                $scheduledMessage = __t('deploy.flash_scheduled', ['id' => $jobId]);
+                if ($skipCount > 0) {
+                    $scheduledMessage .= ' ' . __t($skipCount === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many', ['count' => $skipCount]);
+                }
+                flash_set('success', $scheduledMessage, '', [
                     'url' => deploy_job_log_url($jobId),
                     'label' => __t('deploy.flash_open_job_log'),
                 ]);
                 redirect_to($redirectBase);
             }
-            flash_set('success', __t('deploy.flash_queued', ['id' => $jobId]), '', [
+            $queuedMessage = __t('deploy.flash_queued', ['id' => $jobId]);
+            if ($skipCount > 0) {
+                $queuedMessage .= ' ' . __t($skipCount === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many', ['count' => $skipCount]);
+            }
+            flash_set('success', $queuedMessage, '', [
                 'url' => deploy_job_log_url($jobId),
                 'label' => __t('deploy.flash_open_job_log'),
             ]);

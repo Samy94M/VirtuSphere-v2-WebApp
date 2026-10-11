@@ -58,6 +58,7 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
             $jobId = (int) $candidate['id'];
             $missionId = (int) ($candidate['mission_id'] ?? 0);
             $scope = [];
+            $explicitEmptyScope = false;
             if ($missionId > 0) {
                 repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$missionId]);
             }
@@ -80,8 +81,10 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
                 if (!is_array($payload)) {
                     return null;
                 }
-                $scope = deploy_job_normalize_vm_ids($payload['vm_ids'] ?? []);
-                if (repo_deploy_create_fence_conflicts($db, $missionId, (int) $row['credential_esxi_id'], $scope, $jobId, true) !== []) {
+                $normalizedPayload = deploy_job_payload($payload);
+                $scope = $normalizedPayload['vm_ids'];
+                $explicitEmptyScope = deploy_job_payload_has_explicit_empty_scope($normalizedPayload);
+                if (!$explicitEmptyScope && repo_deploy_create_fence_conflicts($db, $missionId, (int) $row['credential_esxi_id'], $scope, $jobId, true) !== []) {
                     return null;
                 }
             }
@@ -107,7 +110,7 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
                 return null;
             }
             repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
-            if ($missionId > 0) {
+            if ($missionId > 0 && !$explicitEmptyScope) {
                 repo_deploy_job_vm_capture($db, ['id' => $jobId, 'mission_id' => $missionId], $scope);
             }
 

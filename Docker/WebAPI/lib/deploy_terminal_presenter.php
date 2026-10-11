@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 require_once __DIR__ . '/deploy_job_result.php';
 require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/deploy_host_preflight_result.php';
@@ -27,6 +28,9 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
         $hostPreflight = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED
             ? deploy_host_preflight_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null)
             : null;
+        $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
+        $skippedVmIds = is_array($payload) ? deploy_job_normalize_vm_ids($payload['skipped_vm_ids'] ?? []) : [];
+        $skippedCount = count($skippedVmIds);
         $resultKey = match (true) {
             $network !== null => 'deploy.result_network_preflight',
             $hostPreflight !== null => 'deploy.result_allowlist_denied',
@@ -54,6 +58,9 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
             // decision, so the table has to say that it is not all of it;
             // otherwise "3 of 40 blocked" reads as a table with 3 missing rows.
             'network_omitted' => (int) ($network['vm_results_omitted_count'] ?? 0),
+            // K16 is a queue-scope diagnostic beside the existing result
+            // protocol. It does not alter or impersonate the MAC outcome.
+            'skipped_count' => $skippedCount,
             // K2: an allowlist block names its fix; the link itself is only
             // rendered for readers who may change the list (system.config).
             'allowlist_denied' => $hostPreflight !== null,
@@ -110,7 +117,7 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
     ];
 }
 
-function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null, bool $canConfigure = false): string
+function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null, bool $canConfigure = false, bool $canCreate = false): string
 {
     $view = deploy_terminal_presenter($job, $existingVmIds);
     $html = '';
@@ -123,6 +130,16 @@ function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null,
         $html .= '<p>' . deploy_terminal_h((string) $block['text']) . '</p>';
         if ($name === 'result' && (int) ($block['mac_version'] ?? 0) === VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION) {
             $html .= '<p class="muted">' . deploy_terminal_h(__t('deploy.mac_result_legacy')) . '</p>';
+        }
+        if ($name === 'result' && (int) ($block['skipped_count'] ?? 0) > 0) {
+            $skippedCount = (int) $block['skipped_count'];
+            $skipKey = $skippedCount === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many';
+            $html .= '<p class="muted">' . deploy_terminal_h(__t($skipKey, ['count' => $skippedCount])) . '</p>';
+            $missionId = (int) ($job['mission_id'] ?? 0);
+            if ($canCreate && $missionId > 0) {
+                $html .= '<p><a href="' . deploy_terminal_h(deploy_mission_url($missionId) . '&mode=create#deploy-queue-form') . '">'
+                    . deploy_terminal_h(__t('status.mode_create')) . '</a></p>';
+            }
         }
         if ($name === 'result' && (array) ($block['vm_rows'] ?? []) !== []) {
             $html .= deploy_terminal_vm_results_html((array) $block['vm_rows']);

@@ -8,35 +8,9 @@ require_once __DIR__ . '/helpers.php';
 
 /**
  * Deploy job reads: the list and detail rows the portal renders, the streamed
- * log tail, the mission-scoped VM resolution both the enqueue and its schedule
- * preview share, and the payload summary a log line carries.
- *
- * Read-only by construction. The one deliberate throw is in
- * repo_deploy_filter_mission_vm_ids(): a selection that filters down to nothing
- * must not read as "whole mission".
+ * log tail and the payload summary a log line carries. Read-only; the VM scope
+ * of a job lives in deploy_job_scope.php.
  */
-
-/**
- * Computes the per-VM start times for the schedule preview without creating any
- * jobs. Returns Unix epochs so the page formats them in the portal timezone.
- *
- * @return array<int, array{vm_name:string, epoch:int}>
- */
-function deploy_preview_rows(mysqli $db, int $missionId, array $payloadData, array $schedule): array
-{
-    $vmIds = is_array($payloadData['vm_ids'] ?? null) ? $payloadData['vm_ids'] : [];
-    $vms = repo_deploy_group_vm_list($db, $missionId, $vmIds);
-    $baseEpoch = (int) $schedule['base_epoch'];
-    $stagger = $schedule['stagger'];
-
-    $rows = [];
-    foreach (array_values($vms) as $i => $vm) {
-        $epoch = $baseEpoch + ($stagger !== null ? $i * $stagger * 60 : 0);
-        $rows[] = ['vm_name' => (string) $vm['vm_name'], 'epoch' => $epoch];
-    }
-
-    return $rows;
-}
 
 function deploy_job_payload_summary(?string $payloadJson): string
 {
@@ -309,68 +283,4 @@ function deploy_job_log_page(array $logs, bool $hasOlder, bool $hasMore, bool $c
 function repo_deploy_job_logs(mysqli $db, int $jobId, int $afterSeq = 0, int $limit = VIRTUSPHERE_DEPLOY_LOG_FORWARD_LIMIT): array
 {
     return repo_deploy_job_log_forward($db, $jobId, $afterSeq, $limit)['logs'];
-}
-
-/**
- * @param int[] $vmIds
- * @return int[] VM ids that belong to the mission (order preserved)
- *
- * An empty input stays empty and is read as "whole mission" one level up. But a
- * non-empty input that filters down to nothing is a selection whose VMs have all
- * been deleted (or never belonged here) since the form was rendered: silently
- * returning [] would widen that job to the entire mission. Throw instead, with
- * the exact wording of the worker-side gate (ansible_prepare_job_artifacts), so
- * the same condition reads the same one stage earlier.
- */
-function repo_deploy_filter_mission_vm_ids(mysqli $db, int $missionId, array $vmIds): array
-{
-    if ($vmIds === []) {
-        return [];
-    }
-
-    $stmt = $db->prepare('SELECT id FROM deploy_vms WHERE mission_id = ?');
-    $stmt->bind_param('i', $missionId);
-    $stmt->execute();
-    $owned = [];
-    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
-        $owned[(int) $row['id']] = true;
-    }
-
-    $filtered = array_values(array_filter($vmIds, static fn (int $id): bool => isset($owned[$id])));
-    if ($filtered === []) {
-        throw new RuntimeException('None of the selected VMs belong to this mission.');
-    }
-
-    return $filtered;
-}
-
-/**
- * Ordered VM list for a stagger group / its preview. An explicit selection
- * (filtered to the mission) keeps its order; an empty selection means the whole
- * mission ordered by vm_name.
- *
- * @param int[] $selectedVmIds
- * @return array<int, array{id:int, vm_name:string}>
- */
-function repo_deploy_group_vm_list(mysqli $db, int $missionId, array $selectedVmIds): array
-{
-    $selected = repo_deploy_filter_mission_vm_ids($db, $missionId, $selectedVmIds);
-    if ($selected === []) {
-        $stmt = $db->prepare('SELECT id, vm_name FROM deploy_vms WHERE mission_id = ? ORDER BY vm_name');
-        $stmt->bind_param('i', $missionId);
-        $stmt->execute();
-
-        return array_map(
-            static fn (array $r): array => ['id' => (int) $r['id'], 'vm_name' => (string) $r['vm_name']],
-            repo_fetch_all($stmt->get_result())
-        );
-    }
-
-    $vms = [];
-    foreach ($selected as $vmId) {
-        $name = (string) (repo_scalar($db, 'SELECT vm_name FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$vmId, $missionId]) ?? '');
-        $vms[] = ['id' => $vmId, 'vm_name' => $name];
-    }
-
-    return $vms;
 }

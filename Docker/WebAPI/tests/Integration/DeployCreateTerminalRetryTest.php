@@ -100,7 +100,7 @@ final class DeployCreateTerminalRetryTest extends TestCase
 
     public function testMacPartialConclusionStillRetriesOnlyFailedVmIdsAsExport(): void
     {
-        $ids = [$this->vm('MAC-A'), $this->vm('MAC-B'), $this->vm('MAC-C')];
+        $ids = [$this->vm('MAC-A', true), $this->vm('MAC-B', true), $this->vm('MAC-C', true)];
         $jobId = repo_create_deploy_job($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'export', 'vm_ids' => $ids]);
         $worker = $this->prefix . '-worker';
         $job = repo_claim_next_deploy_job($this->db, $worker);
@@ -228,10 +228,11 @@ final class DeployCreateTerminalRetryTest extends TestCase
         repo_execute($this->db, 'UPDATE deploy_jobs SET payload_json = ? WHERE id = ?', 'si', [json_encode($payload, JSON_THROW_ON_ERROR), $jobId]);
     }
 
-    private function vm(string $suffix): int
+    private function vm(string $suffix, bool $bound = false): int
     {
         $name = $this->prefix . '_' . $suffix;
-        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id,vm_name,vm_hostname) VALUES (?,?,?)', 'iss', [$this->missionId, $name, $name]);
+        $uuid = $bound ? 'retry-' . bin2hex(random_bytes(8)) : null;
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id,vm_name,vm_hostname,vm_instance_uuid) VALUES (?,?,?,?)', 'isss', [$this->missionId, $name, $name, $uuid]);
         $id = (int) $this->db->insert_id;
         repo_execute($this->db, "INSERT INTO deploy_interfaces (vm_id,ip,subnet,gateway,vlan,mac) VALUES (?,'','','','WDS','')", 'i', [$id]);
         return $id;

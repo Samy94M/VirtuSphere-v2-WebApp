@@ -106,6 +106,14 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'repo_deploy_active_job_exists',
         'repo_deploy_active_job_id',
         'repo_deploy_lock_mission',
+        // K15: per-job VM journal (prestate, marker, touch evidence).
+        'repo_deploy_job_vm_admit_touch',
+        'repo_deploy_job_vm_capture',
+        'repo_deploy_job_vm_scope',
+        'repo_deploy_job_vm_states',
+        // K16: the mode-dependent queue scope and its explicit all-skipped marker.
+        'repo_deploy_mode_vm_selection',
+        'deploy_job_payload_has_explicit_empty_scope',
         'repo_deploy_assert_mission_idle',
         'repo_create_deploy_job',
         'repo_retry_deploy_job',

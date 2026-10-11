@@ -120,6 +120,16 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_id',
         'deploy_worker_process_job',
         'deploy_worker_transport_failure_with_step',
+        // K15: the durable per-VM journal shared by failure, cancel, reaper and sweep.
+        'deploy_worker_apply_locked_vm_journal',
+        'deploy_worker_mode_preserves_vm_state',
+        'deploy_worker_restore_locked_vm_journal',
+        'deploy_worker_vm_create_evidence',
+        'deploy_worker_vm_create_launch_intent',
+        'deploy_worker_vm_journal_disposition',
+        'deploy_worker_vm_journal_generation_matches',
+        // K16: a job whose every VM was skipped as never created.
+        'deploy_worker_finish_all_skipped_job',
         // K12 (FC2-05, FC2-16): a failed step carries its last failure line
         // and, for autostart, the reported written count.
         'deploy_worker_step_failed',

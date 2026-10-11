@@ -81,7 +81,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
     public function testFailureBeforeAnyMarkDoesNotChangeLifecycleOrMecm(string $mode): void
     {
         $mission = $this->mission('pre-mark-' . $mode);
-        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, in_array($mode, ['powercycle', 'export', 'start', VIRTUSPHERE_DEPLOY_MODE_AUTOSTART], true));
         $jobId = $this->job($mission, $mode, [$vm]);
         $claim = $this->jobRow($jobId);
 
@@ -96,7 +96,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
     public function testStartAndAutostartNeverWriteVmStateEvenWhenClaimedAndFailed(string $mode): void
     {
         $mission = $this->mission('preserve-' . $mode);
-        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, true);
         $jobId = $this->job($mission, $mode, [$vm]);
         $claim = $this->jobRow($jobId);
 
@@ -115,7 +115,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
     public function testMarkedButUntouchedVmRestoresBothCapturedStates(string $mode): void
     {
         $mission = $this->mission('restore-' . $mode);
-        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, in_array($mode, ['powercycle', 'export'], true));
         $jobId = $this->job($mission, $mode, [$vm]);
         $claim = $this->jobRow($jobId);
 
@@ -130,9 +130,9 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
     public function testFailureFailsOnlyTouchedVmRestoresNeighborAndKeepsImportedSuccess(): void
     {
         $mission = $this->mission('per-vm');
-        $imported = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
-        $touched = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
-        $untouched = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $imported = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, true);
+        $touched = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, true);
+        $untouched = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, true);
         $jobId = $this->job($mission, 'export', [$imported, $touched, $untouched], $this->resultJson([$imported], [$touched]));
         $claim = $this->jobRow($jobId);
         deploy_worker_mark_vms_deploying($this->db, $claim, 'K15 per-VM mark', [$imported, $touched, $untouched]);
@@ -149,7 +149,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
     public function testRegisteredVmTouchedWithoutDeployingMarkStillFails(): void
     {
         $mission = $this->mission('registered-touch');
-        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered');
+        $vm = $this->vm($mission, VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'registered', true);
         repo_execute($this->db, "UPDATE deploy_vms SET mecm_id = '4812' WHERE id = ?", 'i', [$vm]);
         $jobId = $this->job($mission, 'export', [$vm]);
         $claim = $this->jobRow($jobId);
@@ -244,11 +244,12 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
         return $id;
     }
 
-    private function vm(int $missionId, string $lifecycle, string $mecm): int
+    private function vm(int $missionId, string $lifecycle, string $mecm, bool $bound = false): int
     {
         $name = strtoupper($this->prefix . '_VM' . bin2hex(random_bytes(2)));
-        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)',
-            'issss', [$missionId, $name, $name, $lifecycle, $mecm]);
+        $uuid = $bound ? 'uuid-' . bin2hex(random_bytes(8)) : null;
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state, vm_instance_uuid) VALUES (?, ?, ?, ?, ?, ?)',
+            'isssss', [$missionId, $name, $name, $lifecycle, $mecm, $uuid]);
         return (int) $this->db->insert_id;
     }
 

@@ -18,6 +18,8 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 
 Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`. MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet; die Staffelung und die Inventaraktualisierung verwenden dagegen die festen Listen `VIRTUSPHERE_DEPLOY_STAGGER_MODES` und `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES`. Der Worker erkennt die Create-Einheit weiterhin mit dem Modusliteral `create`. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
+Für `start`, `export`, `powercycle` und `autostart` friert derselbe Resolver die Auswahl ein und nimmt VMs ohne gebundene Instance-UUID aus dem Arbeitsumfang. Eine leere Auswahl ohne Formularmarker (interne Aufrufer) gilt dabei vorher als ganze Mission; im Formular sperrt eine leere Auswahl. Die übersprungenen IDs bleiben als Auftragsdiagnose getrennt von den ausführbaren `vm_ids`. Vorschau und Staffelplan enthalten nur ausführbare VMs. Ein Auftrag, bei dem alle VMs übersprungen werden, behält einen ausdrücklich leeren Arbeitsumfang und endet als No-op ohne Remote-Schritt; er wird niemals auf die ganze Mission ausgeweitet. Die übersprungenen VMs bleiben ohne Journal-Capture, Markierung, Touch oder Zustandsänderung. Ergebnis, Protokoll und Vorschau melden „N VMs nicht angelegt, übersprungen“; der Link „VMs anlegen“ wird nur Lesern mit `deploy.run` gezeigt.
+
 ## Einreihen
 
 Das Formular sammelt Mission, ESXi- und Ansible-Zugang, Modus, VM-Auswahl, Wartezeiten, Startzeitpunkt, Staffelung und die ausführliche Ausgabe. Die Sperren darunter prüft die Seite vor dem Absenden und das Repository im Einreihen erneut.
@@ -29,16 +31,20 @@ flowchart TD
   B -->|nein| BX["Sperre mit Verweis anzeigen, nichts eingereiht"]
   B -->|ja| T{"Zeitplan gültig? (nicht in der Vergangenheit, im Planungshorizont; Staffelung nur bei full, powercycle, start und im erlaubten Bereich)"}
   T -->|nein| TX["Feldfehler am Formular, nichts eingereiht"]
-  T -->|ja, mit Zeitplan oder Staffelung| PV["Vorschau: Startzeit je VM, Speicherbedarf je Datastore, Kapazität; erst die Bestätigung reiht ein"]
-  T -->|ja, sofort| S
+  T -->|ja| R["Gemeinsame Scope-Auflösung: Auswahl einfrieren, für Start, Export, Power-Cycle und Autostart ungebundene VMs ausnehmen"]
+  R -->|mit Zeitplan oder Staffelung| PV["Vorschau nur für ausführbare VMs; übersprungene Anzahl und Create-Link anzeigen"]
+  R -->|sofort| S
   PV --> S{"Staffelung gesetzt?"}
-  S -->|ja| G["Je VM ein eigener Auftrag mit gemeinsamer Gruppen-ID, Startzeit je VM um N Minuten versetzt; der letzte Start muss im Planungshorizont liegen"]
-  S -->|nein| J["Ein Auftrag für die Auswahl; leere Auswahl heißt ganze Mission"]
+  S -->|ja, ausführbare VMs vorhanden| G["Je ausführbarer VM ein eigener Auftrag mit gemeinsamer Gruppen-ID und versetzter Startzeit"]
+  S -->|nein| J["Ein Auftrag mit eingefrorenem Umfang"]
+  S -->|ja, alles übersprungen| N["Geplanter Diagnose-No-op mit explizit leerem Umfang; kein Remote-Schritt"]
   G --> C{"Modus legt VMs an?"}
   J --> C
   C -->|ja| CR["Je VM eine Create-Ergebniszeile in fester Reihenfolge (Name, ID); die Auswahl ist damit eingefroren"]
   C -->|nein| Q
   CR --> Q["Auftrag steht als queued bereit, mit geplantem Zeitpunkt"]
+  G --> Q
+  N --> Q
 ```
 
 Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
@@ -47,7 +53,7 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 - Mission: gewählt, keine Vorlage, mindestens eine VM, kein anderer aktiver Auftrag.
 - Ort: Datastore gesetzt und Datacenter auflösbar, außer für `autostart`.
 - Identität: Das Inventar des gewählten Hosts kennt eine namensgleiche VM, die nicht an die Portal-VM gebunden ist.
-- Auswahl: nicht leer, gehört zur Mission, bleibt unter der Obergrenze je Auftrag.
+- Auswahl: im Formular nicht leer, gehört zur Mission, bleibt unter der Obergrenze je Auftrag. Nie angelegte VMs werden bei `start`, `export`, `powercycle` und `autostart` mit Hinweis ausgenommen.
 - Netz: allgemeine Zuordnung und PXE-Karte laut Netzvertrag; welche Modi sperren und welche nur warnen, steht in [DEPLOYMENT.md](../DEPLOYMENT.md#deploy-modes-and-the-mac-generation-power-cycle).
 - Create-Historie: Eine frühere Create-Einheit derselben VM ist noch ungeklärt (`uncertain`).
 - Host-Fähigkeit: Ein aktueller Befund „freie Lizenz“ des gewählten Hosts sperrt jeden schreibenden Modus (`create`, `full`, `powercycle`, `start`, `autostart`); `export` bleibt erlaubt. Ein veralteter oder fehlender Befund warnt nur. Dieselbe Prüfung läuft für Einzelauftrag, Staffelung und Wiederholung und im Worker erneut.
@@ -303,7 +309,7 @@ flowchart TD
 
 Der Worker ruft es erst, wenn das Ergebnis der Einheit gespeichert ist, und nie für eine `uncertain`-Einheit.
 
-### powercycleVMs und powercycle_vm_tasks
+### powercycleVMs und powercycle_vm_info und powercycle_vm_tasks
 
 Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten Einschalten.
 
@@ -312,7 +318,8 @@ flowchart TD
   A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
   B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM per vmware_guest_info"]
   B -->|abgelehnt oder keine Bestätigung| BR["Globaler Abbruch vor der ESXi-Abfrage dieser VM"]
-  C --> D{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  C -->|Abfrage fehlgeschlagen| CQ["fail-Zeile, dann Abbruch vor der nächsten VM mit der Modulmeldung"]
+  C -->|Antwort erhalten| D{"Name gleich und Instance-UUID gleich der gebundenen?"}
   D -->|nein| CX["Abbruch: Identitätsabweichung"]
   D -->|ja| E{"Jede Antwort trägt einen bekannten Energiezustand?"}
   E -->|nein| DX["Abbruch: Modulantwort passt nicht"]
@@ -332,7 +339,7 @@ flowchart TD
 
 Je VM meldet das Playbook `[n/total] RUN`, `pass` oder `fail Powercycle <VM>`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
 
-### exportVMs-Informations
+### exportVMs-Informations und export_vm_info
 
 Liest die MACs und schickt sie an das Portal. Ein Fehler betrifft nur die einzelne VM.
 

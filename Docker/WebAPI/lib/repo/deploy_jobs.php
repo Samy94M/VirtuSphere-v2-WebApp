@@ -47,6 +47,7 @@ require_once __DIR__ . '/deploy_job_modules.php';
 require_once __DIR__ . '/deploy_job_input.php';
 require_once __DIR__ . '/deploy_job_service_state.php';
 require_once __DIR__ . '/deploy_job_queries.php';
+require_once __DIR__ . '/deploy_job_scope.php';
 require_once __DIR__ . '/deploy_job_recovery_actions.php';
 require_once __DIR__ . '/deploy_job_log_search.php';
 require_once __DIR__ . '/deploy_job_guards.php';

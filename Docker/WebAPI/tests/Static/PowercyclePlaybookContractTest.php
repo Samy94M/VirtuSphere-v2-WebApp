@@ -95,9 +95,16 @@ final class PowercyclePlaybookContractTest extends TestCase
     {
         $source = $this->playbook();
 
-        $infoPos = strpos($source, 'community.vmware.vmware_guest_info:');
-        $powerPos = strpos($source, 'community.vmware.vmware_guest_powerstate:');
-        self::assertIsInt($infoPos, 'the playbook must capture the initial power state via vmware_guest_info');
+        // K15: the capture runs per VM in powercycle_vm_info.yml, the switching
+        // per VM in powercycle_vm_tasks.yml; the playbook orders the two loops.
+        $infoTasks = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
+        $powerTasks = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . 'powercycle_vm_tasks.yml');
+        self::assertStringContainsString('community.vmware.vmware_guest_info:', $infoTasks, 'the initial power state is captured via vmware_guest_info');
+        self::assertStringNotContainsString('vmware_guest_powerstate', $infoTasks, 'the capture include never changes power state');
+        self::assertStringContainsString('community.vmware.vmware_guest_powerstate:', $powerTasks);
+        $infoPos = strpos($source, 'include_tasks: ./' . VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
+        $powerPos = strpos($source, 'include_tasks: ./powercycle_vm_tasks.yml');
+        self::assertIsInt($infoPos);
         self::assertIsInt($powerPos);
         self::assertLessThan($powerPos, $infoPos, 'the state capture must run before the first power change');
 

@@ -6,6 +6,7 @@ require_once __DIR__ . '/repo/deploy_job_vm_states.php';
 require_once __DIR__ . '/repo/status_events.php';
 require_once __DIR__ . '/mac_import.php';
 require_once __DIR__ . '/deploy_worker_ownership.php';
+require_once __DIR__ . '/repo/deploy_job_input.php';
 
 /** Original claim only. New intent=true, existing intent=false, refusal=null. */
 function deploy_worker_vm_create_launch_intent(mysqli $db, array $claim, int $vmId, bool $intent): ?bool
@@ -93,6 +94,9 @@ function deploy_worker_apply_locked_vm_journal(mysqli $db, array $job, string $n
         throw new LogicException('VM convergence requires the locked job transaction.');
     }
     $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
+    if (is_array($payload) && deploy_job_payload_has_explicit_empty_scope($payload)) {
+        return 0;
+    }
     $mode = is_array($payload) ? (string) ($payload['mode'] ?? '') : '';
     if (deploy_worker_mode_preserves_vm_state($mode)) {
         return 0;
@@ -150,6 +154,9 @@ function deploy_worker_apply_locked_vm_journal(mysqli $db, array $job, string $n
 function deploy_worker_restore_locked_vm_journal(mysqli $db, array $job, string $note, array $vmIds): int
 {
     $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
+    if (is_array($payload) && deploy_job_payload_has_explicit_empty_scope($payload)) {
+        return 0;
+    }
     if (is_array($payload) && deploy_worker_mode_preserves_vm_state((string) ($payload['mode'] ?? ''))) {
         return 0;
     }

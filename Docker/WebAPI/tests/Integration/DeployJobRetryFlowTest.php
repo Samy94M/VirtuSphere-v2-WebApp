@@ -332,8 +332,9 @@ final class DeployJobRetryFlowTest extends TestCase
         $vmIds = [];
         for ($i = 0; $i < $vmCount; $i++) {
             $vmName = strtoupper($name . '_VM' . $i);
-            $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
-            $stmt->bind_param('iss', $missionId, $vmName, $vmName);
+            $instanceUuid = 'retry-' . bin2hex(random_bytes(8));
+            $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_instance_uuid) VALUES (?, ?, ?, ?)');
+            $stmt->bind_param('isss', $missionId, $vmName, $vmName, $instanceUuid);
             $stmt->execute();
             $vmId = (int) $this->db->insert_id;
             $vmIds[] = $vmId;

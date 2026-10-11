@@ -35,7 +35,7 @@ final class K15DeployVmJournalStorageContractTest extends TestCase
         self::assertStringContainsString('ON DUPLICATE KEY UPDATE job_id = deploy_job_vm_states.job_id', $repository);
         self::assertStringNotContainsString('ON DUPLICATE KEY UPDATE lifecycle_before', $repository);
         self::assertStringContainsString("['powercycle', 'export']", $repository);
-        self::assertStringContainsString("['running', 'cancelling']", $repository);
+        self::assertStringContainsString('[VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING]', $repository);
         self::assertStringContainsString('UPDATE deploy_job_vm_states SET esxi_touched = 1', $repository);
         self::assertStringNotContainsString('UPDATE deploy_vms', $repository);
     }

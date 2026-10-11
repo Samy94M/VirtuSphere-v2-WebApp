@@ -98,7 +98,7 @@ Describe 'Visible progress reporting contract' {
         foreach ($source in @($script:PowercycleInfoTasks, $script:ExportInfoTasks)) {
             $touchPosition = $source.IndexOf('./report_vm_touch.py')
             $infoPosition = $source.IndexOf('community.vmware.vmware_guest_info:')
-            $touchPosition | Should -BeGreaterThanOrEqual 0
+            $touchPosition | Should -BeGreaterOrEqual 0
             $infoPosition | Should -BeGreaterThan $touchPosition
         }
     }

@@ -163,6 +163,7 @@ final class DeployFormStateContractTest extends TestCase
         $blockers = (string) file_get_contents($root . '/lib/deploy_blockers.php');
         self::assertStringContainsString("\$state['vm_selection_explicit'] && \$state['vm_ids'] === []", $blockers);
         self::assertStringContainsString("deploy_selection_blocker('selection_empty'", $blockers);
+        self::assertStringContainsString('repo_deploy_mode_vm_selection', $blockers, 'only an unmarked empty selection is resolved as whole mission before UUID eligibility');
     }
 
     public function testEveryDeployPanelIsRequiredAndEveryRequireExists(): void

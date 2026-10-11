@@ -29,6 +29,8 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_modes_using_start',
         'ansible_mode_expects_mac_result',
         'ansible_mode_creates_vms',
+        // K16: modes that address existing VMs by their bound instance UUID.
+        'ansible_mode_requires_bound_instance_uuid',
         // K10 (DF-E2): which modes write to ESXi, derived from the sequence.
         'ansible_mode_writes_esxi',
         'ansible_step_marker_line',

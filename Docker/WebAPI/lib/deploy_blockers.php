@@ -21,6 +21,7 @@ require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/vms.php';
 require_once __DIR__ . '/repo/vm_network.php';
 require_once __DIR__ . '/repo/deploy_create_fence.php';
+require_once __DIR__ . '/repo/deploy_job_scope.php';
 
 /**
  * One exhaustive, discriminated list for every condition that disables queueing.
@@ -158,12 +159,22 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
     }
 
     $identityConflicts = [];
-    if ($selectedMission !== null && $selectedEsxiValid) {
+    $modeScope = ['eligible_vms' => [], 'skipped_vms' => []];
+    // Only an unmarked empty selection means "whole mission"; an operator who
+    // unticked every VM gets selection_empty, never Create/Full on all of them.
+    $selectionExplicitlyEmpty = $state['vm_selection_explicit'] && $state['vm_ids'] === [];
+    $selectionBelongsToMission = ($state['vm_ids'] === [] && !$selectionExplicitlyEmpty)
+        || array_intersect($state['vm_ids'], array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms)) !== [];
+    if ($selectedMission !== null && $selectionBelongsToMission) {
+        $modeScope = repo_deploy_mode_vm_selection($db, $missionId, $state['vm_ids'], $state['mode']);
+    }
+    $eligibleVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $modeScope['eligible_vms']);
+    if ($selectedMission !== null && $selectedEsxiValid && $eligibleVmIds !== []) {
         $identityConflicts = repo_vm_identity_conflicts(
             $db,
             $missionId,
             $state['credential_esxi_id'],
-            $state['vm_ids']
+            $eligibleVmIds
         );
     }
 
@@ -243,7 +254,7 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
             );
         }
     }
-    if ($selectedMission !== null && $state['vm_selection_explicit'] && $state['vm_ids'] === []) {
+    if ($selectedMission !== null && $selectionExplicitlyEmpty) {
         $blockers[] = deploy_selection_blocker('selection_empty', __t('deploy.err_selection_empty'));
     } elseif ($selectedMission !== null && $state['vm_ids'] !== []) {
         $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
@@ -252,53 +263,48 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
         }
     }
 
-    if ($selectedMission !== null && $missionVms !== []
-        && !($state['vm_selection_explicit'] && $state['vm_ids'] === [])) {
-        $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
-        $scopeIds = $state['vm_ids'] === [] ? [] : array_values(array_intersect($state['vm_ids'], $missionVmIds));
-        if ($state['vm_ids'] === [] || $scopeIds !== []) {
-            $preflight = repo_vm_network_preflight($db, $missionId, $scopeIds, (string) ($selectedMission['wds_vlan'] ?? ''));
-            // The same scope cap the repo enforces before the insert, shown here
-            // as a blocker with its own fix: an operator must learn that the
-            // selection is too large while it is still a selection, not from an
-            // exception after the submit.
-            try {
-                if ((int) $state['stagger_minutes'] > 0 && in_array($state['mode'], VIRTUSPHERE_DEPLOY_STAGGER_MODES, true)) {
-                    foreach ($preflight['vms'] as $vm) {
-                        repo_vm_network_assert_scope_within_bounds([$vm]);
-                    }
-                } else {
-                    repo_vm_network_assert_scope_within_bounds($preflight['vms']);
+    if ($selectedMission !== null && $eligibleVmIds !== []) {
+        $preflight = repo_vm_network_preflight($db, $missionId, $eligibleVmIds, (string) ($selectedMission['wds_vlan'] ?? ''));
+        // The same scope cap the repo enforces before the insert, shown here
+        // as a blocker with its own fix: an operator must learn that the
+        // selection is too large while it is still a selection, not from an
+        // exception after the submit.
+        try {
+            if ((int) $state['stagger_minutes'] > 0 && in_array($state['mode'], VIRTUSPHERE_DEPLOY_STAGGER_MODES, true)) {
+                foreach ($preflight['vms'] as $vm) {
+                    repo_vm_network_assert_scope_within_bounds([$vm]);
                 }
-            } catch (ValidationException $exception) {
-                $scopeBlocker = deploy_action_blocker(
-                    'job_scope_limit',
-                    portal_error_message($exception),
-                    'vms.php?mission_id=' . $missionId,
-                    __t('deploy.vms_empty_link'),
-                    'vms.write'
-                );
-                // The only blocker whose number looks arbitrary from the outside,
-                // so it is the only one that carries a second link. The first one
-                // is the repair (where the selection is made); this one is the
-                // reason the ceiling exists, and it lives in the help exactly
-                // once. It needs no permission of its own: the deploy help panel
-                // already requires `deploy.run`, and nobody without that ever
-                // sees this list. Built with help_url(), never by hand.
-                $scopeBlocker['help'] = [
-                    'url' => help_url('deploy', 'help-network-contract'),
-                    'label' => __t('deploy.blocker_help_network_contract'),
-                ];
-                $blockers[] = $scopeBlocker;
+            } else {
+                repo_vm_network_assert_scope_within_bounds($preflight['vms']);
             }
-            foreach (repo_vm_network_preflight_blockers($preflight, $state['mode']) as $finding) {
-                $blockers[] = deploy_network_finding_item($finding, true);
-            }
+        } catch (ValidationException $exception) {
+            $scopeBlocker = deploy_action_blocker(
+                'job_scope_limit',
+                portal_error_message($exception),
+                'vms.php?mission_id=' . $missionId,
+                __t('deploy.vms_empty_link'),
+                'vms.write'
+            );
+            // The only blocker whose number looks arbitrary from the outside,
+            // so it is the only one that carries a second link. The first one
+            // is the repair (where the selection is made); this one is the
+            // reason the ceiling exists, and it lives in the help exactly
+            // once. It needs no permission of its own: the deploy help panel
+            // already requires `deploy.run`, and nobody without that ever
+            // sees this list. Built with help_url(), never by hand.
+            $scopeBlocker['help'] = [
+                'url' => help_url('deploy', 'help-network-contract'),
+                'label' => __t('deploy.blocker_help_network_contract'),
+            ];
+            $blockers[] = $scopeBlocker;
+        }
+        foreach (repo_vm_network_preflight_blockers($preflight, $state['mode']) as $finding) {
+            $blockers[] = deploy_network_finding_item($finding, true);
         }
     }
 
-    if ($selectedMission !== null && $selectedEsxiValid) {
-        foreach (repo_deploy_create_fence_conflicts($db, $missionId, $state['credential_esxi_id'], $state['vm_ids']) as $finding) {
+    if ($selectedMission !== null && $selectedEsxiValid && $eligibleVmIds !== []) {
+        foreach (repo_deploy_create_fence_conflicts($db, $missionId, $state['credential_esxi_id'], $eligibleVmIds) as $finding) {
             $blockers[] = deploy_action_blocker(
                 (string) $finding['code'],
                 __t('deploy.blocker_create_history', ['name' => $finding['vm_name'], 'job' => $finding['job_id']]),
@@ -326,13 +332,7 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
     }
     unset($blocker);
 
-    $scopeCount = null;
-    if ($selectedMission !== null) {
-        $missionVmIds = array_map(static fn (array $vm): int => (int) $vm['id'], $missionVms);
-        $scopeCount = $state['vm_selection_explicit']
-            ? count(array_intersect($state['vm_ids'], $missionVmIds))
-            : count($missionVmIds);
-    }
+    $scopeCount = $selectedMission !== null ? count($eligibleVmIds) + count($modeScope['skipped_vms']) : null;
     $presentation = deploy_blocker_presentation($state, $blockers, $scopeCount);
 
     return $blockers;

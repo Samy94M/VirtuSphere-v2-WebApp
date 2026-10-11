@@ -320,3 +320,21 @@ function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): v
         error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
 }
+
+/**
+ * K16: a job whose every selected VM was skipped as never created runs no
+ * remote step and touches no VM state. It still ends as a durable job with a
+ * result and log line, so the operator sees why nothing happened.
+ */
+function deploy_worker_finish_all_skipped_job(DeployWorkerDbChannel $channel, array $job, string $workerId, int $skippedCount): void
+{
+    $channel->log(
+        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+        $skippedCount . ' uncreated VM(s) skipped; no remote step or VM-state change was started.'
+    );
+    deploy_worker_assert_job_is_ours($channel->connection(), (int) $job['id'], $workerId, true, $job);
+    $terminalStatus = deploy_worker_finish_job($channel->connection(), $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, null, null, null, null, false);
+    if ($terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED) {
+        deploy_worker_audit_outcome($channel->connection(), $job, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+    }
+}

@@ -176,8 +176,9 @@ final class CorrelationTraceTest extends TestCase
 
         for ($index = 1; $index <= $vmCount; $index++) {
             $vmName = strtoupper($this->prefix) . $suffix . $index;
-            $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
-            $stmt->bind_param('iss', $missionId, $vmName, $vmName);
+            $instanceUuid = 'corr-' . bin2hex(random_bytes(8));
+            $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_instance_uuid) VALUES (?, ?, ?, ?)');
+            $stmt->bind_param('isss', $missionId, $vmName, $vmName, $instanceUuid);
             $stmt->execute();
         }
         test_prepare_network_mac_fixture($this->db, $missionId, $this->esxiCredentialId);
