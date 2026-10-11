@@ -148,7 +148,7 @@ try {
     }
 
     $stmt = $connection->prepare(
-        'SELECT id, mission_id, status, payload_json, result_json, attempts, execution_contract, '
+        'SELECT id, mission_id, status, payload_json, result_json, attempts, execution_contract, credential_esxi_id, '
         . 'LOWER(HEX(execution_generation_id)) AS execution_generation_id '
         . 'FROM deploy_jobs WHERE id = ? AND mission_id = ? AND status IN (?, ?) LIMIT 1 FOR UPDATE'
     );
@@ -230,7 +230,10 @@ try {
     // Entscheidung 6: persist the hypervisor identity the export proved. NULLIF
     // keeps the stored value when a pre-identity playbook result omits a field;
     // a mismatching UUID never reaches this write (the plan fails that VM).
-    $updateIdentity = $connection->prepare("UPDATE deploy_vms SET vm_moid = COALESCE(NULLIF(?, ''), vm_moid), vm_instance_uuid = COALESCE(NULLIF(?, ''), vm_instance_uuid) WHERE id = ?");
+    // K17: a proven instance UUID also records the job's access and its
+    // current target as the place of the binding.
+    $updateIdentity = $connection->prepare("UPDATE deploy_vms SET vm_moid = COALESCE(NULLIF(?, ''), vm_moid), vm_instance_uuid = COALESCE(NULLIF(?, ''), vm_instance_uuid), vm_bound_credential_id = IF(? = '', vm_bound_credential_id, ?), vm_bound_esxi_host = IF(? = '', vm_bound_esxi_host, (SELECT c.host FROM deploy_credentials c WHERE c.id = ? AND c.type = 'esxi')) WHERE id = ?");
+    $boundCredentialId = $job['credential_esxi_id'] === null ? null : (int) $job['credential_esxi_id'];
     $insertStatusEvent = $connection->prepare('INSERT INTO deploy_vm_status_events (vm_id, lifecycle_state, mecm_sync_state, legacy_status, note) VALUES (?, ?, ?, ?, ?)');
     $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
     $mecmState = VIRTUSPHERE_MECM_SYNC_PENDING;
@@ -269,7 +272,7 @@ try {
 
         $identity = is_array($vmPlan['identity'] ?? null) ? $vmPlan['identity'] : null;
         if ($identity !== null && ($identity['moid'] !== '' || $identity['instance_uuid'] !== '')) {
-            $updateIdentity->bind_param('ssi', $identity['moid'], $identity['instance_uuid'], $vmId);
+            $updateIdentity->bind_param('sssisii', $identity['moid'], $identity['instance_uuid'], $identity['instance_uuid'], $boundCredentialId, $identity['instance_uuid'], $boundCredentialId, $vmId);
             $updateIdentity->execute();
         }
 

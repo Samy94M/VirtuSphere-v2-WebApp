@@ -124,10 +124,17 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     -- NULL means "never seen on a host", never "matches anything".
     vm_moid VARCHAR(64) NULL,
     vm_instance_uuid VARCHAR(64) NULL,
+    -- K17 (migration 0061): where the identity above was proven, written with
+    -- it by the create commit and the MAC export. The host is a snapshot of the
+    -- access target at that time; NULL means unknown, never "anywhere". Create
+    -- warns before it builds a bound VM anew on another host.
+    vm_bound_credential_id INT NULL,
+    vm_bound_esxi_host VARCHAR(255) NULL,
     UNIQUE KEY mission_vm_unique (mission_id, vm_name),
     INDEX deploy_vms_mecm_pending_watch (mecm_sync_state, mecm_pending_since),
     INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at),
-    CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE
+    CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_vms_bound_credential FOREIGN KEY (vm_bound_credential_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Globally unique effective MECM names (Etappe 14D, ADR-0043). The uniqueness

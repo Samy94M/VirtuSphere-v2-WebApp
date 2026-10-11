@@ -32,9 +32,11 @@ flowchart TD
   B -->|ja| T{"Zeitplan gültig? (nicht in der Vergangenheit, im Planungshorizont; Staffelung nur bei full, powercycle, start und im erlaubten Bereich)"}
   T -->|nein| TX["Feldfehler am Formular, nichts eingereiht"]
   T -->|ja| R["Gemeinsame Scope-Auflösung: Auswahl einfrieren, für Start, Export, Power-Cycle und Autostart ungebundene VMs ausnehmen"]
-  R -->|mit Zeitplan oder Staffelung| PV["Vorschau nur für ausführbare VMs; übersprungene Anzahl und Create-Link anzeigen"]
-  R -->|sofort| S
-  PV --> S{"Staffelung gesetzt?"}
+  R --> HM{"Create-fähiger Modus und gebundene VMs, deren Bindung auf einem anderen Host liegt?"}
+  HM -->|ja, noch nicht bestätigt| PV["Bestätigungsseite: Warnung mit bisherigem Host; bei Zeitplan oder Staffelung die Vorschau nur für ausführbare VMs, übersprungene Anzahl und Create-Link"]
+  HM -->|nein, mit Zeitplan oder Staffelung, noch nicht bestätigt| PV
+  HM -->|nein und sofort, oder bestätigt| S
+  PV -->|Einreihen bestätigt| S{"Staffelung gesetzt?"}
   S -->|ja, ausführbare VMs vorhanden| G["Je ausführbarer VM ein eigener Auftrag mit gemeinsamer Gruppen-ID und versetzter Startzeit"]
   S -->|nein| J["Ein Auftrag mit eingefrorenem Umfang"]
   S -->|ja, alles übersprungen| N["Geplanter Diagnose-No-op mit explizit leerem Umfang; kein Remote-Schritt"]
@@ -57,6 +59,8 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 - Netz: allgemeine Zuordnung und PXE-Karte laut Netzvertrag; welche Modi sperren und welche nur warnen, steht in [DEPLOYMENT.md](../DEPLOYMENT.md#deploy-modes-and-the-mac-generation-power-cycle).
 - Create-Historie: Eine frühere Create-Einheit derselben VM ist noch ungeklärt (`uncertain`).
 - Host-Fähigkeit: Ein aktueller Befund „freie Lizenz“ des gewählten Hosts sperrt jeden schreibenden Modus (`create`, `full`, `powercycle`, `start`, `autostart`); `export` bleibt erlaubt. Ein veralteter oder fehlender Befund warnt nur. Dieselbe Prüfung läuft für Einzelauftrag, Staffelung und Wiederholung und im Worker erneut.
+
+Keine Sperre, aber eine Bestätigung vor dem Einreihen: Würde `create` oder `full` gebundene VMs anlegen, deren Bindung über ein anderes Zugangsziel nachgewiesen wurde (`vm_bound_esxi_host`, Vergleich ohne Groß-/Kleinschreibung und abschließenden Punkt), zeigt die Seite die Warnung mit dem bisherigen Host live an, und das Absenden führt zuerst auf eine Bestätigungsseite, auch ohne JavaScript. Create fände dort weder UUID noch Namen und legte die VMs neu an; die alten VMs und ihre MECM-Geräte laufen weiter. Eine Wiederholung nennt dieselbe Warnung im Bestätigungsdialog und neben „Erneut ausführen“ im Auftragsprotokoll; die Jobliste verlinkt in diesem Fall dorthin. Eine Bindung ohne bekannten Host warnt nicht.
 
 ## Worker: ein Auftrag
 
@@ -178,7 +182,7 @@ flowchart TD
   PC --> PO
   PO -->|failed| MF["failed (module_failed)"]
   PO -->|rejected oder unlesbar| SU["uncertain"]
-  PO -->|succeeded| CM{"Identität binden: UUID und MOID in einer Transaktion; ersetzte Instanz übernehmen"}
+  PO -->|succeeded| CM{"Identität binden: UUID und MOID mit Zugang und Host des Auftrags in einer Transaktion; ersetzte Instanz übernehmen"}
   CM -->|gebunden| CL["createVMCleanup: Statusdatei genau dieser Job-ID löschen"]
   CM -->|abgelehnt, etwa andere UUID schon gebunden| CMF["failed mit Code der Ablehnung; MOID und UUID der Live-VM in Detail und eigener Protokollzeile"]
   CMF --> CL

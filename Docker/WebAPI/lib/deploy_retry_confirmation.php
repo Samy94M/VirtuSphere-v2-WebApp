@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/lang.php';
+require_once __DIR__ . '/deploy_host_move.php';
 
 /** The confirmation describes the same evaluated plan that insertion consumes. */
 function deploy_retry_confirmation(array $evaluation, string $name): string
@@ -24,6 +25,13 @@ function deploy_retry_confirmation(array $evaluation, string $name): string
         }
     } else {
         $retryConfirm = __t('deploy.confirm_retry', ['name' => $name]);
+    }
+
+    // K17: a create retry that would build bound VMs anew on another host says
+    // so in the same dialog; the job log also shows it beside the button.
+    $hostMoves = $evaluation['host_moves'] ?? [];
+    if (is_array($hostMoves) && $hostMoves !== []) {
+        $retryConfirm .= ' ' . deploy_host_move_message($hostMoves);
     }
 
     return $retryConfirm;

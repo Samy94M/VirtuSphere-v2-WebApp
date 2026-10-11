@@ -251,6 +251,10 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
                 <span class="muted" data-deploy-retry-blocked><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
             <?php } ?>
         </div>
+        <?php // K17: visible before the retry, also without the confirm dialog. ?>
+        <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed']) && ($retryEvaluation['host_moves'] ?? []) !== []) { ?>
+            <p class="alert alert-warning" id="deploy-retry-host-move" data-deploy-host-move><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(deploy_host_move_message($retryEvaluation['host_moves'])); ?></p>
+        <?php } ?>
     </section>
 
     <section class="grid" aria-label="<?php echo h(__t('deploy.log_title')); ?>">

@@ -77,6 +77,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_identity_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_identity_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_identity_p3')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_identity_p4')); ?></p>
         </section>
 
         <section class="panel">

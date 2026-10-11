@@ -175,6 +175,47 @@ echo 'JSON' . json_encode(['logLines' => $logLines, 'auditRows' => $auditRows]) 
   expect(trace.auditRows, 'the audit row carries the same trace').toBeGreaterThan(0);
 });
 
+// K17 (FM-01, FM-E1): a VM bound through access A, Create through access B on
+// another host. The warning names the previous host live, and queueing stops at
+// a confirmation page first, so nothing is queued unseen. With access A itself
+// there is no warning. Nothing is confirmed here: a queued Create would be a
+// job the stack's worker may claim.
+// e2e-covers: deploy.php:start
+test('create on another host: warning names the previous host and queueing needs a confirmation', async ({ page }) => {
+  const seed = seedBase();
+  const second = phpJson(`
+$db = db();
+$esxiB = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi-b', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', ${seed.admin});
+test_prepare_network_mac_fixture($db, ${seed.missionId}, $esxiB, 'WDS', 'DC1');
+$stmt = $db->prepare("UPDATE deploy_vms SET vm_moid = 'vm-17', vm_instance_uuid = '4217e2e0-0000-4000-8000-000000000017', vm_bound_credential_id = ?, vm_bound_esxi_host = '127.0.0.1' WHERE mission_id = ? AND vm_name = 'E2EDVM1'");
+$esxiA = ${seed.esxi};
+$mid = ${seed.missionId};
+$stmt->bind_param('ii', $esxiA, $mid);
+$stmt->execute();
+echo 'JSON' . json_encode(['esxiB' => $esxiB]) . 'JSON';
+`, ['lib/repo/credentials.php', 'tests/Support/NetworkMacFixtures.php']);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const form = page.locator('form:has(select[name="credential_esxi_id"])');
+  await form.locator('select[name="mode"]').selectOption('create');
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  const warnings = page.locator('[data-deploy-warning-list]');
+
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(seed.esxi));
+  await expect(warnings, 'the access the VM was bound through warns nothing').not.toContainText('127.0.0.1');
+
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(second.esxiB));
+  await expect(warnings, 'the live warning names the previous host').toContainText('127.0.0.1');
+  await expect(warnings).toContainText('E2EDVM1');
+
+  await form.locator('button[type="submit"]').click();
+  const hostMove = page.locator('[data-deploy-preview] [data-deploy-host-move]');
+  await expect(hostMove, 'queueing stops at the confirmation first').toBeVisible();
+  await expect(hostMove).toContainText('127.0.0.1');
+  await expect(page.locator('form:has(input[name="confirmed"])'), 'the confirmation re-submits explicitly').toBeVisible();
+  expect(missionJobs(seed.missionId).length, 'nothing was queued before the confirmation').toBe(0);
+});
+
 // WM-E2a: "adopt identity" was removed. A foreign namesake blocks with links to
 // the portal VM and to the inventory refresh, and a hand-made adopt_vm POST
 // (an old tab, a bookmark) binds nothing and writes no audit row.

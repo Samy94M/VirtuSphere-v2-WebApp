@@ -29,9 +29,23 @@ declare(strict_types=1);
 /** @var bool $canQueue */
 /** @var array<string,mixed> $ansibleTestSnapshot */
 
-if ($deployPreview !== null) { ?>
-    <section class="panel">
-        <h2><?php echo h(__t('deploy.preview_heading')); ?></h2>
+if ($deployPreview !== null) {
+    $previewHasSchedule = (bool) $deployPreview['schedule']['has_schedule'];
+    $previewHostMoves = $deployPreview['host_moves'] ?? []; ?>
+    <section class="panel" data-deploy-preview>
+        <h2><?php echo h(__t($previewHasSchedule ? 'deploy.preview_heading' : 'deploy.host_move_heading')); ?></h2>
+        <?php if ($previewHostMoves !== []) { ?>
+            <div class="alert alert-warning" data-deploy-host-move>
+                <p><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(deploy_host_move_message($previewHostMoves)); ?></p>
+                <ul>
+                    <?php foreach ($previewHostMoves as $move) { ?>
+                        <li><?php echo h((string) $move['vm_name']); ?>: <?php echo h((string) $move['bound_host']); ?></li>
+                    <?php } ?>
+                </ul>
+                <p><?php echo h(__t('deploy.host_move_confirm_hint')); ?></p>
+            </div>
+        <?php } ?>
+        <?php if ($previewHasSchedule) { ?>
         <p class="muted"><?php echo h(__t('deploy.preview_hint', ['tz' => portal_timezone()])); ?></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('deploy.preview_when')); ?></th></tr></thead>
@@ -42,6 +56,7 @@ if ($deployPreview !== null) { ?>
             <?php if ($deployPreview['rows'] === [] && $deployPreview['skipped_vms'] === []) { ?><tr><td colspan="2"><?php echo h(__t('deploy.vms_empty')); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
+        <?php } ?>
         <?php if ($deployPreview['skipped_vms'] !== []) { ?>
             <p class="alert alert-warning">
                 <?php echo h(__t(count($deployPreview['skipped_vms']) === 1 ? 'deploy.uncreated_vm_skipped_one' : 'deploy.uncreated_vm_skipped_many', ['count' => count($deployPreview['skipped_vms'])])); ?>

@@ -39,7 +39,7 @@ function repo_deploy_retry_job(mysqli $db, int $jobId, bool $lock = false): ?arr
  * The sole retry decision. Findings are emitted in invariant order: remote,
  * identity, current portal network, then confirmable external history.
  *
- * @return array{retryable:bool,allowed:bool,effective_mode:string,scope_vm_ids:list<int>,findings:list<array<string,mixed>>,blocking_findings:list<array<string,mixed>>,external_confirmation:bool,network_ready:bool,repair_vm_id:?int,plan:?array,source_create_rows:list<array<string,mixed>>}
+ * @return array{retryable:bool,allowed:bool,effective_mode:string,scope_vm_ids:list<int>,findings:list<array<string,mixed>>,blocking_findings:list<array<string,mixed>>,external_confirmation:bool,network_ready:bool,repair_vm_id:?int,plan:?array,source_create_rows:list<array<string,mixed>>,host_moves:list<array<string,mixed>>}
  */
 function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): array
 {
@@ -212,6 +212,9 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
         'repair_vm_id' => $repairVmId,
         'plan' => $plan,
         'source_create_rows' => ansible_mode_creates_vms($mode) ? $sourceCreateRows : [],
+        // K17: what a create retry would build anew on another host; shown in
+        // the retry confirmation and beside the retry button, never a blocker.
+        'host_moves' => $blocking === [] ? repo_vm_create_host_moves($db, $missionId, (int) $job['credential_esxi_id'], $scopeIds, $mode) : [],
     ];
 }
 
@@ -261,6 +264,7 @@ function deploy_retry_evaluation_unavailable(string $code): array
         'repair_vm_id' => null,
         'plan' => null,
         'source_create_rows' => [],
+        'host_moves' => [],
     ];
 }
 

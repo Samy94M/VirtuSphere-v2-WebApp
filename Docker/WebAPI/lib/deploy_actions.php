@@ -7,6 +7,7 @@ require_once __DIR__ . '/deploy_recovery_actions.php';
 require_once __DIR__ . '/ansible.php';
 require_once __DIR__ . '/deploy_form_state.php';
 require_once __DIR__ . '/deploy_blockers.php';
+require_once __DIR__ . '/deploy_network_blockers.php';
 require_once __DIR__ . '/deploy_page.php';
 require_once __DIR__ . '/deploy_storage.php';
 require_once __DIR__ . '/deploy_urls.php';
@@ -80,12 +81,18 @@ function deploy_handle_post(mysqli $connection, array $user, int $selectedMissio
 
             deploy_assert_queue_unblocked($connection, $queueInput);
 
-            if ($schedule['has_schedule'] && !$confirmed) {
+            // K17 (FM-E1): a Create that would build bound VMs anew on another
+            // host is queued only after a server-side confirmation step, so
+            // the warning stands before the job exists, with or without
+            // JavaScript. It reuses the schedule preview's confirm form.
+            $hostMoves = $confirmed ? [] : deploy_queue_host_moves($connection, $queueInput);
+            if (($schedule['has_schedule'] || $hostMoves !== []) && !$confirmed) {
                 $previewMission = repo_get_mission($connection, $missionIdPost);
                 $previewRows = deploy_preview_rows($connection, $missionIdPost, $payloadData, $schedule);
 
                 return [
                     'schedule' => $schedule,
+                    'host_moves' => $hostMoves,
                     'rows' => $previewRows['rows'],
                     'skipped_vms' => $previewRows['skipped_vms'],
                     'storage' => $previewMission !== null && $previewRows['eligible_vm_ids'] !== []

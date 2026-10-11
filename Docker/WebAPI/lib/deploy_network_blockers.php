@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_form_state.php';
+require_once __DIR__ . '/deploy_host_move.php';
 require_once __DIR__ . '/deploy_page.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/vm_network_display.php';
@@ -11,6 +12,7 @@ require_once __DIR__ . '/repo/missions.php';
 require_once __DIR__ . '/repo/vms.php';
 require_once __DIR__ . '/repo/vm_network.php';
 require_once __DIR__ . '/repo/deploy_job_scope.php';
+require_once __DIR__ . '/repo/vm_identity.php';
 
 /** @return list<array<string,mixed>> */
 function deploy_queue_warnings(mysqli $db, array $input): array
@@ -48,11 +50,39 @@ function deploy_queue_warnings(mysqli $db, array $input): array
     if ($eligibleIds === []) {
         return $warnings;
     }
+    $hostMoves = repo_vm_create_host_moves($db, $state['mission_id'], $state['credential_esxi_id'], $eligibleIds, $state['mode']);
+    if ($hostMoves !== []) {
+        $warnings[] = ['kind' => 'vm_host_move', 'code' => 'vm_host_move', 'message' => deploy_host_move_message($hostMoves)];
+    }
     $preflight = repo_vm_network_preflight($db, $state['mission_id'], $eligibleIds, (string) ($mission['wds_vlan'] ?? ''));
     return array_merge($warnings, array_map(
         static fn (array $finding): array => deploy_network_finding_item($finding, false),
         repo_vm_network_preflight_warnings($preflight, $state['mode'])
     ));
+}
+
+/**
+ * K17: the bound VMs this queue request would build anew on another host. The
+ * POST asks for a confirmation while this is non-empty, so the warning stands
+ * before the job exists even without JavaScript.
+ *
+ * @return list<array<string,mixed>>
+ */
+function deploy_queue_host_moves(mysqli $db, array $input): array
+{
+    $state = deploy_queue_normalize_input($input);
+    if ($state['mission_id'] <= 0 || $state['credential_esxi_id'] <= 0) {
+        return [];
+    }
+    $scope = repo_deploy_mode_vm_selection($db, $state['mission_id'], $state['vm_ids'], $state['mode']);
+
+    return repo_vm_create_host_moves(
+        $db,
+        $state['mission_id'],
+        $state['credential_esxi_id'],
+        array_map(static fn (array $vm): int => $vm['id'], $scope['eligible_vms']),
+        $state['mode']
+    );
 }
 
 /** @return array<string,mixed> */

@@ -691,6 +691,54 @@ final class MacImportCallbackTest extends TestCase
     }
 
     /**
+     * K17: the export that proves an instance UUID also records through which
+     * access and against which access target it was proven, so a later Create
+     * through another host can warn before it builds the VM anew.
+     */
+    public function testCallbackRecordsTheAccessAndHostThatProvedTheIdentity(): void
+    {
+        $missionId = $this->insertMission('hostbind');
+        $vmId = $this->insertVm($missionId, 'HOSTBIND');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId]);
+        $host = strtolower($this->prefix) . '.esxi.invalid';
+        $stmt = $this->db->prepare("INSERT INTO deploy_credentials (type,name,host,username,secret_ciphertext) VALUES ('esxi', ?, ?, 'fixture', 'unused')");
+        $name = $this->prefix . '_hostbind';
+        $stmt->bind_param('ss', $name, $host);
+        $stmt->execute();
+        $credentialId = (int) $this->db->insert_id;
+        try {
+            $stmt = $this->db->prepare('UPDATE deploy_jobs SET credential_esxi_id = ? WHERE id = ?');
+            $stmt->bind_param('ii', $credentialId, $jobId);
+            $stmt->execute();
+
+            [$status, $body] = $this->post([
+                'mission_id' => $missionId,
+                'job_id' => $jobId,
+                'results' => [['instance' => [
+                    'hw_name' => $this->vmName('HOSTBIND'),
+                    'moid' => 'vm-4243',
+                    'instance_uuid' => $this->uuid('hostbind'),
+                    'hw_eth0' => ['macaddress' => $this->mac('hb0'), 'summary' => 'WDS'],
+                ]]],
+            ]);
+
+            self::assertSame(200, $status, $body);
+            $stmt = $this->db->prepare('SELECT vm_bound_credential_id, vm_bound_esxi_host FROM deploy_vms WHERE id = ?');
+            $stmt->bind_param('i', $vmId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            self::assertIsArray($row);
+            self::assertSame($credentialId, (int) $row['vm_bound_credential_id']);
+            self::assertSame($host, $row['vm_bound_esxi_host']);
+        } finally {
+            $stmt = $this->db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
+            $stmt->bind_param('i', $credentialId);
+            $stmt->execute();
+        }
+    }
+
+    /**
      * A stored instance UUID is the VM's identity; a callback naming the same
      * VM name with a DIFFERENT instance UUID talks about a foreign VM. Nothing
      * of that row may be written - not the MACs, not the state, and least of

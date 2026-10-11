@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../credentials.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../ansible_command_modes.php';
 require_once __DIR__ . '/helpers.php';
 
 final class VmIdentityConflictException extends RuntimeException
@@ -87,4 +88,67 @@ function repo_deploy_assert_no_vm_identity_conflicts(mysqli $db, int $missionId,
     if ($conflicts !== []) {
         throw new VmIdentityConflictException($conflicts);
     }
+}
+
+/**
+ * Comparable form of an ESXi access target. DNS names are case-insensitive and
+ * a trailing root dot names the same host; anything else (an IP versus a name
+ * for the same machine) stays different and at worst warns once too often.
+ */
+function vm_identity_host_key(string $host): string
+{
+    return strtolower(rtrim(trim($host), '.'));
+}
+
+/**
+ * K17 (FM-01, FM-E1): bound VMs in a create scope whose binding was proven on a
+ * different access target than the one this job would use. Create there finds
+ * neither the UUID nor the name and builds them anew; the old VMs and their
+ * MECM devices keep running. This is a warning source only, never a blocker.
+ *
+ * A binding without a recorded host (before migration 0061 and without create
+ * evidence) is unknown and yields nothing: it is never treated as "elsewhere".
+ *
+ * @param list<int> $vmIds the materialized scope; empty yields nothing
+ * @return list<array{vm_id:int,vm_name:string,bound_host:string,bound_credential_id:?int,bound_credential_name:?string}>
+ */
+function repo_vm_create_host_moves(mysqli $db, int $missionId, int $credentialId, array $vmIds, string $mode): array
+{
+    $vmIds = array_values(array_unique(array_filter(array_map('intval', $vmIds), static fn (int $id): bool => $id > 0)));
+    if ($missionId <= 0 || $credentialId <= 0 || $vmIds === [] || !ansible_mode_creates_vms($mode)) {
+        return [];
+    }
+    $target = repo_scalar($db, 'SELECT host FROM deploy_credentials WHERE id = ? AND type = ? LIMIT 1', 'is', [$credentialId, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI]);
+    if ($target === null) {
+        return [];
+    }
+    $targetKey = vm_identity_host_key((string) $target);
+
+    $stmt = $db->prepare(
+        'SELECT v.id, v.vm_name, v.vm_bound_esxi_host, v.vm_bound_credential_id, c.name AS bound_credential_name'
+        . ' FROM deploy_vms v LEFT JOIN deploy_credentials c ON c.id = v.vm_bound_credential_id'
+        . " WHERE v.mission_id = ? AND COALESCE(v.vm_instance_uuid, '') <> '' AND COALESCE(v.vm_bound_esxi_host, '') <> ''"
+        . ' AND v.id IN (' . implode(',', array_fill(0, count($vmIds), '?')) . ')'
+        . ' ORDER BY v.vm_name, v.id'
+    );
+    $params = array_merge([$missionId], $vmIds);
+    $stmt->bind_param(str_repeat('i', count($params)), ...$params);
+    $stmt->execute();
+
+    $moves = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $boundHost = trim((string) $row['vm_bound_esxi_host']);
+        if (vm_identity_host_key($boundHost) === $targetKey) {
+            continue;
+        }
+        $moves[] = [
+            'vm_id' => (int) $row['id'],
+            'vm_name' => (string) $row['vm_name'],
+            'bound_host' => $boundHost,
+            'bound_credential_id' => $row['vm_bound_credential_id'] === null ? null : (int) $row['vm_bound_credential_id'],
+            'bound_credential_name' => $row['bound_credential_name'] === null ? null : (string) $row['bound_credential_name'],
+        ];
+    }
+
+    return $moves;
 }

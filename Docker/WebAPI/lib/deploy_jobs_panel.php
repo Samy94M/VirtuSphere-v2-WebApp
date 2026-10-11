@@ -62,7 +62,10 @@ require_once __DIR__ . '/deploy_retry_confirmation.php';
                         $retryName = (string) ($job['mission_name'] ?? '');
                         $retryConfirm = deploy_retry_confirmation($retryEvaluation ?? [], $retryName);
                         ?>
-                        <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed'])) { ?>
+                        <?php if (is_array($retryEvaluation) && !empty($retryEvaluation['allowed']) && ($retryEvaluation['host_moves'] ?? []) !== []) { ?>
+                            <?php // K17: the job log shows the host warning beside its retry button. ?>
+                            <a class="button button-secondary" href="<?php echo h(deploy_job_log_url((int) $job['id']) . '#deploy-retry-host-move'); ?>"><?php echo h(__t('deploy.retry')); ?></a>
+                        <?php } elseif (is_array($retryEvaluation) && !empty($retryEvaluation['allowed'])) { ?>
                             <form class="inline-form" method="post" action="deploy.php<?php echo $selectedMissionId > 0 ? '?mission_id=' . h((string) $selectedMissionId) : ''; ?>">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="action" value="retry">

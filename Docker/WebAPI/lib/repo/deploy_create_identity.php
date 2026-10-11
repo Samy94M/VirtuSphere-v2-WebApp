@@ -89,7 +89,7 @@ function repo_deploy_create_commit_success(
     ): array {
         $running = $fromStatus;
         $stmt = $db->prepare(
-            'SELECT r.id, r.vm_id, r.status, r.outcome, r.vm_instance_uuid, r.replaced_instance_uuid, j.mission_id'
+            'SELECT r.id, r.vm_id, r.status, r.outcome, r.vm_instance_uuid, r.replaced_instance_uuid, j.mission_id, j.credential_esxi_id'
             . ' FROM deploy_create_vm_results r JOIN deploy_jobs j ON j.id = r.job_id'
             . ' WHERE r.job_id = ? AND r.position = ?'
             . ' AND j.status IN (?, ?) AND j.locked_by = ? AND j.lock_token = ? AND j.worker_epoch = ?'
@@ -184,13 +184,17 @@ function repo_deploy_create_commit_success(
         // the deleted VM must not count for the new one) and forgets its
         // imported MACs. MECM stays with the operator: delete the old device
         // there, then reset the MECM ID in the portal.
+        // K17: the identity was just proven through this job's access, so the
+        // binding records that access and its current target with it.
+        $credentialId = $row['credential_esxi_id'] === null ? null : (int) $row['credential_esxi_id'];
         repo_execute(
             $db,
             'UPDATE deploy_vms SET vm_moid = ?, vm_instance_uuid = ?, '
             . ($replacement ? 'package_report_generation = UUID_TO_BIN(UUID()), ' : '')
+            . "vm_bound_credential_id = ?, vm_bound_esxi_host = (SELECT c.host FROM deploy_credentials c WHERE c.id = ? AND c.type = 'esxi'), "
             . 'updated_at = NOW() WHERE id = ? AND mission_id = ?',
-            'ssii',
-            [$liveMoid, ($stored === '' || $replacement) ? $liveInstanceUuid : $stored, $vmId, $missionId]
+            'ssiiii',
+            [$liveMoid, ($stored === '' || $replacement) ? $liveInstanceUuid : $stored, $credentialId, $credentialId, $vmId, $missionId]
         );
         if ($replacement) {
             repo_vm_network_forget_observed_macs($db, $vmId);
