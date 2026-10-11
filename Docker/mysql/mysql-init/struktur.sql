@@ -493,6 +493,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- Scheduling (ADR-0022): scheduled_at is a UTC run-not-before time;
     -- group_id ties a staggered batch of per-VM jobs together.
     scheduled_at DATETIME NULL,
+    -- K18 (migration 0062): UTC time of the first claim, written once. The
+    -- portal names a scheduled job that started late; locked_at is cleared at
+    -- every terminal transition and cannot carry it.
+    started_at DATETIME NULL,
     -- Etappe 14B: UTC start of the create section and the persistent source of
     -- its budget. Set by the worker at the first create unit, not at claim
     -- time: queue waiting is not create work, and a budget starting there would

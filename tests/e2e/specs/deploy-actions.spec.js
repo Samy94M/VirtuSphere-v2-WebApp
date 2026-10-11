@@ -216,6 +216,40 @@ echo 'JSON' . json_encode(['esxiB' => $esxiB]) . 'JSON';
   expect(missionJobs(seed.missionId).length, 'nothing was queued before the confirmation').toBe(0);
 });
 
+// K18 (FM-04, FM-E3): a scheduled job that started late shows its actual start
+// and the delay in the job list and on its log page; an on-time job shows
+// neither. Both jobs are terminal seeds, so no worker can touch them.
+test('late scheduled start: list and log name the delay, an on-time job stays quiet', async ({ page }) => {
+  const seed = seedBase();
+  const jobs = phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
+$ids = [];
+foreach ([['late', 7200, 5400], ['ontime', 7200, 7140]] as [$tag, $plannedAgo, $startedAgo]) {
+    $stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, terminal_reason_code, terminal_reason_detail, scheduled_at, started_at) VALUES (?, ?, 'succeeded', ?, ?, ?, 'completed', 'seeded', DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND), DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND))");
+    $mid = ${seed.missionId};
+    $uid = ${seed.admin};
+    $esxi = ${seed.esxi};
+    $ans = ${seed.ansible};
+    $stmt->bind_param('iisiiii', $mid, $uid, $payload, $esxi, $ans, $plannedAgo, $startedAgo);
+    $stmt->execute();
+    $ids[$tag] = (int) $db->insert_id;
+}
+echo 'JSON' . json_encode($ids) . 'JSON';
+`);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const lateRow = page.locator('tr', { has: page.locator(`a[href="deploy_log.php?id=${jobs.late}"]`) });
+  const onTimeRow = page.locator('tr', { has: page.locator(`a[href="deploy_log.php?id=${jobs.ontime}"]`) });
+  await expect(lateRow.locator('[data-deploy-late-start]'), 'the late job names its delay').toContainText('30');
+  await expect(onTimeRow.locator('[data-deploy-late-start]'), 'an on-time job shows no note').toHaveCount(0);
+
+  await page.goto(`deploy_log.php?id=${jobs.late}`);
+  await expect(page.locator('[data-deploy-late-start]'), 'the log page names the delay too').toContainText('30');
+  await page.goto(`deploy_log.php?id=${jobs.ontime}`);
+  await expect(page.locator('[data-deploy-late-start]')).toHaveCount(0);
+});
+
 // WM-E2a: "adopt identity" was removed. A foreign namesake blocks with links to
 // the portal VM and to the inventory refresh, and a hand-made adopt_vm POST
 // (an old tab, a bookmark) binds nothing and writes no audit row.

@@ -1499,3 +1499,20 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 **Gegenproben vorbereitet, nicht ausgeführt:** `K17CreateHostMoveTest` (Create-Commit hält Zugang/Host fest; zweiter Zugang mit anderem Host warnt für `create` und `full`, derselbe Zugang und `export` nicht; umgezogenes Zugangsziel warnt, Groß-/Kleinschreibung und Punkt nicht; Retry-Dialog nennt den bisherigen Host; Migration übernimmt nur unveränderte Create-Belege), `MacImportCallbackTest::testCallbackRecordsTheAccessAndHostThatProvedTheIdentity`, E2E `deploy-actions.spec.js` „create on another host“ (Live-Warnung mit bisherigem Host, Bestätigungsseite statt Auftrag, mit dem bisherigen Zugang keine Warnung). Am Vorherstand fehlen die neuen Spalten und `migrate_0061`; deren Fälle sind strukturell. Fachlich rot am Vorherstand erwartet: Warnungs- und Retry-Fälle sowie der E2E-Fall (dort reiht der alte Code sofort ein); die E2E-Fixture schreibt die neuen Spalten und ist am Vorherstand deshalb ebenfalls strukturell.
 
 **Nachweise:** `qa-artifacts/k17-2026-10-11/own-paths.txt`. Lokal nur `php -l` aller geänderten PHP-Dateien im Tooling-Image (grün). Keine Gates zwischen den Paketen. Nächster Schritt: K18.
+
+### K18: Verspätete geplante Aufträge kennzeichnen (FM-04, FM-E3), 11.10.2026
+
+**Stand: lokal umgesetzt, gebündelte Prüfung und Schlussabnahme offen.** Paketquelle: K17-Kopf `82bde1d`.
+
+**Nachmessung:** FM-04 bestätigt. `repo_claim_next_deploy_job()` nimmt jeden fälligen Auftrag ohne Obergrenze (`scheduled_at <= UTC_TIMESTAMP()`). Die Jobliste zeigt nur „geplant für“ und die letzte Änderung. Der tatsächliche Start war nicht abrufbar: `locked_at` setzt der Claim, aber jeder Terminalübergang (Abschluss, Abbruch, Reaper, Recovery) leert ihn wieder. Kein entfallener Befund.
+
+**Festlegungen im Paket:**
+- *Schwelle:* 15 Minuten, einschließlich (`VIRTUSPHERE_DEPLOY_LATE_START_THRESHOLD_MINUTES`, `lib/deploy_late_start.php`; dort, weil `deploy_constants.php` an der Dateigrößengrenze steht). Begründung: Eine normale Übernahme dauert Sekunden (Leerlaufwarten des Workers); 15 Minuten erreicht nur ein Auftrag, der hinter einem Worker-Ausfall oder einem langen Auftrag einer anderen Mission wartet (WK-01). Der Wert liegt unter jeder Verspätung, um die eine Bedienperson ihren Ablauf planen würde, und deutlich über dem Abstand normaler Staffelung bei kurzem Lauf.
+- *Tatsächlicher Start:* neue Spalte `deploy_jobs.started_at` (UTC), einmalig im Claim-CAS mit `COALESCE`, Migration 0062, keine Rückfüllung; Aufträge von vor dem Update zeigen keinen Hinweis.
+- *Anzeige:* nur ab der Schwelle, sonst nichts zusätzlich (FM-E3 „pünktlich: kein Hinweis“): Jobliste mit Warnbadge „startete N Minuten nach Plan“ und „gestartet <Zeit>“, Auftragsprotokoll mit Karte „Tatsächlicher Start“ samt Badge, und die technische Claim-Zeile `Deploy job claimed by …; started N minutes after its scheduled start … UTC`. Keine Verfallszeit, der Auftrag läuft weiter.
+
+**Umsetzung:** Migration `0062_deploy_job_started_at` und Frischschema; Claim in `lib/repo/deploy_job_worker.php`; Abfragen in `deploy_job_queries.php`; Liste `deploy_jobs_panel.php`; Protokollseite `portal/deploy_log.php`; Hilfe DE/EN (`deploy_schedule_p4`, Schwelle aus der Konstante); `deploy-flows.md` (Worker-Schleife), `deploy-chain.md` (Übergabetabelle), R11 in `docs/ai/reference/database.md`.
+
+**Gegenproben vorbereitet, nicht ausgeführt:** `DeployLateStartTest` (Schwelle einschließlich, darunter nichts, ungeplant/ungestartet/unlesbar nie verspätet; am Vorherstand fehlt das Modul, strukturell), `K18LateStartClaimTest` (verspäteter Auftrag wird trotzdem übernommen und die Claim-Zeile nennt die Verspätung: fachlich rot erwartet; pünktlicher Auftrag ohne Hinweis: Gegenfall, am Vorherstand grün; erster Claim-Zeitpunkt bleibt bei erneutem Claim: strukturell), E2E `deploy-actions.spec.js` „late scheduled start“ (Liste und Protokollseite; Fixture schreibt `started_at`, am Vorherstand strukturell).
+
+**Nachweise:** `qa-artifacts/k18-2026-10-11/own-paths.txt`. Lokal nur `php -l` und `node --check` (grün). Nächster Schritt: K19.

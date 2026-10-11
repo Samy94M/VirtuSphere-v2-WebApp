@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../deploy_late_start.php';
 require_once __DIR__ . '/../deploy_job_output.php';
 require_once __DIR__ . '/../deploy_job_result.php';
 require_once __DIR__ . '/../deploy_host_preflight_result.php';
@@ -103,13 +104,18 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
             // Nothing here activates that contract: the job stays `legacy`.
             $lockToken = bin2hex(random_bytes(16));
             $epoch = (int) repo_scalar($db, "SELECT COALESCE(MAX(epoch), 0) FROM deploy_worker_leases WHERE lease_name = 'deploy-worker'");
-            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, lock_token = ?, worker_epoch = ?, heartbeat_at = NOW(), attempts = attempts + 1, execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ? AND status = ? AND cancelled_at IS NULL');
+            $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, locked_at = NOW(), locked_by = ?, lock_token = ?, worker_epoch = ?, heartbeat_at = NOW(), attempts = attempts + 1, started_at = COALESCE(started_at, UTC_TIMESTAMP()), execution_contract = COALESCE(execution_contract, ?), execution_generation_id = COALESCE(execution_generation_id, UNHEX(?)), updated_at = NOW() WHERE id = ? AND status = ? AND cancelled_at IS NULL');
             $stmt->bind_param('sssissis', $running, $workerId, $lockToken, $epoch, $legacyContract, $generation, $jobId, $queued);
             $stmt->execute();
             if ($stmt->affected_rows !== 1) {
                 return null;
             }
-            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId);
+            // K18: a late scheduled start is named in the claim line itself; the
+            // job still runs, there is no expiry (FM-E3).
+            $start = repo_fetch_one($db, 'SELECT scheduled_at, started_at FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+            $lateMinutes = $start === null ? null : deploy_job_late_start_minutes($start);
+            repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Deploy job claimed by ' . $workerId
+                . ($lateMinutes === null ? '' : '; started ' . $lateMinutes . ' minutes after its scheduled start ' . (string) $start['scheduled_at'] . ' UTC'));
             if ($missionId > 0 && !$explicitEmptyScope) {
                 repo_deploy_job_vm_capture($db, ['id' => $jobId, 'mission_id' => $missionId], $scope);
             }

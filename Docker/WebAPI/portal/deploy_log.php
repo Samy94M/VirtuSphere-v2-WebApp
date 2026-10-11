@@ -16,6 +16,7 @@ require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_log_history.php';
 require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
 require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';
+require_once __DIR__ . '/../lib/deploy_late_start.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -262,6 +263,11 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
+        <?php // K18: only a late scheduled start earns a card; an on-time job shows nothing extra. ?>
+        <?php $lateMinutes = deploy_job_late_start_minutes($job); ?>
+        <?php if ($lateMinutes !== null) { ?>
+            <article class="card kpi" data-deploy-late-start><span class="muted"><?php echo h(__t('deploy.kpi_started')); ?></span><span class="value value-small"><?php echo h(portal_format_timestamp((string) $job['started_at'])); ?> <?php echo portal_badge('warning', __t('deploy.late_start', ['minutes' => $lateMinutes])); ?></span></article>
+        <?php } ?>
         <?php // The trace of the portal request that enqueued this job
               // (ADR-0032). Rendered exactly as the audit table renders it, so
               // the id can be carried from here into the log search and back;

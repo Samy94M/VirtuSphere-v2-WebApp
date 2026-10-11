@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/deploy_retry_confirmation.php';
+require_once __DIR__ . '/deploy_late_start.php';
 
 /** @var list<array<string,mixed>> $missions */
 /** @var int $selectedMissionId */
@@ -41,6 +42,10 @@ require_once __DIR__ . '/deploy_retry_confirmation.php';
                     <?php } ?>
                     <?php if (!empty($job['scheduled_at'])) { ?>
                         <div class="muted nowrap"><?php echo h(__t('deploy.scheduled_for', ['time' => portal_format_timestamp((string) $job['scheduled_at'])])); ?></div>
+                    <?php } ?>
+                    <?php $lateMinutes = deploy_job_late_start_minutes($job); ?>
+                    <?php if ($lateMinutes !== null) { ?>
+                        <div class="nowrap" data-deploy-late-start><?php echo portal_badge('warning', __t('deploy.late_start', ['minutes' => $lateMinutes])); ?> <span class="muted"><?php echo h(__t('deploy.started_at', ['time' => portal_format_timestamp((string) $job['started_at'])])); ?></span></div>
                     <?php } ?>
                 </td>
                 <td><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></td>

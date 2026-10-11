@@ -2,6 +2,7 @@
 // Help panel partial, included by portal/help.php. Not directly reachable
 // (nginx denies /lib/).
 declare(strict_types=1);
+require_once __DIR__ . '/../deploy_late_start.php';
 ?>
     <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -85,6 +86,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_deploy.deploy_schedule_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_schedule_p2', ['modes' => deploy_mode_label_list(VIRTUSPHERE_DEPLOY_STAGGER_MODES)])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_schedule_p3')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_schedule_p4', ['minutes' => VIRTUSPHERE_DEPLOY_LATE_START_THRESHOLD_MINUTES])); ?></p>
         </section>
 
         <section class="panel">

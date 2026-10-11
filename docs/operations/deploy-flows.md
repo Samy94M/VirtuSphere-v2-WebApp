@@ -70,7 +70,7 @@ Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trus
 
 ```mermaid
 flowchart TD
-  L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist"]
+  L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist; keine Verfallszeit, der erste Claim speichert den tatsächlichen Start und nennt einen verspäteten Termin"]
   L --> I{"Systemmodus inventory?"}
   I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
   I -->|nein| J["Claim speichert den Vorzustand pro Auftrag und VM; keine Rückfüllung alter Jobs"] --> K["Collection-Sperre (requirements.yml) lokal lesen"]

@@ -74,3 +74,7 @@ Migration 0060 creates `deploy_job_vm_states`, keyed by durable `id` with unique
 ## R10 VM host binding is evidence, never a guess
 
 Migration 0061 adds `vm_bound_credential_id` (FK, `ON DELETE SET NULL`) and `vm_bound_esxi_host` to `deploy_vms`, after `vm_instance_uuid`. Only the two identity writers set them (create success commit, MAC export identity write). The backfill takes the newest succeeded or skipped create unit whose UUID equals the stored one and copies its job's access and that access's host, but only when the access has not been updated since the unit finished; everything else stays NULL. Clones, templates and mission exports never copy them.
+
+## R11 A job's actual start is written once by its first claim
+
+Migration 0062 adds `deploy_jobs.started_at` (UTC `DATETIME`, after `scheduled_at`). `repo_claim_next_deploy_job()` sets it with `COALESCE(started_at, UTC_TIMESTAMP())` in the claim CAS, so a later re-claim never moves it; `locked_at` is not a substitute because every terminal transition clears it. There is no backfill and no expiry: `deploy_job_late_start_minutes()` (`lib/deploy_late_start.php`) owns the threshold `VIRTUSPHERE_DEPLOY_LATE_START_THRESHOLD_MINUTES` and the one late/not-late decision for list, job log and claim line (FM-E3).
