@@ -167,6 +167,10 @@ vorher 21; `SystemStatusChecksDocContractTest` jetzt grün, der neue
 `PortalPageInventoryContractTest` grün), phpstan (6 Befunde, keiner in Audit-Dateien),
 file-size (4 Dateien), powershell-tests (1 Fall zu Powercycle-/Export-Playbooks).
 
-Offen: e2e-Lauf (`e2e-portal`) für `package_reports.php` und `package_run.php`;
-Cluster B, X-03 und `deploy_log.php` in der Matrix nach Commit des Deploy-Pakets;
-Commit dieser Korrekturen nur auf Anweisung.
+Korrekturen committet als `8a9a041` (10.10.2026). `e2e-portal` am 11.10.2026 im
+Blockabschluss K13 bis K16 bestanden: Health-Matrix und Axe für `package_reports.php` und
+`package_run.php` in beiden Themes erwartet (`qa-artifacts/block-k13-k16/green-2/e2e/`).
+Die oben als vorbestehend rot genannten Gates sind mit diesem Blockabschluss grün.
+
+Offen: Cluster B, X-03 und `deploy_log.php` in der e2e-Matrix. Das Deploy-Paket (K13 bis
+K16) ist seit dem 11.10.2026 auf `main`, damit sind alle drei freigegeben.
