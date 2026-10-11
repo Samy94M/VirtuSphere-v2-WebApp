@@ -45,8 +45,8 @@ final class MaintenanceReapTest extends TestCase
         $this->skipWhenForeignRunningJobsExist();
 
         $missionId = $this->insertMission($this->prefix . '_stale');
-        $importedVmId = $this->insertVm($missionId, 'vm-imported', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
-        $stuckVmId = $this->insertVm($missionId, 'vm-stuck', VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $importedVmId = $this->insertVm($missionId, 'vm-imported', VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $stuckVmId = $this->insertVm($missionId, 'vm-stuck', VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
 
         $resultJson = json_encode([
             'version' => 1,
@@ -59,6 +59,16 @@ final class MaintenanceReapTest extends TestCase
             'retry' => ['mode' => 'export', 'vm_ids' => [$stuckVmId]],
         ], JSON_THROW_ON_ERROR);
         $jobId = $this->insertStaleRunningJob($missionId, [$importedVmId, $stuckVmId], $resultJson);
+        // K15: the reaper converges through the job's VM journal. Both VMs were
+        // marked and read by the export playbook (touch admitted before the
+        // read); the callback then committed the import of the first one.
+        $job = $this->stampExportExecution($jobId);
+        deploy_worker_mark_vms_deploying($this->db, $job, 'K15 reap setup', [$importedVmId, $stuckVmId]);
+        foreach ([$importedVmId, $stuckVmId] as $vmId) {
+            self::assertTrue(repo_deploy_job_vm_admit_touch($this->db, $jobId, $vmId, 1, (string) $job['execution_generation_id'], 'export'));
+        }
+        repo_execute($this->db, 'UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ? WHERE id = ?', 'ssi', [VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, $importedVmId]);
+        repo_execute($this->db, 'UPDATE deploy_jobs SET heartbeat_at = DATE_SUB(NOW(), INTERVAL 700 SECOND) WHERE id = ?', 'i', [$jobId]);
 
         // A just-connected observer must NOT reap: while it was blind nothing
         // could write a heartbeat, so every running job looks abandoned and a
@@ -149,6 +159,27 @@ final class MaintenanceReapTest extends TestCase
         }
 
         return $jobId;
+    }
+
+    /**
+     * Gives a fixture job the execution identity a real claim writes, in a
+     * mode whose playbook admits a per-VM touch (export).
+     *
+     * @return array<string,mixed>
+     */
+    private function stampExportExecution(int $jobId): array
+    {
+        $payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => json_decode((string) $this->row('SELECT payload_json FROM deploy_jobs WHERE id = ' . $jobId)['payload_json'], true)['vm_ids']], JSON_THROW_ON_ERROR);
+        repo_execute(
+            $this->db,
+            'UPDATE deploy_jobs j CROSS JOIN deploy_runtime_identity r SET j.payload_json = ?, j.attempts = 1, j.lock_token = REPEAT(\'a\', 32), j.worker_epoch = 1, j.execution_contract = ?, j.execution_generation_id = r.current_generation_id WHERE j.id = ? AND r.id = 1',
+            'ssi',
+            [$payload, VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY, $jobId]
+        );
+        $job = repo_deploy_job($this->db, $jobId);
+        self::assertNotNull($job);
+
+        return $job;
     }
 
     private function skipWhenForeignRunningJobsExist(): void

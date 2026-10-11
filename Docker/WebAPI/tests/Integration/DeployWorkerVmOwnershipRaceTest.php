@@ -85,10 +85,13 @@ final class DeployWorkerVmOwnershipRaceTest extends TestCase
         if (!deploy_claim_state_allows_new_work(repo_deploy_claim_state($this->db)['state'])) {
             self::markTestSkipped('The deploy service is paused; this test never changes its policy.');
         }
-        $old = $this->claim();
+        // `start` never writes VM state (K15): both jobs use a marking mode, and
+        // the old one carries the touch that lets the reaper fail its VM.
+        $old = $this->claim('export');
         deploy_worker_mark_vms_deploying($this->db, $old, 'old started', [$this->vmId]);
+        $this->admitExportTouch($old);
         repo_execute($this->db, 'UPDATE deploy_jobs SET heartbeat_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?', 'i', [(int) $old['id']]);
-        $queued = $this->claim('start', VIRTUSPHERE_DEPLOY_STATUS_QUEUED);
+        $queued = $this->claim('export', VIRTUSPHERE_DEPLOY_STATUS_QUEUED);
         // A pre-existing stagger slot may wait behind the running job.
         repo_execute($this->db, 'UPDATE deploy_jobs SET locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, attempts = 0 WHERE id = ?', 'i', [(int) $queued['id']]);
         $second = $this->secondConnection();

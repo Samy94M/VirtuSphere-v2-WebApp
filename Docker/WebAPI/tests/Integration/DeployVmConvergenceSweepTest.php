@@ -25,6 +25,9 @@ final class DeployVmConvergenceSweepTest extends TestCase
     /** @var list<int> */
     private array $missionIds = [];
 
+    /** Distinguishes VMs that share a mission and a starting state. */
+    private int $vmSeq = 0;
+
     protected function setUp(): void
     {
         try {
@@ -51,7 +54,9 @@ final class DeployVmConvergenceSweepTest extends TestCase
     public function testOrphanedDeployingVmConvergesToFailedFailedAndKeepsItsMac(): void
     {
         $missionId = $this->insertMission('orphan');
-        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        // The job marks the VM deploying itself (K15): a VM that was already
+        // deploying without this job's own mark is historic and never swept.
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
         $mac = '02:AA:BB:CC:DD:01';
         $this->insertInterface($vmId, 'WDS', $mac);
         $jobId = $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, [$vmId]);
@@ -190,7 +195,7 @@ final class DeployVmConvergenceSweepTest extends TestCase
 
     private function insertVm(int $missionId, string $lifecycleState, string $mecmSyncState): int
     {
-        $name = strtoupper($this->prefix . '_' . $lifecycleState . '_' . count($this->missionIds));
+        $name = strtoupper($this->prefix . '_' . $lifecycleState . '_' . count($this->missionIds) . '_' . ++$this->vmSeq);
         $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)');
         $stmt->bind_param('issss', $missionId, $name, $name, $lifecycleState, $mecmSyncState);
         $stmt->execute();
@@ -292,8 +297,10 @@ final class DeployVmConvergenceSweepTest extends TestCase
 
     private function sweepEventCount(int $vmId): int
     {
-        $note = 'convergence sweep: stuck in deploying without an active deploy job';
-        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_vm_status_events WHERE vm_id = ? AND note = ?');
+        // K15: the sweep writes through the journal owner, whose notes name the
+        // path taken (apply recorded outcome / restore completed bracket).
+        $note = 'convergence sweep: %';
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_vm_status_events WHERE vm_id = ? AND note LIKE ?');
         $stmt->bind_param('is', $vmId, $note);
         $stmt->execute();
 

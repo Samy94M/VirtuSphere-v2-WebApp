@@ -357,7 +357,7 @@ final class VmNetworkContractIntegrationTest extends TestCase
         repo_execute($this->db, 'UPDATE deploy_interfaces SET vlan = ? WHERE vm_id = ?', 'si', ['WDS', $this->vmId]);
         $vmIds = [$this->vmId];
         for ($index = 2; $index <= VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS; $index++) {
-            $vmIds[] = $this->insertVm('SCOPE' . $index, 'WDS');
+            $vmIds[] = $this->bindInstanceUuid($this->insertVm('SCOPE' . $index, 'WDS'));
         }
         self::assertCount(VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS, $vmIds);
 
@@ -372,7 +372,7 @@ final class VmNetworkContractIntegrationTest extends TestCase
         self::assertGreaterThan(0, $atLimit, 'exactly the cap must queue');
         repo_execute($this->db, 'DELETE FROM deploy_jobs WHERE id = ?', 'i', [$atLimit]);
 
-        $vmIds[] = $this->insertVm('SCOPEOVER', 'WDS');
+        $vmIds[] = $this->bindInstanceUuid($this->insertVm('SCOPEOVER', 'WDS'));
         try {
             repo_create_deploy_job(
                 $this->db,
@@ -418,6 +418,12 @@ final class VmNetworkContractIntegrationTest extends TestCase
         self::assertSame(help_url('deploy', 'help-network-contract'), (string) $scopeBlocker['help']['url']);
         self::assertSame(__t('deploy.blocker_help_network_contract'), (string) $scopeBlocker['help']['label']);
 
+        // The rendered remedy is a CSRF-protected form; the portal bootstrap
+        // normally supplies the session it needs.
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            $_SESSION = [];
+            session_start();
+        }
         ob_start();
         deploy_render_blockers($blockers, ['id' => $this->userId, 'role' => 'admin'], [], [], $queueInput);
         $html = (string) ob_get_clean();
@@ -479,6 +485,17 @@ final class VmNetworkContractIntegrationTest extends TestCase
         $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
         return (int) $this->db->insert_id;
+    }
+
+    /**
+     * K16 keeps never-created VMs out of UUID-addressed modes, so a VM that is
+     * meant to count against a `start` scope needs a bound Instance UUID.
+     */
+    private function bindInstanceUuid(int $vmId): int
+    {
+        repo_execute($this->db, 'UPDATE deploy_vms SET vm_instance_uuid = ? WHERE id = ?', 'si', ['net-' . bin2hex(random_bytes(8)), $vmId]);
+
+        return $vmId;
     }
 
     private function insertVm(string $suffix, string $vlan): int

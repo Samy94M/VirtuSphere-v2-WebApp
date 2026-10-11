@@ -272,6 +272,11 @@ test('cancel_group: Cancel keeps the slots, Confirm cancels every queued slot', 
   const seed = seedBase();
   runPhp(`
 $db = db();
+// Power-cycle skips VMs without an Instance UUID (K16); bind them like created VMs.
+$stmt = $db->prepare("UPDATE deploy_vms SET vm_instance_uuid = CONCAT('e2e-cg-', id) WHERE mission_id = ?");
+$missionId = ${seed.missionId};
+$stmt->bind_param('i', $missionId);
+$stmt->execute();
 $payload = ['mode' => 'powercycle', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT];
 $result = repo_enqueue_deploy_group($db, ${seed.missionId}, ${seed.admin}, ${seed.esxi}, ${seed.ansible}, $payload, gmdate('Y-m-d H:i:s', time() + 7200), 5);
 echo 'GROUP=' . $result['group_id'];

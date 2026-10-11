@@ -39,8 +39,10 @@ $vmIds = [];
 foreach (['${MARK}-a' => ['E2EDFA1', 'E2EDFA2'], '${MARK}-b' => ['E2EDFB1']] as $name => $vmNames) {
     $mid = repo_create_mission($db, ['mission_name' => $name, 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local'], false, $admin);
     foreach ($vmNames as $vmName) {
-        $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os) VALUES (?, ?, ?, 'Win11')");
-        $stmt->bind_param('iss', $mid, $vmName, $vmName);
+        // Bound like a created VM: power-cycle skips VMs without an Instance UUID (K16).
+        $uuid = 'e2e-df-' . bin2hex(random_bytes(8));
+        $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os, vm_instance_uuid) VALUES (?, ?, ?, 'Win11', ?)");
+        $stmt->bind_param('isss', $mid, $vmName, $vmName, $uuid);
         $stmt->execute();
         $vmIds[] = (int) $db->insert_id;
     }

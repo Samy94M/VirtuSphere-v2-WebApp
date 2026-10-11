@@ -67,8 +67,11 @@ final class DeployWorkerVmOwnershipFenceTest extends TestCase
 
     public function testCurrentCancellationConvergesBeforeTerminalAndIsIdempotent(): void
     {
-        $job = $this->claim();
+        // `start` never writes VM state (K15), so the converging case needs a
+        // marking mode and the touch its playbook admits before the read.
+        $job = $this->claim('export');
         deploy_worker_mark_vms_deploying($this->db, $job, 'started', [$this->vmId]);
+        $this->admitExportTouch($job);
         repo_cancel_deploy_job($this->db, (int) $job['id'], 1);
         deploy_worker_handle_cancelled($this->db, $job, [$this->vmId]);
         self::assertSame(VIRTUSPHERE_LIFECYCLE_FAILED, $this->state()['lifecycle_state']);

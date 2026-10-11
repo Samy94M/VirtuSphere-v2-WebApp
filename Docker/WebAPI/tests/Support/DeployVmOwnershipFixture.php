@@ -39,6 +39,24 @@ trait DeployVmOwnershipFixture
         }
     }
 
+    /**
+     * K15: only a VM with a journaled ESXi touch of this job may fail; an
+     * untouched marked VM is restored. Export admits that touch before its read.
+     *
+     * @param array<string,mixed> $job
+     */
+    private function admitExportTouch(array $job, ?mysqli $connection = null): void
+    {
+        self::assertTrue(repo_deploy_job_vm_admit_touch(
+            $connection ?? $this->db,
+            (int) $job['id'],
+            $this->vmId,
+            (int) $job['attempts'],
+            (string) $job['execution_generation_id'],
+            'export'
+        ), 'fixture must admit the export touch for the claimed VM');
+    }
+
     private function claim(string $mode = 'start', string $status = VIRTUSPHERE_DEPLOY_STATUS_RUNNING): array
     {
         $payload = json_encode(['mode' => $mode, 'vm_ids' => [$this->vmId]], JSON_THROW_ON_ERROR);

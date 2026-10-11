@@ -111,6 +111,7 @@ final class RegisteredVmExportTest extends TestCase
         [$mission, $vm, $jobId, $claim] = $this->boundFixture('os_installed', 'export', 0, null);
         $before = $this->snapshot($vm);
         deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 start', [$vm]);
+        $this->admitExportTouch($claim, [$vm]);
         $response = $this->sendCallback($mission, $jobId, $this->mac($wdsChanged ? 'new' : 'old'), $this->mac($wdsChanged ? 'app' : 'app-new'));
         // A wholly failed MAC result follows the same worker failure path as
         // a sequence exception. FC2-E1 remains the existing convergence owner.
@@ -141,6 +142,10 @@ final class RegisteredVmExportTest extends TestCase
         $claim = repo_deploy_job($this->db, $jobId);
         $before = $this->snapshot($bound);
         $prior = deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 mixed start', $ids);
+        // Every VM the callback reports was read from ESXi, so each carries the
+        // touch the export playbook admits before its info query (K15). The
+        // unchanged bound VM must still survive through successful_vm_ids.
+        $this->admitExportTouch($claim, $ids);
         $results = [];
         foreach (['BOUND' => 'old', 'CHANGED' => 'changed-new', 'NEW' => 'fresh'] as $name => $salt) {
             $instance = ['hw_name' => $this->vmName($name), 'hw_eth0' => ['summary' => 'WDS', 'macaddress' => $this->mac($salt)]];
@@ -287,6 +292,27 @@ final class RegisteredVmExportTest extends TestCase
         $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
         $stmt->bind_param('isssss', $vmId, $empty, $empty, $empty, $vlan, $mac);
         $stmt->execute();
+    }
+
+    /**
+     * The export playbook admits a touch for each VM before it reads it (K15);
+     * without that journal evidence a failure restores the VM instead.
+     *
+     * @param array<string,mixed> $claim
+     * @param list<int> $vmIds
+     */
+    private function admitExportTouch(array $claim, array $vmIds): void
+    {
+        foreach ($vmIds as $vmId) {
+            self::assertTrue(repo_deploy_job_vm_admit_touch(
+                $this->db,
+                (int) $claim['id'],
+                $vmId,
+                (int) $claim['attempts'],
+                (string) $claim['execution_generation_id'],
+                'export'
+            ), 'fixture must admit the export touch for VM ' . $vmId);
+        }
     }
 
     /** @param list<int> $vmIds */

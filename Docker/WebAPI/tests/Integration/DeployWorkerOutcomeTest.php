@@ -178,13 +178,17 @@ final class DeployWorkerOutcomeTest extends TestCase
      * Matrix 14 (E1): a follow-up failure after a committed import fails the
      * JOB, but VMs from successful_vm_ids keep deployed/pending; only the
      * rest converges to failed/failed.
+     *
+     * Runs as `export`: since K15 a create-capable mode admits a touch only
+     * after its create units completed, which the create tests own. The E1
+     * keep rule under test is the same for every MAC-exporting mode.
      */
     public function testLateFollowUpFailureKeepsSuccessfullyImportedVms(): void
     {
         $missionId = $this->insertMission('m14');
         $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
         $unfinished = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
-        $jobId = $this->insertJob($missionId, VIRTUSPHERE_DEPLOY_MODE_FULL, [$imported, $unfinished], $this->resultJson('partial', [$imported], [$unfinished]));
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $unfinished], $this->resultJson('partial', [$imported], [$unfinished]));
         $this->markAndTouch($jobId, [$imported, $unfinished], [$unfinished]);
 
         deploy_worker_handle_failure($this->db, $this->job($jobId), self::WORKER, [$imported, $unfinished], 'Ansible command failed with exit code 2.');

@@ -39,7 +39,7 @@ if ($deployPreview !== null) { ?>
             <?php foreach ($deployPreview['rows'] as $row) { ?>
                 <tr><td><?php echo h((string) $row['vm_name']); ?></td><td><?php echo h(portal_format_epoch((int) $row['epoch'])); ?></td></tr>
             <?php } ?>
-            <?php if ($deployPreview['rows'] === []) { ?><tr><td colspan="2"><?php echo h(__t('deploy.vms_empty')); ?></td></tr><?php } ?>
+            <?php if ($deployPreview['rows'] === [] && $deployPreview['skipped_vms'] === []) { ?><tr><td colspan="2"><?php echo h(__t('deploy.vms_empty')); ?></td></tr><?php } ?>
             </tbody>
         </table></div>
         <?php if ($deployPreview['skipped_vms'] !== []) { ?>
