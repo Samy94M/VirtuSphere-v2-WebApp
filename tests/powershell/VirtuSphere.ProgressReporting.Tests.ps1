@@ -234,14 +234,14 @@ Describe 'Visible progress reporting contract' {
     }
 
     It 'reports every restore and backup phase before and after execution' {
-        $script:RestoreDrill | Should -Match 'PROGRESS_TOTAL=9'
+        $script:RestoreDrill | Should -Match 'PROGRESS_TOTAL=10'
         $script:RestoreDrill | Should -Match 'echo "\[\$progress_position/\$PROGRESS_TOTAL\] RUN \$progress_unit"'
-        ([regex]::Matches($script:RestoreDrill, 'progress_run [1-9] ')).Count | Should -Be 9
+        ([regex]::Matches($script:RestoreDrill, 'progress_run (10|[1-9]) ')).Count | Should -Be 10
         $script:RestoreDrill | Should -Match 'progress_result (pass|fail|infrastructure_error)'
-        $script:RestoreDrill | Should -Match 'progress_run 9 cleanup'
-        $script:BackupRunner | Should -Match 'BACKUP_PROGRESS_TOTAL=4'
+        $script:RestoreDrill | Should -Match 'progress_run 10 cleanup'
+        $script:BackupRunner | Should -Match 'BACKUP_PROGRESS_TOTAL=6'
         $script:BackupRunner | Should -Match 'echo "\[\$backup_progress_position/\$BACKUP_PROGRESS_TOTAL\] RUN \$backup_progress_unit"'
-        ([regex]::Matches($script:BackupRunner, 'backup_progress_run [1-4] ')).Count | Should -Be 4
+        ([regex]::Matches($script:BackupRunner, 'backup_progress_run [1-6] ')).Count | Should -Be 6
         $script:BackupRunner | Should -Match 'backup_progress_result (pass|fail)'
     }
 

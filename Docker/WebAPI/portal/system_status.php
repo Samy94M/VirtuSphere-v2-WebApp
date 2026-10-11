@@ -13,6 +13,7 @@ require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
 require_once __DIR__ . '/../lib/system_status_deviation_view.php';
 require_once __DIR__ . '/../lib/system_status_directory_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
+require_once __DIR__ . '/../lib/backup_encryption.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -101,6 +102,13 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     <?php if (!virtusphere_is_request_secure()) { ?>
         <div class="alert alert-warning"><?php echo h(__t('system_status.http_plaintext')); ?>
             <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_HTTPS)); ?>"><?php echo h(__t('settings.https_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
+    <?php // K19 (VT-E2): the same derivation as the settings backup card. ?>
+    <?php $backupEncryptionFinding = backup_encryption_finding(backup_encryption_certificate($connection), backup_status_read()); ?>
+    <?php if ($backupEncryptionFinding !== null) { ?>
+        <div class="alert alert-warning" data-backup-encryption-finding><?php echo h(backup_encryption_finding_message($backupEncryptionFinding)); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url('backup')); ?>"><?php echo h(__t('settings.backup_title')); ?></a><?php } ?>
         </div>
     <?php } ?>
     <?php // The topbar (lib/layout.php) already renders the page title and the

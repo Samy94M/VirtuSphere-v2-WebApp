@@ -26,6 +26,13 @@
 #                              Einspielen, ein Backup ohne Manifest ist fuer den
 #                              Drill nicht verifizierbar (AP6/E5)
 #
+# Verschluesselung (K19, ADR-0017 Nachtrag 2026-10-11): Ist im Portal unter
+# Einstellungen > Backup ein Zertifikat hinterlegt, heissen 1. und 2.
+# db-<ts>.sql.gz.cms und config-<ts>.tar.gz.cms, jeweils getrennt per
+# `openssl cms` an den oeffentlichen Schluessel verschluesselt
+# (scripts/lib/backup_crypto.sh). Der private Schluessel liegt nie auf diesem
+# Host. Ohne Zertifikat bleibt alles unverschluesselt und das Portal meldet es.
+#
 # Zusaetzlich schreibt jeder Lauf eine JSONL-Statuszeile nach
 # Docker/backups/status/backup-status.jsonl. Dieses Status-Verzeichnis (und nur
 # dieses, nie die Dumps) wird read-only in den PHP-Container gemountet, damit das
@@ -49,7 +56,8 @@
 # Restore-Probe: sh scripts/restore_test.sh (siehe docs/operations/backup.md).
 set -eu
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
-cd "$(dirname "$0")/.."
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)
+cd "$SCRIPT_DIR/.."
 
 CONTAINER="${VIRTUSPHERE_MYSQL_CONTAINER:-virtusphere-v2-webapp-mysql-1}"
 BACKUP_DIR="Docker/backups"
@@ -60,13 +68,18 @@ CRON_FILE="${VIRTUSPHERE_BACKUP_CRON_FILE:-/etc/cron.d/virtusphere-backup}"
 TIMER_UNIT="${VIRTUSPHERE_BACKUP_TIMER_UNIT:-virtusphere-backup.timer}"
 KEEP=14
 STATUS_KEEP_LINES=90
-BACKUP_PROGRESS_TOTAL=4
+BACKUP_PROGRESS_TOTAL=6
 backup_progress_position=0
 backup_progress_unit=""
 db_sql_file=""
 db_file=""
 config_file=""
 manifest_file=""
+db_gz_file=""
+config_tmp_file=""
+cert_dir=""
+encrypted=false
+recipient_sha256=""
 
 backup_progress_run() {
   backup_progress_position=$1
@@ -211,9 +224,9 @@ write_status() {
   esc_schedule_tz=$(json_escape "$schedule_tz")
   esc_schedule_source=$(json_escape "$schedule_source")
 
-  printf '{"ts":%s,"status":"%s","db_bytes":%s,"config_bytes":%s,"duration_s":%s,"keep":%s,"disk_free_pct":%s,"disk_free_bytes":%s,"error":"%s","schedule":"%s","schedule_tz":"%s","schedule_source":"%s","next_ts":%s}\n' \
+  printf '{"ts":%s,"status":"%s","db_bytes":%s,"config_bytes":%s,"duration_s":%s,"keep":%s,"disk_free_pct":%s,"disk_free_bytes":%s,"error":"%s","schedule":"%s","schedule_tz":"%s","schedule_source":"%s","next_ts":%s,"encrypted":%s,"recipient_sha256":"%s"}\n' \
     "$now" "$status" "$db_bytes" "$config_bytes" "$duration" "$KEEP" "$disk_free_pct" "$disk_free_bytes" "$esc_error" \
-    "$esc_schedule" "$esc_schedule_tz" "$esc_schedule_source" "$next_ts" \
+    "$esc_schedule" "$esc_schedule_tz" "$esc_schedule_source" "$next_ts" "$encrypted" "$recipient_sha256" \
     >> "$STATUS_FILE" 2>/dev/null || true
 
   if [ -f "$STATUS_FILE" ]; then
@@ -226,8 +239,13 @@ finish_backup() {
   trap - EXIT INT TERM
   [ -z "$backup_progress_unit" ] || backup_progress_result fail
   cleanup_failed=0
-  if [ -n "$db_sql_file" ] && [ -e "$db_sql_file" ]; then
-    rm -f "$db_sql_file" || cleanup_failed=1
+  # Klartext-Tempdateien verschwinden immer, auch nach Erfolg: verschluesselt
+  # darf kein lesbarer Dump und kein lesbares Config-Archiv liegen bleiben.
+  for plain in "$db_sql_file" "$db_gz_file" "$config_tmp_file"; do
+    [ -z "$plain" ] || [ ! -e "$plain" ] || rm -f "$plain" || cleanup_failed=1
+  done
+  if [ -n "$cert_dir" ] && [ -d "$cert_dir" ]; then
+    rm -rf "$cert_dir" || cleanup_failed=1
   fi
   if [ "$status" != ok ]; then
     for partial in "$db_file" "$config_file" "$manifest_file"; do
@@ -255,7 +273,6 @@ if ! docker exec "$CONTAINER" true >/dev/null 2>&1; then
   backup_fail "MySQL-Container '$CONTAINER' nicht erreichbar. Stack gestartet?"
 fi
 
-db_file="$BACKUP_DIR/db-$ts.sql.gz"
 db_sql_file=$(umask 077 && mktemp "$BACKUP_DIR/.db-$ts-XXXXXX.sql") \
   || backup_fail "Geschuetzte SQL-Tempdatei konnte nicht erzeugt werden."
 chmod 600 "$db_sql_file" \
@@ -263,22 +280,51 @@ chmod 600 "$db_sql_file" \
 if ! docker exec "$CONTAINER" sh -c 'exec mysqldump --databases "$MYSQL_DATABASE" --routines --events --triggers --single-transaction -uroot -p"$MYSQL_ROOT_PASSWORD"' > "$db_sql_file"; then
   backup_fail "mysqldump schlug fehl; partieller Dump wird verworfen."
 fi
-if ! gzip -c "$db_sql_file" > "$db_file"; then
+# Auch der komprimierte Dump entsteht zuerst geschuetzt; erst Schritt 4 legt
+# ihn - verschluesselt oder nicht - unter seinem endgueltigen Namen ab.
+db_gz_file=$(umask 077 && mktemp "$BACKUP_DIR/.db-$ts-XXXXXX.gz") \
+  || backup_fail "Geschuetzte Dump-Tempdatei konnte nicht erzeugt werden."
+if ! gzip -c "$db_sql_file" > "$db_gz_file"; then
   backup_fail "Komprimierung des DB-Dumps schlug fehl."
 fi
 rm -f "$db_sql_file" || backup_fail "Roher SQL-Dump konnte nicht entfernt werden."
 db_sql_file=""
 
 # Plausibilitaet: ein leerer/abgebrochener Dump darf nicht als Erfolg zaehlen.
-size=$(wc -c < "$db_file" | tr -d ' ')
-if [ "$size" -lt 10240 ] || ! gunzip -t "$db_file" 2>/dev/null; then
-  backup_fail "DB-Dump $db_file ist verdaechtig klein ($size Bytes) oder korrupt."
+size=$(wc -c < "$db_gz_file" | tr -d ' ')
+if [ "$size" -lt 10240 ] || ! gunzip -t "$db_gz_file" 2>/dev/null; then
+  backup_fail "DB-Dump ist verdaechtig klein ($size Bytes) oder korrupt."
 fi
-db_bytes=$size
 backup_progress_result pass
 
-backup_progress_run 2 config-archive
-config_file="$BACKUP_DIR/config-$ts.tar.gz"
+# K19 (VT-E2): Ist im Portal ein Zertifikat hinterlegt, werden Dump und
+# Config-Archiv getrennt daran verschluesselt. Das Config-Archiv traegt den
+# APP_KEY, der Dump die damit verschluesselten Zugangsdaten. Kann die Abfrage
+# nicht beantwortet werden, schlaegt der Lauf fehl: lieber kein Backup als ein
+# unverschluesseltes, das niemand bestellt hat. Ohne Zertifikat bleibt alles
+# wie bisher, die Statuszeile meldet dann encrypted=false.
+backup_progress_run 2 encryption-key
+cert_value=$(docker exec "$CONTAINER" sh -c 'exec mysql -N -B -r -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -e "$1"' sh \
+  "SELECT setting_value FROM deploy_settings WHERE setting_key = 'backup_encryption_certificate'" 2>/dev/null) \
+  || backup_fail "Das Zertifikat fuer die Backup-Verschluesselung konnte nicht gelesen werden; es wird nichts unverschluesselt abgelegt."
+if [ -n "$cert_value" ]; then
+  command -v openssl >/dev/null 2>&1 \
+    || backup_fail "openssl fehlt; das hinterlegte Zertifikat verlangt ein verschluesseltes Backup."
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/lib/backup_crypto.sh"
+  cert_dir=$(umask 077 && mktemp -d "$BACKUP_DIR/.cert-$ts-XXXXXX") \
+    || backup_fail "Temporaeres Verzeichnis fuer das Zertifikat konnte nicht erzeugt werden."
+  cert_file="$cert_dir/backup-cert.pem"
+  printf '%s\n' "$cert_value" > "$cert_file" \
+    || backup_fail "Zertifikat konnte nicht zwischengespeichert werden."
+  recipient_sha256=$(backup_crypto_fingerprint "$cert_file")
+  [ -n "$recipient_sha256" ] \
+    || backup_fail "Das hinterlegte Zertifikat ist nicht lesbar; es wird nichts unverschluesselt abgelegt."
+  encrypted=true
+fi
+backup_progress_result pass
+
+backup_progress_run 3 config-archive
 config_items="docker-compose.yml"
 [ -f .env ] && config_items="$config_items .env"
 # docker-compose.override.yml ist host-spezifisch und NICHT in Git. Genau deshalb
@@ -290,14 +336,39 @@ config_items="docker-compose.yml"
 [ -f docker-compose.override.yml ] && config_items="$config_items docker-compose.override.yml"
 [ -d Docker/nginx/conf.d ] && config_items="$config_items Docker/nginx/conf.d"
 [ -d Docker/nginx/ssl ] && config_items="$config_items Docker/nginx/ssl"
+config_tmp_file=$(umask 077 && mktemp "$BACKUP_DIR/.config-$ts-XXXXXX.gz") \
+  || backup_fail "Geschuetzte Config-Tempdatei konnte nicht erzeugt werden."
 # shellcheck disable=SC2086
-tar czf "$config_file" $config_items \
+tar czf "$config_tmp_file" $config_items \
   || backup_fail "Config-Archiv konnte nicht erstellt werden."
+backup_progress_result pass
+
+# Endgueltige Namen entstehen erst hier. Verschluesselt heissen sie
+# db-<ts>.sql.gz.cms und config-<ts>.tar.gz.cms; die Klartext-Tempdateien
+# raeumt finish_backup in jedem Fall weg.
+backup_progress_run 4 store-archives
+if [ "$encrypted" = true ]; then
+  db_file="$BACKUP_DIR/db-$ts.sql.gz.cms"
+  config_file="$BACKUP_DIR/config-$ts.tar.gz.cms"
+  backup_crypto_encrypt "$cert_file" "$db_gz_file" "$db_file" 2>/dev/null \
+    || backup_fail "Verschluesselung des DB-Dumps schlug fehl."
+  backup_crypto_encrypt "$cert_file" "$config_tmp_file" "$config_file" 2>/dev/null \
+    || backup_fail "Verschluesselung des Config-Archivs schlug fehl."
+else
+  db_file="$BACKUP_DIR/db-$ts.sql.gz"
+  config_file="$BACKUP_DIR/config-$ts.tar.gz"
+  mv "$db_gz_file" "$db_file" || backup_fail "DB-Dump konnte nicht abgelegt werden."
+  db_gz_file=""
+  mv "$config_tmp_file" "$config_file" || backup_fail "Config-Archiv konnte nicht abgelegt werden."
+  config_tmp_file=""
+fi
+db_bytes=$(wc -c < "$db_file" | tr -d ' ') \
+  || backup_fail "Groesse des DB-Dumps konnte nicht gelesen werden."
 config_bytes=$(wc -c < "$config_file" | tr -d ' ') \
   || backup_fail "Groesse des Config-Archivs konnte nicht gelesen werden."
 backup_progress_result pass
 
-backup_progress_run 3 manifest
+backup_progress_run 5 manifest
 
 # Manifest: ohne Hashes kann der Restore-Drill ein manipuliertes oder halb
 # kopiertes Archiv nicht von einem intakten unterscheiden.
@@ -305,20 +376,24 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   backup_fail "sha256sum fehlt; Backup ohne Manifest ist nicht verifizierbar."
 fi
 manifest_file="$BACKUP_DIR/manifest-$ts.sha256"
-( cd "$BACKUP_DIR" && sha256sum "db-$ts.sql.gz" "config-$ts.tar.gz" ) > "$manifest_file" \
+( cd "$BACKUP_DIR" && sha256sum "$(basename "$db_file")" "$(basename "$config_file")" ) > "$manifest_file" \
   || backup_fail "Hash-Manifest konnte nicht erstellt werden."
 backup_progress_result pass
 
-backup_progress_run 4 retention
+backup_progress_run 6 retention
 
 # Retention: je Lauf-Artefakt getrennt nur die neuesten $KEEP Laeufe behalten.
-for pattern in 'db-*.sql.gz' 'config-*.tar.gz' 'manifest-*.sha256'; do
-  # shellcheck disable=SC2086
-  ls -1t "$BACKUP_DIR"/$pattern 2>/dev/null | tail -n +$((KEEP + 1)) | while IFS= read -r old; do
+# Klartext- und verschluesselte Laeufe bilden eine Reihe, damit alte
+# unverschluesselte Backups nach $KEEP verschluesselten Laeufen verschwinden.
+backup_retain() {
+  ls -1t "$@" 2>/dev/null | tail -n +$((KEEP + 1)) | while IFS= read -r old; do
     rm -f "$old"
   done
-done
+}
+backup_retain "$BACKUP_DIR"/db-*.sql.gz "$BACKUP_DIR"/db-*.sql.gz.cms
+backup_retain "$BACKUP_DIR"/config-*.tar.gz "$BACKUP_DIR"/config-*.tar.gz.cms
+backup_retain "$BACKUP_DIR"/manifest-*.sha256
 backup_progress_result pass
 
 status="ok"
-echo "Backup OK: $db_file ($size Bytes), $config_file"
+echo "Backup OK: $db_file ($db_bytes Bytes), $config_file"

@@ -23,7 +23,9 @@ The effective MECM rollout hostname is globally unique through `deploy_vm_hostna
 ## R5 Logical backup is the only supported recovery stream; MySQL binlog is disabled.
 
 `scripts/backup.sh`, its timestamp-matched manifest/config/database triplet and
-`scripts/restore_test.sh` own the recovery contract (ADR-0017). There is no
+`scripts/restore_test.sh` own the recovery contract (ADR-0017). With a stored
+backup certificate both archives are `*.cms` envelopes (amendment 5); the drill
+decrypts them only with `VIRTUSPHERE_BACKUP_PRIVATE_KEY`. There is no
 replication or point-in-time-recovery consumer, so Compose starts MySQL with
 `mysqld --skip-log-bin`. Disabling does not authorize direct deletion of old
 binlog files from the data directory. Enabling it again requires a separately

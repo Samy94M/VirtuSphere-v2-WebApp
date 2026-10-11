@@ -88,3 +88,38 @@ Decision:
   binlog files, and operators must never remove such files directly from the
   data directory. A future PITR decision must add its own archive, retention and
   restore proof before binary logging is enabled again.
+
+## Amendment 5 (2026-10-11, VT-E2): backups are encrypted to a public key
+
+The original decision accepted that the config archive (with `APP_KEY`) and the
+dump (with the credentials encrypted under it) lie side by side and readable,
+protected only by directory permissions and a pull to a second host. Decision
+VT-E2 (05.10.2026) replaces that acceptance:
+
+- Both artifacts are encrypted, separately, to a public key whenever the portal
+  holds an X.509 certificate (RSA, at least 3072 bits) in the setting
+  `backup_encryption_certificate`. The portal stores only the certificate,
+  refuses any private key block and never generates a key pair; the private key
+  stays offline with the operator and never touches the app host.
+- `scripts/backup.sh` reads the certificate from the database at every run and
+  writes `db-<ts>.sql.gz.cms` and `config-<ts>.tar.gz.cms` as CMS EnvelopedData
+  (`openssl cms`, AES-256-CBC, DER) through `scripts/lib/backup_crypto.sh`; the
+  manifest hashes those files. Plaintext exists only as mode-0600 temporary
+  files that the exit trap removes after success and failure alike. A failing
+  certificate query or encryption fails the run instead of falling back to
+  plaintext. Without a certificate the run stays unencrypted and records
+  `encrypted:false`; System status and the settings backup card then report
+  "Backups unencrypted" from one derivation (`backup_encryption_finding()`).
+- Encryption gives confidentiality, not authenticity: anyone holding the
+  certificate can build a valid envelope. Corruption detection stays with the
+  manifest. CBC instead of GCM keeps OpenSSL 1.1 restore machines able to
+  decrypt.
+- `scripts/restore_test.sh` selects encrypted triplets as well, decrypts them
+  into its throwaway work directory with the key named by
+  `VIRTUSPHERE_BACKUP_PRIVATE_KEY`, and reports a missing key as a missing
+  prerequisite (exit 2), never as a pass.
+- Retention treats plaintext and encrypted runs of one artifact as one series,
+  so old plaintext backups age out after `KEEP` encrypted runs; nothing is
+  deleted early. Losing the private key makes every encrypted backup
+  unrestorable; key generation, safekeeping, rotation and decryption are in
+  `docs/operations/backup.md`.

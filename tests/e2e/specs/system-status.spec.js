@@ -441,3 +441,38 @@ test('Systemstatus overview: the deviation card and its section agree', async ({
   await expect(page).toHaveURL(/system_status\.php#deviations$/);
   await expect(page.locator('#deviations')).toBeVisible();
 });
+
+// K19 (VT-E2): without a stored backup certificate System status says the
+// backups are unencrypted; with one stored that sentence disappears. The
+// certificate is generated per run, its private key is discarded at once, and
+// the previous setting is restored.
+test('backup encryption: no certificate reports unencrypted backups, a stored one lifts it', async ({ page }) => {
+  const before = phpJson(`
+$v = repo_setting_value(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, '');
+echo 'JSON' . json_encode(['v' => $v]) . 'JSON';
+`, ['lib/constants.php', 'lib/repo/settings.php']).v;
+  const restore = (value) => runPhp(`
+$v = base64_decode('${Buffer.from(value).toString('base64')}');
+$v === '' ? repo_delete_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE) : repo_set_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $v);
+echo 'OK';
+`, ['lib/constants.php', 'lib/repo/settings.php']);
+  try {
+    restore('');
+    await page.goto('system_status.php');
+    const finding = page.locator('[data-backup-encryption-finding]');
+    await expect(finding, 'no certificate: the unencrypted state is named').toContainText(/no certificate is configured|kein Zertifikat hinterlegt/);
+    await expect(finding.locator('a'), 'the remedy is linked for an admin').toHaveAttribute('href', /settings\.php#panel-backup$/);
+
+    runPhp(`
+$key = openssl_pkey_new(['private_key_bits' => VIRTUSPHERE_BACKUP_ENCRYPTION_MIN_RSA_BITS, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+$cert = openssl_csr_sign(openssl_csr_new(['commonName' => 'e2e-k19'], $key), null, $key, 30);
+openssl_x509_export($cert, $pem);
+repo_set_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $pem);
+echo 'OK';
+`, ['lib/backup_encryption.php']);
+    await page.goto('system_status.php');
+    await expect(page.locator('body'), 'a stored certificate lifts the unencrypted state').not.toContainText(/no certificate is configured|kein Zertifikat hinterlegt/);
+  } finally {
+    restore(before);
+  }
+});

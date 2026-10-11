@@ -84,6 +84,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_stack.ops_restore_p1')); ?></p>
             <p><?php echo h(__t('help_stack.ops_restore_p2')); ?></p>
             <p><?php echo h(__t('help_stack.ops_restore_p3')); ?></p>
+            <p><?php echo h(__t('help_stack.ops_restore_p4')); ?></p>
 
             <h3><?php echo h(__t('help_stack.ops_backup_heading')); ?></h3>
             <ul>
@@ -91,6 +92,7 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_stack.ops_backup_stale')); ?></li>
                 <li><?php echo h(__t('help_stack.ops_backup_disk_low')); ?></li>
                 <li><?php echo h(__t('help_stack.ops_backup_unknown')); ?></li>
+                <li><?php echo h(__t('help_stack.ops_backup_unencrypted')); ?></li>
             </ul>
             <p class="muted"><?php echo h(__t('help_stack.ops_backup_more')); ?></p>
         </section>

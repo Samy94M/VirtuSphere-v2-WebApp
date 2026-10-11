@@ -126,6 +126,23 @@ case "$1" in
         if [ "${3:-}" = sh ]; then head -c 32768 /dev/urandom; exit 42; fi
         exit 96
         ;;
+      encrypted-backup|plain-backup)
+        # K19: a complete dump (incompressible enough for the 10 KiB floor)
+        # carrying a readable marker, and the stored certificate (or none).
+        if [ "${3:-}" = true ]; then exit 0; fi
+        case "$*" in
+          *mysqldump*)
+            printf -- '-- Current Database: `fixture_backup`\nCREATE TABLE k19_secret_marker (id INT);\n'
+            head -c 16384 /dev/urandom | od -An -tx1
+            exit 0
+            ;;
+          *backup_encryption_certificate*)
+            [ "$mode" = plain-backup ] || cat "$VS_FAKE_BACKUP_CERT"
+            exit 0
+            ;;
+        esac
+        exit 96
+        ;;
       backup-signal)
         if [ "${3:-}" = true ]; then exit 0; fi
         if [ "${3:-}" = sh ]; then

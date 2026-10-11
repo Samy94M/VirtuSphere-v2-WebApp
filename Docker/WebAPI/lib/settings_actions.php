@@ -9,6 +9,7 @@ require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ansible_test_config.php';
+require_once __DIR__ . '/backup_encryption.php';
 
 /**
  * Guarding and permission checks stay in the page shell. This dispatcher owns
@@ -39,6 +40,8 @@ function settings_handle_post(mysqli $connection, array $user): never
         'save_timezone' => 'system',
         'save_session' => 'system',
         'save_password_policy' => 'system',
+        'save_backup_certificate' => 'system',
+        'remove_backup_certificate' => 'system',
         'upload_https_cert' => 'https',
         'save_https_enabled' => 'https',
         'save_https_redirect' => 'https',
@@ -372,6 +375,8 @@ function settings_handle_post(mysqli $connection, array $user): never
                 flash_set('error', portal_error_message($exception));
             }
         }
+    } elseif (in_array($action, VIRTUSPHERE_BACKUP_ENCRYPTION_ACTIONS, true)) {
+        backup_encryption_handle_action($connection, $user, $action);
     } elseif ($action === 'allow_delete') {
         try {
             $entry = repo_api_access_delete($connection, request_int($_POST, 'id'));

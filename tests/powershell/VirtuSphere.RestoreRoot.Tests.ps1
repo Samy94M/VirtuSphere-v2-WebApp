@@ -94,6 +94,8 @@ BeforeAll {
         }
         Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') `
             -Destination $moduleParent -Recurse
+        Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'backup_crypto.sh') `
+            -Destination $moduleParent
     }
 
     function New-FakeDockerPath {
@@ -316,7 +318,9 @@ Describe 'Restore and backup resource safety' {
                 [Parameter(Mandatory)][string]$ScriptPath,
                 [Parameter(Mandatory)][string]$Mode,
                 [string]$CheckRoot,
-                [string]$BackupContainer = 'fixture-backup-mysql-never-real'
+                [string]$BackupContainer = 'fixture-backup-mysql-never-real',
+                [string]$BackupCert = '',
+                [string]$PrivateKey = ''
             )
             $fakeBin = Join-Path $TestDrive ('safety-bin-' + [guid]::NewGuid().ToString('N'))
             $fakeLog = Join-Path $TestDrive ('safety-' + [guid]::NewGuid().ToString('N') + '.log')
@@ -335,6 +339,9 @@ Describe 'Restore and backup resource safety' {
                 VIRTUSPHERE_MYSQL_IMAGE = $env:VIRTUSPHERE_MYSQL_IMAGE
                 VIRTUSPHERE_MYSQL_CONTAINER = $env:VIRTUSPHERE_MYSQL_CONTAINER
                 VIRTUSPHERE_BACKUP_SCHEDULE = $env:VIRTUSPHERE_BACKUP_SCHEDULE
+                VS_FAKE_BACKUP_CERT = $env:VS_FAKE_BACKUP_CERT
+                VIRTUSPHERE_BACKUP_PRIVATE_KEY = $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY
+                MSYS_NO_PATHCONV = $env:MSYS_NO_PATHCONV
                 TZ = $env:TZ
             }
             try {
@@ -352,6 +359,10 @@ Describe 'Restore and backup resource safety' {
                 $env:VIRTUSPHERE_MYSQL_CONTAINER = $BackupContainer
                 $env:VIRTUSPHERE_BACKUP_SCHEDULE = '0 0 * * *'
                 $env:TZ = 'UTC'
+                if ($BackupCert -ne '') { $env:VS_FAKE_BACKUP_CERT = $BackupCert.Replace('\', '/') }
+                else { Remove-Item Env:VS_FAKE_BACKUP_CERT -ErrorAction SilentlyContinue }
+                if ($PrivateKey -ne '') { $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY = $PrivateKey.Replace('\', '/') }
+                else { Remove-Item Env:VIRTUSPHERE_BACKUP_PRIVATE_KEY -ErrorAction SilentlyContinue }
 
                 $runnerShell = (Get-Command sh -ErrorAction SilentlyContinue).Source
                 if (-not $runnerShell -or $runnerShell -notmatch 'safety-bin-') {
@@ -393,23 +404,61 @@ Describe 'Restore and backup resource safety' {
         }
 
         function Invoke-RestoreSafety {
-            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump)
-            $stamp = $Mode
-            $root = Join-Path $TestDrive ('restore-' + $Mode)
+            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump, [string]$Cert = '', [string]$PrivateKey = '', [string]$Stamp = '')
+            $stamp = if ($Stamp -ne '') { $Stamp } else { $Mode }
+            $root = Join-Path $TestDrive ('restore-' + $stamp)
             New-CanonicalSourceRoot -Root $root -Stamp $stamp
             if ($FullDump) { Set-CompleteSyntheticDump -Root $root -Stamp $stamp }
+            if ($Cert -ne '') { Protect-SyntheticBackup -Root $root -Stamp $stamp -Cert $Cert }
             $scriptPath = Join-Path (Join-Path $root 'scripts') 'restore_test.sh'
-            Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode $Mode -CheckRoot $root
+            Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode $Mode -CheckRoot $root -PrivateKey $PrivateKey
         }
 
         function Invoke-BackupSafety {
-            param([Parameter(Mandatory)][string]$Mode)
+            param([Parameter(Mandatory)][string]$Mode, [string]$BackupCert = '')
             $root = Join-Path $TestDrive ('backup-' + $Mode)
             $scripts = Join-Path $root 'scripts'
-            New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $scripts 'lib') -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Destination $scripts
+            Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'backup_crypto.sh') -Destination (Join-Path $scripts 'lib')
             Set-Content -LiteralPath (Join-Path $root 'docker-compose.yml') -Value 'services: {}' -Encoding Ascii
-            Invoke-WithSafetyDocker -ScriptPath (Join-Path $scripts 'backup.sh') -Mode $Mode -CheckRoot $root
+            Set-Content -LiteralPath (Join-Path $root '.env') -Value 'APP_KEY=k19-fixture-app-key' -Encoding Ascii
+            Invoke-WithSafetyDocker -ScriptPath (Join-Path $scripts 'backup.sh') -Mode $Mode -CheckRoot $root -BackupCert $BackupCert
+        }
+
+        # K19: a throwaway RSA-3072 pair per test run; the private key exists
+        # only in TestDrive and is never committed.
+        function New-BackupTestKeyPair {
+            $dir = (Join-Path $TestDrive ('keys-' + [guid]::NewGuid().ToString('N'))).Replace('\', '/')
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $r = Invoke-PosixSnippet -Snippet 'cd "$1" && openssl req -x509 -newkey rsa:3072 -nodes -keyout key.pem -out cert.pem -days 30 -subj "/CN=k19-test" >/dev/null 2>&1 && openssl x509 -in cert.pem -noout -fingerprint -sha256' -Arguments @($dir)
+            if ($r.ExitCode -ne 0) { throw ('test key pair could not be generated: ' + ($r.Output -join ' | ')) }
+            $fingerprint = (($r.Output -join '') -replace '^[^=]*=', '' -replace ':', '').ToLowerInvariant()
+            [pscustomobject]@{ Cert = "$dir/cert.pem"; Key = "$dir/key.pem"; Fingerprint = $fingerprint }
+        }
+
+        # Runs one shell snippet with the Git/POSIX tools next to sh (openssl,
+        # gunzip, tar) and returns its output lines. The snippet goes through a
+        # file: Windows PowerShell 5.1 strips embedded quotes from native
+        # arguments, the same reason the safety harness writes capture.sh.
+        function Invoke-PosixSnippet {
+            param([Parameter(Mandatory)][string]$Snippet, [string[]]$Arguments = @())
+            $file = Join-Path $TestDrive ('snippet-' + [guid]::NewGuid().ToString('N') + '.sh')
+            # /usr/bin is Git's usr/bin under MSYS and the system tools on Linux.
+            $body = "export MSYS_NO_PATHCONV=1`nPATH=/usr/bin:`$PATH`n" + $Snippet + "`n"
+            [IO.File]::WriteAllText($file, $body, [Text.UTF8Encoding]::new($false))
+            $out = @(& $script:ShExe $file.Replace('\', '/') @Arguments 2>&1 | ForEach-Object { "$_" })
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
+        }
+
+        # Replaces the plaintext triplet of a synthetic root by an encrypted one
+        # the way backup.sh writes it: two .cms files plus their manifest.
+        function Protect-SyntheticBackup {
+            param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Stamp, [Parameter(Mandatory)][string]$Cert)
+            $dir = (Join-Path $Root 'Docker\backups').Replace('\', '/')
+            $snippet = 'cd "$1" && for f in "db-$2.sql.gz" "config-$2.tar.gz"; do openssl cms -encrypt -binary -aes256 -stream -outform DER -in "$f" -out "$f.cms" "$3" && rm -f "$f" || exit 1; done && sha256sum "db-$2.sql.gz.cms" "config-$2.tar.gz.cms" > "manifest-$2.sha256"'
+            $r = Invoke-PosixSnippet -Snippet $snippet -Arguments @($dir, $Stamp, $Cert)
+            if ($r.ExitCode -ne 0) { throw ('synthetic backup could not be encrypted: ' + ($r.Output -join ' | ')) }
         }
     }
 
@@ -435,7 +484,7 @@ Describe 'Restore and backup resource safety' {
         $result.DockerCalls | Should -Contain ('rm -f ' + ('c' * 64))
         $result.DockerCalls | Should -Contain ('rm -f ' + ('b' * 64))
         $result.DockerCalls | Should -Contain ('network rm ' + ('a' * 64))
-        ($result.Output -join "`n") | Should -Match '\[9/9\] pass cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
     }
 
     It 'keeps ownership after create when database start fails and cleans by exact ID' {
@@ -455,7 +504,7 @@ Describe 'Restore and backup resource safety' {
     It 'turns an exact-ID docker rm failure into a failed drill' {
         $result = Invoke-RestoreSafety -Mode cleanup-rm-failure -FullDump
         $result.ExitCode | Should -Be 1
-        ($result.Output -join "`n") | Should -Match '\[9/9\] fail cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/10\] fail cleanup'
     }
 
     It 'cleans recorded IDs when TERM arrives after create and before start completes' {
@@ -476,6 +525,64 @@ Describe 'Restore and backup resource safety' {
         $status.status | Should -Be 'failed'
         $result.DockerCalls | Should -Contain 'exec fixture-backup-mysql-never-real true'
         (Get-Content -LiteralPath (Join-Path $script:FixtureDir 'fake-docker-safety.sh') -Raw) | Should -Match 'head -c 32768 /dev/urandom'
+    }
+
+    It 'K19: encrypts dump and config archive to the stored certificate and leaves no readable copy' {
+        $keys = New-BackupTestKeyPair
+        $result = Invoke-BackupSafety -Mode encrypted-backup -BackupCert $keys.Cert
+        $result.ExitCode | Should -Be 0
+        $dir = Join-Path $TestDrive 'backup-encrypted-backup\Docker\backups'
+        $db = @(Get-ChildItem -LiteralPath $dir -File -Filter 'db-*.sql.gz.cms')
+        $config = @(Get-ChildItem -LiteralPath $dir -File -Filter 'config-*.tar.gz.cms')
+        $db.Count | Should -Be 1
+        $config.Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath $dir -File -Force | Where-Object { $_.Name -match '\.(sql|gz)$' -or $_.Name -match '^\.(db|config|cert)-' }).Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $dir -Directory -Force | Where-Object { $_.Name -like '.cert-*' }).Count | Should -Be 0
+        foreach ($file in @($db[0], $config[0])) {
+            $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            $bytes[0] | Should -Be 0x30 -Because 'a CMS envelope is DER, not gzip'
+            $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+            $text | Should -Not -Match 'APP_KEY|k19_secret_marker|CREATE TABLE'
+        }
+        $status = Get-Content -LiteralPath (Join-Path $dir 'status\backup-status.jsonl') | Select-Object -Last 1 | ConvertFrom-Json
+        $status.status | Should -Be 'ok'
+        $status.encrypted | Should -BeTrue
+        $status.recipient_sha256 | Should -Be $keys.Fingerprint
+        $manifest = Get-Content -LiteralPath (Join-Path $dir ((Get-ChildItem -LiteralPath $dir -Filter 'manifest-*.sha256').Name))
+        ($manifest -join "`n") | Should -Match 'db-.*\.sql\.gz\.cms'
+
+        $restored = Invoke-PosixSnippet -Snippet 'openssl cms -decrypt -binary -inform DER -in "$1" -inkey "$3" | gunzip -c | grep -c k19_secret_marker; openssl cms -decrypt -binary -inform DER -in "$2" -inkey "$3" | tar -xzOf - .env' `
+            -Arguments @($db[0].FullName.Replace('\', '/'), $config[0].FullName.Replace('\', '/'), $keys.Key)
+        ($restored.Output -join "`n") | Should -Match '(?m)^1$'
+        ($restored.Output -join "`n") | Should -Match 'APP_KEY=k19-fixture-app-key'
+    }
+
+    It 'K19: without a stored certificate keeps the plaintext triplet and says so in the status line' {
+        $result = Invoke-BackupSafety -Mode plain-backup
+        $result.ExitCode | Should -Be 0
+        $dir = Join-Path $TestDrive 'backup-plain-backup\Docker\backups'
+        @(Get-ChildItem -LiteralPath $dir -File -Filter 'db-*.sql.gz').Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath $dir -File -Filter '*.cms').Count | Should -Be 0
+        $status = Get-Content -LiteralPath (Join-Path $dir 'status\backup-status.jsonl') | Select-Object -Last 1 | ConvertFrom-Json
+        $status.status | Should -Be 'ok'
+        $status.encrypted | Should -BeFalse
+        $status.recipient_sha256 | Should -Be ''
+    }
+
+    It 'K19: restores an encrypted triplet with the private test key' {
+        $keys = New-BackupTestKeyPair
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Cert $keys.Cert -PrivateKey $keys.Key -Stamp 'encrypted-success'
+        $result.ExitCode | Should -Be 0
+        ($result.Output -join "`n") | Should -Match 'verschluesseltes Backup encrypted-success entschluesselt'
+        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+    }
+
+    It 'K19: an encrypted triplet without a private key is a missing prerequisite, not a pass' {
+        $keys = New-BackupTestKeyPair
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Cert $keys.Cert -Stamp 'encrypted-nokey'
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join "`n") | Should -Match '\[restore\.key-missing\]'
+        @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
     }
 
     It 'cleans the protected raw dump and records failure when TERM interrupts mysqldump' {

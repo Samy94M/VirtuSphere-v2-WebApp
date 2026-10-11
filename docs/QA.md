@@ -121,6 +121,16 @@ it does not prove the later mounts, import, migration, cleanup or smoke. Those
 remain the responsibility of an authorized full `restore-drill` against the
 synthetic QA backup.
 
+The same suite carries the K19 encryption cases (ADR-0017 amendment 5) on the
+fake-Docker safety harness: `backup.sh` with a stored test certificate writes
+only `*.cms` envelopes, leaves no plaintext temporary file and records
+`encrypted`/`recipient_sha256`; without a certificate it keeps the plaintext
+triplet and records `encrypted:false`; `restore_test.sh` decrypts an encrypted
+triplet with the test key generated per run, and without
+`VIRTUSPHERE_BACKUP_PRIVATE_KEY` ends as a missing prerequisite (exit 2). The
+key pair exists only in the Pester `TestDrive`. A full `restore-drill` against an
+encrypted QA backup needs that key in `VIRTUSPHERE_BACKUP_PRIVATE_KEY`.
+
 ### Container hardening and supply chain (AP8)
 
 PHP-FPM requires exactly `KILL`, `SETGID` and `SETUID`: the master runs as

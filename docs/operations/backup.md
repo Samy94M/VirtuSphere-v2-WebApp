@@ -6,6 +6,8 @@ VirtuSphere schreibt pro vollständigem Lauf ein Tripel nach `Docker/backups/` (
 2. `config-<ts>.tar.gz`: `.env`, `docker-compose.yml`, `docker-compose.override.yml` (falls vorhanden), nginx-Konfiguration und (falls vorhanden) SSL-Material.
 3. `manifest-<ts>.sha256`: SHA-256-Nachweis für Dump und Konfigurationsarchiv; ein auswählbarer Backupstand braucht alle drei Dateien desselben Zeitstempels.
 
+Ist im Portal ein Zertifikat hinterlegt, heißen 1. und 2. `db-<ts>.sql.gz.cms` und `config-<ts>.tar.gz.cms` und sind verschlüsselt (Abschnitt „Verschlüsselung“).
+
 Die Override-Datei ist host-spezifisch und nicht in Git, und genau deshalb liegt sie im Archiv: der Produktionshost braucht sie zum Starten (Subnetz-Pin, damit die Docker-Bridge das SSH nicht abschneidet, geleerte Proxy-Umgebung je Service). Ein Restore ohne sie bringt den Stack nicht hoch, obwohl beide Archive intakt sind.
 
 Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte des PHP-Logverzeichnisses**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen, sonst kann der Fehlerhandler nicht schreiben (Begruendung in `docs/operations/go-live.md`, Schritt 1a). nginx schreibt nicht mehr in einen Host-Logmount, sondern in die begrenzten Docker-Streams.
@@ -16,9 +18,34 @@ Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt
 sh scripts/backup.sh
 ```
 
-Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Dateimuster; ein Restore braucht deshalb weiterhin das vollständige Zeitstempel-Tripel. MySQL-Binlogs sind deaktiviert: Es gibt keinen Replikations- oder Point-in-Time-Recovery-Verbraucher, und der zugesagte Wiederherstellungspunkt ist ausschließlich ein erfolgreich geprüftes Backuptripel. Vorhandene historische Binlogdateien niemals direkt im Datenverzeichnis löschen.
+Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Artefaktart; unverschlüsselte und verschlüsselte Läufe einer Art bilden dabei eine gemeinsame Reihe, sodass alte Klartext-Backups nach `KEEP` verschlüsselten Läufen verschwinden. Ein Restore braucht weiterhin das vollständige Zeitstempel-Tripel. MySQL-Binlogs sind deaktiviert: Es gibt keinen Replikations- oder Point-in-Time-Recovery-Verbraucher, und der zugesagte Wiederherstellungspunkt ist ausschließlich ein erfolgreich geprüftes Backuptripel. Vorhandene historische Binlogdateien niemals direkt im Datenverzeichnis löschen.
 
 Die Backup-Dateien enthalten Secrets (`.env`, DB-Inhalte inkl. verschlüsselter Credentials). `Docker/backups/` gehört auf ein zugriffsbeschränktes Ziel (`chmod 700`) und sollte zusätzlich auf einen zweiten Host synchronisiert werden (Pull vom Backup-Host, nicht Push vom App-Host). Den `APP_KEY` zu wechseln beschreibt [APP_KEY wechseln](app-key-rotation.md); ältere Backups bleiben nur mit dem alten Schlüssel lesbar.
+
+## Verschlüsselung (VT-E2, ADR-0017 Nachtrag)
+
+Das Config-Archiv trägt den `APP_KEY`, der Dump die damit verschlüsselten ESXi-, Ansible- und LDAP-Zugangsdaten. Wer beide lesen kann, kann alle Zugangsdaten entschlüsseln. Deshalb verschlüsselt `scripts/backup.sh` beide Dateien an einen **öffentlichen Schlüssel**, sobald im Portal ein Zertifikat hinterlegt ist. Der private Schlüssel liegt offline bei der Bedienperson und nie auf dem App-Host.
+
+**Schlüsselpaar erzeugen**, auf einem Rechner, der nicht der App-Host ist (OpenSSL 1.1 oder neuer):
+
+```sh
+openssl req -x509 -newkey rsa:4096 -nodes -keyout virtusphere-backup-key.pem -out virtusphere-backup-cert.pem -days 3650 -subj "/CN=VirtuSphere backup"
+```
+
+`virtusphere-backup-key.pem` ist der private Schlüssel: mindestens zweifach offline aufbewahren (etwa auf einem verschlüsselten Datenträger im Tresor und im Passwortsafe), nie auf den App-Host kopieren. Ohne ihn lassen sich verschlüsselte Backups nicht wiederherstellen. Das Zertifikat `virtusphere-backup-cert.pem` kommt unter **Einstellungen > System > Backup > Verschlüsselung** ins Portal (RSA, mindestens 3072 Bit; das Portal lehnt jeden privaten Schlüssel ab und speichert ihn nicht). Die Karte zeigt danach Inhaber, SHA-256-Fingerabdruck und Ablaufdatum. Das Ablaufdatum hindert die Verschlüsselung nicht; ein Wechsel vorher ist trotzdem ratsam.
+
+**Was ein Lauf mit Zertifikat schreibt:** `db-<ts>.sql.gz.cms` und `config-<ts>.tar.gz.cms`, jeweils getrennt als CMS EnvelopedData (AES-256-CBC, RSA-Schlüsseltransport, DER) über `openssl cms` (`scripts/lib/backup_crypto.sh`); das Manifest hasht genau diese Dateien. Klartext entsteht nur als geschützte Tempdatei (Modus 0600) im Backup-Verzeichnis und wird am Ende jedes Laufs entfernt, auch nach einem Fehler. Das Zertifikat liest das Skript bei jedem Lauf aus der Datenbank; scheitert diese Abfrage oder die Verschlüsselung, schlägt der Lauf fehl, statt unverschlüsselt abzulegen. Ohne hinterlegtes Zertifikat bleibt alles wie bisher, und Systemstatus sowie Backup-Karte melden „Backups unverschlüsselt“.
+
+**Grenze:** Die Verschlüsselung schützt die Vertraulichkeit, nicht die Echtheit. Wer das Zertifikat hat, kann gültige Umschläge erzeugen; Beschädigung erkennt weiterhin das Manifest. Deshalb CBC statt GCM, damit auch ein Restore-Rechner mit OpenSSL 1.1 entschlüsseln kann. Beim Entschlüsseln liest `openssl cms` die ganze Datei in den Speicher; der Restore-Rechner braucht freien Arbeitsspeicher mindestens in Größe des Dumps.
+
+**Schlüsselwechsel:** neues Paar erzeugen, Zertifikat im Portal ersetzen. Ab dem nächsten Lauf gilt der neue Schlüssel; ältere Backups brauchen weiter den alten privaten Schlüssel, bis die Retention sie entfernt hat. Den alten Schlüssel erst danach vernichten. Bestehende unverschlüsselte Backups bleiben bis zum Ende der Aufbewahrung liegen; wer sie sofort loswerden will, löscht sie von Hand.
+
+**Entschlüsseln** auf dem Rechner mit dem privaten Schlüssel:
+
+```sh
+openssl cms -decrypt -binary -inform DER -in db-<ts>.sql.gz.cms -inkey virtusphere-backup-key.pem -out db-<ts>.sql.gz
+openssl cms -decrypt -binary -inform DER -in config-<ts>.tar.gz.cms -inkey virtusphere-backup-key.pem -out config-<ts>.tar.gz
+```
 
 ## Zeitplan einrichten (ADR-0024)
 
@@ -48,7 +75,7 @@ Das Backup ist der einzige Cron-Job. Deploy-Worker (alle 5 s) und Wartungs-Worke
 
 ## Statuskanal und Portal-Anzeige (ADR-0021)
 
-Jeder Lauf hängt eine JSON-Zeile an `Docker/backups/status/backup-status.jsonl` an: `ts` (Unix-Epoch), `status` (`ok`/`failed`), `db_bytes`, `config_bytes`, `duration_s`, `keep`, `disk_free_pct`, `disk_free_bytes`, `error` sowie den Zeitplan-Kanal aus ADR-0024: `schedule` (Cron-Ausdruck), `schedule_tz`, `schedule_source` (Fundort) und `next_ts` (exakter nächster Lauf, nur bei systemd-Timer). Die Datei wird auf die neuesten 90 Zeilen gekappt und ist reine Metadaten (wird selbst nicht mitgesichert). Zeilen aus der Zeit vor ADR-0024 haben die Zeitplanfelder nicht; der Reader fällt dann auf die Intervall-Schätzung zurück.
+Jeder Lauf hängt eine JSON-Zeile an `Docker/backups/status/backup-status.jsonl` an: `ts` (Unix-Epoch), `status` (`ok`/`failed`), `db_bytes`, `config_bytes`, `duration_s`, `keep`, `disk_free_pct`, `disk_free_bytes`, `error` sowie den Zeitplan-Kanal aus ADR-0024: `schedule` (Cron-Ausdruck), `schedule_tz`, `schedule_source` (Fundort) und `next_ts` (exakter nächster Lauf, nur bei systemd-Timer), dazu `encrypted` (`true`/`false`) und `recipient_sha256` (Fingerabdruck des Zertifikats, an das verschlüsselt wurde, sonst leer). Die Datei wird auf die neuesten 90 Zeilen gekappt und ist reine Metadaten (wird selbst nicht mitgesichert). Zeilen aus der Zeit vor ADR-0024 haben die Zeitplanfelder nicht; der Reader fällt dann auf die Intervall-Schätzung zurück.
 
 Nur dieses Unterverzeichnis wird read-only in den PHP-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), nie die Dumps oder das Config-Tar (das die `.env` mit dem DB-Root-Passwort enthält). Ein Dump-Download über das Portal gibt es bewusst nicht. Der Missions-Export (JSON) ist ein Transportweg zwischen Umgebungen, der Listen-Export (CSV) nur ein Tabellen-Export für Berichte; beides ist kein Backup und kein Restore-Pfad.
 
@@ -87,6 +114,7 @@ zuordnet.
 Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
 1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
+1b. Ist das jüngste Tripel verschlüsselt (`*.cms`), entschlüsselt der Drill beide Archive mit dem privaten Schlüssel aus `VIRTUSPHERE_BACKUP_PRIVATE_KEY` ins Wegwerf-Arbeitsverzeichnis. Fehlt die Variable oder ist die Datei nicht lesbar, endet der Drill als fehlende Voraussetzung (`[restore.key-missing]`, Exitcode 2), nie als bestanden. Den Drill dafür auf einem Rechner mit dem Schlüssel ausführen, nicht auf dem App-Host.
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
 3. Import des jüngsten Dumps, danach `FLUSH PRIVILEGES` (wie der Neustart im Ernstfall) und die Arbeitsprobe des App-Users; ein Alt-Archiv (`--all-databases`) wird erkannt und durchläuft den unten dokumentierten Grant-Reparaturschritt
 4. Tabellenzahl Dump gegen Restore, Migrationen bis `pending=0`, danach AD-Konvergenz und Rotation der Paketbericht-Annahmegeneration sowie Schema-Fingerprint gegen das frische `struktur.sql`
@@ -108,7 +136,7 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
 1. Stack stoppen: `docker compose down`.
 2. Defekte Daten wegräumen: `Docker/mysql/mysql-data/` sichern/leeren.
 3. Stack starten und warten, bis MySQL initialisiert ist: `docker compose up -d mysql`.
-4. Dump einspielen:
+4. Dump einspielen (ein verschlüsseltes Tripel vorher wie unter „Verschlüsselung“ beschrieben auf dem Rechner mit dem privaten Schlüssel entschlüsseln und nur die Klartextdateien auf den Zielhost bringen):
    ```sh
    gunzip -c Docker/backups/db-<ts>.sql.gz | docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
    ```
@@ -149,6 +177,9 @@ Kurzfassung auch im Hilfe-Panel `stack`; hier die ausführlichen Maßnahmen.
 | Banner/Karte `failed` | Letzter Lauf gescheitert | Cron-Log (`/var/log/virtusphere-backup.log`) und `error`-Feld der Karte lesen; Stack läuft? Platz frei? |
 | Banner/Karte `stale` | Erwarteter Lauf blieb samt Kulanzzeit aus | `sh scripts/install-backup-schedule.sh --show`, dann `sh scripts/backup.sh` manuell testen |
 | Karte: Zeitplan „Nicht gemeldet" | Kein Cron-Eintrag gefunden (Backup lief von Hand) | `sudo sh scripts/install-backup-schedule.sh` ausführen; danach zeigt die Karte Zeitplan und nächsten Lauf |
+| Systemstatus/Karte „Backups unverschlüsselt“ | Kein Zertifikat hinterlegt | Schlüsselpaar offline erzeugen und das Zertifikat unter Einstellungen > System > Backup hinterlegen (Abschnitt „Verschlüsselung“) |
+| Systemstatus/Karte: letzter Lauf nicht mit dem hinterlegten Zertifikat verschlüsselt | Zertifikat erst nach dem letzten Lauf hinterlegt oder ersetzt | Nächsten Lauf abwarten oder `sh scripts/backup.sh` ausführen; danach `*.cms`-Dateien und `encrypted: true` in der Statuszeile prüfen |
+| Karte `failed`, Fehler nennt das Zertifikat oder die Verschlüsselung | Zertifikat nicht lesbar, `openssl` fehlt auf dem Host oder die Datenbankabfrage scheiterte | `openssl version` auf dem Host prüfen, Zertifikat im Portal neu hinterlegen; das Skript legt in diesem Fall bewusst nichts unverschlüsselt ab |
 | Banner/Karte `disk_low` (<10 %) | Backup-Volume voll | Ältere Läufe/`KEEP` prüfen, Volume vergrößern |
 | Karte zeigt `unknown` nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sh scripts/backup.sh` laufen lassen |
 | Import bricht ab | Fehlende VLANs, falsche Version, kein JSON | Fehlliste in der Vorschau lesen; VLANs zuerst anlegen; Datei aus passender Version exportieren |

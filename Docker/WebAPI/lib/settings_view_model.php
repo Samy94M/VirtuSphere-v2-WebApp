@@ -7,6 +7,7 @@ require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/ansible_test_config.php';
+require_once __DIR__ . '/backup_encryption.php';
 
 /** @return array<string,mixed> */
 function settings_build_view_model(mysqli $connection): array
@@ -57,6 +58,8 @@ function settings_build_view_model(mysqli $connection): array
     $backupNextHours = $backupNextTs !== null ? (int) floor(($backupNextTs - $serverEpoch) / 3600) : null;
     $backupOverdueAt = $backup['overdue_at'];
     $backupIsOverdue = $backupOverdueAt !== null && $serverEpoch > $backupOverdueAt;
+    $backupCertificate = backup_encryption_certificate($connection);
+    $backupEncryptionFinding = backup_encryption_finding($backupCertificate, $backup);
 
     $currentTimezone = portal_timezone();
     $timezoneGroups = portal_timezone_choices($currentTimezone);
@@ -119,6 +122,8 @@ function settings_build_view_model(mysqli $connection): array
         'backupNextHours',
         'backupOverdueAt',
         'backupIsOverdue',
+        'backupCertificate',
+        'backupEncryptionFinding',
         'currentTimezone',
         'timezoneGroups',
         'esxiIntervalHours',

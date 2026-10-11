@@ -209,6 +209,8 @@ const VIRTUSPHERE_PORTAL_TIMEZONE_DEFAULT = 'Europe/Berlin';
 // SHA-256 hash of the optional machine report token. The plaintext token is
 // shown exactly once when generated and lives only in the MECM server registry.
 const VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH = 'machine_report_token_hash';
+// K19: PEM certificate backups are encrypted to; never a private key (lib/backup_encryption.php).
+const VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE = 'backup_encryption_certificate';
 
 // Absolute portal session lifetime, admin-configured in minutes. The stored
 // value is clamped to the bounds on read, so a hand-edited DB row can never

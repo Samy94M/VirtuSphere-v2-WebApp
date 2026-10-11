@@ -6,6 +6,8 @@
 # isolierten Wegwerf-Umgebung wieder her und prueft die volle Kette:
 #
 #   1. Manifest-Hashes beider Archive (sha256sum -c)
+#   1b. Verschluesselte Archive (*.cms, K19) mit dem privaten Schluessel aus
+#      VIRTUSPHERE_BACKUP_PRIVATE_KEY in das Wegwerf-Arbeitsverzeichnis entschluesseln
 #   2. Dateirechte von .env und SSL-Schluesseln im Config-Archiv
 #   3. Import in einen Wegwerf-MySQL (gleiches Image wie der Stack)
 #   4. Tabellenzahl des Dumps gegen die wiederhergestellte Datenbank
@@ -27,7 +29,7 @@
 set -eu
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
-PROGRESS_TOTAL=9
+PROGRESS_TOTAL=10
 progress_position=0
 progress_unit=""
 progress_run() {
@@ -117,7 +119,7 @@ cleanup() {
   original_ec=$1
   trap - EXIT INT TERM
   [ -z "$progress_unit" ] || progress_result fail
-  progress_run 9 cleanup
+  progress_run 10 cleanup
   cleanup_failed=0
   if [ -n "$SMOKE_ID" ]; then
     if verify_container "$SMOKE_ID" "$SMOKE_NAME"; then
@@ -156,10 +158,16 @@ trap 'cleanup $?' EXIT
 trap 'exit 130' INT TERM
 
 # --- 0. Juengstes Backup-Tripel finden --------------------------------------
-dump=$(ls -1t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | head -n 1 || true)
+dump=$(ls -1t "$BACKUP_DIR"/db-*.sql.gz "$BACKUP_DIR"/db-*.sql.gz.cms 2>/dev/null | head -n 1 || true)
 [ -n "$dump" ] || envfail "[restore.backup-missing] kein DB-Dump unter $BACKUP_DIR/ gefunden. Erst sh scripts/backup.sh laufen lassen."
-ts=$(basename "$dump" | sed 's/^db-//; s/\.sql\.gz$//')
+# K19: ein verschluesseltes Tripel (*.cms) braucht den privaten Schluessel des
+# Zertifikats, das beim Backup hinterlegt war. Er kommt nur ueber
+# VIRTUSPHERE_BACKUP_PRIVATE_KEY und wird nie kopiert.
+encrypted=0
+case "$dump" in *.cms) encrypted=1 ;; esac
+ts=$(basename "$dump" | sed 's/^db-//; s/\.cms$//; s/\.sql\.gz$//')
 config="$BACKUP_DIR/config-$ts.tar.gz"
+[ "$encrypted" -eq 0 ] || config="$config.cms"
 manifest="$BACKUP_DIR/manifest-$ts.sha256"
 [ -f "$config" ] || fail "[restore.backup-incomplete] Config-Archiv $config fehlt zum Dump $dump; das Backup-Tripel ist unvollstaendig."
 [ -f "$manifest" ] || fail "[restore.backup-incomplete] Manifest $manifest fehlt. Ein Backup ohne Hash-Manifest ist nicht verifizierbar; sh scripts/backup.sh erneut laufen lassen."
@@ -167,6 +175,15 @@ echo "Restore-Drill Auswahl: Pruefroot=$CHECK_ROOT; Backup-Stand=$ts"
 
 command -v docker >/dev/null 2>&1 || envfail "docker fehlt."
 command -v sha256sum >/dev/null 2>&1 || envfail "sha256sum fehlt."
+if [ "$encrypted" -eq 1 ]; then
+  command -v openssl >/dev/null 2>&1 || envfail "[restore.key-missing] openssl fehlt; das Backup $ts ist verschluesselt."
+  [ -n "${VIRTUSPHERE_BACKUP_PRIVATE_KEY:-}" ] && [ -r "$VIRTUSPHERE_BACKUP_PRIVATE_KEY" ] \
+    || envfail "[restore.key-missing] Backup $ts ist verschluesselt; VIRTUSPHERE_BACKUP_PRIVATE_KEY muss auf den lesbaren privaten Schluessel zeigen (docs/operations/backup.md)."
+  [ -f "$SCRIPT_DIR/lib/backup_crypto.sh" ] \
+    || envfail "[restore.root-incomplete] lib/backup_crypto.sh fehlt neben dem Pruefskript $SCRIPT_DIR"
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/lib/backup_crypto.sh"
+fi
 docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 \
   || envfail "PHP-Image $PHP_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_PHP_IMAGE setzen)."
 docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1 \
@@ -179,8 +196,26 @@ progress_run 2 manifest
   || fail "Manifest-Pruefung fehlgeschlagen: mindestens ein Archiv ist veraendert oder unvollstaendig."
 progress_result pass
 
+# --- 1b. Entschluesseln (K19) --------------------------------------------------
+# Nur in das Wegwerf-Arbeitsverzeichnis, das der Cleanup-Trap entfernt. Alle
+# folgenden Schritte lesen danach dieselben Variablen wie bei einem
+# unverschluesselten Backup.
+progress_run 3 decrypt
+if [ "$encrypted" -eq 1 ]; then
+  plain_dump="$WORKDIR/db-$ts.sql.gz"
+  plain_config="$WORKDIR/config-$ts.tar.gz"
+  backup_crypto_decrypt "$VIRTUSPHERE_BACKUP_PRIVATE_KEY" "$dump" "$plain_dump" 2>/dev/null \
+    || fail "[restore.decrypt-failed] DB-Dump $dump laesst sich mit dem angegebenen Schluessel nicht entschluesseln."
+  backup_crypto_decrypt "$VIRTUSPHERE_BACKUP_PRIVATE_KEY" "$config" "$plain_config" 2>/dev/null \
+    || fail "[restore.decrypt-failed] Config-Archiv $config laesst sich mit dem angegebenen Schluessel nicht entschluesseln."
+  dump=$plain_dump
+  config=$plain_config
+  echo "Restore-Drill: verschluesseltes Backup $ts entschluesselt."
+fi
+progress_result pass
+
 # --- 2. Dateirechte im Config-Archiv -------------------------------------------
-progress_run 3 archived-config
+progress_run 4 archived-config
 # Auf einem POSIX-Host ist ein gruppen-/weltlesbares .env oder ein lesbarer
 # SSL-Key ein Befund. Git-Bash unter Windows kann POSIX-Modi nicht abbilden
 # (alles erscheint als 644/755), dort wird nur gewarnt.
@@ -245,7 +280,7 @@ APP_DB_PASS="$(env_value DB_PASS)"
 progress_result pass
 
 # --- 4. Wegwerf-MySQL + Import ---------------------------------------------------
-progress_run 4 database-restore
+progress_run 5 database-restore
 # Der Wegwerf-Container entsteht wie der Produktionsstack: der mysql-Entrypoint
 # legt den App-User aus der archivierten .env an (MYSQL_USER/MYSQL_PASSWORD/
 # MYSQL_DATABASE, wie docker-compose.yml sie setzt). Genau diese Grants muss der
@@ -339,7 +374,7 @@ echo "OK: App-User $APP_DB_USER kann nach dem Restore arbeiten."
 progress_result pass
 
 # --- 5. Tabellenzahl Dump vs. Restore ------------------------------------------
-progress_run 5 table-count
+progress_run 6 table-count
 dump_tables=$(gunzip -c "$dump" | awk -v db="$DB_NAME" '
   /^-- Current Database:/ { in_db = index($0, "`" db "`") > 0 }
   in_db && /^CREATE TABLE/ { n++ }
@@ -353,7 +388,7 @@ echo "Tabellen OK: $restored_tables Tabellen in $DB_NAME wiederhergestellt."
 progress_result pass
 
 # --- 6. Migrationen + Konvergenz -------------------------------------------------
-progress_run 6 migrations-and-schema
+progress_run 7 migrations-and-schema
 # run_php <app-key> <php-script> [args...] — Projekt-PHP im Drill-Netz mit den
 # Restore-Verbindungsdaten; der Schluessel ist Parameter, damit die Krypto-Probe
 # denselben Weg einmal mit dem gesicherten und einmal mit einem falschen
@@ -427,7 +462,7 @@ diff -u "$WORKDIR/schema-fresh.txt" "$WORKDIR/schema-restored.txt" \
 progress_result pass
 
 # --- 7. Invarianten, Rowcounts, Credential-Krypto -------------------------------
-progress_run 7 invariants-and-crypto
+progress_run 8 invariants-and-crypto
 PROBE=/repo/Docker/WebAPI/tests/tools/restore-drill-probe.php
 run_php "$APP_KEY" "$PROBE" verify || fail "Invarianten-/Krypto-Probe rot."
 WRONG_KEY="base64:$(docker run --rm \
@@ -439,7 +474,7 @@ run_php "$WRONG_KEY" "$PROBE" expect-decrypt-failure \
 progress_result pass
 
 # --- 8. App-Smoke gegen die wiederhergestellten Daten ---------------------------
-progress_run 8 app-smoke
+progress_run 9 app-smoke
 echo "Starte Smoke-Server (php -S) gegen den Restore ..."
 if docker container inspect "$SMOKE_NAME" >/dev/null 2>&1; then
   fail "[restore.resource-collision] Smoke-Name $SMOKE_NAME existiert bereits."

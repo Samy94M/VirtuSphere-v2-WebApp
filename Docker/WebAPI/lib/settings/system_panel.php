@@ -9,6 +9,8 @@ declare(strict_types=1);
 /** @var string $passwordMinLength */
 /** @var array<string,int> $retentionRows */
 /** @var array<string,mixed> $backup */
+/** @var array{pem:string,fingerprint:string,subject:string,valid_from:int,valid_to:int,bits:int}|null $backupCertificate */
+/** @var string|null $backupEncryptionFinding */
 /** @var string $backupState */
 /** @var array<string,mixed> $backupLast */
 /** @var int $backupTs */
@@ -195,6 +197,34 @@ declare(strict_types=1);
                     <?php } ?>
                 </tbody>
             </table></div>
+            <h3><?php echo h(__t('settings.backup_cert_heading')); ?></h3>
+            <?php if ($backupEncryptionFinding !== null) { ?>
+                <div class="alert alert-warning" data-backup-encryption-finding><?php echo h(backup_encryption_finding_message($backupEncryptionFinding)); ?></div>
+            <?php } ?>
+            <?php if ($backupCertificate !== null) { ?>
+                <div class="table-wrap" tabindex="0"><table>
+                    <tbody>
+                        <tr><th><?php echo h(__t('settings.backup_cert_subject')); ?></th><td><?php echo h($backupCertificate['subject']); ?></td></tr>
+                        <tr><th><?php echo h(__t('settings.backup_cert_fingerprint')); ?></th><td><code><?php echo h($backupCertificate['fingerprint']); ?></code></td></tr>
+                        <tr><th><?php echo h(__t('settings.backup_cert_valid_to')); ?></th><td><?php echo h(portal_format_epoch($backupCertificate['valid_to'])); ?></td></tr>
+                    </tbody>
+                </table></div>
+                <form class="inline-form" method="post" action="settings.php">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="remove_backup_certificate">
+                    <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('settings.backup_cert_remove_confirm')); ?>"><?php echo h(__t('settings.backup_cert_remove')); ?></button>
+                </form>
+            <?php } ?>
+            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_backup_certificate">
+                <label class="form-grid-full"><?php echo h(__t('settings.backup_cert_label')); ?>
+                    <textarea name="backup_certificate" rows="6" spellcheck="false"<?php echo form_control_attrs('backup_cert', 'backup_certificate', null, true); ?>></textarea>
+                    <span class="hint" id="<?php echo h(form_hint_id('backup_cert', 'backup_certificate')); ?>"><?php echo h(__t('settings.backup_cert_hint', ['bits' => VIRTUSPHERE_BACKUP_ENCRYPTION_MIN_RSA_BITS])); ?></span>
+                    <?php echo form_error_html('backup_cert', 'backup_certificate'); ?>
+                </label>
+                <div class="actions form-grid-full"><button class="button" type="submit" data-confirm="<?php echo h(__t('settings.backup_cert_save_confirm')); ?>"><?php echo h(__t($backupCertificate === null ? 'settings.backup_cert_save' : 'settings.backup_cert_replace')); ?></button></div>
+            </form>
             <p><?php echo h(__t('settings.backup_ops_where')); ?></p>
             <p><code>sudo sh scripts/install-backup-schedule.sh --schedule "0 6 * * *"</code></p>
             <p class="muted"><a href="<?php echo h(help_url('stack', 'help-backup')); ?>"><?php echo h(__t('settings.backup_ops_more')); ?></a></p>
