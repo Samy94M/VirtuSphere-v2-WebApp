@@ -10,10 +10,10 @@ declare(strict_types=1);
 function migrate_0063_machine_api_roles(mysqli $db): void
 {
     migrator_add_column($db, 'deploy_accessToWebAPI', 'role',
-        'VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER description');
+        'VARCHAR(16) NULL AFTER description');
     if (!migrator_check_exists($db, 'deploy_accessToWebAPI', 'deploy_access_role_check')) {
         $db->query("ALTER TABLE deploy_accessToWebAPI ADD CONSTRAINT deploy_access_role_check CHECK (
-            role IS NULL OR role IN ('mecm_server', 'ansible_host', 'client')
+            role IS NULL OR role IN (_utf8mb4'mecm_server', _utf8mb4'ansible_host', _utf8mb4'client')
         )");
     }
 

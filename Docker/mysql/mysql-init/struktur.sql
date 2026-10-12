@@ -345,9 +345,9 @@ CREATE TABLE IF NOT EXISTS deploy_accessToWebAPI (
     -- (lib/machine_api_roles.php owns the set and the endpoint map). NULL is a
     -- legacy entry that still opens every machine endpoint; System status
     -- counts those until a role is assigned.
-    role VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    role VARCHAR(16) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT deploy_access_role_check CHECK (role IS NULL OR role IN ('mecm_server', 'ansible_host', 'client'))
+    CONSTRAINT deploy_access_role_check CHECK (role IS NULL OR role IN (_utf8mb4'mecm_server', _utf8mb4'ansible_host', _utf8mb4'client'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS deploy_migrations (

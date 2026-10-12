@@ -65,7 +65,7 @@ function settings_allowlist_handle_action(mysqli $connection, array $user, strin
                 audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                     'action' => 'role_assigned',
                     'role' => $role,
-                    'previous_role' => (string) ($before['role'] ?? ''),
+                    'previous_role' => (string) ($before['role'] ?? 'none'),
                 ], (int) $user['id']);
                 flash_set('success', __t('settings.allowlist_role_saved'));
             }

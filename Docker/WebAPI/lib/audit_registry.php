@@ -45,7 +45,7 @@ function audit_context_field_registry(): array
         'permission' => ['type' => 'identifier', 'max' => 128],
         'username' => ['type' => 'string', 'max' => 191],
         'name' => ['type' => 'string', 'max' => 191],
-        'role' => $id, 'outcome' => $id, 'component' => $id, 'direction' => $id,
+        'role' => $id, 'previous_role' => $id, 'outcome' => $id, 'component' => $id, 'direction' => $id,
         'trust_mode' => $id, 'progress_kind' => $id, 'mode' => $id,
         'status' => $id, 'old_state' => $id, 'new_state' => $id,
         'report_type' => $id, 'error_class' => ['type' => 'string', 'max' => 191],

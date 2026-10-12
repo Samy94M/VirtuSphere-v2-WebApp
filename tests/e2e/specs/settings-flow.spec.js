@@ -519,7 +519,7 @@ $ip = '${ip}';
 $stmt->bind_param('s', $ip);
 $stmt->execute();
 $row = $stmt->get_result()->fetch_assoc();
-echo 'JSON' . json_encode(['role' => $row['role'] ?? 'missing']) . 'JSON';
+echo 'JSON' . json_encode(['role' => $row === null ? 'missing' : $row['role']]) . 'JSON';
 `).role;
   const shownCount = async () => {
     const hint = page.locator('[data-allowlist-without-role]');
