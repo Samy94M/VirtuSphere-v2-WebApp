@@ -35,7 +35,7 @@ return [
     'saved' => 'Einstellungen gespeichert.',
     'machine_api_directions' => 'Diese Machine-API ist ausschließlich eingehend: MECM, der Ansible-Host und die Deploy-Clients rufen das Portal an, und nur freigegebene IP-Adressen dürfen das. Das Portal baut keine Verbindung zum MECM-Server auf; es gibt hier bewusst keinen MECM-Host und keinen Port. Provider, Site-Code und Berichtsintervall werden mit dem Windows-Installer beziehungsweise in dessen Registry konfiguriert.',
     'allowlist_title' => 'Zugriff auf das Portal (eingehend)',
-    'allowlist_hint' => 'Nur freigegebene IP-Adressen dürfen die Machine-API aufrufen, und jede nur die Endpunkte ihrer Rolle: MECM-Server (Device-Sync, Paket-Sync, Server-Berichte), Ansible-Host (MAC-Rückruf, VM-Zugriffsfreigabe) oder Client (Konfiguration, Phasen, Bestätigung, Paketberichte). Trage hier die IPs von MECM-Server und Ansible-Host mit ihrer Rolle ein.',
+    'allowlist_hint' => 'Nur freigegebene IP-Adressen dürfen die Machine-API aufrufen, und jeder Eintrag erlaubt nur die Endpunkte seiner Rolle: MECM-Server (Device-Sync, Paket-Sync, Server-Berichte), Ansible-Host (MAC-Rückruf, VM-Zugriffsfreigabe) oder Client (Konfiguration, Phasen, Bestätigung, Paketberichte). Trage hier die IPs von MECM-Server und Ansible-Host mit ihrer Rolle ein; Clients brauchen nur für Paketberichte einen Eintrag.',
     'allowlist_empty_warning' => 'Solange die Liste leer ist, kommt nichts an. Das Portal weist dann jeden Aufruf ab, auch den von MECM. Device-Sync, Paket-Sync, Autoimporter und der MAC-Upload eines Deploys funktionieren erst ab dem ersten Eintrag. Eine leere Liste sperrt alles, sie erlaubt nicht alles.',
     'allowlist_th_ip' => 'IP-Adresse',
     'allowlist_th_description' => 'Beschreibung',

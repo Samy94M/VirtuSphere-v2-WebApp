@@ -676,6 +676,58 @@ Describe 'Restore and backup resource safety' {
         @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
     }
 
+    # K19-A2: the drill restores the newest db-/config- pair it finds. A decrypted
+    # copy left next to an encrypted triplet of the same stamp can be newer than
+    # the .cms files, and the manifest (which names the .cms files) must refuse it.
+    It 'K19-A2: a plaintext copy next to an encrypted triplet of the same stamp fails the drill instead of restoring an unlisted file' {
+        $keys = New-BackupTestKeyPair
+        $stamp = 'k19-a2-plain-copy'
+        $root = Join-Path $TestDrive ('restore-' + $stamp)
+        New-CanonicalSourceRoot -Root $root -Stamp $stamp
+        Set-CompleteSyntheticDump -Root $root -Stamp $stamp
+        $backupDir = Join-Path $root 'Docker\backups'
+        $names = @(('db-{0}.sql.gz' -f $stamp), ('config-{0}.tar.gz' -f $stamp))
+        $holding = Join-Path $TestDrive ('holding-' + $stamp)
+        New-Item -ItemType Directory -Path $holding -Force | Out-Null
+        foreach ($name in $names) {
+            Copy-Item -LiteralPath (Join-Path $backupDir $name) -Destination (Join-Path $holding $name)
+        }
+        Protect-SyntheticBackup -Root $root -Stamp $stamp -Cert $keys.Cert
+        foreach ($name in $names) {
+            $copy = Join-Path $backupDir $name
+            Copy-Item -LiteralPath (Join-Path $holding $name) -Destination $copy
+            $encrypted = Get-Item -LiteralPath (Join-Path $backupDir ($name + '.cms'))
+            (Get-Item -LiteralPath $copy).LastWriteTime = $encrypted.LastWriteTime.AddMinutes(5)
+        }
+        $scriptPath = Join-Path (Join-Path $root 'scripts') 'restore_test.sh'
+        $result = Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode success -CheckRoot $root -PrivateKey $keys.Key
+        $result.ExitCode | Should -Be 1
+        ($result.Output -join "`n") | Should -Match '\[restore\.manifest-mismatch\]'
+        @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
+    }
+
+    # K19-A2, second shape: a plain triplet whose manifest lists one more file
+    # that the drill never chose. The listed hashes all verify, so only the
+    # exact-name rule can refuse it.
+    It 'K19-A2: a manifest that lists a third foreign file fails the drill even when the chosen triplet verifies' {
+        $stamp = 'k19-a2-foreign-line'
+        $root = Join-Path $TestDrive ('restore-' + $stamp)
+        New-CanonicalSourceRoot -Root $root -Stamp $stamp
+        Set-CompleteSyntheticDump -Root $root -Stamp $stamp
+        $backupDir = Join-Path $root 'Docker\backups'
+        $foreign = Join-Path $backupDir ('extra-{0}.txt' -f $stamp)
+        Set-Content -LiteralPath $foreign -Value 'foreign file listed in the manifest' -Encoding Ascii
+        $manifest = Join-Path $backupDir ('manifest-{0}.sha256' -f $stamp)
+        $foreignLine = '{0}  {1}' -f (Get-FileHash -LiteralPath $foreign -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $foreign -Leaf)
+        $manifestLines = @(Get-Content -LiteralPath $manifest) + $foreignLine
+        [IO.File]::WriteAllText($manifest, (($manifestLines -join "`n") + "`n"), [Text.Encoding]::ASCII)
+        $scriptPath = Join-Path (Join-Path $root 'scripts') 'restore_test.sh'
+        $result = Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode success -CheckRoot $root
+        $result.ExitCode | Should -Be 1
+        ($result.Output -join "`n") | Should -Match '\[restore\.manifest-mismatch\]'
+        @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
+    }
+
     It 'cleans the protected raw dump and records failure when TERM interrupts mysqldump' {
         $result = Invoke-BackupSafety -Mode backup-signal
         $result.ExitCode | Should -Be 130

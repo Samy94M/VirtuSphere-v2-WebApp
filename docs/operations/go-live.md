@@ -407,10 +407,13 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    |---|---|---|
    | MECM-Server, Rolle MECM-Server | `mecm-api.php?action=getDeviceList`, `mecm_packages.php`, `mecm_updateid.php`, `mecm_report.php` (Heartbeat, Laufberichte) | Device-Sync, Paket-Sync, MECM-IDs und Heartbeats bleiben aus |
    | Ansible-Host, Rolle Ansible-Host | `db_importMAC.php` (`upload_mac_list.py` meldet die MACs zurück), `deploy_vm_touch.php` | Deploy läuft, aber keine MAC kommt an, damit keine MECM-Übergabe |
+   | Client-VMs, die Paketberichte senden, Rolle Client | `mecm_report.php?action=reportPackageRun` (der Paketwrapper meldet jeden Paketlauf) | Paketberichte kommen nicht an (403); Konfiguration, Phasen und Bestätigung laufen über die MAC weiter |
 
-   Die ausgerollten Client-VMs brauchen **keinen** Eintrag: `mecm-api.php` und
-   `mecm_report.php` lassen alternativ eine im Portal bekannte MAC-Adresse als
-   Ausweis gelten. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
+   Die ausgerollten Client-VMs brauchen für Konfiguration, Phasenmeldungen und
+   Bestätigung **keinen** Eintrag: `mecm-api.php?action=getDeviceInfos`,
+   `mecm_report.php?action=reportPhase` und `mecm_client_ack.php` lassen dafür
+   alternativ eine im Portal bekannte MAC-Adresse als Ausweis gelten. Paketberichte
+   gelten nur per IP, daher die Client-Zeile oben. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
    („Verbindung und Umgebung prüfen" beim Ansible-Zugang): fehlt er, endet die Prüfung als Warnung mit der
    IP, die hier einzutragen ist. Jeder Eintrag erreicht nur die Endpunkte seiner Rolle (K20); Einträge ohne Rolle aus einem älteren Stand gelten bis zur Zuordnung für alle Endpunkte und werden im Systemstatus gezählt.
 5. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft

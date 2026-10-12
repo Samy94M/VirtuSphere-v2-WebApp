@@ -128,9 +128,13 @@ function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint 
     }
 
     if ($db instanceof mysqli) {
-        // Throttled per (category, event code, IP): a task that polls every ten seconds
-        // must not flood the log, and another host's first refusal must still get
-        // through. The category is the security one, because that is the question
+        // Throttled per (category, event code, IP and closed cause): a task that polls
+        // every ten seconds must not flood the log, and another host's first refusal must
+        // still get through. A change of cause (an unknown IP later listed under another
+        // role) writes its line at once instead of waiting for the old cause's window to
+        // end. A refusal without a closed cause keeps the bare IP as its scope. Lines
+        // throttled under the former IP-only scope expire with their window; there is no
+        // migration. The category is the security one, because that is the question
         // this answers.
         machine_api_audit_warning(
             $db,
@@ -140,7 +144,7 @@ function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint 
             VIRTUSPHERE_AUDIT_RESULT_DENIED,
             $context,
             $ip,
-            $ip
+            machine_api_denial_throttle_scope($ip, $context['reason'] ?? null)
         );
     } else {
         machine_api_log_warning('machine_api.access_denied', 'Machine API access denied for endpoint ' . $where . '.');
@@ -149,6 +153,25 @@ function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint 
     machine_api_json(['error' => 'Zugriff verweigert. Ihre IP: ' . $ip], 403);
 }
 
+/**
+ * The throttle scope of one refusal (K20, finding A3): the IP, plus the closed
+ * cause when there is one. The throttle is keyed by (category, event, scope), so
+ * a second cause of the same IP is not silenced by the first one for an hour. A
+ * refusal without a closed cause keeps the bare IP as its scope. An empty IP stays
+ * empty for every cause, so the audit writer refuses that scope as it did before.
+ */
+function machine_api_denial_throttle_scope(string $ip, ?string $reason): string
+{
+    if ($ip === '') {
+        return $ip;
+    }
+
+    return match ($reason) {
+        VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED => $ip . '|n',
+        VIRTUSPHERE_MACHINE_API_DENY_ROLE => $ip . '|r',
+        default => $ip,
+    };
+}
 
 function machine_api_prepared_result(mysqli $db, string $sql, string $types = '', array $params = []): mysqli_result
 {

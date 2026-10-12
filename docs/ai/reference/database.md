@@ -27,8 +27,11 @@ The effective MECM rollout hostname is globally unique through `deploy_vm_hostna
 backup certificate both archives are `*.cms` envelopes (amendment 5); the drill
 decrypts them only with `VIRTUSPHERE_BACKUP_PRIVATE_KEY`. An optional
 `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` (amendment 6) must match the
-stored certificate or the run fails; the drill does not read it. Plaintext temp
-files of a killed run are swept under the lock on the next run. There is no
+stored certificate or the run fails; the drill does not read it. The drill
+accepts a triplet only when its manifest lists exactly the chosen archive names;
+decrypted copies belong in a working directory outside `Docker/backups/` and are
+deleted after the restore. Plaintext temp files of a killed run are swept under
+the lock on the next run. There is no
 replication or point-in-time-recovery consumer, so Compose starts MySQL with
 `mysqld --skip-log-bin`. Disabling does not authorize direct deletion of old
 binlog files from the data directory. Enabling it again requires a separately

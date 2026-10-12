@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/ClientIpAllowlist.php';
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/api_access.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/log.php';
 
 /**
  * K20 (VT-01): an allowlist entry admits only the endpoints of its role. The
@@ -91,6 +92,47 @@ final class MachineApiRoleTest extends TestCase
     {
         self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
         self::assertSame('ip_not_allowlisted', $this->lastDenialReason());
+    }
+
+    /**
+     * K20 (finding A3): an IP first refused as unknown and then listed under the
+     * wrong role must show the new cause at once. The throttle scope carries the
+     * cause, so the second refusal gets its own row; a third refusal with the same
+     * cause stays inside its window and adds none.
+     */
+    public function testAnIpThatGainsTheWrongRoleIsRecordedWithItsNewCause(): void
+    {
+        self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
+        self::assertSame(1, $this->denialRowCount(), 'the unknown IP writes its first row');
+        self::assertSame('ip_not_allowlisted', $this->lastDenialReason());
+
+        $this->allowlistOwnIp('client');
+        self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
+        self::assertSame(2, $this->denialRowCount(), 'the new cause is not hidden for an hour by the old one');
+        self::assertSame('ip_role_not_permitted', $this->lastDenialReason(), 'the newest row names the role, not the stale missing entry');
+
+        self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
+        self::assertSame(2, $this->denialRowCount(), 'a repeat with the same cause stays throttled');
+    }
+
+    /** Guard, green today: the throttle still collapses a repeat with the same cause into one row. */
+    public function testARepeatedRefusalWithTheSameCauseWritesOneRow(): void
+    {
+        self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
+        self::assertSame(403, $this->request('POST', '/mecm_updateid.php?action=updateDevice')[0]);
+        self::assertSame(1, $this->denialRowCount(), 'a polling caller with one cause writes one row per window');
+    }
+
+    private function denialRowCount(): int
+    {
+        $row = repo_fetch_one(
+            $this->db,
+            'SELECT COUNT(*) AS c FROM deploy_logs WHERE category = ? AND event_code = ?',
+            'ss',
+            [VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED]
+        );
+
+        return (int) ($row['c'] ?? 0);
     }
 
     private function allowlistOwnIp(?string $role): void

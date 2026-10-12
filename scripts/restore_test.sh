@@ -5,7 +5,8 @@
 # stellt das juengste Backup-Tripel (db-/config-/manifest-Datei) in einer
 # isolierten Wegwerf-Umgebung wieder her und prueft die volle Kette:
 #
-#   1. Manifest-Hashes beider Archive (sha256sum -c)
+#   1. Manifest: Namensmenge (genau die gewaehlten Archive) und Hashes beider
+#      Archive (sha256sum -c); sonst Befund [restore.manifest-mismatch]
 #   1b. Verschluesselte Archive (*.cms, K19) mit dem privaten Schluessel aus
 #      VIRTUSPHERE_BACKUP_PRIVATE_KEY in das Wegwerf-Arbeitsverzeichnis entschluesseln
 #   2. Dateirechte von .env und SSL-Schluesseln im Config-Archiv
@@ -196,7 +197,19 @@ docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1 \
 progress_result pass
 
 # --- 1. Manifest ---------------------------------------------------------------
+# Das Manifest listet genau die gewaehlten Archive: genau zwei Zeilen
+# "<hash>  <name>" (binaer: "<hash> *<name>"), die Namen sind Dump und Config aus
+# Schritt 0. Eine Klartextkopie oder fremde Datei im Backupverzeichnis wuerde
+# sonst ungeprueft eingespielt. Der Vergleich laeuft vor sha256sum -c und vor dem
+# Entschluesseln; kein Netz und kein Container wird dafuer angelegt.
 progress_run 2 manifest
+manifest_expected=$(printf '%s\n%s\n' "$(basename "$dump")" "$(basename "$config")" | LC_ALL=C sort)
+manifest_lines=$(grep -c '' "$manifest" || true)
+manifest_entries=$(grep -Ec '^[0-9a-f]{64}(  | \*)[^ *]' "$manifest" || true)
+manifest_listed=$(tr -d '\r' < "$manifest" | sed -n -E 's/^[0-9a-f]{64}(  | \*)//p' | LC_ALL=C sort)
+if [ "$manifest_lines" != 2 ] || [ "$manifest_entries" != 2 ] || [ "$manifest_listed" != "$manifest_expected" ]; then
+  fail "[restore.manifest-mismatch] Manifest $manifest listet nicht genau die gewaehlten Archive $(basename "$dump") und $(basename "$config") (gelistet: $(tr -d '\r' < "$manifest" | sed -E 's/^[0-9a-f]{64}(  | \*)//' | tr '\n' ' ')); eine Klartextkopie oder fremde Datei im Backupverzeichnis wuerde sonst ungeprueft eingespielt."
+fi
 ( cd "$BACKUP_DIR" && sha256sum -c "$(basename "$manifest")" ) \
   || fail "Manifest-Pruefung fehlgeschlagen: mindestens ein Archiv ist veraendert oder unvollstaendig."
 progress_result pass

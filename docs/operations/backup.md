@@ -42,11 +42,11 @@ openssl req -x509 -newkey rsa:4096 -nodes -keyout virtusphere-backup-key.pem -ou
 
 **Schlüsselwechsel:** neues Paar erzeugen. Dann zwei Schritte direkt hintereinander: das Zertifikat im Portal ersetzen und, falls ein Pin gesetzt ist, `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` auf den neuen Fingerabdruck setzen. Ist ein Pin gesetzt, scheitert jeder Lauf dazwischen laut. Das gilt in jeder Reihenfolge, weil Zertifikat und Pin dann nicht übereinstimmen; es entsteht kein Backup, das niemand bestellt hat. Danach einmal `sh scripts/backup.sh` von Hand laufen lassen und die Statuszeile prüfen: `encrypted` ist `true`, `recipient_sha256` ist der neue Fingerabdruck. Ab dem nächsten Lauf gilt der neue Schlüssel; ältere Backups brauchen weiter den alten privaten Schlüssel, bis die Retention sie entfernt hat. Den alten Schlüssel erst danach vernichten. Bestehende unverschlüsselte Backups bleiben bis zum Ende der Aufbewahrung liegen; wer sie sofort loswerden will, löscht sie von Hand.
 
-**Entschlüsseln** auf dem Rechner mit dem privaten Schlüssel:
+**Entschlüsseln** auf dem Rechner mit dem privaten Schlüssel. Die Klartextdateien kommen in ein Arbeitsverzeichnis außerhalb von `Docker/backups/`, hier `RESTORE_WORK`, etwa `RESTORE_WORK=restore-work; mkdir -p "$RESTORE_WORK"` neben dem Projektordner. Klartext gehört nie nach `Docker/backups/` (Begründung unter „Echter Restore“):
 
 ```sh
-openssl cms -decrypt -binary -inform DER -in db-<ts>.sql.gz.cms -inkey virtusphere-backup-key.pem -out db-<ts>.sql.gz
-openssl cms -decrypt -binary -inform DER -in config-<ts>.tar.gz.cms -inkey virtusphere-backup-key.pem -out config-<ts>.tar.gz
+openssl cms -decrypt -binary -inform DER -in db-<ts>.sql.gz.cms -inkey virtusphere-backup-key.pem -out "$RESTORE_WORK/db-<ts>.sql.gz"
+openssl cms -decrypt -binary -inform DER -in config-<ts>.tar.gz.cms -inkey virtusphere-backup-key.pem -out "$RESTORE_WORK/config-<ts>.tar.gz"
 ```
 
 ## Zeitplan einrichten (ADR-0024)
@@ -115,7 +115,7 @@ zuordnet.
 
 Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
-1. SHA-256-Manifest beider Archive (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf)
+1. Manifest (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf): Es muss genau die gewählten Archive listen, also Dump und Konfigurationsarchiv desselben Zeitstempels (bei verschlüsseltem Tripel deren `.cms`-Namen), und deren SHA-256-Hashes müssen stimmen. Sonst endet der Drill mit `[restore.manifest-mismatch]` (Exitcode 1), bevor etwas entschlüsselt oder ein Container angelegt wird.
 1b. Ist das jüngste Tripel verschlüsselt (`*.cms`), entschlüsselt der Drill beide Archive mit dem privaten Schlüssel aus `VIRTUSPHERE_BACKUP_PRIVATE_KEY` ins Wegwerf-Arbeitsverzeichnis. Fehlt die Variable oder ist die Datei nicht lesbar, endet der Drill als fehlende Voraussetzung (`[restore.key-missing]`, Exitcode 2), nie als bestanden. Den Drill dafür auf einem Rechner mit dem Schlüssel ausführen, nicht auf dem App-Host.
 2. Dateirechte von `.env` und SSL-Schlüsseln im Config-Archiv (auf Windows-Hosts nur Warnung, POSIX-Modi sind dort nicht abbildbar)
 3. Import des jüngsten Dumps, danach `FLUSH PRIVILEGES` (wie der Neustart im Ernstfall) und die Arbeitsprobe des App-Users; ein Alt-Archiv (`--all-databases`) wird erkannt und durchläuft den unten dokumentierten Grant-Reparaturschritt
@@ -138,10 +138,11 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
 1. Stack stoppen: `docker compose down`.
 2. Defekte Daten wegräumen: `Docker/mysql/mysql-data/` sichern/leeren.
 3. Stack starten und warten, bis MySQL initialisiert ist: `docker compose up -d mysql`.
-4. Dump einspielen (ein verschlüsseltes Tripel vorher wie unter „Verschlüsselung“ beschrieben auf dem Rechner mit dem privaten Schlüssel entschlüsseln und nur die Klartextdateien auf den Zielhost bringen):
+4. Dump einspielen. Ein verschlüsseltes Tripel wird vorher wie unter „Verschlüsselung“ beschrieben auf dem Rechner mit dem privaten Schlüssel entschlüsselt. Nur die Klartextdateien kommen auf den Zielhost, ebenfalls in ein Arbeitsverzeichnis außerhalb von `Docker/backups/`, hier `RESTORE_WORK` (siehe „Entschlüsseln“):
    ```sh
-   gunzip -c Docker/backups/db-<ts>.sql.gz | docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
+   gunzip -c "$RESTORE_WORK/db-<ts>.sql.gz" | docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
    ```
+   Bei einem unverschlüsselten Tripel entfällt die Kopie; dann liest der Befehl `Docker/backups/db-<ts>.sql.gz` direkt. Klartextkopien gehören nicht nach `Docker/backups/`: Dort zählt eine Kopie als jüngster Lauf ihrer Reihe, sodass die Retention (`KEEP`) ein älteres Tripel zu früh verdrängt. Außerdem läge sie bis zu `KEEP` Läufe lang im Klartext im synchronisierten Verzeichnis. Und der Restore-Drill lehnt ein Tripel ab, dessen Manifest die Klartextnamen nicht listet (`[restore.manifest-mismatch]`).
 4a. **Nur bei einem Alt-Archiv** (Dump aus der Zeit vor dem Formatwechsel, erkennbar an `-- Current Database: mysql` im Dump; neue Dumps enthalten nur die Anwendungsdatenbank): der Import hat die mysql-Grant-Tabellen mitgebracht und ersetzt damit die Konten des Zielservers durch den archivierten Stand. Zwei Folgen, beide mit dem archivierten `.env` behebbar. Erstens kann nach dem nächsten `FLUSH PRIVILEGES`/Neustart das **Root-Passwort** das aus der archivierten `.env` sein statt des aktuellen. Zweitens passt der **App-User** nach einer Passwortrotation nicht mehr zur aktuellen `.env`; dann die Grants aus der wirksamen `.env` neu setzen:
    ```sh
    docker compose exec -T mysql mysql -uroot -p"<wirksames Root-Passwort>" <<'SQL'
@@ -152,9 +153,11 @@ Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
    SQL
    ```
    `scripts/restore_test.sh` führt genau diesen Schritt beim Alt-Archiv automatisch vor und beweist, dass er genügt.
-5. Konfiguration aus `config-<ts>.tar.gz` zurückspielen, **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a). Zunächst ausschließlich PHP samt seiner MySQL-Abhängigkeit starten: `docker compose up -d --wait php`. Ohne Webserver ist die Maschinen-API während der Konvergenz noch nicht erreichbar.
+5. Konfiguration aus `$RESTORE_WORK/config-<ts>.tar.gz` zurückspielen (bei einem unverschlüsselten Tripel aus `Docker/backups/config-<ts>.tar.gz`), **inklusive `docker-compose.override.yml`, falls das Archiv sie enthält**, danach auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen. Ohne die Override-Datei startet der Produktionsstack nicht; ohne die PHP-Logrechte läuft er, kann aber Anwendungsfehler nicht in die persistente Datei schreiben (siehe `go-live.md`, Schritt 1a). Zunächst ausschließlich PHP samt seiner MySQL-Abhängigkeit starten: `docker compose up -d --wait php`. Ohne Webserver ist die Maschinen-API während der Konvergenz noch nicht erreichbar.
 6. Restore-Konvergenz vor dem Webserverstart ausführen: zuerst `docker compose exec -T php php /var/www/html/lib/directory_restore_converge.php`, danach `docker compose exec -T php php /var/www/html/lib/package_report_restore_converge.php`. Der erste Schritt deaktiviert die Verzeichnisanmeldung und entwertet alte Controllerprüfungen; der zweite rotiert die Paketbericht-Annahmegeneration, sodass Berichte aus dem Backup oder vom späteren verlorenen Live-Stand nicht als aktuelle Evidenz angenommen werden. Beide Befehle müssen erfolgreich enden; Details zur Verzeichnisanmeldung stehen in `docs/operations/active-directory.md`.
 7. Erst jetzt den übrigen Stack starten: `docker compose up -d --wait`. Danach `docker compose exec -T php php /var/www/html/lib/migrate.php --check` und `portal/health.php` prüfen.
+
+Sobald der Restore geprüft ist, `$RESTORE_WORK` auf dem Zielhost und auf dem Schlüsselrechner löschen (`rm -r "$RESTORE_WORK"`). Dort liegen die Klartextdumps und die Konfiguration mit allen Zugangsdaten.
 
 ## Was deckt das Backup ab, was kommt aus Git
 

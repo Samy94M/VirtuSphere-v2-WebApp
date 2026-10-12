@@ -35,7 +35,7 @@ return [
     'saved' => 'Settings saved.',
     'machine_api_directions' => 'This machine API is inbound only: MECM, the Ansible host and the deploy clients call the portal, and only allowlisted IP addresses may do so. The portal never connects out to the MECM server; there is deliberately no MECM host and no port here. Provider, site code and the report interval are configured with the Windows installer and in its registry.',
     'allowlist_title' => 'Access to the portal (inbound)',
-    'allowlist_hint' => 'Only allowlisted IP addresses may call the machine API, and each only the endpoints of its role: MECM server (device sync, package sync, server reports), Ansible host (MAC callback, VM access admission) or client (configuration, phases, acknowledgement, package reports). Add the IPs of the MECM server and the Ansible host here with their role.',
+    'allowlist_hint' => 'Only allowlisted IP addresses may call the machine API, and each entry admits only the endpoints of its role: MECM server (device sync, package sync, server reports), Ansible host (MAC callback, VM access admission) or client (configuration, phases, acknowledgement, package reports). Add the IPs of the MECM server and the Ansible host here with their role; clients need an entry only for package reports.',
     'allowlist_empty_warning' => 'While this list is empty, nothing arrives. The portal rejects every call, including the ones from MECM. Device sync, package sync, the autoimporter and a deploy\'s MAC upload only work from the first entry onwards. An empty list blocks everything, it does not allow everything.',
     'allowlist_th_ip' => 'IP address',
     'allowlist_th_description' => 'Description',
