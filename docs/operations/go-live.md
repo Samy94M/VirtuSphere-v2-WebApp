@@ -323,6 +323,13 @@ damit automatisch mitgesichert.
 sh scripts/backup.sh            # Erstsicherung, Ablage/Runbook siehe docs/operations/backup.md
 ```
 
+Verschlüsselung: Zertifikat im Portal hinterlegen (Einstellungen > System >
+Backup) und optional seinen SHA-256-Fingerabdruck als
+`VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` festschreiben. Danach
+`sh scripts/backup.sh` von Hand laufen lassen; die Statuszeile zeigt
+`encrypted` gleich `true` und als `recipient_sha256` denselben Fingerabdruck
+(`docs/operations/backup.md`, Abschnitt „Verschlüsselung“).
+
 Restore-Probe (`scripts/restore_test.sh`) mindestens einmal ausführen, bevor
 produktive Daten entstehen.
 
@@ -392,8 +399,9 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 4. **IP-Freigaben füllen** (Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)). Die Maschinen-
    Schnittstelle ist per Allowlist gesperrt und antwortet jeder nicht
    freigegebenen IP mit **403**, ohne dass im Portal etwas kaputt aussieht.
-   Eine frische Datenbank kennt nur `127.0.0.1`, eine migrierte Bestands-DB
-   unter Umständen gar keinen Eintrag. Eintragen:
+   Eine frische Datenbank kennt keinen Eintrag. Eine migrierte Bestands-DB
+   behält ihre Einträge ohne Rolle; einen Eintrag `127.0.0.1` aus früheren
+   Installationen in den Einstellungen löschen, er gehört zu keinem Host. Eintragen:
 
    | IP und Rolle | Wofür | Sonst |
    |---|---|---|

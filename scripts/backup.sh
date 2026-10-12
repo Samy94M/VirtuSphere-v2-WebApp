@@ -32,6 +32,11 @@
 # `openssl cms` an den oeffentlichen Schluessel verschluesselt
 # (scripts/lib/backup_crypto.sh). Der private Schluessel liegt nie auf diesem
 # Host. Ohne Zertifikat bleibt alles unverschluesselt und das Portal meldet es.
+# Optionaler Pin (K19-A3): steht in .env VIRTUSPHERE_BACKUP_RECIPIENT_SHA256, muss
+# er zum Zertifikat im Portal passen. Abweichung, fehlendes Zertifikat oder ein
+# ungueltiger Wert lassen den Lauf scheitern. Gelesen wird nur .env.
+# Klartext-Tempdateien eines frueher abgebrochenen Laufs raeumt der naechste Lauf
+# unter dem Lock auf (K19-A1).
 #
 # Zusaetzlich schreibt jeder Lauf eine JSONL-Statuszeile nach
 # Docker/backups/status/backup-status.jsonl. Dieses Status-Verzeichnis (und nur
@@ -59,6 +64,17 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)
 cd "$SCRIPT_DIR/.."
 
+# Gemeinsame Helfer: .env-Werte lesen (env_file.sh), Verschluesselung und Pin
+# (backup_crypto.sh). Eine fehlende Datei ist eine unvollstaendige Installation
+# und bricht vor dem ersten Schreiben ab.
+for lib in env_file.sh backup_crypto.sh; do
+  [ -f "$SCRIPT_DIR/lib/$lib" ] || { echo "FEHLER: scripts/lib/$lib fehlt." >&2; exit 1; }
+done
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/env_file.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/backup_crypto.sh"
+
 CONTAINER="${VIRTUSPHERE_MYSQL_CONTAINER:-virtusphere-v2-webapp-mysql-1}"
 BACKUP_DIR="Docker/backups"
 STATUS_DIR="$BACKUP_DIR/status"
@@ -80,6 +96,13 @@ config_tmp_file=""
 cert_dir=""
 encrypted=false
 recipient_sha256=""
+lock_taken=0
+
+# Klartext-Tempdateien (K19-A1): das Praefix steht genau hier. mktemp und das
+# Aufraeumen unter dem Lock nutzen dieselben Werte.
+TMP_PREFIX_DB=".db-"
+TMP_PREFIX_CONFIG=".config-"
+TMP_PREFIX_CERT=".cert-"
 
 backup_progress_run() {
   backup_progress_position=$1
@@ -107,7 +130,48 @@ if command -v flock >/dev/null 2>&1; then
     echo "FEHLER: Ein Backup laeuft bereits (Lock $LOCK_FILE)." >&2
     exit 1
   fi
+  lock_taken=1
 fi
+
+# K19-A1: Ein Lauf, der nicht mehr aufraeumen konnte (Stromausfall, OOM-Killer,
+# kill -9), laesst Klartext-Tempdateien zurueck, weil der EXIT-Trap dann nicht
+# lief. Der naechste Lauf entfernt sie, aber nur unter der Sperre: ein paralleler
+# Lauf wuerde sonst seine eigenen Tempdateien verlieren. Ohne flock wird nur
+# gewarnt. Glob statt find (unter Git Bash kann find.exe greifen); Tiefe 1, keine
+# Links. Ein .cert-Verzeichnis darf rekursiv weg, aber nur wenn es kein Link ist.
+sweep_orphan_plain_temps() {
+  set --
+  for prefix in "$TMP_PREFIX_DB" "$TMP_PREFIX_CONFIG" "$TMP_PREFIX_CERT"; do
+    for entry in "$BACKUP_DIR/$prefix"*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      [ ! -L "$entry" ] || continue
+      if [ -f "$entry" ]; then
+        set -- "$@" "$entry"
+      elif [ -d "$entry" ] && [ "$prefix" = "$TMP_PREFIX_CERT" ]; then
+        set -- "$@" "$entry"
+      fi
+    done
+  done
+  [ "$#" -gt 0 ] || return 0
+  if [ "$lock_taken" -ne 1 ]; then
+    echo "WARNUNG: flock fehlt; $# verwaiste Klartext-Tempdatei(en) in $BACKUP_DIR bleiben liegen. Aufraeumen nur unter der Sperre." >&2
+    return 0
+  fi
+  removed=0
+  for entry in "$@"; do
+    if [ -d "$entry" ]; then
+      rm -rf "$entry" || { echo "WARNUNG: verwaiste Klartext-Tempdatei $entry konnte nicht entfernt werden." >&2; continue; }
+    else
+      rm -f "$entry" || { echo "WARNUNG: verwaiste Klartext-Tempdatei $entry konnte nicht entfernt werden." >&2; continue; }
+    fi
+    removed=$((removed + 1))
+  done
+  if [ "$removed" -gt 0 ]; then
+    echo "$removed verwaiste Klartext-Tempdateien entfernt. Auch den Backup-Host pruefen (docs/operations/backup.md)."
+  fi
+  return 0
+}
+sweep_orphan_plain_temps
 
 start_epoch=$(date +%s)
 status="failed"
@@ -273,7 +337,7 @@ if ! docker exec "$CONTAINER" true >/dev/null 2>&1; then
   backup_fail "MySQL-Container '$CONTAINER' nicht erreichbar. Stack gestartet?"
 fi
 
-db_sql_file=$(umask 077 && mktemp "$BACKUP_DIR/.db-$ts-XXXXXX.sql") \
+db_sql_file=$(umask 077 && mktemp "$BACKUP_DIR/${TMP_PREFIX_DB}${ts}-XXXXXX.sql") \
   || backup_fail "Geschuetzte SQL-Tempdatei konnte nicht erzeugt werden."
 chmod 600 "$db_sql_file" \
   || backup_fail "SQL-Tempdatei konnte nicht auf Modus 0600 begrenzt werden."
@@ -282,7 +346,7 @@ if ! docker exec "$CONTAINER" sh -c 'exec mysqldump --databases "$MYSQL_DATABASE
 fi
 # Auch der komprimierte Dump entsteht zuerst geschuetzt; erst Schritt 4 legt
 # ihn - verschluesselt oder nicht - unter seinem endgueltigen Namen ab.
-db_gz_file=$(umask 077 && mktemp "$BACKUP_DIR/.db-$ts-XXXXXX.gz") \
+db_gz_file=$(umask 077 && mktemp "$BACKUP_DIR/${TMP_PREFIX_DB}${ts}-XXXXXX.gz") \
   || backup_fail "Geschuetzte Dump-Tempdatei konnte nicht erzeugt werden."
 if ! gzip -c "$db_sql_file" > "$db_gz_file"; then
   backup_fail "Komprimierung des DB-Dumps schlug fehl."
@@ -307,12 +371,24 @@ backup_progress_run 2 encryption-key
 cert_value=$(docker exec "$CONTAINER" sh -c 'exec mysql -N -B -r -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -e "$1"' sh \
   "SELECT setting_value FROM deploy_settings WHERE setting_key = 'backup_encryption_certificate'" 2>/dev/null) \
   || backup_fail "Das Zertifikat fuer die Backup-Verschluesselung konnte nicht gelesen werden; es wird nichts unverschluesselt abgelegt."
+# K19-A3: Der Fingerabdruck des Zertifikats darf optional in .env festgeschrieben
+# sein. Gelesen wird nur .env, nie die Prozessumgebung. Ein gesetzter Wert zaehlt
+# immer, auch ein ungueltiger: er ist nie "nicht gesetzt".
+pin_raw=$(env_file_value .env VIRTUSPHERE_BACKUP_RECIPIENT_SHA256)
+pin_probe=$(printf '%s' "$pin_raw" | tr -d ' \t\r"\047')
+pin_sha256=""
+if [ -n "$pin_probe" ]; then
+  pin_sha256=$(backup_crypto_normalize_pin "$pin_raw")
+  [ -n "$pin_sha256" ] \
+    || backup_fail "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 in .env ist kein SHA-256-Fingerabdruck (64 Hexzeichen); es wird nichts abgelegt."
+fi
+if [ -z "$cert_value" ] && [ -n "$pin_sha256" ]; then
+  backup_fail "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 ist gesetzt, im Portal ist aber kein Zertifikat hinterlegt; es wird nichts unverschluesselt abgelegt."
+fi
 if [ -n "$cert_value" ]; then
   command -v openssl >/dev/null 2>&1 \
     || backup_fail "openssl fehlt; das hinterlegte Zertifikat verlangt ein verschluesseltes Backup."
-  # shellcheck disable=SC1091
-  . "$SCRIPT_DIR/lib/backup_crypto.sh"
-  cert_dir=$(umask 077 && mktemp -d "$BACKUP_DIR/.cert-$ts-XXXXXX") \
+  cert_dir=$(umask 077 && mktemp -d "$BACKUP_DIR/${TMP_PREFIX_CERT}${ts}-XXXXXX") \
     || backup_fail "Temporaeres Verzeichnis fuer das Zertifikat konnte nicht erzeugt werden."
   cert_file="$cert_dir/backup-cert.pem"
   printf '%s\n' "$cert_value" > "$cert_file" \
@@ -320,6 +396,9 @@ if [ -n "$cert_value" ]; then
   recipient_sha256=$(backup_crypto_fingerprint "$cert_file")
   [ -n "$recipient_sha256" ] \
     || backup_fail "Das hinterlegte Zertifikat ist nicht lesbar; es wird nichts unverschluesselt abgelegt."
+  if [ -n "$pin_sha256" ] && [ "$pin_sha256" != "$recipient_sha256" ]; then
+    backup_fail "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 in .env ($pin_sha256) passt nicht zum Zertifikat im Portal ($recipient_sha256); es wird nichts abgelegt."
+  fi
   encrypted=true
 fi
 backup_progress_result pass
@@ -336,7 +415,7 @@ config_items="docker-compose.yml"
 [ -f docker-compose.override.yml ] && config_items="$config_items docker-compose.override.yml"
 [ -d Docker/nginx/conf.d ] && config_items="$config_items Docker/nginx/conf.d"
 [ -d Docker/nginx/ssl ] && config_items="$config_items Docker/nginx/ssl"
-config_tmp_file=$(umask 077 && mktemp "$BACKUP_DIR/.config-$ts-XXXXXX.gz") \
+config_tmp_file=$(umask 077 && mktemp "$BACKUP_DIR/${TMP_PREFIX_CONFIG}${ts}-XXXXXX.gz") \
   || backup_fail "Geschuetzte Config-Tempdatei konnte nicht erzeugt werden."
 # shellcheck disable=SC2086
 tar czf "$config_tmp_file" $config_items \

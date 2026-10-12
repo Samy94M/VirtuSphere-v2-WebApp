@@ -53,11 +53,14 @@ function settings_allowlist_handle_action(mysqli $connection, array $user, strin
     if ($action === 'allow_set_role') {
         $role = request_string($_POST, 'role');
         try {
-            $entry = repo_fetch_one($connection, 'SELECT id, ipAddress FROM deploy_accessToWebAPI WHERE id = ? LIMIT 1', 'i', [request_int($_POST, 'id')]);
+            $entry = repo_fetch_one($connection, 'SELECT id, ipAddress, role FROM deploy_accessToWebAPI WHERE id = ? LIMIT 1', 'i', [request_int($_POST, 'id')]);
             if ($entry === null) {
                 flash_set('error', __t('settings.allowlist_not_found'));
             } elseif (!in_array($role, VIRTUSPHERE_MACHINE_API_ROLES, true)) {
                 flash_set('error', __t('settings.allowlist_role_required'));
+            } elseif ($entry['role'] === $role) {
+                // The entry has this role already: no write and no role_assigned audit row.
+                flash_set('info', __t('settings.allowlist_role_unchanged'));
             } elseif (($conflict = repo_api_access_conflict($connection, (string) $entry['ipAddress'], $role, (int) $entry['id'])) !== null) {
                 flash_set('error', __t($conflict === 'legacy_present' ? 'settings.allowlist_ip_legacy_present' : 'settings.allowlist_ip_exists'));
             } else {

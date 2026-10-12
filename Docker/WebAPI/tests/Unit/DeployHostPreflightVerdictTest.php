@@ -32,6 +32,18 @@ final class DeployHostPreflightVerdictTest extends TestCase
         }
     }
 
+    public function testDeniedMessageAlsoNamesTheRoleThatIsMissing(): void
+    {
+        // K20-A2: an IP listed only as MECM server is on the allowlist, so "not
+        // on the allowlist" alone sends the operator to the wrong fix.
+        try {
+            deploy_worker_host_preflight_verdict('export', 0, $this->allowlist('denied 10.0.0.20'));
+            self::fail('an export from an Ansible host without the Ansible host role passed');
+        } catch (DeployWorkerConfigurationBlocked $blocked) {
+            self::assertStringContainsString('or is not listed with the Ansible host role', $blocked->getMessage());
+        }
+    }
+
     public function testModesWithoutAMacImportIgnoreTheVerdict(): void
     {
         foreach (['create', 'start', VIRTUSPHERE_DEPLOY_MODE_AUTOSTART] as $mode) {

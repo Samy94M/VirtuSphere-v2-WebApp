@@ -441,6 +441,7 @@ const VIRTUSPHERE_INTEGRATION_RUN_SOURCES = [
 const VIRTUSPHERE_MACHINE_API_ENDPOINT_UNKNOWN = 'machine-api-unknown';
 const VIRTUSPHERE_MACHINE_API_ENDPOINTS = [
     'db_importMAC.php',
+    'deploy_vm_touch.php',
     'mecm-api.php',
     'mecm_client_ack.php',
     'mecm_packages.php',

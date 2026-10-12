@@ -51,6 +51,13 @@ require_once __DIR__ . '/../machine_api_roles.php';
                                     <input type="hidden" name="action" value="allow_set_role">
                                     <input type="hidden" name="id" value="<?php echo h((string) $entry['id']); ?>">
                                     <select name="role" aria-label="<?php echo h(__t('settings.allowlist_th_role') . ' ' . (string) $entry['ipAddress']); ?>">
+                                        <?php
+                                        // K20-A1: without a role no option is picked, and a browser would send the
+                                        // first role on "Set role". The empty choice is preselected instead, and the
+                                        // handler refuses it with allowlist_role_required.
+                                        if ($entry['role'] === null) { ?>
+                                            <option value="" selected><?php echo h(__t('settings.allowlist_role_select')); ?></option>
+                                        <?php } ?>
                                         <?php foreach (VIRTUSPHERE_MACHINE_API_ROLES as $role) { ?>
                                             <option value="<?php echo h($role); ?>" <?php echo $entry['role'] === $role ? 'selected' : ''; ?>><?php echo h(__t('settings.allowlist_role_' . $role)); ?></option>
                                         <?php } ?>

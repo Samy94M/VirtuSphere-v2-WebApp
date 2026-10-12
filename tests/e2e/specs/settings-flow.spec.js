@@ -500,7 +500,7 @@ test('report token: regenerate asks (existing token would die), the one-time val
 
 // K20 (VT-01): an entry from before roles opens every endpoint until a role is
 // assigned. System status counts it; the settings row assigns a role after a
-// confirmation, and the count drops. The fresh-schema 127.0.0.1 seed may be
+// confirmation, and the count drops. Other entries of the install may be
 // counted too, so the test compares counts instead of expecting one.
 // e2e-covers: settings.php:allow_set_role
 // e2e-covers-cancel: settings.php:allow_set_role
@@ -556,6 +556,53 @@ echo 'JSON' . json_encode(['role' => $row === null ? 'missing' : $row['role']]) 
 
     await page.goto('system_status.php');
     expect(await shownCount(), 'the count dropped by one').toBe(before - 1);
+  } finally {
+    sql(`$stmt = $db->prepare('DELETE FROM deploy_accessToWebAPI WHERE ipAddress = ?'); $stmt->bind_param('s', $ip); $stmt->execute();`);
+  }
+});
+
+// K20-A1 (VT-01): a row without a role must not pick one by itself. Confirmed
+// untouched, it sends no role (before the fix the browser sent the first one,
+// MECM server); the server refuses it, and the entry stays unset.
+// e2e-covers: settings.php:allow_set_role
+test('allowlist roles: a row without a role refuses an unchosen role and stays unset', async ({ page }) => {
+  const ip = '192.0.2.78'; // TEST-NET-2, never a real machine.
+  const sql = (body) => runPhp(`
+$db = db();
+$ip = '${ip}';
+${body}
+echo 'OK';
+`);
+  const roleOf = () => phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT role FROM deploy_accessToWebAPI WHERE ipAddress = ?');
+$ip = '${ip}';
+$stmt->bind_param('s', $ip);
+$stmt->execute();
+$row = $stmt->get_result()->fetch_assoc();
+echo 'JSON' . json_encode(['role' => $row === null ? 'missing' : $row['role']]) . 'JSON';
+`).role;
+
+  try {
+    sql(`$stmt = $db->prepare("INSERT INTO deploy_accessToWebAPI (ipAddress, description) VALUES (?, 'e2e unchosen role')"); $stmt->bind_param('s', $ip); $stmt->execute();`);
+
+    await openTab(page, 'machine-api');
+    const row = page.locator('tr', { hasText: ip }).first();
+    const roleForm = row.locator('form:has(input[name="action"][value="allow_set_role"])');
+    const dialog = page.locator('[data-confirm-dialog]');
+
+    // The row is used as it stands: no option is picked.
+    await roleForm.locator('button').click();
+    await expect(dialog, 'the row asks before it assigns').toBeVisible();
+    await expect(page.locator('[data-confirm-msg]'), 'the dialog names the IP').toContainText(ip);
+    // Soft: the wording is a second, independent defect; the refusal below must still be checked.
+    await expect.soft(page.locator('[data-confirm-msg]'), 'the question is about the entry, not the IP').toContainText('This entry then admits only the endpoints of this role.');
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
+      dialog.locator('[data-confirm-accept]').click(),
+    ]);
+    await expect(page.locator('.alert-error').first(), 'the server names the missing role').toContainText('Please choose a role.');
+    expect(roleOf(), 'the entry keeps no role').toBeNull();
   } finally {
     sql(`$stmt = $db->prepare('DELETE FROM deploy_accessToWebAPI WHERE ipAddress = ?'); $stmt->bind_param('s', $ip); $stmt->execute();`);
   }

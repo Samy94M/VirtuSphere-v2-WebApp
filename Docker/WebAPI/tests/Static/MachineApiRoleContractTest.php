@@ -27,14 +27,7 @@ final class MachineApiRoleContractTest extends TestCase
 
     public function testEveryIpGateNamesAKnownGateAndEveryEndpointHasItsRoles(): void
     {
-        $found = [];
-        foreach (glob(dirname(__DIR__, 2) . '/*.php') ?: [] as $file) {
-            $gates = self::gatesIn((string) file_get_contents($file));
-            if ($gates !== []) {
-                $found[basename($file)] = $gates;
-            }
-        }
-        ksort($found);
+        $found = self::gatedEndpoints();
 
         self::assertSame(self::EXPECTED, $found, 'derived from every IP gate in the machine endpoint files');
         $used = array_unique(array_merge(...array_values($found)));
@@ -42,6 +35,33 @@ final class MachineApiRoleContractTest extends TestCase
         $known = array_keys(VIRTUSPHERE_MACHINE_API_GATE_ROLES);
         sort($known);
         self::assertSame($known, $used, 'every gate of the role map is used, and nothing outside it');
+    }
+
+    public function testEveryEndpointWithAnIpGateIsListedInTheEndpointTable(): void
+    {
+        // An endpoint missing from the table is audited under the unknown
+        // sentinel, so its refusals lose the endpoint name in the security trail.
+        self::assertSame(
+            [],
+            array_values(array_diff(array_keys(self::gatedEndpoints()), VIRTUSPHERE_MACHINE_API_ENDPOINTS)),
+            'every endpoint file with an IP gate is listed in VIRTUSPHERE_MACHINE_API_ENDPOINTS'
+        );
+    }
+
+    public function testTheFreshSchemaSeedsNoAllowlistEntryWithoutARole(): void
+    {
+        // A role-less entry opens every machine endpoint. A fresh install must
+        // not start with one, because nothing in the install names its role.
+        $path = dirname(__DIR__, 4) . '/Docker/mysql/mysql-init/struktur.sql';
+        self::assertFileExists($path, 'struktur.sql is the fresh-schema source and must be visible to the unit lane');
+        $schema = (string) file_get_contents($path);
+
+        preg_match_all('/INSERT\s+INTO\s+deploy_accessToWebAPI\s*\(([^)]*)\)/i', $schema, $inserts);
+        $withoutRole = array_values(array_filter(
+            $inserts[1],
+            static fn (string $columns): bool => preg_match('/\brole\b/i', $columns) !== 1
+        ));
+        self::assertSame([], $withoutRole, 'the fresh schema seeds an allowlist entry without a role');
     }
 
     public function testTheRolesOfEachGateMatchItsCaller(): void
@@ -69,6 +89,26 @@ final class MachineApiRoleContractTest extends TestCase
         self::assertSame(['typo_gate'], self::gatesIn("machine_api_ip_allowed(\$connection, \$clientIp, 'typo_gate');"));
         self::assertSame(['a', 'b'], self::gatesIn("machine_api_ip_allowed(\$db, \$ip, \$x === 'y' ? 'b' : 'a');"));
         self::assertSame([], self::gatesIn('// machine_api_ip_decision only'));
+    }
+
+    /**
+     * Endpoint file name => its gate keys, for every top-level endpoint file
+     * that calls machine_api_ip_allowed().
+     *
+     * @return array<string, list<string>>
+     */
+    private static function gatedEndpoints(): array
+    {
+        $found = [];
+        foreach (glob(dirname(__DIR__, 2) . '/*.php') ?: [] as $file) {
+            $gates = self::gatesIn((string) file_get_contents($file));
+            if ($gates !== []) {
+                $found[basename($file)] = $gates;
+            }
+        }
+        ksort($found);
+
+        return $found;
     }
 
     /**

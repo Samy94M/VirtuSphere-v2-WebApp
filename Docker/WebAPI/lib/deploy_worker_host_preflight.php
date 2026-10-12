@@ -99,7 +99,7 @@ function deploy_worker_host_preflight_verdict(string $mode, int $exitCode, strin
     throw new DeployWorkerConfigurationBlocked(
         'The portal refuses MAC uploads from the Ansible host'
         . ($allowlist['ip'] !== '' ? ' (' . $allowlist['ip'] . ')' : '')
-        . ': its IP is not on the machine API allowlist (Settings > Machine API). '
+        . ': its IP is not on the machine API allowlist or is not listed with the Ansible host role (Settings > Machine API). '
         . 'This mode ends with a MAC import, so the job stopped before any VM was created or changed.',
         deploy_host_preflight_allowlist_result($allowlist['ip'])
     );

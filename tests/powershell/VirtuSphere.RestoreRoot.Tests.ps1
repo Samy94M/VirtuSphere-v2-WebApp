@@ -19,7 +19,8 @@ BeforeAll {
             [Parameter(Mandatory)][string]$Root,
             [Parameter(Mandatory)][string]$Stamp,
             [ValidateSet('complete', 'incomplete-triplet', 'empty-backups', 'incomplete-root')]
-            [string]$State = 'complete'
+            [string]$State = 'complete',
+            [string[]]$ExtraArchiveEnv = @()
         )
         $backupDir = Join-Path $Root 'Docker\backups'
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
@@ -58,6 +59,10 @@ BeforeAll {
         $archiveEnv = Join-Path $archiveSource '.env'
         Copy-Item -LiteralPath (Join-Path $script:FixtureDir 'archive.env') `
             -Destination $archiveEnv
+        if ($ExtraArchiveEnv.Count -gt 0) {
+            $archiveText = [IO.File]::ReadAllText($archiveEnv).TrimEnd([char]13, [char]10)
+            [IO.File]::WriteAllText($archiveEnv, $archiveText + "`n" + (($ExtraArchiveEnv) -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+        }
         Copy-Item -LiteralPath (Join-Path $script:FixtureDir 'docker-compose.yml') `
             -Destination (Join-Path $archiveSource 'docker-compose.yml')
         if ($env:OS -ne 'Windows_NT') {
@@ -83,8 +88,8 @@ BeforeAll {
     }
 
     function New-CanonicalSourceRoot {
-        param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Stamp)
-        New-SyntheticRestoreRoot -Root $Root -Stamp $Stamp
+        param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Stamp, [string[]]$ExtraArchiveEnv = @())
+        New-SyntheticRestoreRoot -Root $Root -Stamp $Stamp -ExtraArchiveEnv $ExtraArchiveEnv
         $scripts = Join-Path $Root 'scripts'
         $moduleParent = Join-Path $scripts 'lib'
         New-Item -ItemType Directory -Path $scripts, $moduleParent -Force | Out-Null
@@ -95,6 +100,8 @@ BeforeAll {
         Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') `
             -Destination $moduleParent -Recurse
         Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'backup_crypto.sh') `
+            -Destination $moduleParent
+        Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'env_file.sh') `
             -Destination $moduleParent
     }
 
@@ -320,12 +327,21 @@ Describe 'Restore and backup resource safety' {
                 [string]$CheckRoot,
                 [string]$BackupContainer = 'fixture-backup-mysql-never-real',
                 [string]$BackupCert = '',
-                [string]$PrivateKey = ''
+                [string]$PrivateKey = '',
+                [string]$ProcessPin = ''
             )
             $fakeBin = Join-Path $TestDrive ('safety-bin-' + [guid]::NewGuid().ToString('N'))
             $fakeLog = Join-Path $TestDrive ('safety-' + [guid]::NewGuid().ToString('N') + '.log')
             $fakeState = Join-Path $TestDrive ('safety-state-' + [guid]::NewGuid().ToString('N'))
             New-FakeDockerPath -Root $fakeBin -DockerFixture 'fake-docker-safety.sh'
+            # Git Bash on Windows ships no flock. backup.sh takes its single-run
+            # lock with it on the Linux hosts it runs on, so the fixture models
+            # such a host; without it the orphan sweep would correctly stay off.
+            [IO.File]::WriteAllText((Join-Path $fakeBin 'flock'), "#!/bin/sh`nexit 0`n", [Text.UTF8Encoding]::new($false))
+            if ($env:OS -ne 'Windows_NT') {
+                & chmod '+x' (Join-Path $fakeBin 'flock')
+                if ($LASTEXITCODE -ne 0) { throw 'flock shim could not be made executable' }
+            }
             New-Item -ItemType Directory -Path $fakeState -Force | Out-Null
             $saved = @{
                 PATH = $env:PATH
@@ -341,6 +357,7 @@ Describe 'Restore and backup resource safety' {
                 VIRTUSPHERE_BACKUP_SCHEDULE = $env:VIRTUSPHERE_BACKUP_SCHEDULE
                 VS_FAKE_BACKUP_CERT = $env:VS_FAKE_BACKUP_CERT
                 VIRTUSPHERE_BACKUP_PRIVATE_KEY = $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY
+                VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 = $env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256
                 MSYS_NO_PATHCONV = $env:MSYS_NO_PATHCONV
                 TZ = $env:TZ
             }
@@ -363,6 +380,10 @@ Describe 'Restore and backup resource safety' {
                 else { Remove-Item Env:VS_FAKE_BACKUP_CERT -ErrorAction SilentlyContinue }
                 if ($PrivateKey -ne '') { $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY = $PrivateKey.Replace('\', '/') }
                 else { Remove-Item Env:VIRTUSPHERE_BACKUP_PRIVATE_KEY -ErrorAction SilentlyContinue }
+                # K19-A3: the pin is read from .env only. A value set here is a
+                # probe for the process-environment case, never a source.
+                if ($ProcessPin -ne '') { $env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 = $ProcessPin }
+                else { Remove-Item Env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 -ErrorAction SilentlyContinue }
 
                 $runnerShell = (Get-Command sh -ErrorAction SilentlyContinue).Source
                 if (-not $runnerShell -or $runnerShell -notmatch 'safety-bin-') {
@@ -404,26 +425,42 @@ Describe 'Restore and backup resource safety' {
         }
 
         function Invoke-RestoreSafety {
-            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump, [string]$Cert = '', [string]$PrivateKey = '', [string]$Stamp = '')
+            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump, [string]$Cert = '', [string]$PrivateKey = '', [string]$Stamp = '', [string[]]$ArchiveEnv = @())
             $stamp = if ($Stamp -ne '') { $Stamp } else { $Mode }
             $root = Join-Path $TestDrive ('restore-' + $stamp)
-            New-CanonicalSourceRoot -Root $root -Stamp $stamp
+            New-CanonicalSourceRoot -Root $root -Stamp $stamp -ExtraArchiveEnv $ArchiveEnv
             if ($FullDump) { Set-CompleteSyntheticDump -Root $root -Stamp $stamp }
             if ($Cert -ne '') { Protect-SyntheticBackup -Root $root -Stamp $stamp -Cert $Cert }
             $scriptPath = Join-Path (Join-Path $root 'scripts') 'restore_test.sh'
             Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode $Mode -CheckRoot $root -PrivateKey $PrivateKey
         }
 
+        # -Name separates roots of runs that share a fake-docker mode; -EnvText
+        # is the exact .env content; -Arrange seeds the backup directory.
         function Invoke-BackupSafety {
-            param([Parameter(Mandatory)][string]$Mode, [string]$BackupCert = '')
-            $root = Join-Path $TestDrive ('backup-' + $Mode)
+            param(
+                [Parameter(Mandatory)][string]$Mode,
+                [string]$BackupCert = '',
+                [string]$Name = '',
+                [string]$EnvText = "APP_KEY=k19-fixture-app-key`n",
+                [switch]$NoEnvFile,
+                [string]$ProcessPin = '',
+                [scriptblock]$Arrange = $null
+            )
+            $label = if ($Name -ne '') { $Name } else { $Mode }
+            $root = Join-Path $TestDrive ('backup-' + $label)
             $scripts = Join-Path $root 'scripts'
             New-Item -ItemType Directory -Path (Join-Path $scripts 'lib') -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Destination $scripts
             Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'backup_crypto.sh') -Destination (Join-Path $scripts 'lib')
+            Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'env_file.sh') -Destination (Join-Path $scripts 'lib')
             Set-Content -LiteralPath (Join-Path $root 'docker-compose.yml') -Value 'services: {}' -Encoding Ascii
-            Set-Content -LiteralPath (Join-Path $root '.env') -Value 'APP_KEY=k19-fixture-app-key' -Encoding Ascii
-            Invoke-WithSafetyDocker -ScriptPath (Join-Path $scripts 'backup.sh') -Mode $Mode -CheckRoot $root -BackupCert $BackupCert
+            New-Item -ItemType Directory -Path (Join-Path $root 'Docker\backups') -Force | Out-Null
+            if (-not $NoEnvFile) {
+                [IO.File]::WriteAllText((Join-Path $root '.env'), $EnvText, [Text.UTF8Encoding]::new($false))
+            }
+            if ($null -ne $Arrange) { & $Arrange $root }
+            Invoke-WithSafetyDocker -ScriptPath (Join-Path $scripts 'backup.sh') -Mode $Mode -CheckRoot $root -BackupCert $BackupCert -ProcessPin $ProcessPin
         }
 
         # K19: a throwaway RSA-3072 pair per test run; the private key exists
@@ -459,6 +496,60 @@ Describe 'Restore and backup resource safety' {
             $snippet = 'cd "$1" && for f in "db-$2.sql.gz" "config-$2.tar.gz"; do openssl cms -encrypt -binary -aes256 -stream -outform DER -in "$f" -out "$f.cms" "$3" && rm -f "$f" || exit 1; done && sha256sum "db-$2.sql.gz.cms" "config-$2.tar.gz.cms" > "manifest-$2.sha256"'
             $r = Invoke-PosixSnippet -Snippet $snippet -Arguments @($dir, $Stamp, $Cert)
             if ($r.ExitCode -ne 0) { throw ('synthetic backup could not be encrypted: ' + ($r.Output -join ' | ')) }
+        }
+
+        # K19-A3 helpers. The .env text always starts with the APP_KEY line that
+        # the backup needs; PinLines carry the pin spellings under test.
+        function New-K19EnvText {
+            param([string[]]$PinLines = @(), [string]$Eol = "`n")
+            $lines = @('APP_KEY=k19-fixture-app-key') + @($PinLines)
+            return (($lines -join $Eol) + $Eol)
+        }
+
+        # The spellings an operator can paste: the card form (lower case, no
+        # separators), upper case, colon-separated, and the openssl output with
+        # its prefix. Quoting and CRLF are added by the caller.
+        function Format-K19Pin {
+            param([Parameter(Mandatory)][string]$Fingerprint, [Parameter(Mandatory)][string]$Form)
+            $pairs = New-Object System.Collections.Generic.List[string]
+            for ($i = 0; $i -lt 64; $i += 2) { $pairs.Add($Fingerprint.Substring($i, 2).ToUpperInvariant()) }
+            $colons = $pairs -join ':'
+            switch ($Form) {
+                'card' { return $Fingerprint }
+                'upper-card' { return $Fingerprint.ToUpperInvariant() }
+                'colon' { return $colons }
+                'openssl' { return 'SHA256 Fingerprint=' + $colons }
+                'openssl-lower' { return 'sha256 Fingerprint=' + $colons }
+                'quoted' { return '"' + $Fingerprint + '"' }
+                default { throw "unknown pin spelling: $Form" }
+            }
+        }
+
+        function Get-K19BackupState {
+            param([Parameter(Mandatory)][string]$Root)
+            $dir = Join-Path $Root 'Docker\backups'
+            $names = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+            [pscustomobject]@{
+                Plain = @($names | Where-Object { $_ -match '^(db|config)-.*\.(sql\.gz|tar\.gz)$' })
+                Encrypted = @($names | Where-Object { $_ -match '\.cms$' })
+                Temp = @($names | Where-Object { $_ -match '^\.(db|config|cert)-' })
+            }
+        }
+
+        function Get-K19LastStatus {
+            param([Parameter(Mandatory)][string]$Root)
+            Get-Content -LiteralPath (Join-Path $Root 'Docker\backups\status\backup-status.jsonl') | Select-Object -Last 1 | ConvertFrom-Json
+        }
+
+        # A refused run leaves no readable archive, no .cms file and no temp
+        # file, and its status line says failed.
+        function Assert-K19NothingWritten {
+            param([Parameter(Mandatory)][string]$Root)
+            $state = Get-K19BackupState -Root $Root
+            @($state.Plain).Count | Should -Be 0 -Because 'a refused run never leaves a readable archive'
+            @($state.Encrypted).Count | Should -Be 0 -Because 'a refused run writes no .cms file'
+            @($state.Temp).Count | Should -Be 0 -Because 'a refused run removes its temp files'
+            (Get-K19LastStatus -Root $Root).status | Should -Be 'failed'
         }
     }
 
@@ -592,5 +683,206 @@ Describe 'Restore and backup resource safety' {
         @(Get-ChildItem -LiteralPath (Join-Path $root 'Docker\backups') -File -Filter '.db-*.sql').Count | Should -Be 0
         $status = Get-Content -LiteralPath (Join-Path $root 'Docker\backups\status\backup-status.jsonl') | Select-Object -Last 1 | ConvertFrom-Json
         $status.status | Should -Be 'failed'
+    }
+
+    It 'K19-A1: removes orphaned plaintext temp files of an interrupted run and reports how many' {
+        $keys = New-BackupTestKeyPair
+        $arrange = {
+            param($root)
+            $dir = Join-Path $root 'Docker\backups'
+            Set-Content -LiteralPath (Join-Path $dir '.db-20260101-000000-AbCdEf.gz') -Value 'orphaned plaintext dump' -Encoding Ascii
+            Set-Content -LiteralPath (Join-Path $dir '.config-20260101-000000-AbCdEf.gz') -Value 'orphaned plaintext config' -Encoding Ascii
+            $certDir = Join-Path $dir '.cert-20260101-000000-AbCdEf'
+            New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $certDir 'backup-cert.pem') -Value 'orphaned certificate directory' -Encoding Ascii
+            Set-Content -LiteralPath (Join-Path $dir 'db-20251231-235959.sql.gz.cms') -Value 'older encrypted run' -Encoding Ascii
+        }
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a1-orphans -BackupCert $keys.Cert -Arrange $arrange
+        $result.ExitCode | Should -Be 0
+        ($result.Output -join "`n") | Should -Match '3 verwaiste Klartext-Tempdateien entfernt'
+        $root = Join-Path $TestDrive 'backup-k19-a1-orphans'
+        $state = Get-K19BackupState -Root $root
+        @($state.Temp).Count | Should -Be 0
+        @($state.Encrypted | Where-Object { $_ -eq 'db-20251231-235959.sql.gz.cms' }).Count | Should -Be 1 -Because 'the sweep matches temp names only'
+        @($state.Encrypted | Where-Object { $_ -ne 'db-20251231-235959.sql.gz.cms' }).Count | Should -Be 2 -Because 'this run wrote its own encrypted pair'
+    }
+
+    It 'K19-A3 case 1: a pin that matches the stored certificate encrypts as before' {
+        $keys = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($keys.Fingerprint)")
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-match -BackupCert $keys.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 0
+        $root = Join-Path $TestDrive 'backup-k19-a3-match'
+        @((Get-K19BackupState -Root $root).Encrypted).Count | Should -Be 2
+        @((Get-K19BackupState -Root $root).Plain).Count | Should -Be 0
+        $status = Get-K19LastStatus -Root $root
+        $status.status | Should -Be 'ok'
+        $status.recipient_sha256 | Should -Be $keys.Fingerprint
+    }
+
+    It 'K19-A3 case 2: a pin that differs from the stored certificate fails and names both fingerprints' {
+        $stored = New-BackupTestKeyPair
+        $pinned = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($pinned.Fingerprint)")
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-mismatch -BackupCert $stored.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 1
+        # Colons are dropped before matching, so an openssl-style print of either fingerprint also counts.
+        $text = (($result.Output -join "`n").ToLowerInvariant()) -replace ':', ''
+        $text | Should -Match $stored.Fingerprint
+        $text | Should -Match $pinned.Fingerprint
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-mismatch')
+    }
+
+    It 'K19-A3 case 3: a pin without a stored certificate fails and writes no plaintext archive' {
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$('ab' * 32)")
+        $result = Invoke-BackupSafety -Mode plain-backup -Name k19-a3-pin-no-cert -EnvText $envText
+        $result.ExitCode | Should -Be 1
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-pin-no-cert')
+    }
+
+    It 'K19-A3 case 4: a malformed pin (<Name>) fails the run and is never read as unset' -ForEach @(
+        @{ Name = 'k19-a3-pin-short'; Pin = 'abc123' }
+        @{ Name = 'k19-a3-pin-non-hex'; Pin = ('g' * 64) }
+    ) {
+        $keys = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$Pin")
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name $Name -BackupCert $keys.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 1
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive ('backup-' + $Name))
+    }
+
+    It 'K19-A3 case 5: an empty pin value keeps the encrypted run of today' {
+        $keys = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @('VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=')
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-empty-pin -BackupCert $keys.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 0
+        $root = Join-Path $TestDrive 'backup-k19-a3-empty-pin'
+        @((Get-K19BackupState -Root $root).Encrypted).Count | Should -Be 2
+        (Get-K19LastStatus -Root $root).recipient_sha256 | Should -Be $keys.Fingerprint
+    }
+
+    It 'K19-A3 case 5: a missing .env keeps the encrypted run of today' {
+        $keys = New-BackupTestKeyPair
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-no-env -BackupCert $keys.Cert -NoEnvFile
+        $result.ExitCode | Should -Be 0
+        $root = Join-Path $TestDrive 'backup-k19-a3-no-env'
+        @((Get-K19BackupState -Root $root).Encrypted).Count | Should -Be 2
+        (Get-K19LastStatus -Root $root).recipient_sha256 | Should -Be $keys.Fingerprint
+    }
+
+    It 'K19-A3 case 6: a pin that names the stored certificate is accepted in the spelling <Form>' -ForEach @(
+        @{ Form = 'upper-card' }
+        @{ Form = 'colon' }
+        @{ Form = 'openssl' }
+        @{ Form = 'openssl-lower' }
+        @{ Form = 'quoted' }
+        @{ Form = 'crlf-card' }
+    ) {
+        $keys = New-BackupTestKeyPair
+        $eol = "`n"
+        $spelling = $Form
+        if ($Form -eq 'crlf-card') {
+            $eol = "`r`n"
+            $spelling = 'card'
+        }
+        $pin = Format-K19Pin -Fingerprint $keys.Fingerprint -Form $spelling
+        $name = 'k19-a3-spelling-' + $Form
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$pin") -Eol $eol
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name $name -BackupCert $keys.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 0 -Because ('the pin spelled as ' + $Form + ' names the stored certificate')
+        $root = Join-Path $TestDrive ('backup-' + $name)
+        @((Get-K19BackupState -Root $root).Encrypted).Count | Should -Be 2
+        (Get-K19LastStatus -Root $root).recipient_sha256 | Should -Be $keys.Fingerprint
+    }
+
+    It 'K19-A3 case 6b: a pin in the openssl spelling that names another certificate still fails' {
+        $stored = New-BackupTestKeyPair
+        $other = New-BackupTestKeyPair
+        $pin = Format-K19Pin -Fingerprint $other.Fingerprint -Form 'openssl'
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$pin")
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-spelling-mismatch -BackupCert $stored.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 1
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-spelling-mismatch')
+    }
+
+    It 'K19-A3 case 7: of duplicate pin lines the first one decides, a later correct line does not rescue it' {
+        $stored = New-BackupTestKeyPair
+        $wrong = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @(
+            "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($wrong.Fingerprint)",
+            "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($stored.Fingerprint)"
+        )
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-dup-wrong-first -BackupCert $stored.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 1
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-dup-wrong-first')
+    }
+
+    It 'K19-A3 case 7: of duplicate pin lines a correct first one decides over a later wrong one' {
+        $stored = New-BackupTestKeyPair
+        $wrong = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @(
+            "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($stored.Fingerprint)",
+            "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($wrong.Fingerprint)"
+        )
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-dup-right-first -BackupCert $stored.Cert -EnvText $envText
+        $result.ExitCode | Should -Be 0
+        @((Get-K19BackupState -Root (Join-Path $TestDrive 'backup-k19-a3-dup-right-first')).Encrypted).Count | Should -Be 2
+    }
+
+    It 'K19-A3 case 8: a certificate replaced before its pin, or a pin moved before its certificate, fails loudly' {
+        $old = New-BackupTestKeyPair
+        $new = New-BackupTestKeyPair
+        $certFirst = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-rotate-cert-first -BackupCert $new.Cert -EnvText (New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($old.Fingerprint)"))
+        $certFirst.ExitCode | Should -Be 1 -Because 'the certificate was replaced while the pin still names the old key'
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-rotate-cert-first')
+        $pinFirst = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-rotate-pin-first -BackupCert $old.Cert -EnvText (New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($new.Fingerprint)"))
+        $pinFirst.ExitCode | Should -Be 1 -Because 'the pin moved to the new key while the certificate is still the old one'
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-rotate-pin-first')
+    }
+
+    It 'K19-A3 case 9: a restore drill does not read the pin, so a pin in the archived .env does not fail it' {
+        $keys = New-BackupTestKeyPair
+        $other = New-BackupTestKeyPair
+        $archivePin = "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($other.Fingerprint)"
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Cert $keys.Cert -PrivateKey $keys.Key -Stamp 'k19-a3-restore-pin' -ArchiveEnv @($archivePin)
+        $result.ExitCode | Should -Be 0
+        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+    }
+
+    It 'K19-A3: a pin set only in the process environment has no effect' {
+        $keys = New-BackupTestKeyPair
+        $other = New-BackupTestKeyPair
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-env-only -BackupCert $keys.Cert -ProcessPin $other.Fingerprint
+        $result.ExitCode | Should -Be 0
+        $root = Join-Path $TestDrive 'backup-k19-a3-env-only'
+        @((Get-K19BackupState -Root $root).Encrypted).Count | Should -Be 2
+        (Get-K19LastStatus -Root $root).recipient_sha256 | Should -Be $keys.Fingerprint
+    }
+
+    It 'K19-A3: the .env pin decides even when the process environment holds the right value' {
+        $keys = New-BackupTestKeyPair
+        $other = New-BackupTestKeyPair
+        $envText = New-K19EnvText -PinLines @("VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($other.Fingerprint)")
+        $result = Invoke-BackupSafety -Mode encrypted-backup -Name k19-a3-env-loses -BackupCert $keys.Cert -EnvText $envText -ProcessPin $keys.Fingerprint
+        $result.ExitCode | Should -Be 1
+        Assert-K19NothingWritten -Root (Join-Path $TestDrive 'backup-k19-a3-env-loses')
+    }
+
+    It 'K19-A3: backup.sh names the recipient pin key VIRTUSPHERE_BACKUP_RECIPIENT_SHA256' {
+        $backupSh = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
+        $match = [regex]::Match($backupSh, 'VIRTUSPHERE_BACKUP_[A-Z0-9_]*SHA256')
+        $match.Success | Should -BeTrue -Because 'backup.sh names the recipient pin key'
+        $match.Value | Should -Be 'VIRTUSPHERE_BACKUP_RECIPIENT_SHA256'
+    }
+
+    It 'K19-A3: .env.example (commented) and backup.md document the pin key that backup.sh names' {
+        $backupSh = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
+        $key = [regex]::Match($backupSh, 'VIRTUSPHERE_BACKUP_[A-Z0-9_]*SHA256').Value
+        $key | Should -Not -BeNullOrEmpty -Because 'the key name is derived from backup.sh'
+        $example = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.env.example') -Raw
+        $example | Should -Match ('(?m)^#[ \t]*' + $key + '=')
+        $example | Should -Not -Match ('(?m)^[ \t]*' + $key + '[ \t]*=')
+        $doc = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'docs') 'operations') 'backup.md') -Raw
+        $doc | Should -Match $key
     }
 }

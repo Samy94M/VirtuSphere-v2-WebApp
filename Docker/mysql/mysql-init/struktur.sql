@@ -970,10 +970,6 @@ CREATE TABLE IF NOT EXISTS deploy_audit_throttle (
     PRIMARY KEY (category, tag, scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO deploy_accessToWebAPI (ipAddress, description)
-VALUES ('127.0.0.1', 'Lokaler Host')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
-
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- K15: immutable per-job VM prestate; no historical backfill.

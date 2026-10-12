@@ -173,6 +173,11 @@ manifest="$BACKUP_DIR/manifest-$ts.sha256"
 [ -f "$manifest" ] || fail "[restore.backup-incomplete] Manifest $manifest fehlt. Ein Backup ohne Hash-Manifest ist nicht verifizierbar; sh scripts/backup.sh erneut laufen lassen."
 echo "Restore-Drill Auswahl: Pruefroot=$CHECK_ROOT; Backup-Stand=$ts"
 
+# K19-A3: .env-Werte liest dieselbe Funktion wie backup.sh (scripts/lib/env_file.sh).
+[ -f "$SCRIPT_DIR/lib/env_file.sh" ] \
+  || envfail "[restore.root-incomplete] lib/env_file.sh fehlt neben dem Pruefskript $SCRIPT_DIR"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/env_file.sh"
 command -v docker >/dev/null 2>&1 || envfail "docker fehlt."
 command -v sha256sum >/dev/null 2>&1 || envfail "sha256sum fehlt."
 if [ "$encrypted" -eq 1 ]; then
@@ -266,13 +271,10 @@ fi
 docker compose $compose_args --env-file "$workdir_host/.env" config --quiet \
   || fail "Der archivierte Compose-Satz laesst sich nicht aufloesen; ein Restore daraus wuerde nicht starten."
 echo "OK: archivierter Compose-Satz aufloesbar (Override im Archiv: $override_present)"
-env_value() {
-  grep -E "^$1=" "$WORKDIR/.env" | head -n 1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
-}
-DB_NAME="$(env_value DB_NAME)"
-APP_KEY="$(env_value APP_KEY)"
-APP_DB_USER="$(env_value DB_USER)"
-APP_DB_PASS="$(env_value DB_PASS)"
+DB_NAME="$(env_file_value "$WORKDIR/.env" DB_NAME)"
+APP_KEY="$(env_file_value "$WORKDIR/.env" APP_KEY)"
+APP_DB_USER="$(env_file_value "$WORKDIR/.env" DB_USER)"
+APP_DB_PASS="$(env_file_value "$WORKDIR/.env" DB_PASS)"
 [ -n "$DB_NAME" ] || fail "DB_NAME fehlt im gesicherten .env."
 [ -n "$APP_KEY" ] || fail "APP_KEY fehlt im gesicherten .env; Credentials waeren nach diesem Restore unlesbar."
 [ -n "$APP_DB_USER" ] || fail "DB_USER fehlt im gesicherten .env; die App haette nach diesem Restore keinen DB-Zugang."
@@ -341,7 +343,7 @@ docker exec "$MYSQL_ID" mysql -uroot -p"$ROOT_PW" -N -e "FLUSH PRIVILEGES" 2>/de
 # durch den archivierten Stand (empirisch: der Drill brach hier still ab). Der
 # Ernstfall-Operator kennt es aus der archivierten .env; der Drill genauso.
 if ! drill_sql "SELECT 1" >/dev/null; then
-  ARCHIVED_ROOT_PW="$(env_value MYSQL_ROOT_PASSWORD)"
+  ARCHIVED_ROOT_PW="$(env_file_value "$WORKDIR/.env" MYSQL_ROOT_PASSWORD)"
   if [ -n "$ARCHIVED_ROOT_PW" ] \
     && docker exec "$MYSQL_ID" mysql -uroot -p"$ARCHIVED_ROOT_PW" -N -e "SELECT 1" >/dev/null 2>&1; then
     ROOT_PW="$ARCHIVED_ROOT_PW"

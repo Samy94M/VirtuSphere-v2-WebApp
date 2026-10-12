@@ -18,6 +18,21 @@ backup_crypto_fingerprint() {
     | sed -e 's/^[^=]*=//' -e 's/://g' | tr 'ABCDEF' 'abcdef'
 }
 
+# Normalisiert den Pin aus .env ($1, Rohwert) zur selben Form wie der Fingerabdruck
+# oben: 64 Kleinbuchstaben-Hex ohne Trennzeichen. Akzeptiert werden Grossbuchstaben,
+# Doppelpunkte, CR, Anfuehrungszeichen und das Praefix "SHA256 Fingerprint="
+# (Ausgabe von openssl x509 -fingerprint, auch in Kleinschrift). Ausgabe leer,
+# wenn das Ergebnis nicht genau 64 Hexzeichen sind.
+backup_crypto_normalize_pin() {
+  _pin=$(printf '%s' "$1" | tr -d '\r"\047' | tr 'A-Z' 'a-z')
+  _pin=$(printf '%s' "$_pin" | sed -e 's/^[[:space:]]*//' -e 's/^sha256[[:space:]]*fingerprint=//')
+  _pin=$(printf '%s' "$_pin" | tr -d ': \t')
+  if printf '%s' "$_pin" | grep -Eq '^[0-9a-f]{64}$'; then
+    printf '%s' "$_pin"
+  fi
+  return 0
+}
+
 # Verschluesselt Datei $2 nach $3 fuer das Zertifikat $1.
 backup_crypto_encrypt() {
   openssl cms -encrypt -binary -aes256 -stream -outform DER -in "$2" -out "$3" "$1"

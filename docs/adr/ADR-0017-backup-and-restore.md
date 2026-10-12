@@ -123,3 +123,33 @@ VT-E2 (05.10.2026) replaces that acceptance:
   deleted early. Losing the private key makes every encrypted backup
   unrestorable; key generation, safekeeping, rotation and decryption are in
   `docs/operations/backup.md`.
+
+## Amendment 6 (2026-10-12, K19 follow-up): recipient pin and orphan sweep
+
+Two gaps of amendment 5 are closed without changing the portal or the stored
+certificate (VT-E2 unchanged):
+
+- Orphaned plaintext temp files. A run killed without its exit trap (power
+  loss, OOM killer, `kill -9`) can leave `.db-*`, `.config-*` and `.cert-*`
+  entries in the backup directory. The next run removes them right after it
+  takes the single-run lock and reports their number. The sweep looks at depth
+  one only, never follows links, and runs only under `flock`; without `flock`
+  it warns and removes nothing, so a parallel run keeps its own temp files.
+  Hosts that sync the backup directory must exclude dot files, and the
+  operator checks the backup host after such a report.
+- Recipient pin. An optional `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env`
+  fixes the SHA-256 fingerprint of the certificate. It is read from `.env`
+  only, never from the process environment, and normalized to the 64-character
+  lower-case form. A run fails loudly when the pin does not match the stored
+  certificate, when a pin is set but no certificate is stored, and when the
+  value is malformed; a malformed value never counts as unset. Nothing is
+  written in any of these cases. The pin is checked in step 2 (encryption-key),
+  so the progress contract keeps its six units. The restore drill does not read
+  the pin; `.env` and the certificate come back together on a new host. Backup
+  and drill read `.env` through one shared parser (`scripts/lib/env_file.sh`),
+  so both take the first matching line the same way.
+
+The pin turns a certificate exchange into a visible decision instead of a silent
+change of the recipient. It does not replace the offline private key: a pin that
+names a key nobody holds makes every run fail, which is the intended loud
+failure.
