@@ -77,6 +77,8 @@ final class PortalConfirmNamingContractTest extends TestCase
         'settings.https_confirm_redirect' => 'a global switch, not a row',
         'settings.report_token_confirm_clear' => 'the one machine-API token, not a row',
         'settings.report_token_confirm_regenerate' => 'the one machine-API token, not a row',
+        'settings.backup_cert_save_confirm' => 'the one backup encryption certificate, not a row; the pasted text is not echoed back because it may be a refused private key',
+        'settings.backup_cert_remove_confirm' => 'the one backup encryption certificate, not a row',
         'directory.confirm_disable' => 'the one directory login switch, not a row',
         'directory.confirm_delete_config' => 'the singleton directory configuration, not a row',
         'users.confirm_role_self' => 'the target is the signed-in user themselves; "your own role" is the name',

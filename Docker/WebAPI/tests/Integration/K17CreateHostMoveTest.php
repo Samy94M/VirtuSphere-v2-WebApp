@@ -92,7 +92,9 @@ final class K17CreateHostMoveTest extends TestCase
         repo_execute($this->db, 'UPDATE deploy_credentials SET host = ? WHERE id = ?', 'si', ['moved.' . $this->host('a'), $this->esxiA]);
         $warnings = $this->hostMoveWarnings($this->esxiA, 'create', $vmId);
         self::assertCount(1, $warnings, 'the same access pointed at another host warns (FM-01)');
-        self::assertStringContainsString($this->host('a'), (string) $warnings[0]['message']);
+        $first = reset($warnings);
+        self::assertIsArray($first);
+        self::assertStringContainsString($this->host('a'), (string) ($first['message'] ?? ''));
     }
 
     public function testARetryOfACreateOnAnotherHostCarriesTheWarningIntoItsConfirmation(): void

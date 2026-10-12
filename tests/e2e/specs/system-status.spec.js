@@ -443,35 +443,80 @@ test('Systemstatus overview: the deviation card and its section agree', async ({
 });
 
 // K19 (VT-E2): without a stored backup certificate System status says the
-// backups are unencrypted; with one stored that sentence disappears. The
-// certificate is generated per run, its private key is discarded at once, and
-// the previous setting is restored.
+// backups are unencrypted. The certificate is pasted on the settings page: a
+// private key is refused and never stored, a certificate is stored after its
+// confirmation and lifts the finding, and removing it (confirmed) brings the
+// finding back. The pair is generated per run; the previous setting is restored.
+// e2e-covers: settings.php:save_backup_certificate
+// e2e-covers: settings.php:remove_backup_certificate
+// e2e-covers-cancel: settings.php:save_backup_certificate
+// e2e-covers-cancel: settings.php:remove_backup_certificate
 test('backup encryption: no certificate reports unencrypted backups, a stored one lifts it', async ({ page }) => {
-  const before = phpJson(`
+  const libs = ['lib/constants.php', 'lib/repo/settings.php'];
+  const stored = () => phpJson(`
 $v = repo_setting_value(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, '');
 echo 'JSON' . json_encode(['v' => $v]) . 'JSON';
-`, ['lib/constants.php', 'lib/repo/settings.php']).v;
+`, libs).v;
+  const before = stored();
   const restore = (value) => runPhp(`
 $v = base64_decode('${Buffer.from(value).toString('base64')}');
 $v === '' ? repo_delete_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE) : repo_set_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $v);
 echo 'OK';
-`, ['lib/constants.php', 'lib/repo/settings.php']);
-  try {
-    restore('');
-    await page.goto('system_status.php');
-    const finding = page.locator('[data-backup-encryption-finding]');
-    await expect(finding, 'no certificate: the unencrypted state is named').toContainText(/no certificate is configured|kein Zertifikat hinterlegt/);
-    await expect(finding.locator('a'), 'the remedy is linked for an admin').toHaveAttribute('href', /settings\.php#panel-backup$/);
-
-    runPhp(`
+`, libs);
+  const pair = phpJson(`
 $key = openssl_pkey_new(['private_key_bits' => VIRTUSPHERE_BACKUP_ENCRYPTION_MIN_RSA_BITS, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
 $cert = openssl_csr_sign(openssl_csr_new(['commonName' => 'e2e-k19'], $key), null, $key, 30);
 openssl_x509_export($cert, $pem);
-repo_set_setting(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $pem);
-echo 'OK';
+openssl_pkey_export($key, $keyPem);
+echo 'JSON' . json_encode(['cert' => $pem, 'key' => $keyPem]) . 'JSON';
 `, ['lib/backup_encryption.php']);
+  const finding = page.locator('[data-backup-encryption-finding]');
+  const unencrypted = /no certificate is configured|kein Zertifikat hinterlegt/;
+  const dialog = page.locator('[data-confirm-dialog]');
+  const saveForm = page.locator('form:has(input[name="action"][value="save_backup_certificate"])');
+  const cancelConfirm = async (button) => {
+    await button.click();
+    await expect(dialog, 'the action asks first').toBeVisible();
+    await dialog.locator('button[value="cancel"]').click();
+    await expect(dialog).toBeHidden();
+  };
+  const submitConfirmed = async (button) => {
+    await button.click();
+    await expect(dialog, 'the action asks first').toBeVisible();
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
+      dialog.locator('[data-confirm-accept]').click(),
+    ]);
+  };
+  try {
+    restore('');
     await page.goto('system_status.php');
-    await expect(page.locator('body'), 'a stored certificate lifts the unencrypted state').not.toContainText(/no certificate is configured|kein Zertifikat hinterlegt/);
+    await expect(finding, 'no certificate: the unencrypted state is named').toContainText(unencrypted);
+    await expect(finding.locator('a'), 'the remedy is linked for an admin').toHaveAttribute('href', /settings\.php#panel-backup$/);
+
+    await page.goto('settings.php#panel-backup');
+    await saveForm.locator('textarea[name="backup_certificate"]').fill(pair.key);
+    await submitConfirmed(saveForm.locator('button[type="submit"]'));
+    expect(stored(), 'a private key is refused and never stored').toBe('');
+    await expect(page.locator('body'), 'the pasted key is not echoed back').not.toContainText('PRIVATE KEY-----');
+
+    await page.goto('settings.php#panel-backup');
+    await saveForm.locator('textarea[name="backup_certificate"]').fill(pair.cert);
+    await cancelConfirm(saveForm.locator('button[type="submit"]'));
+    expect(stored(), 'Cancel stored nothing').toBe('');
+    await submitConfirmed(saveForm.locator('button[type="submit"]'));
+    expect(stored(), 'the certificate is stored').toContain('BEGIN CERTIFICATE');
+    await page.goto('system_status.php');
+    await expect(page.locator('body'), 'a stored certificate lifts the unencrypted state').not.toContainText(unencrypted);
+
+    await page.goto('settings.php#panel-backup');
+    const removeButton = page.locator('form:has(input[name="action"][value="remove_backup_certificate"]) button');
+    await cancelConfirm(removeButton);
+    expect(stored(), 'Cancel kept the certificate').toContain('BEGIN CERTIFICATE');
+    await submitConfirmed(removeButton);
+    expect(stored(), 'the certificate is removed').toBe('');
+    await page.goto('system_status.php');
+    await expect(finding, 'removing it brings the finding back').toContainText(unencrypted);
   } finally {
     restore(before);
   }

@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/lang.php';
 require_once __DIR__ . '/validate.php';
 require_once __DIR__ . '/backup_status.php';
+require_once __DIR__ . '/request.php';
 require_once __DIR__ . '/repo/settings.php';
 
 /**
@@ -149,7 +150,7 @@ function backup_encryption_handle_action(mysqli $db, array $user, string $action
     $previous = backup_encryption_certificate($db);
     try {
         if ($action === 'save_backup_certificate') {
-            $certificate = backup_encryption_parse_certificate((string) ($_POST['backup_certificate'] ?? ''));
+            $certificate = backup_encryption_parse_certificate(request_string($_POST, 'backup_certificate'));
             repo_set_setting($db, VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $certificate['pem']);
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'action' => 'updated',
