@@ -16,6 +16,7 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
+require_once __DIR__ . '/deploy_remote_secret.php';
 
 /**
  * The ESXi inventory processor: the mission-less system job (ADR-0023).
@@ -30,6 +31,10 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
     $jobId = (int) $job['id'];
     $credentialId = (int) $job['credential_esxi_id'];
     $localDir = null;
+    // K21: the remote directory and the Ansible credential are known only once
+    // the preparation ran; the finally block removes what was left on the host.
+    $remoteDir = null;
+    $ansibleCredential = null;
     $failCategory = null;
     $fullOutput = '';
     $captureOverflow = false;
@@ -111,9 +116,16 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             );
         }
 
+        // K21: leftovers of earlier jobs of this Ansible credential; never throws.
+        deploy_remote_secret_sweep($channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, null, static fn (string $line) => $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line));
+
         $phase = VIRTUSPHERE_DEPLOY_PHASE_CONFIG;
         $artifacts = ansible_prepare_inventory_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
         $localDir = (string) $artifacts['local_dir'];
+        $remoteDir = (string) $artifacts['remote_dir'];
+        // K21: written before the SFTP phase starts, so a database failure here
+        // is not classified as a failed file transfer.
+        deploy_remote_secret_remember($channel->connection(), $jobId, (int) $ansibleCredential['id'], $remoteDir);
         // The upload leg has its own phase (Etappe 8): it is the only step that
         // runs SFTP, so an unrecognized failure here can say "the file transfer
         // failed" instead of the generic transport fallback. It covers the
@@ -247,6 +259,11 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         // database that is still gone must not turn a handled outcome into an
         // unhandled exception from the finally block.
         $channel->tick(0);
+        // K21: the pull is over, so its directory and its ESXi access file leave
+        // the host with it. Never throws; a failed removal is remembered.
+        if ($remoteDir !== null && $ansibleCredential !== null && $ansibleSecret !== null) {
+            deploy_remote_secret_release(fn () => $channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, $remoteDir, true);
+        }
         if (!empty($options['cleanup'])) {
             ansible_cleanup_artifacts($localDir);
         }

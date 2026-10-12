@@ -7,6 +7,8 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/ansible_command_shell.php';
+// K21: the remote-directory assertion of the file-only removal below.
+require_once __DIR__ . '/ansible_command_create.php';
 
 /**
  * Deploy-mode planning and the remote command the worker runs for a mission:
@@ -334,6 +336,19 @@ function ansible_remote_steps(string $remoteDir, array $payload, bool $autostart
 function ansible_remote_cleanup_command(string $remoteDir): string
 {
     return 'rm -rf -- ' . ansible_sh_quote($remoteDir);
+}
+
+/**
+ * K21 (VT-04): removes the ESXi access file accounts.yml and nothing else. The
+ * one command that deletes it outside a sequence step: the directory is left
+ * alone because an uncertain create unit keeps its async state there. Refuses a
+ * remote directory that is not absolute or that traverses before it is quoted.
+ */
+function ansible_remote_secret_remove_command(string $remoteDir): string
+{
+    ansible_create_assert_remote_dir($remoteDir);
+
+    return 'rm -f -- ' . ansible_sh_quote(rtrim($remoteDir, '/') . '/accounts.yml');
 }
 
 /** Writing follows the real playbook sequence; system inventory and export read. */

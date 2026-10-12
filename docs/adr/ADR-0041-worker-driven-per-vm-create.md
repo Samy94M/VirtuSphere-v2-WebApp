@@ -212,3 +212,48 @@ against a power-on after the read. A unit left unchanged because of its power
 state requires a new Create job to align it later. Retrying the earlier job only
 verifies successful units through `verify_skip`. The reason for not aligning is
 recorded only in the job log and is no longer distinguishable after its retention.
+
+## Amendment (2026-10-12): the ESXi access file never outlives its job (K21)
+
+Finding VT-04 of the 2026-10-03 gap matrices showed that `accounts.yml`, which
+carries the ESXi credentials to the Ansible host, could stay there after a job
+whose create unit was unresolved or whose step never returned. The user decided on
+05.10.2026 that the file must not outlive its job. After a job, the async state is
+the evidence; the file is not.
+
+What changes in "Cleanup never destroys evidence" above: the evidence is the async
+state under `create.vm.<position>/async`. `accounts.yml` is not evidence. It is
+removed at the end of every job that uploaded it, including an unresolved create
+unit and a step still in flight:
+
+- The worker removes the file with `rm -f` whenever it cannot prove the host idle,
+  and removes the whole job directory with `rm -rf` only when it can. The
+  directory of an unresolved unit is never deleted.
+- Before every upload that carries the file, a write-ahead row is written to
+  `deploy_remote_secret_files`. The row has no foreign key to the job, so it
+  survives a mission delete. It is deleted only after the host confirmed the
+  removal. Existing installations get no backfill.
+- A failed removal (unreachable host, killed worker, database gone while the row
+  is being forgotten) leaves the row. The next deploy or inventory job of the same
+  Ansible credential removes the file at its next contact: after its host
+  preflight and before its own upload. That removal writes the audit event
+  `deploy.remote_secret_removed`.
+- A status query of a create unit outside the running job uploads only
+  `accounts.yml` again, removes it in `finally` also when the query fails, and
+  writes nothing to the unit or the job log. It has no caller yet; a later
+  operator path is a separate package.
+
+The limits are stated, not solved:
+
+- The next contact is keyed by the Ansible credential id, not by the host address.
+  A host that is reached only through another credential keeps the file until that
+  credential is used again.
+- A deleted Ansible credential leaves a row that nobody can resolve. The foreign
+  key is `ON DELETE SET NULL`, so the row survives and the file stays on the host.
+- Deleting `accounts.yml` while a step is still running relies on the playbook
+  having loaded its `vars_files` at play start.
+- Whether Ansible's async wrapper keeps module arguments elsewhere on the host is
+  lab probe LP-06. It is not answered here.
+
+Verification: `K21RemoteSecretCleanupTest`, `AnsibleRemoteSecretCommandTest`,
+`RemoteSecretUploadContractTest`, `DeployTerminalCleanupTest`.

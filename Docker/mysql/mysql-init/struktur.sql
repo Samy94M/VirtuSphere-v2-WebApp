@@ -990,3 +990,17 @@ CREATE TABLE IF NOT EXISTS deploy_job_vm_states (
         CONSTRAINT fk_deploy_job_vm_state_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
         CONSTRAINT deploy_job_vm_state_flags CHECK (marked_deploying IN (0,1) AND esxi_touched IN (0,1) AND create_launch_intent IN (0,1))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- K21 (VT-04): an ESXi access file left on an Ansible host until its removal is
+-- confirmed. No foreign key to deploy_jobs: a mission delete cascades the job
+-- while the file on the host survives it.
+CREATE TABLE IF NOT EXISTS deploy_remote_secret_files (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        job_id INT NOT NULL,
+        credential_ansible_id INT NULL,
+        remote_dir VARCHAR(255) NOT NULL,
+        uploaded_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        UNIQUE KEY deploy_remote_secret_file_unique (job_id, remote_dir),
+        INDEX deploy_remote_secret_file_credential (credential_ansible_id, id),
+        CONSTRAINT fk_deploy_remote_secret_file_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

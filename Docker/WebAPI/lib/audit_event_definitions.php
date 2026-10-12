@@ -64,6 +64,9 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED = 'deploy.claim_resumed';
 // most common outcome and the trail has to be able to say so.
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED = 'deploy.recovery_reviewed';
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED = 'deploy.remote_cleanup_retried';
+// K21 (VT-04): an ESXi access file that a later contact removed from an Ansible
+// host. The job that left it is the object; the contact's job is the context.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_REMOVED = 'deploy.remote_secret_removed';
 // What a person established outside this system. The VERDICT is here; their own
 // words stay in the append-only evidence table, because a free sentence about a
 // production incident does not belong in a row every users.manage holder reads.
@@ -191,6 +194,7 @@ function audit_event_registry(): array
         // it means the evidence moved under the operator between looking and
         // clicking.
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['execution_id']),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_REMOVED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS], ['credential_id'], ['job_id']),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], $success, ['resolution_code', 'resolution_id']),
         // Success and failure both, and the difference matters: a refusal means
         // the evidence moved between the operator looking and confirming, which

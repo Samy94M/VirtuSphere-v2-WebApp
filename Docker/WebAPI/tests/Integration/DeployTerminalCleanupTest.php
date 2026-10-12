@@ -40,14 +40,21 @@ final class DeployTerminalCleanupTest extends TestCase
         repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)', 'iss', [$this->missionId, $vmName, $vmName]);
         repo_deploy_create_materialize($this->db, $jobId, [['id' => (int) $this->db->insert_id, 'vm_name' => $vmName]]);
         repo_execute($this->db, "UPDATE deploy_create_vm_results SET status = 'uncertain', async_jid = '123456789.1', error_code = ?, error_detail = 'fixture unresolved result', finished_at = NOW() WHERE job_id = ?", 'si', [VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT, $jobId]);
+        // K21: the directory stays, but accounts.yml is removed through the injected execute seam.
+        $commands = [];
         try {
             self::assertTrue(repo_finish_deploy_job($this->db, $jobId, 'phpunit-cleanup', 'failed', 'unresolved create'));
             $before = $this->snapshot($jobId);
         } finally {
-            $diagnostic = $this->captureErrorLog(static function () use ($channel): void {
-                deploy_worker_cleanup_remote_dir($channel, ['host' => 'never-connect.example.invalid'], 'unused-fixture-secret', '/tmp/virtusphere-cleanup-never-created', false);
+            $diagnostic = $this->captureErrorLog(static function () use ($channel, &$commands): void {
+                deploy_worker_cleanup_remote_dir($channel, ['host' => 'never-connect.example.invalid'], 'unused-fixture-secret', '/tmp/virtusphere-cleanup-never-created', false, static function (array $credential, string $secret, string $command, int $timeout = 20) use (&$commands): array {
+                    $commands[] = $command;
+
+                    return ['exit_code' => 0, 'output' => ''];
+                });
             });
         }
+        self::assertSame(["rm -f -- '/tmp/virtusphere-cleanup-never-created/accounts.yml'"], $commands);
         self::assertSame($before, $this->snapshot($jobId));
         self::assertSame('uncertain', repo_deploy_create_results($this->db, $jobId)[0]['status']);
         self::assertStringContainsString('Remote job directory left in place', $diagnostic);
@@ -76,7 +83,8 @@ final class DeployTerminalCleanupTest extends TestCase
         }
         self::assertSame($before, $this->snapshot($jobId));
         self::assertSame([], repo_deploy_create_results($this->db, $jobId));
-        self::assertStringContainsString('Remote job directory could not be removed', $cleanup->diagnostic);
+        // K21: a failed removal of an idle host is reported by the release, which names the next contact.
+        self::assertStringContainsString('will be removed at the next contact with this Ansible host', $cleanup->diagnostic);
         self::assertSame(0, $channel->spooledLineCount());
     }
 

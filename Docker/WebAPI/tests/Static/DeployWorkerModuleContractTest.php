@@ -143,7 +143,6 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_esxi_write_preflight',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
-        'deploy_worker_cleanup_diagnose',
         'deploy_worker_credential',
         'deploy_worker_log_stream_chunk',
         'deploy_worker_log_stream_flush',

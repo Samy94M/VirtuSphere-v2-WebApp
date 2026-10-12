@@ -39,7 +39,7 @@ Runtime setup:
 SSH and SFTP have separate, typed failure boundaries. `SshTransportBudgetExceeded` means only a VirtuSphere-owned idle, command-total, SFTP-operation or SFTP-total budget. `SftpTransportFailed` means the SFTP subsystem or a remote file operation failed after the SSH/preflight path worked. `SshTransportConfigurationException` is reserved for local prerequisites such as a missing phpseclib class, empty host/user fields, a vanished local artifact directory or an unreadable effective Ansible requirements file. The SFTP total uses a monotonic clock starting after login. Before every `is_dir`, `mkdir`, upload, probe write and probe delete, phpseclib receives the smaller of the operation budget and the remaining total; the same total is checked after every operation and before success. A `false` or exception is classified through `isTimeout()` before disconnect, and upload/probe each disconnect exactly once in their outer `finally`. Logger and heartbeat callbacks stay outside that guard, so a database fault cannot be relabelled as SFTP. The credential test maps the exact budget type to `ansible_timeout`, local prerequisites to `config` and other SFTP failures to its SFTP result; identical text in an ordinary `RuntimeException` is not a budget.
 - Queueing a deploy job now preflights the session user, mission deploy fields, VM presence and ESXi/Ansible credential completeness before the worker can claim the job.
 
-The worker never writes plaintext secrets to deploy logs. It generates `accounts.yml` only inside the temporary job directory, uploads it to the Ansible host, and removes the local job directory after processing.
+The worker never writes plaintext secrets to deploy logs. It generates `accounts.yml` only inside the temporary job directory, uploads it to the Ansible host, and removes the local job directory after processing. The copy on the Ansible host is removed at the end of every job that uploaded it; if that removal fails, the next job with the same Ansible credential removes it.
 
 A database outage while a job runs is survivable and does not fail the job. The playbook executes on the Ansible host, so the job log and the job heartbeat are a side channel, and ending the SSH stream because that side channel broke would throw away the remote exit code, which is the only remaining evidence about the VMs already created. Every write of a running job therefore goes through a channel that owns the live connection: it announces the outage exactly once on STDERR (redacted), spools finished log lines in a bounded FIFO, and attempts at most one backed-off reconnect per liveness tick. After a reconnect it re-checks ownership, refreshes the job heartbeat and replays the spool in order, reporting any lines the buffer limit dropped in its own SYSTEM line. A job whose ownership changed meanwhile stops without publishing a result, so an established terminal state is never overwritten by this worker's older view. When the remote command ends during the outage, the loop worker waits bounded for the database and finalizes exactly once; `deploy_worker.php --once` stays bounded and states on STDERR that the outcome could not be persisted and that the job stays claimed. Both effects are visible in `docker compose logs deploy-worker maintenance-worker`.
 
@@ -130,9 +130,11 @@ them). `createVMLaunch` starts exactly one `vmware_guest` call with `async` and
   never a blind retry.
 - **Cleanup is explicit.** `createVMCleanup` removes one job id's status file;
   the worker removes the whole work directory only after a step sequence ended.
-  A step that never returned is deliberately left in place and said so in the
+  A step that never returned leaves that directory in place and says so in the
   log, because deleting under a running playbook would destroy the evidence about
-  VMs whose outcome is still unknown.
+  VMs whose outcome is still unknown. `accounts.yml` is the one file removed in
+  every case, at the end of every job that uploaded it, including an unresolved
+  create unit; only the async state of such a unit stays on the host (K21).
 - **Identity is bound immediately.** After each successful unit one transaction
   locks job, result row and VM, binds an empty UUID, refreshes only the MOID on
   an equal UUID and writes nothing on a differing one. A create-only job does not

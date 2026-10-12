@@ -6,31 +6,34 @@ require_once __DIR__ . '/deploy_worker_db_channel.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/ansible_command.php';
+require_once __DIR__ . '/deploy_remote_secret.php';
 
 /**
- * Removes the job's remote work directory, but only when this worker can prove
- * that nothing of the job is still running on the host.
+ * Removes the ESXi access file accounts.yml at the end of a job, and removes the
+ * job's whole remote work directory when this worker can prove that nothing of
+ * the job is still running on the host (K21, VT-04).
  *
  * The material is not ordinary scratch: accounts.yml carries the ESXi password
- * until it is gone. With one chained remote command an EXIT trap removed it;
- * one command per playbook cannot use EXIT, so the steps carry HUP/INT/TERM
- * traps for the terminated cases and this runs for the normal one.
+ * until it is gone. The file is removed in every case. The directory is removed
+ * only on an idle host: a step that never returned (a cancel accepted
+ * mid-playbook, a broken transport) or an unresolved create unit keeps its
+ * directory, because deleting it under a running playbook, or the async state of
+ * an uncertain unit, would destroy the very evidence whose outcome is unknown.
  *
- * A step that never returned (a cancel accepted mid-playbook, a broken
- * transport) is deliberately left alone: deleting the directory under a
- * running playbook would break the very work whose outcome is still unknown,
- * and the remote trap covers it when that shell ends. Material left behind by
- * a host this worker can no longer reach is reported, not resolved; it is the
- * remote-ownership stage that resolves it.
+ * A removal the host did not confirm is remembered in deploy_remote_secret_files
+ * and removed again at the next contact with the same Ansible credential; see
+ * lib/deploy_remote_secret.php.
  *
  * @param array<string, mixed>|null $credential
+ * @param (callable(array<string,mixed>, string, string, int): array{exit_code: int, output: string})|null $execute ssh_execute_capture() signature
  */
 function deploy_worker_cleanup_remote_dir(
     DeployWorkerDbChannel $channel,
     ?array $credential,
     ?string $secret,
     ?string $remoteDir,
-    bool $stepInFlight
+    bool $stepInFlight,
+    ?callable $execute = null
 ): void {
     if ($remoteDir === null || $remoteDir === '' || $credential === null || $secret === null) {
         return;
@@ -48,52 +51,23 @@ function deploy_worker_cleanup_remote_dir(
         // An unavailable evidence store is not proof that the host is idle.
         $stepInFlight = true;
     }
-    if ($stepInFlight || $channel->hasLostOwnership()) {
+    $idle = !$stepInFlight && !$channel->hasLostOwnership();
+
+    // Never throws: a failed removal is diagnosed and remembered by the release.
+    $removed = deploy_remote_secret_release(
+        static fn (): mysqli => $channel->connection(),
+        $credential,
+        $secret,
+        $channel->jobId(),
+        $remoteDir,
+        $idle,
+        $execute
+    );
+    if (!$idle && $removed) {
         deploy_worker_cleanup_diagnose(
             $channel->jobId(),
-            'Remote job directory left in place: this worker cannot prove the host is idle.',
+            'Remote job directory left in place: this worker cannot prove the host is idle; the ESXi access file was removed.',
             $secret
         );
-
-        return;
-    }
-
-    try {
-        $exit = ssh_execute_command(
-            $credential,
-            $secret,
-            ansible_remote_cleanup_command($remoteDir),
-            static function (string $chunk): void {
-            },
-            VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS
-        );
-        if ($exit !== 0) {
-            throw new RuntimeException('Remote cleanup returned exit code ' . $exit . '.');
-        }
-    } catch (Throwable $exception) {
-        // Never the job's outcome: this runs in a finally block, after the
-        // result is decided, and a host that cannot be reached for a cleanup
-        // must not turn a finished deploy into an unhandled exception.
-        deploy_worker_cleanup_diagnose(
-            $channel->jobId(),
-            'Remote job directory could not be removed: ' . $exception->getMessage(),
-            $secret
-        );
-    }
-}
-
-/**
- * Cleanup runs after the terminal decision, including after ownership loss or
- * a database outage. Its diagnosis belongs to the existing worker error log,
- * never the immutable job log or a spool that could replay after termination.
- * Even a failing diagnostic sink must allow the rest of finally to run.
- */
-function deploy_worker_cleanup_diagnose(int $jobId, string $message, string $secret): void
-{
-    try {
-        error_log('[deploy-worker] job ' . $jobId . ' cleanup: '
-            . deploy_worker_redact_secrets(deploy_job_output_normalize_line($message), [$secret]));
-    } catch (Throwable) {
-        // A secondary diagnostic failure cannot replace the decided outcome.
     }
 }

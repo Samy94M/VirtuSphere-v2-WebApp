@@ -140,8 +140,9 @@ const FILE_SIZE_ALLOWANCES = [
     // and backfill logic remains in lib/migrations/0056_package_report_foundation.php.
     // IDR-P02 adds the two registry lines for migration 0057; its column and
     // check live in lib/migrations/0057_create_replaced_identity.php.
+    // K21 adds the two registry lines for migration 0064; its table lives in lib/migrations/0064_remote_secret_files.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1253,
+        'lines' => 1255,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

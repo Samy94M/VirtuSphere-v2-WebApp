@@ -38,6 +38,9 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_step_failure_suffix',
         'ansible_remote_steps',
         'ansible_remote_cleanup_command',
+        // K21 (VT-04): the one command that removes accounts.yml alone, next to
+        // the recursive job-directory cleanup it must never be confused with.
+        'ansible_remote_secret_remove_command',
         'ansible_preflight_checks',
         'ansible_pinned_collection_version',
         'ansible_pinned_collection_versions',
