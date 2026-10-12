@@ -11,6 +11,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/audit_registry.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/mac.php';
+require_once __DIR__ . '/machine_api_roles.php';
 require_once __DIR__ . '/request.php';
 
 /**
@@ -34,13 +35,24 @@ function machine_api_client_ip(): string
     return (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 }
 
-function machine_api_ip_allowed(mysqli $db, string $ip): bool
+/** Closed cause of this request's last IP refusal, for the audit row only. */
+final class MachineApiIpGate
 {
-    $stmt = $db->prepare('SELECT id FROM deploy_accessToWebAPI WHERE ipAddress = ? LIMIT 1');
-    $stmt->bind_param('s', $ip);
-    $stmt->execute();
+    public static ?string $lastDenial = null;
+}
 
-    return $stmt->get_result()->num_rows > 0;
+/**
+ * The IP gate of one machine endpoint (K20). $gate names the caller role the
+ * endpoint expects (VIRTUSPHERE_MACHINE_API_GATE_ROLES); an entry without a
+ * role still opens every gate. A refusal remembers its closed cause for the
+ * audit row machine_api_forbidden() writes; the wire answer is unchanged.
+ */
+function machine_api_ip_allowed(mysqli $db, string $ip, string $gate): bool
+{
+    $decision = machine_api_ip_decision($db, $ip, $gate);
+    MachineApiIpGate::$lastDenial = $decision['reason'];
+
+    return $decision['allowed'];
 }
 
 function machine_api_mac_allowed(mysqli $db, string $mac): bool
@@ -108,6 +120,11 @@ function machine_api_forbidden(string $ip, ?mysqli $db = null, string $endpoint 
     $context = [];
     if ($action !== '' && strlen($action) <= 128 && preg_match('/^[A-Za-z0-9_.:+\/-]+$/', $action) === 1) {
         $context['action'] = $action;
+    }
+    // K20: unknown IP versus an IP listed only under another role. Closed
+    // values; a refusal before any IP decision carries none.
+    if (in_array(MachineApiIpGate::$lastDenial, [VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED, VIRTUSPHERE_MACHINE_API_DENY_ROLE], true)) {
+        $context['reason'] = MachineApiIpGate::$lastDenial;
     }
 
     if ($db instanceof mysqli) {

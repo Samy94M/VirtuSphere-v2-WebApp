@@ -246,7 +246,7 @@ function packages_pick_successor(mysqli $db, string $basename, string $retiredVe
 }
 
 $clientIp = machine_api_client_ip();
-if (!machine_api_ip_allowed($connection, $clientIp)) {
+if (!machine_api_ip_allowed($connection, $clientIp, 'package_catalog')) {
     machine_api_forbidden($clientIp, $connection);
 }
 

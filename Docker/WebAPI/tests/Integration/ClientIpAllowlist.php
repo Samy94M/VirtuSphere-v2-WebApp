@@ -22,7 +22,7 @@ trait ClientIpAllowlist
     /** @var list<string> IPs, die dieser Test eingetragen hat */
     private array $allowlistInserted = [];
 
-    /** @var list<array{ip: string, description: string}> Zeilen, die dieser Test entfernt hat */
+    /** @var list<array{ip: string, description: string, role: ?string}> Zeilen, die dieser Test entfernt hat (K20: samt Rolle) */
     private array $allowlistRemoved = [];
 
     private function ownClientIp(): string
@@ -58,7 +58,7 @@ trait ClientIpAllowlist
     private function ensureClientIpNotAllowlisted(mysqli $db): void
     {
         $ip = $this->ownClientIp();
-        $stmt = $db->prepare('SELECT ipAddress, description FROM deploy_accessToWebAPI WHERE ipAddress = ?');
+        $stmt = $db->prepare('SELECT ipAddress, description, role FROM deploy_accessToWebAPI WHERE ipAddress = ?');
         $stmt->bind_param('s', $ip);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -66,6 +66,7 @@ trait ClientIpAllowlist
             $this->allowlistRemoved[] = [
                 'ip' => (string) $row['ipAddress'],
                 'description' => (string) $row['description'],
+                'role' => $row['role'] === null ? null : (string) $row['role'],
             ];
         }
         $result->free();
@@ -91,8 +92,8 @@ trait ClientIpAllowlist
             $stmt->execute();
         }
         foreach ($this->allowlistRemoved as $row) {
-            $stmt = $db->prepare('INSERT INTO deploy_accessToWebAPI (ipAddress, description) VALUES (?, ?)');
-            $stmt->bind_param('ss', $row['ip'], $row['description']);
+            $stmt = $db->prepare('INSERT INTO deploy_accessToWebAPI (ipAddress, description, role) VALUES (?, ?, ?)');
+            $stmt->bind_param('sss', $row['ip'], $row['description'], $row['role']);
             $stmt->execute();
         }
         $this->allowlistInserted = [];

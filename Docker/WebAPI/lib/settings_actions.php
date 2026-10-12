@@ -10,6 +10,7 @@ require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/backup_encryption.php';
+require_once __DIR__ . '/settings_allowlist_actions.php';
 
 /**
  * Guarding and permission checks stay in the page shell. This dispatcher owns
@@ -31,6 +32,7 @@ function settings_handle_post(mysqli $connection, array $user): never
         'save_api' => 'deploy',
         'clear_api' => 'deploy',
         'allow_create' => 'machine-api',
+        'allow_set_role' => 'machine-api',
         'allow_delete' => 'machine-api',
         'generate_token' => 'machine-api',
         'clear_token' => 'machine-api',
@@ -330,30 +332,8 @@ function settings_handle_post(mysqli $connection, array $user): never
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
         }
-    } elseif ($action === 'allow_create') {
-        $ip = request_trimmed($_POST, 'ip_address');
-        $description = request_trimmed($_POST, 'description');
-        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
-            $message = __t('settings.allowlist_ip_invalid');
-            form_remember('allowlist', $_POST, ['ip_address' => $message]);
-            flash_set('error', $message);
-        } elseif (repo_api_access_exists($connection, $ip)) {
-            $message = __t('settings.allowlist_ip_exists');
-            form_remember('allowlist', $_POST, ['ip_address' => $message]);
-            flash_set('error', $message);
-        } elseif (mb_strlen($description) > 255) {
-            $message = __t('settings.allowlist_description_too_long');
-            form_remember('allowlist', $_POST, ['description' => $message]);
-            flash_set('error', $message);
-        } else {
-            try {
-                repo_api_access_add($connection, $ip, $description);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', $ip, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'allowlisted'], (int) $user['id']);
-                flash_set('success', __t('settings.allowlist_added'));
-            } catch (Throwable $exception) {
-                flash_set('error', portal_error_message($exception));
-            }
-        }
+    } elseif (in_array($action, VIRTUSPHERE_SETTINGS_ALLOWLIST_ACTIONS, true)) {
+        settings_allowlist_handle_action($connection, $user, $action);
     } elseif ($action === 'save_retire_threshold') {
         $threshold = request_int($_POST, 'retire_threshold');
         if ($threshold < VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN || $threshold > VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MAX) {
@@ -377,18 +357,6 @@ function settings_handle_post(mysqli $connection, array $user): never
         }
     } elseif (in_array($action, VIRTUSPHERE_BACKUP_ENCRYPTION_ACTIONS, true)) {
         backup_encryption_handle_action($connection, $user, $action);
-    } elseif ($action === 'allow_delete') {
-        try {
-            $entry = repo_api_access_delete($connection, request_int($_POST, 'id'));
-            if ($entry === null) {
-                flash_set('error', __t('settings.allowlist_not_found'));
-            } else {
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'removed'], (int) $user['id']);
-                flash_set('success', __t('settings.allowlist_removed'));
-            }
-        } catch (Throwable $exception) {
-            flash_set('error', portal_error_message($exception));
-        }
     }
 
     // Through the builder, so a map entry naming a tab the page does not render

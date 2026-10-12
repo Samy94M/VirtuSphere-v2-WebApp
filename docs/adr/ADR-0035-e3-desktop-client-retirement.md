@@ -78,3 +78,21 @@ Deliberately **kept**:
   proves the machine chain.
 - A future "desktop client" would be a new decision against the portal's
   RBAC/session model, not a revival of the token path.
+
+## Amendment 1 (2026-10-12, VT-01): one role per allowlist entry
+
+Machine authentication stays the IP allowlist plus the optional hashed report
+token. Until now one entry opened every endpoint, so the Ansible host listed
+for the MAC callback could also call `updateDevice`, `reportMembership` and the
+package catalog (finding VT-01, released by the user on 2026-10-05).
+
+- Each entry carries one role: MECM server, Ansible host or client
+  (migration 0063). `VIRTUSPHERE_MACHINE_API_GATE_ROLES`
+  (`lib/machine_api_roles.php`) maps every IP gate to the roles it admits, and
+  `machine_api_ip_allowed()` requires the gate key.
+- Entries without a role keep the old behaviour, every endpoint, until an
+  administrator assigns one. System status and the settings page count them; no
+  role is inferred.
+- The refusal stays the frozen legacy 403 including the IP echo; the audit row
+  adds the closed `reason`. The MAC-based client paths are unchanged, and the
+  Ansible preflight probe keeps asking the MAC callback gate.

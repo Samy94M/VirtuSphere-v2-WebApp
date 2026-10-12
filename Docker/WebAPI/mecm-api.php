@@ -73,7 +73,9 @@ $clientIp = machine_api_client_ip();
 // one per request. See lib/request.php.
 $action = request_string($_GET, 'action');
 $mac = request_string($_GET, 'mac');
-$ipAllowed = machine_api_ip_allowed($connection, $clientIp);
+// K20: the client reads its own configuration; the device list is the
+// MECM server's. One gate per action, decided before either branch runs.
+$ipAllowed = machine_api_ip_allowed($connection, $clientIp, $action === 'getDeviceInfos' ? 'device_infos' : 'device_list');
 
 // ADR-0032: adopt the PowerShell client's per-run correlation id for this
 // request's audit lines. Diagnostic only; an invalid header is ignored.

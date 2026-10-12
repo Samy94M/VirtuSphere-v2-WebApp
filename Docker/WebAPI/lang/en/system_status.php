@@ -279,7 +279,7 @@ return [
     'ansible_job_cancelled' => 'Cancelled',
     'ansible_job_unknown' => 'Unknown outcome',
     'ansible_failed_component' => 'Failed at: :component',
-    'ansible_allowlist_detail' => 'Host and toolchain are fine, but the host IP is missing from the machine API IP allowlist; jobs with a MAC export are refused before any VM is changed. Allow it under Settings, Machine API.',
+    'ansible_allowlist_detail' => 'Host and toolchain are fine, but the host IP is missing from the machine API IP allowlist or listed there without the role Ansible host; jobs with a MAC export are refused before any VM is changed. Allow it with the role Ansible host under Settings, Machine API.',
     'ansible_test_link' => 'Credentials page',
     'ansible_test_now' => 'Run full test now',
     'ansible_testing' => 'Full test running…',
@@ -321,8 +321,8 @@ return [
     'mecm_setup_sources_summary' => 'Show technical sources without a report yet',
     // The same grey state, but with evidence: somebody is knocking and being
     // turned away. "Probably not set up yet" would simply be false here.
-    'mecm_setup_denied' => 'The MECM connection appears to be set up but is being refused: accesses have arrived and failed at the machine API IP allowlist (see the note above). So the tasks are running, their server is just not allowed to talk to the portal yet. Allow the IP named there and the first source reports within its interval.',
-    'machine_api_denied' => 'Refused machine access from :ips, last one at :when. Those addresses are not on the machine API IP allowlist; while that is the case, no sync, no MECM ID and no result report arrives from them.',
+    'mecm_setup_denied' => 'The MECM connection appears to be set up but is being refused: accesses have arrived and failed at the machine API IP allowlist (see the note above). So the tasks are running, their server is just not allowed to talk to the portal yet. Allow the IP named there with the role MECM server and the first source reports within its interval.',
+    'machine_api_denied' => 'Refused machine access from :ips, last one at :when. Those addresses are not on the machine API IP allowlist, or only under another role; while that is the case, no sync, no MECM ID and no result report arrives from them.',
     'machine_api_denied_history' => 'Historical rejections within the last :hours hours: :total distinct IP addresses, showing :ips; newest rejection at :when. This does not identify which service sent a request or prove that the address is still blocked.',
     'machine_api_denied_more' => ':count more IP addresses are not displayed.',
     'machine_api_open_log' => 'Open refused accesses in the log',

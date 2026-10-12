@@ -10,7 +10,7 @@ final class K15VmTouchEndpointContractTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/deploy_vm_touch.php');
         self::assertIsString($source);
-        self::assertStringContainsString('machine_api_ip_allowed($connection, $clientIp)', $source);
+        self::assertStringContainsString('machine_api_ip_allowed($connection, $clientIp, \'vm_touch\')', $source);
         self::assertStringContainsString('($_SERVER[\'REQUEST_METHOD\'] ?? \'\') !== \'POST\'', $source);
         self::assertStringContainsString('count($payload) !== 5', $source);
         foreach (['job_id', 'vm_id', 'attempt', 'generation', 'phase'] as $field) {

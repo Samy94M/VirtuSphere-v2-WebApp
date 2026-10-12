@@ -82,7 +82,7 @@ flowchart TD
   W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
   D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
-  H -->|MAC-Modus, IP nicht freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
+  H -->|MAC-Modus, IP nicht oder nicht als Ansible-Host freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
   H --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]

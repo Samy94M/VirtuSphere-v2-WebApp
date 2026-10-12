@@ -30,6 +30,7 @@ require_once __DIR__ . '/../ansible_test_config.php';
             <h3><?php echo h(__t('help_settings.settings_allowlist_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_allowlist_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_allowlist_p2')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_allowlist_p3')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_reporting_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_reporting_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_reporting_p2')); ?></p>

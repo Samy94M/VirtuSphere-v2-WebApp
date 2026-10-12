@@ -27,6 +27,7 @@ require_once __DIR__ . '/migrations/0059_ansible_host_identity.php';
 require_once __DIR__ . '/migrations/0060_deploy_vm_prestate.php';
 require_once __DIR__ . '/migrations/0061_vm_host_binding.php';
 require_once __DIR__ . '/migrations/0062_deploy_job_started_at.php';
+require_once __DIR__ . '/migrations/0063_machine_api_roles.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -1203,6 +1204,7 @@ SQL;
     '0060_deploy_vm_prestate' => migrate_0060_deploy_vm_prestate(...),
     '0061_vm_host_binding' => migrate_0061_vm_host_binding(...),
     '0062_deploy_job_started_at' => migrate_0062_deploy_job_started_at(...),
+    '0063_machine_api_roles' => migrate_0063_machine_api_roles(...),
 ];
 try {
     $db = db();

@@ -16,7 +16,7 @@ require_once __DIR__ . '/lib/mecm_rollout_fence.php';
 header('Content-Type: application/json; charset=utf-8');
 
 $clientIp = machine_api_client_ip();
-if (!machine_api_ip_allowed($connection, $clientIp)) {
+if (!machine_api_ip_allowed($connection, $clientIp, 'device_update')) {
     machine_api_forbidden($clientIp, $connection);
 }
 

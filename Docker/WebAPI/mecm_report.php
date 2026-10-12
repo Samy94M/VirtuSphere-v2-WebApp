@@ -70,7 +70,12 @@ try {
         machine_api_json(['error' => 'Invalid JSON body'], 400);
     }
 
-    $ipAllowed = machine_api_ip_allowed($connection, $clientIp);
+    // K20: client reports versus the MECM server's token-gated reports.
+    $ipAllowed = machine_api_ip_allowed($connection, $clientIp, match ($action) {
+        'reportPackageRun' => 'package_report',
+        'reportPhase' => 'client_phase',
+        default => 'server_report',
+    });
 
     if ($action === 'reportPackageRun') {
         if (!$ipAllowed) {

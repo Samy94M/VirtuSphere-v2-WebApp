@@ -279,7 +279,7 @@ return [
     'ansible_job_cancelled' => 'Abgebrochen',
     'ansible_job_unknown' => 'Unbekannter Ausgang',
     'ansible_failed_component' => 'Fehlgeschlagen an: :component',
-    'ansible_allowlist_detail' => 'Host und Toolchain in Ordnung, aber die Host-IP fehlt in den Machine-API IP-Freigaben; Aufträge mit MAC-Export werden vor jeder VM-Änderung abgewiesen. Freigeben unter Einstellungen, Machine-API.',
+    'ansible_allowlist_detail' => 'Host und Toolchain in Ordnung, aber die Host-IP fehlt in den Machine-API IP-Freigaben oder steht dort nicht mit der Rolle Ansible-Host; Aufträge mit MAC-Export werden vor jeder VM-Änderung abgewiesen. Mit der Rolle Ansible-Host freigeben unter Einstellungen, Machine-API.',
     'ansible_test_link' => 'Seite Zugangsdaten',
     'ansible_test_now' => 'Volltest jetzt starten',
     'ansible_testing' => 'Volltest läuft…',
@@ -321,8 +321,8 @@ return [
     'mecm_setup_sources_summary' => 'Technische Quellen ohne bisherigen Bericht anzeigen',
     // Dieselbe graue Lage, aber mit Beweis: es klopft jemand und wird abgewiesen.
     // „Vermutlich noch nicht eingerichtet" wäre hier schlicht falsch.
-    'mecm_setup_denied' => 'Die MECM-Anbindung ist offenbar eingerichtet, wird aber abgewiesen: es sind Zugriffe angekommen und an der IP-Freigabe der Machine-API gescheitert (siehe Hinweis oben). Die Aufgaben laufen also, nur darf ihr Server noch nicht mit dem Portal sprechen. Die genannte IP freigeben, dann meldet sich die erste Quelle innerhalb ihres Intervalls.',
-    'machine_api_denied' => 'Abgewiesene Maschinenzugriffe von :ips, letzter am :when. Diese Adressen sind nicht in den IP-Freigaben der Machine-API; solange das so ist, kommt von dort kein Sync, keine MECM-ID und kein Ergebnisbericht an.',
+    'mecm_setup_denied' => 'Die MECM-Anbindung ist offenbar eingerichtet, wird aber abgewiesen: es sind Zugriffe angekommen und an der IP-Freigabe der Machine-API gescheitert (siehe Hinweis oben). Die Aufgaben laufen also, nur darf ihr Server noch nicht mit dem Portal sprechen. Die genannte IP mit der Rolle MECM-Server freigeben, dann meldet sich die erste Quelle innerhalb ihres Intervalls.',
+    'machine_api_denied' => 'Abgewiesene Maschinenzugriffe von :ips, letzter am :when. Diese Adressen sind nicht oder nur mit einer anderen Rolle in den IP-Freigaben der Machine-API; solange das so ist, kommt von dort kein Sync, keine MECM-ID und kein Ergebnisbericht an.',
     'machine_api_denied_history' => 'Historische Abweisungen in den letzten :hours Stunden: :total unterschiedliche IP-Adressen, angezeigt :ips; jüngste Abweisung am :when. Daraus folgt weder, welcher Dienst die Anfrage gesendet hat, noch dass die Adresse weiterhin blockiert ist.',
     'machine_api_denied_more' => ':count weitere IP-Adressen sind nicht dargestellt.',
     'machine_api_open_log' => 'Abgewiesene Zugriffe im Protokoll öffnen',

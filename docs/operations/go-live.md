@@ -395,16 +395,16 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Eine frische Datenbank kennt nur `127.0.0.1`, eine migrierte Bestands-DB
    unter Umständen gar keinen Eintrag. Eintragen:
 
-   | IP | Wofür | Sonst |
+   | IP und Rolle | Wofür | Sonst |
    |---|---|---|
-   | MECM-Server | `mecm_packages.php`, `mecm_updateid.php`, `mecm_report.php` | Paket-Sync, MECM-IDs und Heartbeats bleiben aus |
-   | Ansible-Host | `db_importMAC.php` (`upload_mac_list.py` meldet die MACs zurück) | Deploy läuft, aber keine MAC kommt an, damit keine MECM-Übergabe |
+   | MECM-Server, Rolle MECM-Server | `mecm-api.php?action=getDeviceList`, `mecm_packages.php`, `mecm_updateid.php`, `mecm_report.php` (Heartbeat, Laufberichte) | Device-Sync, Paket-Sync, MECM-IDs und Heartbeats bleiben aus |
+   | Ansible-Host, Rolle Ansible-Host | `db_importMAC.php` (`upload_mac_list.py` meldet die MACs zurück), `deploy_vm_touch.php` | Deploy läuft, aber keine MAC kommt an, damit keine MECM-Übergabe |
 
    Die ausgerollten Client-VMs brauchen **keinen** Eintrag: `mecm-api.php` und
    `mecm_report.php` lassen alternativ eine im Portal bekannte MAC-Adresse als
    Ausweis gelten. Ob der Ansible-Host-Eintrag stimmt, beweist der Zugangstest
    („Verbindung und Umgebung prüfen" beim Ansible-Zugang): fehlt er, endet die Prüfung als Warnung mit der
-   IP, die hier einzutragen ist.
+   IP, die hier einzutragen ist. Jeder Eintrag erreicht nur die Endpunkte seiner Rolle (K20); Einträge ohne Rolle aus einem älteren Stand gelten bis zur Zuordnung für alle Endpunkte und werden im Systemstatus gezählt.
 5. **HTTP vs. HTTPS** entscheiden: Start ist HTTP-first im LAN; HTTPS läuft
    später über den Admin-Config-Flow (ADR-0012, Runbook
    `docs/operations/https.md`).

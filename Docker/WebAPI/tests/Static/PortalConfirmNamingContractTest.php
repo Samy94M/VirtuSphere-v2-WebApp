@@ -57,6 +57,7 @@ final class PortalConfirmNamingContractTest extends TestCase
         'portal.vm_mecm_reset_confirm_editing',
         'portal.vm_mecm_transfer_confirm',
         'settings.allowlist_confirm_delete',
+        'settings.allowlist_confirm_role',
         'directory.confirm_deactivate_controller',
         'directory.confirm_delete_controller',
         'users.confirm_deactivate',

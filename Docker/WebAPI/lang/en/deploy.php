@@ -238,7 +238,7 @@ return [
     'result_partial_counts' => 'Partial result: :successful VMs succeeded, :failed VMs failed.',
     'result_failed' => 'The job failed.',
     'result_network_preflight' => 'The network check before remote work blocked :blocked of :expected VMs.',
-    'result_allowlist_denied' => 'The portal does not accept MAC uploads from the Ansible host (IP :ip is not on the Machine API allowlist). The job stopped before any VM was changed; VM states are unchanged.',
+    'result_allowlist_denied' => 'The portal does not accept MAC uploads from the Ansible host (IP :ip is not on the Machine API allowlist, or not with the role Ansible host). The job stopped before any VM was changed; VM states are unchanged.',
     'allowlist_ip_unknown' => 'unknown',
     'allowlist_open_settings' => 'Open the allowlist in Settings',
     'network_issue_heading' => 'Network finding',

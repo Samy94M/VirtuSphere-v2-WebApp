@@ -14,6 +14,8 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Zeile |
 | Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
 
+Über der Übersicht stehen drei Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`). Für `system.config` verlinkt jeder Hinweis die Einstellung, die ihn behebt.
+
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite; `SystemStatusChecksDocContractTest` leitet die Namen aus den Kachelbeschriftungen ab.
 
 Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`): rot vor „Erwartet, nie gemeldet“ vor gelb vor „Legacy“ vor grau vor grün.
@@ -118,7 +120,7 @@ flowchart TD
   T3 -->|Komponente fehlt| TF3["fehlgeschlagen mit Name der Komponente"]
   T3 --> T4{"SFTP-Schreibprobe in /tmp?"}
   T4 -->|nein| TF4["fehlgeschlagen (SFTP)"]
-  T4 -->|ja| T5{"IP-Freigabe für den MAC-Rückruf?"}
+  T4 -->|ja| T5{"IP-Freigabe für den MAC-Rückruf (Eintrag ohne Rolle oder mit Rolle Ansible-Host)?"}
   T5 -->|abgewiesen| TW["bestanden mit Einschränkung (warning)"]
   T5 -->|frei oder ohne URL| TO["bestanden"]
   TF --> R

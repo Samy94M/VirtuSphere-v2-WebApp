@@ -14,6 +14,7 @@ require_once __DIR__ . '/../lib/system_status_deviation_view.php';
 require_once __DIR__ . '/../lib/system_status_directory_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 require_once __DIR__ . '/../lib/backup_encryption.php';
+require_once __DIR__ . '/../lib/repo/api_access.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -102,6 +103,13 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     <?php if (!virtusphere_is_request_secure()) { ?>
         <div class="alert alert-warning"><?php echo h(__t('system_status.http_plaintext')); ?>
             <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_HTTPS)); ?>"><?php echo h(__t('settings.https_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
+    <?php // K20 (VT-01): legacy allowlist entries still open every machine endpoint. ?>
+    <?php $allowlistWithoutRole = repo_api_access_without_role_count($connection); ?>
+    <?php if ($allowlistWithoutRole > 0) { ?>
+        <div class="alert alert-warning" data-allowlist-without-role><?php echo h(__t('settings.allowlist_without_role_warning', ['count' => $allowlistWithoutRole])); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('settings.allowlist_title')); ?></a><?php } ?>
         </div>
     <?php } ?>
     <?php // K19 (VT-E2): the same derivation as the settings backup card. ?>

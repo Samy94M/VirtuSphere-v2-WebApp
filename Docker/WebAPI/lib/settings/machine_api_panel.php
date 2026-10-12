@@ -6,6 +6,8 @@ declare(strict_types=1);
 /** @var string $reportTokenOnce */
 /** @var bool $reportTokenSet */
 
+require_once __DIR__ . '/../machine_api_roles.php';
+
 ?>
     <div class="stack" id="panel-machine-api" role="tabpanel" aria-labelledby="tab-machine-api" tabindex="0" data-tab-panel hidden>
         <?php
@@ -26,15 +28,35 @@ declare(strict_types=1);
             if ($allowlistEntries === []) { ?>
                 <div class="alert alert-warning"><?php echo h(__t('settings.allowlist_empty_warning')); ?></div>
             <?php } ?>
+            <?php
+            // K20: entries without a role still open every machine endpoint.
+            $allowlistWithoutRole = count(array_filter($allowlistEntries, static fn (array $entry): bool => $entry['role'] === null));
+            if ($allowlistWithoutRole > 0) { ?>
+                <div class="alert alert-warning" data-allowlist-without-role><?php echo h(__t('settings.allowlist_without_role_warning', ['count' => $allowlistWithoutRole])); ?></div>
+            <?php } ?>
             <div class="table-wrap" tabindex="0">
                 <table>
-                    <thead><tr><th><?php echo h(__t('settings.allowlist_th_ip')); ?></th><th><?php echo h(__t('settings.allowlist_th_description')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                    <thead><tr><th><?php echo h(__t('settings.allowlist_th_ip')); ?></th><th><?php echo h(__t('settings.allowlist_th_role')); ?></th><th><?php echo h(__t('settings.allowlist_th_description')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                     <tbody>
                     <?php foreach ($allowlistEntries as $entry) { ?>
                         <tr>
                             <td><code><?php echo h((string) $entry['ipAddress']); ?></code></td>
+                            <td><?php echo $entry['role'] === null
+                                ? portal_badge('warning', __t('settings.allowlist_role_none'))
+                                : h(__t('settings.allowlist_role_' . (string) $entry['role'])); ?></td>
                             <td><?php echo h((string) ($entry['description'] ?? '')); ?></td>
                             <td class="actions">
+                                <form class="inline-form" method="post" action="settings.php">
+                                    <?php echo csrf_field(); ?>
+                                    <input type="hidden" name="action" value="allow_set_role">
+                                    <input type="hidden" name="id" value="<?php echo h((string) $entry['id']); ?>">
+                                    <select name="role" aria-label="<?php echo h(__t('settings.allowlist_th_role') . ' ' . (string) $entry['ipAddress']); ?>">
+                                        <?php foreach (VIRTUSPHERE_MACHINE_API_ROLES as $role) { ?>
+                                            <option value="<?php echo h($role); ?>" <?php echo $entry['role'] === $role ? 'selected' : ''; ?>><?php echo h(__t('settings.allowlist_role_' . $role)); ?></option>
+                                        <?php } ?>
+                                    </select>
+                                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('settings.allowlist_confirm_role', ['name' => (string) ($entry['ipAddress'] ?? '')])); ?>"><?php echo h(__t('settings.allowlist_set_role')); ?></button>
+                                </form>
                                 <form method="post" action="settings.php">
                                     <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="allow_delete">
@@ -45,7 +67,7 @@ declare(strict_types=1);
                         </tr>
                     <?php } ?>
                     <?php if ($allowlistEntries === []) { ?>
-                        <tr><td colspan="3"><?php echo h(__t('settings.allowlist_empty')); ?></td></tr>
+                        <tr><td colspan="4"><?php echo h(__t('settings.allowlist_empty')); ?></td></tr>
                     <?php } ?>
                     </tbody>
                 </table>
@@ -56,6 +78,15 @@ declare(strict_types=1);
                 <label><?php echo h(__t('settings.allowlist_th_ip')); ?>
                     <input name="ip_address" value="<?php echo h(form_old('allowlist', 'ip_address', '')); ?>"<?php echo form_control_attrs('allowlist', 'ip_address'); ?> placeholder="10.0.0.10" required>
                     <?php echo form_error_html('allowlist', 'ip_address'); ?>
+                </label>
+                <label><?php echo h(__t('settings.allowlist_th_role')); ?>
+                    <select name="role"<?php echo form_control_attrs('allowlist', 'role'); ?>>
+                        <option value=""><?php echo h(__t('settings.allowlist_role_select')); ?></option>
+                        <?php foreach (VIRTUSPHERE_MACHINE_API_ROLES as $role) { ?>
+                            <option value="<?php echo h($role); ?>" <?php echo form_old('allowlist', 'role', '') === $role ? 'selected' : ''; ?>><?php echo h(__t('settings.allowlist_role_' . $role)); ?></option>
+                        <?php } ?>
+                    </select>
+                    <?php echo form_error_html('allowlist', 'role'); ?>
                 </label>
                 <label><?php echo h(__t('settings.allowlist_th_description')); ?>
                     <input name="description" value="<?php echo h(form_old('allowlist', 'description', '')); ?>"<?php echo form_control_attrs('allowlist', 'description'); ?> maxlength="255" placeholder="<?php echo h(__t('settings.allowlist_description_placeholder')); ?>">

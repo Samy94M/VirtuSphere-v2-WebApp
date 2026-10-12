@@ -395,8 +395,16 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
     await expect(form.locator('input[name="description"]'), 'the description stays sticky').toHaveValue(description);
     expect(countFor(), 'nothing was written').toBe(0);
 
+    // K20: a valid IP without a role is refused too, field-bound.
+    await form.locator('input[name="ip_address"]').fill(ip);
+    await submitAndReturnToTab(page, form, 'machine-api');
+    form = settingsForm(page, 'allow_create');
+    await expect(form.locator('select[name="role"][aria-invalid="true"]'), 'the missing role is field-bound').toBeVisible();
+    expect(countFor(), 'nothing was written without a role').toBe(0);
+
     // The valid add lands in the DB and the list.
     await form.locator('input[name="ip_address"]').fill(ip);
+    await form.locator('select[name="role"]').selectOption('ansible_host');
     await submitAndReturnToTab(page, form, 'machine-api');
     expect(countFor(), 'the entry was added').toBe(1);
 
@@ -487,5 +495,68 @@ test('report token: regenerate asks (existing token would die), the one-time val
     expect(readHash(), 'Confirm cleared the token').toBe('');
   } finally {
     writeSetting('VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH', before);
+  }
+});
+
+// K20 (VT-01): an entry from before roles opens every endpoint until a role is
+// assigned. System status counts it; the settings row assigns a role after a
+// confirmation, and the count drops. The fresh-schema 127.0.0.1 seed may be
+// counted too, so the test compares counts instead of expecting one.
+// e2e-covers: settings.php:allow_set_role
+// e2e-covers-cancel: settings.php:allow_set_role
+test('allowlist roles: an entry without a role is counted in System status until a role is set', async ({ page }) => {
+  const ip = '192.0.2.77'; // TEST-NET-2, never a real machine.
+  const sql = (body) => runPhp(`
+$db = db();
+$ip = '${ip}';
+${body}
+echo 'OK';
+`);
+  const roleOf = () => phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT role FROM deploy_accessToWebAPI WHERE ipAddress = ?');
+$ip = '${ip}';
+$stmt->bind_param('s', $ip);
+$stmt->execute();
+$row = $stmt->get_result()->fetch_assoc();
+echo 'JSON' . json_encode(['role' => $row['role'] ?? 'missing']) . 'JSON';
+`).role;
+  const shownCount = async () => {
+    const hint = page.locator('[data-allowlist-without-role]');
+    if (await hint.count() === 0) return 0;
+    const match = (await hint.innerText()).match(/:\s*(\d+)/);
+    return match ? Number(match[1]) : -1;
+  };
+
+  try {
+    sql(`$stmt = $db->prepare("INSERT INTO deploy_accessToWebAPI (ipAddress, description) VALUES (?, 'e2e legacy entry')"); $stmt->bind_param('s', $ip); $stmt->execute();`);
+    await page.goto('system_status.php');
+    const before = await shownCount();
+    expect(before, 'System status counts the entry without a role').toBeGreaterThanOrEqual(1);
+    await expect(page.locator('[data-allowlist-without-role] a'), 'the remedy is linked').toHaveAttribute('href', /settings\.php#panel-machine-api$/);
+
+    await openTab(page, 'machine-api');
+    const row = page.locator('tr', { hasText: ip }).first();
+    await expect(row, 'the row says the entry has no role').toContainText(/No role|Keine Rolle/);
+    const roleForm = row.locator('form:has(input[name="action"][value="allow_set_role"])');
+    await roleForm.locator('select[name="role"]').selectOption('mecm_server');
+    const dialog = page.locator('[data-confirm-dialog]');
+    await roleForm.locator('button').click();
+    await expect(dialog, 'restricting an entry asks first').toBeVisible();
+    await expect(page.locator('[data-confirm-msg]'), 'the dialog names the IP').toContainText(ip);
+    await dialog.locator('button[value="cancel"]').click();
+    expect(roleOf(), 'Cancel kept the entry without a role').toBeNull();
+
+    await roleForm.locator('button').click();
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
+      dialog.locator('[data-confirm-accept]').click(),
+    ]);
+    expect(roleOf(), 'Confirm assigned the role').toBe('mecm_server');
+
+    await page.goto('system_status.php');
+    expect(await shownCount(), 'the count dropped by one').toBe(before - 1);
+  } finally {
+    sql(`$stmt = $db->prepare('DELETE FROM deploy_accessToWebAPI WHERE ipAddress = ?'); $stmt->bind_param('s', $ip); $stmt->execute();`);
   }
 });

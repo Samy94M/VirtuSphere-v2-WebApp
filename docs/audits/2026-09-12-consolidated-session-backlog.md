@@ -1557,3 +1557,23 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 - **BK-N2 (P3):** `scripts/check.ps1` benennt sein Temp-Artefaktverzeichnis sekundengenau (`virtusphere-qa-yyyyMMdd-HHmmss`); zwei gleichzeitig gestartete Läufe teilen es, und der Lauf ohne `-KeepArtifacts` löscht es dem anderen weg (DirectoryNotFoundException beim nächsten Gate-Log).
 
 **Offen:** visuelle UX02-Abnahme (Nutzer); P3-1 aus K11; `deploy_log.php` in der e2e-Matrix; BK-N1, BK-N2. **Nächster Schritt:** K20 mit Astra-Halt.
+
+### K20: IP-Freigabe je Rolle (VT-01), Prüfstand vor Astra (12.10.2026)
+
+**Stand: umgesetzt und lokal committet, Rot- und Grünnachweis siehe unten; Astra-Halt nach Stoppregel 5 (Prüfauftrag `qa-artifacts/k20-2026-10-12/astra-brief.md`, umfasst nachgeholt K15 und K19).** Paketquelle: Blockkopf `bac71ca` (gepusht).
+
+**Nachmessung:** VT-01 bestätigt. `machine_api_ip_allowed($db, $ip)` kannte keinen Endpunkt, `deploy_accessToWebAPI` nur IP und Beschreibung; jeder Eintrag öffnete alle sieben Endpunkte (`db_importMAC.php`, `deploy_vm_touch.php`, `mecm-api.php`, `mecm_client_ack.php`, `mecm_packages.php`, `mecm_report.php`, `mecm_updateid.php`). Kein entfallener Befund.
+
+**Festlegungen im Paket:**
+- *Rollen und Zuordnung* aus den tatsächlichen Aufrufern (PowerShell-Skripte, Ansible): MECM-Server für `getDeviceList`, `updateDevice`/`reportMembership`, Paket-Sync, `heartbeat` und `reportRun`; Ansible-Host für MAC-Rückruf und K15-Zugriffsfreigabe; Client für `getDeviceInfos`, `reportPhase`, Client-ACK und `reportPackageRun`. Eine Karte (`VIRTUSPHERE_MACHINE_API_GATE_ROLES`), jedes Gate nennt seinen Schlüssel, `MachineApiRoleContractTest` leitet die Gates aus den Endpunktdateien ab.
+- *Eine Rolle je Eintrag*; ein Host mit zwei Aufgaben bekommt zwei Einträge. Ein Eintrag ohne Rolle sperrt weitere Einträge derselben IP (er öffnet ohnehin alles).
+- *Übergang:* Einträge ohne Rolle (alle Bestandseinträge und der Frischschema-Eintrag `127.0.0.1`) gelten bis zur Zuordnung wie bisher für alle Endpunkte; Systemstatus und Einstellungsseite zählen sie. Keine geratene Rolle, keine Migration von Beschreibungen.
+- *Geschlossene Ursache:* Der 403-Text bleibt der eingefrorene Wire-Vertrag samt IP-Echo; der gedrosselte Audit-Eintrag `machine_api.denied` trägt zusätzlich `reason` (`ip_not_allowlisted` oder `ip_role_not_permitted`).
+- *Bedienung:* Neue Einträge verlangen eine Rolle (serverseitige Feldprüfung); bestehende Einträge bekommen ihre Rolle über „Rolle setzen“ mit Bestätigung, weil das den Zugriff einschränkt. Die Freigabeaktionen zogen aus dem Einstellungs-Dispatcher nach `lib/settings_allowlist_actions.php` (Dateigröße).
+- *Freigabeprobe (K2)* unverändert gegen `db_importMAC.php`; eine nur als MECM-Server eingetragene Ansible-IP gilt dort als abgewiesen, die Meldetexte nennen jetzt auch die Rolle.
+
+**Umsetzung:** `lib/machine_api_roles.php`, `lib/machine_api.php`, sieben Endpunkte, Migration `0063_machine_api_roles` und Frischschema, `lib/repo/api_access.php`, `lib/settings_allowlist_actions.php`, Einstellungsansicht, Systemstatus, Audit-Definition und -Darstellung; Hilfe DE/EN (`settings_allowlist_p3`, Freigabe-Hinweis, fünf Meldungen zur Freigabeprobe und zwei zu abgewiesenen Zugriffen), `docs/ai/contracts/machine.md` A69, GROK.md 1.4, `docs/ai/reference/machine-api.md` R6, ADR-0035 Nachtrag 1, `go-live.md`, `system-status-checks.md` (Hinweise oberhalb der Übersicht, Testdiagramm), `deploy-flows.md`, `troubleshooting.md`.
+
+**Gegenproben:** `MachineApiRoleTest` (Wire: Ansible-Host-IP ruft `updateDevice` → 403 mit Ursache `ip_role_not_permitted`, Geräteliste und Paketkatalog ebenfalls 403; dieselbe IP passiert MAC-Rückruf und Zugriffsfreigabe; Client-IP erreicht `getDeviceInfos`, nicht den MAC-Rückruf; Eintrag ohne Rolle öffnet weiter alles und wird gezählt; unbekannte IP behält `ip_not_allowlisted`), `MachineApiRoleContractTest` (abgeleitete Gates, Rollenkarte, Detektor mit Negativfällen), E2E `settings-flow.spec.js` (Rolle Pflicht beim Hinzufügen; Eintrag ohne Rolle im Systemstatus gezählt, Rolle setzen mit Abbrechen- und Bestätigungszweig senkt die Zahl), angepasst `K15VmTouchEndpointContractTest`, `PortalConfirmNamingContractTest`, Testhilfe `ClientIpAllowlist` (sichert und restauriert die Rolle).
+
+**Neuer Befund außerhalb des Pakets (Stoppregel 2):** **K20-N1 (P3):** `deploy_vm_touch.php` (K15) fehlt in `VIRTUSPHERE_MACHINE_API_ENDPOINTS`; seine Ablehnungen werden unter dem Sentinel `unknown` auditiert.

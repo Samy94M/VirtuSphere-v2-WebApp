@@ -56,7 +56,7 @@ try {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
 
-    if (!machine_api_ip_allowed($connection, $clientIp) && !machine_api_mac_allowed($connection, $mac)) {
+    if (!machine_api_ip_allowed($connection, $clientIp, 'client_ack') && !machine_api_mac_allowed($connection, $mac)) {
         machine_api_forbidden($clientIp, $connection, 'mecm_client_ack.php');
     }
 

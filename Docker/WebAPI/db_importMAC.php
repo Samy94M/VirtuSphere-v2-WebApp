@@ -31,7 +31,7 @@ final class MacImportBoundsException extends MacImportConflictException
 }
 
 $clientIp = machine_api_client_ip();
-if (!machine_api_ip_allowed($connection, $clientIp)) {
+if (!machine_api_ip_allowed($connection, $clientIp, 'mac_import')) {
     machine_api_forbidden($clientIp, $connection);
 }
 

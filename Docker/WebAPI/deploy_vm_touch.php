@@ -9,7 +9,7 @@ require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/deploy_job_vm_states.php';
 
 $clientIp = machine_api_client_ip();
-if (!machine_api_ip_allowed($connection, $clientIp)) {
+if (!machine_api_ip_allowed($connection, $clientIp, 'vm_touch')) {
     machine_api_forbidden($clientIp, $connection);
 }
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {

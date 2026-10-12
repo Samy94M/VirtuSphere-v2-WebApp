@@ -59,7 +59,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_setting_description($id, $context),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => 'installed https certificate (CN=' . ($context['subject'] ?? '') . ', expires ' . ($context['valid_to'] ?? '') . ' UTC)',
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN => ($action === 'generated' ? 'generated' : 'cleared') . ' machine report token',
-        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP => $action . ' machine API ip ' . $id,
+        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP => $action . ' machine API ip ' . $id . (isset($context['role']) ? ' as ' . $context['role'] . (($context['previous_role'] ?? '') !== '' ? ' (was ' . $context['previous_role'] . ')' : '') : ''),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED => 'queued ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : '') . (!empty($context['scheduled']) ? ' (scheduled)' : ''),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED => 'requested cancel of deploy job id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED => $action . ' ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : ''),
@@ -100,7 +100,10 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
         VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR => 'error [' . $id . '] ' . ($context['error_class'] ?? 'Throwable'),
         VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_logs_export_description($id, $context),
-        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => 'Refused ' . $id . (isset($context['action']) ? '?action=' . $context['action'] : '') . ': not on the machine API IP allowlist (and no known MAC presented).',
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => 'Refused ' . $id . (isset($context['action']) ? '?action=' . $context['action'] : '')
+            . (($context['reason'] ?? '') === 'ip_role_not_permitted'
+                ? ': the IP is on the machine API allowlist only under a role this endpoint does not accept (and no known MAC presented).'
+                : ': not on the machine API IP allowlist (and no known MAC presented).'),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => 'MAC callback rejected for job id ' . $id . ': ' . ($context['reason_code'] ?? 'conflict'),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => 'Machine endpoint ' . $id . ' failed internally (' . ($context['error_class'] ?? 'Throwable') . ')',
         VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => ($context['report_type'] ?? 'report') . ' for unknown VM id ' . $id . (isset($context['resource_id']) ? ' (ResourceID ' . $context['resource_id'] . ')' : ''),
