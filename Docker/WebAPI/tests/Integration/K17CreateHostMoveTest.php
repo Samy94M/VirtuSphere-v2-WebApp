@@ -87,14 +87,15 @@ final class K17CreateHostMoveTest extends TestCase
         $this->createThrough($this->esxiA, $vmId);
 
         repo_execute($this->db, 'UPDATE deploy_credentials SET host = ? WHERE id = ?', 'si', [strtoupper($this->host('a')) . '.', $this->esxiA]);
-        self::assertSame([], $this->hostMoveWarnings($this->esxiA, 'create', $vmId), 'case and a trailing dot name the same host');
+        // Held in a variable: asserting on the call itself would let static
+        // analysis carry "always empty" over to the identical call below.
+        $sameHost = $this->hostMoveWarnings($this->esxiA, 'create', $vmId);
+        self::assertSame([], $sameHost, 'case and a trailing dot name the same host');
 
         repo_execute($this->db, 'UPDATE deploy_credentials SET host = ? WHERE id = ?', 'si', ['moved.' . $this->host('a'), $this->esxiA]);
         $warnings = $this->hostMoveWarnings($this->esxiA, 'create', $vmId);
         self::assertCount(1, $warnings, 'the same access pointed at another host warns (FM-01)');
-        $first = reset($warnings);
-        self::assertIsArray($first);
-        self::assertStringContainsString($this->host('a'), (string) ($first['message'] ?? ''));
+        self::assertStringContainsString($this->host('a'), (string) $warnings[0]['message']);
     }
 
     public function testARetryOfACreateOnAnotherHostCarriesTheWarningIntoItsConfirmation(): void
