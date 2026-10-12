@@ -397,8 +397,8 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    einmal produktiv bestätigt. Die kontextsensitive Portal-Hilfe erklärt die
    Bedienung; die Betriebs-Runbooks liegen im Projektordner auf dem Server.
 4. **IP-Freigaben füllen** (Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)). Die Maschinen-
-   Schnittstelle ist per Allowlist gesperrt und antwortet jeder nicht
-   freigegebenen IP mit **403**, ohne dass im Portal etwas kaputt aussieht.
+   Schnittstelle ist per Allowlist gesperrt: MECM- und Ansible-Zugriffe von einer
+   nicht freigegebenen IP bekommen **403**, ohne dass im Portal etwas kaputt aussieht.
    Eine frische Datenbank kennt keinen Eintrag. Eine migrierte Bestands-DB
    behält ihre Einträge ohne Rolle; einen Eintrag `127.0.0.1` aus früheren
    Installationen in den Einstellungen löschen, er gehört zu keinem Host. Eintragen:

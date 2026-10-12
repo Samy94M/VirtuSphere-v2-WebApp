@@ -641,6 +641,40 @@ function zz_guard_sentinel(): void
             "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_ORPHAN = 'zz.guard_orphan';"
         Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unused-event\].*ZZ_GUARD_ORPHAN'
     } }
+    # Historische Ereignisse (VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL) bleiben lesbar,
+    # duerfen aber nie wieder geschrieben werden. Die Liste ist die einzige
+    # Ausnahme von unused-event. Der Ereignisname ist synthetisch, damit der Fall
+    # nicht davon abhaengt, welche echten Ereignisse historisch sind.
+    @{ Name = 'audit-contract.historical-produced'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED = 'zz.guard_retired';"
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_historical.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_historical(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED, 'user', 1, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, []);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.historical-produced\].*ZZ_GUARD_RETIRED'
+    } }
+    @{ Name = 'audit-contract.historical-exempt'; Body = {
+        # Dieselbe synthetische Registrierung wie historical-produced, aber ohne
+        # Producer: der Listeneintrag allein befreit das Ereignis von unused-event.
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED = 'zz.guard_retired';"
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
+    } }
     @{ Name = 'audit-contract.zero-match-registry'; Body = {
         # Eine leere Registry darf nie als "alle Producer sind sauber" gelten.
         $fx = New-Fixture $auditFixtureFiles

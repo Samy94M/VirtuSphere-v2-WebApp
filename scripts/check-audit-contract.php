@@ -17,14 +17,15 @@ declare(strict_types=1);
  * writes past them. Every finding carries a stable [audit-contract.*] id.
  *
  *   free-producer      a call passing a category/message instead of an event
- *   unknown-event      an event code that is not in the registry
+ *   unknown-event      an event code, or a historical list entry, that is not in the registry
  *   registry-bypass    a direct INSERT into deploy_logs outside the owner
  *   forbidden-field    a context key that may carry a secret or a payload
  *   dead-sink          addLog()/audit_auth() reintroduced
  *   token-sink         a log/audit signature taking a token as a parameter
  *   sentinel           a hardcoded secret-shaped literal in a log call
  *   unredacted-sink    an exception message reaches a process log unredacted
- *   unused-event       a registry entry no producer writes
+ *   unused-event       a registry entry no producer writes (historical events excepted)
+ *   historical-produced a historical event (VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL) written again
  *   zero-match         the scan found no producers at all
  *
  * The last one is the one that matters most in a year: every other rule is a
@@ -83,6 +84,8 @@ const AUDIT_TOKEN_SINK_PARAMS = [
 $findings = [];
 $producerCalls = 0;
 $usedEvents = [];
+// Files per registered constant that write it; historical-produced reads it.
+$writtenBy = [];
 
 $registryPath = $root . '/' . AUDIT_REGISTRY_FILE;
 $registrySource = is_file($registryPath) ? (string) file_get_contents($registryPath) : '';
@@ -169,6 +172,27 @@ function audit_contract_files(string $app): array
     return $files;
 }
 
+// Historical events stay registered but must never be written again. The list is
+// read from the comment-stripped registry, so a commented-out entry does not
+// count. Every identifier in the list must be a registered constant; any other
+// name is reported, not dropped. A missing or unparseable list exempts nothing:
+// every event without a producer then stays unused-event, so the guard fails
+// closed instead of going green.
+$historicalConstants = [];
+if (preg_match('/\bconst\s+VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL\s*=\s*\[(.*?)\]\s*;/s', audit_contract_code($registrySource), $historicalBlock) === 1) {
+    preg_match_all('/[A-Za-z_][A-Za-z0-9_]*/', $historicalBlock[1], $historicalNames);
+    foreach ($historicalNames[0] as $name) {
+        if (!isset($registeredConstants[$name])) {
+            $findings[] = sprintf(
+                '  [audit-contract.unknown-event] VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL lists %s, which the registry does not define.',
+                $name
+            );
+            continue;
+        }
+        $historicalConstants[$name] = $registeredConstants[$name];
+    }
+}
+
 $files = audit_contract_files($app);
 if ($files === []) {
     echo "check-audit-contract: no first-party PHP files in scope.\n";
@@ -213,6 +237,7 @@ foreach ($files as $path) {
                 continue;
             }
             $usedEvents[$constant] = true;
+            $writtenBy[$constant][$relative] = true;
             continue;
         }
         // A definition or a pass-through inside the owner is not a producer.
@@ -333,8 +358,20 @@ if ($producerCalls === 0) {
 // A registry entry nothing writes is either a producer that was removed without
 // its event, or an event somebody defined and then wired up differently. Both
 // leave a code in the vocabulary that a filter offers and no row ever carries.
+// A historical event is the deliberate exception: it is listed so that old rows
+// stay readable, and a producer writing it again is historical-produced instead.
+foreach ($historicalConstants as $constant => $code) {
+    foreach (array_keys($writtenBy[$constant] ?? []) as $file) {
+        $findings[] = sprintf(
+            '  [audit-contract.historical-produced] %s writes %s (%s), a historical event kept only so old rows stay readable; its producer was removed on purpose.',
+            $file,
+            $constant,
+            $code
+        );
+    }
+}
 foreach ($registeredConstants as $constant => $code) {
-    if (!isset($usedEvents[$constant])) {
+    if (!isset($usedEvents[$constant]) && !isset($historicalConstants[$constant])) {
         $findings[] = sprintf(
             '  [audit-contract.unused-event] %s (%s) is defined but no producer writes it; remove it or wire it up.',
             $constant,

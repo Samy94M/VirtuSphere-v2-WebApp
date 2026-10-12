@@ -44,7 +44,9 @@
     Pfad fuer das maschinenlesbare Ergebnisartefakt (UTF-8, ohne Secrets).
 
 .PARAMETER KeepArtifacts
-    Gate-Logs im Artefaktverzeichnis behalten (Pfad wird ausgegeben).
+    Gate-Logs im eigenen Artefaktverzeichnis dieses Laufs behalten. Es heisst
+    virtusphere-qa-<stamp>-<id> unter dem Temp-Pfad; sein Pfad wird ausgegeben.
+    Ohne Schalter wird das Verzeichnis nach dem Lauf geloescht.
 
 .PARAMETER FailFast
     Nach dem ersten fail/infrastructure_error abbrechen.
@@ -157,7 +159,7 @@ $script:qaStackStarted = $false
 
 # --- Fokussierte Runner-Module ----------------------------------------------
 $checkModuleDir = Join-Path $scriptDir 'lib/check'
-foreach ($module in @('runtime.ps1', 'registry.ps1', 'phpmyadmin.ps1', 'gates-fast.ps1', 'gates-integration.ps1', 'gates-release.ps1')) {
+foreach ($module in @('artifact-dir.ps1', 'runtime.ps1', 'registry.ps1', 'phpmyadmin.ps1', 'gates-fast.ps1', 'gates-integration.ps1', 'gates-release.ps1')) {
     . (Join-Path $checkModuleDir $module)
 }
 
@@ -198,14 +200,18 @@ $originalCheckRoot = $env:VIRTUSPHERE_CHECK_ROOT
 $env:VIRTUSPHERE_CHECK_ROOT = $repoRoot
 
 $runStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$artifactDir = Join-Path ([System.IO.Path]::GetTempPath()) ('virtusphere-qa-' + $runStamp)
+try {
+    $artifactDir = New-CheckArtifactDirectory -Root ([System.IO.Path]::GetTempPath()) -Stamp $runStamp
+} catch {
+    Write-Host ('check.ps1: Gate-Log-Verzeichnis nicht anlegbar: {0}' -f $_.Exception.Message) -ForegroundColor Red
+    $env:VIRTUSPHERE_CHECK_ROOT = $originalCheckRoot
+    exit 2
+}
 $dockerAvailable = Test-Command 'docker'
 $results = @()
 $startedAt = Get-Date
 
 try {
-    New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-
     Write-Host ('==> VirtuSphere check.ps1 - Lane {0}, Root {1}' -f $Lane, $repoRoot) -ForegroundColor Cyan
 
     $gateNumber = 0

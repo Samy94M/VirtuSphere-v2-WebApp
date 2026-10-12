@@ -98,8 +98,11 @@ const VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED = 'mecm.reporter_upgraded';
 /**
  * Events nothing writes any more. They stay registered and labelled so that
  * rows written before their producer was removed remain readable and
- * filterable (with their line in `audit_presenter.php`);
- * `AuditProducerContractTest` fails if any audit call writes one again.
+ * filterable (with their line in `audit_presenter.php`).
+ * Two enforcers read this list: `AuditProducerContractTest` fails if any audit
+ * call writes one of these events again, and `scripts/check-audit-contract.php`
+ * exempts them from `unused-event` and reports `historical-produced` when a
+ * producer writes one.
  * `vm.identity_adopted`: "adopt identity" was removed (WM-E2a).
  */
 const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [

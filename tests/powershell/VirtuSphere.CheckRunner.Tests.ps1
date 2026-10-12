@@ -127,6 +127,68 @@ Describe 'dot-sourced runner modules' {
     }
 }
 
+Describe 'run artifact directory' {
+    BeforeAll {
+        # Calls New-CheckArtifactDirectory from the module in a child scope, the
+        # same way the Get-CheckFiles case above dot-sources runtime.ps1.
+        function Invoke-ArtifactDirectoryCase {
+            param([string]$Root, [string]$Stamp)
+            return @(& {
+                param($module, $root, $stamp)
+                . $module
+                New-CheckArtifactDirectory -Root $root -Stamp $stamp
+            } (Join-Path $script:ModuleDir 'artifact-dir.ps1') $Root $Stamp)
+        }
+    }
+
+    It 'does not reuse an existing directory with the same stamp' {
+        Test-Path -LiteralPath (Join-Path $script:ModuleDir 'artifact-dir.ps1') -PathType Leaf | Should -BeTrue
+        $root = Join-Path $TestDrive 'collision-root'
+        $stamp = '20261012-120000'
+        $occupied = Join-Path $root ('virtusphere-qa-' + $stamp)
+        New-Item -ItemType Directory -Path $occupied -Force | Out-Null
+        $marker = Join-Path $occupied 'marker.txt'
+        Set-Content -LiteralPath $marker -Value 'occupied by another run' -Encoding ascii
+
+        $created = @(Invoke-ArtifactDirectoryCase -Root $root -Stamp $stamp)
+
+        @($created).Count | Should -Be 1
+        $created[0] | Should -Not -Be $occupied
+        (Split-Path -Leaf $created[0]) | Should -BeLike ('virtusphere-qa-' + $stamp + '-*')
+        Test-Path -LiteralPath $created[0] -PathType Container | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $created[0] -Force).Count | Should -Be 0
+        Get-Content -LiteralPath $marker -Raw | Should -Match 'occupied by another run'
+    }
+
+    It 'gives two runs in the same second distinct, existing directories' {
+        Test-Path -LiteralPath (Join-Path $script:ModuleDir 'artifact-dir.ps1') -PathType Leaf | Should -BeTrue
+        $root = Join-Path $TestDrive 'same-second-root'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $stamp = '20261012-120000'
+
+        $first = @(Invoke-ArtifactDirectoryCase -Root $root -Stamp $stamp)
+        $second = @(Invoke-ArtifactDirectoryCase -Root $root -Stamp $stamp)
+
+        @($first).Count | Should -Be 1
+        @($second).Count | Should -Be 1
+        $second[0] | Should -Not -Be $first[0]
+        foreach ($dir in @($first[0], $second[0])) {
+            Test-Path -LiteralPath $dir -PathType Container | Should -BeTrue
+            (Split-Path -Leaf $dir) | Should -BeLike ('virtusphere-qa-' + $stamp + '-*')
+            Split-Path -Parent $dir | Should -Be $root
+        }
+    }
+
+    It 'has check.ps1 delegate the directory name to the module instead of forming it' {
+        $lines = @(Get-Content -LiteralPath $script:RunnerPath)
+        @($lines | Where-Object { $_ -match "'virtusphere-qa-'\s*\+" }) | Should -BeNullOrEmpty
+        @($lines | Where-Object { $_ -match 'New-Item.*-Force.*\$artifactDir' }) | Should -BeNullOrEmpty
+        @($lines | Where-Object { $_ -match "'artifact-dir\.ps1'" }).Count | Should -BeGreaterThan 0
+        @($lines | Where-Object { $_ -match '\$artifactDir\s*=\s*New-CheckArtifactDirectory\b.*-Stamp\s+\$runStamp' }).Count | Should -BeGreaterThan 0
+        Test-Path -LiteralPath (Join-Path $script:ModuleDir 'artifact-dir.ps1') -PathType Leaf | Should -BeTrue
+    }
+}
+
 Describe 'JavaScript visual contracts' {
     It 'makes runner and Playwright consume the same browser resolver' {
         $runtime = Get-Content -LiteralPath (Join-Path $script:ModuleDir 'runtime.ps1') -Raw

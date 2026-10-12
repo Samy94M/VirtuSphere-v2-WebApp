@@ -32,7 +32,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A12 The former desktop token API is removed (ADR-0035); its paths answer 404 by contract. Do not re
 
-- The former desktop token API is removed (ADR-0035); its paths answer 404 by contract. Do not reintroduce token-based machine auth; machine access is the IP allowlist plus the optional report-channel token.
+- The former desktop token API is removed (ADR-0035); its paths answer 404 by contract. Do not reintroduce token-based machine auth; machine access is the role-bound IP allowlist (A69), for the three client paths alternatively the known MAC, plus the optional report-channel token.
 
 ## A13 scripts/: local tooling. check.ps1 is the only public runner and executable SSoT of all quality
 
