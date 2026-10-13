@@ -514,7 +514,7 @@ final class AnsibleFullTestSweepTest extends TestCase
 
     private function insertMission(string $suffix): int
     {
-        repo_execute($this->db, "INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, 'active')", 's', [$this->prefix() . '_' . $suffix]);
+        repo_execute($this->db, "INSERT INTO deploy_missions (mission_name, mission_status, hypervisor_datacenter, hypervisor_datastorage, wds_vlan) VALUES (?, 'active', ?, ?, ?)", 'ssss', [$this->prefix() . '_' . $suffix, 'DC1', 'DS1', 'WDS']);
         $missionId = (int) $this->db->insert_id;
         $this->missionIds[] = $missionId;
 

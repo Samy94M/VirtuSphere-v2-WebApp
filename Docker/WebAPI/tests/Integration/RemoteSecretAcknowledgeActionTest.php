@@ -12,6 +12,7 @@ require_once dirname(__DIR__, 2) . '/lib/audit_registry.php';
 require_once dirname(__DIR__, 2) . '/lib/layout.php';
 require_once dirname(__DIR__, 2) . '/lib/layout_response.php';
 require_once dirname(__DIR__, 2) . '/lib/credentials.php';
+require_once dirname(__DIR__, 2) . '/lib/request.php';
 require_once dirname(__DIR__, 2) . '/lib/credentials_actions.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_constants.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/helpers.php';

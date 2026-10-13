@@ -142,8 +142,8 @@ function repo_remote_secret_fence_credential_change(mysqli $db, int $id, ?array 
 
     $message = validator_text(
         'credentials.remote_secret_fence',
-        'The Ansible host :host:port still holds :count ESXi access file record(s) whose removal is not confirmed, the oldest since :oldest. '
-            . 'Until they are removed or acknowledged by hand, this credential cannot be deleted or pointed at another host, port or host key.',
+        'On the Ansible host :host (port :port), access files are still open without a confirmed removal (:count, oldest from :oldest). '
+            . 'Target, type and host key stay locked; password, username and name can still be changed.',
         ['count' => $open['files'], 'host' => $open['host'], 'port' => $open['port'], 'oldest' => $open['oldest']]
     );
     throw new ValidationException([], $message, [

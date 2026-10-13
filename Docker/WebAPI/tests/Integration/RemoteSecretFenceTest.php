@@ -243,7 +243,8 @@ final class RemoteSecretFenceTest extends TestCase
 
         $message = $exception->getMessage();
         self::assertMatchesRegularExpression('/(?<![\w.:-])2(?![\w.:-])/', $message, 'the message names the count of open rows');
-        self::assertStringContainsString($this->hostFor('ansible') . ':' . self::PORT, $message, 'the message names host and port');
+        self::assertStringContainsString($this->hostFor('ansible'), $message, 'the message names the host');
+        self::assertMatchesRegularExpression('/(?<![\w.:-])' . self::PORT . '(?![\w.:-])/', $message, 'the message names the port');
         self::assertStringNotContainsString($this->ciphertext, $message, 'the message carries no secret ciphertext');
         foreach ($exception->errors() as $value) {
             self::assertStringNotContainsString($this->ciphertext, $value);
