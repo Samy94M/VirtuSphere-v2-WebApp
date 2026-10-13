@@ -6,7 +6,8 @@
 # Isolationsentscheidungen:
 # - Die Datenbank liegt in einem projekt-eigenen Named Volume statt im
 #   Dev-Bind-Mount: jeder Lane-Lauf beginnt mit einem frischen struktur.sql
-#   und stirbt mit `down -v`. Kein Test laeuft je auf der Dev-Datenbank.
+#   und stirbt mit `--profile tools down -v`. Kein Test laeuft je auf der
+#   Dev-Datenbank.
 # - ssl/ und virtusphere-conf.d/ sind Named Volumes, die php und webserver
 #   teilen: ein HTTPS-Zertifikats-Test im QA-Stack darf niemals die
 #   nginx-Konfiguration des Dev-Stacks anfassen.

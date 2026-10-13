@@ -390,3 +390,69 @@ Describe 'JavaScript visual contracts' {
         @($script:Golden.lanes.Fast) | Should -Not -Contain 'visual-contract'
     }
 }
+
+Describe 'QA stack teardown carries the tools profile (BK-N5)' {
+    BeforeAll {
+        . (Join-Path $script:ModuleDir 'qa-identity.ps1')
+        . (Join-Path $script:ModuleDir 'runtime.ps1')
+
+        # The teardown branch is taken from the shipped runner, not re-typed here:
+        # the if-statement in check.ps1's finally block that tests $script:qaStackStarted.
+        $tokens = $null
+        $errors = $null
+        $runnerAst = [System.Management.Automation.Language.Parser]::ParseFile($script:RunnerPath, [ref]$tokens, [ref]$errors)
+        $errors | Should -BeNullOrEmpty
+        $finallyBlocks = @($runnerAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.TryStatementAst] -and
+                $null -ne $node.Finally -and $node.Finally.Extent.Text -match 'QA-Stack bleibt stehen'
+        }, $true))
+        $finallyBlocks.Count | Should -Be 1
+        $teardownIf = @($finallyBlocks[0].Finally.Statements | Where-Object {
+            $_ -is [System.Management.Automation.Language.IfStatementAst] -and
+                $_.Clauses[0].Item1.Extent.Text -eq '$script:qaStackStarted'
+        })
+        $teardownIf.Count | Should -Be 1
+        $script:TeardownBranch = [scriptblock]::Create($teardownIf[0].Extent.Text)
+
+        function Invoke-QaTeardownCase {
+            param([bool]$KeepArtifacts)
+            # Synthetic root: only the identity values matter, no Docker is touched.
+            $repoRoot = 'C:/synthetic/qa-root'
+            $identity = Get-QaStackIdentity $repoRoot
+            $qaProject = $identity.Project
+            $qaEnvFile = $identity.EnvFile
+            $qaComposeOverride = $identity.ComposeOverride
+            $script:qaStackStarted = $true
+
+            # Everything Invoke-QaCompose puts in front of a subcommand (runtime.ps1).
+            $script:DockerArguments = @()
+            $null = Invoke-QaCompose @()
+            $base = @($script:DockerArguments)
+
+            $script:DockerArguments = @()
+            $output = @(& $script:TeardownBranch 6>&1 | ForEach-Object { "$_" })
+            return @{ Base = $base; Output = $output; Docker = @($script:DockerArguments) }
+        }
+    }
+
+    BeforeEach {
+        Mock Invoke-Tool {
+            param($Exe, $Arguments)
+            $script:DockerArguments = @($Arguments)
+            return @{ ExitCode = 0; Output = @() }
+        }
+    }
+
+    It 'tears the QA project down with the tools profile before the subcommand' {
+        $case = Invoke-QaTeardownCase -KeepArtifacts $false
+        $case.Docker | Should -Be (@($case.Base) + @('--profile', 'tools', 'down', '-v', '--remove-orphans'))
+    }
+
+    It 'prints the -KeepArtifacts teardown command with the same project, env file, compose files and tools profile' {
+        $case = Invoke-QaTeardownCase -KeepArtifacts $true
+        $case.Docker.Count | Should -Be 0
+        $expected = 'docker ' + ((@($case.Base) + @('--profile', 'tools', 'down', '-v', '--remove-orphans')) -join ' ')
+        ($case.Output -join "`n") | Should -Match ([regex]::Escape($expected))
+    }
+}

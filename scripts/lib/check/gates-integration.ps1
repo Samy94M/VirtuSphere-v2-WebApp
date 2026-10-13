@@ -135,8 +135,9 @@ function Register-IntegrationCheckGates {
     # --- Integration-Lane ---------------------------------------------------------
 
     # Der QA-Stack ist das erste Integration-Gate: alle folgenden Gates laufen
-    # gegen seine Container. down -v im finally des Runners raeumt ihn ab;
-    # -KeepArtifacts laesst ihn zum Debuggen stehen.
+    # gegen seine Container. `--profile tools down -v` im finally des Runners
+    # raeumt ihn ab (inklusive phpMyAdmin); -KeepArtifacts laesst ihn zum
+    # Debuggen stehen.
     Add-Gate -Name 'qa-stack' -Lanes $intRel -Kind 'container' -Body {
         if (-not (Test-Path $qaEnvFile)) { return New-InfraResult ('QA-Env fehlt: {0}' -f $qaEnvFile) }
         if (-not (Test-Path (Join-Path $repoRoot '.env'))) {

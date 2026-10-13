@@ -272,10 +272,17 @@ try {
     $env:VIRTUSPHERE_CHECK_ROOT = $originalCheckRoot
     if ($script:qaStackStarted) {
         if ($KeepArtifacts) {
-            Write-Host ('QA-Stack bleibt stehen (-KeepArtifacts); aufraeumen mit: docker compose -p {0} down -v --remove-orphans' -f $qaProject) -ForegroundColor Yellow
+            # The same argument list Invoke-QaCompose (runtime.ps1) passes to docker, spelled
+            # out for a shell. The tools profile is part of the teardown: phpMyAdmin is started
+            # with it, and `down` leaves profile services that are not activated (BK-N5).
+            $teardownCommandWords = @('docker', 'compose', '-p', $qaProject, '--env-file', $qaEnvFile,
+                '-f', (Join-Path $repoRoot 'docker-compose.yml'), '-f', $qaComposeOverride,
+                '--project-directory', $repoRoot, '--profile', 'tools', 'down', '-v', '--remove-orphans')
+            $teardownCommand = @($teardownCommandWords | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+            Write-Host ('QA-Stack bleibt stehen (-KeepArtifacts); aufraeumen mit: ' + $teardownCommand) -ForegroundColor Yellow
         } else {
             Write-Host ('==> QA-Stack abraeumen ({0})' -f $qaProject) -ForegroundColor Cyan
-            [void](Invoke-QaCompose @('down', '-v', '--remove-orphans'))
+            [void](Invoke-QaCompose @('--profile', 'tools', 'down', '-v', '--remove-orphans'))
         }
     }
 }
