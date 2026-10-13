@@ -112,7 +112,7 @@ return [
     'remote_secret_open_line' => 'Ziel :target, :files ohne bestätigtes Entfernen, älteste vom :oldest.',
     'remote_secret_no_permission' => 'Bestätigen können nur Benutzer mit der Berechtigung Zugangsdaten verwalten.',
     'remote_secret_reason_label' => 'Begründung',
-    'remote_secret_reason_hint' => 'Die Begründung wird protokolliert.',
+    'remote_secret_reason_hint' => 'Die Begründung wird protokolliert und ist für alle sichtbar, die das Protokoll lesen dürfen. Tragen Sie kein Passwort ein.',
     'remote_secret_acknowledge_submit' => 'Von Hand entfernt bestätigen',
     'remote_secret_acknowledge_confirm' => 'Ist die Zugangsdatei auf :name von Hand entfernt oder der Host außer Betrieb? Alle offenen Einträge für :name werden dann geschlossen und protokolliert.',
     'remote_secret_open_action' => 'Zugangsdateien prüfen',

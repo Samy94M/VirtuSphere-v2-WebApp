@@ -40,7 +40,8 @@ const VIRTUSPHERE_REMOTE_SECRET_REASON_MAX_BYTES = 256;
  * the credential row is locked by the caller, so a concurrent writer of a row
  * waits for the decision.
  *
- * @return array{files: int, host: string, port: int, oldest: string}|null null when no row is open
+ * @return array{files: int, host: string, port: int, oldest_at: string}|null null when no row is open;
+ *         oldest_at is the raw database time of the oldest row, for display in the portal format
  */
 function repo_remote_secret_fence_open(mysqli $db, int $credentialId): ?array
 {
@@ -69,7 +70,7 @@ function repo_remote_secret_fence_open(mysqli $db, int $credentialId): ?array
         'files' => $files,
         'host' => (string) $oldest['target_host'],
         'port' => (int) $oldest['target_port'],
-        'oldest' => repo_remote_secret_utc_iso((string) $oldest['uploaded_at']),
+        'oldest_at' => (string) $oldest['uploaded_at'],
     ];
 }
 
@@ -140,11 +141,12 @@ function repo_remote_secret_fence_credential_change(mysqli $db, int $id, ?array 
         return;
     }
 
+    require_once __DIR__ . '/../portal_time.php';
     $message = validator_text(
         'credentials.remote_secret_fence',
         'On the Ansible host :host (port :port), access files are still open without a confirmed removal (:count, oldest from :oldest). '
             . 'Target, type and host key stay locked; password, username and name can still be changed.',
-        ['count' => $open['files'], 'host' => $open['host'], 'port' => $open['port'], 'oldest' => $open['oldest']]
+        ['count' => $open['files'], 'host' => $open['host'], 'port' => $open['port'], 'oldest' => portal_format_datetime($open['oldest_at'])]
     );
     throw new ValidationException([], $message, [
         'url' => 'credentials.php#remote-secret-' . $id,

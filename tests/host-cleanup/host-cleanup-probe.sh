@@ -160,6 +160,22 @@ check "path outside the job pattern stays" test -f /tmp/other-dir-8/accounts.yml
 check "summary line with counts reaches logger under the tag" grep -q 'virtusphere-secret-cleanup summary seen=' "$WORK/logger.out"
 check "logger never carries file content" sh -c "! grep -q 'SECRET-' '$WORK/logger.out'"
 
+# --- Foreign job directory: second run as the ansible account ----------------------
+# Kept out of the main fixtures, so the main run's exit status is still 0. The
+# directory belongs to the other account but is group-writable for ansible, so the
+# removal of its file would succeed. A refusal of it counts as failed, so this run
+# exits 1. Case 3's file may or may not be removed in this run, depending on whether
+# its lock is still held; no check below reads it.
+# 9 foreign job directory: own old file in a directory of another account -> stays, run exits 1
+mkdir -p /tmp/virtusphere-job-9-foreigndir && chown other:ansible /tmp/virtusphere-job-9-foreigndir && chmod 0770 /tmp/virtusphere-job-9-foreigndir
+mkacc /tmp/virtusphere-job-9-foreigndir/accounts.yml ansible:ansible 25
+setpriv --reuid=1000 --regid=1000 --clear-groups env PATH="$RUNPATH" HOME=/tmp sh "$SCRIPT" > "$WORK/run2.out" 2>&1
+rc2=$?
+
+check "foreign job directory run exits 1" test "$rc2" -eq 1
+check "foreign job directory keeps its own file" test -f /tmp/virtusphere-job-9-foreigndir/accounts.yml
+check "outcome 'failed' with 'not owned' for that file reaches the journal line" sh -c "grep 'failed /tmp/virtusphere-job-9-foreigndir/accounts.yml' '$WORK/logger.out' | grep -q 'not owned'"
+
 # --- Installer -----------------------------------------------------------------
 UNIT=/etc/systemd/system
 LIB=/usr/local/libexec/virtusphere

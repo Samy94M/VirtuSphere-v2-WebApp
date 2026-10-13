@@ -248,7 +248,8 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 );
                 $target = $targetHost . ':' . $targetPort;
                 if ($closed > 0) {
-                    flash_set('success', __t('credentials.remote_secret_acknowledged', ['target' => $target]));
+                    flash_set('success', __t('credentials.remote_secret_acknowledged', ['target' => $target])
+                        . ' ' . __t('system_status.remote_secret_password_hint'));
                 } else {
                     flash_set('warning', __t('credentials.remote_secret_nothing_open', ['target' => $target]));
                 }

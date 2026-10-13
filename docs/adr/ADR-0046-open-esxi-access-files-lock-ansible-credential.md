@@ -1,7 +1,7 @@
 # ADR-0046: Open ESXi access files lock their Ansible credential
 
 Date: 2026-10-13
-Status: Accepted (K21-F), implemented. Open: the Astra review of the implementation, the lab items named under Consequences, and K21-T1.
+Status: Accepted (K21-F), implemented. Astra review 2026-10-13: releasable with conditions K21F-A1 to K21F-A4, all met in the same package. Open: the lab items named under Consequences, the lock round and K21-T1.
 
 ## Context
 
@@ -42,7 +42,7 @@ The acknowledgement is the operator's statement, not a fact the system establish
 
 Rows under a running lease and rows of an active job are not counted. The groups are per credential and target. Each group carries its complete count, the oldest finding, the host and the reason, and they are sorted orphaned first, then moved, then overdue. The notice renders above the System status overview, with one acknowledgement form per group for `credentials.manage`. It has no traffic light and renders nothing when no group is due.
 
-**5. The host timer, as an addition and not as the lock.** On the Ubuntu host, `Ansible/host-cleanup/` ships `virtusphere-secret-cleanup.sh`, a service and a timer, and `install-secret-cleanup.sh`, which an administrator runs once as root from the offline bundle with the Ansible account name. The script removes only a regular file named `accounts.yml` directly inside a `/tmp/virtusphere-job-*` directory, which belongs to the running account, is older than 24 h, and whose job directory `flock -n` can lock. It follows no link. It never reads the content of the file. The service runs as the Ansible account with `PrivateTmp=no`. The timer runs once after boot and then hourly, without catch-up. The installer is idempotent and needs no network and no package. It does not use systemd-tmpfiles and does not change lingering.
+**5. The host timer, as an addition and not as the lock.** On the Ubuntu host, `Ansible/host-cleanup/` ships `virtusphere-secret-cleanup.sh`, a service and a timer, and `install-secret-cleanup.sh`, which an administrator runs once as root from the offline bundle with the Ansible account name. The script removes only a regular file named `accounts.yml` directly inside a `/tmp/virtusphere-job-*` directory, which belongs to the running account, is older than 24 h, and whose job directory belongs to the running account and can be locked by `flock -n`. It follows no link. It never reads the content of the file. The service runs as the Ansible account with `PrivateTmp=no`. The timer runs once after boot and then hourly, without catch-up. The installer is idempotent and needs no network and no package. It does not use systemd-tmpfiles and does not change lingering.
 
 The timer writes no row. An existing row stays, and the next contact with the same credential and target finds the file gone (`absent`) and closes the row through the existing path.
 
@@ -56,6 +56,7 @@ The preflight reads whether the timer is enabled through a last component `secre
 - The window between the lease recheck and the removal of a status query is still open. It closes with the same lock round.
 - The mapping of `systemctl is-enabled` answers to `enabled`, `missing` and `unknown` is proven with a fake systemctl in the containerised probe, because the test containers have no systemd. The output of Ubuntu 24.04 and the unit directives (`User=`, `PrivateTmp=no`, `NoNewPrivileges`, `RestrictAddressFamilies=AF_UNIX`) are not executed by any test. They are the open lab item.
 - The reason text is the operator's own sentence and is therefore bounded by truncation, not refused. This is an exception to the rule for object ids (R20).
+- The reason stays in the audit context, bounded and redacted by key patterns, and not in an append-only evidence table like `deploy.recovery_documented`, because it is a short operator statement about a removal and not an incident narrative; the input field tells the operator that every log reader sees the reason and that it must not contain a password.
 
 ## Alternatives
 
@@ -76,7 +77,7 @@ The tests below exist in the working tree. The integration tests need the QA dat
 
 Open before this ADR is closed:
 
-- The Astra review of the implementation, as the user asked for after the change.
+- Done 2026-10-13: the Astra review of the implementation (conditions K21F-A1 to K21F-A4 met; recorded in the package register, section "Paket K21-F").
 - The lab probe on Ubuntu 24.04 for the `systemctl` answers and the unit directives.
 - The lock round: `flock` in every host command, which waits for the lab probe the user is to run.
 - K21-T1, which stays open in the package register.

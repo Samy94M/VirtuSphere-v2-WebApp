@@ -34,7 +34,7 @@ function ansible_test_run_due(mysqli $db, array $seams = []): void
         $verdict = !$stored ? 'discarded' : ($result['ok']
             ? (credentials_test_is_allowlist_warning($result) ? 'warning' : 'pass') : 'fail');
         // The sweep outcome rides on the same line: the scheduled test has no page
-        // to show it, and the audit carries the same count.
+        // to show it, and the cleared audit rows carry the same count.
         $sweep = isset($result['secret_sweep'])
             ? ' secret_sweep closed=' . (int) $result['secret_sweep']['closed'] . ' aborted=' . ($result['secret_sweep']['aborted'] ? '1' : '0')
             : '';

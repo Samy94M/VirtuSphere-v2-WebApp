@@ -112,7 +112,7 @@ return [
     'remote_secret_open_line' => 'Target :target, :files without a confirmed removal, oldest from :oldest.',
     'remote_secret_no_permission' => 'Only users with the permission to manage credentials can confirm.',
     'remote_secret_reason_label' => 'Reason',
-    'remote_secret_reason_hint' => 'The reason is logged.',
+    'remote_secret_reason_hint' => 'The reason is logged and visible to everyone who may read the log. Do not enter a password.',
     'remote_secret_acknowledge_submit' => 'Confirm removed by hand',
     'remote_secret_acknowledge_confirm' => 'Has the access file on :name been removed by hand, or is the host out of service? All open entries for :name are then closed and logged.',
     'remote_secret_open_action' => 'Review access files',

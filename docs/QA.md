@@ -486,8 +486,10 @@ and prints `[n/total]` lines per case. Every rule has a control case. The
 positive case, an old, own, unlocked file, must be removed; without it, the
 cases that expect a file to stay would also pass on a run that did nothing.
 The cases that must stay: a file younger than 24 h, a locked job directory, a
-job directory that is a symlink, a symlinked `accounts.yml`, a file of another
-owner, a file one level too deep, and a path outside `/tmp/virtusphere-job-*`.
+job directory that is a symlink, a job directory of another owner (its file stays
+and the run reports `failed` and exits 1), a symlinked `accounts.yml`, a file of
+another owner, a file one level too deep, and a path outside
+`/tmp/virtusphere-job-*`.
 The installer is probed too: placeholder filled, idempotent, the account name
 checked as a whole, and root refused. A failing case is a red gate. A missing
 Docker or image is an `infrastructure_error`, never a pass. Two limits are

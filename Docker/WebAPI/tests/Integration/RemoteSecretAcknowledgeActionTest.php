@@ -177,6 +177,12 @@ final class RemoteSecretAcknowledgeActionTest extends TestCase
         return flash_messages();
     }
 
+    /** @param array{type: string, message: string, detail: string, action: mixed} $flash the text the alert shows: message and detail */
+    private function flashText(array $flash): string
+    {
+        return trim($flash['message'] . ' ' . $flash['detail']);
+    }
+
     /**
      * @param array<string, string> $overrides
      * @return array<string, string>
@@ -217,7 +223,32 @@ final class RemoteSecretAcknowledgeActionTest extends TestCase
         $flashes = $this->flashes();
         self::assertCount(1, $flashes);
         self::assertSame('success', $flashes[0]['type']);
-        self::assertSame(__t('credentials.remote_secret_acknowledged', ['target' => $this->host . ':22']), $flashes[0]['message']);
+        self::assertStringContainsString(__t('credentials.remote_secret_acknowledged', ['target' => $this->host . ':22']), $this->flashText($flashes[0]));
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function successReturnPages(): iterable
+    {
+        yield 'status page' => ['system_status', 'system_status.php'];
+        yield 'credentials page' => ['credentials', 'credentials.php'];
+    }
+
+    #[RunInSeparateProcess]
+    #[DataProvider('successReturnPages')]
+    public function testASuccessfulAcknowledgementCarriesThePasswordRecommendationOnBothReturnPages(string $returnTo, string $expected): void
+    {
+        $this->seedRows(1, $this->oldAge());
+        $_POST = $this->post(['return_to' => $returnTo]);
+
+        self::assertSame($expected, credentials_handle_post($this->db, $this->manager()));
+
+        self::assertSame(0, $this->openRows());
+        $flashes = $this->flashes();
+        self::assertCount(1, $flashes);
+        self::assertSame('success', $flashes[0]['type']);
+        self::assertStringContainsString(__t('credentials.remote_secret_acknowledged', ['target' => $this->host . ':22']), $this->flashText($flashes[0]));
+        // The recommendation is part of the success flash itself, not a separate notice.
+        self::assertStringContainsString(__t('system_status.remote_secret_password_hint'), $this->flashText($flashes[0]), 'the success flash recommends changing the ESXi password');
     }
 
     #[RunInSeparateProcess]

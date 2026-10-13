@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
@@ -10,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/lib/credentials.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/credentials.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/credential_host_identity.php';
 require_once dirname(__DIR__, 2) . '/lib/network_mac_constants.php';
+require_once dirname(__DIR__, 2) . '/lib/portal_time.php';
 
 /**
  * The fence of the ESXi access file on its Ansible credential (K21-F).
@@ -205,6 +207,34 @@ final class RemoteSecretFenceTest extends TestCase
         self::assertSame($rows, $this->remoteRows($this->ansibleId));
     }
 
+    /** @return iterable<string, array{mixed}> */
+    public static function emptyOrNullPorts(): iterable
+    {
+        yield 'empty string' => [''];
+        yield 'null' => [null];
+    }
+
+    /**
+     * The empty port and the null port both mean the default SSH port (credential_ssh_port), so the same
+     * target with either one is no target change, and it stays allowed while a row is open.
+     */
+    #[DataProvider('emptyOrNullPorts')]
+    public function testAnEmptyOrNullPortOnTheSameTargetIsNoTargetChangeWhileARowIsOpen(mixed $port): void
+    {
+        $this->seedRow($this->finishedJob($this->ansibleId), $this->ansibleId);
+        $credential = repo_credential($this->db, $this->ansibleId);
+        $rows = $this->remoteRows($this->ansibleId);
+
+        // payloadFor() normalizes the port of the row; the change overrides it, so the raw value reaches the writer.
+        self::assertTrue(repo_update_credential($this->db, $this->ansibleId, $this->payloadFor($credential, ['port' => $port]), null));
+
+        $after = repo_credential($this->db, $this->ansibleId);
+        self::assertSame(self::PORT, credential_ssh_port($after['port']), 'the effective port stays 22');
+        self::assertSame($credential['host'], $after['host']);
+        self::assertSame($credential['ansible_host_fingerprint'], $after['ansible_host_fingerprint'], 'the pinned key is untouched');
+        self::assertSame($rows, $this->remoteRows($this->ansibleId));
+    }
+
     /** Control: without a row, the host change and the delete are allowed. */
     public function testWithoutAnOpenRowChangingTheHostAndDeletingAreAllowed(): void
     {
@@ -249,6 +279,28 @@ final class RemoteSecretFenceTest extends TestCase
         foreach ($exception->errors() as $value) {
             self::assertStringNotContainsString($this->ciphertext, $value);
         }
+    }
+
+    /** The refusal names the oldest open row's time in the portal format, and no UTC ISO token. */
+    public function testTheRefusalNamesTheOldestRowTimeInThePortalFormatAndNoIsoToken(): void
+    {
+        $older = $this->finishedJob($this->ansibleId);
+        $this->seedRow($older, $this->ansibleId);
+        $this->seedRow($this->finishedJob($this->ansibleId), $this->ansibleId);
+        repo_execute($this->db, 'UPDATE deploy_remote_secret_files SET uploaded_at = NOW(6) - INTERVAL 2 DAY WHERE job_id = ?', 'i', [$older]);
+        $oldest = repo_fetch_one(
+            $this->db,
+            'SELECT uploaded_at FROM deploy_remote_secret_files WHERE credential_ansible_id = ? ORDER BY uploaded_at, id LIMIT 1',
+            'i',
+            [$this->ansibleId]
+        );
+        self::assertNotNull($oldest, 'fixture: the open rows');
+
+        $exception = $this->expectRefusal(fn (): bool => repo_delete_credential($this->db, $this->ansibleId));
+
+        $message = $exception->getMessage();
+        self::assertStringContainsString(portal_format_datetime((string) $oldest['uploaded_at']), $message, 'the message names the oldest row time in the portal format');
+        self::assertDoesNotMatchRegularExpression('/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/', $message, 'the message carries no UTC ISO token');
     }
 
     /** The refusal offers an action with a permission, like the create fence does. */
@@ -320,6 +372,34 @@ final class RemoteSecretFenceTest extends TestCase
 
         self::assertSame($rows, $this->remoteRows($this->ansibleId));
         self::assertCount(0, $this->acknowledgedRows());
+    }
+
+    /** Padding does not count: a reason whose raw length reaches the minimum but whose trimmed length does not is refused on the reason field. */
+    public function testAReasonBelowTheMinimumAfterTrimmingIsRefusedEvenWhenPaddedToTheMinimum(): void
+    {
+        $this->seedRow($this->finishedJob($this->ansibleId), $this->ansibleId);
+        $rows = $this->remoteRows($this->ansibleId);
+        $padded = '   ' . str_repeat('x', VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS - 1) . '   ';
+        self::assertGreaterThanOrEqual(VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS, strlen($padded), 'fixture: the raw reason reaches the minimum');
+
+        $exception = $this->expectRefusal(fn (): int => $this->acknowledge($this->ansibleId, $this->hostFor('ansible'), $padded));
+
+        self::assertArrayHasKey('reason', $exception->errors());
+        self::assertSame($rows, $this->remoteRows($this->ansibleId));
+        self::assertCount(0, $this->acknowledgedRows());
+    }
+
+    /** A reason of exactly the minimum after trimming is accepted, and it closes the rows. */
+    public function testAReasonOfExactlyTheMinimumAfterTrimmingIsAcceptedAndClosesTheRows(): void
+    {
+        $this->seedRow($this->finishedJob($this->ansibleId), $this->ansibleId);
+        $this->seedRow($this->finishedJob($this->ansibleId), $this->ansibleId);
+        $atMinimum = '  ' . str_repeat('x', VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS) . '  ';
+
+        self::assertSame(2, $this->acknowledge($this->ansibleId, $this->hostFor('ansible'), $atMinimum));
+
+        self::assertSame([], $this->remoteRows($this->ansibleId));
+        self::assertCount(1, $this->acknowledgedRows(), 'exactly one audit row');
     }
 
     /** A row under a live lease and a row of an active job stay open; only the finished row closes. */

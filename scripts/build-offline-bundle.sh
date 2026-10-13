@@ -366,10 +366,14 @@ Alle Schritte laufen ohne Internetzugang.
    Ansible-Zugangs, unter dem die Auftraege laufen):
    `sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>`
    Der Timer loescht nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die
-   aelter als 24 h und nicht gesperrt sind. Er ist die Sicherung fuer Dateien,
-   die kein Auftrag mehr erreicht; die Bereinigung durch die Auftraege bleibt
-   unveraendert. Die Installation braucht kein Netz, installiert kein Paket und
-   ist wiederholbar. Status: `systemctl status virtusphere-secret-cleanup.timer`.
+   aelter als 24 h ist, dem Ansible-Konto gehoert und in einem Auftragsordner
+   dieses Kontos liegt. Den Schutz laufender Auftraege leistet das Alter von
+   24 h. Die Sperre des Auftragsordners schliesst nur einen zweiten Lauf des
+   Skripts aus, solange die Auftragsbefehle ihre Ordner nicht selbst sperren.
+   Der Timer ist die Sicherung fuer Dateien, die kein Auftrag mehr erreicht; die
+   Bereinigung durch die Auftraege bleibt unveraendert. Die Installation braucht
+   kein Netz, installiert kein Paket und ist wiederholbar. Status:
+   `systemctl status virtusphere-secret-cleanup.timer`.
 7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. Der Kernlauf lädt und startet

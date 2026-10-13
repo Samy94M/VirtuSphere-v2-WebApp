@@ -10,7 +10,8 @@
 #     /tmp (find -maxdepth 2 -mindepth 2, no -L, no -H, no -follow),
 #   - it belongs to the running account (find -user),
 #   - it is older than 24 h by its modification time (find -mmin +1440),
-#   - its job directory is a real directory and flock -n on it succeeds.
+#   - its job directory is a real directory owned by the running account, and
+#     flock -n on it succeeds.
 #
 # What protects the file, stated plainly: the 24 h age is the protection that
 # matters. The flock is taken by this script only, because the job commands do
@@ -64,6 +65,13 @@ while IFS= read -r path; do
     # before the lock, because flock would follow the link.
     if [ -L "$dir" ] || [ ! -d "$dir" ]; then
         log "failed $path: the job directory is not a real directory"
+        failed=$((failed + 1))
+        continue
+    fi
+    # A job directory of another account is refused too: that account may rename
+    # it and put a link in its place after this check.
+    if [ ! -O "$dir" ]; then
+        log "failed $path: the job directory is not owned by $(id -un)"
         failed=$((failed + 1))
         continue
     fi

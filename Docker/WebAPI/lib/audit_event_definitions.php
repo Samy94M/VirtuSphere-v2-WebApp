@@ -67,7 +67,9 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED = 'deploy.remote_cleanup_re
 // K21 (VT-04): an ESXi access file that a later contact settled on an Ansible
 // host: outcome `removed` (it was there) or `absent` (it was already gone), with
 // the target host and port. The job that left it is the object; the contact's
-// job is the context.
+// job is the context. A job_id of 0 means the contact was a full test of the
+// Ansible credential (manual or scheduled), correlated with its credential.tested
+// entry through correlation_id.
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED = 'deploy.remote_secret_cleared';
 // K21-F: an operator confirmed by hand that the ESXi access file records of one
 // Ansible credential on one target are gone, or that the host is out of service.

@@ -139,7 +139,7 @@ Netzwege gelten in beiden Fällen.
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
-**Aufräum-Timer (einmalig als root, empfohlen).** Bleibt nach einem abgebrochenen Auftrag eine `accounts.yml` mit dem ESXi-Passwort auf dem Host liegen, entfernt sie der nächste Auftrag oder Zugangstest desselben Zugangs, solange dieser auf dasselbe Ziel zeigt. Der Timer sichert Dateien, die kein solcher Kontakt mehr erreicht. Er entfernt nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die älter als 24 Stunden ist, dem Ansible-Konto gehört und deren Auftragsordner gerade nicht gesperrt ist. Ein Administrator richtet ihn einmal aus dem entpackten Offline-Bundle ein:
+**Aufräum-Timer (einmalig als root, empfohlen).** Bleibt nach einem abgebrochenen Auftrag eine `accounts.yml` mit dem ESXi-Passwort auf dem Host liegen, entfernt sie der nächste Auftrag oder Zugangstest desselben Zugangs, solange dieser auf dasselbe Ziel zeigt. Der Timer sichert Dateien, die kein solcher Kontakt mehr erreicht. Er entfernt nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die älter als 24 Stunden ist, dem Ansible-Konto gehört und in einem Auftragsordner liegt, der ebenfalls diesem Konto gehört. Den Schutz laufender Aufträge übernimmt das Alter von 24 Stunden. Die Sperre des Auftragsordners schließt nur einen zweiten Lauf des Skripts aus, solange die Auftragsbefehle ihre Ordner nicht selbst sperren. Ein Administrator richtet ihn einmal aus dem entpackten Offline-Bundle ein:
 
 ```bash
 sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>
