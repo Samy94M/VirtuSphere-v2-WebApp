@@ -124,6 +124,7 @@ return [
     'eventcode_deploy_recovery_reviewed' => 'Wiederherstellung geprüft',
     'eventcode_deploy_remote_cleanup_retried' => 'Remote-Aufräumen wiederholt',
     'eventcode_deploy_remote_secret_cleared' => 'Zugangsdatei nachträglich bereinigt',
+    'eventcode_deploy_remote_secret_acknowledged' => 'Zugangsdatei von Hand als entfernt bestätigt',
     'eventcode_deploy_retried' => 'Auftrag wiederholt',
     'eventcode_deploy_supervisor_contract_switched' => 'Dienstaufsicht umgestellt',
     'eventcode_deploy_vlan_reassigned' => 'VLAN neu zugeordnet',

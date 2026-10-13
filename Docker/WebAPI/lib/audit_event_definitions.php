@@ -69,6 +69,11 @@ const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED = 'deploy.remote_cleanup_re
 // the target host and port. The job that left it is the object; the contact's
 // job is the context.
 const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED = 'deploy.remote_secret_cleared';
+// K21-F: an operator confirmed by hand that the ESXi access file records of one
+// Ansible credential on one target are gone, or that the host is out of service.
+// The object is the credential; a credential that was already deleted is addressed
+// by 0. The reason is the operator's own sentence, bounded in the context.
+const VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_ACKNOWLEDGED = 'deploy.remote_secret_acknowledged';
 // What a person established outside this system. The VERDICT is here; their own
 // words stay in the append-only evidence table, because a free sentence about a
 // production incident does not belong in a row every users.manage holder reads.
@@ -197,6 +202,7 @@ function audit_event_registry(): array
         // clicking.
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['execution_id']),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS], ['credential_id', 'host', 'port', 'outcome'], ['job_id']),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_ACKNOWLEDGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['credential'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS], ['count', 'host', 'port', 'oldest', 'reason', 'credential_id']),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_DEPLOY, ['deploy_job'], $success, ['resolution_code', 'resolution_id']),
         // Success and failure both, and the difference matters: a refusal means
         // the evidence moved between the operator looking and confirming, which

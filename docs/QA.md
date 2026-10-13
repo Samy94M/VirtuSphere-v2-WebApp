@@ -475,6 +475,28 @@ case is an `infrastructure_error`. The probe uses a local pipe, not sshd; that
 sshd closes the child's stdout without a HUP is reading, not measurement
 (FM-03).
 
+**`host-secret-cleanup` (all lanes, containerised, K21-F).** The Ansible host
+removes `accounts.yml` (the ESXi password) of stale job directories through a
+systemd timer (`Ansible/host-cleanup/`, user decision 5). The rules are measured
+by `tests/host-cleanup/host-cleanup-probe.sh` in the digest-pinned
+`debian:bookworm-slim` image (`scripts/tool-lock.json`, key `hostCleanupProbe`),
+with the repository mounted read-only and no network. The probe creates real
+files, runs the cleanup as the Ansible account (uid 1000), as the service does,
+and prints `[n/total]` lines per case. Every rule has a control case. The
+positive case, an old, own, unlocked file, must be removed; without it, the
+cases that expect a file to stay would also pass on a run that did nothing.
+The cases that must stay: a file younger than 24 h, a locked job directory, a
+job directory that is a symlink, a symlinked `accounts.yml`, a file of another
+owner, a file one level too deep, and a path outside `/tmp/virtusphere-job-*`.
+The installer is probed too: placeholder filled, idempotent, the account name
+checked as a whole, and root refused. A failing case is a red gate. A missing
+Docker or image is an `infrastructure_error`, never a pass. Two limits are
+stated, not solved. The 24 h age is the real protection: the job commands do not
+lock their job directory yet, so `flock -n` only excludes other runs of this
+script until that separate round is done. The systemctl mapping of the preflight
+hint is proven with a fake systemctl only, because the test containers have no
+systemd; the confirmation on the real Ubuntu host is an open lab item.
+
 **`CreateFlowBaselineContractTest`.** Six facts, each written first as the
 starting point and then rewritten by the sub-stage that changed it, which is how
 the file reads today: create is no longer a step of the remote sequence at all

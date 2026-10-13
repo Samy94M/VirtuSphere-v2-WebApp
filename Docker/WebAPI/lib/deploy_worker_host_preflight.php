@@ -53,6 +53,7 @@ function deploy_worker_run_host_preflight(
     $preflightObserver = static function (string $line) use (&$preflightOutput): void {
         if (ansible_preflight_failed_component($line) !== null
             || str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ')
+            || str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER . ' ')
         ) {
             $preflightOutput .= $line . "\n";
         }
@@ -70,6 +71,13 @@ function deploy_worker_run_host_preflight(
     deploy_worker_log_stream_flush($channel, VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, $preflightBuffer, $preflightObserver);
     deploy_worker_settle_db_channel($channel, $options, null);
     deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+
+    // K21-F: one line only when the cleanup timer is missing, so a job log names
+    // the reason why leftover ESXi access files wait for a contact. An installed
+    // or unreadable timer adds nothing. Written before the verdict, which may end the job.
+    if (ansible_secret_cleanup_timer_state($preflightOutput) === 'missing') {
+        $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Ansible host has no secret cleanup timer (virtusphere-secret-cleanup.timer).');
+    }
 
     deploy_worker_host_preflight_verdict($mode, $preflightExitCode, $preflightOutput);
 }

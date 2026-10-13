@@ -73,6 +73,8 @@ function repo_confirm_ansible_host_identity(mysqli $db, int $id, int $revision, 
             throw new RuntimeException('Credential not found.');
         }
         repo_deploy_create_fence_credential_change($db, $id, $snapshot);
+        // Any change of the pinned key is a target change: refused while rows of this credential are open.
+        repo_remote_secret_fence_credential_change($db, $id, array_replace($snapshot, ['ansible_host_fingerprint' => $fingerprint]));
         $current = repo_fetch_one($db, 'SELECT * FROM deploy_credentials WHERE id = ? FOR UPDATE', 'i', [$id]);
         if ($current === null || $current['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
             || (int) $current['config_revision'] !== $revision

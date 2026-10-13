@@ -74,6 +74,10 @@ function audit_context_field_registry(): array
         'filter_fingerprint' => ['type' => 'hex', 'length' => 64],
         'duration_minutes' => $int, 'duration_seconds' => $int, 'failure_count' => $int,
         'controller_id' => $int, 'revision' => $int, 'port' => $int,
+        // K21-F: the operator's hand acknowledgement of leftover ESXi access file
+        // records. `count` is how many were closed; `oldest` is the age of the
+        // oldest one as ISO 8601 UTC, an identifier so it stays one token.
+        'count' => $int, 'oldest' => ['type' => 'identifier', 'max' => 32],
         'mission_id' => $int, 'vm_count' => $int, 'row_count' => $int,
         'target_mission_id' => $int, 'affected_count' => $int, 'credential_id' => $int,
         'job_id' => $int, 'job_count' => $int, 'retry_of_job_id' => $int,

@@ -45,3 +45,4 @@
 - [ADR-0043: MECM erhält einen eingefrorenen Rolloutnamen, nicht den ESXi-VM-Namen](ADR-0043-mecm-rollout-hostname.md)
 - [ADR-0044: Package-wrapper reports are fenced by VM incarnation and restore generation](ADR-0044-package-wrapper-report-identity-and-replay.md)
 - [ADR-0045: SSH und SFTP prüfen die Hostidentität vor jeder Anmeldung](ADR-0045-ansible-host-identity.md)
+- [ADR-0046: Open ESXi access files lock their Ansible credential](ADR-0046-open-esxi-access-files-lock-ansible-credential.md)

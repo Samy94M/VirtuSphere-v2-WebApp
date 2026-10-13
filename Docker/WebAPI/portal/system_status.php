@@ -15,6 +15,7 @@ require_once __DIR__ . '/../lib/system_status_directory_panels.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 require_once __DIR__ . '/../lib/backup_encryption.php';
 require_once __DIR__ . '/../lib/repo/api_access.php';
+require_once __DIR__ . '/../lib/system_status_remote_secret_notice.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -119,6 +120,8 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
             <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url('backup')); ?>"><?php echo h(__t('settings.backup_title')); ?></a><?php } ?>
         </div>
     <?php } ?>
+    <?php // K21-F: ESXi access files still open on an Ansible host. Silent without a group. ?>
+    <?php system_status_render_remote_secret_notice(repo_remote_secret_notice_groups($connection), $user); ?>
     <?php // The topbar (lib/layout.php) already renders the page title and the
           // help link for this page. A second <h1> here made the page's own title
           // larger than the one in the chrome above it and gave the document two

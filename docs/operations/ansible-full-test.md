@@ -13,7 +13,9 @@ Der Bereitstellungsdienst prüft die Fälligkeit in freien Durchläufen.
 Deploy-Aufträge haben Vorrang. Pausierte oder gestoppte Dienste starten keine
 neue automatische Prüfung. Eine gestartete Prüfung darf fertig werden, auch
 wenn danach die Automatik ausgeschaltet oder die Annahme pausiert wird.
-Ein gesonderter Ubuntu-Cronjob oder systemd-Timer ist nicht erforderlich.
+Für die Prüfung selbst sind weder ein Ubuntu-Cronjob noch ein systemd-Timer nötig.
+Der Aufräum-Timer für liegengebliebene Zugangsdateien ist eine eigene, einmalige
+und empfohlene Einrichtung auf dem Host (siehe [Ansible-Host vorbereiten](go-live.md#ansible-host-vorbereiten-vor-schritt-4)).
 
 Die Diagnose läuft als eigener PHP-Kindprozess im Deploy-Worker-Container mit
 eigener Datenbankverbindung. Jobannahme und Prozess-Lebenszeichen bleiben
@@ -50,6 +52,14 @@ API-Rückadresse Portal-Erreichbarkeit und Allowlist. Eine fehlende Rückadresse
 erlaubt die übrigen Prüfungen; eine ungültige Adresse ist ein Konfigurationsfehler.
 Ein Datenbankfehler gilt nicht als fehlende Rückadresse.
 Der Test legt keine VM an und schaltet keine VM um.
+
+Nach einem bestandenen Test, manuell oder geplant, räumt er liegengebliebene
+`accounts.yml` dieses Zugangs auf dessen Ziel auf, soweit der Zugang noch darauf
+zeigt. Ein fehlgeschlagener Test räumt nicht auf. Das Zeitbudget beträgt 60 Sekunden
+und endet vor dem Zeitlimit des Laufs: 300 Sekunden für die Anfrage im Portal,
+600 Sekunden für die Gesamtlaufzeit des geplanten Tests. Bricht das Aufräumen ab,
+bleibt der Rest für den nächsten Kontakt mit dem Host offen. Das Ergebnis nennt die
+Zahl der entfernten Dateien als Hinweis; die Ampel ändert sich dadurch nicht.
 
 Ergebnis und Audit werden gemeinsam durch `ansible_full_test_store_result()`
 gespeichert. **Systemstatus → Ansible-Host** zeigt Volltest und Intervall.

@@ -139,6 +139,14 @@ Netzwege gelten in beiden Fällen.
 | Ausgehend zu ESXi (Port 443) | die vmware_guest-Aufrufe |
 | Ausgehend zurück zum Portal (API-Basis-URL, z. B. Port 8021) | `upload_mac_list.py` meldet die MACs an `db_importMAC.php` |
 
+**Aufräum-Timer (einmalig als root, empfohlen).** Bleibt nach einem abgebrochenen Auftrag eine `accounts.yml` mit dem ESXi-Passwort auf dem Host liegen, entfernt sie der nächste Auftrag oder Zugangstest desselben Zugangs, solange dieser auf dasselbe Ziel zeigt. Der Timer sichert Dateien, die kein solcher Kontakt mehr erreicht. Er entfernt nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die älter als 24 Stunden ist, dem Ansible-Konto gehört und deren Auftragsordner gerade nicht gesperrt ist. Ein Administrator richtet ihn einmal aus dem entpackten Offline-Bundle ein:
+
+```bash
+sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>
+```
+
+Die Installation braucht kein Netz und kein Paket und lässt sich wiederholen; ein Root-Konto lehnt sie ab. Status: `systemctl status virtusphere-secret-cleanup.timer`; Ausgaben: `journalctl -t virtusphere-secret-cleanup`. Fehlt der Timer, nennt der Zugangstest das als Hinweis. Der Befehl ist auf Ubuntu 24.04 im Labor noch nicht geprüft.
+
 „Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login mit
 SFTP-Schreibtest, `ansible-playbook`, `python3`, `pyvmomi`, `requests`,
 `community.vmware` samt gepinnter Version, ansible-core-Untergrenze und

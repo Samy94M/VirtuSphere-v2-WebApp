@@ -433,4 +433,13 @@ return [
     'inv_datacenter_resolution_unsupported' => 'Die Datacenter-Abfrage enthält keinen unterstützten Objektnamen.',
     'inv_datacenter_resolution_timestamp_invalid' => 'Der positive Datacenter-Zeitpunkt fehlt, ist unlesbar oder liegt in der Zukunft.',
     'inv_unsupported_name' => 'Nicht unterstützter Randabstand, :count Zeichen',
+    // K21-F: the notice above the overview (lib/system_status_remote_secret_notice.php).
+    'remote_secret_notice_title' => 'Zugangsdateien auf Ansible-Hosts sind noch offen',
+    'remote_secret_group_line' => 'Zugang :name, Ziel :target, :files, älteste vom :oldest. :reason',
+    'remote_secret_group_line_orphan' => 'Gelöschter Zugang, Ziel :target, :files, älteste vom :oldest. :reason',
+    'remote_secret_reason_overdue' => 'Die älteste Zugangsdatei liegt seit mehr als :hours Stunden dort.',
+    'remote_secret_reason_orphaned' => 'Der Zugang ist gelöscht, daher kann kein Auftrag die Zugangsdateien mehr entfernen.',
+    'remote_secret_reason_moved' => 'Der Zugang zeigt inzwischen auf ein anderes Ziel, daher kann kein Auftrag die Zugangsdateien hier mehr entfernen.',
+    'remote_secret_remedy' => 'Ein Auftrag oder Zugangstest entfernt die Zugangsdateien, solange der Zugang auf dieses Ziel zeigt. Sind sie von Hand entfernt oder der Host außer Betrieb, bestätigen Sie das mit einer Begründung.',
+    'remote_secret_password_hint' => 'Empfehlung: Ändern Sie das ESXi-Passwort, denn die Zugangsdateien haben es enthalten.',
 ];

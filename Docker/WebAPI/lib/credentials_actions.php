@@ -20,6 +20,7 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/repo/credential_host_identity.php';
+require_once __DIR__ . '/repo/deploy_remote_secret_fence.php';
 
 
 /**
@@ -107,6 +108,20 @@ function credentials_complete_ansible_test(
         $result['ok'] ? '' : (string) $result['detail'],
         $flashAction
     );
+    // Follow-up sentences of this stored result, for example the ESXi access files it left on
+    // the host. Only a stored result reaches this point: a discarded one returned above.
+    foreach (credentials_test_followup_notices($result) as $notice) {
+        flash_set('info', $notice);
+    }
+}
+
+/**
+ * The page an acknowledgement returns to. The token is closed: only a value the
+ * two forms send can name a page; anything else returns to the credentials page.
+ */
+function credentials_remote_secret_return_page(string $returnTo): string
+{
+    return $returnTo === 'system_status' ? 'system_status.php' : 'credentials.php';
 }
 
 // After saving an ESXi credential: clear any auth pause and trigger an immediate
@@ -151,7 +166,7 @@ function credentials_handle_post(mysqli $connection, array $user): string
 
     try {
         $action = request_string($_POST, 'action');
-        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy', 'confirm_host_identity'], true)) {
+        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy', 'confirm_host_identity', 'remote_secret_acknowledge'], true)) {
             http_response_code(400);
             echo h(__t('common.unknown_action'));
             exit;
@@ -212,6 +227,37 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 request_string($_POST, 'old_host_fingerprint'), request_string($_POST, 'host_fingerprint'),
                 request_string($_POST, 'host_key_type'), (int) $user['id']);
             flash_set('success', __t('credentials.host_identity_saved'));
+        } elseif ($action === 'remote_secret_acknowledge') {
+            // K21-F: the operator confirms, with a reason, that the ESXi access files on one
+            // Ansible target were removed by hand or the host is out of service. The repository
+            // closes every open row of that target (not leased, no active job, any age) in one
+            // transaction with its audit row. The page guard checks credentials.manage and CSRF,
+            // as for every other action of this page.
+            $redirect = credentials_remote_secret_return_page(request_string($_POST, 'return_to'));
+            $credentialId = request_int($_POST, 'credential_id');
+            $targetHost = request_string($_POST, 'target_host');
+            $targetPort = request_int($_POST, 'target_port');
+            try {
+                $closed = repo_remote_secret_acknowledge(
+                    $connection,
+                    $credentialId > 0 ? $credentialId : null,
+                    $targetHost,
+                    $targetPort,
+                    request_string($_POST, 'reason'),
+                    (int) $user['id']
+                );
+                $target = $targetHost . ':' . $targetPort;
+                if ($closed > 0) {
+                    flash_set('success', __t('credentials.remote_secret_acknowledged', ['target' => $target]));
+                } else {
+                    flash_set('warning', __t('credentials.remote_secret_nothing_open', ['target' => $target]));
+                }
+            } catch (ValidationException $exception) {
+                // The notice sits on the status page, which shows no field errors: the reason's own
+                // sentence goes to the flash, not the generic "Validation failed.".
+                flash_set('error', $exception->errors()['reason']
+                    ?? __t('credentials.remote_secret_reason_required', ['min' => VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS]));
+            }
         } elseif ($action === 'activate_strict') {
             repo_activate_esxi_strict_trust($connection, $id);
             audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [

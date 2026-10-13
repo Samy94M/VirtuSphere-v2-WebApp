@@ -98,6 +98,16 @@ Vor dem Wheelhouse hieß „BEFORE the network is air-gapped" in
 `Ansible/requirements.yml` faktisch „vorher im Netz installieren“; für einen
 frisch aufzusetzenden Air-Gap-Host war das ein Widerspruch in sich.
 
+Danach den Aufräum-Timer einmal als root installieren. Er liegt im Bundle unter
+`virtusphere/Ansible/host-cleanup/`; die Installation braucht weder Netz noch Paket:
+
+```bash
+sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>
+```
+
+Was der Timer tut und warum er empfohlen ist, steht in
+[Go-Live, Abschnitt Ansible-Host vorbereiten](go-live.md#ansible-host-vorbereiten-vor-schritt-4).
+
 ## Schritt 4: deaktivierten Durable Runner installieren und prüfen (Ansible-Host)
 
 Das Bundle enthält unter `runner/` den in Etappe 8R-O entwickelten Runner. Der

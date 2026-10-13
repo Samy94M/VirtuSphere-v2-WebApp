@@ -30,6 +30,10 @@ final class PortalConfirmNamingContractTest extends TestCase
         'credentials.confirm_delete',
         'credentials.confirm_use_legacy',
         'credentials.host_identity_confirm',
+        // K21-F: the acknowledgement of the ESXi access files left on one Ansible target. The question
+        // names the target (host:port), which the server renders from the stored credential target, not
+        // from an editable field.
+        'credentials.remote_secret_acknowledge_confirm',
         'deploy.confirm_cancel',
         // Etappe 14B-F: the release names the one VM whose outcome is being
         // decided. Confirming it for the wrong row would record that a VM

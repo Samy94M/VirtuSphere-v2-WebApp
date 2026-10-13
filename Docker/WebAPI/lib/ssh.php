@@ -127,11 +127,14 @@ function credential_test_ansible(array $credential, string $secret, string $apiB
     // ok-with-warning. Reaching health.php proved the network path, but only
     // passing the db_importMAC.php IP gate proves the MAC upload would land.
     $allowlist = ansible_preflight_allowlist_verdict((string) $result['output']);
+    // K21-F: the state of the host's secret cleanup timer, read from the same
+    // preflight output. It is a hint for the page, never part of the verdict.
+    $secretCleanup = ansible_secret_cleanup_timer_state((string) $result['output']);
     if ($allowlist['status'] === 'denied') {
-        return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST, '', ['ip' => $allowlist['ip']]);
+        return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST, '', ['ip' => $allowlist['ip'], 'secret_cleanup' => $secretCleanup]);
     }
 
-    return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_OK);
+    return credential_test_result(true, VIRTUSPHERE_CREDENTIAL_TEST_OK, '', ['secret_cleanup' => $secretCleanup]);
 }
 
 function credential_test_ssh(array $credential, string $secret): array

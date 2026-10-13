@@ -695,10 +695,14 @@ PHP;
 
     /**
      * The calls that mean "the host preflight ran", derived instead of listed:
-     * ansible_preflight_command() and every named lib function that calls it,
-     * except a function that sweeps itself. Such a function (the inventory job)
-     * is a subject of the rule, not a preflight: the mission worker dispatches to
-     * it long before its own preflight.
+     * ansible_preflight_command() and every named lib function that calls one of
+     * them, transitively, except a function that sweeps itself. Such a function
+     * (the inventory job, the full test) is a subject of the rule, not a preflight:
+     * the mission worker dispatches to the inventory job long before its own preflight.
+     *
+     * The transitive step is what makes the synchronous credential test an anchor:
+     * credential_test_connection() reaches the preflight through credential_test_ansible().
+     * testTheSynchronousTestEntryReachesThePreflightThroughItsOwnChain pins that chain.
      *
      * @return list<string>
      */
@@ -707,14 +711,59 @@ PHP;
         $files = self::libFiles();
         $sweepers = array_map(static fn (string $caller): string => explode('::', $caller, 2)[1], self::callersOf(self::SWEEP, $files));
         $anchors = [self::PREFLIGHT_COMMAND];
-        foreach (self::callersOf(self::PREFLIGHT_COMMAND, $files) as $caller) {
-            $function = explode('::', $caller, 2)[1];
-            if ($function !== '(file scope)' && !in_array($function, $sweepers, true)) {
-                $anchors[] = $function;
+        $pending = [self::PREFLIGHT_COMMAND];
+        while ($pending !== []) {
+            $name = array_shift($pending);
+            foreach (self::callersOf($name, $files) as $caller) {
+                $function = explode('::', $caller, 2)[1];
+                if ($function !== '(file scope)' && !in_array($function, $sweepers, true) && !in_array($function, $anchors, true)) {
+                    $anchors[] = $function;
+                    $pending[] = $function;
+                }
             }
         }
 
         return array_values(array_unique($anchors));
+    }
+
+    /**
+     * K21-F: the synchronous full test is an anchor only because it really reaches
+     * the host preflight. This pins that chain in the source, so the derived anchor
+     * cannot outlive it without a red test.
+     */
+    public function testTheSynchronousTestEntryReachesThePreflightThroughItsOwnChain(): void
+    {
+        self::assertContains(
+            'credential_test_connection',
+            self::preflightAnchors(),
+            'credential_test_connection() is no longer derived as a preflight anchor, so the sweep in ansible_full_test_execute() has no preflight before it.'
+        );
+        $ssh = self::libSource('lib/ssh.php');
+        self::assertStringContainsString(
+            'credential_test_ansible(',
+            self::functionCode($ssh, 'credential_test_connection'),
+            'credential_test_connection() no longer runs credential_test_ansible(), which holds the host preflight.'
+        );
+        self::assertStringContainsString(
+            self::PREFLIGHT_COMMAND . '(',
+            self::functionCode($ssh, 'credential_test_ansible'),
+            'credential_test_ansible() no longer builds the host preflight command.'
+        );
+    }
+
+    /**
+     * K21-F: both ok results of the credential test carry the timer state for the
+     * page's hint (plain ok and allowlist warning), read from the same preflight output.
+     */
+    public function testTheCredentialTestReportsTheTimerStateOnItsOkResults(): void
+    {
+        $code = self::functionCode(self::libSource('lib/ssh.php'), 'credential_test_ansible');
+        self::assertStringContainsString('ansible_secret_cleanup_timer_state(', $code);
+        self::assertSame(
+            2,
+            substr_count($code, "'secret_cleanup' =>"),
+            'Both ok results of credential_test_ansible() must carry the timer state in their context.'
+        );
     }
 
     /**

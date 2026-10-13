@@ -9,6 +9,7 @@ require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_remote_mode_activation.php';
 require_once __DIR__ . '/deploy_create_fence.php';
+require_once __DIR__ . '/deploy_remote_secret_fence.php';
 
 function credential_normalize_type(string $type): string
 {
@@ -241,6 +242,7 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
 
     return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {
         repo_deploy_create_fence_credential_change($db, $id, $values);
+        repo_remote_secret_fence_credential_change($db, $id, $values);
         $locked = repo_fetch_one($db, 'SELECT type, host, port FROM deploy_credentials WHERE id = ? FOR UPDATE', 'i', [$id]);
         $stmt->execute();
         if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
@@ -336,6 +338,7 @@ function repo_delete_credential(mysqli $db, int $id): bool
 
     return repo_transaction($db, static function () use ($db, $id): bool {
         repo_deploy_create_fence_credential_change($db, $id, null);
+        repo_remote_secret_fence_credential_change($db, $id, null);
         $stmt = $db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
         $stmt->bind_param('i', $id);
         $stmt->execute();

@@ -56,23 +56,29 @@ const VIRTUSPHERE_REMOTE_SECRET_STATUS_LEASE_SECONDS = 2 * (
 function deploy_remote_secret_remember(mysqli $db, int $jobId, int $ansibleCredentialId, string $remoteDir, int $leaseSeconds = 0): void
 {
     ansible_create_assert_remote_dir($remoteDir);
-    $target = deploy_remote_secret_target($db, $ansibleCredentialId);
-    if ($target === null) {
-        throw new RuntimeException('The ESXi access file of job ' . $jobId . ' could not be recorded before its upload: the Ansible credential is gone.');
-    }
-    $existing = repo_fetch_one($db, 'SELECT target_host, target_port, target_fingerprint FROM deploy_remote_secret_files WHERE job_id = ? AND remote_dir = ?', 'is', [$jobId, $remoteDir]);
-    if ($existing !== null && !deploy_remote_secret_same_target($existing, $target)) {
-        throw new RuntimeException('The ESXi access file of job ' . $jobId . ' is still recorded on the Ansible host '
-            . deploy_remote_secret_target_label($existing) . '; it is not uploaded to ' . deploy_remote_secret_target_label($target) . ' as well.');
-    }
-    $stored = repo_execute(
-        $db,
-        'INSERT INTO deploy_remote_secret_files (job_id, credential_ansible_id, remote_dir, target_host, target_port, target_fingerprint, lease_until)'
-            . ' VALUES (?, ?, ?, ?, ?, ?, IF(? > 0, NOW(6) + INTERVAL ? SECOND, NULL))'
-            . ' ON DUPLICATE KEY UPDATE lease_until = IF(? > 0, NOW(6) + INTERVAL ? SECOND, NULL)',
-        'iissisiiii',
-        [$jobId, $ansibleCredentialId, $remoteDir, $target['target_host'], $target['target_port'], $target['target_fingerprint'], $leaseSeconds, $leaseSeconds, $leaseSeconds, $leaseSeconds]
-    );
+    // Lock sequence of the K21-F fence: the credential, then its row. A concurrent
+    // target change waits for this write, and the row describes the target that
+    // was locked when it was read.
+    $stored = repo_transaction($db, static function () use ($db, $jobId, $ansibleCredentialId, $remoteDir, $leaseSeconds): bool {
+        $target = deploy_remote_secret_target($db, $ansibleCredentialId, true);
+        if ($target === null) {
+            throw new RuntimeException('The ESXi access file of job ' . $jobId . ' could not be recorded before its upload: the Ansible credential is gone.');
+        }
+        $existing = repo_fetch_one($db, 'SELECT target_host, target_port, target_fingerprint FROM deploy_remote_secret_files WHERE job_id = ? AND remote_dir = ?', 'is', [$jobId, $remoteDir]);
+        if ($existing !== null && !deploy_remote_secret_same_target($existing, $target)) {
+            throw new RuntimeException('The ESXi access file of job ' . $jobId . ' is still recorded on the Ansible host '
+                . deploy_remote_secret_target_label($existing) . '; it is not uploaded to ' . deploy_remote_secret_target_label($target) . ' as well.');
+        }
+
+        return repo_execute(
+            $db,
+            'INSERT INTO deploy_remote_secret_files (job_id, credential_ansible_id, remote_dir, target_host, target_port, target_fingerprint, lease_until)'
+                . ' VALUES (?, ?, ?, ?, ?, ?, IF(? > 0, NOW(6) + INTERVAL ? SECOND, NULL))'
+                . ' ON DUPLICATE KEY UPDATE lease_until = IF(? > 0, NOW(6) + INTERVAL ? SECOND, NULL)',
+            'iissisiiii',
+            [$jobId, $ansibleCredentialId, $remoteDir, $target['target_host'], $target['target_port'], $target['target_fingerprint'], $leaseSeconds, $leaseSeconds, $leaseSeconds, $leaseSeconds]
+        );
+    });
     if (!$stored) {
         throw new RuntimeException('The ESXi access file of job ' . $jobId . ' could not be recorded before its upload.');
     }
@@ -81,13 +87,14 @@ function deploy_remote_secret_remember(mysqli $db, int $jobId, int $ansibleCrede
 /**
  * Where an Ansible credential points now: host, effective SSH port and pinned
  * host key, in the column names of deploy_remote_secret_files. Not config_revision:
- * that also moves on a password change, which does not move the file.
+ * that also moves on a password change, which does not move the file. $lock takes
+ * the credential row FOR UPDATE; the write-ahead row reads it that way.
  *
  * @return array{target_host: string, target_port: int, target_fingerprint: ?string}|null
  */
-function deploy_remote_secret_target(mysqli $db, int $ansibleCredentialId): ?array
+function deploy_remote_secret_target(mysqli $db, int $ansibleCredentialId, bool $lock = false): ?array
 {
-    $row = repo_fetch_one($db, 'SELECT host, port, ansible_host_fingerprint FROM deploy_credentials WHERE id = ?', 'i', [$ansibleCredentialId]);
+    $row = repo_fetch_one($db, 'SELECT host, port, ansible_host_fingerprint FROM deploy_credentials WHERE id = ?' . ($lock ? ' FOR UPDATE' : ''), 'i', [$ansibleCredentialId]);
     if ($row === null) {
         return null;
     }
@@ -172,7 +179,9 @@ function deploy_remote_secret_unconfirmed_reason(array $result): string
  */
 function deploy_remote_secret_release(callable $connection, array $credential, string $secret, int $jobId, string $remoteDir, bool $removeWholeDir, ?callable $execute = null): bool
 {
-    $run = $execute ?? ssh_execute_capture(...);
+    // A ternary, not "??": the portal closure contract resolves a callable through a
+    // ternary of a declared callable and a first-class callable only.
+    $run = $execute !== null ? $execute : ssh_execute_capture(...);
     try {
         $result = $run($credential, $secret, ansible_remote_secret_remove_command($remoteDir, $removeWholeDir), VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS);
         $state = deploy_remote_secret_removal_state($result);

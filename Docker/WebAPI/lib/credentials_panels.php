@@ -23,6 +23,7 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/integration_health.php';
+require_once __DIR__ . '/system_status_remote_secret_notice.php';
 
 /** @param array<string,mixed> $user */
 function credentials_render_page(mysqli $connection, array $user): void
@@ -47,6 +48,8 @@ $renderedAt = time();
 $esxiStates = repo_esxi_inventory_states($connection);
 $ansiblePreflightStates = repo_ansible_preflight_states($connection);
 $ansibleTestIntervalHours = ansible_test_interval_hours($connection);
+// K21-F: the open ESXi access files per Ansible credential, read once for the whole table.
+$remoteSecretOpen = repo_remote_secret_open_by_credential($connection);
 layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
 ?>
 <div class="stack">
@@ -181,6 +184,12 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                         <?php } ?>
                     </td>
                 </tr>
+                <?php if ($isAnsible && ($remoteSecretOpen[$rowId] ?? []) !== []) { ?>
+                    <?php // K21-F: anchor of the lock message and of the notice's link (credentials.php#remote-secret-<id>). ?>
+                    <tr data-remote-secret-row id="remote-secret-<?php echo h((string) $rowId); ?>">
+                        <td colspan="8"><?php remote_secret_render_open_line($rowId, $remoteSecretOpen[$rowId], $user); ?></td>
+                    </tr>
+                <?php } ?>
                 <tr class="row-editor" id="<?php echo h($editorId); ?>"<?php echo $editorOpen ? '' : ' hidden'; ?>>
                     <td colspan="8">
                         <form class="form-grid" method="post" action="credentials.php" autocomplete="off">

@@ -106,4 +106,20 @@ return [
     // The pull is a deploy job: without a running deploy service it is queued and
     // never executed.
     'cadence_esxi_no_worker' => 'no automatic pull, the deploy service is not running',
+    // K21-F: open ESXi access files of an Ansible target (shared form, credentials row, notice).
+    'remote_secret_count_one' => '1 access file',
+    'remote_secret_count_other' => ':count access files',
+    'remote_secret_open_line' => 'Target :target, :files without a confirmed removal, oldest from :oldest.',
+    'remote_secret_no_permission' => 'Only users with the permission to manage credentials can confirm.',
+    'remote_secret_reason_label' => 'Reason',
+    'remote_secret_reason_hint' => 'The reason is logged.',
+    'remote_secret_acknowledge_submit' => 'Confirm removed by hand',
+    'remote_secret_acknowledge_confirm' => 'Has the access file on :name been removed by hand, or is the host out of service? All open entries for :name are then closed and logged.',
+    'remote_secret_open_action' => 'Review access files',
+    // The refusal of a target change or delete (lib/repo/deploy_remote_secret_fence.php). Host and port are
+    // separate placeholders on purpose: ":host:port" would eat the separator when the placeholders are replaced.
+    'remote_secret_fence' => 'On the Ansible host :host (port :port), access files are still open without a confirmed removal (:count, oldest from :oldest). Target, type and host key stay locked; password, username and name can still be changed.',
+    'remote_secret_reason_required' => 'Please give a reason of at least :min characters explaining why the access file was removed or the host is out of service.',
+    'remote_secret_acknowledged' => 'The access files on :target are confirmed as removed by hand and logged.',
+    'remote_secret_nothing_open' => 'There are no open access files left for :target. Nothing was changed.',
 ];

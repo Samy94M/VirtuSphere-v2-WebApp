@@ -290,16 +290,27 @@ The limits are stated, not solved:
   every contact names it in the worker's error log with its host and its oldest
   date; pointing the credential back reaches it again. A host that is reached
   only through another credential keeps the file until this credential is used
-  again.
+  again. Revision 2026-10-13 (ADR-0046): while such a row is open, the portal
+  refuses the target change itself, and a moved row is named by the System status
+  notice at once; the row is closed by a contact or by a logged acknowledgement.
 - A deleted Ansible credential leaves a row that nobody can resolve. The foreign
   key is `ON DELETE SET NULL`, so the row survives and the file stays on the host.
+  Revision 2026-10-13 (ADR-0046): the portal refuses the deletion while rows are
+  open, so no new orphan arises from a deletion. Orphans that predate the fence
+  are named at once by the notice and are closed only by a logged acknowledgement.
 - Between the lease recheck and the removal a status query can still start; the
-  remaining window closes with the host-side lock of the follow-up package.
+  remaining window closes with the host-side lock of the follow-up package. That
+  window stays open until the same lock round (ADR-0046, open items).
 - Both measured facts belong to the Ansible runtime. An update that caches
   `vars_files` again or catches the broken pipe turns the gate red; the
   reasoning above has to be re-read then, not the gate.
 - Whether Ansible's async wrapper keeps module arguments elsewhere on the host is
   lab probe LP-06. It is not answered here.
+
+Revision 2026-10-13 (K21-F, ADR-0046): the fence, the acknowledgement, the notice,
+the sweep after a passed full test and the optional host timer are decided in
+ADR-0046. The sweep after a passed full test calls the same owner
+(`deploy_remote_secret_sweep()`). The host timer is the only removal outside it.
 
 Verification: `K21RemoteSecretCleanupTest`, `AnsibleRemoteSecretCommandTest`,
 `DeployRemoteSecretStateTest`, `RemoteSecretUploadContractTest`,

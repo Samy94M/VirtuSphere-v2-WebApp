@@ -361,6 +361,30 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'vars_files je Task gelesen, Playbook ohne Leser endet vor dem naechsten Task' 'Grundlage des Loeschens von accounts.yml verletzt'
     }
 
+    Add-Gate -Name 'host-secret-cleanup' -Lanes $allLanes -Kind 'container' -Body {
+        # K21-F (Entscheidung 5): der Ansible-Host raeumt verwaiste accounts.yml
+        # (ESXi-Passwort) per systemd-Timer auf. Alter, Eigentuemer,
+        # Verknuepfungen, Sperre, Tiefe, Root-Abbruch und der Installer werden in
+        # einem Debian-Container gegen echte Dateien geprueft, ohne Netz und ohne
+        # Host. Jede Regel hat einen Kontrollfall: der positive Fall (alt, eigen,
+        # ungesperrt) muss entfernt werden, sonst wuerden die Behalte-Faelle auch
+        # bei einem Lauf ohne Wirkung gruen.
+        $probe = Join-Path $repoRoot 'tests/host-cleanup/host-cleanup-probe.sh'
+        if (-not (Test-Path $probe)) { return New-InfraResult 'host-cleanup-probe.sh fehlt unter dem Pruef-Root (Zero-Match)' }
+        $lockEntry = $toolLock.dockerImages.PSObject.Properties['hostCleanupProbe']
+        if ((-not $lockEntry) -or (-not $lockEntry.Value.ref)) {
+            return New-InfraResult 'Tool-Lockdatei ohne dockerImages.hostCleanupProbe.ref'
+        }
+        $probeImage = [string]$lockEntry.Value.ref
+        if (-not (Test-DockerImage $probeImage)) {
+            return New-InfraResult ('Probe-Image {0} fehlt lokal (docker pull debian:bookworm-slim; Digest laut scripts/tool-lock.json)' -f $probeImage)
+        }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $probeImage, 'sh', '/repo/tests/host-cleanup/host-cleanup-probe.sh', '/repo/Ansible/host-cleanup') -Live
+        if ($r.ExitCode -eq 2) { return New-InfraResult 'Host-Cleanup-Probe ohne brauchbare Umgebung (Root oder Werkzeug fehlt)' $r.Output }
+        Format-ToolResult $r 'Loeschregeln und Installer je Kontrollfall bestaetigt' 'Host-Aufraeumen oder Installer verletzt eine Regel (Kontrollfall rot)'
+    }
+
     Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
         # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
         # rendert die feindliche Fixture mit den Produktions-Generatoren,

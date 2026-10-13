@@ -41,6 +41,16 @@ const VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST = 'allowlist';
 // allowlist entry is a warning about a FUTURE deploy, not a broken credential.
 const VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER = '::virtusphere-allowlist::';
 
+// K21-F: component token of the host hint "is the timer that removes stale
+// accounts.yml enabled?" (ansible_secret_cleanup_probe_command()). It is the
+// last step of the chain and cannot fail: its probe always exits 0. It is
+// deliberately NOT one of ansible_preflight_checks(), so no failure reader can
+// name it, and it never changes the traffic light.
+const VIRTUSPHERE_ANSIBLE_PREFLIGHT_SECRET_CLEANUP = 'secret-cleanup';
+
+// Verdict line of that hint: "<marker> enabled|missing|unknown".
+const VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER = '::virtusphere-secret-cleanup::';
+
 /**
  * The Ansible-host readiness checks, keyed by the component token shown to the
  * operator, in the order a deploy needs the pieces. Each value is the shell test
@@ -173,6 +183,12 @@ function ansible_preflight_command(string $apiBaseUrl = '', bool $strict = false
         $steps[] = 'echo ' . ansible_sh_quote(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . $component);
         $steps[] = $check;
     }
+
+    // K21-F hint, always last. The braces absorb a failure of the probe only:
+    // a plain `|| true` on the whole chain would also swallow the failure of
+    // every check before it.
+    $steps[] = 'echo ' . ansible_sh_quote(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . VIRTUSPHERE_ANSIBLE_PREFLIGHT_SECRET_CLEANUP);
+    $steps[] = '{ ' . ansible_secret_cleanup_probe_command() . ' || true; }';
 
     return implode(' && ', $steps);
 }
@@ -317,12 +333,41 @@ function ansible_preflight_failed_component(string $output): ?string
             continue;
         }
         $candidate = trim(substr($line, strlen(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER) + 1));
+        if ($candidate === VIRTUSPHERE_ANSIBLE_PREFLIGHT_SECRET_CLEANUP) {
+            // Reaching the hint means every check before it passed (the allowlist
+            // probe exits 0 by design). Nothing failed that a reader could name,
+            // so an earlier marker must not be blamed.
+            $found = null;
+            continue;
+        }
         if (in_array($candidate, $components, true)) {
             $found = $candidate;
         }
     }
 
     return $found;
+}
+
+/**
+ * The timer hint read from the preflight output: 'enabled', 'missing' or
+ * 'unknown'. The last verdict line wins; a line that does not start with the
+ * marker, a value outside the three words, and output without any verdict all
+ * answer 'unknown'. Raw systemctl words (disabled, not-found) are NOT verdicts:
+ * the probe maps them, the reader never guesses.
+ */
+function ansible_secret_cleanup_timer_state(string $preflightOutput): string
+{
+    $state = 'unknown';
+    foreach (explode("\n", $preflightOutput) as $line) {
+        $line = trim($line);
+        if (!str_starts_with($line, VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER . ' ')) {
+            continue;
+        }
+        $verdict = trim(substr($line, strlen(VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER) + 1));
+        $state = in_array($verdict, ['enabled', 'missing', 'unknown'], true) ? $verdict : 'unknown';
+    }
+
+    return $state;
 }
 
 /**
@@ -335,6 +380,7 @@ function ansible_preflight_strip_markers(string $output): string
         explode("\n", $output),
         static fn (string $line): bool => !str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ')
             && !str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ')
+            && !str_starts_with(trim($line), VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER . ' ')
     );
 
     return trim(implode("\n", $lines));

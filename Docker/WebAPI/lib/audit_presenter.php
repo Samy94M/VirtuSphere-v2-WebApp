@@ -81,6 +81,11 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED => 'ESXi access file of job ' . $id
             . (($context['outcome'] ?? '') === 'absent' ? ' was no longer on' : ' removed from')
             . ' the Ansible host ' . ($context['host'] ?? 'unknown') . ':' . ($context['port'] ?? 0) . ' at a later contact',
+        // K21-F. The object is the credential; 0 names one that was deleted. The
+        // operator's reason stays in the context, not in this sentence.
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_ACKNOWLEDGED => 'acknowledged by hand ' . ($context['count'] ?? 0)
+            . ' ESXi access file record(s) on the Ansible host ' . ($context['host'] ?? 'unknown') . ':' . ($context['port'] ?? 0)
+            . ($id === '0' ? ' of a deleted Ansible credential' : ' of Ansible credential id ' . $id),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => 'documented external check for deploy job id ' . $id
             . ': ' . ($context['resolution_code'] ?? 'inconclusive') . ' (resolution ' . ($context['resolution_id'] ?? 0) . ')',
         // Etappe 14B-F. The sentence says what the operator ESTABLISHED, never

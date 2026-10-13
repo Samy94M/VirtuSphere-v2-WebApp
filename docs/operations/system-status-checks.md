@@ -14,7 +14,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Zeile |
 | Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
 
-Über der Übersicht stehen drei Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`). Für `system.config` verlinkt jeder Hinweis die Einstellung, die ihn behebt.
+Über der Übersicht stehen vier Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinkt jeder der ersten drei Hinweise die Einstellung, die ihn behebt.
 
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite; `SystemStatusChecksDocContractTest` leitet die Namen aus den Kachelbeschriftungen ab.
 
@@ -106,6 +106,8 @@ Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` In
 
 Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Volltest jetzt starten**, über **Verbindung und Umgebung prüfen** (Zugangsdaten) oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 
+Ein bestandener Volltest, manuell oder geplant, räumt danach liegengebliebene ESXi-Zugangsdateien dieses Ziels auf, soweit der Zugang noch darauf zeigt. Das Zeitbudget beträgt 60 Sekunden; bricht das Aufräumen ab, bleibt der Rest für den nächsten Kontakt, und die Meldung sagt es. Das Ergebnis des Tests ändert der Aufräumlauf nicht. Fehlt der Aufräum-Timer auf dem Ansible-Host, nennt die Meldung ihn als Hinweis, ohne die Ampel zu verändern.
+
 Die getrennte Hostidentitätsanzeige zeigt Pin, Bestätigung und zuletzt beobachtete Abweichung. Sie ist kein Volltest und färbt dessen vorhandenen Nachweis nicht um. Jede SSH-/SFTP-Anmeldung geht über den [gemeinsamen Vertrauensablauf](trust-flows.md#ssh-und-sftp-zum-ubuntu-host); das gilt auch für die SFTP-Probe nach bestandenem SSH-Preflight.
 
 ```mermaid
@@ -128,8 +130,9 @@ flowchart TD
   TF2 --> R
   TF3 --> R
   TF4 --> R
-  TW --> R
-  TO --> R
+  TW --> SW
+  TO --> SW
+  SW["Nur nach bestandenem Test: liegengebliebene Zugangsdateien dieses Ziels entfernen (Budget 60 s, Abbruch lässt den Rest offen; das Ergebnis bleibt)"] --> R
   R{"Zugang während des Tests geändert?"} -->|ja| RX["Ergebnis verworfen (discarded), Audit warning; bisheriger Nachweis bleibt unverändert"]
   R -->|nein| RS["Ergebnis mit Konfigurationsstand speichern"] --> A{"Ergebnis gehört zum aktuellen Stand des Zugangs?"}
   A -->|nein, Zugang seither geändert oder nie getestet| U["Nicht getestet (unknown, grau)"]

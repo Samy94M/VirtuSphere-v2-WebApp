@@ -90,15 +90,27 @@ function deploy_remote_secret_diagnose_other_targets(mysqli $db, int $credential
  * transport failure ends the sweep, because the host will not answer the next
  * row either. Never throws, so a side channel cannot end the current job.
  *
+ * A time budget (K21-F, the manual and scheduled Volltest only) is the expired
+ * seam: when it answers true before a candidate, that candidate is not started.
+ * The sweep then stops with the rows still open, and the stopped seam tells the
+ * caller it did not finish. A candidate started before that may still run to its own end.
+ *
  * @param callable(): mysqli $connection the worker passes fn () => $channel->connection(); taken per use
  * @param array<string, mixed> $ansibleCredential
- * @param array{execute?: callable, log?: callable(string): void, tick?: callable(): void} $seams
- *        execute = ssh_execute_capture() signature; log receives one line per closed record; tick keeps the job's heartbeat
+ * @param array{execute?: callable, log?: callable(string): void, tick?: callable(): void, expired?: callable(): bool, stopped?: callable(): void} $seams
+ *        execute = ssh_execute_capture() signature; log receives one line per closed record; tick keeps the job's heartbeat;
+ *        expired answers true once the time budget is used up, checked before each candidate (absent: no time limit);
+ *        stopped is called once when the sweep ends before its last candidate (budget, transport failure, failed check or listing)
  * @return int the number of records closed
  */
 function deploy_remote_secret_sweep(callable $connection, array $ansibleCredential, string $ansibleSecret, int $currentJobId, array $seams = []): int
 {
-    $run = $seams['execute'] ?? ssh_execute_capture(...);
+    // Local callables, so every call below is one the portal's require closure can prove (tests/Support).
+    $run = isset($seams['execute']) ? $seams['execute'] : ssh_execute_capture(...);
+    $tick = isset($seams['tick']) ? $seams['tick'] : null;
+    $log = isset($seams['log']) ? $seams['log'] : null;
+    $stopped = isset($seams['stopped']) ? $seams['stopped'] : null;
+    $expired = isset($seams['expired']) ? $seams['expired'] : null;
     $credentialId = (int) ($ansibleCredential['id'] ?? 0);
     try {
         $target = deploy_remote_secret_target($connection(), $credentialId);
@@ -109,13 +121,19 @@ function deploy_remote_secret_sweep(callable $connection, array $ansibleCredenti
         $candidates = deploy_remote_secret_sweep_candidates($connection(), $credentialId, $currentJobId, $target);
     } catch (Throwable $exception) {
         deploy_worker_cleanup_diagnose($currentJobId, 'Leftover ESXi access files could not be listed: ' . $exception->getMessage(), $ansibleSecret);
+        deploy_remote_secret_side_channel($stopped);
 
         return 0;
     }
 
     $closed = 0;
     foreach ($candidates as $candidate) {
-        deploy_remote_secret_side_channel($seams['tick'] ?? null);
+        if ($expired !== null && $expired()) {
+            deploy_remote_secret_side_channel($stopped);
+
+            break;
+        }
+        deploy_remote_secret_side_channel($tick);
         $rowId = (int) $candidate['id'];
         $jobId = (int) $candidate['job_id'];
         $remoteDir = (string) $candidate['remote_dir'];
@@ -127,6 +145,7 @@ function deploy_remote_secret_sweep(callable $connection, array $ansibleCredenti
             }
         } catch (Throwable $exception) {
             deploy_worker_cleanup_diagnose($currentJobId, 'Leftover ESXi access files could not be checked: ' . $exception->getMessage() . ' The rest waits for the next contact.', $ansibleSecret);
+            deploy_remote_secret_side_channel($stopped);
 
             break;
         }
@@ -141,6 +160,7 @@ function deploy_remote_secret_sweep(callable $connection, array $ansibleCredenti
                     . ' The host is not asked about the other leftover files now; they wait for the next contact with this Ansible host.',
                 $ansibleSecret
             );
+            deploy_remote_secret_side_channel($stopped);
 
             break;
         }
@@ -172,7 +192,7 @@ function deploy_remote_secret_sweep(callable $connection, array $ansibleCredenti
 
         $closed++;
         deploy_remote_secret_side_channel(
-            $seams['log'] ?? null,
+            $log,
             $state === VIRTUSPHERE_REMOTE_SECRET_REMOVED
                 ? 'Removed the ESXi access file that job ' . $jobId . ' left on the Ansible host.'
                 : 'The ESXi access file that job ' . $jobId . ' left was no longer on the Ansible host; its record is closed.'

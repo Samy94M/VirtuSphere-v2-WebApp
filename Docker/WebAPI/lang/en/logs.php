@@ -123,6 +123,7 @@ return [
     'eventcode_deploy_recovery_reviewed' => 'Recovery reviewed',
     'eventcode_deploy_remote_cleanup_retried' => 'Remote cleanup retried',
     'eventcode_deploy_remote_secret_cleared' => 'Access file cleared later',
+    'eventcode_deploy_remote_secret_acknowledged' => 'Access file confirmed removed by hand',
     'eventcode_deploy_retried' => 'Job retried',
     'eventcode_deploy_supervisor_contract_switched' => 'Supervisor contract switched',
     'eventcode_deploy_vlan_reassigned' => 'VLAN reassigned',

@@ -44,6 +44,72 @@ SH;
     return 'sh -c ' . ansible_sh_quote(ansible_embedded_script_source($source)) . ' 2>&1';
 }
 
+/** The unit that removes stale accounts.yml on the Ansible host (K21-F). */
+const VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_TIMER = 'virtusphere-secret-cleanup.timer';
+
+/**
+ * Probe for the timer hint of the preflight (component secret-cleanup). It asks
+ * systemctl unprivileged and prints exactly one verdict line, then exits 0.
+ *
+ * What the mapping rests on, and what is NOT verified here:
+ *
+ * systemctl is-enabled prints one word per unit state, as the systemd manual
+ * lists them: enabled, enabled-runtime, linked, linked-runtime, alias, masked,
+ * masked-runtime, static, indirect, disabled, generated, transient, bad and
+ * not-found. The verdict is mapped like this:
+ *
+ *   enabled                                      -> enabled
+ *   disabled, not-found                          -> missing
+ *   a message containing "No such file" or
+ *   "does not exist" (the error text for an
+ *   absent unit file, as older systemd builds
+ *   print it on stderr)                          -> missing
+ *   masked, every other word, empty output,
+ *   a host without systemctl, and output from a
+ *   system that is not booted with systemd       -> unknown
+ *
+ * The exit status is ignored on purpose: is-enabled exits non-zero for every
+ * state except enabled, so only the printed text carries the verdict.
+ *
+ * NOT verified here: the exact output of a given systemd version on the Ubuntu
+ * host. The test containers have no systemd, so the mapping is proven with a
+ * fake systemctl only (unit test). The lab confirmation on the real host stays
+ * open and is not claimed by this code.
+ */
+function ansible_secret_cleanup_probe_source(): string
+{
+    $source = <<<'SH'
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo '{marker} unknown'
+    exit 0
+fi
+out=$(systemctl is-enabled {timer} 2>&1)
+case "$out" in
+    enabled) state=enabled ;;
+    disabled | not-found) state=missing ;;
+    *'No such file'* | *'does not exist'*) state=missing ;;
+    *) state=unknown ;;
+esac
+echo '{marker} '"$state"
+exit 0
+SH;
+
+    return str_replace(
+        ['{marker}', '{timer}'],
+        [VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_MARKER, VIRTUSPHERE_ANSIBLE_SECRET_CLEANUP_TIMER],
+        ansible_embedded_script_source($source)
+    );
+}
+
+/**
+ * The timer-hint probe as one remote command: the source quoted for `sh -c`,
+ * like the async workspace probe. Wrapped by the caller in `{ ...; || true; }`.
+ */
+function ansible_secret_cleanup_probe_command(): string
+{
+    return 'sh -c ' . ansible_sh_quote(ansible_secret_cleanup_probe_source()) . ' 2>&1';
+}
+
 /**
  * Normalizes an embedded script to LF before it is quoted into a remote command.
  *

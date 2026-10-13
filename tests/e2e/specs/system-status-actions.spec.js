@@ -19,6 +19,8 @@ $db->query("DELETE l FROM deploy_logs l INNER JOIN deploy_credentials c ON l.log
 $db->query("DELETE FROM deploy_jobs WHERE credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%') OR credential_ansible_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%') OR mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
 $db->query("DELETE FROM deploy_ansible_preflight_state WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
 $db->query("DELETE FROM deploy_esxi_inventory_state WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_remote_secret_files WHERE target_host LIKE '${MARK}%'");
+$db->query("DELETE FROM deploy_logs WHERE event_code = 'deploy.remote_secret_acknowledged' AND context_json LIKE '%${MARK}%'");
 $db->query("DELETE FROM deploy_credentials WHERE name LIKE '${MARK}%'");
 $db->query("DELETE FROM deploy_vlan WHERE vlan_name LIKE 'E2EVLAN-%'");
 $db->query("DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
@@ -397,4 +399,88 @@ $db->query("DELETE FROM deploy_logs WHERE event_code = 'deploy.recovery_reviewed
 echo 'CLEANED';
 `);
   reset();
+});
+
+// K21-F: the acknowledgement of the ESXi access files left on an Ansible host. The notice on the
+// status page and the line on the credentials page carry the same form. Cancel changes nothing, a
+// reason below the minimum is refused by the server, and a confirmation with a reason closes every
+// open file of the target and writes one audit row.
+// e2e-covers: system_status.php:remote_secret_acknowledge
+// e2e-covers-cancel: system_status.php:remote_secret_acknowledge
+test('remote_secret_acknowledge: Cancel changes nothing, a short reason is refused, Confirm closes the open files and audits them', async ({ page }) => {
+  const seed = phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$credential = repo_create_credential($db, [
+    'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE,
+    'name' => '${MARK}-ansible-secret',
+    'host' => '${MARK}-secret.invalid',
+    'port' => 22,
+    'username' => 'ansible',
+], 'secret123', $admin);
+$db->query("UPDATE deploy_credentials SET ansible_host_fingerprint = 'SHA256:e2eint' WHERE id = " . $credential);
+// Two files uploaded two days ago. No job row of these ids exists, so no job can still own them.
+for ($i = 0; $i < 2; $i++) {
+    $db->query("INSERT INTO deploy_remote_secret_files (job_id, credential_ansible_id, remote_dir, target_host, target_port, target_fingerprint, uploaded_at) VALUES (" . (1900000100 + $i) . ", " . $credential . ", '/tmp/${MARK}/job-" . $i . "', '${MARK}-secret.invalid', 22, 'SHA256:e2eint', NOW(6) - INTERVAL 2 DAY)");
+}
+echo 'JSON' . json_encode(['credential' => $credential]) . 'JSON';
+`, ['lib/repo/credentials.php']);
+
+  const openRows = () => phpJson(`
+$db = db();
+$c = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_remote_secret_files WHERE target_host = '${MARK}-secret.invalid'")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['c' => $c]) . 'JSON';
+`).c;
+  const audited = () => phpJson(`
+$db = db();
+$c = (int) $db->query("SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = 'deploy.remote_secret_acknowledged' AND context_json LIKE '%${MARK}-secret.invalid%'")->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['c' => $c]) . 'JSON';
+`).c;
+
+  // The credentials page shows the same open files under the credential, at the anchor the lock message links to.
+  await page.goto('credentials.php');
+  await expect(page.locator(`#remote-secret-${Number(seed.credential)}`)).toContainText(/2 Zugangsdateien|2 access files/);
+
+  await page.goto('system_status.php');
+  const group = page.locator('[data-remote-secret-files] [data-remote-secret-group]').filter({ hasText: `${MARK}-ansible-secret` });
+  await expect(group, 'two overdue files on an Ansible host raise the notice').toBeVisible();
+  const form = group.locator('form');
+  const reason = form.locator('textarea[name="reason"]');
+  await expect(reason).toHaveAttribute('required', '');
+  const submit = form.getByRole('button', { name: /Von Hand entfernt bestätigen|Confirm removed by hand/ });
+  const dialog = page.locator('[data-confirm-dialog]');
+
+  // Cancel changes nothing, proven by the database.
+  await reason.fill('Von Hand entfernt, Host außer Betrieb.');
+  await submit.click();
+  await expect(dialog, 'the acknowledgement asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(openRows(), 'Cancel kept both files open').toBe(2);
+  expect(audited(), 'Cancel writes no audit row').toBe(0);
+
+  // A reason below the minimum is refused by the server: nothing closes and nothing is audited.
+  await reason.fill('kurz');
+  await submit.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('credentials.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page.locator('.alert-error').first()).toContainText(/mindestens \d+ Zeichen|at least \d+ characters/);
+  expect(openRows(), 'a refused reason closes nothing').toBe(2);
+  expect(audited(), 'a refused reason writes no audit row').toBe(0);
+
+  // A confirmation with a reason closes both files and writes exactly one audit row.
+  await reason.fill('Von Hand entfernt, Host außer Betrieb.');
+  await submit.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('credentials.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page).toHaveURL(/system_status\.php$/);
+  await expect(page.locator('.alert-success').first()).toContainText(/bestätigt und protokolliert|confirmed as removed by hand/);
+  expect(openRows(), 'the confirmation closed both files').toBe(0);
+  expect(audited(), 'the confirmation is audited once').toBe(1);
 });

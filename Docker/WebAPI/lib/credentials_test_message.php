@@ -138,3 +138,65 @@ function credentials_test_action(array $result): ?array
 
     return null;
 }
+
+/**
+ * The line a passed test adds about the ESXi access files it swept (K21-F).
+ * Null when there is nothing to say: no row was closed and none was left.
+ * Information only, never a verdict: the traffic light comes from the test alone.
+ *
+ * @param array{closed: int, aborted: bool} $sweep
+ * @return array{type: string, message: string}|null
+ */
+function credentials_test_secret_sweep_notice(array $sweep): ?array
+{
+    $closed = (int) ($sweep['closed'] ?? 0);
+    if (!empty($sweep['aborted'])) {
+        return ['type' => 'info', 'message' => __t('ansible_test.sweep_aborted', ['count' => $closed])];
+    }
+    if ($closed > 0) {
+        return ['type' => 'info', 'message' => __t('ansible_test.sweep_closed', ['count' => $closed])];
+    }
+
+    return null;
+}
+
+/**
+ * The timer hint of a passed test (K21-F). Only a MISSING timer is named: an
+ * installed timer and an unreadable state say nothing, so the page does not
+ * repeat a healthy fact on every test.
+ *
+ * @return array{type: string, message: string}|null
+ */
+function credentials_test_secret_cleanup_notice(string $state): ?array
+{
+    if ($state !== 'missing') {
+        return null;
+    }
+
+    return ['type' => 'info', 'message' => __t('ansible_test.secret_cleanup_missing')];
+}
+
+/**
+ * The follow-up sentences of a test result, for the page to show as info flashes
+ * after the verdict (F-UI calls it only once the evidence is stored). Empty when
+ * there is nothing to say.
+ *
+ * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>, secret_sweep?: array{closed: int, aborted: bool}} $result
+ * @return list<string>
+ */
+function credentials_test_followup_notices(array $result): array
+{
+    $notices = [];
+    if (isset($result['secret_sweep'])) {
+        $sweep = credentials_test_secret_sweep_notice($result['secret_sweep']);
+        if ($sweep !== null) {
+            $notices[] = $sweep['message'];
+        }
+    }
+    $cleanup = credentials_test_secret_cleanup_notice((string) ($result['context']['secret_cleanup'] ?? ''));
+    if ($cleanup !== null) {
+        $notices[] = $cleanup['message'];
+    }
+
+    return $notices;
+}

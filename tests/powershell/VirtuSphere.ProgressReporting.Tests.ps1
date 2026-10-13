@@ -153,6 +153,15 @@ Describe 'Visible progress reporting contract' {
         $registerSection | Should -Not -Match '\$failed\s*=\s*\$true'
     }
 
+    It 'reports every host cleanup case before and after it and streams the gate live' {
+        $probe = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'tests/host-cleanup/host-cleanup-probe.sh') -Raw
+        $probe | Should -Match '\[0/\$TOTAL\] START'
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] RUN '
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] PASS '
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] FAIL '
+        $script:FastGates | Should -Match "host-cleanup-probe\.sh', '/repo/Ansible/host-cleanup'\) -Live"
+    }
+
     It 'reports and streams every create async production sample' {
         $script:CreateAsyncContract | Should -Match 'for index, \(label, case\) in enumerate\(cases, start=1\)'
         $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] RUN \{label\}"'

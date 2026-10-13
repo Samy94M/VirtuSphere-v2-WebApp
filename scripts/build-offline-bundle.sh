@@ -361,6 +361,15 @@ Alle Schritte laufen ohne Internetzugang.
    Der anschliessende lesende Preflight braucht den am Standort freigegebenen
    Mindestwert: `python3 ~/.local/libexec/virtusphere/virtusphere_remote_preflight.py --required-free-bytes <standortfreigabe>`.
    Sein JSON ist Evidenz fuer 8R-S, keine Freigabe aus sich selbst.
+6a. Den Aufraeum-Timer fuer verwaiste Zugangsdateien einmalig installieren
+   (als root, auf dem Ansible-Host; `<ansible-konto>` ist das Linux-Konto des
+   Ansible-Zugangs, unter dem die Auftraege laufen):
+   `sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>`
+   Der Timer loescht nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die
+   aelter als 24 h und nicht gesperrt sind. Er ist die Sicherung fuer Dateien,
+   die kein Auftrag mehr erreicht; die Bereinigung durch die Auftraege bleibt
+   unveraendert. Die Installation braucht kein Netz, installiert kein Paket und
+   ist wiederholbar. Status: `systemctl status virtusphere-secret-cleanup.timer`.
 7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
    Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
    mit `virtusphere/docs/operations/go-live.md`. Der Kernlauf lädt und startet

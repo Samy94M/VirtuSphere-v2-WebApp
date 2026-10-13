@@ -433,4 +433,13 @@ return [
     'inv_datacenter_resolution_unsupported' => 'The datacenter query contains no supported object name.',
     'inv_datacenter_resolution_timestamp_invalid' => 'The positive datacenter timestamp is missing, unreadable, or in the future.',
     'inv_unsupported_name' => 'Unsupported boundary whitespace, :count characters',
+    // K21-F: the notice above the overview (lib/system_status_remote_secret_notice.php).
+    'remote_secret_notice_title' => 'Access files on Ansible hosts are still open',
+    'remote_secret_group_line' => 'Credential :name, target :target, :files, oldest from :oldest. :reason',
+    'remote_secret_group_line_orphan' => 'Deleted credential, target :target, :files, oldest from :oldest. :reason',
+    'remote_secret_reason_overdue' => 'The oldest access file has been there for more than :hours hours.',
+    'remote_secret_reason_orphaned' => 'The credential is deleted, so no job can remove the access files any more.',
+    'remote_secret_reason_moved' => 'The credential now points to another target, so no job can remove the access files here any more.',
+    'remote_secret_remedy' => 'A job or an access test removes the access files as long as the credential points to this target. If they were removed by hand or the host is out of service, confirm it with a reason.',
+    'remote_secret_password_hint' => 'Recommendation: change the ESXi password, because the access files contained it.',
 ];

@@ -84,7 +84,8 @@ flowchart TD
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht oder nicht als Ansible-Host freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
-  H --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
+  H --> SW["Liegengebliebene accounts.yml früherer Aufträge desselben Zugangs auf diesem Ziel entfernen (nächster Kontakt, bricht den Auftrag nicht ab)"]
+  SW --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
   M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
@@ -130,7 +131,7 @@ flowchart TD
   STX --> Z
   CX --> Z
   EMX --> Z
-  Z --> FIN["Auf jedem Weg (finally): Arbeitsverzeichnisse auf dem Ansible-Host und lokal löschen, außer ein Schritt läuft dort noch"]
+  Z --> FIN["Ab den vorbereiteten Dateien, auf jedem Weg (finally): accounts.yml auf dem Ansible-Host entfernen; Arbeitsverzeichnisse dort und lokal löschen, außer ein Schritt läuft dort noch"]
 ```
 
 ## Create je VM

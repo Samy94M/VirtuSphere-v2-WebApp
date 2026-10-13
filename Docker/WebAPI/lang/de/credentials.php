@@ -106,4 +106,20 @@ return [
     // Der Abruf ist ein Bereitstellungsauftrag: ohne laufenden Deploy-Dienst wird
     // er eingereiht und nie ausgeführt.
     'cadence_esxi_no_worker' => 'kein automatischer Abruf, der Bereitstellungsdienst läuft nicht',
+    // K21-F: open ESXi access files of an Ansible target (shared form, credentials row, notice).
+    'remote_secret_count_one' => '1 Zugangsdatei',
+    'remote_secret_count_other' => ':count Zugangsdateien',
+    'remote_secret_open_line' => 'Ziel :target, :files ohne bestätigtes Entfernen, älteste vom :oldest.',
+    'remote_secret_no_permission' => 'Bestätigen können nur Benutzer mit der Berechtigung Zugangsdaten verwalten.',
+    'remote_secret_reason_label' => 'Begründung',
+    'remote_secret_reason_hint' => 'Die Begründung wird protokolliert.',
+    'remote_secret_acknowledge_submit' => 'Von Hand entfernt bestätigen',
+    'remote_secret_acknowledge_confirm' => 'Ist die Zugangsdatei auf :name von Hand entfernt oder der Host außer Betrieb? Alle offenen Einträge für :name werden dann geschlossen und protokolliert.',
+    'remote_secret_open_action' => 'Zugangsdateien prüfen',
+    // The refusal of a target change or delete (lib/repo/deploy_remote_secret_fence.php). Host and port are
+    // separate placeholders on purpose: ":host:port" would eat the separator when the placeholders are replaced.
+    'remote_secret_fence' => 'Auf dem Ansible-Host :host (Port :port) sind offene Zugangsdateien ohne bestätigtes Entfernen vorhanden (:count, älteste vom :oldest). Ziel, Typ und Host-Schlüssel bleiben gesperrt; Passwort, Benutzername und Name lassen sich weiter ändern.',
+    'remote_secret_reason_required' => 'Bitte begründen Sie mit mindestens :min Zeichen, warum die Zugangsdatei entfernt ist oder der Host außer Betrieb ist.',
+    'remote_secret_acknowledged' => 'Die Zugangsdateien auf :target sind als von Hand entfernt bestätigt und protokolliert.',
+    'remote_secret_nothing_open' => 'Für :target gibt es keine offenen Zugangsdateien mehr. Es wurde nichts geändert.',
 ];

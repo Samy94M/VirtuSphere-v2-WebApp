@@ -46,6 +46,10 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_pinned_collection_versions',
         'ansible_runtime_version_probe_command',
         'ansible_async_workspace_probe_command',
+        // K21-F: the timer hint of the preflight (component secret-cleanup), its
+        // embedded probe and the reader of its verdict line.
+        'ansible_secret_cleanup_probe_source',
+        'ansible_secret_cleanup_probe_command',
         'ansible_embedded_script_source',
         'ansible_collection_probe_command',
         'ansible_preflight_command',
@@ -54,6 +58,7 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_preflight_allowlist_verdict',
         'ansible_preflight_failed_component',
         'ansible_preflight_strip_markers',
+        'ansible_secret_cleanup_timer_state',
         'ansible_sh_quote',
         // Etappe 14B-E: the four control calls of one create unit. They are
         // remote commands like the sequence steps above and belong to the same

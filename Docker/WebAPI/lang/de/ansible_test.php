@@ -11,4 +11,7 @@ return [
     'cadence' => 'Automatisch im Abstand von :hours h, sobald der Dienst frei und die Auftragsannahme aktiv ist; Nachweis :days Tage gültig. Manueller Volltest weiterhin möglich.',
     'cadence_off' => 'Automatischer Volltest ausgeschaltet; manuell auf Klick. Nachweis :days Tage gültig.',
     'help' => 'Unter Einstellungen → Kataloge und Inventar ändern Benutzer mit Einstellungsberechtigung das Prüfintervall. Ohne bisherigen Test ist ein Zugang beim nächsten freien Durchlauf fällig. Bei ausgelastetem, pausiertem oder gestopptem Bereitstellungsdienst verschiebt sich der Start. Nach einer Änderung der Zugangsdaten ist ein neuer Test fällig. Ein neueres Testergebnis oder eine neuere Konfiguration kann nicht durch eine ältere Prüfung überschrieben werden. Ergebnisse stehen im Systemstatus und in den Prüfprotokollen; automatische Prüfungen sind dort gekennzeichnet. Ein Deploy ersetzt diesen Volltest nicht.',
+    'sweep_closed' => 'Entfernte ESXi-Zugangsdateien früherer Aufträge: :count.',
+    'sweep_aborted' => 'Aufräumen früherer ESXi-Zugangsdateien abgebrochen (vorher entfernt: :count). Der Rest folgt beim nächsten Kontakt mit diesem Ansible-Host.',
+    'secret_cleanup_missing' => 'Der Timer virtusphere-secret-cleanup.timer fehlt auf dem Ansible-Host. Zugangsdateien abgebrochener Aufträge bleiben dort, bis ein Kontakt sie entfernt. Einmalige Einrichtung durch einen Administrator aus dem Offline-Bundle.',
 ];
