@@ -335,6 +335,32 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'Ausgabe kommt ohne PYTHONUNBUFFERED gesammelt, mit ihr laufend' 'Buffering-Vertrag der Playbookausgabe verletzt'
     }
 
+    Add-Gate -Name 'ansible-vars-files-lifetime' -Lanes $allLanes -Kind 'container' -Body {
+        # K21 loescht accounts.yml (ESXi-Passwort) an jedem Auftragsende, auch
+        # unter einem Schritt, der nicht zurueckgemeldet hat. Die erste
+        # Begruendung ("vars_files beim Play-Start gelesen") hat die
+        # Astra-Pruefung vom 12.10.2026 widerlegt. Zulaessig ist das Loeschen nur
+        # wegen zweier Tatsachen der Ansible-Laufzeit, die diese Probe misst:
+        # vars_files wird je Task neu gelesen (fehlt die Datei, sind die Werte
+        # ab dem naechsten Task undefiniert, auch im always), und ein Playbook
+        # ohne lesenden Kanal endet an seiner naechsten Ausgabe. Ein
+        # Ansible-Update kann beides lautlos aendern; dann ist die Begruendung im
+        # Amendment ADR-0041 neu zu lesen, nicht die Probe.
+        #
+        # Jeder Fall hat seinen Kontrollfall (ohne Loeschen liest das Playbook
+        # den Wert, mit Leser erreicht es den Marker). Ohne ihn bewiese ein
+        # Playbook, das ohnehin nie liest, gar nichts. Kein ESXi, kein Netz.
+        $probe = Join-Path $repoRoot 'Docker/qa-ansible/vars-files-lifetime-probe.py'
+        if (-not (Test-Path $probe)) { return New-InfraResult 'vars-files-lifetime-probe.py fehlt unter dem Pruef-Root (Zero-Match)' }
+        if (-not (Test-DockerImage $toolImages.ansible)) {
+            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+        }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/vars-files-lifetime-probe.py')
+        if ($r.ExitCode -eq 2) { return New-InfraResult 'vars_files-Probe ohne brauchbare Umgebung (Fixture, ansible-playbook oder Kontrollfall)' $r.Output }
+        Format-ToolResult $r 'vars_files je Task gelesen, Playbook ohne Leser endet vor dem naechsten Task' 'Grundlage des Loeschens von accounts.yml verletzt'
+    }
+
     Add-Gate -Name 'yaml-roundtrip' -Lanes $allLanes -Kind 'container' -Body {
         # Golden-Mission semantisch durch den echten PyYAML-Loader (AP5): PHP
         # rendert die feindliche Fixture mit den Produktions-Generatoren,

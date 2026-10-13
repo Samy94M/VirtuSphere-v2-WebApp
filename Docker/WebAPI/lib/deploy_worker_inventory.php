@@ -16,7 +16,8 @@ require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
-require_once __DIR__ . '/deploy_remote_secret.php';
+require_once __DIR__ . '/deploy_remote_secret_sweep.php';
+require_once __DIR__ . '/deploy_worker_cleanup.php';
 
 /**
  * The ESXi inventory processor: the mission-less system job (ADR-0023).
@@ -117,7 +118,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         }
 
         // K21: leftovers of earlier jobs of this Ansible credential; never throws.
-        deploy_remote_secret_sweep($channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, null, static fn (string $line) => $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line));
+        deploy_remote_secret_sweep(static fn (): mysqli => $channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, deploy_worker_remote_secret_seams($channel));
 
         $phase = VIRTUSPHERE_DEPLOY_PHASE_CONFIG;
         $artifacts = ansible_prepare_inventory_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);

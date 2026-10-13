@@ -50,11 +50,11 @@ final class DeployTerminalCleanupTest extends TestCase
                 deploy_worker_cleanup_remote_dir($channel, ['host' => 'never-connect.example.invalid'], 'unused-fixture-secret', '/tmp/virtusphere-cleanup-never-created', false, static function (array $credential, string $secret, string $command, int $timeout = 20) use (&$commands): array {
                     $commands[] = $command;
 
-                    return ['exit_code' => 0, 'output' => ''];
+                    return ['exit_code' => 0, 'output' => "VIRTUSPHERE_REMOTE_SECRET removed\n"];
                 });
             });
         }
-        self::assertSame(["rm -f -- '/tmp/virtusphere-cleanup-never-created/accounts.yml'"], $commands);
+        self::assertSame([ansible_remote_secret_remove_command('/tmp/virtusphere-cleanup-never-created')], $commands);
         self::assertSame($before, $this->snapshot($jobId));
         self::assertSame('uncertain', repo_deploy_create_results($this->db, $jobId)[0]['status']);
         self::assertStringContainsString('Remote job directory left in place', $diagnostic);
@@ -83,8 +83,10 @@ final class DeployTerminalCleanupTest extends TestCase
         }
         self::assertSame($before, $this->snapshot($jobId));
         self::assertSame([], repo_deploy_create_results($this->db, $jobId));
-        // K21: a failed removal of an idle host is reported by the release, which names the next contact.
-        self::assertStringContainsString('will be removed at the next contact with this Ansible host', $cleanup->diagnostic);
+        // K21: a failed removal of an idle host is reported by the release. The next
+        // contact removes only accounts.yml, so the line must not promise the directory.
+        self::assertStringContainsString('Its ESXi access file will be removed at the next contact; the rest of the directory stays.', $cleanup->diagnostic);
+        self::assertStringNotContainsString('It will be removed at the next contact', $cleanup->diagnostic);
         self::assertSame(0, $channel->spooledLineCount());
     }
 

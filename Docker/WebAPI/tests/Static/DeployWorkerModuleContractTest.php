@@ -143,6 +143,8 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_esxi_write_preflight',
         'deploy_worker_process_inventory_job',
         'deploy_worker_cleanup_remote_dir',
+        // K21-A3: heartbeat and job-log line of the remote secret sweep through the DB channel.
+        'deploy_worker_remote_secret_seams',
         'deploy_worker_credential',
         'deploy_worker_log_stream_chunk',
         'deploy_worker_log_stream_flush',

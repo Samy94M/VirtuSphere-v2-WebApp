@@ -338,17 +338,31 @@ function ansible_remote_cleanup_command(string $remoteDir): string
     return 'rm -rf -- ' . ansible_sh_quote($remoteDir);
 }
 
+/** K21: the state line of a confirmed removal of accounts.yml; lib/deploy_remote_secret.php reads it. */
+const VIRTUSPHERE_REMOTE_SECRET_STATE_PREFIX = 'VIRTUSPHERE_REMOTE_SECRET';
+const VIRTUSPHERE_REMOTE_SECRET_REMOVED = 'removed';
+const VIRTUSPHERE_REMOTE_SECRET_ABSENT = 'absent';
+
 /**
- * K21 (VT-04): removes the ESXi access file accounts.yml and nothing else. The
- * one command that deletes it outside a sequence step: the directory is left
- * alone because an uncertain create unit keeps its async state there. Refuses a
- * remote directory that is not absolute or that traverses before it is quoted.
+ * K21 (VT-04): the one command that removes the ESXi access file accounts.yml.
+ * The file form removes the file and nothing else, because an uncertain create
+ * unit keeps its async state in the directory; $wholeDir removes the job
+ * directory of a provably idle host. Only after a successful removal it prints
+ * one state line: "removed" when the file was there, "absent" when it was already
+ * gone. `rm -f` answers 0 for a path that does not exist, so exit 0 alone cannot
+ * tell a removed file from a host that never had it. Refuses a remote directory
+ * that is not absolute or that traverses before it is quoted.
  */
-function ansible_remote_secret_remove_command(string $remoteDir): string
+function ansible_remote_secret_remove_command(string $remoteDir, bool $wholeDir = false): string
 {
     ansible_create_assert_remote_dir($remoteDir);
+    $dir = rtrim($remoteDir, '/');
+    $file = ansible_sh_quote($dir . '/accounts.yml');
 
-    return 'rm -f -- ' . ansible_sh_quote(rtrim($remoteDir, '/') . '/accounts.yml');
+    return 'if [ -e ' . $file . ' ] || [ -L ' . $file . ' ]; then s=' . VIRTUSPHERE_REMOTE_SECRET_REMOVED
+        . '; else s=' . VIRTUSPHERE_REMOTE_SECRET_ABSENT . '; fi; '
+        . ($wholeDir ? 'rm -rf -- ' . ansible_sh_quote($dir) : 'rm -f -- ' . $file)
+        . ' && echo "' . VIRTUSPHERE_REMOTE_SECRET_STATE_PREFIX . ' $s"';
 }
 
 /** Writing follows the real playbook sequence; system inventory and export read. */

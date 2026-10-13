@@ -21,7 +21,7 @@ require_once __DIR__ . '/deploy_worker_step_failure.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
 require_once __DIR__ . '/deploy_worker_create.php';
 require_once __DIR__ . '/deploy_worker_cleanup.php';
-require_once __DIR__ . '/deploy_remote_secret.php';
+require_once __DIR__ . '/deploy_remote_secret_sweep.php';
 
 /**
  * The mission deploy processor: preflight, artifact preparation, the autostart
@@ -110,7 +110,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // nothing, so its failure must not repaint a VM either.
         deploy_worker_run_host_preflight($channel, $job, $workerId, $ansibleCredential, $ansibleSecret, $apiBaseUrl, $heartbeatOnSilence, $options);
         // K21: leftovers of earlier jobs of this Ansible credential; never throws.
-        deploy_remote_secret_sweep($channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, null, static fn (string $line) => $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $line));
+        deploy_remote_secret_sweep(static fn (): mysqli => $channel->connection(), $ansibleCredential, $ansibleSecret, $jobId, deploy_worker_remote_secret_seams($channel));
 
         $priorLifecycles = deploy_worker_mark_vms_deploying($channel->connection(), $job, 'deploy job ' . $jobId . ' started', $vmIds);
         $vmsMarked = true;

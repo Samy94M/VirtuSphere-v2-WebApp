@@ -1,0 +1,35 @@
+---
+# Fixture des vars_files-Beweises (QA-Werkzeug, wird nicht ausgeliefert;
+# Gate ansible-vars-files-lifetime, Treiber vars-files-lifetime-probe.py).
+#
+# Bindet accounts.yml genau so ein wie die ESXi-Playbooks (vars_files:
+# ./accounts.yml) und liest den Wert vor dem Loeschen, im block und im always.
+# Geloescht wird nur mit -e vs_delete=true; ohne den Schalter ist es der
+# Kontrollfall, der zeigt, dass Block und always den Wert sonst lesen. Kein
+# ESXi, keine Collection, kein Netz; der Treiber legt eine Kopie samt
+# accounts.yml in ein eigenes Temp-Verzeichnis.
+- name: Lebensdauer einer vars_files-Datei im laufenden Play messen
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./accounts.yml
+  tasks:
+    - name: Wert vor dem Loeschen
+      ansible.builtin.debug:
+        msg: "vs-before={{ esxi_password }}"
+
+    - name: Zugangsdatei entfernen (nur im Prueffall)
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/accounts.yml"
+        state: absent
+      when: vs_delete | default(false) | bool
+
+    - name: Wert nach dem Loeschen
+      block:
+        - name: Wert im block
+          ansible.builtin.debug:
+            msg: "vs-block={{ esxi_password }}"
+      always:
+        - name: Wert im always
+          ansible.builtin.debug:
+            msg: "vs-always={{ esxi_password }}"

@@ -454,6 +454,27 @@ pass, and the gate would guard nothing. If the control case ever goes green-by-
 buffering-no-more, the runtime changed and the plan's premise needs re-reading -
 that is not a threshold to raise.
 
+**`ansible-vars-files-lifetime` (Fast lane, containerised, K21).** K21 removes
+`accounts.yml` (the ESXi password) at every job end, also under a step that
+never returned. The first reasoning, that a running playbook read its
+`vars_files` at play start, was refuted by the Astra review of 12.10.2026.
+`Docker/qa-ansible/vars-files-lifetime-probe.py` measures the two facts that
+carry the removal instead, without ESXi and without the network, each with a
+control case. First, with `vars_files: ./accounts.yml` as in the ESXi
+playbooks, a task that deletes the file makes the value undefined in the next
+task of a `block` and in its `always`; without the deletion both read it. On
+the pinned image (ansible-core 2.19.11) the deleting run ended with exit code 2
+and six "'esxi_password' is undefined" lines. Second, with
+`PYTHONUNBUFFERED=1` and stderr on stdout as in the production command, a
+playbook whose reader closes the pipe after the first output ends with exit
+code 1 before its marker task runs; with a reader that stays, the marker is
+written. A red case means the runtime changed (it caches `vars_files` again or
+survives a broken pipe): the reasoning in the ADR-0041 amendment of 2026-10-12
+and in webapi R15 has to be re-read, not the probe adjusted. A failing control
+case is an `infrastructure_error`. The probe uses a local pipe, not sshd; that
+sshd closes the child's stdout without a HUP is reading, not measurement
+(FM-03).
+
 **`CreateFlowBaselineContractTest`.** Six facts, each written first as the
 starting point and then rewritten by the sub-stage that changed it, which is how
 the file reads today: create is no longer a step of the remote sequence at all

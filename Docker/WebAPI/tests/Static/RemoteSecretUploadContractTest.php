@@ -20,6 +20,9 @@ final class RemoteSecretUploadContractTest extends TestCase
     private const UPLOAD = 'ssh_sftp_upload_directory';
     private const REMEMBER = 'deploy_remote_secret_remember';
     private const SWEEP = 'deploy_remote_secret_sweep';
+    private const RELEASE = 'deploy_remote_secret_release';
+    private const WORKER_CLEANUP = 'deploy_worker_cleanup_remote_dir';
+    private const PREFLIGHT_COMMAND = 'ansible_preflight_command';
     private const REMOTE_INVENTORY_UPLOAD = 'remote_inventory_upload';
     private const COMMAND_MODULE = 'lib/ansible_command_modes.php';
     private const CREATE_CONTROL_MODULE = 'lib/ansible_command_create.php';
@@ -97,6 +100,170 @@ final class RemoteSecretUploadContractTest extends TestCase
             $files,
             'The inventory worker does not call deploy_remote_secret_sweep(); a leftover file would wait for a contact that never comes.'
         );
+    }
+
+    /**
+     * K21-A5, rule 1: a function that remembers an upload answers for it in its
+     * own finally block, through the release or the worker cleanup that calls it.
+     * Without the finally a thrown step would leave the file for the next contact
+     * although this job could still have removed it.
+     */
+    public function testEveryLibFunctionThatRemembersAnUploadReleasesItInAFinallyBlock(): void
+    {
+        $analysis = self::libFinallyAnalysis();
+
+        self::assertNotSame([], $analysis, 'Zero match: no function under lib/ calls deploy_remote_secret_remember(), so this rule would pass on nothing.');
+        $unanswered = array_keys(array_filter($analysis, static fn (bool $answered): bool => !$answered));
+        self::assertSame(
+            [],
+            $unanswered,
+            'These functions call deploy_remote_secret_remember() without deploy_remote_secret_release() or '
+                . 'deploy_worker_cleanup_remote_dir() inside a finally block of the same function: ' . implode(', ', $unanswered)
+        );
+    }
+
+    /**
+     * K21-A5, rule 2: the sweep runs after the host preflight (a host that failed
+     * it is not asked to remove anything) and before the first remember of the
+     * same function (the current job's own row is not a leftover). The preflight
+     * anchors are derived: ansible_preflight_command() and every lib function
+     * that calls it.
+     */
+    public function testEverySweepCallFollowsTheHostPreflightAndPrecedesTheFirstRemember(): void
+    {
+        $analysis = self::libSweepOrderAnalysis();
+
+        self::assertNotSame([], $analysis, 'Zero match: no function under lib/ calls deploy_remote_secret_sweep(), so this rule would pass on nothing.');
+        $misplaced = [];
+        foreach ($analysis as $caller => $order) {
+            if (!$order['after_preflight'] || !$order['before_remember']) {
+                $misplaced[] = $caller . ($order['after_preflight'] ? '' : ' (before the host preflight)')
+                    . ($order['before_remember'] ? '' : ' (after the first remember)');
+            }
+        }
+        self::assertSame([], $misplaced, 'The remote secret sweep is misplaced in: ' . implode(', ', $misplaced));
+    }
+
+    public function testTheFinallyScannerAcceptsOnlyAReleaseInsideAFinallyOfTheSameFunction(): void
+    {
+        $source = <<<'PHP'
+<?php
+function answered(): void
+{
+    try {
+        deploy_remote_secret_remember($db, 1, 2, $dir);
+    } finally {
+        deploy_remote_secret_release($connection, $credential, $secret, 1, $dir, false);
+    }
+}
+function cleanedUp(): void
+{
+    try {
+        deploy_remote_secret_remember($db, 1, 2, $dir);
+    } finally {
+        deploy_worker_cleanup_remote_dir($channel, $credential, $secret, $dir, false);
+    }
+}
+function releasedOutsideFinally(): void
+{
+    deploy_remote_secret_remember($db, 1, 2, $dir);
+    deploy_remote_secret_release($connection, $credential, $secret, 1, $dir, false);
+}
+function releasedInACommentOnly(): void
+{
+    try {
+        deploy_remote_secret_remember($db, 1, 2, $dir);
+    } finally {
+        // deploy_remote_secret_release( is no call
+        $x = 1;
+    }
+}
+function neverRemembers(): void
+{
+    deploy_remote_secret_release($connection, $credential, $secret, 1, $dir, false);
+}
+PHP;
+
+        self::assertSame(
+            ['answered' => true, 'cleanedUp' => true, 'releasedOutsideFinally' => false, 'releasedInACommentOnly' => false],
+            self::finallyAnalysis($source)
+        );
+    }
+
+    /** Astra mutations 1 and 3: the real workers with the removal taken out of their finally block. */
+    public function testTheFinallyScannerCatchesTheRealWorkersWithTheirRemovalTakenOut(): void
+    {
+        $inventory = self::libSource('lib/deploy_worker_inventory.php');
+        $mission = self::libSource('lib/deploy_worker_mission.php');
+
+        self::assertTrue(self::finallyAnalysis($inventory)['deploy_worker_process_inventory_job'] ?? false, 'Zero match: the real inventory worker is not recognised as answered.');
+        self::assertTrue(self::finallyAnalysis($mission)['deploy_worker_process_job'] ?? false, 'Zero match: the real mission worker is not recognised as answered.');
+        self::assertFalse(
+            self::finallyAnalysis(self::withoutLinesCalling($inventory, self::RELEASE))['deploy_worker_process_inventory_job'] ?? true,
+            'The inventory worker without its release in finally must be reported.'
+        );
+        self::assertFalse(
+            self::finallyAnalysis(self::withoutLinesCalling($mission, self::WORKER_CLEANUP))['deploy_worker_process_job'] ?? true,
+            'The mission worker without its cleanup in finally must be reported.'
+        );
+    }
+
+    public function testTheSweepOrderScannerRejectsASweepBeforeThePreflightOrAfterTheFirstRemember(): void
+    {
+        $source = <<<'PHP'
+<?php
+function inOrder(): void
+{
+    deploy_worker_run_host_preflight($channel);
+    deploy_remote_secret_sweep($connection, $credential, $secret, 1);
+    deploy_remote_secret_remember($db, 1, 2, $dir);
+}
+function beforePreflight(): void
+{
+    deploy_remote_secret_sweep($connection, $credential, $secret, 1);
+    deploy_worker_run_host_preflight($channel);
+    deploy_remote_secret_remember($db, 1, 2, $dir);
+}
+function afterRemember(): void
+{
+    $command = ansible_preflight_command('');
+    deploy_remote_secret_remember($db, 1, 2, $dir);
+    deploy_remote_secret_sweep($connection, $credential, $secret, 1);
+}
+PHP;
+
+        self::assertSame(
+            [
+                'inOrder' => ['after_preflight' => true, 'before_remember' => true],
+                'beforePreflight' => ['after_preflight' => false, 'before_remember' => true],
+                'afterRemember' => ['after_preflight' => true, 'before_remember' => false],
+            ],
+            self::sweepOrderAnalysis($source, ['ansible_preflight_command', 'deploy_worker_run_host_preflight'])
+        );
+    }
+
+    /** Astra mutation 2: the real mission worker with its sweep moved before the preflight or behind the upload. */
+    public function testTheSweepOrderScannerCatchesTheRealMissionWorkerWithItsSweepMoved(): void
+    {
+        $mission = self::libSource('lib/deploy_worker_mission.php');
+        $anchors = self::preflightAnchors();
+        self::assertContains('deploy_worker_run_host_preflight', $anchors, 'Zero match: the mission preflight is not derived as an anchor.');
+        self::assertSame(['after_preflight' => true, 'before_remember' => true], self::sweepOrderAnalysis($mission, $anchors)['deploy_worker_process_job'] ?? null);
+
+        $lines = explode("\n", $mission);
+        $sweep = self::lineCalling($lines, self::SWEEP);
+        $preflight = self::lineCalling($lines, 'deploy_worker_run_host_preflight');
+        $upload = self::lineCalling($lines, self::UPLOAD);
+
+        $early = $lines;
+        unset($early[$sweep]);
+        array_splice($early, $preflight, 0, [$lines[$sweep]]);
+        self::assertFalse(self::sweepOrderAnalysis(implode("\n", $early), $anchors)['deploy_worker_process_job']['after_preflight']);
+
+        $late = $lines;
+        array_splice($late, $upload + 1, 0, [$lines[$sweep]]);
+        unset($late[$sweep]);
+        self::assertFalse(self::sweepOrderAnalysis(implode("\n", $late), $anchors)['deploy_worker_process_job']['before_remember']);
     }
 
     public function testNoLibFileOutsideTheCommandModuleBuildsARemovalOfAccountsYml(): void
@@ -430,5 +597,184 @@ PHP;
         }
 
         return null;
+    }
+
+    /** @return array<string, bool> "lib/file.php::function" => it releases in a finally block, for every function that remembers */
+    private static function libFinallyAnalysis(): array
+    {
+        $analysis = [];
+        foreach (self::libFiles() as $relative => $path) {
+            foreach (self::finallyAnalysis((string) file_get_contents($path)) as $function => $answered) {
+                $analysis[$relative . '::' . $function] = $answered;
+            }
+        }
+
+        return $analysis;
+    }
+
+    /**
+     * @return array<string, bool> function name => a release or worker cleanup call
+     *     stands inside a finally block of the same function, for every function
+     *     that calls deploy_remote_secret_remember()
+     */
+    private static function finallyAnalysis(string $source): array
+    {
+        if (!str_contains($source, self::REMEMBER)) {
+            return [];
+        }
+        $tokens = self::tokenize($source);
+        $functions = self::functionRanges($tokens);
+        $finallyBlocks = self::finallyBlocks($tokens);
+        $releases = [...self::callSites($tokens, self::RELEASE), ...self::callSites($tokens, self::WORKER_CLEANUP)];
+
+        $analysis = [];
+        foreach (self::callSites($tokens, self::REMEMBER) as $remember) {
+            $owner = self::enclosingFunction($functions, $remember);
+            if ($owner === null || isset($analysis[$owner['name']])) {
+                continue;
+            }
+            $answered = false;
+            foreach ($releases as $release) {
+                if ($release < $owner['start'] || $release > $owner['end']) {
+                    continue;
+                }
+                foreach ($finallyBlocks as [$open, $close]) {
+                    if ($release > $open && $release < $close) {
+                        $answered = true;
+                    }
+                }
+            }
+            $analysis[$owner['name']] = $answered;
+        }
+
+        return $analysis;
+    }
+
+    /** @return list<array{0: int, 1: int}> token indexes of the braces of every finally block */
+    private static function finallyBlocks(array $tokens): array
+    {
+        $blocks = [];
+        foreach ($tokens as $index => $token) {
+            if ($token[0] !== T_FINALLY) {
+                continue;
+            }
+            $open = self::nextSignificant($tokens, $index + 1);
+            if ($open === null || $tokens[$open][1] !== '{') {
+                continue;
+            }
+            $depth = 0;
+            for ($close = $open, $count = count($tokens); $close < $count; $close++) {
+                if ($tokens[$close][1] === '{' || $tokens[$close][0] === T_CURLY_OPEN || $tokens[$close][0] === T_DOLLAR_OPEN_CURLY_BRACES) {
+                    $depth++;
+                } elseif ($tokens[$close][1] === '}') {
+                    $depth--;
+                    if ($depth === 0) {
+                        break;
+                    }
+                }
+            }
+            $blocks[] = [$open, $close];
+        }
+
+        return $blocks;
+    }
+
+    /** @return array<string, array{after_preflight: bool, before_remember: bool}> "lib/file.php::function" for every sweep caller */
+    private static function libSweepOrderAnalysis(): array
+    {
+        $anchors = self::preflightAnchors();
+        $analysis = [];
+        foreach (self::libFiles() as $relative => $path) {
+            foreach (self::sweepOrderAnalysis((string) file_get_contents($path), $anchors) as $function => $order) {
+                $analysis[$relative . '::' . $function] = $order;
+            }
+        }
+
+        return $analysis;
+    }
+
+    /**
+     * The calls that mean "the host preflight ran", derived instead of listed:
+     * ansible_preflight_command() and every named lib function that calls it,
+     * except a function that sweeps itself. Such a function (the inventory job)
+     * is a subject of the rule, not a preflight: the mission worker dispatches to
+     * it long before its own preflight.
+     *
+     * @return list<string>
+     */
+    private static function preflightAnchors(): array
+    {
+        $files = self::libFiles();
+        $sweepers = array_map(static fn (string $caller): string => explode('::', $caller, 2)[1], self::callersOf(self::SWEEP, $files));
+        $anchors = [self::PREFLIGHT_COMMAND];
+        foreach (self::callersOf(self::PREFLIGHT_COMMAND, $files) as $caller) {
+            $function = explode('::', $caller, 2)[1];
+            if ($function !== '(file scope)' && !in_array($function, $sweepers, true)) {
+                $anchors[] = $function;
+            }
+        }
+
+        return array_values(array_unique($anchors));
+    }
+
+    /**
+     * @param list<string> $anchors
+     * @return array<string, array{after_preflight: bool, before_remember: bool}> function name => order of its first sweep call
+     */
+    private static function sweepOrderAnalysis(string $source, array $anchors): array
+    {
+        if (!str_contains($source, self::SWEEP)) {
+            return [];
+        }
+        $tokens = self::tokenize($source);
+        $functions = self::functionRanges($tokens);
+        $preflights = [];
+        foreach ($anchors as $anchor) {
+            $preflights = [...$preflights, ...self::callSites($tokens, $anchor)];
+        }
+        $remembers = self::callSites($tokens, self::REMEMBER);
+
+        $analysis = [];
+        foreach (self::callSites($tokens, self::SWEEP) as $sweep) {
+            $owner = self::enclosingFunction($functions, $sweep);
+            if ($owner === null || isset($analysis[$owner['name']])) {
+                continue;
+            }
+            $inOwner = static fn (int $site): bool => $site >= $owner['start'] && $site <= $owner['end'];
+            $analysis[$owner['name']] = [
+                'after_preflight' => array_filter($preflights, static fn (int $site): bool => $inOwner($site) && $site < $sweep) !== [],
+                'before_remember' => array_filter($remembers, static fn (int $site): bool => $inOwner($site) && $site < $sweep) === [],
+            ];
+        }
+
+        return $analysis;
+    }
+
+    private static function libSource(string $relative): string
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/' . $relative);
+        self::assertNotSame('', $source, 'Zero match: ' . $relative . ' is missing or empty.');
+
+        return $source;
+    }
+
+    /** The source without every line that calls $name. */
+    private static function withoutLinesCalling(string $source, string $name): string
+    {
+        $kept = array_filter(explode("\n", $source), static fn (string $line): bool => !str_contains($line, $name . '('));
+        self::assertNotSame(substr_count($source, "\n") + 1, count($kept), 'Zero match: no line calls ' . $name . '().');
+
+        return implode("\n", $kept);
+    }
+
+    /** @param list<string> $lines @return int index of the first line that calls $name */
+    private static function lineCalling(array $lines, string $name): int
+    {
+        foreach ($lines as $index => $line) {
+            if (str_contains($line, $name . '(') && preg_match('~^\s*(\*|/\*|//|#)~', $line) !== 1) {
+                return $index;
+            }
+        }
+        self::fail('Zero match: no line calls ' . $name . '().');
     }
 }

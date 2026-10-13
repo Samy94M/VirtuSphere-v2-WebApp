@@ -24,10 +24,16 @@ require_once __DIR__ . '/ssh.php';
  * there; if it is not, the status check fails visibly. Not used by any
  * production caller in K21.
  *
+ * It runs beside the worker, so the single-worker rule of ADR-0042 does not keep
+ * a sweep of another job away from its file. Its row therefore carries a lease
+ * of VIRTUSPHERE_REMOTE_SECRET_STATUS_LEASE_SECONDS, longer than upload, status
+ * command and removal together; a sweep leaves a leased row alone, and a failed
+ * removal ends the lease so the next contact can take the row (K21-A4).
+ *
  * @param array<string,mixed> $unit deploy_create_vm_results row: job_id, position, vm_id, vm_name, async_jid
  * @param array{upload?: callable, execute?: callable} $seams upload = ssh_sftp_upload_directory() signature, execute = ssh_execute_capture() signature
  * @return array{marker: ?array<string,mixed>, error: ?string, secret_removed: bool}
- *         secret_removed is true only when the host confirmed the removal of accounts.yml
+ *         secret_removed is true only when the host confirmed that accounts.yml is gone (removed or already absent)
  */
 function deploy_create_status_query_outside_job(mysqli $db, array $unit, string $remoteDir, array $esxiCredential, string $esxiSecret, array $ansibleCredential, string $ansibleSecret, string $apiBaseUrl, array $seams = []): array
 {
@@ -55,7 +61,7 @@ function deploy_create_status_query_outside_job(mysqli $db, array $unit, string 
 
         // The row exists before the first byte goes out: a worker that dies
         // between the two leaves a row for the next contact, never a file without one.
-        deploy_remote_secret_remember($db, $jobId, (int) $ansibleCredential['id'], $remoteDir);
+        deploy_remote_secret_remember($db, $jobId, (int) $ansibleCredential['id'], $remoteDir, VIRTUSPHERE_REMOTE_SECRET_STATUS_LEASE_SECONDS);
         $remembered = true;
         $upload = $seams['upload'] ?? static function (array $credential, string $secret, string $sourceDir, string $targetDir, ?callable $logger = null, ?callable $now = null): void {
             ssh_sftp_upload_directory($credential, $secret, $sourceDir, $targetDir, $logger, $now);

@@ -219,7 +219,10 @@ Finding VT-04 of the 2026-10-03 gap matrices showed that `accounts.yml`, which
 carries the ESXi credentials to the Ansible host, could stay there after a job
 whose create unit was unresolved or whose step never returned. The user decided on
 05.10.2026 that the file must not outlive its job. After a job, the async state is
-the evidence; the file is not.
+the evidence; the file is not. This amendment was revised on 13.10.2026, before
+publication, after the Astra review of 12.10.2026 (conditions K21-A1 to K21-A6):
+the target in the row, the state line of the removal, the order and lease of the
+sweep, and the measured reasons below.
 
 What changes in "Cleanup never destroys evidence" above: the evidence is the async
 state under `create.vm.<position>/async`. `accounts.yml` is not evidence. It is
@@ -228,32 +231,76 @@ unit and a step still in flight:
 
 - The worker removes the file with `rm -f` whenever it cannot prove the host idle,
   and removes the whole job directory with `rm -rf` only when it can. The
-  directory of an unresolved unit is never deleted.
+  directory of an unresolved unit is never deleted. Both forms come from
+  `ansible_remote_secret_remove_command()` and print a state line after a
+  successful removal: `removed` when the file was there, `absent` when it was
+  already gone. A removal is confirmed only by exit 0 together with that line,
+  because `rm -f` also answers 0 for a path that does not exist.
 - Before every upload that carries the file, a write-ahead row is written to
-  `deploy_remote_secret_files`. The row has no foreign key to the job, so it
-  survives a mission delete. It is deleted only after the host confirmed the
-  removal. Existing installations get no backfill.
+  `deploy_remote_secret_files`. It records the target the file goes to: host,
+  effective SSH port and pinned host key of the Ansible credential, read at that
+  moment (not `config_revision`, which also moves on a password change). The row
+  has no foreign key to the job, so it survives a mission delete. It is deleted
+  only after the host confirmed the removal. Existing installations get no
+  backfill.
 - A failed removal (unreachable host, killed worker, database gone while the row
-  is being forgotten) leaves the row. The next deploy or inventory job of the same
-  Ansible credential removes the file at its next contact: after its host
-  preflight and before its own upload. That removal writes the audit event
-  `deploy.remote_secret_removed`.
+  is being forgotten) leaves the row and records `last_attempt_at`. The next
+  deploy or inventory job of the same Ansible credential removes the file at its
+  next contact: after its host preflight and before its own upload, and only for
+  rows whose target equals the credential's target now. Each closed row writes
+  the audit event `deploy.remote_secret_cleared` with the outcome `removed` or
+  `absent` and the target host and port. Rows never tried come first, then the
+  longest untried; a removal the host did not confirm moves on to the next row,
+  the first transport failure ends the sweep for this contact, and every row
+  costs one heartbeat.
 - A status query of a create unit outside the running job uploads only
-  `accounts.yml` again, removes it in `finally` also when the query fails, and
-  writes nothing to the unit or the job log. It has no caller yet; a later
-  operator path is a separate package.
+  `accounts.yml` again, holds a lease (`lease_until`) on its row for twice its
+  worst case (upload, status command up to `VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS`,
+  removal), removes the file in `finally` also when the query fails, and writes
+  nothing to the unit or the job log. A sweep leaves a leased row alone. The
+  query has no caller yet; a later operator path is a separate package.
+
+Why removing the file under a step that never returned is safe (measured after
+the Astra review of 12.10.2026, gate `ansible-vars-files-lifetime`):
+
+- Ansible does NOT read `vars_files` once at play start. ansible-core 2.19
+  loads each of them with `cache='vaulted'`, which caches only encrypted files,
+  and resolves the variables for every task. When `accounts.yml` disappears,
+  every value from it is undefined from the next task on, also in an `always`
+  section. A playbook that kept running after the removal would therefore lose
+  its ESXi credentials mid-play, including the `always` that powers a VM off
+  again (`powercycle_vm_tasks.yml`).
+- It cannot keep running, for two reasons together. A playbook whose reading
+  SSH channel is gone ends at its next output with a broken pipe, before its
+  next task starts, and the worker removes the file only after its own channel
+  to that step is closed. And after ADR-0042 there is exactly one worker, so no
+  second job holds a channel to a step of the same host while the sweep of
+  another job removes. The sentence in ADR-0042 (Context) that a playbook "keeps
+  running on the Ansible host whether or not this process is alive" holds for
+  the async create unit, not for a sequence step: such a step lives only until
+  its next output.
+- A caller outside the worker (the status query) does not have the second
+  reason. Its lease takes its place.
 
 The limits are stated, not solved:
 
-- The next contact is keyed by the Ansible credential id, not by the host address.
-  A host that is reached only through another credential keeps the file until that
-  credential is used again.
+- A row is reached only through its own Ansible credential and only while that
+  credential points at the recorded target. After the credential is pointed at
+  another host or the host key changes, the row stays without an audit row and
+  every contact names it in the worker's error log with its host and its oldest
+  date; pointing the credential back reaches it again. A host that is reached
+  only through another credential keeps the file until this credential is used
+  again.
 - A deleted Ansible credential leaves a row that nobody can resolve. The foreign
   key is `ON DELETE SET NULL`, so the row survives and the file stays on the host.
-- Deleting `accounts.yml` while a step is still running relies on the playbook
-  having loaded its `vars_files` at play start.
+- Between the lease recheck and the removal a status query can still start; the
+  remaining window closes with the host-side lock of the follow-up package.
+- Both measured facts belong to the Ansible runtime. An update that caches
+  `vars_files` again or catches the broken pipe turns the gate red; the
+  reasoning above has to be re-read then, not the gate.
 - Whether Ansible's async wrapper keeps module arguments elsewhere on the host is
   lab probe LP-06. It is not answered here.
 
 Verification: `K21RemoteSecretCleanupTest`, `AnsibleRemoteSecretCommandTest`,
-`RemoteSecretUploadContractTest`, `DeployTerminalCleanupTest`.
+`DeployRemoteSecretStateTest`, `RemoteSecretUploadContractTest`,
+`DeployTerminalCleanupTest`, gate `ansible-vars-files-lifetime`.

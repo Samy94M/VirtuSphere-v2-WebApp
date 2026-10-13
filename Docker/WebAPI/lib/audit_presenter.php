@@ -78,7 +78,9 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED => 'deploy job intake resumed',
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS ? 'queued' : 'refused')
             . ' remote cleanup retry for deploy job id ' . $id . ' (execution ' . ($context['execution_id'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_REMOVED => 'ESXi access file of job ' . $id . ' removed from the Ansible host at a later contact',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED => 'ESXi access file of job ' . $id
+            . (($context['outcome'] ?? '') === 'absent' ? ' was no longer on' : ' removed from')
+            . ' the Ansible host ' . ($context['host'] ?? 'unknown') . ':' . ($context['port'] ?? 0) . ' at a later contact',
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => 'documented external check for deploy job id ' . $id
             . ': ' . ($context['resolution_code'] ?? 'inconclusive') . ' (resolution ' . ($context['resolution_id'] ?? 0) . ')',
         // Etappe 14B-F. The sentence says what the operator ESTABLISHED, never

@@ -999,8 +999,13 @@ CREATE TABLE IF NOT EXISTS deploy_remote_secret_files (
         job_id INT NOT NULL,
         credential_ansible_id INT NULL,
         remote_dir VARCHAR(255) NOT NULL,
+        target_host VARCHAR(255) NOT NULL,
+        target_port INT NOT NULL,
+        target_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
         uploaded_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        last_attempt_at DATETIME(6) NULL,
+        lease_until DATETIME(6) NULL,
         UNIQUE KEY deploy_remote_secret_file_unique (job_id, remote_dir),
-        INDEX deploy_remote_secret_file_credential (credential_ansible_id, id),
+        INDEX deploy_remote_secret_file_credential (credential_ansible_id, last_attempt_at),
         CONSTRAINT fk_deploy_remote_secret_file_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
