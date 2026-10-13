@@ -288,6 +288,7 @@ final class RemoteSecretNoticeTest extends TestCase
             'host' => $this->pinTarget($this->ansibleId, $this->hostFor('moved'), $before['fingerprint']),
             'port' => repo_execute($this->db, 'UPDATE deploy_credentials SET port = ? WHERE id = ?', 'ii', [2222, $this->ansibleId]),
             'fingerprint' => $this->pinTarget($this->ansibleId, $before['host'], 'SHA256:' . $this->token . 'changed'),
+            default => self::fail('unknown target change ' . $change),
         };
 
         $group = $this->onlyGroup();

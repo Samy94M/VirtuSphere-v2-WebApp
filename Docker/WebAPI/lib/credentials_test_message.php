@@ -149,8 +149,8 @@ function credentials_test_action(array $result): ?array
  */
 function credentials_test_secret_sweep_notice(array $sweep): ?array
 {
-    $closed = (int) ($sweep['closed'] ?? 0);
-    if (!empty($sweep['aborted'])) {
+    $closed = $sweep['closed'];
+    if ($sweep['aborted']) {
         return ['type' => 'info', 'message' => __t('ansible_test.sweep_aborted', ['count' => $closed])];
     }
     if ($closed > 0) {

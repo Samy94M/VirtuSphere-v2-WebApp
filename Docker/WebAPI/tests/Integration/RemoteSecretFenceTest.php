@@ -259,9 +259,9 @@ final class RemoteSecretFenceTest extends TestCase
 
         $action = $exception->portalAction();
         self::assertIsArray($action, 'the refusal carries an action');
-        self::assertSame('credentials.manage', $action['permission'] ?? null);
-        self::assertSame('credentials.php#remote-secret-' . $this->ansibleId, $action['url'] ?? null, 'the action opens the credential row');
-        self::assertSame('credentials.remote_secret_open_action', $action['label_key'] ?? null);
+        self::assertSame('credentials.manage', $action['permission']);
+        self::assertSame('credentials.php#remote-secret-' . $this->ansibleId, $action['url'], 'the action opens the credential row');
+        self::assertSame('credentials.remote_secret_open_action', $action['label_key']);
     }
 
     /** Acknowledging closes the rows of this credential and target, writes one audit row, and then allows the delete. */

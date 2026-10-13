@@ -411,7 +411,7 @@ final class AnsibleFullTestSweepTest extends TestCase
 
     /* ---------- helpers ---------- */
 
-    /** @param array<string, callable> $seams */
+    /** @param array{test?: callable, execute?: callable, clock?: callable(): float, time_limit?: int} $seams */
     private function manualTest(array $seams): array
     {
         $credential = repo_credential($this->db, $this->ansibleId, true);
