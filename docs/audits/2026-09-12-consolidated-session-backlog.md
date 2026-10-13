@@ -1711,3 +1711,32 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 **Offen:** Push nach Freigabe. Folgepaket K21-F, K21-T1, K21-N1, K21-N3, K21-N4, LP-06 (Nutzer), Prod-Eintrag `127.0.0.1` (Nutzer). Weiter aus dem Register: K19-A4, K20-N3, BK-N3, BK-N4, UX02-Abnahme, P3-1 aus K11, `deploy_log.php` in der e2e-Matrix. K22 bis K24 nicht begonnen.
 
 **Nächster Schritt:** Freigabe des Nutzers für den Push von `45e7f55`, `fa49f6b`, `b17ca73`, `3592ef3` und diesem Eintrag auf `origin/main` (nur `main`, keine Tags). Danach Folgepaket K21-F nach Auftrag des Nutzers.
+
+### Paket R: kleine Reste K21-N1, K21-N3, K21-N4, BK-N3, BK-N4, K20-N3 (13.10.2026)
+
+**Stand: umgesetzt, Rot- und Grünnachweis vollständig, Push nach Freigabe des Nutzers.** Paketquelle `892a549` (gepusht). Paketcommits `1e43cd9` und `b1718e5` (Testfix K21-N1). Reihenfolge laut Nutzer 13.10.2026: erst Paket R, dann K21-F. Sol-Rolle: Claude Opus 5.5 als vom Nutzer freigegebener Ersatz; Umsetzung und Gate-Läufe durch Haiku-Subagenten mit Effort xhigh (Runner-Implementierer: Skripte, Pester, `docs/QA.md`; PHP-Implementierer: Integrationstests, Static-Wächter, e2e; ein QA-Agent zur Zeit), Durchsicht am Diff, Berichte und Git beim Koordinator.
+
+**Nachmessung:** alle sechs Befunde am Code bestätigt. K21-N4 hat 22 statt 20 Fundstellen in 20 Dateien. Geschwister zu BK-N3: `scripts/update-visual-baselines.ps1:81` (`visual-baseline-review-<Sekundenstempel>`), mitgenommen.
+
+**Umgesetzt (`1e43cd9`):**
+- *K21-N1:* `scripts/check-schema-convergence.sh` wechselt zuerst nach `VIRTUSPHERE_CHECK_ROOT` bzw. ins Repo-Wurzelverzeichnis (`|| exit 2`, wie die übrigen Umgebungsfehler des Skripts).
+- *K21-N3:* `EsxiVlanReassignTest` bindet `lib/repo/vlan_reassign.php` und die übrigen Dateien ein, deren Funktionen er ruft. Kein anderer Integrationstest nutzt `vlan_reassign.php`.
+- *K21-N4:* die 22 Zugangsanlagen binden `host` als `s` und `port` als `i`. Neuer abgeleiteter Wächter `CredentialInsertBindTypesContractTest`: liest die Spaltentypen von `deploy_credentials` aus `struktur.sql` und prüft jede `INSERT INTO deploy_credentials` mit `bind_param` oder `repo_execute` (37 Fundstellen); ein nicht bestimmbarer Typstring ist ein Befund; Scanner-Selbsttests.
+- *BK-N3:* `New-CheckArtifactDirectory` hat `-Prefix` (Standard `virtusphere-qa-`); Guard-Harness (`virtusphere-guards-`), Visual-Gate (`visual-baselines-`) und Baseline-Schreiber (`visual-baseline-review-`) legen ihr Laufverzeichnis darüber an, der Harness erst nach `-List`, ein Anlegefehler ist Exit 2. Pester leitet aus `scripts/**/*.ps1` ab, dass kein anderer Ort einen Namen aus Präfix und Sekundenstempel bildet. `docs/QA.md` nennt die eine Namensregel.
+- *BK-N4:* `test-guards.ps1` ist wieder ASCII; Pester prüft jede BOM-lose `.ps1` unter `scripts/` auf ASCII. Der Kommentar an `Edit-Fixture` nennt die tatsächliche Einordnung (Ausnahme im Fall = infra).
+- *K20-N3:* `settings-flow.spec.js` wartet nach „Rolle setzen“ auf den Erfolgs-Flash der Weiterleitung (gleiche URL, `waitForURL` würde sofort zurückkehren; Muster von `submitAndReturnToTab`).
+
+**Testfix (`b1718e5`):** Der neue K21-N1-Fall rief das Skript unter `ErrorActionPreference = Stop`; Windows PowerShell 5.1 macht daraus bei jeder stderr-Zeile eine Ausnahme. Der Aufruf läuft jetzt wie in `Invoke-Tool` mit `Continue`.
+
+**Rotnachweis** (`qa-artifacts/paket-r-2026-10-13/red/summary.md`, Kopf `892a549` plus die zwei Testdateien): phpunit-unit 2032 Tests, 1 fachlich rot (K21-N4, 22 Fundstellen); Pester 947 grün, 4 rot: 3 fachlich (K21-N1, BK-N3-Wächter, BK-N4-Wächter), 1 strukturell (`-Prefix` fehlt). K21-N3 als gekennzeichnete Diagnose (`--testsuite integration` allein, Aufruf des Gates phpunit-full): 626 Tests, 7 Errors, 2 Failures, nur `EsxiVlanReassignTest`. Kein fremdes Rot. K20-N3 hat keinen deterministischen Rotnachweis (Beleg bleibt `bk-n-2026-10-12/green/lauf-b/e2e-failure/`). Berichtigung: Der K21-N1-Fall scheiterte im Rotlauf an der stderr-Ausnahme, deren Meldung den Befund nannte; der Nachtest mit dem Testfix ist an der Zusicherung rot (`red/k21n1-retest/`).
+
+**Schlussabnahme** (`qa-artifacts/paket-r-2026-10-13/green/summary.md`): sauberer LF-Worktree. `1e43cd9`: Fast 31 von 32, Integration 37 von 40 grün, darunter phpunit-unit (2032, 0 Skips), phpunit-full (2658, 0 Skips), schema-convergence, guard-harness (117 proven); e2e-portal funktional bestanden (`.last-run.json` passed, K20-N3-Fall grün), Bildteil und visual-contract wie seit K13 (UX02); rot nur der K21-N1-Fall (oben). `b1718e5`: powershell-tests pass (Pester 951 grün, 0 rot). Neue Namensformen im Lauf beobachtet, kein `virtusphere-guards-*`-Rest.
+
+**Neue Befunde außerhalb des Pakets (Stoppregel 2, nicht behoben):**
+- **BK-N5 (P3):** `scripts/check.ps1:278` (Abbau) und der Hinweis in Zeile 275 rufen `docker compose ... down -v --remove-orphans` ohne `--profile tools`. `phpmyadmin.ps1` startet phpMyAdmin mit dem Profil und stoppt es nur; der gestoppte Container bleibt nach dem Abbau zurück.
+- **BK-N6 (P3, Beobachtung):** Sechs BOM-lose Pester-Dateien unter `tests/powershell/` enthalten Nicht-ASCII (ErrorPaths, JsonTransport, Logging, MembershipJournal, RunReport). Der BK-N4-Wächter prüft bewusst nur `scripts/`; ob die Tests unter Windows PowerShell 5.1 dadurch etwas anderes prüfen als gemeint, ist nicht untersucht.
+- Nicht geprüft: die neuen Pester-Fälle unter pwsh (auf dem Windows-Host nur 5.1).
+
+**Offen:** Push nach Freigabe. K21-F (Abschnitt folgt), K21-T1, LP-06 (Nutzer), Prod-Eintrag `127.0.0.1` (Nutzer), K19-A4, UX02-Abnahme, P3-1 aus K11, `deploy_log.php` in der e2e-Matrix, BK-N5, BK-N6. K22 bis K24 nicht begonnen.
+
+**Nächster Schritt:** Freigabe des Nutzers für den Push von `1e43cd9`, `b1718e5` und diesem Eintrag auf `origin/main` (nur `main`, keine Tags). K21-F läuft parallel in einem eigenen Worktree und wird erst nach dem Astra-Ergebnis gepusht.
