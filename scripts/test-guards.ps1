@@ -42,7 +42,11 @@ if ($Filter) { $Filter = @($Filter | ForEach-Object { $_ -split ',' } | Where-Ob
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Split-Path $scriptDir -Parent) -replace '\\', '/'
-$workRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('virtusphere-guards-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+# Ein Laufverzeichnis nach der einen Namensregel des Moduls (eigener Name je Lauf,
+# nie wiederverwendet). $workRoot wird erst nach -List und -Filter angelegt, damit
+# diese Aufrufe keine Verzeichnisse hinterlassen.
+. (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'artifact-dir.ps1')
+$workRoot = $null
 $hostShell = 'powershell'
 if ($PSVersionTable.PSEdition -eq 'Core') { $hostShell = 'pwsh' }
 
@@ -162,8 +166,11 @@ function New-Fixture {
     return $root
 }
 
-# Mutation mit Anker: schlaegt der Anker fehl, ist der Fall unproven (die
-# Quelle hat sich bewegt und die Mutation waere ein No-op-Gruenlauf).
+# Mutation mit Anker: schlaegt der Anker fehl, wirft Edit-Fixture. Der Lauf faengt
+# jede Ausnahme eines Falls (catch um $case.Body) und klassifiziert sie als infra,
+# nicht als unproven (Exit 2, sofern kein Fall unproven ist): die Quelle hat sich
+# bewegt, der Fall ist also weder bewiesen noch widerlegt, und ein No-op-Gruenlauf
+# ist ausgeschlossen.
 function Edit-Fixture {
     param([string]$FixtureRoot, [string]$RelativePath, [string]$Find, [string]$Replace)
     $file = Join-Path $FixtureRoot $RelativePath
@@ -430,7 +437,7 @@ $cases = @(
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
     } }
     @{ Name = 'doc-semantics.installation-ascii-umlaut'; Body = {
-        # Pinnt den weggefallenen Sonderweg: Die Installationsanleitung gehört
+        # Pinnt den weggefallenen Sonderweg: Die Installationsanleitung gehoert
         # zum gleichen deutschen Prosa-Scope wie jedes andere aktive Runbook.
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'docs/INSTALLATION-ANLEITUNG.md' '# Installationsanleitung' ("# Installationsanleitung`n`nDiese Ausnahme waere fuer Administratoren stoerend.")
@@ -1260,7 +1267,13 @@ if ($List) {
     exit 0
 }
 
-New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+# Ein Anlegefehler ist Infrastruktur (Exit 2 laut Kopf), kein Fallergebnis.
+try {
+    $workRoot = New-CheckArtifactDirectory -Root ([System.IO.Path]::GetTempPath()) -Stamp (Get-Date -Format 'yyyyMMdd-HHmmss') -Prefix 'virtusphere-guards-'
+} catch {
+    Write-Host ('test-guards.ps1: Arbeitsverzeichnis nicht anlegbar: ' + $_.Exception.Message) -ForegroundColor Yellow
+    exit 2
+}
 $proven = 0
 $unproven = 0
 $infra = 0

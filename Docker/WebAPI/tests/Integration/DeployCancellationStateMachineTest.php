@@ -397,7 +397,7 @@ final class DeployCancellationStateMachineTest extends TestCase
         $userName = 'svc';
         $secret = 'x';
         $stmt = $this->db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES (?, ?, ?, ?, ?, ?)');
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $userName, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $userName, $secret);
         $stmt->execute();
 
         return (int) $this->db->insert_id;

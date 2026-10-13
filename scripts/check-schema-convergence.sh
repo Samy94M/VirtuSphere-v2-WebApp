@@ -9,7 +9,12 @@
 #   sh scripts/check-schema-convergence.sh
 #
 # Env overrides: MYSQL_CONTAINER, PHP_CONTAINER, MYSQL_ROOT_PASSWORD.
+#
+# Runs from any working directory: it changes to the repo root first, because
+# the schema file and .env are repo-relative. VIRTUSPHERE_CHECK_ROOT overrides
+# that root (guard fixtures), as in the sibling scripts.
 set -eu
+cd "${VIRTUSPHERE_CHECK_ROOT:-$(dirname "$0")/..}" || exit 2
 
 # Git Bash on Windows rewrites /var/www/... into a host path; disable that so
 # container-absolute paths survive docker exec.

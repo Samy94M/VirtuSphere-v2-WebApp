@@ -548,10 +548,16 @@ echo 'JSON' . json_encode(['role' => $row === null ? 'missing' : $row['role']]) 
     expect(roleOf(), 'Cancel kept the entry without a role').toBeNull();
 
     await roleForm.locator('button').click();
+    // The POST answers with a redirect to the same settings URL, only the
+    // fragment kept. That URL is already open here, so waitForURL would resolve
+    // before the POST is processed. The success flash is the signal that the
+    // redirect has loaded and the handler ran, as in submitAndReturnToTab.
     await Promise.all([
       page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
       dialog.locator('[data-confirm-accept]').click(),
     ]);
+    await expect(page.locator('.alert-success').first(), 'the redirect shows the success flash').toBeVisible();
+    expect(page.url(), 'the redirect carries the tab anchor').toContain('#panel-machine-api');
     expect(roleOf(), 'Confirm assigned the role').toBe('mecm_server');
 
     await page.goto('system_status.php');

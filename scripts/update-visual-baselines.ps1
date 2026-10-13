@@ -47,6 +47,7 @@ $repoRoot = ($repoRoot -replace '\\', '/').TrimEnd('/')
 
 . (Join-Path (Join-Path $scriptDir 'lib/check') 'qa-identity.ps1')
 . (Join-Path (Join-Path $scriptDir 'lib/check') 'runtime.ps1')
+. (Join-Path (Join-Path $scriptDir 'lib/check') 'artifact-dir.ps1')
 
 # Dieselbe Aufloesung wie in check.ps1; runtime.ps1 liest genau diese Namen.
 $qaIdentity = Get-QaStackIdentity $repoRoot
@@ -78,7 +79,16 @@ if (-not (Test-Path (Join-Path $e2eDir 'node_modules'))) {
     exit 2
 }
 
-$reviewDir = Join-Path (Join-Path $repoRoot 'qa-artifacts') ('visual-baseline-review-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+# Ein eigenes Reviewverzeichnis je Lauf nach der Namensregel des Moduls. Der Harness
+# (update-baselines.js) legt es mit recursive an und akzeptiert ein leeres Verzeichnis.
+$qaArtifactsRoot = Join-Path $repoRoot 'qa-artifacts'
+try {
+    New-Item -ItemType Directory -Force -Path $qaArtifactsRoot | Out-Null
+    $reviewDir = New-CheckArtifactDirectory -Root $qaArtifactsRoot -Stamp (Get-Date -Format 'yyyyMMdd-HHmmss') -Prefix 'visual-baseline-review-'
+} catch {
+    Write-Host ('update-visual-baselines: Reviewverzeichnis nicht anlegbar: ' + $_.Exception.Message) -ForegroundColor Red
+    exit 2
+}
 $previous = @{}
 $updateEnv = @{
     VIRTUSPHERE_BASE_URL               = ($qaPortalBase + '/portal/')

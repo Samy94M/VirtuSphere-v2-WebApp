@@ -157,7 +157,7 @@ final class DeployEnqueueRaceTest extends TestCase
         $host = 'host.example.com';
         $user = 'svc';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
 
         return (int) $this->db->insert_id;

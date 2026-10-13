@@ -36,7 +36,7 @@ final class EsxiInventoryCacheTest extends TestCase
         $port = 443;
         $user = 'svc';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
         $this->credentialId = (int) $this->db->insert_id;
     }
@@ -404,7 +404,7 @@ final class EsxiInventoryCacheTest extends TestCase
         $port = 443;
         $user = 'svc';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
 
         return (int) $this->db->insert_id;

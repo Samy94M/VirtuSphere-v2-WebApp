@@ -189,6 +189,177 @@ Describe 'run artifact directory' {
     }
 }
 
+Describe 'artifact directory prefixes for the other runners' {
+    BeforeAll {
+        function Invoke-PrefixedArtifactDirectoryCase {
+            param([string]$Root, [string]$Stamp, [string]$Prefix)
+            return @(& {
+                param($module, $root, $stamp, $prefix)
+                . $module
+                if ($prefix) { New-CheckArtifactDirectory -Root $root -Stamp $stamp -Prefix $prefix }
+                else { New-CheckArtifactDirectory -Root $root -Stamp $stamp }
+            } (Join-Path $script:ModuleDir 'artifact-dir.ps1') $Root $Stamp $Prefix)
+        }
+    }
+
+    It 'gives two guard runs with the same stamp distinct, existing, empty directories under their prefix' {
+        $root = Join-Path $TestDrive 'guards-same-second'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $stamp = '20261012-120000'
+        $prefix = 'virtusphere-guards-'
+
+        $first = @(Invoke-PrefixedArtifactDirectoryCase -Root $root -Stamp $stamp -Prefix $prefix)
+        $second = @(Invoke-PrefixedArtifactDirectoryCase -Root $root -Stamp $stamp -Prefix $prefix)
+
+        @($first).Count | Should -Be 1
+        @($second).Count | Should -Be 1
+        $second[0] | Should -Not -Be $first[0]
+        foreach ($dir in @($first[0], $second[0])) {
+            Test-Path -LiteralPath $dir -PathType Container | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $dir -Force).Count | Should -Be 0
+            (Split-Path -Leaf $dir) | Should -BeLike ($prefix + $stamp + '-*')
+            Split-Path -Parent $dir | Should -Be $root
+        }
+    }
+
+    It 'keeps the virtusphere-qa- name when no prefix is given' {
+        $root = Join-Path $TestDrive 'qa-default-prefix'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $stamp = '20261012-120000'
+
+        $created = @(Invoke-PrefixedArtifactDirectoryCase -Root $root -Stamp $stamp -Prefix '')
+
+        @($created).Count | Should -Be 1
+        (Split-Path -Leaf $created[0]) | Should -BeLike ('virtusphere-qa-' + $stamp + '-*')
+        Test-Path -LiteralPath $created[0] -PathType Container | Should -BeTrue
+    }
+}
+
+Describe 'schema convergence from a foreign working directory' {
+    BeforeAll {
+        # Same host-sh lookup as the restore-root regression: a missing sh fails here.
+        $script:ConvergenceShExe = & { param($module) . $module; Find-Sh } (Join-Path $script:ModuleDir 'runtime.ps1')
+        if (-not $script:ConvergenceShExe) { throw 'sh is required for the schema-convergence cwd regression' }
+    }
+
+    It 'loads struktur.sql from the repo root when started from a foreign working directory' {
+        $scriptPath = (Join-Path $script:RepoRoot 'scripts/check-schema-convergence.sh') -replace '\\', '/'
+        $structure = Join-Path $script:RepoRoot 'Docker/mysql/mysql-init/struktur.sql'
+        $stubDir = Join-Path $TestDrive 'convergence-bin'
+        $foreignCwd = Join-Path $TestDrive 'foreign-cwd'
+        $stdinLog = Join-Path $TestDrive 'convergence-struktur-stdin.bin'
+        New-Item -ItemType Directory -Path $stubDir, $foreignCwd -Force | Out-Null
+
+        # Test double for the docker CLI: records the stdin of the fresh-schema
+        # import (mysql ... vs_conv_struktur without -e) and answers every call
+        # with 0. It never reaches a Docker engine.
+        $stubLines = @(
+            '#!/bin/sh',
+            'for arg in "$@"; do',
+            '  if [ "$arg" = "-e" ]; then exit 0; fi',
+            'done',
+            'case "$*" in',
+            '  *" mysql "*" vs_conv_struktur") cat > "$VS_STUB_STDIN_LOG" ;;',
+            'esac',
+            'exit 0'
+        )
+        $stub = Join-Path $stubDir 'docker'
+        [IO.File]::WriteAllText($stub, (($stubLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+        if ($env:OS -ne 'Windows_NT') {
+            & chmod '+x' $stub
+            if ($LASTEXITCODE -ne 0) { throw 'convergence docker stub could not be made executable' }
+        }
+
+        $oldPath = $env:PATH
+        $oldPassword = $env:MYSQL_ROOT_PASSWORD
+        $oldStubLog = $env:VS_STUB_STDIN_LOG
+        $oldLocation = (Get-Location).Path
+        try {
+            $env:PATH = $stubDir + [IO.Path]::PathSeparator + (Split-Path $script:ConvergenceShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
+            $env:MYSQL_ROOT_PASSWORD = 'convergence-test-only'
+            $env:VS_STUB_STDIN_LOG = $stdinLog -replace '\\', '/'
+            Set-Location -LiteralPath $foreignCwd
+            $output = @(& $script:ConvergenceShExe $scriptPath 2>&1 | ForEach-Object { "$_" })
+        } finally {
+            Set-Location -LiteralPath $oldLocation
+            $env:PATH = $oldPath
+            $env:MYSQL_ROOT_PASSWORD = $oldPassword
+            $env:VS_STUB_STDIN_LOG = $oldStubLog
+        }
+
+        ($output -join "`n") | Should -Not -Match '\[schema-convergence\.fresh-load\]'
+        Test-Path -LiteralPath $stdinLog -PathType Leaf | Should -BeTrue
+        $expected = [IO.File]::ReadAllBytes($structure)
+        $actual = [IO.File]::ReadAllBytes($stdinLog)
+        $head = [Math]::Min(200, $expected.Length)
+        $actual.Length | Should -BeGreaterOrEqual $head
+        [Convert]::ToBase64String($actual, 0, $head) | Should -Be ([Convert]::ToBase64String($expected, 0, $head))
+    }
+}
+
+Describe 'stamp naming and encoding guards over scripts/' {
+    BeforeAll {
+        # A directory name built from a text prefix and a second-precision stamp
+        # collides when two runs start in the same second. Only artifact-dir.ps1
+        # may form such a name (New-CheckArtifactDirectory).
+        $script:StampNamePattern = '[''"][^''"]*-[''"]\s*\+\s*(?:\(\s*Get-Date\s+-Format\s+[''"]yyyyMMdd-HHmmss[''"]\s*\)|\$runStamp\b)|[''"][^''"]*-\$(?:runStamp\b|\(\s*Get-Date\s+-Format\s+[''"]yyyyMMdd-HHmmss[''"]\s*\))'
+        $script:ScriptFiles = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'scripts') -Filter '*.ps1' -File -Recurse)
+    }
+
+    It 'matches the stamp naming pattern on known cases and not on the stamp itself' {
+        $positive = @(
+            '$d = Join-Path $root (''virtusphere-guards-'' + (Get-Date -Format ''yyyyMMdd-HHmmss''))',
+            '$d = Join-Path $root (''visual-baselines-'' + $runStamp)',
+            '$d = "visual-baseline-review-$(Get-Date -Format ''yyyyMMdd-HHmmss'')"'
+        )
+        $negative = @(
+            '$runStamp = Get-Date -Format ''yyyyMMdd-HHmmss''',
+            '$artifactDir = New-CheckArtifactDirectory -Root ([System.IO.Path]::GetTempPath()) -Stamp $runStamp'
+        )
+        foreach ($line in $positive) { $line | Should -Match $script:StampNamePattern }
+        foreach ($line in $negative) { $line | Should -Not -Match $script:StampNamePattern }
+    }
+
+    It 'keeps prefix-plus-stamp directory names out of scripts/ except in artifact-dir.ps1' {
+        $own = Join-Path $script:ModuleDir 'artifact-dir.ps1'
+        $files = @($script:ScriptFiles | Where-Object { $_.FullName -ne $own })
+        $files.Count | Should -BeGreaterThan 0
+        $hits = @()
+        foreach ($file in $files) {
+            $relative = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')
+            $lineNumber = 0
+            foreach ($text in @(Get-Content -LiteralPath $file.FullName)) {
+                $lineNumber++
+                if ($text -match $script:StampNamePattern) { $hits += ('{0}:{1}: {2}' -f $relative, $lineNumber, $text.Trim()) }
+            }
+        }
+        if ($hits.Count -gt 0) {
+            throw ('Verzeichnisname aus Praefix und Sekundenstempel ausserhalb von artifact-dir.ps1 (New-CheckArtifactDirectory verwenden): ' + ($hits -join ' | '))
+        }
+    }
+
+    It 'keeps every script under scripts/ without a UTF-8 BOM pure ASCII' {
+        $script:ScriptFiles.Count | Should -BeGreaterThan 0
+        $hits = @()
+        foreach ($file in $script:ScriptFiles) {
+            $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { continue }
+            $relative = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')
+            $lineNumber = 1
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+                if ($bytes[$i] -ge 0x80) {
+                    $hits += ('{0}:{1}: Nicht-ASCII-Byte ohne UTF-8-BOM' -f $relative, $lineNumber)
+                    break
+                }
+                if ($bytes[$i] -eq 0x0A) { $lineNumber++ }
+            }
+        }
+        if ($hits.Count -gt 0) {
+            throw ('Nicht-ASCII in BOM-losen Skripten unter scripts/ (PS 5.1 liest sie als ANSI): ' + ($hits -join ' | '))
+        }
+    }
+}
+
 Describe 'JavaScript visual contracts' {
     It 'makes runner and Playwright consume the same browser resolver' {
         $runtime = Get-Content -LiteralPath (Join-Path $script:ModuleDir 'runtime.ps1') -Raw

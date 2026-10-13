@@ -5,9 +5,14 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/helpers.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/vms_persistence.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory_cache.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/vlan_reassign.php';
 require_once dirname(__DIR__, 2) . '/lib/esxi_inventory.php';
+require_once dirname(__DIR__, 2) . '/lib/esxi_inventory_deviations.php';
 
 /**
  * Paket E4 refinement (ADR-0023): the guided VLAN mass reassignment and the
@@ -38,7 +43,7 @@ final class EsxiVlanReassignTest extends TestCase
         $port = 443;
         $user = 'u';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
         $this->credentialId = (int) $this->db->insert_id;
     }

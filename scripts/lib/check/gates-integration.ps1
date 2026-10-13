@@ -83,7 +83,15 @@ function Invoke-VisualBaselines {
     $e2eDir = Join-Path (Join-Path $repoRoot 'tests') 'e2e'
     $harness = Join-Path (Join-Path $e2eDir 'visual') 'harness.js'
     if (-not (Test-Path $harness)) { return New-InfraResult 'Visual-Harness fehlt unter tests/e2e/visual' }
-    $visualArtifactDir = Join-Path (Join-Path $repoRoot 'qa-artifacts') ('visual-baselines-' + $runStamp)
+    # Eine Namensregel fuer alle Laufverzeichnisse (artifact-dir.ps1); der CI-Glob
+    # qa-artifacts/visual-baselines-* trifft das neue Format ebenso.
+    $qaArtifactsRoot = Join-Path $repoRoot 'qa-artifacts'
+    try {
+        New-Item -ItemType Directory -Force -Path $qaArtifactsRoot | Out-Null
+        $visualArtifactDir = New-CheckArtifactDirectory -Root $qaArtifactsRoot -Stamp $runStamp -Prefix 'visual-baselines-'
+    } catch {
+        return New-InfraResult ('Visual-Artefaktverzeichnis nicht anlegbar: ' + $_.Exception.Message)
+    }
 
     $previous = @{}
     $visualEnv = @{

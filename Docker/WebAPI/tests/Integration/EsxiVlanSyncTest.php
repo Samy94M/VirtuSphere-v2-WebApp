@@ -54,7 +54,7 @@ final class EsxiVlanSyncTest extends TestCase
         $port = 443;
         $user = 'u';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
         $this->credentialId = (int) $this->db->insert_id;
         // repo_esxi_vlan_sync() reads the ENTIRE portgroup cache and the ENTIRE
@@ -385,7 +385,7 @@ final class EsxiVlanSyncTest extends TestCase
         $port = 443;
         $user = 'u';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $user, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
         $stmt->execute();
 
         return (int) $this->db->insert_id;

@@ -149,7 +149,7 @@ final class VmIdentityCollisionTest extends TestCase
         $host = $type === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI ? 'esxi.example.test' : 'ansible.example.test';
         $username = 'svc';
         $secret = 'x';
-        $stmt->bind_param('ssisss', $type, $name, $host, $port, $username, $secret);
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $username, $secret);
         $stmt->execute();
 
         return (int) $this->db->insert_id;
