@@ -274,6 +274,14 @@ Describe 'schema convergence from a foreign working directory' {
         $oldPassword = $env:MYSQL_ROOT_PASSWORD
         $oldStubLog = $env:VS_STUB_STDIN_LOG
         $oldLocation = (Get-Location).Path
+        # The script reports its BLOCK lines on stderr. Under a caller that uses
+        # ErrorActionPreference Stop, each native stderr line would become a
+        # RemoteException before the assertions run, so the call is wrapped like
+        # Invoke-Tool does: Continue locally, every line collected as a string,
+        # the preference restored in finally. No exit-code assertion: the stub
+        # answers no PHP call, so the run ends in a later, expected BLOCK.
+        $oldErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         try {
             $env:PATH = $stubDir + [IO.Path]::PathSeparator + (Split-Path $script:ConvergenceShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
             $env:MYSQL_ROOT_PASSWORD = 'convergence-test-only'
@@ -285,6 +293,7 @@ Describe 'schema convergence from a foreign working directory' {
             $env:PATH = $oldPath
             $env:MYSQL_ROOT_PASSWORD = $oldPassword
             $env:VS_STUB_STDIN_LOG = $oldStubLog
+            $ErrorActionPreference = $oldErrorAction
         }
 
         ($output -join "`n") | Should -Not -Match '\[schema-convergence\.fresh-load\]'
