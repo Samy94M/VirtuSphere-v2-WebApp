@@ -187,6 +187,28 @@ function Get-VsPackageReportApiConfiguration {
         }
         return [pscustomobject]@{ Port = $port; Job = $job }
     }
+    function Get-RepairReportingDiagnostic {
+        param([long]$WrapperWallMs)
+        # Reads only what the product already logs. It must never throw, because it runs
+        # before the assertions it explains.
+        try {
+            $logRoot = Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper'
+            $log = Get-ChildItem -LiteralPath $logRoot -Filter 'reporting_*.log' -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($null -eq $log) { return "no reporting log found; wrapper_wall_ms=$WrapperWallMs" }
+            $records = @(Get-Content -LiteralPath $log.FullName -ErrorAction Stop | ForEach-Object { $_ | ConvertFrom-Json })
+            $disabled = @($records | Where-Object event -eq 'reporting_disabled')
+            $budget = @($records | Where-Object event -eq 'reporting_budget')
+            $reasonPart = if ($disabled.Count -gt 0) { "reporting_disabled=$($disabled[0].reason)" } else { 'reporting_disabled=(no record)' }
+            $timingPart = if ($budget.Count -gt 0) {
+                $b = $budget[0]
+                "reporting_budget: active_ms=$($b.active_ms), verifier_ms=$($b.verifier_ms), host_start_ms=$($b.host_start_ms), ipc_ms=$($b.ipc_ms), teardown_ms=$($b.teardown_ms)"
+            } else { 'reporting_budget=(no record)' }
+            return "$reasonPart; $timingPart; wrapper_wall_ms=$WrapperWallMs"
+        } catch {
+            return "reporting log unreadable ($($_.Exception.Message)); wrapper_wall_ms=$WrapperWallMs"
+        }
+    }
 }
 
 # Discovery-time capability flag, like $HasRegistry in VirtuSphere.ErrorPaths.Tests.ps1.
@@ -392,11 +414,17 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
                 $watch = [Diagnostics.Stopwatch]::StartNew()
                 Invoke-RepairWrapper
                 $watch.Stop()
+                # Read before the assertions below: a silent receiver is explained by the product's own disable reason and phase timings.
+                $diag = Get-RepairReportingDiagnostic -WrapperWallMs $watch.ElapsedMilliseconds
                 $script:WrapperExit | Should -Be 0
-                $watch.ElapsedMilliseconds | Should -BeLessThan 10000
-                (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty
-                $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-                @($received.event) | Should -Be @('started')
+                $watch.ElapsedMilliseconds | Should -BeLessThan 10000 -Because $diag
+                (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty -Because $diag
+                try {
+                    $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
+                } catch {
+                    throw ("{0} ({1})" -f $_.Exception.Message, $diag)
+                }
+                @($received.event) | Should -Be @('started') -Because $diag
                 $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
                     -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
                 $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
