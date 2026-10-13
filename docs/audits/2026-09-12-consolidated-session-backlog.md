@@ -1714,7 +1714,7 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 
 ### Paket R: kleine Reste K21-N1, K21-N3, K21-N4, BK-N3, BK-N4, K20-N3 (13.10.2026)
 
-**Stand: umgesetzt, Rot- und Grünnachweis vollständig, Push nach Freigabe des Nutzers.** Paketquelle `892a549` (gepusht). Paketcommits `1e43cd9` und `b1718e5` (Testfix K21-N1). Reihenfolge laut Nutzer 13.10.2026: erst Paket R, dann K21-F. Sol-Rolle: Claude Opus 5.5 als vom Nutzer freigegebener Ersatz; Umsetzung und Gate-Läufe durch Haiku-Subagenten mit Effort xhigh (Runner-Implementierer: Skripte, Pester, `docs/QA.md`; PHP-Implementierer: Integrationstests, Static-Wächter, e2e; ein QA-Agent zur Zeit), Durchsicht am Diff, Berichte und Git beim Koordinator.
+**Stand: umgesetzt, Rot- und Grünnachweis vollständig, gepusht 13.10.2026 nach Freigabe des Nutzers (`origin/main` = `ca9f5eb`).** Paketquelle `892a549` (gepusht). Paketcommits `1e43cd9` und `b1718e5` (Testfix K21-N1). Reihenfolge laut Nutzer 13.10.2026: erst Paket R, dann K21-F. Sol-Rolle: Claude Opus 5.5 als vom Nutzer freigegebener Ersatz; Umsetzung und Gate-Läufe durch Haiku-Subagenten mit Effort xhigh (Runner-Implementierer: Skripte, Pester, `docs/QA.md`; PHP-Implementierer: Integrationstests, Static-Wächter, e2e; ein QA-Agent zur Zeit), Durchsicht am Diff, Berichte und Git beim Koordinator.
 
 **Nachmessung:** alle sechs Befunde am Code bestätigt. K21-N4 hat 22 statt 20 Fundstellen in 20 Dateien. Geschwister zu BK-N3: `scripts/update-visual-baselines.ps1:81` (`visual-baseline-review-<Sekundenstempel>`), mitgenommen.
 
@@ -1741,9 +1741,9 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 
 **Nächster Schritt:** Freigabe des Nutzers für den Push von `1e43cd9`, `b1718e5` und diesem Eintrag auf `origin/main` (nur `main`, keine Tags). K21-F läuft parallel in einem eigenen Worktree und wird erst nach dem Astra-Ergebnis gepusht.
 
-### Paket K21-F: offene Zugangsdateien sichtbar und behandelbar (13.10.2026, wartet auf Astra)
+### Paket K21-F: offene Zugangsdateien sichtbar und behandelbar (13.10.2026, Astra-Auflagen erfüllt)
 
-**Stand: umgesetzt (ohne flock-Runde), Rot- und Grünnachweis vollständig, Astra-Prüfauftrag geschrieben; angehalten bis zum Astra-Ergebnis (Stoppregel 5).** Commits lokal im LF-Worktree `C:\tmp\vs-k21f-lf` auf `ca9f5eb` (Paket R, noch nicht gepusht): `fc7ae84` (Paket), `07f1381` (Register-Zwischenstand), `a4e88ae` (PHPStan), `49e051c` (Testladen, Fixtures, Fallback-Text). Nicht gepusht; Push erst nach dem Astra-Ergebnis.
+**Stand: umgesetzt (ohne flock-Runde), Astra „freigabefähig mit Auflagen“, Auflagen K21F-A1 bis K21F-A4 erfüllt, Rot- und Grünnachweis vollständig; Push zusammen mit BK-N5/BK-N7 nach Freigabe des Nutzers (13.10.2026).** Commits im LF-Worktree `C:\tmp\vs-k21f-lf` auf `ca9f5eb` (Paket R, gepusht 13.10.2026): `fc7ae84` (Paket), `07f1381` (Register-Zwischenstand), `a4e88ae` (PHPStan), `49e051c` (Testladen, Fixtures, Fallback-Text), `f7424d1` (Register), `1940c8a` (Astra-Auflagen), `264b07f` (POSIX-Eigentümerprüfung).
 
 **Entscheidungen des Nutzers, 13.10.2026:** Host-Aufräumjob als systemd-Systemtimer (`User=<Ansible-Konto>`, `PrivateTmp=no`, Journal, einmalige Installation durch einen Admin mit root aus dem Offline-Bundle); die Sperre verweigert auch das Bestätigen eines anderen Host-Schlüssels; Sweep im manuellen und geplanten Zugangstest; Systemstatus-Hinweis nach 24 h, sofort bei Waisen oder verschobenem Ziel. flock in den Host-Befehlen erst nach der Laborprobe des Nutzers auf dem air-gapped Ubuntu-Host (Probe: `qa-artifacts/k21f-2026-10-13/host-probe/`, Ergebnisbox zurück an den Koordinator); dieselbe Probe liest die `/tmp`-Fakten für K21-T1.
 
@@ -1764,6 +1764,17 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 **Neue Befunde außerhalb des Pakets (Stoppregel 2, nicht behoben):**
 - **BK-N7 (P3):** `tests/powershell/VirtuSphere.PackageRepair.Tests.ps1:388` („keeps package success when a report response stalls beyond the IPC deadline“) ist zeitabhängig. In `lauf-2` scheiterte er unter Last mit `Synthetic HTTP event 0 did not arrive`; im Einzellauf bestand er nach 9,88 s bei einer Grenze von 10 s (`ElapsedMilliseconds | Should -BeLessThan 10000`). Kein Codebezug zu K21-F.
 
-**Offen:** Astra-Ergebnis; danach Push (erst nach Paket R). flock-Runde und K21-T1 nach der Host-Probe und der Laborbestätigung des Nutzers (`systemctl is-enabled`, Unit-Direktiven auf Ubuntu 24.04). Sonst wie bei Paket R, dazu BK-N7.
+**Astra-Ergebnis (13.10.2026, Claude Opus 5.5 xhigh als vom Nutzer freigegebener Astra-Ersatz, `qa-artifacts/k21f-2026-10-13/astra-result.md`):** freigabefähig mit Auflagen; P0 0, P1 0, P2 1, P3 7. Q1 (Audit `job_id 0`) vertretbar, Korrelation über `correlation_id`; Q2 (Groß-/Kleinschreibung) vertretbar, die Sperre muss case-sensitiv bleiben, weil Identitätsrücksetzung und SSH-Wächter es auch sind; Q3 (Aktionsinventar) vertretbar, Grenze des Wächters; Q4 (Restfenster) Hypothese, behoben über A4. Sperre vollständig abgeleitet, keine Wettläufe und keine Verklemmung gefunden.
 
-**Nächster Schritt:** Auf das Astra-Ergebnis warten (Stoppregel 5). Unabhängig: Push von Paket R nach Freigabe des Nutzers; danach K21-F auf den gepushten Stand setzen (Fast-Forward, denn K21-F liegt auf `ca9f5eb`).
+**Auflagen und Empfehlungen (Umfang nach Entscheidung des Nutzers: Auflagen plus kleine Empfehlungen):**
+- *K21F-A1 (P2):* Die Passwort-Empfehlung steht jetzt im sichtbaren Erfolgs-Flash der Bestätigung, auf beiden Rückkehrseiten (nicht im eingeklappten Detail).
+- *K21F-A2 (P3):* `docs/operations/go-live.md` und das Bundle-README sagen, dass das Alter von 24 h laufende Aufträge schützt und die Sperre nur einen zweiten Skriptlauf ausschließt. Weitere Doku mit den Timer-Regeln um die Eigentümerregel ergänzt (QA.md, QUALITY-GATES.md, DEPLOYMENT.md, deploy-chain.md).
+- *K21F-A3 (P3):* Die Sperrmeldung zeigt den ältesten Fund über `portal_format_datetime()`; das Audit-Feld `oldest` bleibt ISO-UTC.
+- *K21F-A4 (P3):* Das Host-Skript verweigert einen Auftragsordner, der nicht dem Ansible-Konto gehört (`failed … not owned`, Lauf endet mit 1), Kontrollfall 9 in der Probe. Erste Fassung mit `test -O` war in POSIX-sh undefiniert (shellcheck SC3067), ersetzt durch `find "$dir" -prune -user` (`264b07f`).
+- *Empfehlungen:* P3-4 GROK 1.3 nennt, was `RemoteSecretFenceContractTest` wirklich prüft; P3-5 Tests für leeren/null-Port und Trim-Grenze; P3-6 klein: Feldhinweis „für alle Protokollleser sichtbar, kein Passwort“ DE/EN und Satz in ADR-0046 (Evidenztabelle nicht umgesetzt); P3-7 `job_id 0` dokumentiert, Scheduler-Kommentar berichtigt. ADR-0046-Status nachgezogen.
+
+**Rotnachweis Auflagen** (`qa-artifacts/k21f-2026-10-13/astra-auflagen/red/summary.md`, Kopf `f7424d1` plus nur Testdateien): phpunit-full 2809 Tests, 3 rot (A1 zweimal, A3), Probe 3 von 38 rot (A4); P3-5-Fälle schon grün. **Grünnachweis** (`…/astra-auflagen/green/summary.md`): Integration auf `1940c8a` 38 pass (phpunit-full 2809 grün ohne Skips, guard-harness 117 proven, host-secret-cleanup 38 von 38, e2e funktional bestanden; rot UX02 wie seit K13 und shellcheck, behoben); Fast auf `264b07f` 33 von 33. `264b07f` ändert nur das Host-Skript, das kein Integration-Gate liest.
+
+**Offen:** flock-Runde und K21-T1 nach der Host-Probe und der Laborbestätigung des Nutzers (`systemctl is-enabled`, Unit-Direktiven auf Ubuntu 24.04). Astra-Empfehlung ohne Freigabewirkung: Aktionsinventar folgt keinen `require_once`-Ketten (Q3), Evidenztabelle für die Begründung nur nach Rückfrage (P3-6 groß). Sonst wie bei Paket R, dazu BK-N7.
+
+**Nächster Schritt:** BK-N5 und BK-N7 in einem eigenen Worktree auf diesem Stand, Worktrees aufräumen; danach alles zusammen pushen (Freigabe des Nutzers 13.10.2026).
