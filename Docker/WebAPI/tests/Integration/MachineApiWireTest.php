@@ -376,18 +376,20 @@ final class MachineApiWireTest extends TestCase
             VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES - 1,
             VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES,
         ] as $size) {
-            [$status, $headers, $body] = $this->postRaw(
+            [$status, $headers, $body] = $this->postRepeated(
                 '/db_importMAC.php?action=updateInterface',
-                str_repeat('x', $size)
+                'x',
+                $size
             );
             self::assertNotSame(413, $status, 'size ' . $size . ' is inside the request bound: ' . $body);
             self::assertStringContainsString('application/json', strtolower($headers), 'size ' . $size);
             self::assertStringNotContainsString('request_too_large', $body, 'size ' . $size);
         }
 
-        [$status, $headers, $body] = $this->postRaw(
+        [$status, $headers, $body] = $this->postRepeated(
             '/db_importMAC.php?action=updateInterface',
-            str_repeat('x', VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES + 1)
+            'x',
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES + 1
         );
         self::assertSame(413, $status, $body);
         self::assertStringContainsString('application/json', strtolower($headers));
@@ -398,14 +400,16 @@ final class MachineApiWireTest extends TestCase
 
         // Bytes, not characters: the same byte count in two-byte characters is
         // still inside the bound, one character more is over it.
-        [$status] = $this->postRaw(
+        [$status] = $this->postRepeated(
             '/db_importMAC.php?action=updateInterface',
-            str_repeat('ä', intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2))
+            'ä',
+            intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2)
         );
         self::assertNotSame(413, $status);
-        [$status, , $body] = $this->postRaw(
+        [$status, , $body] = $this->postRepeated(
             '/db_importMAC.php?action=updateInterface',
-            str_repeat('ä', intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2) + 1)
+            'ä',
+            intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2) + 1
         );
         self::assertSame(413, $status, $body);
     }
@@ -470,6 +474,54 @@ final class MachineApiWireTest extends TestCase
     private function post(string $path, array $payload): array
     {
         return $this->postRaw($path, json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * POSTs $unit repeated $repeat times without ever holding that body in
+     * memory (K21-N2). The bound cases send up to 16 MiB; built as one string
+     * and handed to the HTTP stream wrapper, which copies it again into the
+     * request, they took about 64 MB on top of the suite and pushed phpunit-full
+     * over its 128 MB limit as soon as the suite grew a little. The body is
+     * written in 64 KiB slices of the same bytes, so the wire sees exactly what
+     * str_repeat($unit, $repeat) would have sent.
+     *
+     * HTTP/1.0 with Connection: close keeps the response unchunked, so the body
+     * is everything after the blank line.
+     *
+     * @return array{0:int,1:string,2:string}
+     */
+    private function postRepeated(string $path, string $unit, int $repeat): array
+    {
+        $url = parse_url(virtusphere_test_base_url());
+        $scheme = (string) ($url['scheme'] ?? 'http');
+        $host = (string) ($url['host'] ?? 'webserver');
+        $port = (int) ($url['port'] ?? ($scheme === 'https' ? 443 : 80));
+        $socket = @stream_socket_client(($scheme === 'https' ? 'ssl://' : 'tcp://') . $host . ':' . $port, $errno, $error, 5);
+        if ($socket === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable: ' . $error);
+        }
+        stream_set_timeout($socket, 30);
+
+        $length = strlen($unit) * $repeat;
+        fwrite($socket, 'POST ' . $path . " HTTP/1.0\r\nHost: " . $host . "\r\nContent-Type: application/json\r\n"
+            . 'Content-Length: ' . $length . "\r\nConnection: close\r\n\r\n");
+        $perSlice = max(1, intdiv(65536, strlen($unit)));
+        $slice = str_repeat($unit, $perSlice);
+        for ($left = $repeat; $left > 0; $left -= $perSlice) {
+            // A server that answers before reading the whole body (413) closes
+            // its side; the answer is read below either way.
+            if (@fwrite($socket, $left >= $perSlice ? $slice : str_repeat($unit, $left)) === false) {
+                break;
+            }
+        }
+        $response = (string) stream_get_contents($socket);
+        fclose($socket);
+
+        [$head, $body] = array_pad(explode("\r\n\r\n", $response, 2), 2, '');
+        $headers = explode("\r\n", $head);
+        $status = preg_match('/^HTTP\/\S+\s+(\d+)/', $headers[0], $match) === 1 ? (int) $match[1] : 0;
+
+        return [$status, implode("\n", $headers), $body];
     }
 
     /** @return array{0:int,1:string,2:string} */
