@@ -70,7 +70,7 @@ while IFS= read -r path; do
     fi
     # A job directory of another account is refused too: that account may rename
     # it and put a link in its place after this check.
-    if [ ! -O "$dir" ]; then
+    if [ -z "$(find "$dir" -prune -user "$(id -un)" 2>/dev/null)" ]; then
         log "failed $path: the job directory is not owned by $(id -un)"
         failed=$((failed + 1))
         continue
