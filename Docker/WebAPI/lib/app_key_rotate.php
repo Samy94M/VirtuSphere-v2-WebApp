@@ -232,12 +232,12 @@ function app_key_rotate_open(string $stored, string $key): ?string
 function app_key_rotate_stored(mysqli $db, string $table, int $id): ?string
 {
     if ($table === 'deploy_credentials') {
-        $row = repo_fetch_one($db, 'SELECT secret_ciphertext AS stored FROM deploy_credentials WHERE id = ?', 'i', [$id]);
+        $row = repo_fetch_one($db, 'SELECT secret_ciphertext AS ciphertext FROM deploy_credentials WHERE id = ?', 'i', [$id]);
     } else {
-        $row = repo_fetch_one($db, 'SELECT bind_secret_ciphertext AS stored FROM deploy_ad_config WHERE id = ?', 'i', [$id]);
+        $row = repo_fetch_one($db, 'SELECT bind_secret_ciphertext AS ciphertext FROM deploy_ad_config WHERE id = ?', 'i', [$id]);
     }
 
-    return $row === null ? null : (string) $row['stored'];
+    return $row === null ? null : (string) $row['ciphertext'];
 }
 
 /**
