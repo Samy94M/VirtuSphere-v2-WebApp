@@ -87,6 +87,8 @@ function audit_context_field_registry(): array
         // changed" and "three cases still need a person" are different answers
         // and a saved search has to be able to tell them apart.
         'reviewed_count' => $int, 'requested_count' => $int, 'manual_count' => $int,
+        // K22: the APP_KEY rotation's counts. Only counts are recorded, never a value.
+        'credential_count' => $int, 'directory_count' => $int, 'already_count' => $int,
         'execution_id' => $int, 'resolution_id' => $int, 'resolution_code' => $id,
         // Etappe 14B-F: which create unit an operator released, and why the
         // release was refused when it was. The reason they typed is NOT here;

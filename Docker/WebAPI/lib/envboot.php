@@ -77,9 +77,14 @@ function envboot_optional(string $name, string $default): string
     return (string) $value;
 }
 
-function envboot_app_key_bytes(): string
+/**
+ * Parses an APP_KEY written as `base64:<key>` or as bare base64 into the raw key bytes.
+ * Surrounding whitespace is ignored, so a line read from STDIN (the APP_KEY rotation, K22)
+ * parses the same way as the value from the environment.
+ */
+function envboot_parse_app_key(string $raw): string
 {
-    $raw = envboot_required('APP_KEY');
+    $raw = trim($raw);
     if (str_starts_with($raw, 'base64:')) {
         $raw = substr($raw, 7);
     }
@@ -91,6 +96,11 @@ function envboot_app_key_bytes(): string
     }
 
     return $bytes;
+}
+
+function envboot_app_key_bytes(): string
+{
+    return envboot_parse_app_key(envboot_required('APP_KEY'));
 }
 
 function envboot_assert_secure_runtime(): void

@@ -242,7 +242,7 @@ sh scripts/restore_test.sh  # Restore-Drill in einer Wegwerf-Umgebung (berührt 
 
 Der Drill verifiziert das Manifest, spielt den jüngsten Dump in einen Wegwerf-MySQL ein, lässt die Migrationen laufen, vergleicht das Schema gegen `struktur.sql`, prüft Invarianten und die Entschlüsselung der Zugangsdaten mit dem gesicherten `APP_KEY` und fährt einen App-Smoke (Health, Portal-Login, Machine API). Der Ernstfall-Ablauf steht in `docs/operations/backup.md` (Disaster Recovery).
 
-Wichtig: `.env` und `APP_KEY` sind für verschlüsselte Zugangsdaten kritisch. Ohne passenden `APP_KEY` können gespeicherte Secrets nicht sinnvoll entschlüsselt werden; genau das beweist der Drill in beide Richtungen.
+Wichtig: `.env` und `APP_KEY` sind für verschlüsselte Zugangsdaten kritisch. Ohne passenden `APP_KEY` können gespeicherte Secrets nicht sinnvoll entschlüsselt werden; genau das beweist der Drill in beide Richtungen. Den Schlüssel zu wechseln, mit dem Werkzeug zum Neuverschlüsseln, beschreibt [APP_KEY wechseln](operations/app-key-rotation.md).
 
 Jeder Backup-Lauf schreibt zusätzlich eine Statuszeile nach `Docker/backups/status/backup-status.jsonl`. Nur dieses `status/`-Unterverzeichnis wird read-only in den `php`-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), damit das Portal auf der Einstellungen-Seite eine Backup-Karte und bei Problemen ein Dashboard-Banner anzeigt (ADR-0021). Die Dumps und das Config-Tar (mit `.env`) werden nie gemountet. Nach dem ersten Start ohne Backup zeigt die Karte den Zustand `Unbekannt`, bis `scripts/backup.sh` einmal gelaufen ist.
 

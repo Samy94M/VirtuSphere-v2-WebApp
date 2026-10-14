@@ -40,6 +40,8 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             . (!empty($context['selection_cleared']) ? '; inventory ansible selection cleared' : ''),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => (!empty($context['scheduled']) ? 'scheduled full test for credential id ' : 'tested credential id ') . $id . ': ' . ($context['outcome'] ?? $result) . audit_description_component($context),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => 'esxi inventory auto-pull ' . $action . ' for credential id ' . $id . audit_description_reason($context),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_APP_KEY_ROTATED => 're-encrypted ' . ($context['credential_count'] ?? 0) . ' credential secret(s) and ' . ($context['directory_count'] ?? 0)
+            . ' directory secret(s) with a new APP_KEY (' . ($context['already_count'] ?? 0) . ' already current)',
         VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED => $action . ' mission id ' . $id . audit_description_named($context)
             . (isset($context['vm_count']) ? ' (' . $context['vm_count'] . ' vms)' : '') . audit_description_changes($context),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_mission_transfer_description($id, $context),

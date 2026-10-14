@@ -25,6 +25,9 @@ const VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED = 'directory.bind_rejected
 const VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED = 'credential.changed';
 const VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED = 'credential.tested';
 const VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION = 'credential.inventory_automation_changed';
+// K22: the object is the system, not a credential. One row per apply that rewrote at least
+// one secret; the counts say what moved, and the values never appear in the trail.
+const VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_APP_KEY_ROTATED = 'credential.app_key_rotated';
 const VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED = 'mission.changed';
 const VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED = 'mission.transferred';
 const VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED = 'mission.list_exported';
@@ -167,6 +170,7 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, ['credential'], $success, ['action'], ['changes', 'trust_mode', 'selection_cleared']),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, ['credential'], [VIRTUSPHERE_AUDIT_RESULT_SUCCESS, VIRTUSPHERE_AUDIT_RESULT_WARNING, VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['outcome', 'evidence_stored'], ['component', 'ip', 'scheduled']),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => audit_definition(VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, ['credential'], [VIRTUSPHERE_AUDIT_RESULT_WARNING, VIRTUSPHERE_AUDIT_RESULT_RECOVERED], ['action', 'reason']),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_APP_KEY_ROTATED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS, ['system'], $success, ['credential_count', 'directory_count', 'already_count'], [], 'nullable'),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['mission'], $success, ['action'], ['name', 'changes', 'vm_count']),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['mission'], $success, ['action'], ['name', 'target_mission_id']),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MISSIONS, ['mission_list'], $success, ['row_count'], [], 'required', [], [], [], ['missions', 'templates']),

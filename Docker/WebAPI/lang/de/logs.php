@@ -107,6 +107,7 @@ return [
     'eventcode_auth_password_change_attempt' => 'Passwortwechsel',
     'eventcode_auth_session_ended' => 'Sitzung beendet',
     'eventcode_catalog_item_deleted' => 'Katalogeintrag gelöscht',
+    'eventcode_credential_app_key_rotated' => 'Zugangsdaten mit neuem APP_KEY verschlüsselt',
     'eventcode_credential_changed' => 'Zugangsdaten geändert',
     'eventcode_credential_inventory_automation_changed' => 'Inventarautomatik geändert',
     'eventcode_credential_tested' => 'Zugangsdaten getestet',
