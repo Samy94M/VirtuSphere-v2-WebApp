@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
@@ -96,13 +97,16 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame([], $this->rotationAuditRows(), 'a dry run writes no audit row');
     }
 
-    /** Apply: the old-key rows decrypt only with the new key, the control row stays byte-identical and one audit row is written. */
+    /** Apply: the old-key rows decrypt only with the new key and keep their updated_at, the control row stays byte-identical and one audit row is written. */
     public function testApplyRewritesTheOldKeyRowsAndLeavesTheControlRowAlone(): void
     {
         self::requireFunction('crypto_encrypt_secret_with_key');
         self::requireFunction('crypto_decrypt_secret_with_key');
         self::requireFunction('app_key_rotate');
         $this->seedFixture($this->oldKey);
+        // A fixed old updated_at: a rewrite that bumped it would show as a new timestamp.
+        repo_execute($this->db, "UPDATE deploy_credentials SET updated_at = '2020-01-02 03:04:05' WHERE id IN (?, ?)", 'ii', [$this->esxiId, $this->ansibleId]);
+        repo_execute($this->db, "UPDATE deploy_ad_config SET updated_at = '2020-01-02 03:04:05' WHERE id = 1");
         $before = $this->fixtureSnapshot();
 
         $result = app_key_rotate($this->db, $this->oldKey, $this->newKey, true);
@@ -117,12 +121,14 @@ final class AppKeyRotationTest extends TestCase
             self::assertSame($this->plain[$label], crypto_decrypt_secret_with_key((string) $row['secret_ciphertext'], $this->newKey), $label . ' reads with the new key');
             $this->assertNotDecryptable((string) $row['secret_ciphertext'], $this->oldKey, $label . ' no longer reads with the old key');
             self::assertSame($before['credentials'][$credentialId]['config_revision'], $row['config_revision'], $label . ' keeps its config_revision');
+            self::assertSame('2020-01-02 03:04:05', $row['updated_at'], $label . ' keeps its updated_at');
         }
 
         $directory = $this->directoryRow();
         self::assertSame($this->plain['directory'], crypto_decrypt_secret_with_key((string) $directory['bind_secret_ciphertext'], $this->newKey), 'the directory reads with the new key');
         $this->assertNotDecryptable((string) $directory['bind_secret_ciphertext'], $this->oldKey, 'the directory no longer reads with the old key');
         self::assertSame($before['directory']['revision'], $directory['revision'], 'the directory keeps its revision');
+        self::assertSame('2020-01-02 03:04:05', $directory['updated_at'], 'the directory keeps its updated_at');
 
         self::assertSame($before['credentials'][$this->controlId], $this->credentialRow($this->controlId), 'the control row is byte-identical');
 
@@ -205,13 +211,14 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame([], $this->rotationAuditRows(), 'the refused run writes no audit row');
     }
 
-    /** An active deploy job refuses the run with reason active_jobs and changes nothing. */
-    public function testAnActiveDeployJobRefusesTheRunAndChangesNothing(): void
+    /** A running or cancelling deploy job refuses the run with reason active_jobs and changes nothing. */
+    #[DataProvider('blockingJobStatuses')]
+    public function testARunningOrCancellingDeployJobRefusesTheRunAndChangesNothing(string $status): void
     {
         self::requireFunction('crypto_encrypt_secret_with_key');
         self::requireFunction('app_key_rotate');
         $this->seedFixture($this->oldKey);
-        $this->insertActiveJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING);
+        $this->insertActiveJob($status);
         $before = $this->fixtureSnapshot();
 
         $exception = $this->expectRefusal(fn (): mixed => app_key_rotate($this->db, $this->oldKey, $this->newKey, true));
@@ -219,6 +226,35 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame('active_jobs', $exception->reason);
         self::assertSame($before, $this->fixtureSnapshot(), 'the refused run changes no row');
         self::assertSame([], $this->rotationAuditRows(), 'the refused run writes no audit row');
+    }
+
+    /** A queued deploy job does not block the rotation: apply rewrites the rows and the job stays queued. */
+    public function testAQueuedDeployJobDoesNotBlockTheRotationAndStaysQueued(): void
+    {
+        self::requireFunction('crypto_encrypt_secret_with_key');
+        self::requireFunction('crypto_decrypt_secret_with_key');
+        self::requireFunction('app_key_rotate');
+        $this->seedFixture($this->oldKey);
+        $jobId = $this->insertActiveJob(VIRTUSPHERE_DEPLOY_STATUS_QUEUED);
+
+        $result = app_key_rotate($this->db, $this->oldKey, $this->newKey, true);
+
+        self::assertTrue($result['applied']);
+        self::assertSame(2, $result['credentials']);
+        self::assertSame(1, $result['directory']);
+        self::assertSame(
+            $this->plain['esxi'],
+            crypto_decrypt_secret_with_key((string) $this->credentialRow($this->esxiId)['secret_ciphertext'], $this->newKey),
+            'the ESXi row reads with the new key'
+        );
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->jobStatus($jobId), 'the queued job is still queued');
+    }
+
+    /** The two job statuses that refuse a rotation. */
+    public static function blockingJobStatuses(): iterable
+    {
+        yield 'running' => [VIRTUSPHERE_DEPLOY_STATUS_RUNNING];
+        yield 'cancelling' => [VIRTUSPHERE_DEPLOY_STATUS_CANCELLING];
     }
 
     /** An old key equal to the new key refuses the run with reason same_key and changes nothing. */
@@ -281,7 +317,7 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame(2, $result['exit'], $result['output']);
     }
 
-    /** CLI: a dry run with the old key exits 0, changes no row and prints neither a plaintext secret nor a v1: ciphertext. */
+    /** CLI: a dry run with the old key exits 0, prints the four progress lines in order, changes no row and prints neither a plaintext secret nor a v1: ciphertext. */
     public function testCliDryRunExitsZeroChangesNothingAndPrintsNoSecret(): void
     {
         self::requireFunction('crypto_encrypt_secret_with_key');
@@ -292,16 +328,29 @@ final class AppKeyRotationTest extends TestCase
         $result = $this->runCli([], $this->oldKeyLine());
 
         self::assertSame(0, $result['exit'], $result['output']);
+        $this->assertProgressLinesInOrder($result['output'], [
+            '[1/2] RUN backup check',
+            '[1/2] SKIP backup check (dry run)',
+            '[2/2] RUN re-encrypt',
+            '[2/2] PASS re-encrypt (dry run): credentials=2 directory=1 already=',
+        ]);
         $this->assertNoSecretInOutput($result['output']);
         self::assertSame($before, $this->fixtureSnapshot(), 'a CLI dry run changes no row');
         self::assertSame([], $this->rotationAuditRows(), 'a CLI dry run writes no audit row');
     }
 
-    /** CLI: --apply without a backup status line exits 1 with a message about the backup and changes no row. */
+    /** CLI: --apply without a fresh ok backup status line exits 1 with a message about the backup and changes no row. */
     public function testCliApplyWithoutABackupStatusExitsOneWithABackupMessageAndChangesNothing(): void
     {
         self::requireFunction('crypto_encrypt_secret_with_key');
         self::requireFunction('app_key_rotate');
+        self::requireFunction('app_key_rotate_backup_blocker');
+        self::requireFunction('backup_status_read');
+        // The refusal is what this test checks. With a fresh ok backup line the CLI would run a real apply, so stop before it.
+        self::assertNotNull(
+            app_key_rotate_backup_blocker(backup_status_read(), time()),
+            'a fresh ok backup status line exists in this environment; this test would run a real apply'
+        );
         $this->seedFixture($this->oldKey);
         $before = $this->fixtureSnapshot();
 
@@ -355,6 +404,25 @@ final class AppKeyRotationTest extends TestCase
             self::assertStringNotContainsString($plain, $output, 'the CLI output carries the ' . $label . ' secret');
         }
         self::assertStringNotContainsString('v1:', $output, 'the CLI output carries a ciphertext');
+    }
+
+    /**
+     * Asserts that a line of $output starts with each prefix, and that the prefixes appear in the given order.
+     *
+     * @param list<string> $prefixes
+     */
+    private function assertProgressLinesInOrder(string $output, array $prefixes): void
+    {
+        $lines = preg_split('/\R/', $output) ?: [];
+        $cursor = 0;
+        foreach ($prefixes as $prefix) {
+            $index = $cursor;
+            while ($index < count($lines) && !str_starts_with($lines[$index], $prefix)) {
+                $index++;
+            }
+            self::assertTrue($index < count($lines), 'progress line missing or out of order: ' . $prefix . PHP_EOL . $output);
+            $cursor = $index + 1;
+        }
     }
 
     /** Removes what an earlier run of this suite left behind, identified by the name prefix. */
@@ -430,8 +498,8 @@ final class AppKeyRotationTest extends TestCase
         }
     }
 
-    /** Inserts a mission with one job in the given status, the state that blocks a rotation. */
-    private function insertActiveJob(string $status): void
+    /** Inserts a mission with one job in the given status and returns the job id. */
+    private function insertActiveJob(string $status): int
     {
         repo_execute($this->db, "INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, 'active')", 's', [self::PREFIX . $this->token . '-mission']);
         $missionId = (int) $this->db->insert_id;
@@ -441,6 +509,16 @@ final class AppKeyRotationTest extends TestCase
             'iss',
             [$missionId, $status, json_encode(['mode' => 'start', 'vm_ids' => []], JSON_THROW_ON_ERROR)]
         );
+
+        return (int) $this->db->insert_id;
+    }
+
+    /** @return string|null the status of one deploy job */
+    private function jobStatus(int $jobId): ?string
+    {
+        $row = repo_fetch_one($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+
+        return $row === null ? null : (string) $row['status'];
     }
 
     /** @return array<string, mixed>|null the full row of a credential */

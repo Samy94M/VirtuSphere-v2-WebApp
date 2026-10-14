@@ -100,15 +100,19 @@ function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply,
                 throw new AppKeyRotationDryRunRollback();
             }
         });
-    } catch (AppKeyRotationDryRunRollback) {
-        // Expected: the counts are in $counts and the rows are back in their old state.
+    } catch (AppKeyRotationDryRunRollback $sentinel) {
+        // Expected for a dry run: the counts are in $counts and the rows are back in their old state.
+        // An apply never rolls back on purpose, so a sentinel there is a failure and must propagate.
+        if ($apply) {
+            throw $sentinel;
+        }
     }
 
     return ['applied' => $apply] + $counts;
 }
 
 /**
- * The work of one rotation, inside its transaction: refuse while a job is active, classify every row,
+ * The work of one rotation, inside its transaction: refuse while a job is running or cancelling, classify every row,
  * refuse before the first write if a row reads with neither key, rewrite, verify every rewritten row,
  * then write the audit row in the same transaction.
  *
@@ -117,15 +121,19 @@ function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply,
  */
 function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKey, bool $apply, ?callable $afterRow): array
 {
-    // A running job reads its credentials with the key it started with, so a rewrite under it would
-    // fail that job's next read. Locked like the deploy claim pause, so the check holds until the commit.
-    $placeholders = implode(',', array_fill(0, count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES), '?'));
+    // A running or cancelling job may hold secrets it decrypted with the old key and may read the credential
+    // again, so a rewrite under it would fail that read. A queued job holds no decrypted secret and reads the
+    // ciphertext only when a worker claims it, with that worker's key, so it does not block: otherwise the
+    // maintenance worker's automatic inventory pulls and every ESXi save would block the rotation while the
+    // service is paused. Locked like the deploy claim pause, so the check holds until the commit.
+    $activeStatuses = [VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING];
+    $placeholders = implode(',', array_fill(0, count($activeStatuses), '?'));
     $jobStmt = $db->prepare('SELECT id FROM deploy_jobs WHERE status IN (' . $placeholders . ') ORDER BY id FOR UPDATE');
-    $jobStmt->bind_param(str_repeat('s', count(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES)), ...VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES);
+    $jobStmt->bind_param(str_repeat('s', count($activeStatuses)), ...$activeStatuses);
     $jobStmt->execute();
     $activeJobs = count(repo_fetch_all($jobStmt->get_result()));
     if ($activeJobs > 0) {
-        throw new AppKeyRotationRefused('active_jobs', $activeJobs . ' deploy job(s) are queued, running or cancelling; let them finish first.');
+        throw new AppKeyRotationRefused('active_jobs', $activeJobs . ' deploy job(s) are running or being cancelled; let them finish first.');
     }
 
     $credentialStmt = $db->prepare('SELECT id, secret_ciphertext FROM deploy_credentials ORDER BY id FOR UPDATE');
@@ -135,7 +143,7 @@ function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKe
     $directoryStmt->execute();
     $directoryRows = repo_fetch_all($directoryStmt->get_result());
 
-    // The plaintext of each row to rewrite is held here until the run ends, then wiped in the finally.
+    // The plaintext of each row to rewrite is held here until the run ends, then wiped in the finally (best effort, see app_key_rotate_wipe()).
     $pending = [];
     try {
         // Classify every row before the first write, so a row that reads with neither key refuses the run
@@ -161,6 +169,7 @@ function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKe
                     continue;
                 }
                 $pending[] = ['table' => $table, 'id' => $id, 'plaintext' => $plaintext];
+                $plaintext = null;
             }
         }
         if ($unreadable !== []) {
@@ -190,6 +199,7 @@ function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKe
             $stored = app_key_rotate_stored($db, $item['table'], $item['id']);
             $check = $stored === null ? null : app_key_rotate_open($stored, $newKey);
             if ($check === null || !hash_equals($item['plaintext'], $check)) {
+                app_key_rotate_wipe($check);
                 throw new RuntimeException('verification failed for ' . $item['table'] . ':' . $item['id']);
             }
             app_key_rotate_wipe($check);
@@ -241,8 +251,9 @@ function app_key_rotate_stored(mysqli $db, string $table, int $id): ?string
 }
 
 /**
- * Overwrites a secret held in memory, where the sodium extension is available. sodium_memzero() leaves the
- * variable null afterwards, so callers must not read it again.
+ * Overwrites a secret held in memory, where the sodium extension is available. Best effort only: sodium_memzero()
+ * overwrites a string only while nothing else references it, and PHP may hold copies. It leaves the variable
+ * null afterwards, so callers must not read it again.
  */
 function app_key_rotate_wipe(?string &$secret): void
 {
