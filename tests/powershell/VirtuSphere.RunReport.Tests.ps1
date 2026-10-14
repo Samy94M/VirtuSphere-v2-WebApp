@@ -1,4 +1,4 @@
-# Pester-Suite fuer den Run-Report-Kanal (ADR-0018): die reinen Bausteine in
+﻿# Pester-Suite fuer den Run-Report-Kanal (ADR-0018): die reinen Bausteine in
 # VirtuSphere-Common.ps1 (New-VsRunId, Detail-Sanitize/Byte-Kuerzung, Summary-
 # Whitelist, Fehlerkategorisierung, Site-Health-Abbildung, Provider-Aufloesung)
 # plus das Sende-Verhalten von Send-VsRunReport und die Schleifenstruktur der

@@ -220,14 +220,16 @@ docker compose exec -T php php /var/www/html/lib/migrate.php
 Container stoppen:
 
 ```bash
-docker compose stop
+docker compose --profile tools stop
 ```
 
 Container und Netz entfernen, Daten aber behalten:
 
 ```bash
-docker compose down
+docker compose --profile tools down
 ```
+
+Das Profil `tools` gehört in beide Befehle; ohne es bleibt ein bei Bedarf gestartetes phpMyAdmin stehen.
 
 ## Backup und Restore
 

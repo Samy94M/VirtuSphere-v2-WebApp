@@ -135,7 +135,7 @@ Der vollständige Versions-, Schema- und Rückkehrvertrag steht ergänzend in
 [`upgrade-recovery.md`](upgrade-recovery.md). Das Rootpasswort bleibt in diesem
 Host-/MySQL-Ablauf; es wird keinem PHP- oder Worker-Runtimecontainer mitgegeben.
 
-1. Stack stoppen: `docker compose down`.
+1. Stack stoppen: `docker compose --profile tools down`. Ohne das Profil bleibt ein bei Bedarf gestartetes phpMyAdmin mit seiner Verbindung zur Datenbank stehen.
 2. Defekte Daten wegräumen: `Docker/mysql/mysql-data/` sichern/leeren.
 3. Stack starten und warten, bis MySQL initialisiert ist: `docker compose up -d mysql`.
 4. Dump einspielen. Ein verschlüsseltes Tripel wird vorher wie unter „Verschlüsselung“ beschrieben auf dem Rechner mit dem privaten Schlüssel entschlüsselt. Nur die Klartextdateien kommen auf den Zielhost, ebenfalls in ein Arbeitsverzeichnis außerhalb von `Docker/backups/`, hier `RESTORE_WORK` (siehe „Entschlüsseln“):

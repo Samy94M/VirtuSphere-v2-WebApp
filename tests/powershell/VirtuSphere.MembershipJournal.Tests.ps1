@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $script:JournalModule = Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-MembershipJournal.ps1'
     $script:DeviceSyncPath = Join-Path (Split-Path $script:JournalModule -Parent) 'mecm_new-device-sync.ps1'

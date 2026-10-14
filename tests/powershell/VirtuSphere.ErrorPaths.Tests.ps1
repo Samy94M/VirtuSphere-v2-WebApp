@@ -1,4 +1,4 @@
-# Pester-Suite fuer die Fehlerpfade der PowerShell-Integrationsclients (AP5):
+﻿# Pester-Suite fuer die Fehlerpfade der PowerShell-Integrationsclients (AP5):
 # HTTP-Statuscodes, verlorene/kaputte Registry-Werte, TLS-Kontrakt, Token-
 # Redaction, Doppelstart-Schutz und Backoff-Vertrag der Endlosschleifen.
 #

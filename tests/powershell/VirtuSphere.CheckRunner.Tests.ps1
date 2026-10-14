@@ -347,24 +347,28 @@ Describe 'stamp naming and encoding guards over scripts/' {
         }
     }
 
-    It 'keeps every script under scripts/ without a UTF-8 BOM pure ASCII' {
-        $script:ScriptFiles.Count | Should -BeGreaterThan 0
+    It 'keeps non-ASCII bytes in scripts/ and tests/powershell only behind a UTF-8 BOM' {
         $hits = @()
-        foreach ($file in $script:ScriptFiles) {
-            $bytes = [IO.File]::ReadAllBytes($file.FullName)
-            if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { continue }
-            $relative = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')
-            $lineNumber = 1
-            for ($i = 0; $i -lt $bytes.Length; $i++) {
-                if ($bytes[$i] -ge 0x80) {
+        $latin1 = [Text.Encoding]::GetEncoding(28591)
+        foreach ($root in @('scripts', (Join-Path 'tests' 'powershell'))) {
+            $files = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot $root) -Recurse -File |
+                Where-Object { $_.Extension -in '.ps1', '.psm1', '.psd1' })
+            $files.Count | Should -BeGreaterThan 0
+            foreach ($file in $files) {
+                $bytes = [IO.File]::ReadAllBytes($file.FullName)
+                if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { continue }
+                # Latin-1 maps each byte to exactly one char, so the first char >= 0x80 is the first byte >= 0x80.
+                $text = $latin1.GetString($bytes)
+                $match = [regex]::Match($text, '[\x80-\xFF]')
+                if ($match.Success) {
+                    $relative = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')
+                    $lineNumber = 1 + [regex]::Matches($text.Substring(0, $match.Index), '\n').Count
                     $hits += ('{0}:{1}: Nicht-ASCII-Byte ohne UTF-8-BOM' -f $relative, $lineNumber)
-                    break
                 }
-                if ($bytes[$i] -eq 0x0A) { $lineNumber++ }
             }
         }
         if ($hits.Count -gt 0) {
-            throw ('Nicht-ASCII in BOM-losen Skripten unter scripts/ (PS 5.1 liest sie als ANSI): ' + ($hits -join ' | '))
+            throw ('Nicht-ASCII in BOM-losen Skripten (PS 5.1 liest sie als ANSI): ' + ($hits -join ' | '))
         }
     }
 }

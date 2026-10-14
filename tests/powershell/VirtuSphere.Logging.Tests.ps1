@@ -1,4 +1,4 @@
-# Etappe 10D: gespiegelt versionierter Server-/Client-Logvertrag, lokale Module,
+﻿# Etappe 10D: gespiegelt versionierter Server-/Client-Logvertrag, lokale Module,
 # Retention, Sinkstoerung und Packaging. Alle Dateipfade bleiben Join-Path-basiert,
 # damit dieselbe Suite unter Windows PowerShell 5.1 und Linux-pwsh laeuft.
 

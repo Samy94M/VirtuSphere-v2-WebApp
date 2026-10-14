@@ -1,4 +1,4 @@
-# Regression fuer E1: JSON muss Invoke-RestMethod als echtes byte[] erreichen.
+﻿# Regression fuer E1: JSON muss Invoke-RestMethod als echtes byte[] erreichen.
 # Die Suite ist engine-neutral und wird fuer die Laufzeitabnahme einmal unter
 # Windows PowerShell 5.1 und einmal unter PowerShell 7 ausgefuehrt. Der
 # Loopback-Teil liest die Bytes hinter dem HTTP-Header direkt vom TCP-Stream.
