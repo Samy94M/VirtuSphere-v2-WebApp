@@ -1,7 +1,7 @@
 # Every stage uses the same digest-pinned PHP 8.4 base. Build dependencies live
 # only in extension-builder; the long-lived services use runtime, while Composer
 # and VCS/archive tools are available only in the explicitly built tooling stage.
-FROM php:8.4-fpm@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2 AS extension-builder
+FROM php:8.4-fpm@sha256:1071b5609d16d60674f78eea8cf9bd7e9e79169ecb566d015c931c5ee789bb13 AS extension-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     linux-libc-dev \
@@ -21,12 +21,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-install gd ldap mysqli pcntl zip \
     && rm -rf /var/lib/apt/lists/*
 
-FROM php:8.4-fpm@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2 AS runtime
+FROM php:8.4-fpm@sha256:1071b5609d16d60674f78eea8cf9bd7e9e79169ecb566d015c931c5ee789bb13 AS runtime
 
 # Shared libraries only. Compilers, headers, Composer, git and archive tools
 # stay out of this stage. libfcgi-bin carries cgi-fcgi for the FPM healthcheck.
+#
+# The digest fixes the upstream filesystem; `apt-get upgrade` consumes the
+# Debian security updates the pinned base lags on during the controlled
+# rebuild. Measured 2026-10-14: the newest published php:8.4-fpm (pinned above,
+# PHP 8.4.26) still shipped curl 8.14.1-2+deb13u5 while the fix needed deb13u7,
+# so the digest bump alone would have left the release gate red.
 # hadolint ignore=SC2086
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     libpng16-16t64 \
     libjpeg62-turbo \
     libfreetype6 \
@@ -39,7 +46,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # headers from the final filesystem without maintaining a second list.
     # Word splitting is intentional: PHPIZE_DEPS is the upstream-owned,
     # whitespace-separated apt package list, not an application value.
-    && apt-get purge -y --auto-remove ${PHPIZE_DEPS} \
+    # It names the virtual `libc-dev`, which purge does not resolve: without
+    # the explicit `libc6-dev` the C and kernel headers under /usr/include
+    # stayed in the runtime until 2026-10-14.
+    && apt-get purge -y --auto-remove ${PHPIZE_DEPS} libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=extension-builder /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/

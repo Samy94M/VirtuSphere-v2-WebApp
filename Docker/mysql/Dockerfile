@@ -5,10 +5,12 @@
 # 2026-09-07, docker.io/library/mysql:8.4 resolves to the digest pinned below.
 # So the fix has to come from here. This stage rebuilds gosu from source against
 # the current Go toolchain; the module has no semver tags, so the pin is the
-# exact pseudo-version. CGO_ENABLED=0 is load-bearing and not a habit: a
+# exact pseudo-version. The Go toolchain comes from the builder digest, so a
+# new Go stdlib fix means bumping that digest (2026-10-14: Go 1.27.1 to 1.27.2,
+# three High findings). CGO_ENABLED=0 is load-bearing and not a habit: a
 # cgo-linked build from Alpine would be musl-linked and unusable in the
 # glibc-based Oracle Linux stage below.
-FROM golang:1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS gosu
+FROM golang:1-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS gosu
 ENV CGO_ENABLED=0
 RUN go install -trimpath -ldflags="-s -w" \
         github.com/tianon/gosu@v0.0.0-20260606051551-40506998e34a

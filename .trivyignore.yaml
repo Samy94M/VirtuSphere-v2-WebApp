@@ -19,6 +19,11 @@
 # tun. Ein Digest-Bump des Basisimages ist die dritte Moeglichkeit und hilft oft
 # gerade nicht: pruefen, nicht annehmen.
 #
+# Stand 2026-10-14: weiterhin KEINE aktive Ausnahme. Das Release vom 14.10.
+# fand fixbare Funde in allen vier Images; alle sind im Image beantwortet
+# (allgemeines Paket-Upgrade, neue php- und golang-Digests), der Rest hat
+# keinen Fix (Nachweis qa-artifacts/cve-2026-10-14/, lokal).
+#
 # Stand 2026-09-07: KEINE aktive Ausnahme. Gemessen ueber alle sechs Image-
 # Referenzen aus `docker compose --profile "*" config --images` meldet trivy
 # ohne diese Datei null fixbare Critical/High.

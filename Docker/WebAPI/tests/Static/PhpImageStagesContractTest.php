@@ -22,6 +22,9 @@ final class PhpImageStagesContractTest extends TestCase
         foreach (['composer', "\n    git ", "\n    zip ", "\n    unzip ", 'linux-libc-dev', 'libpng-dev', 'libldap2-dev', 'libzip-dev'] as $forbidden) {
             self::assertStringNotContainsString($forbidden, $this->runtimeStage($beforeTooling), $forbidden);
         }
+        // PHPIZE_DEPS names the virtual `libc-dev`; purging it leaves libc6-dev
+        // and with it every C and kernel header in the runtime (2026-10-14).
+        self::assertSame(1, preg_match('/apt-get purge -y --auto-remove \$\{PHPIZE_DEPS\} libc6-dev /', $this->runtimeStage($beforeTooling)));
         foreach (['git', 'zip', 'unzip', 'composer'] as $tool) {
             self::assertStringContainsString($tool, $tooling, $tool);
         }

@@ -4,17 +4,17 @@
 # stable 1.28 tag lagged behind on Alpine package fixes.
 FROM nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
 
-# The digest fixes the upstream filesystem; consume the relevant Alpine
-# security updates during the controlled rebuild.
+# The digest fixes the upstream filesystem; consume all Alpine security
+# updates during the controlled rebuild.
 #
-# `libuuid` joined in 2026-09 and is the reason a digest bump alone was not the
-# answer: the current published build of this tag still ships util-linux
-# 2.42.1-r0 while the seven fixable Critical/High findings (CVE-2026-53612,
-# -53613, -53614, -76642, -78408, -78409, -78410) need 2.42.3-r1. Measured on
-# both digests before and after. An exception in `.trivyignore.yaml` would have
-# been wrong for the same reason the file itself gives: exceptions are for
-# findings with no available fix, and this one has one.
-RUN apk add --no-cache --upgrade libcrypto3 libssl3 libexpat libuuid
+# This was a named package list until 2026-10 and went stale twice: `libuuid`
+# had to join in 2026-09, and on 2026-10-14 the release gate found pcre2 and
+# tiff, which the list did not name. A digest bump was no answer either time:
+# the newest published build of this tag carried the same three findings
+# (libexpat, pcre2, tiff), measured on both digests. An exception in
+# `.trivyignore.yaml` would have been wrong for the same reason the file itself
+# gives: exceptions are for findings with no available fix.
+RUN apk upgrade --no-cache
 
 COPY ./default.conf /etc/nginx/conf.d/default.conf
 
