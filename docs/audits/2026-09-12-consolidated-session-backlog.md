@@ -1814,6 +1814,21 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 
 **Nächster Schritt:** Umsetzung in `vs-s10-impl` fortsetzen und prüfen; `phpunit-full`-Rotnachweis in `vs-s10-red` nachholen (QA-Stack frei); danach Runbook, Selbstkontrolle, Astra.
 
+#### K22: Umsetzung, Selbstkontrolle, Astra-Auftrag (14.10.2026)
+
+**Stand: umgesetzt, Selbstkontrolle grün bis auf bekannte Rotstellen; Astra-Prüfung läuft.** Commits `71caef2` (Paket) und `c5e29c2` (Alias der Rücklese-Abfrage).
+
+**Umsetzung (Haiku im Wegwerf-Worktree `C:\tmp\vs-s10-impl`, vom Koordinator am Diff geprüft und übernommen):** `lib/app_key_rotate.php` (Werkzeug und CLI mit `[n/2]`-Fortschritt; zuerst klassifizieren, dann schreiben; Trockenlauf als zurückgerollte Transaktion über eine private Ausnahme; Rücklese-Prüfung vor dem Commit; Klartexte im `finally` mit `sodium_memzero`); `lib/crypto.php` (`*_with_key`, die bisherigen Funktionen delegieren); `lib/envboot.php` (`envboot_parse_app_key()`, jetzt mit `trim()`: Leerraum am Rand des APP_KEY wird ignoriert); Audit-Ereignis `credential.app_key_rotated` (Register, Feldregister, Beschreibung, Ereignisname DE/EN). Koordinator: Kontextfelder `credential_count`, `directory_count`, `already_count` statt `credentials`/`directory`/`already`, weil das Feldregister global und typisiert ist; Konstantenfall über `constant()` (PHPStan). Doku: Runbook `docs/operations/app-key-rotation.md` neu (Ablauf mit Werkzeug, Ablehnungen, Rückweg, Grenzen), `docs/INSTALLATION-ANLEITUNG.md` (Link), `docs/ai/reference/webapi.md` R29. Hilfe unverändert (sie nennt den APP_KEY nur in Fehlermeldungen). Kein Schema, keine Migration, keine Portalseite.
+
+**Rotnachweis** (`qa-artifacts/k22-2026-10-14/red/summary.md`, `red/teil2/summary.md`, `16070ec` plus nur die Testdateien): `phpunit-unit` 2126 Fälle, 14 rot; `phpunit-full` 2835 Fälle, 26 rot (12 Integration, 14 Unit), alle K22 mit Namen, 0 Skips. Erster Versuch ungültig (`vendor/bin` ist git-ignoriert und fehlte im frischen Worktree).
+
+**Selbstkontrolle** (`qa-artifacts/k22-2026-10-14/green/summary.md`): `lauf-1` volle Integration-Lane auf `71caef2`: 37 pass; rot `phpunit-full` nur in vier K22-Fällen: `AS stored` ist in MySQL 8 reserviert, behoben in `c5e29c2`; rot `powershell-tests` mit einem Fall ohne Paketbezug (BK-N9 unten); `visual-contract` rot und `e2e-portal` infrastructure_error wie seit K13 (UX02), e2e funktional bestanden. `lauf-2` auf `c5e29c2` (`powershell-tests`, `qa-stack`, `phpunit-full`): Exit 0, Pester 954 grün, `phpunit-full` 2835 grün ohne Skips, alle 26 K22-Fälle grün.
+
+**Astra-Prüfauftrag:** `qa-artifacts/k22-2026-10-14/astra-review.md` (zehn Prüffragen: Fenster zwischen `.env`-Wechsel und Lauf, Lückensperre bei Aufträgen, Altformate, Abhängige des Chiffrats, `trim()` gegen rohe Shell-Vergleiche, Trockenlauf und Rollback, Redaktion und Speicherlöschung, Backup-Sperre, Runbook, Tests; offen Q-A ADR nötig, Q-B Feldnamen). Prüfer Claude Opus (xhigh) als vom Nutzer freigegebener Astra-Ersatz.
+
+**Neuer Befund außerhalb des Pakets (Stoppregel 2, nicht behoben):**
+- **BK-N9 (P3):** `tests/powershell/VirtuSphere.PackageReporterJob.Tests.ps1:106` („authenticates the actual bundle worker and reads one bounded ready handshake“) startet die Reporter-Sitzung mit festem `-TimeoutMs 2000`; der Fall braucht einzeln stabil 1,58 bis 1,71 s, mit und ohne Coverage. Im vollen Gate heute zweimal rot (2,09 s bzw. 2,12 s, auch auf `16070ec` ohne Änderung dieser Session), einmal grün. Gleiche Familie wie BK-N7 (feste Zeitgrenze, knappe Reserve).
+
 #### Rest S: BK-N8, BK-N6
 
 **BK-N8 (umgesetzt, Gates in der nächsten Lane):** `docs/operations/backup.md` (Restore Schritt 1), `docs/operations/go-live.md` (Recovery nach eingefrorener SSH-Sitzung) und als Geschwister `docs/INSTALLATION-ANLEITUNG.md` (Abschnitt Container stoppen und entfernen, `stop` und `down`) nennen jetzt `--profile tools`. Kein Test pinnt diese Befehle.
