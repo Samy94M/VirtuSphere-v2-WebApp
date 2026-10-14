@@ -1862,6 +1862,16 @@ Auftrag des Nutzers vom 11.10.2026: K17, K18 und K19 als Block nach S9, je Paket
 
 **Nächster Schritt:** Push von Rest S, K22 und K24 nach Freigabe; danach Offline-Bundle (Release-Lane `offline-bundle`) für das Prod-Upgrade von `8f40351`.
 
+#### Abschluss Session s10 und Prod-Upgrade (14.10.2026)
+
+**Gepusht:** `origin/main` = `06dde1f` (Fast-Forward von `16070ec`, 10 Commits: Rest S, K22 mit Astra-Auflagen, K24, Register), nach Freigabe des Nutzers. K23 nicht begonnen (Folgesession).
+
+**Offline-Bundle für das Prod-Upgrade abgebrochen (BK-N11, P1 für das Upgrade):** Erster Versuch aus `C:\tmp\vs-k21f-lf` scheiterte mit „Image fehlt lokal: `vs-k21f-lf-webserver`“: Compose benennt Images ohne festen Namen (webserver) nach dem Projektverzeichnis; Prod liegt in `/opt/VirtuSphere-v2-WebApp` und erwartet `virtusphere-v2-webapp-webserver`. Das Bundle muss deshalb aus einem Verzeichnis mit dem Basisnamen `VirtuSphere-v2-WebApp` gebaut werden (Worktree `C:\tmp\vs-bundle\VirtuSphere-v2-WebApp` auf `06dde1f`). Zweiter Versuch dort (`qa-artifacts/release-2026-10-14/lauf-2/`): `docker compose --profile '*' build` vollständig aus dem Cache (Images vom 07. bis 12.09.2026), dann Abbruch des Gates mit fixbaren Critical/High-CVEs in allen vier Images (mysql: curl, Go-stdlib in `gosu`; webserver: libexpat; phpMyAdmin; php-runtime: Debian-Pakete, 201 High/5 Critical gesamt). Nach Projektregel gehört ein fixbarer Fund ins Image, eine Ausnahme ist nicht zulässig. **Nutzerentscheidung:** CVE-Paket als erster Punkt der Folgesession; Prod bleibt bis dahin auf `8f403511d12ad56228ba6f4752b75418e11f1b0e`.
+
+**Nachgemessen für Prod (am Repository, ohne Prod-Zugriff):** Bei `8f40351` haben `php`, `deploy-worker`, `maintenance-worker` und `webserver` keinen festen Imagenamen (`virtusphere-v2-webapp-*`); ab `06dde1f` verlangen die drei PHP-Dienste `virtusphere-php:8.4-runtime`. Ein `git pull` auf Prod ohne geladenes Bundle bräche die PHP-Dienste (kein Build auf dem Server). Checkliste `qa-artifacts/session-handoff/prod-upgrade-8f40351.md` trägt diesen Hinweis; Übergabeprompt `qa-artifacts/session-handoff/next-session-prompt-s11.md`.
+
+**Nächster Schritt (Folgesession s11):** CVE-Paket, dann Bundle und Checkliste; danach die freigegebenen kleinen Punkte und K23.
+
 #### Rest S: BK-N8, BK-N6
 
 **BK-N8 (fertig, `876af45`; Gates grün in der Lane auf `8f4772b`):** `docs/operations/backup.md` (Restore Schritt 1), `docs/operations/go-live.md` (Recovery nach eingefrorener SSH-Sitzung) und als Geschwister `docs/INSTALLATION-ANLEITUNG.md` (Abschnitt Container stoppen und entfernen, `stop` und `down`) nennen jetzt `--profile tools`. Kein Test pinnt diese Befehle.
